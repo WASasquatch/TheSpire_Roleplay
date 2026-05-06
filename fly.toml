@@ -1,61 +1,45 @@
-# Fly.io configuration for The Spire.
+# fly.toml app configuration file generated for thespire-still-rain-4187 on 2026-05-06T17:45:33Z
 #
-# Quickstart:
-#   1. flyctl launch --no-deploy            # picks an app name + region
-#   2. flyctl secrets set SESSION_SECRET=$(openssl rand -hex 32)
-#   3. flyctl volumes create thespire_data --size 1 --region <your-region>
-#   4. flyctl deploy
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
-# Notes:
-# - The app inside the container listens on PORT 8080. Fly's edge proxy maps
-#   external 80 → that port (and 443 with TLS termination). Users hit
-#   https://<app>.fly.dev with no port suffix; force_https=true upgrades :80
-#   to :443 automatically.
-# - DATABASE_URL points at /data/thekeep.sqlite which lives on the mounted
-#   volume so the SQLite file survives deploys and machine restarts.
-# - SESSION_SECRET MUST be set as a Fly secret before the first deploy or
-#   the server will refuse to start (its index.ts has a min-length guard).
 
-app = "thespire"           # change to your chosen app name
-primary_region = "ord"     # any Fly region; pick what's near your users
+app = 'thespire-still-rain-4187'
+primary_region = 'ord'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
-# Static env. Secrets (SESSION_SECRET) go through `flyctl secrets set`.
 [env]
-  NODE_ENV = "production"
-  PORT = "8080"
-  WEB_ORIGIN = ""
-  DATABASE_URL = "/data/thekeep.sqlite"
-  LOG_LEVEL = "info"
+  DATABASE_URL = '/data/thekeep.sqlite'
+  LOG_LEVEL = 'info'
+  NODE_ENV = 'production'
+  PORT = '8080'
+  WEB_ORIGIN = ''
 
-# Persistent SQLite storage. The volume's name must match the `source` here.
 [[mounts]]
-  source = "thespire_data"
-  destination = "/data"
+  source = 'thespire_data'
+  destination = '/data'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 1
-  processes = ["app"]
+  processes = ['app']
 
   [http_service.concurrency]
-    type = "requests"
-    soft_limit = 200
+    type = 'requests'
     hard_limit = 250
+    soft_limit = 200
 
-# Health check — Fastify exposes /health unauthenticated.
-[[http_service.checks]]
-  grace_period = "10s"
-  interval = "30s"
-  method = "GET"
-  timeout = "5s"
-  path = "/health"
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/health'
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
+  size = 'shared-cpu-1x'
+  memory = '512mb'

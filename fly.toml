@@ -17,7 +17,7 @@
 #   the server will refuse to start (its index.ts has a min-length guard).
 
 app = "thespire"           # change to your chosen app name
-primary_region = "ord"     # any Fly region; pick what's near your users
+primary_region = "sjc"     # any Fly region; pick what's near your users
 
 [build]
   dockerfile = "Dockerfile"

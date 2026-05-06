@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Default theme — closely matches the phpMyChat parchment aesthetic. Each
+ * value is a *space-separated RGB triple* so Tailwind opacity modifiers
+ * (bg-keep-panel/30, border-keep-border/40, ...) compose correctly with
+ * `rgb(var(--keep-X) / <alpha-value>)`.
+ *
+ * lib/theme.ts converts hex theme values to this format at apply time.
+ */
+:root {
+  --keep-bg: 244 239 226;       /* #f4efe2 */
+  --keep-panel: 226 214 184;    /* #e2d6b8 */
+  --keep-border: 168 149 114;   /* #a89572 */
+  --keep-text: 26 26 26;        /* #1a1a1a */
+  --keep-muted: 107 98 86;      /* #6b6256 */
+  --keep-action: 44 93 44;      /* #2c5d2c */
+  --keep-accent: 138 31 31;     /* #8a1f1f */
+  --keep-system: 122 90 26;     /* #7a5a1a */
+}
+
+@layer base {
+  html, body {
+    @apply font-chat text-sm;
+    margin: 0;
+    background-color: rgb(var(--keep-bg) / 1);
+    color: rgb(var(--keep-text) / 1);
+  }
+}

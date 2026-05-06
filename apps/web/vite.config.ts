@@ -1,0 +1,27 @@
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    proxy: {
+      "/auth": "http://localhost:3001",
+      "/admin": "http://localhost:3001",
+      "/characters": "http://localhost:3001",
+      "/profiles": "http://localhost:3001",
+      "/nav-links": "http://localhost:3001",
+      "/rooms": "http://localhost:3001",
+      "/stats": "http://localhost:3001",
+      "/commands": "http://localhost:3001",
+      "/me": "http://localhost:3001",
+      "/health": "http://localhost:3001",
+      "/users": "http://localhost:3001",
+      "/site": "http://localhost:3001",
+      "/socket.io": {
+        target: "http://localhost:3001",
+        ws: true,
+      },
+    },
+  },
+});

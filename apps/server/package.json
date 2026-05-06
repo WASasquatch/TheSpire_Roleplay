@@ -1,0 +1,41 @@
+{
+  "name": "@thekeep/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "node scripts/apply-migrations.mjs",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^10.0.1",
+    "@fastify/cors": "^10.0.1",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/session": "^11.0.1",
+    "@fastify/static": "^9.1.3",
+    "@thekeep/shared": "workspace:*",
+    "argon2": "^0.41.1",
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.0",
+    "fastify": "^5.0.0",
+    "nanoid": "^5.0.7",
+    "pino": "^9.4.0",
+    "pino-pretty": "^11.2.2",
+    "sanitize-html": "^2.13.1",
+    "socket.io": "^4.8.0",
+    "tsx": "^4.19.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.7.4",
+    "@types/sanitize-html": "^2.13.0",
+    "drizzle-kit": "^0.27.0",
+    "typescript": "^5.6.2"
+  }
+}

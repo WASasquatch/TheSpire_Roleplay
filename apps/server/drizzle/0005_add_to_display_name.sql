@@ -1,0 +1,1 @@
+ALTER TABLE `messages` ADD `to_display_name` text;

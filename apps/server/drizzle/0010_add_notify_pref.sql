@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `notify_pref` text DEFAULT 'mentions' NOT NULL;

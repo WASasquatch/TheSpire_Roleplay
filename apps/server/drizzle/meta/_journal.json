@@ -1,0 +1,83 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1777952325645,
+      "tag": "0000_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1777998785616,
+      "tag": "0001_add_color_and_away",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1778006163751,
+      "tag": "0002_add_nav_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1778007484326,
+      "tag": "0003_add_gender",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1778023086000,
+      "tag": "0004_consolidate_room_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1778023086740,
+      "tag": "0005_add_to_display_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1778026607139,
+      "tag": "0006_add_theme",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1778036742028,
+      "tag": "0007_add_mutes",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1778037087772,
+      "tag": "0008_add_site_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1778038029398,
+      "tag": "0009_add_custom_cmd_color",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1778039237911,
+      "tag": "0010_add_notify_pref",
+      "breakpoints": true
+    }
+  ]
+}

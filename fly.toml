@@ -38,8 +38,11 @@ primary_region = "sjc"     # any Fly region; pick what's near your users
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
-  auto_start_machines = true
+  # Always-on: this is a chat app with long-lived WebSocket connections.
+  # Auto-stopping would drop those mid-conversation and the cold-start on
+  # the next request would feel like an outage. Keep the machine warm.
+  auto_stop_machines = "off"
+  auto_start_machines = false
   min_machines_running = 1
   processes = ["app"]
 

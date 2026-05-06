@@ -15,6 +15,7 @@ interface Props {
   /** Bumped by AdminPanel after editing links so the banner re-fetches. */
   navLinksVersion: number;
   onOpenAdmin?: () => void;
+  onOpenRules: () => void;
 }
 
 /**
@@ -28,7 +29,7 @@ interface Props {
  * the active theme's panel color / text color / font-action stack when not
  * overridden, so a fresh install still looks coherent.
  */
-export function Banner({ navLinksVersion, onOpenAdmin }: Props) {
+export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
   const branding = useChat((s) => s.branding);
@@ -91,9 +92,18 @@ export function Banner({ navLinksVersion, onOpenAdmin }: Props) {
             </a>
           </span>
         ))}
+        {links.length > 0 ? <span className="text-keep-rule">|</span> : null}
+        <button
+          type="button"
+          onClick={onOpenRules}
+          className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
+          title="House rules and privacy notice"
+        >
+          Rules
+        </button>
         {me?.role === "admin" && onOpenAdmin ? (
           <>
-            {links.length > 0 ? <span className="text-keep-rule">|</span> : null}
+            <span className="text-keep-rule">|</span>
             <button
               type="button"
               onClick={onOpenAdmin}
@@ -104,9 +114,7 @@ export function Banner({ navLinksVersion, onOpenAdmin }: Props) {
             </button>
           </>
         ) : null}
-        {(links.length > 0 || me?.role === "admin") ? (
-          <span className="text-keep-rule">|</span>
-        ) : null}
+        <span className="text-keep-rule">|</span>
         <button
           type="button"
           onClick={logout}

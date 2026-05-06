@@ -13,6 +13,15 @@ const credentialsSchema = z.object({
   email: z.string().email().max(200),
   username: z.string().min(2).max(40).regex(/^[\p{L}\p{N}_\-]+$/u),
   password: z.string().min(8).max(200),
+  /**
+   * Defense-in-depth: the client only submits when the user ticks the
+   * disclaimer checkbox, but a direct POST could bypass that. Require the
+   * field server-side so any registration path proves acceptance. The
+   * literal `true` rejects coerced/truthy values.
+   */
+  acceptDisclaimer: z.literal(true, {
+    errorMap: () => ({ message: "you must accept the disclaimer to register" }),
+  }),
 });
 
 export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<void> {

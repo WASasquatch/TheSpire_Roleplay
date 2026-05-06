@@ -385,6 +385,12 @@ export async function registerAdminRoutes(
     registrationOpen: z.boolean().optional(),
     /** HTML rendered above the splash login form. Sanitized on save. 50KB cap. */
     welcomeHtml: z.string().max(50_000).optional(),
+    /** HTML body of the Rules modal. Sanitized on save. 50KB cap. */
+    rulesHtml: z.string().max(50_000).optional(),
+    /** HTML body of the privacy/safety notice in the Rules modal. Sanitized on save. 10KB cap. */
+    securityNoticeHtml: z.string().max(10_000).optional(),
+    /** HTML body of the registration disclaimer. Sanitized on save. 20KB cap. */
+    registerDisclaimerHtml: z.string().max(20_000).optional(),
   });
 
   function settingsResponse(s: Awaited<ReturnType<typeof getSettings>>) {
@@ -404,6 +410,9 @@ export async function registerAdminRoutes(
       maxBioLength: s.maxBioLength,
       registrationOpen: s.registrationOpen,
       welcomeHtml: s.welcomeHtml,
+      rulesHtml: s.rulesHtml,
+      securityNoticeHtml: s.securityNoticeHtml,
+      registerDisclaimerHtml: s.registerDisclaimerHtml,
       updatedAt: s.updatedAt,
     };
   }
@@ -433,6 +442,18 @@ export async function registerAdminRoutes(
       // Sanitize on save (same allow-list as bios) — never trust admin HTML input.
       const { sanitizeBio } = await import("../auth/html.js");
       patch.welcomeHtml = sanitizeBio(body.welcomeHtml);
+    }
+    if (body.rulesHtml !== undefined) {
+      const { sanitizeBio } = await import("../auth/html.js");
+      patch.rulesHtml = sanitizeBio(body.rulesHtml);
+    }
+    if (body.securityNoticeHtml !== undefined) {
+      const { sanitizeBio } = await import("../auth/html.js");
+      patch.securityNoticeHtml = sanitizeBio(body.securityNoticeHtml);
+    }
+    if (body.registerDisclaimerHtml !== undefined) {
+      const { sanitizeBio } = await import("../auth/html.js");
+      patch.registerDisclaimerHtml = sanitizeBio(body.registerDisclaimerHtml);
     }
     return settingsResponse(await updateSettings(db, patch, sessionUser.id));
   });

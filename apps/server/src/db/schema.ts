@@ -410,6 +410,27 @@ export const siteSettings = sqliteTable("site_settings", {
    * splash screen. Empty string = the splash shows just the form.
    */
   welcomeHtml: text("welcome_html").notNull().default(""),
+  /**
+   * Sanitized HTML rendered in the Rules modal. Migration 0015 seeds a
+   * baseline 8-point code of conduct; admins customize freely. The schema
+   * default is empty here — the SQL DEFAULT in the migration is what
+   * actually populates new rows, so drizzle keeps this column out of
+   * inserts and lets SQLite apply the seeded default.
+   */
+  rulesHtml: text("rules_html").notNull().default(""),
+  /**
+   * Sanitized HTML rendered in the Rules modal as the privacy/safety
+   * notice. Same default-source story as rulesHtml: migration 0015 seeds
+   * the canonical "admins cannot read private/whisper content" text.
+   */
+  securityNoticeHtml: text("security_notice_html").notNull().default(""),
+  /**
+   * Sanitized HTML rendered above the register form on the splash. Migration
+   * 0016 seeds a default disclaimer covering: free-form RP, views not those
+   * of operators/software, potentially offensive themes, be respectful OOC.
+   * Users must tick an "I agree" checkbox before /auth/register will succeed.
+   */
+  registerDisclaimerHtml: text("register_disclaimer_html").notNull().default(""),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
 });

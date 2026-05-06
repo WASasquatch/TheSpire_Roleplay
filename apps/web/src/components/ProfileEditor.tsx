@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { CharacterStats, Theme } from "@thekeep/shared";
+import type { CharacterStats, ProfileView, Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import { GENDER_OPTIONS, type Gender } from "../lib/gender.js";
 import {
@@ -8,6 +8,7 @@ import {
   requestPermission as notifyRequestPermission,
   type NotifyPref,
 } from "../lib/notifications.js";
+import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
 
 interface Props {
@@ -251,6 +252,45 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
     window.setTimeout(() => setSavedFlash(false), 1500);
   }
 
+  /**
+   * Preview pane — opens a ProfileModal showing the current form state as
+   * other users would see it. Pulled from local state (not the server) so
+   * the user can preview unsaved edits while iterating.
+   */
+  const [previewing, setPreviewing] = useState(false);
+  const previewProfile: ProfileView | null = useMemo(() => {
+    const previewTheme = theme ?? DEFAULT_THEME;
+    if (target.kind === "master") {
+      if (!master) return null;
+      return {
+        kind: "master",
+        profile: {
+          userId: "preview",
+          username: master.username,
+          bioHtml: bioHtml,
+          avatarUrl: avatarUrl.trim() || null,
+          gender,
+          theme: previewTheme,
+          createdAt: Date.now(),
+        },
+      };
+    }
+    return {
+      kind: "character",
+      profile: {
+        id: target.id,
+        userId: "preview",
+        name,
+        bioHtml,
+        stats,
+        avatarUrl: avatarUrl.trim() || null,
+        theme: previewTheme,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    };
+  }, [target, master, name, bioHtml, avatarUrl, gender, stats, theme]);
+
   const targetOptions = useMemo(() => {
     return [
       { value: "master:", label: master ? `Master OOC — ${master.username}` : "Master OOC" },
@@ -450,6 +490,15 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           <div className="flex gap-2">
             <button
               type="button"
+              onClick={() => setPreviewing(true)}
+              disabled={loadingTarget || !previewProfile}
+              title="Preview this profile as other users will see it (uses your unsaved edits)."
+              className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm disabled:opacity-50 hover:bg-keep-banner"
+            >
+              View profile
+            </button>
+            <button
+              type="button"
               onClick={onClose}
               className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
             >
@@ -465,6 +514,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           </div>
         </div>
       </form>
+      {previewing && previewProfile ? (
+        // stopPropagation so clicking the preview backdrop (which closes the
+        // preview) doesn't bubble to the editor's backdrop and close that too.
+        <div onClick={(e) => e.stopPropagation()}>
+          <ProfileModal profile={previewProfile} onClose={() => setPreviewing(false)} />
+        </div>
+      ) : null}
     </div>
   );
 }

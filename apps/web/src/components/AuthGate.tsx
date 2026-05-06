@@ -179,11 +179,14 @@ export function SplashShell({
 }
 
 function SplashStats({ stats }: { stats: SiteStats | null }) {
+  // Use the admin-configured site name in flavor copy so "the keep" (the
+  // codename) doesn't leak through to users on a rebranded install.
+  const siteName = useChat((s) => s.branding.siteName);
   if (!stats) {
     return (
       <div className="my-2 flex items-center justify-center gap-2 text-xs text-keep-muted">
         <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-keep-muted/40" />
-        <span>checking the keep…</span>
+        <span>checking {siteName}…</span>
       </div>
     );
   }
@@ -226,6 +229,19 @@ export function AuthGate() {
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  /**
+   * Confirm-password field, register-mode only. Pure client-side typo guard:
+   * the server never sees it. Without this a user could mistype their
+   * password during registration and lock themselves out before they ever
+   * logged in.
+   */
+  const [passwordConfirm, setPasswordConfirm] = useState("");
+  /**
+   * Acceptance of the registration disclaimer. Required for /auth/register
+   * (server enforces a literal `true`). Reset whenever mode toggles so a
+   * stale tick from a prior session doesn't carry over.
+   */
+  const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const setMe = useChat((s) => s.setMe);
@@ -240,11 +256,17 @@ export function AuthGate() {
     setSubmitting(true);
     try {
       if (mode === "register") {
+        if (password !== passwordConfirm) {
+          throw new Error("Passwords don't match. Please retype them.");
+        }
+        if (!accepted) {
+          throw new Error("Please accept the disclaimer to register.");
+        }
         const res = await fetch("/auth/register", {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, username, password }),
+          body: JSON.stringify({ email, username, password, acceptDisclaimer: true }),
         });
         if (!res.ok) throw new Error((await res.json()).error ?? "register failed");
         const j = await res.json();
@@ -270,6 +292,24 @@ export function AuthGate() {
     }
   }
 
+  function setModeAndReset(next: "login" | "register") {
+    // Reset register-only fields when leaving register mode so a stale tick
+    // or stale confirm-password value doesn't linger after the user backs
+    // out and returns later. (Empty disclaimer text means there's nothing
+    // to agree to; that case is handled separately below.)
+    if (next !== "register") {
+      setAccepted(false);
+      setPasswordConfirm("");
+    }
+    setMode(next);
+  }
+
+  // Server enforces this too; the gate here is UX. Empty disclaimer text =
+  // nothing to agree to, so we don't block the user behind a meaningless tick.
+  const disclaimerText = branding.registerDisclaimerHtml.trim();
+  const needsAcceptance = mode === "register" && disclaimerText !== "";
+  const canSubmit = !submitting && (mode === "login" || !needsAcceptance || accepted);
+
   return (
     <SplashShell
       footer={
@@ -277,7 +317,7 @@ export function AuthGate() {
           <button
             type="button"
             className="w-full text-xs text-keep-muted hover:text-keep-text"
-            onClick={() => setMode(mode === "login" ? "register" : "login")}
+            onClick={() => setModeAndReset(mode === "login" ? "register" : "login")}
           >
             {mode === "login" ? "Need an account? Register." : "Already have one? Log in."}
           </button>
@@ -313,6 +353,52 @@ export function AuthGate() {
           type="password"
           autoComplete={mode === "register" ? "new-password" : "current-password"}
         />
+        {mode === "register" ? (
+          <div>
+            <Field
+              label="Confirm password"
+              value={passwordConfirm}
+              onChange={setPasswordConfirm}
+              type="password"
+              autoComplete="new-password"
+            />
+            {/*
+              Inline mismatch hint — only fires once the user has typed in the
+              confirm field, otherwise the empty initial state would shout at
+              them before they even start. Deliberately doesn't block the
+              submit button (matching is verified on submit) so the keyboard
+              flow stays uninterrupted; the message is just a visual cue.
+            */}
+            {passwordConfirm && password !== passwordConfirm ? (
+              <div className="mt-1 text-[10px] text-keep-accent">
+                Passwords don't match yet.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {needsAcceptance ? (
+          <div className="space-y-2 rounded border border-keep-border/60 bg-keep-bg/40 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-[0.25em] text-keep-muted">
+              before you register
+            </div>
+            <div
+              className="prose prose-sm max-h-48 max-w-none overflow-y-auto pr-1 text-xs text-keep-text/90"
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(disclaimerText) }}
+            />
+            <label className="flex cursor-pointer items-start gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={accepted}
+                onChange={(e) => setAccepted(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                I have read and accept the disclaimer above and the house rules.
+              </span>
+            </label>
+          </div>
+        ) : null}
 
         {error ? (
           <div className="rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">
@@ -322,7 +408,12 @@ export function AuthGate() {
 
         <button
           type="submit"
-          disabled={submitting}
+          disabled={!canSubmit}
+          title={
+            needsAcceptance && !accepted
+              ? "Tick the box above to confirm you accept the disclaimer."
+              : undefined
+          }
           className="w-full rounded border border-keep-border bg-keep-panel py-2 text-sm font-semibold tracking-wide hover:bg-keep-panel/80 disabled:opacity-50"
         >
           {submitting

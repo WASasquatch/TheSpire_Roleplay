@@ -1,5 +1,7 @@
 import { eq, lt } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import type { Server as IoServer } from "socket.io";
+import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { messages, rooms, sessions, users } from "./db/schema.js";
 import { hashPassword } from "./auth/passwords.js";
 import { ensureSiteSettings, getSettings } from "./settings.js";
@@ -112,13 +114,42 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
  * when the corresponding setting is 0/forever. Safe to run from a single
  * setInterval at server start; cancellation token returned for graceful
  * shutdown in tests.
+ *
+ * `io` is optional so test harnesses can pass `null`; in production, passing
+ * the live IoServer lets the janitor force-disconnect any socket whose
+ * underlying session was just swept, sending those clients back to the
+ * login splash without them having to act first.
  */
-export function startJanitor(db: Db, log: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void }): () => void {
+export function startJanitor(
+  db: Db,
+  log: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void },
+  io: IoServer<ClientToServerEvents, ServerToClientEvents> | null = null,
+): () => void {
   async function sweep() {
     try {
       // Expired sessions — always cleared, no admin setting needed.
       const expired = await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
       if (expired.changes > 0) log.info(`[janitor] cleared ${expired.changes} expired sessions`);
+
+      // Boot any connected socket whose session row no longer exists. The
+      // janitor only runs hourly, so users may stay connected past their
+      // TTL until the next sweep — that's fine; chat:input also re-checks.
+      if (io && expired.changes > 0) {
+        const liveSids = new Set(
+          (await db.select({ id: sessions.id }).from(sessions)).map((r) => r.id),
+        );
+        const liveSockets = await io.fetchSockets();
+        let kicked = 0;
+        for (const s of liveSockets) {
+          const sid = (s.data as { sid?: string }).sid;
+          if (sid && !liveSids.has(sid)) {
+            s.emit("auth:expired");
+            s.disconnect(true);
+            kicked += 1;
+          }
+        }
+        if (kicked > 0) log.info(`[janitor] booted ${kicked} sockets whose sessions expired`);
+      }
 
       // Messages older than retentionMs — only when admin configured a value.
       const { messageRetentionMs } = await getSettings(db);

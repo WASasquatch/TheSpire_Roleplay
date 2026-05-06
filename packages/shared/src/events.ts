@@ -23,6 +23,12 @@ export interface ServerToClientEvents {
   "ui:hint": (hint: UiHint) => void;
   /** Soft errors surfaced to the user (bad command, not in room, etc.). */
   "error:notice": (payload: { code: string; message: string }) => void;
+  /**
+   * Session has expired or been invalidated. Client should clear local user
+   * state and return to the login splash. Sent immediately before the
+   * socket is force-disconnected by the server.
+   */
+  "auth:expired": () => void;
 }
 
 export type UiHint =

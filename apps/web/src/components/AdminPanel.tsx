@@ -10,7 +10,7 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "settings" | "branding" | "links" | "rooms" | "commands" | "users";
+type Tab = "settings" | "branding" | "rules" | "links" | "rooms" | "commands" | "users";
 
 export function AdminPanel({ onClose, onLinksChanged }: Props) {
   const [tab, setTab] = useState<Tab>("settings");
@@ -27,6 +27,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             <nav className="flex gap-1 text-xs uppercase tracking-widest">
               <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>Settings</TabBtn>
               <TabBtn active={tab === "branding"} onClick={() => setTab("branding")}>Branding</TabBtn>
+              <TabBtn active={tab === "rules"} onClick={() => setTab("rules")}>Rules</TabBtn>
               <TabBtn active={tab === "links"} onClick={() => setTab("links")}>Nav Links</TabBtn>
               <TabBtn active={tab === "commands"} onClick={() => setTab("commands")}>Commands</TabBtn>
               <TabBtn active={tab === "rooms"} onClick={() => setTab("rooms")}>Rooms</TabBtn>
@@ -41,6 +42,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
         <div className="max-h-[78vh] overflow-y-auto p-4">
           {tab === "settings" ? <SettingsTab /> : null}
           {tab === "branding" ? <BrandingTab /> : null}
+          {tab === "rules" ? <RulesTab /> : null}
           {tab === "links" ? <LinksTab onLinksChanged={onLinksChanged} /> : null}
           {tab === "commands" ? <CommandsTab /> : null}
           {tab === "rooms" ? <RoomsTab /> : null}
@@ -104,6 +106,9 @@ interface SettingsRow {
   maxBioLength: number;
   registrationOpen: boolean;
   welcomeHtml: string;
+  rulesHtml: string;
+  securityNoticeHtml: string;
+  registerDisclaimerHtml: string;
   updatedAt: number;
 }
 
@@ -336,6 +341,7 @@ function SettingsTab() {
         logoFont: j.logoFont,
         registrationOpen: j.registrationOpen,
         welcomeHtml: j.welcomeHtml,
+        registerDisclaimerHtml: j.registerDisclaimerHtml,
         defaultTheme: j.defaultTheme,
       });
       setSavedFlash(true);
@@ -570,6 +576,7 @@ function BrandingTab() {
         logoFont: j.logoFont,
         registrationOpen: j.registrationOpen,
         welcomeHtml: j.welcomeHtml,
+        registerDisclaimerHtml: j.registerDisclaimerHtml,
         defaultTheme: j.defaultTheme,
       });
       setSavedFlash(true);
@@ -729,6 +736,212 @@ function BrandingTab() {
           className="rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
         >
           {saving ? "Saving…" : "Save branding"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/* =============================================================
+ * RULES TAB
+ * =============================================================
+ *
+ * Edits the two HTML bodies rendered by the Rules modal:
+ *   - rulesHtml          — admin-authored house rules
+ *   - securityNoticeHtml — privacy/safety notice (defaults to the canonical
+ *                          "private rooms aren't readable by admins" text)
+ *
+ * Both go through the same sanitizeBio() allow-list as profile bios on save.
+ */
+function RulesTab() {
+  const setBranding = useChat((s) => s.setBranding);
+  const [data, setData] = useState<SettingsRow | null>(null);
+  const [rulesHtml, setRulesHtml] = useState("");
+  const [securityHtml, setSecurityHtml] = useState("");
+  const [disclaimerHtml, setDisclaimerHtml] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  async function load() {
+    setError(null);
+    try {
+      const r = await fetch("/admin/settings", { credentials: "include" });
+      if (!r.ok) throw new Error(await readError(r));
+      const j = (await r.json()) as SettingsRow;
+      setData(j);
+      setRulesHtml(j.rulesHtml ?? "");
+      setSecurityHtml(j.securityNoticeHtml ?? "");
+      setDisclaimerHtml(j.registerDisclaimerHtml ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "load failed");
+    }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (!data) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await fetch("/admin/settings", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rulesHtml,
+          securityNoticeHtml: securityHtml,
+          registerDisclaimerHtml: disclaimerHtml,
+        }),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      const j = (await r.json()) as SettingsRow;
+      setData(j);
+      // Re-sync from server: sanitize may have stripped tags or transformed
+      // attributes, so the textarea should reflect what's actually stored.
+      setRulesHtml(j.rulesHtml ?? "");
+      setSecurityHtml(j.securityNoticeHtml ?? "");
+      setDisclaimerHtml(j.registerDisclaimerHtml ?? "");
+      // The disclaimer is part of public branding (consumed by AuthGate); push
+      // the new copy into the store so other open tabs / the splash see it
+      // without waiting for the next /site fetch.
+      setBranding({
+        siteName: j.siteName,
+        bannerCoverCss: j.bannerCoverCss,
+        logoColor: j.logoColor,
+        logoFont: j.logoFont,
+        registrationOpen: j.registrationOpen,
+        welcomeHtml: j.welcomeHtml,
+        registerDisclaimerHtml: j.registerDisclaimerHtml,
+        defaultTheme: j.defaultTheme,
+      });
+      setSavedFlash(true);
+      window.setTimeout(() => setSavedFlash(false), 1500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!data) {
+    return <div className="text-keep-muted text-xs">{error ?? "loading…"}</div>;
+  }
+
+  return (
+    <form onSubmit={save} className="space-y-4">
+      <p className="text-xs text-keep-muted">
+        Rules and the privacy notice shown when users click the Rules button.
+        Both fields accept the same HTML allow-list as profile bios — formatting
+        tags, links, lists, and headings (h3–h6).
+      </p>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">House rules</legend>
+        <textarea
+          value={rulesHtml}
+          onChange={(e) => setRulesHtml(e.target.value)}
+          rows={14}
+          maxLength={50_000}
+          placeholder="<h3>House Rules</h3><ol><li>...</li></ol>"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+        />
+        <p className="mt-1 text-keep-muted">
+          Free-form RP house rules. Defaults seed an 8-point baseline covering
+          consent, godmodding, OOC/IC separation, and reporting.
+        </p>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Privacy &amp; safety notice</legend>
+        <textarea
+          value={securityHtml}
+          onChange={(e) => setSecurityHtml(e.target.value)}
+          rows={8}
+          maxLength={10_000}
+          placeholder="<h3>Privacy &amp; Safety</h3><p>...</p>"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+        />
+        <p className="mt-1 text-keep-muted">
+          Shown alongside the rules. Defaults explain the privacy contract:
+          admins cannot read private/whispered messages, so users should
+          self-govern and report problems with screenshots.
+        </p>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Registration disclaimer</legend>
+        <textarea
+          value={disclaimerHtml}
+          onChange={(e) => setDisclaimerHtml(e.target.value)}
+          rows={10}
+          maxLength={20_000}
+          placeholder="<p>This is a free-form roleplay chat...</p>"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+        />
+        <p className="mt-1 text-keep-muted">
+          Rendered above the registration form on the splash. Users must tick
+          an "I agree" checkbox before <code>/auth/register</code> succeeds.
+          Empty disclaimer = no checkbox shown (registration unblocked).
+        </p>
+      </fieldset>
+
+      {/* Live preview */}
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Preview</legend>
+        <div className="space-y-3 rounded border border-keep-rule bg-keep-bg p-3">
+          {securityHtml.trim() ? (
+            <div
+              className="prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-2"
+              dangerouslySetInnerHTML={{ __html: securityHtml }}
+            />
+          ) : null}
+          {rulesHtml.trim() ? (
+            <div
+              className="prose prose-sm max-w-none"
+              dangerouslySetInnerHTML={{ __html: rulesHtml }}
+            />
+          ) : (
+            <p className="italic text-keep-muted">(no rules set)</p>
+          )}
+          {disclaimerHtml.trim() ? (
+            <div className="rounded border border-keep-border/60 bg-keep-bg/50 p-2">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.25em] text-keep-muted">
+                register disclaimer (shown on the splash)
+              </div>
+              <div
+                className="prose prose-sm max-w-none"
+                dangerouslySetInnerHTML={{ __html: disclaimerHtml }}
+              />
+              <label className="mt-1 flex items-start gap-2 text-[11px] text-keep-muted">
+                <input type="checkbox" disabled checked className="mt-0.5" />
+                <span>I have read and accept the disclaimer above and the house rules.</span>
+              </label>
+            </div>
+          ) : null}
+        </div>
+        <p className="mt-1 text-[10px] text-keep-muted">
+          The preview renders unsanitized. The server strips disallowed tags
+          on save, so tags missing from the allow-list will disappear after
+          saving.
+        </p>
+      </fieldset>
+
+      {error ? (
+        <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
+      ) : null}
+
+      <div className="flex items-center justify-between">
+        <span className={`text-xs ${savedFlash ? "text-keep-system" : "text-keep-muted"}`}>
+          {savedFlash ? "Saved." : `Last updated ${new Date(data.updatedAt).toLocaleString()}`}
+        </span>
+        <button
+          type="submit"
+          disabled={saving}
+          className="rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
+        >
+          {saving ? "Saving…" : "Save rules"}
         </button>
       </div>
     </form>

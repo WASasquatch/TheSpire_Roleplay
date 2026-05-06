@@ -10,8 +10,9 @@ import { MessageList } from "./components/MessageList.js";
 import { ProfileEditor } from "./components/ProfileEditor.js";
 import { ProfileModal } from "./components/ProfileModal.js";
 import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
+import { RulesModal } from "./components/RulesModal.js";
 import { UsersModal } from "./components/UsersModal.js";
-import { getSocket } from "./lib/socket.js";
+import { getSocket, disconnect as disconnectSocket } from "./lib/socket.js";
 import { applyTheme } from "./lib/theme.js";
 import { fire as fireNotification, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { useChat, type SiteBranding } from "./state/store.js";
@@ -65,6 +66,24 @@ export function App() {
     return () => { cancelled = true; };
   }, [setMe, setAuthChecked]);
 
+  // Backstop poll: re-verify the session every 60s so admin-shortened TTLs
+  // (or janitor sweeps) drop the user back to the login splash even if they
+  // never type or click. The socket bounces them sooner via `auth:expired`,
+  // but this catches cases where the socket disconnected silently.
+  useEffect(() => {
+    if (!me) return;
+    const id = window.setInterval(async () => {
+      try {
+        const r = await fetch("/auth/me", { credentials: "include" });
+        if (!r.ok) {
+          disconnectSocket();
+          setMe(null);
+        }
+      } catch { /* network blip — ignore */ }
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [me, setMe]);
+
   if (!authChecked) return <BootSplash />;
   if (!me) return <AuthGate />;
   return <Chat />;
@@ -85,6 +104,7 @@ function BootSplash() {
 
 function Chat() {
   const me = useChat((s) => s.me);
+  const setMe = useChat((s) => s.setMe);
   const setRoom = useChat((s) => s.setRoom);
   const setOccupants = useChat((s) => s.setOccupants);
   const appendMessage = useChat((s) => s.appendMessage);
@@ -108,6 +128,7 @@ function Chat() {
   const setRefreshIntervalSec = useChat((s) => s.setRefreshIntervalSec);
 
   const [adminOpen, setAdminOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState<{ filter?: string } | null>(null);
   const [usersOpen, setUsersOpen] = useState<{ query?: string } | null>(null);
   const [navLinksVersion, setNavLinksVersion] = useState(0);
@@ -228,6 +249,13 @@ function Chat() {
       if (msgs.length) setMessages(msgs[0]!.roomId, msgs);
     });
     socket.on("error:notice", (n) => setNotice(n));
+    socket.on("auth:expired", () => {
+      // Server invalidated the session (TTL elapsed, admin disabled the
+      // account, or sweep deleted the row). Hand the client back to the
+      // splash — the cookie is already worthless, so /auth/me would 401.
+      disconnectSocket();
+      setMe(null);
+    });
     socket.on("ui:hint", (h) => {
       switch (h.kind) {
         case "open-profile":
@@ -266,9 +294,10 @@ function Chat() {
       socket.off("message:new");
       socket.off("message:bulk");
       socket.off("error:notice");
+      socket.off("auth:expired");
       socket.off("ui:hint");
     };
-  }, [socket, setRoom, setOccupants, appendMessage, setMessages, setCurrentRoom, setNotice, setHint, setOpenProfile, openEditor, setRefreshIntervalSec]);
+  }, [socket, setRoom, setOccupants, appendMessage, setMessages, setCurrentRoom, setNotice, setHint, setOpenProfile, openEditor, setRefreshIntervalSec, setMe]);
 
   function send(text: string) {
     if (!currentRoomId) return;
@@ -348,6 +377,7 @@ function Chat() {
     <div className="flex h-screen h-dvh flex-col">
       <Banner
         navLinksVersion={navLinksVersion}
+        onOpenRules={() => setRulesOpen(true)}
         {...(me?.role === "admin" ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
       {room?.topic ? (
@@ -435,6 +465,7 @@ function Chat() {
           onLinksChanged={() => setNavLinksVersion((v) => v + 1)}
         />
       ) : null}
+      {rulesOpen ? <RulesModal onClose={() => setRulesOpen(false)} /> : null}
       {helpOpen ? (
         <HelpModal
           onClose={() => setHelpOpen(null)}

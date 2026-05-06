@@ -29,6 +29,8 @@ export interface SiteBranding {
   registrationOpen: boolean;
   /** Sanitized welcome HTML rendered above the splash login form. */
   welcomeHtml: string;
+  /** Sanitized disclaimer HTML rendered above the register form. */
+  registerDisclaimerHtml: string;
   /**
    * Sitewide default theme — used by the splash so the login screen renders
    * in the admin-configured palette instead of inheriting whatever theme the
@@ -44,6 +46,7 @@ export const DEFAULT_BRANDING: SiteBranding = {
   logoFont: null,
   registrationOpen: true,
   welcomeHtml: "",
+  registerDisclaimerHtml: "",
   defaultTheme: DEFAULT_THEME,
 };
 
@@ -79,6 +82,9 @@ export function loadCachedBranding(): SiteBranding {
       welcomeHtml: typeof parsed.welcomeHtml === "string"
         ? parsed.welcomeHtml
         : DEFAULT_BRANDING.welcomeHtml,
+      registerDisclaimerHtml: typeof parsed.registerDisclaimerHtml === "string"
+        ? parsed.registerDisclaimerHtml
+        : DEFAULT_BRANDING.registerDisclaimerHtml,
       // Theme is structured; fall through to DEFAULT_THEME if the cached
       // payload is malformed instead of letting a partial value slip in.
       defaultTheme: parsed.defaultTheme && typeof parsed.defaultTheme === "object"

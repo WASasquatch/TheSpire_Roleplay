@@ -18,7 +18,7 @@ import type {
 } from "@thekeep/shared";
 
 import { db } from "./db/index.js";
-import { rooms } from "./db/schema.js";
+import { rooms, sessions } from "./db/schema.js";
 import { CommandRegistry } from "./commands/registry.js";
 import { registerBuiltins } from "./commands/builtins/index.js";
 import { dispatchChatInput } from "./realtime/dispatch.js";
@@ -60,11 +60,13 @@ if (SESSION_SECRET.length < 32) {
   throw new Error("SESSION_SECRET must be set and at least 32 chars");
 }
 
-// Resolve the built web bundle relative to this file. Works whether we're
-// running from `src/` (tsx in dev) or `dist/` (compiled prod): we walk up
-// to apps/server then over to apps/web/dist.
+// Resolve the built web bundle relative to this file. From either
+// apps/server/src/ (tsx) or apps/server/dist/ (compiled), two `..` levels
+// reach apps/, then over to web/dist. Three was wrong — that climbed
+// past apps/ to the workspace root and the static-file registration
+// silently no-op'd, leaving every GET as a Fastify 404.
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const webDistPath = resolve(__dirname, "..", "..", "..", "web", "dist");
+const webDistPath = resolve(__dirname, "..", "..", "web", "dist");
 
 const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
@@ -154,6 +156,21 @@ async function main() {
       registrationOpen: s.registrationOpen,
       // Sanitized welcome message rendered above the splash login form.
       welcomeHtml: s.welcomeHtml,
+      // Sanitized disclaimer rendered above the register form. Users must
+      // tick an "I agree" checkbox before /auth/register accepts the request.
+      registerDisclaimerHtml: s.registerDisclaimerHtml,
+    };
+  });
+
+  /**
+   * Public rules endpoint — returns the admin-configured house rules and the
+   * privacy/safety notice. Public so the splash screen could surface them too.
+   */
+  app.get("/rules", async () => {
+    const s = await getSettings(db);
+    return {
+      rulesHtml: s.rulesHtml,
+      securityNoticeHtml: s.securityNoticeHtml,
     };
   });
 
@@ -186,8 +203,12 @@ async function main() {
       if (!userId) return next(new Error("unauthenticated"));
       const user = await loadSessionUser(db, userId);
       if (!user) return next(new Error("unauthenticated"));
+      // Stash the sid so per-event handlers (and the janitor sweep) can
+      // verify the session row is still alive. The userId/user fields stay
+      // for backwards-compatibility with handlers that reference them.
       (socket.data as { userId: string }).userId = userId;
       (socket.data as { user: typeof user }).user = user;
+      (socket.data as { sid: string }).sid = sid;
       next();
     } catch (err) {
       next(err as Error);
@@ -208,9 +229,25 @@ async function main() {
 
     socket.on("chat:input", async (payload, ack) => {
       try {
+        // Session-row check — once the janitor sweeps an expired session
+        // (or an admin invalidates it), the next chat input bounces the
+        // socket so the client returns to the splash. Without this, a
+        // long-lived socket happily kept dispatching past its TTL.
+        const sid = (socket.data as { sid?: string }).sid;
+        if (sid) {
+          const row = (await db.select().from(sessions).where(eq(sessions.id, sid)).limit(1))[0];
+          if (!row || +row.expiresAt < Date.now()) {
+            socket.emit("auth:expired");
+            ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
+            socket.disconnect(true);
+            return;
+          }
+        }
         const fresh = await loadSessionUser(db, user.id);
         if (!fresh) {
+          socket.emit("auth:expired");
           ack?.({ ok: false, code: "AUTH", message: "Session expired." });
+          socket.disconnect(true);
           return;
         }
         Object.assign(user, fresh);
@@ -299,8 +336,10 @@ async function main() {
   });
 
   // Janitor: hourly sweep for expired sessions and (if admin enabled it)
-  // messages older than the retention window.
-  startJanitor(db, log);
+  // messages older than the retention window. Passing `io` lets the sweep
+  // force-disconnect sockets whose underlying session was just deleted, so
+  // those clients drop back to the login splash without having to type.
+  startJanitor(db, log, io);
 
   /* ---------- production: serve the built web bundle ----------
    *
@@ -344,7 +383,7 @@ async function main() {
         }
         // Don't SPA-fallback API-shaped paths — these should genuinely 404
         // so a typo'd /admin/foo doesn't return HTML and confuse a fetch().
-        const apiPrefixes = ["/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/me", "/health", "/users", "/site", "/socket.io"];
+        const apiPrefixes = ["/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/me", "/health", "/users", "/site", "/rules", "/socket.io"];
         if (apiPrefixes.some((p) => req.url === p || req.url.startsWith(p + "/") || req.url.startsWith(p + "?"))) {
           reply.code(404);
           return reply.send({ error: "not found" });

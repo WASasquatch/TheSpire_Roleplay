@@ -33,6 +33,12 @@ export interface SiteSettings {
   registrationOpen: boolean;
   /** Sanitized HTML rendered above the splash login/register form. */
   welcomeHtml: string;
+  /** Sanitized HTML rendered in the Rules modal (admin-editable house rules). */
+  rulesHtml: string;
+  /** Sanitized HTML rendered alongside the rules — privacy/safety notice. */
+  securityNoticeHtml: string;
+  /** Sanitized HTML rendered above the register form. Acceptance is required. */
+  registerDisclaimerHtml: string;
   updatedAt: number;
 }
 
@@ -81,6 +87,12 @@ export interface SettingsPatch {
   registrationOpen?: boolean;
   /** Pre-sanitized HTML; settings layer doesn't re-sanitize so the route handler must. */
   welcomeHtml?: string;
+  /** Pre-sanitized HTML; route handler sanitizes before invoking. */
+  rulesHtml?: string;
+  /** Pre-sanitized HTML; route handler sanitizes before invoking. */
+  securityNoticeHtml?: string;
+  /** Pre-sanitized HTML; route handler sanitizes before invoking. */
+  registerDisclaimerHtml?: string;
 }
 
 export async function updateSettings(
@@ -111,6 +123,9 @@ export async function updateSettings(
   if (patch.maxBioLength !== undefined) update.maxBioLength = patch.maxBioLength;
   if (patch.registrationOpen !== undefined) update.registrationOpen = patch.registrationOpen;
   if (patch.welcomeHtml !== undefined) update.welcomeHtml = patch.welcomeHtml;
+  if (patch.rulesHtml !== undefined) update.rulesHtml = patch.rulesHtml;
+  if (patch.securityNoticeHtml !== undefined) update.securityNoticeHtml = patch.securityNoticeHtml;
+  if (patch.registerDisclaimerHtml !== undefined) update.registerDisclaimerHtml = patch.registerDisclaimerHtml;
   await db.update(siteSettings).set(update).where(eq(siteSettings.id, "singleton"));
   cached = null;
   return getSettings(db);
@@ -138,6 +153,9 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     maxBioLength: row.maxBioLength,
     registrationOpen: row.registrationOpen,
     welcomeHtml: row.welcomeHtml,
+    rulesHtml: row.rulesHtml,
+    securityNoticeHtml: row.securityNoticeHtml,
+    registerDisclaimerHtml: row.registerDisclaimerHtml,
     updatedAt: +row.updatedAt,
   };
 }

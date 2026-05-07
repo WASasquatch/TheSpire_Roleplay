@@ -39,6 +39,10 @@ export interface SiteSettings {
   securityNoticeHtml: string;
   /** Sanitized HTML rendered above the register form. Acceptance is required. */
   registerDisclaimerHtml: string;
+  /** Plain-text SEO description (meta description, og:description, twitter:description). */
+  metaDescription: string;
+  /** Verbatim HTML injected into <head> on the server-rendered splash (analytics scripts). */
+  customHeadHtml: string;
   updatedAt: number;
 }
 
@@ -93,6 +97,10 @@ export interface SettingsPatch {
   securityNoticeHtml?: string;
   /** Pre-sanitized HTML; route handler sanitizes before invoking. */
   registerDisclaimerHtml?: string;
+  /** Plain text. Admin route handler trims; storage is verbatim. */
+  metaDescription?: string;
+  /** Raw HTML, NOT sanitized (analytics scripts must remain intact). Admin-only. */
+  customHeadHtml?: string;
 }
 
 export async function updateSettings(
@@ -126,6 +134,8 @@ export async function updateSettings(
   if (patch.rulesHtml !== undefined) update.rulesHtml = patch.rulesHtml;
   if (patch.securityNoticeHtml !== undefined) update.securityNoticeHtml = patch.securityNoticeHtml;
   if (patch.registerDisclaimerHtml !== undefined) update.registerDisclaimerHtml = patch.registerDisclaimerHtml;
+  if (patch.metaDescription !== undefined) update.metaDescription = patch.metaDescription;
+  if (patch.customHeadHtml !== undefined) update.customHeadHtml = patch.customHeadHtml;
   await db.update(siteSettings).set(update).where(eq(siteSettings.id, "singleton"));
   cached = null;
   return getSettings(db);
@@ -156,6 +166,8 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     rulesHtml: row.rulesHtml,
     securityNoticeHtml: row.securityNoticeHtml,
     registerDisclaimerHtml: row.registerDisclaimerHtml,
+    metaDescription: row.metaDescription,
+    customHeadHtml: row.customHeadHtml,
     updatedAt: +row.updatedAt,
   };
 }

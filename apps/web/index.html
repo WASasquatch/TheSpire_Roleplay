@@ -31,7 +31,52 @@
     <meta name="msapplication-square150x150logo" content="/mstile-150x150.png" />
     <meta name="msapplication-wide310x150logo" content="/mstile-310x150.png" />
     <meta name="msapplication-square310x310logo" content="/mstile-310x310.png" />
+    <meta name="theme-color" content="#1a1a1a" />
+
+    <!--
+      SEO + social-card meta. The server (apps/server/src/seo.ts) rewrites
+      title, description, og:*, twitter:*, and the canonical link with the
+      admin-configured siteName + metaDescription before serving the splash,
+      so non-JS crawlers see live values. The defaults below are what
+      anyone fetching the file directly (dev, raw GET) would see.
+    -->
     <title>The Spire</title>
+    <meta name="description" content="A roleplay-focused chat sanctuary. Build characters, share scenes, and tell collaborative stories with other writers." />
+    <link rel="canonical" href="https://thespire.fly.dev/" />
+
+    <!-- Open Graph (Facebook, Discord, LinkedIn, etc.) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="The Spire" />
+    <meta property="og:description" content="A roleplay-focused chat sanctuary. Build characters, share scenes, and tell collaborative stories with other writers." />
+    <meta property="og:url" content="https://thespire.fly.dev/" />
+    <meta property="og:image" content="/the_spire_bg.jpg" />
+    <meta property="og:site_name" content="The Spire" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="The Spire" />
+    <meta name="twitter:description" content="A roleplay-focused chat sanctuary. Build characters, share scenes, and tell collaborative stories with other writers." />
+    <meta name="twitter:image" content="/the_spire_bg.jpg" />
+
+    <!--
+      JSON-LD structured data. The server rewrites name + description with
+      live values; url is rewritten to the absolute request origin. Schema
+      type WebApplication is the closest match for an interactive chat app
+      that runs in the browser without needing install.
+    -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "The Spire",
+      "description": "A roleplay-focused chat sanctuary. Build characters, share scenes, and tell collaborative stories with other writers.",
+      "applicationCategory": "SocialNetworkingApplication",
+      "operatingSystem": "Web",
+      "url": "https://thespire.fly.dev/"
+    }
+    </script>
+
+    <!-- HEAD_EXTRA: server splices admin-configured analytics scripts here. -->
   </head>
   <body>
     <!-- Theme is applied via a React-controlled wrapper inside #root, not on body. -->

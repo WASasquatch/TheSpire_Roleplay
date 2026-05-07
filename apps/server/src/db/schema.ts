@@ -431,6 +431,20 @@ export const siteSettings = sqliteTable("site_settings", {
    * Users must tick an "I agree" checkbox before /auth/register will succeed.
    */
   registerDisclaimerHtml: text("register_disclaimer_html").notNull().default(""),
+  /**
+   * Plain-text description used by search engines and social previews
+   * (rendered into <meta name="description">, og:description, and
+   * twitter:description on the splash). Admins write the ~150-character SEO
+   * summary they want crawlers to see.
+   */
+  metaDescription: text("meta_description").notNull().default(""),
+  /**
+   * Verbatim HTML injected into <head> on the server-rendered splash for
+   * analytics scripts (Plausible / GA4 / Cloudflare / Umami / etc.). NOT
+   * sanitized - admins paste from their provider's dashboard. Admin-only
+   * surface; non-admin write paths don't exist for this column.
+   */
+  customHeadHtml: text("custom_head_html").notNull().default(""),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
 });

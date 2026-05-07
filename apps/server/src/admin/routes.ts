@@ -393,6 +393,14 @@ export async function registerAdminRoutes(
     securityNoticeHtml: z.string().max(10_000).optional(),
     /** HTML body of the registration disclaimer. Sanitized on save. 20KB cap. */
     registerDisclaimerHtml: z.string().max(20_000).optional(),
+    /** Plain-text SEO description (meta description, OG, Twitter card). 500-char cap. */
+    metaDescription: z.string().max(500).optional(),
+    /**
+     * Raw HTML injected into <head> for analytics scripts. NOT sanitized -
+     * admins paste from their provider's dashboard. 20KB cap as a sanity
+     * check; the UI warns the field is admin-trusted raw HTML.
+     */
+    customHeadHtml: z.string().max(20_000).optional(),
   });
 
   function settingsResponse(s: Awaited<ReturnType<typeof getSettings>>) {
@@ -415,6 +423,8 @@ export async function registerAdminRoutes(
       rulesHtml: s.rulesHtml,
       securityNoticeHtml: s.securityNoticeHtml,
       registerDisclaimerHtml: s.registerDisclaimerHtml,
+      metaDescription: s.metaDescription,
+      customHeadHtml: s.customHeadHtml,
       updatedAt: s.updatedAt,
     };
   }
@@ -456,6 +466,17 @@ export async function registerAdminRoutes(
     if (body.registerDisclaimerHtml !== undefined) {
       const { sanitizeBio } = await import("../auth/html.js");
       patch.registerDisclaimerHtml = sanitizeBio(body.registerDisclaimerHtml);
+    }
+    // metaDescription is plain text - just trim. Newlines collapse to spaces
+    // since meta descriptions are single-line.
+    if (body.metaDescription !== undefined) {
+      patch.metaDescription = body.metaDescription.replace(/\s+/g, " ").trim();
+    }
+    // customHeadHtml is verbatim raw HTML - DO NOT sanitize. Admins paste
+    // analytics scripts here and sanitization would strip <script>. The
+    // 20KB cap on the input schema is the only guard.
+    if (body.customHeadHtml !== undefined) {
+      patch.customHeadHtml = body.customHeadHtml;
     }
     return settingsResponse(await updateSettings(db, patch, sessionUser.id));
   });

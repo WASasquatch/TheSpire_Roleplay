@@ -112,6 +112,8 @@ interface SettingsRow {
   rulesHtml: string;
   securityNoticeHtml: string;
   registerDisclaimerHtml: string;
+  metaDescription: string;
+  customHeadHtml: string;
   updatedAt: number;
 }
 
@@ -515,6 +517,8 @@ interface BrandingDraft {
   logoColor: string;
   logoFont: string;
   welcomeHtml: string;
+  metaDescription: string;
+  customHeadHtml: string;
 }
 
 function BrandingTab() {
@@ -538,6 +542,8 @@ function BrandingTab() {
         logoColor: j.logoColor ?? "",
         logoFont: j.logoFont ?? "",
         welcomeHtml: j.welcomeHtml ?? "",
+        metaDescription: j.metaDescription ?? "",
+        customHeadHtml: j.customHeadHtml ?? "",
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "load failed");
@@ -559,6 +565,11 @@ function BrandingTab() {
         logoFont: draft.logoFont.trim() === "" ? null : draft.logoFont.trim(),
         // welcomeHtml is sanitized server-side; empty stays empty (no rendering).
         welcomeHtml: draft.welcomeHtml,
+        // metaDescription is plain text; server collapses internal whitespace.
+        metaDescription: draft.metaDescription,
+        // customHeadHtml is admin-trusted raw HTML (analytics scripts) - the
+        // server stores it verbatim without sanitization.
+        customHeadHtml: draft.customHeadHtml,
       };
       if (body.logoColor && !/^#[0-9a-fA-F]{6}$/.test(body.logoColor as string)) {
         throw new Error("Logo color must be a 6-digit hex like #2c5d2c (or empty to clear).");
@@ -702,6 +713,48 @@ function BrandingTab() {
           server-side using the same allow-list as profile bios - basic
           formatting tags, links, lists, and headings (h3-h6) are accepted.
           Empty hides the welcome block entirely.
+        </p>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">SEO description</legend>
+        <textarea
+          value={draft.metaDescription}
+          onChange={(e) => setDraft({ ...draft, metaDescription: e.target.value })}
+          rows={3}
+          maxLength={500}
+          placeholder="A roleplay-focused chat sanctuary. Build characters, share scenes, and tell collaborative stories with other writers."
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+        />
+        <p className="mt-1 text-keep-muted">
+          Plain-text description used in <code>&lt;meta name="description"&gt;</code>
+          and the OG / Twitter card. Search engines typically display the
+          first ~155 characters. Empty falls back to the welcome message
+          stripped to text.
+          <span className="ml-1 tabular-nums">
+            ({draft.metaDescription.length}/500)
+          </span>
+        </p>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-accent/40 bg-keep-accent/5 p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-accent">
+          Custom head HTML (analytics)
+        </legend>
+        <textarea
+          value={draft.customHeadHtml}
+          onChange={(e) => setDraft({ ...draft, customHeadHtml: e.target.value })}
+          rows={6}
+          maxLength={20_000}
+          spellCheck={false}
+          placeholder={`<!-- Plausible -->\n<script defer data-domain="example.com" src="https://plausible.io/js/script.js"></script>\n\n<!-- or Google Analytics, Cloudflare Web Analytics, Umami, etc. -->`}
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+        />
+        <p className="mt-1 text-keep-accent/80">
+          <b>Raw HTML, not sanitized.</b> Pasted verbatim into <code>&lt;head&gt;</code>
+          on every splash response so analytics fire before React mounts.
+          Anything you put here ships to every visitor on first paint -
+          double-check the snippet from your provider's dashboard before saving.
         </p>
       </fieldset>
 

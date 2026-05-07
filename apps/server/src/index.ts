@@ -7,7 +7,7 @@ import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
 import pino from "pino";
 import { Server as IoServer } from "socket.io";
@@ -32,6 +32,14 @@ import {
 } from "./realtime/broadcast.js";
 import { lookupProfile } from "./commands/builtins/profile.js";
 import { emitMutualSettled, respondToPrompt } from "./titles/service.js";
+import {
+  originFromRequest,
+  renderRobotsTxt,
+  renderSitemapXml,
+  renderSplashHtml,
+  resolveIndexHtmlPath,
+} from "./seo.js";
+import { readFile } from "node:fs/promises";
 import { extendSession, loadSessionUser } from "./auth/session.js";
 import { registerAuthRoutes, getSessionUser, userIdFromSessionId, SESSION_COOKIE_NAME } from "./routes/auth.js";
 import { registerCharacterRoutes } from "./routes/characters.js";
@@ -169,6 +177,11 @@ async function main() {
       // Sanitized disclaimer rendered above the register form. Users must
       // tick an "I agree" checkbox before /auth/register accepts the request.
       registerDisclaimerHtml: s.registerDisclaimerHtml,
+      // SEO description - same string the server renders into <meta name=
+      // "description"> on the splash. Surfaced here so the React app can
+      // keep document head meta in sync after admin updates without a
+      // hard reload.
+      metaDescription: s.metaDescription,
       // Retention + session-lifetime values, surfaced so the splash can show
       // visitors how long their messages and login will persist BEFORE they
       // commit to creating an account. Both are durations in milliseconds;
@@ -507,16 +520,68 @@ async function main() {
    * is the SPA fallback so deep links like /room/foo serve index.html and
    * the React router takes over.
    */
+  /**
+   * Public SEO routes - registered in BOTH dev and prod so crawlers /
+   * link previewers / sitemap submissions all work consistently. The
+   * splash-rewrite handler (GET /) only kicks in for prod since dev runs
+   * Vite at :5173, but robots.txt + sitemap.xml work everywhere.
+   */
+  app.get("/robots.txt", publicLimit, async (req, reply) => {
+    reply.type("text/plain; charset=utf-8");
+    return renderRobotsTxt(originFromRequest(req));
+  });
+  app.get("/sitemap.xml", publicLimit, async (req, reply) => {
+    reply.type("application/xml; charset=utf-8");
+    return renderSitemapXml(originFromRequest(req));
+  });
+
   if (IS_PROD) {
     if (!existsSync(webDistPath)) {
       log.warn({ webDistPath }, "production mode but web/dist not found - did `pnpm --filter @thekeep/web run build` run?");
     } else {
+      // Read index.html once at startup and cache. The bundle is baked
+      // into the container image; restarting the server is the only way
+      // it changes, which means the cache is implicitly invalidated by
+      // process lifecycle. Avoids a disk read on every splash GET.
+      const indexHtmlPath = resolveIndexHtmlPath(__dirname);
+      let cachedIndexHtml: string | null = null;
+      const getIndexHtml = async (): Promise<string> => {
+        if (cachedIndexHtml == null) {
+          cachedIndexHtml = await readFile(indexHtmlPath, "utf8");
+        }
+        return cachedIndexHtml;
+      };
+
+      // GET / and any non-API GET that should serve the SPA shell go
+      // through the SEO renderer so admin-configured siteName / meta
+      // description / analytics scripts land in the HTML before crawlers
+      // (or anyone) parses it.
+      const serveSplash = async (req: FastifyRequest, reply: FastifyReply) => {
+        const html = await renderSplashHtml(
+          db,
+          originFromRequest(req),
+          req.url.split("?")[0] ?? "/",
+          await getIndexHtml(),
+        );
+        reply.type("text/html; charset=utf-8");
+        reply.header("cache-control", "public, max-age=60");
+        return html;
+      };
+
+      // Explicit GET / handler must register BEFORE fastify-static so it
+      // wins over the static plugin's default index.html serving.
+      app.get("/", publicLimit, serveSplash);
+
       await app.register(fastifyStatic, {
         root: webDistPath,
+        // We render index.html ourselves; tell fastify-static not to
+        // auto-serve it on directory hits. Otherwise / would be handled
+        // by the plugin and our SEO rewrite would never run.
+        index: false,
         // Cache hashed bundle assets aggressively. Vite emits content-hashed
         // filenames in /assets/, so anything in there is safe to cache for a
-        // year. Everything else (index.html, favicons, the_spire_bg.jpg)
-        // gets short caching so admin-uploaded changes propagate quickly.
+        // year. Everything else (favicons, the_spire_bg.jpg) gets short
+        // caching so admin-uploaded changes propagate quickly.
         setHeaders(res, path) {
           if (path.includes("/assets/")) {
             res.setHeader("cache-control", "public, max-age=31536000, immutable");
@@ -527,10 +592,11 @@ async function main() {
       });
 
       // SPA fallback. Any GET that didn't match an API route or a static file
-      // is treated as a client-side route and served index.html so the React
-      // app can resolve it. Non-GET methods get a real 404 - they were
-      // genuinely meant for an API endpoint that doesn't exist.
-      app.setNotFoundHandler((req, reply) => {
+      // is treated as a client-side route and served the SEO-rewritten
+      // index.html so the React app can resolve it. Non-GET methods get a
+      // real 404 - they were genuinely meant for an API endpoint that
+      // doesn't exist.
+      app.setNotFoundHandler(async (req, reply) => {
         if (req.method !== "GET") {
           reply.code(404);
           return reply.send({ error: "not found" });
@@ -542,7 +608,7 @@ async function main() {
           reply.code(404);
           return reply.send({ error: "not found" });
         }
-        return reply.sendFile("index.html");
+        return serveSplash(req, reply);
       });
     }
   }

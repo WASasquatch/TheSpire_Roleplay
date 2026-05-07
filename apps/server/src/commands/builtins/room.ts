@@ -79,18 +79,142 @@ async function joinOrCreatePublic(ctx: CommandContext, name: string) {
   await joinRoom(ctx.io, ctx.db, ctx.socket, ctx.user, room.id);
 }
 
+/**
+ * Create a brand-new private room owned by the caller and immediately join it.
+ * Shared by /private and the /go-with-password sugar form below. Caller has
+ * already verified there's no existing room with this name.
+ */
+async function createPrivateRoom(ctx: CommandContext, name: string, password: string) {
+  if (!NAME_RX.test(name)) {
+    ctx.socket.emit("error:notice", { code: "BAD_ROOM_NAME", message: "Bad room name." });
+    return;
+  }
+  if (!(await checkRoomCap(ctx))) return;
+  const id = nanoid();
+  await ctx.db.insert(rooms).values({
+    id,
+    name,
+    type: "private",
+    passwordHash: await argon2.hash(password),
+    ownerId: ctx.user.id,
+  });
+  await ctx.db.insert(roomMembers).values({
+    roomId: id,
+    userId: ctx.user.id,
+    role: "owner",
+  });
+  await joinRoom(ctx.io, ctx.db, ctx.socket, ctx.user, id);
+}
+
+/**
+ * Verify a supplied password against an existing private room, then join.
+ * Used by /go's inline-password sugar so users don't have to click through
+ * the prompt-room-password modal. Public rooms ignore the password (with a
+ * gentle notice so users know it was a no-op rather than silently accepted).
+ */
+async function joinExistingWithPassword(
+  ctx: CommandContext,
+  room: typeof rooms.$inferSelect,
+  password: string,
+) {
+  if (room.type === "public") {
+    ctx.socket.emit("error:notice", {
+      code: "PASSWORD_IGNORED",
+      message: `${room.name} is a public room - the password you supplied was ignored.`,
+    });
+    await joinRoom(ctx.io, ctx.db, ctx.socket, ctx.user, room.id);
+    return;
+  }
+  // Private. Owner gets a free pass; otherwise verify the password upfront.
+  if (room.ownerId === ctx.user.id || !room.passwordHash) {
+    await joinRoom(ctx.io, ctx.db, ctx.socket, ctx.user, room.id);
+    return;
+  }
+  const ok = await argon2.verify(room.passwordHash, password).catch(() => false);
+  if (!ok) {
+    ctx.socket.emit("error:notice", { code: "BAD_PASSWORD", message: "Incorrect password." });
+    return;
+  }
+  await joinRoom(ctx.io, ctx.db, ctx.socket, ctx.user, room.id, { passwordOk: true });
+}
+
+/**
+ * /go <room> [password]
+ *
+ * Unified entry into a room:
+ *   - /go MainHall            join existing public room
+ *   - /go MyRoom              create a public room (and join) if it doesn't exist
+ *   - /go SecretRoom hunter2  same as /private: create a private room with this
+ *                             password if it doesn't exist, OR join an existing
+ *                             private room using this password (skips the modal)
+ *   - /go My Cool Room        multi-word public name still works as long as it
+ *                             matches an existing room or you don't pass a password
+ *
+ * Disambiguation: when the argsText has multiple whitespace-separated tokens
+ * AND the entire argsText doesn't match an existing room name, the first
+ * token is treated as the room name and the rest is the password (mirroring
+ * /private's convention). Multi-word room names with inline passwords aren't
+ * supported via this sugar form — use /private with quoting (or just /go
+ * <name> first, then enter the password in the modal) for that.
+ */
 export const goCommand: CommandHandler = {
   name: "go",
   aliases: ["join"],
-  usage: "/go <room>",
-  description: "Join a public room (or create one if it doesn't exist).",
+  usage: "/go <room> [password]",
+  description:
+    "Join a room (creating it if needed). With a password, behaves like /private: creates a password-protected room or joins an existing private room without a separate prompt.",
+  subcommands: [
+    {
+      verb: "<room>",
+      usage: "/go MainHall",
+      description: "Join an existing room, or create a new PUBLIC room with this name. Multi-word names allowed.",
+    },
+    {
+      verb: "<room> <password>",
+      usage: "/go SecretRoom hunter2",
+      description:
+        "Create a private room with this password if it doesn't exist, or join an existing private room with it. Same effect as /private. First whitespace-separated token is the name; everything after is the password.",
+    },
+  ],
   async run(ctx) {
-    const name = ctx.argsText.trim();
-    if (!name) {
-      ctx.socket.emit("error:notice", { code: "EMPTY", message: "Usage: /go <room>" });
+    const argsText = ctx.argsText.trim();
+    if (!argsText) {
+      ctx.socket.emit("error:notice", { code: "EMPTY", message: "Usage: /go <room> [password]" });
       return;
     }
-    await joinOrCreatePublic(ctx, name);
+
+    // Always try the full argsText as a room name first - this preserves the
+    // pre-existing /go behavior for multi-word room names like "Common Room".
+    // joinRoom itself surfaces the password prompt UI for private rooms when
+    // the user didn't supply one inline.
+    const fullMatch = await findRoomByName(ctx, argsText);
+    if (fullMatch) {
+      await joinRoom(ctx.io, ctx.db, ctx.socket, ctx.user, fullMatch.id);
+      return;
+    }
+
+    // No full-text room match. If the user provided multiple tokens, treat
+    // the first as the name and the rest as a password (the /private form).
+    const tokens = argsText.split(/\s+/);
+    if (tokens.length === 1) {
+      // Single token, no room of that name - create as public.
+      await joinOrCreatePublic(ctx, tokens[0]!);
+      return;
+    }
+
+    const name = tokens[0]!;
+    const password = tokens.slice(1).join(" ");
+    const existingByFirst = await findRoomByName(ctx, name);
+    if (existingByFirst) {
+      // The first-token name matches an existing room. Treat the trailing
+      // text as a password and let joinExistingWithPassword sort out
+      // public-vs-private (public will emit a "password ignored" notice).
+      await joinExistingWithPassword(ctx, existingByFirst, password);
+      return;
+    }
+    // No existing room by first token either - create a NEW private room
+    // with this name + password (same as /private).
+    await createPrivateRoom(ctx, name, password);
   },
 };
 
@@ -98,7 +222,8 @@ export const privateRoomCommand: CommandHandler = {
   name: "private",
   aliases: ["pvt", "lock"],
   usage: "/private <name> <password>",
-  description: "Create a password-protected room.",
+  description:
+    "Create a password-protected room. Equivalent to /go <name> <password> when no room with that name exists. First whitespace-separated token is the name; everything after is the password.",
   async run(ctx) {
     const [name, ...pwParts] = ctx.args;
     const password = pwParts.join(" ").trim();
@@ -109,10 +234,6 @@ export const privateRoomCommand: CommandHandler = {
       });
       return;
     }
-    if (!NAME_RX.test(name)) {
-      ctx.socket.emit("error:notice", { code: "BAD_ROOM_NAME", message: "Bad room name." });
-      return;
-    }
     const existing = await findRoomByName(ctx, name);
     if (existing) {
       ctx.socket.emit("error:notice", {
@@ -121,21 +242,7 @@ export const privateRoomCommand: CommandHandler = {
       });
       return;
     }
-    if (!(await checkRoomCap(ctx))) return;
-    const id = nanoid();
-    await ctx.db.insert(rooms).values({
-      id,
-      name,
-      type: "private",
-      passwordHash: await argon2.hash(password),
-      ownerId: ctx.user.id,
-    });
-    await ctx.db.insert(roomMembers).values({
-      roomId: id,
-      userId: ctx.user.id,
-      role: "owner",
-    });
-    await joinRoom(ctx.io, ctx.db, ctx.socket, ctx.user, id);
+    await createPrivateRoom(ctx, name, password);
   },
 };
 
@@ -176,7 +283,19 @@ async function callerCanEditRoom(ctx: CommandContext): Promise<boolean> {
 export const topicCommand: CommandHandler = {
   name: "topic",
   usage: "/topic [<text>]",
-  description: "Show or set the current room's topic (owner/mod only).",
+  description: "Show or set the current room's topic (owner/mod only to set).",
+  subcommands: [
+    {
+      verb: "(no args)",
+      usage: "/topic",
+      description: "Show the current room's topic.",
+    },
+    {
+      verb: "<text>",
+      usage: "/topic <text>",
+      description: "Set the room's topic (owner/mod/admin only). Topic is the short headline above the chat.",
+    },
+  ],
   async run(ctx) {
     const txt = ctx.argsText.trim();
     if (!txt) {

@@ -31,6 +31,7 @@ import {
   userIsOnline,
 } from "./realtime/broadcast.js";
 import { lookupProfile } from "./commands/builtins/profile.js";
+import { emitMutualSettled, respondToPrompt } from "./titles/service.js";
 import { extendSession, loadSessionUser } from "./auth/session.js";
 import { registerAuthRoutes, getSessionUser, userIdFromSessionId, SESSION_COOKIE_NAME } from "./routes/auth.js";
 import { registerCharacterRoutes } from "./routes/characters.js";
@@ -426,6 +427,27 @@ async function main() {
       if (now - lastActiveAt < 5_000) return;
       lastActiveAt = now;
       await checkAndExtendSession();
+    });
+
+    /**
+     * Accept | Decline response for a mutual-title prompt (request OR
+     * dissolve). The service layer authorizes by row state and the
+     * authenticated socket's userId; we just route the result.
+     */
+    socket.on("mutual:respond", async (payload, ack) => {
+      if (!(await checkAndExtendSession())) {
+        ack?.({ ok: false, code: "AUTH", message: "Session expired." });
+        return;
+      }
+      const result = await respondToPrompt(db, user.id, payload.id, payload.accept);
+      if (!result.ok) {
+        ack?.({ ok: false, code: result.code ?? "RESPOND_FAILED", message: result.message ?? "Could not respond." });
+        return;
+      }
+      if (result.affectedUserIds) {
+        await emitMutualSettled(io, result.affectedUserIds);
+      }
+      ack?.({ ok: true });
     });
 
     // We use `disconnecting` (not `disconnect`) because by the time `disconnect`

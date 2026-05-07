@@ -1,6 +1,6 @@
 import type { ChatMessage } from "./message.js";
 import type { RoomOccupant, RoomSummary } from "./room.js";
-import type { ProfileView } from "./profile.js";
+import type { IdentityRef, ProfileView } from "./profile.js";
 
 /** Events emitted by the client → server. */
 export interface ClientToServerEvents {
@@ -17,6 +17,17 @@ export interface ClientToServerEvents {
    */
   "presence:active": () => void;
   "profile:fetch": (payload: { username: string }, ack: AckFn<{ ok: true; profile: ProfileView } | AckError>) => void;
+  /**
+   * Respond to a pending mutual-title prompt (request OR dissolve). `id` is
+   * the mutual_titles row id; `accept` true=>flip status, false=>delete row
+   * (request) or revert to accepted (dissolve). The recipient's session is
+   * authenticated server-side, so no proof-of-recipient is needed in the
+   * payload beyond the row id.
+   */
+  "mutual:respond": (
+    payload: { id: string; accept: boolean },
+    ack?: AckFn<{ ok: true } | AckError>,
+  ) => void;
 }
 
 /** Events emitted by the server → client. */
@@ -30,6 +41,32 @@ export interface ServerToClientEvents {
   "ui:hint": (hint: UiHint) => void;
   /** Soft errors surfaced to the user (bad command, not in room, etc.). */
   "error:notice": (payload: { code: string; message: string }) => void;
+  /**
+   * Sent to the recipient of a pending mutual-title request OR to the
+   * non-initiating side of a dissolve request. The client renders an
+   * inline Accept | Decline card in the active room. `previewText` is the
+   * formatted title as it would appear on the recipient's profile if
+   * accepted (so they can see what they'd be agreeing to).
+   */
+  "mutual:prompt": (payload: {
+    id: string;
+    action: "request" | "dissolve";
+    kindSlug: string;
+    kindLabel: string;
+    /** Display name of the requesting / dissolving party. */
+    fromDisplayName: string;
+    /** Identity ref of the requesting party, for click-to-view. */
+    from: IdentityRef;
+    /** Pre-rendered title string ("Married to Kaal") - what would show on YOUR profile. */
+    previewText: string;
+  }) => void;
+  /**
+   * Tells both parties (and their other open sockets) that a title's state
+   * changed - new acceptance, dissolution, decline. Clients use it to
+   * refresh any open profile views. Carries no payload-level detail; the
+   * client refetches as needed.
+   */
+  "mutual:settled": () => void;
   /**
    * Session has expired or been invalidated. Client should clear local user
    * state and return to the login splash. Sent immediately before the

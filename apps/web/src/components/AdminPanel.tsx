@@ -11,7 +11,7 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "settings" | "branding" | "rules" | "links" | "rooms" | "commands" | "users";
+type Tab = "settings" | "branding" | "rules" | "links" | "rooms" | "commands" | "titles" | "users";
 
 export function AdminPanel({ onClose, onLinksChanged }: Props) {
   const [tab, setTab] = useState<Tab>("settings");
@@ -31,6 +31,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
               <TabBtn active={tab === "rules"} onClick={() => setTab("rules")}>Rules</TabBtn>
               <TabBtn active={tab === "links"} onClick={() => setTab("links")}>Nav Links</TabBtn>
               <TabBtn active={tab === "commands"} onClick={() => setTab("commands")}>Commands</TabBtn>
+              <TabBtn active={tab === "titles"} onClick={() => setTab("titles")}>Titles</TabBtn>
               <TabBtn active={tab === "rooms"} onClick={() => setTab("rooms")}>Rooms</TabBtn>
               <TabBtn active={tab === "users"} onClick={() => setTab("users")}>Users</TabBtn>
             </nav>
@@ -46,6 +47,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
           {tab === "rules" ? <RulesTab /> : null}
           {tab === "links" ? <LinksTab onLinksChanged={onLinksChanged} /> : null}
           {tab === "commands" ? <CommandsTab /> : null}
+          {tab === "titles" ? <TitleKindsTab /> : null}
           {tab === "rooms" ? <RoomsTab /> : null}
           {tab === "users" ? <UsersTab /> : null}
         </div>
@@ -1771,6 +1773,356 @@ function draftFromRoom(r: AdminRoom): RoomDraft {
     password: "",
     clearPassword: false,
   };
+}
+
+/* ============================================================================
+ * TITLE KINDS TAB
+ *
+ * CRUD over the catalog of mutual-title kinds (marriage, partner, mentor, etc.).
+ * Slug = the user-facing keyword in /request <slug> <name>. Format strings
+ * use {target} as the substitution point for the other party's display name.
+ * Symmetric kinds use formatA on both sides; asymmetric kinds let the
+ * requester (A side) and recipient (B side) carry different labels.
+ * ========================================================================== */
+
+interface TitleKindRow {
+  id: string;
+  slug: string;
+  label: string;
+  symmetric: boolean;
+  formatA: string;
+  formatB: string;
+  exclusive: boolean;
+  enabled: boolean;
+  usageCount: number;
+}
+
+interface TitleKindInput {
+  slug: string;
+  label: string;
+  symmetric: boolean;
+  formatA: string;
+  formatB: string;
+  exclusive: boolean;
+  enabled: boolean;
+}
+
+function TitleKindsTab() {
+  const [kinds, setKinds] = useState<TitleKindRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<TitleKindRow | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  async function reload() {
+    setLoading(true);
+    try {
+      const r = await fetch("/admin/title-kinds", { credentials: "include" });
+      if (!r.ok) throw new Error(await readError(r));
+      const j = (await r.json()) as { kinds: TitleKindRow[] };
+      setKinds(j.kinds);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "load failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { reload(); }, []);
+
+  async function create(input: TitleKindInput) {
+    const r = await fetch("/admin/title-kinds", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!r.ok) throw new Error(await readError(r));
+    setAdding(false);
+    await reload();
+  }
+
+  async function update(id: string, input: TitleKindInput) {
+    const r = await fetch(`/admin/title-kinds/${id}`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!r.ok) throw new Error(await readError(r));
+    setEditing(null);
+    await reload();
+  }
+
+  async function destroy(id: string, usageCount: number) {
+    const msg = usageCount > 0
+      ? `Delete this kind? ${usageCount} active or pending title(s) of this kind will also be removed.`
+      : "Delete this kind?";
+    if (!window.confirm(msg)) return;
+    const r = await fetch(`/admin/title-kinds/${id}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (!r.ok) throw new Error(await readError(r));
+    await reload();
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start justify-between">
+        <div className="text-xs text-keep-muted max-w-[60%]">
+          Catalog of mutual-title kinds. Users invoke these via{" "}
+          <code>/request &lt;slug&gt; &lt;user&gt;</code>. <code>{"{target}"}</code> in the
+          format string is replaced with the other party's display name.
+          Symmetric kinds use the same label on both sides; asymmetric kinds
+          (e.g. mentor / apprentice) let you set distinct A and B labels.
+          Exclusive kinds limit each identity to one accepted title of that kind at a time.
+        </div>
+        <button
+          type="button"
+          onClick={() => { setAdding(true); setEditing(null); }}
+          className="rounded border border-keep-rule bg-keep-banner px-3 py-1 text-xs hover:bg-keep-banner/80"
+        >
+          + New title kind
+        </button>
+      </div>
+
+      {error ? (
+        <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
+      ) : null}
+
+      {adding ? (
+        <TitleKindForm
+          mode="create"
+          onCancel={() => setAdding(false)}
+          onSubmit={create}
+        />
+      ) : null}
+
+      {editing ? (
+        <TitleKindForm
+          mode="edit"
+          initial={editing}
+          onCancel={() => setEditing(null)}
+          onSubmit={(input) => update(editing.id, input)}
+          onDelete={() => destroy(editing.id, editing.usageCount)}
+        />
+      ) : null}
+
+      {loading ? (
+        <div className="text-keep-muted text-xs">loading...</div>
+      ) : kinds.length === 0 ? (
+        <div className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">
+          No title kinds yet.
+        </div>
+      ) : (
+        <table className="w-full text-xs">
+          <thead className="bg-keep-banner/50 text-keep-muted uppercase tracking-widest">
+            <tr>
+              <th className="px-2 py-1 text-left">Slug</th>
+              <th className="px-2 py-1 text-left">Label</th>
+              <th className="px-2 py-1 text-left">A side</th>
+              <th className="px-2 py-1 text-left">B side</th>
+              <th className="px-2 py-1">Excl.</th>
+              <th className="px-2 py-1">In use</th>
+              <th className="px-2 py-1">On</th>
+              <th className="px-2 py-1"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {kinds.map((k) => (
+              <tr key={k.id} className="border-t border-keep-rule">
+                <td className="px-2 py-1 font-mono">{k.slug}</td>
+                <td className="px-2 py-1">{k.label}</td>
+                <td className="px-2 py-1 truncate max-w-[180px]" title={k.formatA}>{k.formatA}</td>
+                <td className="px-2 py-1 truncate max-w-[180px]" title={k.formatB}>
+                  {k.symmetric ? <span className="italic text-keep-muted">(same)</span> : k.formatB}
+                </td>
+                <td className="px-2 py-1 text-center">{k.exclusive ? "✓" : ""}</td>
+                <td className="px-2 py-1 text-center tabular-nums">{k.usageCount}</td>
+                <td className="px-2 py-1 text-center">{k.enabled ? "✓" : ""}</td>
+                <td className="px-2 py-1 text-right">
+                  <button
+                    type="button"
+                    onClick={() => { setEditing(k); setAdding(false); }}
+                    className="mr-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+                  >
+                    Edit
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function TitleKindForm({
+  mode,
+  initial,
+  onSubmit,
+  onCancel,
+  onDelete,
+}: {
+  mode: "create" | "edit";
+  initial?: TitleKindRow;
+  onSubmit: (input: TitleKindInput) => Promise<void>;
+  onCancel: () => void;
+  onDelete?: () => Promise<void>;
+}) {
+  const [slug, setSlug] = useState(initial?.slug ?? "");
+  const [label, setLabel] = useState(initial?.label ?? "");
+  const [symmetric, setSymmetric] = useState(initial?.symmetric ?? true);
+  const [formatA, setFormatA] = useState(initial?.formatA ?? "Married to {target}");
+  const [formatB, setFormatB] = useState(initial?.formatB ?? "Married to {target}");
+  const [exclusive, setExclusive] = useState(initial?.exclusive ?? false);
+  const [enabled, setEnabled] = useState(initial?.enabled ?? true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await onSubmit({
+        slug: slug.trim().toLowerCase(),
+        label: label.trim(),
+        symmetric,
+        formatA: formatA.trim(),
+        formatB: symmetric ? formatA.trim() : formatB.trim(),
+        exclusive,
+        enabled,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-2 rounded border border-keep-rule bg-keep-bg p-3 text-xs">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <label className="space-y-1">
+          <div className="text-keep-muted uppercase tracking-widest">Slug</div>
+          <input
+            type="text"
+            value={slug}
+            onChange={(e) => setSlug(e.target.value)}
+            placeholder="marriage"
+            className="w-full rounded border border-keep-rule bg-keep-parchment px-2 py-1 font-mono"
+            required
+          />
+        </label>
+        <label className="space-y-1">
+          <div className="text-keep-muted uppercase tracking-widest">Label</div>
+          <input
+            type="text"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Marriage"
+            className="w-full rounded border border-keep-rule bg-keep-parchment px-2 py-1"
+            required
+          />
+        </label>
+      </div>
+
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={symmetric}
+          onChange={(e) => setSymmetric(e.target.checked)}
+        />
+        <span>Symmetric (same label on both sides)</span>
+      </label>
+
+      <label className="space-y-1 block">
+        <div className="text-keep-muted uppercase tracking-widest">
+          {symmetric ? "Display format" : "A side (requester)"}
+        </div>
+        <input
+          type="text"
+          value={formatA}
+          onChange={(e) => setFormatA(e.target.value)}
+          placeholder="Married to {target}"
+          className="w-full rounded border border-keep-rule bg-keep-parchment px-2 py-1 font-mono"
+          required
+        />
+        <div className="text-[10px] text-keep-muted">
+          {"{target} is replaced with the other party's display name."}
+        </div>
+      </label>
+
+      {!symmetric ? (
+        <label className="space-y-1 block">
+          <div className="text-keep-muted uppercase tracking-widest">B side (recipient)</div>
+          <input
+            type="text"
+            value={formatB}
+            onChange={(e) => setFormatB(e.target.value)}
+            placeholder="Apprentice of {target}"
+            className="w-full rounded border border-keep-rule bg-keep-parchment px-2 py-1 font-mono"
+            required
+          />
+        </label>
+      ) : null}
+
+      <div className="flex flex-wrap gap-4">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={exclusive}
+            onChange={(e) => setExclusive(e.target.checked)}
+          />
+          <span>Exclusive (one accepted per identity)</span>
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+          />
+          <span>Enabled</span>
+        </label>
+      </div>
+
+      {error ? (
+        <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-keep-accent">{error}</div>
+      ) : null}
+
+      <div className="flex justify-between pt-1">
+        <div>
+          {mode === "edit" && onDelete ? (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="rounded border border-keep-accent/60 bg-keep-bg px-3 py-1 text-keep-accent hover:bg-keep-accent/10"
+            >
+              Delete
+            </button>
+          ) : null}
+        </div>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-keep-muted hover:bg-keep-banner"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy}
+            className="rounded border border-keep-rule bg-keep-banner px-3 py-1 hover:bg-keep-banner/80 disabled:opacity-50"
+          >
+            {mode === "create" ? "Create" : "Save"}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
 }
 
 function RoomsTab() {

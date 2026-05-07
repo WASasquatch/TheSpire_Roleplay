@@ -11,6 +11,8 @@ interface Props {
   onWhisper?: (name: string) => void;
   /** Issue `/ignore <name>`. */
   onIgnore?: (name: string) => void;
+  /** Open another profile by name (used to follow a mutual-title link). */
+  onOpenProfile?: (name: string) => void;
 }
 
 /**
@@ -30,7 +32,7 @@ interface Props {
  * Every section degrades gracefully: characters with nothing filled out
  * still get a clean modal that says "X hasn't filled out their profile yet."
  */
-export function ProfileModal({ profile, onClose, onWhisper, onIgnore }: Props) {
+export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProfile }: Props) {
   const isChar = profile.kind === "character";
   const name = isChar ? profile.profile.name : profile.profile.username;
   const bio = profile.profile.bioHtml.trim();
@@ -39,11 +41,12 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore }: Props) {
   const createdAt = profile.profile.createdAt;
   const stats = isChar ? profile.profile.stats : null;
   const gender = resolveGender(profile);
+  const titles = profile.profile.titles ?? [];
 
   // Stat entries that actually have a value - empty fields are dropped so
   // a half-filled character doesn't show a row of dashes.
   const statEntries = stats ? collectStatEntries(stats) : [];
-  const isCompletelyBlank = !bio && statEntries.length === 0 && !avatar;
+  const isCompletelyBlank = !bio && statEntries.length === 0 && !avatar && titles.length === 0;
 
   return (
     <div
@@ -127,6 +130,32 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore }: Props) {
             <EmptyProfile name={name} kind={isChar ? "character" : "master"} />
           ) : (
             <>
+              {titles.length > 0 ? (
+                <Section title="Bonds">
+                  <ul className="flex flex-wrap gap-1.5 text-sm">
+                    {titles.map((t) => (
+                      <li
+                        key={t.id}
+                        className="rounded border border-keep-rule/60 bg-keep-panel/60 px-2 py-0.5"
+                      >
+                        {onOpenProfile ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenProfile(t.other.displayName)}
+                            className="font-medium hover:underline"
+                            title={`View ${t.other.displayName}'s profile`}
+                          >
+                            {t.text}
+                          </button>
+                        ) : (
+                          <span className="font-medium">{t.text}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </Section>
+              ) : null}
+
               {statEntries.length > 0 ? (
                 <Section title="Stats">
                   <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">

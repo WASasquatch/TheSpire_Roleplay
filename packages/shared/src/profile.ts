@@ -13,6 +13,37 @@ export interface CharacterStats {
 
 import type { Theme } from "./theme.js";
 
+/**
+ * A reference to a "title-bound identity" - either a master account
+ * (characterId=null) or a specific character. Used to link a rendered
+ * mutual title to the other party's profile so the client can route a
+ * click to /whois <name>.
+ */
+export interface IdentityRef {
+  userId: string;
+  /** null = master account; non-null = character */
+  characterId: string | null;
+  /** The display name to show + use for /whois lookup. */
+  displayName: string;
+}
+
+/**
+ * One mutual title rendered on a profile - e.g. "Married to Kaal",
+ * "Kaal's Partner", "Mentor of Kaal". The `text` is pre-rendered server-
+ * side from the kind's format string with `{target}` replaced by
+ * `other.displayName`.
+ */
+export interface ProfileTitle {
+  /** mutual_titles.id - opaque to the client, useful for dissolve flows. */
+  id: string;
+  /** title_kinds.slug - used by /dissolve to identify the title kind. */
+  kindSlug: string;
+  /** Pre-formatted display string (e.g. "Married to Kaal"). */
+  text: string;
+  /** Other party's identity, so the client can link the rendered title. */
+  other: IdentityRef;
+}
+
 export interface CharacterProfile {
   id: string;
   userId: string;
@@ -23,6 +54,8 @@ export interface CharacterProfile {
   avatarUrl: string | null;
   /** Owner's chosen UI theme - applied to the profile modal when others view it. */
   theme: Theme;
+  /** Mutual titles (marriages, partnerships, etc.) bound to this character. */
+  titles: ProfileTitle[];
   createdAt: number;
   updatedAt: number;
 }
@@ -36,6 +69,8 @@ export interface MasterProfile {
   gender: "male" | "female" | "nonbinary" | "other" | "undisclosed";
   /** Owner's chosen UI theme - applied to the profile modal when others view it. */
   theme: Theme;
+  /** Mutual titles bound to this master account (separate from any character titles). */
+  titles: ProfileTitle[];
   createdAt: number;
 }
 

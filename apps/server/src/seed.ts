@@ -55,7 +55,18 @@ const DEFAULT_ROOMS: Array<{
   },
 ];
 
-/** System rows we always need to exist (system user, default rooms, settings). */
+/**
+ * System rows we always need to exist (system user, default rooms, settings).
+ *
+ * Env opt-out: setting `SKIP_DEFAULT_SEED=1` skips the default-rooms loop and
+ * the legacy MainHall→The_Spire rename. The system sentinel user and the
+ * site-settings singleton are still ensured (both are insert-if-missing and
+ * never overwrite admin customization). Use this when an admin has renamed
+ * default rooms - without the flag, the seed sees no room called "Tavern"
+ * and re-creates one alongside the renamed copy. Toggle via the ship script:
+ *   pnpm ship "msg" --no-seed     # set the flag (persists until unset)
+ *   pnpm ship "msg" --reseed      # clear the flag
+ */
 export async function ensureSystemSeeds(db: Db): Promise<void> {
   // System sentinel user - owns server-authored messages, never logs in.
   const sys = (await db.select().from(users).where(eq(users.username, "system")).limit(1))[0];
@@ -71,40 +82,48 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
     });
   }
 
-  // One-time migration: existing installs were seeded with a room called
-  // "MainHall" before The Spire became the canonical landing. If it still
-  // exists as a system room, rename it in place so message history,
-  // memberships, bans, etc. (all keyed on roomId, not name) survive.
-  // Topic + description are overwritten because the new lore replaces the
-  // old generic welcome - admins who customized those will need to re-edit.
-  const legacy = (await db.select().from(rooms).where(eq(rooms.name, "MainHall")).limit(1))[0];
-  const alreadyHasSpire = (await db.select().from(rooms).where(eq(rooms.name, "The_Spire")).limit(1))[0];
-  if (legacy && legacy.isSystem && !alreadyHasSpire) {
-    const spireDefaults = DEFAULT_ROOMS.find((r) => r.name === "The_Spire")!;
-    await db.update(rooms).set({
-      name: spireDefaults.name,
-      topic: spireDefaults.topic,
-      description: spireDefaults.description,
-    }).where(eq(rooms.id, legacy.id));
+  const skipDefaults = /^(1|true|yes)$/i.test(process.env.SKIP_DEFAULT_SEED ?? "");
+  if (!skipDefaults) {
+    // One-time migration: existing installs were seeded with a room called
+    // "MainHall" before The Spire became the canonical landing. If it still
+    // exists as a system room, rename it in place so message history,
+    // memberships, bans, etc. (all keyed on roomId, not name) survive.
+    // Topic + description are overwritten because the new lore replaces the
+    // old generic welcome - admins who customized those will need to re-edit.
+    const legacy = (await db.select().from(rooms).where(eq(rooms.name, "MainHall")).limit(1))[0];
+    const alreadyHasSpire = (await db.select().from(rooms).where(eq(rooms.name, "The_Spire")).limit(1))[0];
+    if (legacy && legacy.isSystem && !alreadyHasSpire) {
+      const spireDefaults = DEFAULT_ROOMS.find((r) => r.name === "The_Spire")!;
+      await db.update(rooms).set({
+        name: spireDefaults.name,
+        topic: spireDefaults.topic,
+        description: spireDefaults.description,
+      }).where(eq(rooms.id, legacy.id));
+    }
+
+    // Create any missing default rooms. The unique index on lower(name) makes
+    // the existence check authoritative; admin customizations to topic /
+    // description / type on already-present rooms are preserved. (Admins who
+    // *renamed* a default room would still trigger a duplicate here on next
+    // boot - hence the SKIP_DEFAULT_SEED escape hatch above.)
+    for (const def of DEFAULT_ROOMS) {
+      const existing = (await db.select().from(rooms).where(eq(rooms.name, def.name)).limit(1))[0];
+      if (existing) continue;
+      await db.insert(rooms).values({
+        id: nanoid(),
+        name: def.name,
+        type: "public",
+        isSystem: true,
+        ownerId: null,
+        topic: def.topic,
+        description: def.description,
+      });
+    }
   }
 
-  // Create any missing default rooms. The unique index on lower(name) makes
-  // the existence check authoritative; admin customizations to topic /
-  // description / type on already-present rooms are preserved.
-  for (const def of DEFAULT_ROOMS) {
-    const existing = (await db.select().from(rooms).where(eq(rooms.name, def.name)).limit(1))[0];
-    if (existing) continue;
-    await db.insert(rooms).values({
-      id: nanoid(),
-      name: def.name,
-      type: "public",
-      isSystem: true,
-      ownerId: null,
-      topic: def.topic,
-      description: def.description,
-    });
-  }
-
+  // Always ensure the singleton settings row exists. ensureSiteSettings is
+  // insert-if-missing only - it never overwrites customized values - so it's
+  // safe to run regardless of SKIP_DEFAULT_SEED.
   await ensureSiteSettings(db);
 }
 

@@ -271,6 +271,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           avatarUrl: avatarUrl.trim() || null,
           gender,
           theme: previewTheme,
+          // Titles are populated server-side from accepted relationships;
+          // the editor preview shows the form's contents only.
+          titles: [],
           createdAt: Date.now(),
         },
       };
@@ -285,6 +288,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         stats,
         avatarUrl: avatarUrl.trim() || null,
         theme: previewTheme,
+        titles: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
       },

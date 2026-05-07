@@ -15,7 +15,24 @@ export const awayCommand: CommandHandler = {
   name: "away",
   aliases: ["afk", "brb"],
   usage: "/away [reason]  (omit reason while away to come back)",
-  description: "Toggle your away state.",
+  description: "Toggle your away state. Userlist shows '[away]' next to your name.",
+  subcommands: [
+    {
+      verb: "<reason>",
+      usage: "/away <reason>",
+      description: "Mark yourself away with a reason (visible to others on hover).",
+    },
+    {
+      verb: "(no args, present)",
+      usage: "/away",
+      description: "Mark yourself away with no reason note.",
+    },
+    {
+      verb: "(no args, away)",
+      usage: "/away",
+      description: "If you're already away, this returns you to present.",
+    },
+  ],
   async run(ctx) {
     const reason = ctx.argsText.trim();
     const wasAway = ctx.user.awayMessage != null;

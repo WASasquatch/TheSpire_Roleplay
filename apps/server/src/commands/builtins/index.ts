@@ -9,6 +9,7 @@ import {
   topicCommand,
 } from "./room.js";
 import { profileCommand, whoisCommand } from "./profile.js";
+import { dissolveCommand, requestCommand, titlesCommand } from "./titles.js";
 import { makeHelpCommand } from "./help.js";
 import { colorCommand } from "./color.js";
 import { awayCommand } from "./away.js";
@@ -42,6 +43,9 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(describeCommand);
   reg.registerBuiltin(profileCommand);
   reg.registerBuiltin(whoisCommand);
+  reg.registerBuiltin(requestCommand);
+  reg.registerBuiltin(dissolveCommand);
+  reg.registerBuiltin(titlesCommand);
   reg.registerBuiltin(colorCommand);
   reg.registerBuiltin(awayCommand);
   reg.registerBuiltin(refreshCommand);

@@ -2,6 +2,10 @@
 
 A roleplay-focused chat system. Node/React reimagining of RPGHost/NexxusChat theKeep which is subsequently based on phpMyChat. First-class character profiles, slash-command parity, and an admin command authoring layer.
 
+### Live Demo
+
+[https://thespire.fly.dev/](https://thespire.fly.dev/)
+
 ## Layout
 
 ```
@@ -17,7 +21,7 @@ TheSpire/
 
 ## Development
 
-Two processes, two ports, Vite proxies API calls from one to the other.
+Two processes, two ports, Vite proxies API calls from one to the other. The following commands will start the development servers for codename `thekeep` (The Spire):
 
 ```sh
 pnpm install
@@ -46,6 +50,8 @@ In production mode the server registers `@fastify/static` against `apps/web/dist
 
 ## Deploying to Fly.io
 
+### One-time setup
+
 ```sh
 flyctl launch --no-deploy
 flyctl secrets set SESSION_SECRET=$(openssl rand -hex 32)
@@ -53,11 +59,39 @@ flyctl volumes create thespire_data --size 1 --region <your-region>
 flyctl deploy
 ```
 
-The included `fly.toml`:
+### Day-to-day publishing
+
+A `pnpm ship` wrapper script bundles typecheck → commit → push to `origin/main` → `flyctl deploy` so a routine publish is one command:
+
+```sh
+pnpm ship "your commit message"          # full flow (typecheck, commit, push, deploy)
+pnpm ship -m "msg" --remote-only         # build on Fly's builders (handy from WSL)
+pnpm ship "msg" --all                    # also stage root files (fly.toml, Dockerfile, scripts/)
+pnpm ship "msg" --no-typecheck           # faster, riskier
+pnpm ship "msg" --no-deploy              # commit + push only
+pnpm deploy                              # alias for `ship --deploy-only` (no commit)
+```
+
+By default the script stages `apps/`, `packages/`, and `README.md` only — root-level files require `--all`. `.gitignore` is honored either way. Run `bash scripts/ship.sh --help` for the full flag reference.
+
+### Preserving admin customizations across deploys
+
+Server boot calls `ensureSystemSeeds`, which idempotently re-creates the default rooms (`The_Spire`, `Tavern`, `Library`, `Garden`, `Bazaar`) by exact-name match. If an admin **renames** a default room, the seed sees the original name as missing and re-creates it — leaving a duplicate next to the renamed copy.
+
+To freeze the seed once you've customized rooms, ship with `--no-seed`:
+
+```sh
+pnpm ship "msg" --no-seed                # stages SKIP_DEFAULT_SEED=1 as a Fly secret, then deploys
+pnpm ship "msg" --reseed                 # clears it so default rooms get re-seeded again
+```
+
+The flag is sticky — once set, every subsequent deploy honors it until cleared with `--reseed`. The system sentinel user and the site-settings singleton are still ensured (both insert-if-missing only; they never overwrite admin customization), so this is safe to leave on permanently for production installs.
+
+### What `fly.toml` does
 
 - Runs the container on internal port **8080**, with Fly's edge mapping external **80** and **443** (HTTPS forced) to it. End users hit `https://<app>.fly.dev` with no port suffix.
 - Mounts a 1 GB volume at `/data`, where the SQLite file lives. Survives deploys and machine restarts.
-- Wires `/health` as the health check and lets machines auto-stop when idle.
+- Wires `/health` as the health check and keeps at least one machine warm (chat needs persistent WebSocket connections).
 
 The `Dockerfile` builds the web bundle, then runs the server with `tsx`. Migrations apply on every boot (idempotent) before the server starts listening.
 

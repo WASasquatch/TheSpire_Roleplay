@@ -72,7 +72,19 @@ export const kickCommand: CommandHandler = {
   name: "kick",
   aliases: ["boot"],
   usage: "/kick <username> [reason]",
-  description: "Boot a user from the current room (back to MainHall).",
+  description: "Boot a user from the current room (back to MainHall). Mod/owner/admin only.",
+  subcommands: [
+    {
+      verb: "<username>",
+      usage: "/kick Bob",
+      description: "Kick with no reason. The kicked user can rejoin immediately - use /ban to keep them out.",
+    },
+    {
+      verb: "[reason]",
+      usage: "/kick Bob being rude",
+      description: "Optional reason shown to the kicked user and posted as a system notice.",
+    },
+  ],
   async run(ctx) {
     if (!(await callerCanModerateRoom(ctx))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /kick.");
@@ -130,7 +142,19 @@ export const muteCommand: CommandHandler = {
   name: "mute",
   aliases: ["silence"],
   usage: "/mute <username> <duration> [reason]   (e.g. /mute Alice 5m spam)",
-  description: "Silence a user in the current room for a duration (e.g. 5m, 1h20m, 30d).",
+  description: "Silence a user in the current room for a duration. Mod/owner/admin only.",
+  subcommands: [
+    {
+      verb: "<duration>",
+      usage: "/mute Alice 10m",
+      description: "Duration formats: s/m/h/d. Combine for compound (e.g. 1h20m). Examples: 30s, 5m, 2h, 1h20m, 7d.",
+    },
+    {
+      verb: "[reason]",
+      usage: "/mute Bob 1h spamming",
+      description: "Optional reason - shown in the system notice posted when the mute is issued.",
+    },
+  ],
   async run(ctx) {
     if (!(await callerCanModerateRoom(ctx))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /mute.");
@@ -326,7 +350,24 @@ export const banCommand: CommandHandler = {
   name: "ban",
   aliases: ["banish"],
   usage: "/ban <username> [duration] [reason]",
-  description: "Ban a user from the current room. Optional duration (e.g. 1d, 2h, 30m); omit for permanent.",
+  description: "Ban a user from the current room. Mod/owner/admin only.",
+  subcommands: [
+    {
+      verb: "<username>",
+      usage: "/ban Bob",
+      description: "Permanent ban with no reason note. Boots their sockets to MainHall and refuses re-entry.",
+    },
+    {
+      verb: "<duration>",
+      usage: "/ban Bob 1h",
+      description: "Time-limited ban. Duration formats: s/m/h/d, combinable (e.g. 30m, 1h20m, 7d). Omit for permanent.",
+    },
+    {
+      verb: "[reason]",
+      usage: "/ban Bob 1d spam",
+      description: "Optional reason. The booted user sees it; everyone else sees a system notice.",
+    },
+  ],
   async run(ctx) {
     if (!(await callerCanModerateRoom(ctx))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /ban.");

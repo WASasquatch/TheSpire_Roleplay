@@ -72,8 +72,20 @@ export const clearCommand: CommandHandler = {
 export const findCommand: CommandHandler = {
   name: "find",
   aliases: ["search"],
-  usage: "/find <name>",
-  description: "Search the users directory for a name (master or character).",
+  usage: "/find [name]",
+  description: "Open the users directory, optionally pre-filtered by name.",
+  subcommands: [
+    {
+      verb: "<name>",
+      usage: "/find Alice",
+      description: "Open the directory with the search box pre-filled.",
+    },
+    {
+      verb: "(no args)",
+      usage: "/find",
+      description: "Same as /users - open the directory with no filter.",
+    },
+  ],
   run(ctx) {
     const q = ctx.argsText.trim();
     ctx.socket.emit("ui:hint", q ? { kind: "open-users", query: q } : { kind: "open-users" });

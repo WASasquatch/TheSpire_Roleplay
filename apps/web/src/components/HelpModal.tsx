@@ -270,24 +270,31 @@ function CommandCard({ cmd }: { cmd: CommandDoc }) {
       ) : null}
 
       {cmd.subcommands.length ? (
-        <table className="mt-2 w-full text-[11px]">
-          <tbody>
-            {cmd.subcommands.map((s, i) => (
-              <tr key={`${s.verb}-${i}`} className="align-top">
-                <td className="w-24 py-0.5 pr-2 font-mono text-keep-action">{s.verb}</td>
-                <td className="py-0.5">
-                  <div className="font-mono">{s.usage}</div>
-                  <div className="text-keep-muted">{s.description}</div>
-                  {s.aliases.length ? (
-                    <div className="mt-0.5 font-mono text-[10px] text-keep-muted">
-                      aliases: {s.aliases.join(", ")}
-                    </div>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="mt-2 rounded border border-keep-rule/40 bg-keep-panel/30">
+          <div className="border-b border-keep-rule/40 px-2 py-1 text-[10px] uppercase tracking-widest text-keep-muted">
+            Options
+          </div>
+          <table className="w-full text-[11px]">
+            <tbody>
+              {cmd.subcommands.map((s, i) => (
+                <tr key={`${s.verb}-${i}`} className="border-t border-keep-rule/20 align-top first:border-t-0">
+                  {/* whitespace-nowrap so a long placeholder verb like
+                      "(no args, away)" doesn't wrap and squash the description */}
+                  <td className="whitespace-nowrap py-1 pl-2 pr-3 font-mono text-keep-action">{s.verb}</td>
+                  <td className="py-1 pr-2">
+                    <div className="font-mono">{s.usage}</div>
+                    <div className="text-keep-muted">{s.description}</div>
+                    {s.aliases.length ? (
+                      <div className="mt-0.5 font-mono text-[10px] text-keep-muted">
+                        aliases: {s.aliases.join(", ")}
+                      </div>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : null}
     </li>
   );

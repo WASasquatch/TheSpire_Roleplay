@@ -21,7 +21,15 @@ export const whisperCommand: CommandHandler = {
   name: "whisper",
   aliases: ["wh", "w", "to", "msg", "message", "pm"],
   usage: "/whisper <name> <text>",
-  description: "Send a private message to one user.",
+  description:
+    "Send a private 1:1 message. The recipient is resolved by master username OR their currently-active character name. Whispers are persisted for sender and recipient scrollback only - they're never visible to admins or other users.",
+  subcommands: [
+    {
+      verb: "<name> <text>",
+      usage: "/whisper Alice are you free?",
+      description: "Send a private message. Use a master username (always works) or a character name (only if they're currently active as that character).",
+    },
+  ],
   async run(ctx) {
     const args = ctx.args;
     if (args.length < 2) {

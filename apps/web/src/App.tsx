@@ -7,6 +7,7 @@ import { Banner } from "./components/Banner.js";
 import { Composer } from "./components/Composer.js";
 import { HelpModal } from "./components/HelpModal.js";
 import { MessageList } from "./components/MessageList.js";
+import { MutualPrompts } from "./components/MutualPrompts.js";
 import { ProfileEditor } from "./components/ProfileEditor.js";
 import { ProfileModal } from "./components/ProfileModal.js";
 import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
@@ -353,6 +354,25 @@ function Chat() {
       }
     });
 
+    /**
+     * Mutual-title state changed somewhere - if the user is currently
+     * looking at a profile, refetch it so newly-accepted titles (or
+     * dissolved ones) appear without forcing them to close and reopen
+     * the modal. We read openProfile via getState to avoid putting it
+     * in this useEffect's deps and re-binding all socket listeners.
+     */
+    socket.on("mutual:settled", () => {
+      const open = useChat.getState().openProfile;
+      if (!open) return;
+      const name = open.kind === "master" ? open.profile.username : open.profile.name;
+      socket.emit("profile:fetch", { username: name }, (res) => {
+        if (res.ok) setOpenProfile(res.profile);
+        // If the lookup fails (e.g. the other party deleted), leave the
+        // current view in place rather than yanking it out from under
+        // the user.
+      });
+    });
+
     return () => {
       socket.off("room:state");
       socket.off("presence:update");
@@ -361,6 +381,7 @@ function Chat() {
       socket.off("error:notice");
       socket.off("auth:expired");
       socket.off("ui:hint");
+      socket.off("mutual:settled");
     };
   }, [socket, setRoom, setOccupants, appendMessage, setMessages, setCurrentRoom, setNotice, setHint, setOpenProfile, openEditor, setRefreshIntervalSec, setMe]);
 
@@ -460,6 +481,10 @@ function Chat() {
             onMentionClick={onMentionClick}
             fontStep={fontStep}
           />
+          <MutualPrompts
+            socket={socket}
+            onError={(n) => setNotice(n)}
+          />
           <Composer
             value={composerText}
             onChange={setComposerText}
@@ -508,6 +533,12 @@ function Chat() {
           onIgnore={(name) => {
             setOpenProfile(null);
             send(`/ignore ${name}`);
+          }}
+          onOpenProfile={(name) => {
+            socket.emit("profile:fetch", { username: name }, (res) => {
+              if (res.ok) setOpenProfile(res.profile);
+              else setNotice({ code: res.code, message: res.message });
+            });
           }}
         />
       ) : null}

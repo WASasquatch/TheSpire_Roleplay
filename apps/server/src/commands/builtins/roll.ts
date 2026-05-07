@@ -43,7 +43,24 @@ export const rollCommand: CommandHandler = {
   name: "roll",
   aliases: ["dice"],
   usage: "/roll <NdM>   (e.g. 1d20, 3d6, 2d100)",
-  description: "Roll dice. NdM = N dice with M sides each.",
+  description: "Roll dice. NdM = N dice with M sides each. Result is broadcast to the room.",
+  subcommands: [
+    {
+      verb: "1dM",
+      usage: "/roll 1d20",
+      description: "Roll one die with M sides. Output: 'rolls 1d20: 14'.",
+    },
+    {
+      verb: "NdM",
+      usage: "/roll 3d6",
+      description: "Roll N dice with M sides each. Output shows individual rolls and total.",
+    },
+    {
+      verb: "dM",
+      usage: "/roll d20",
+      description: "Shorthand for 1dM (count defaults to 1).",
+    },
+  ],
   async run(ctx) {
     const arg = ctx.argsText.trim();
     if (!arg) {

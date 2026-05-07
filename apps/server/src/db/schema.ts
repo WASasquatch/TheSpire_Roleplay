@@ -435,6 +435,87 @@ export const siteSettings = sqliteTable("site_settings", {
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
 });
 
+/* ---------- title_kinds ----------
+ * Catalog of mutual-title types (marriage, partner, mentor, etc.). Admin-
+ * managed. Each kind carries display formats for the A side (requester)
+ * and B side (recipient); for symmetric kinds the two formats match.
+ * `{target}` in either format is replaced with the other party's display
+ * name when rendered into a profile.
+ */
+export const titleKinds = sqliteTable(
+  "title_kinds",
+  {
+    id: id(),
+    /** lowercased keyword used in /request <slug> <user>; unique. */
+    slug: text("slug").notNull(),
+    /** Human-readable name for admin UI ("Marriage", "Mentor / Apprentice"). */
+    label: text("label").notNull(),
+    /** When false, A and B sides render with different formats (mentor/apprentice). */
+    symmetric: integer("symmetric", { mode: "boolean" }).notNull().default(true),
+    /** Display string for the requester side. {target} = other party's name. */
+    formatA: text("format_a").notNull(),
+    /** Display string for the recipient side. Equal to formatA when symmetric. */
+    formatB: text("format_b").notNull(),
+    /** When true, an identity may hold at most one accepted title of this kind. */
+    exclusive: integer("exclusive", { mode: "boolean" }).notNull().default(false),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdById: text("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    slugUq: uniqueIndex("title_kinds_slug_uq").on(sql`lower(${t.slug})`),
+  }),
+);
+
+/* ---------- mutual_titles ----------
+ * In-flight or accepted relationship between two identities (an identity =
+ * userId + nullable characterId; null = master account). The "A" side is
+ * always the requester / dissolve initiator, the "B" side is the responder.
+ *
+ * Lifecycle:
+ *   pending     - request created, recipient hasn't responded
+ *   accepted    - both parties confirmed, title shows on each profile
+ *   dissolving  - one party has asked to remove an accepted title; the
+ *                 other side gets an Accept | Decline prompt. On Accept the
+ *                 row is deleted; on Decline the status reverts to accepted.
+ *
+ * `dissolve_initiator` records which side asked to dissolve ("a" or "b")
+ * so the prompt can be shown to the *other* side - it is null for any
+ * status other than `dissolving`.
+ *
+ * Decline (whether on initial request or on a dissolve request) deletes
+ * the row outright rather than retaining a record - declines are private.
+ */
+export const mutualTitles = sqliteTable(
+  "mutual_titles",
+  {
+    id: id(),
+    kindId: text("kind_id")
+      .notNull()
+      .references(() => titleKinds.id, { onDelete: "cascade" }),
+    aUserId: text("a_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    aCharacterId: text("a_character_id").references(() => characters.id, { onDelete: "cascade" }),
+    bUserId: text("b_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bCharacterId: text("b_character_id").references(() => characters.id, { onDelete: "cascade" }),
+    status: text("status", { enum: ["pending", "accepted", "dissolving"] })
+      .notNull()
+      .default("pending"),
+    dissolveInitiator: text("dissolve_initiator", { enum: ["a", "b"] }),
+    createdAt: ts("created_at"),
+    respondedAt: integer("responded_at", { mode: "timestamp_ms" }),
+  },
+  (t) => ({
+    aIdx: index("mutual_titles_a_idx").on(t.aUserId, t.aCharacterId),
+    bIdx: index("mutual_titles_b_idx").on(t.bUserId, t.bCharacterId),
+    kindIdx: index("mutual_titles_kind_idx").on(t.kindId),
+  }),
+);
+
 export type DbUser = typeof users.$inferSelect;
 export type DbCharacter = typeof characters.$inferSelect;
 export type DbRoom = typeof rooms.$inferSelect;
@@ -443,3 +524,5 @@ export type DbMessage = typeof messages.$inferSelect;
 export type DbCustomCommand = typeof customCommands.$inferSelect;
 export type DbNavLink = typeof navLinks.$inferSelect;
 export type DbSiteSettings = typeof siteSettings.$inferSelect;
+export type DbTitleKind = typeof titleKinds.$inferSelect;
+export type DbMutualTitle = typeof mutualTitles.$inferSelect;

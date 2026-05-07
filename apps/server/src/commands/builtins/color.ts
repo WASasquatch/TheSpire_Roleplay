@@ -27,6 +27,24 @@ export const colorCommand: CommandHandler = {
   aliases: ["co", "colour"],
   usage: "/color <hex>   or   /color clear",
   description: "Set the hex color used for your chat messages and actions.",
+  subcommands: [
+    {
+      verb: "(no args)",
+      usage: "/color",
+      description: "Show your current chat color.",
+    },
+    {
+      verb: "<hex>",
+      usage: "/color #990000",
+      description: "Set your chat color. Accepts #rrggbb, rrggbb, #rgb, or rgb (e.g. /color 990000, /color #abc).",
+    },
+    {
+      verb: "clear",
+      usage: "/color clear",
+      description: "Revert to the default chat color.",
+      aliases: ["none", "off", "default"],
+    },
+  ],
   async run(ctx) {
     const arg = ctx.argsText.trim();
     if (!arg) {

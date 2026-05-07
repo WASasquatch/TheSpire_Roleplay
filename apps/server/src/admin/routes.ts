@@ -7,8 +7,10 @@ import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared
 import {
   customCommandAliases,
   customCommands,
+  mutualTitles,
   roomMembers,
   rooms,
+  titleKinds,
   users,
 } from "../db/schema.js";
 import type { Db } from "../db/index.js";
@@ -560,6 +562,129 @@ export async function registerAdminRoutes(
   app.delete<{ Params: { id: string } }>("/admin/custom-commands/:id", async (req) => {
     await db.delete(customCommands).where(eq(customCommands.id, req.params.id));
     await registry.reloadCustom(db);
+    return { ok: true };
+  });
+
+  /* ---------- title kinds (mutual-title catalog) ----------
+   * CRUD over the title_kinds table. Slug is the user-facing keyword for
+   * /request <slug> <user>; format strings use {target} as the substitution
+   * point for the other party's display name. Deleting a kind cascades to
+   * any in-flight or accepted titles of that kind, so we surface a count
+   * in the GET response so admins can preview the impact.
+   */
+  app.get("/admin/title-kinds", async () => {
+    const kinds = await db.select().from(titleKinds).orderBy(asc(titleKinds.slug));
+    const counts = await db
+      .select({ kindId: mutualTitles.kindId, n: sql<number>`count(*)` })
+      .from(mutualTitles)
+      .groupBy(mutualTitles.kindId);
+    const byId = new Map(counts.map((r) => [r.kindId, r.n]));
+    return {
+      kinds: kinds.map((k) => ({
+        id: k.id,
+        slug: k.slug,
+        label: k.label,
+        symmetric: k.symmetric,
+        formatA: k.formatA,
+        formatB: k.formatB,
+        exclusive: k.exclusive,
+        enabled: k.enabled,
+        usageCount: byId.get(k.id) ?? 0,
+        updatedAt: +k.updatedAt,
+      })),
+    };
+  });
+
+  // Slug rule: lowercase letters, digits, hyphen, underscore. Matches the
+  // shape used in slash-command keywords elsewhere in the app.
+  const SLUG_RX = /^[a-z0-9_-]{1,32}$/;
+  const titleKindBody = z.object({
+    slug: z.string().min(1).max(32).regex(SLUG_RX, "slug must be lowercase a-z/0-9/_/- only"),
+    label: z.string().min(1).max(80),
+    symmetric: z.boolean(),
+    formatA: z.string().min(1).max(120),
+    formatB: z.string().min(1).max(120),
+    exclusive: z.boolean(),
+    enabled: z.boolean(),
+  });
+
+  app.post<{ Body: unknown }>("/admin/title-kinds", async (req, reply) => {
+    const parsed = titleKindBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: "invalid", details: parsed.error.flatten() };
+    }
+    const { slug, label, symmetric, formatA, formatB, exclusive, enabled } = parsed.data;
+    const dup = (await db
+      .select({ id: titleKinds.id })
+      .from(titleKinds)
+      .where(sql`lower(${titleKinds.slug}) = ${slug.toLowerCase()}`)
+      .limit(1))[0];
+    if (dup) {
+      reply.code(409);
+      return { error: "slug already exists" };
+    }
+    const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+    const id = nanoid();
+    await db.insert(titleKinds).values({
+      id,
+      slug,
+      label,
+      symmetric,
+      // For symmetric kinds we still store both columns so the listTitles
+      // query doesn't need to special-case; we just write formatA into both.
+      formatA,
+      formatB: symmetric ? formatA : formatB,
+      exclusive,
+      enabled,
+      createdById: sessionUser.id,
+    });
+    return { ok: true, id };
+  });
+
+  app.put<{ Params: { id: string }; Body: unknown }>("/admin/title-kinds/:id", async (req, reply) => {
+    const parsed = titleKindBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: "invalid", details: parsed.error.flatten() };
+    }
+    const { slug, label, symmetric, formatA, formatB, exclusive, enabled } = parsed.data;
+    const existing = (await db.select().from(titleKinds).where(eq(titleKinds.id, req.params.id)).limit(1))[0];
+    if (!existing) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    // Slug uniqueness check excluding this row.
+    if (slug.toLowerCase() !== existing.slug.toLowerCase()) {
+      const dup = (await db
+        .select({ id: titleKinds.id })
+        .from(titleKinds)
+        .where(sql`lower(${titleKinds.slug}) = ${slug.toLowerCase()}`)
+        .limit(1))[0];
+      if (dup) {
+        reply.code(409);
+        return { error: "slug already exists" };
+      }
+    }
+    await db
+      .update(titleKinds)
+      .set({
+        slug,
+        label,
+        symmetric,
+        formatA,
+        formatB: symmetric ? formatA : formatB,
+        exclusive,
+        enabled,
+        updatedAt: new Date(),
+      })
+      .where(eq(titleKinds.id, req.params.id));
+    return { ok: true };
+  });
+
+  app.delete<{ Params: { id: string } }>("/admin/title-kinds/:id", async (req) => {
+    // Cascade by FK: deletes all mutual_titles rows of this kind too.
+    await db.delete(titleKinds).where(eq(titleKinds.id, req.params.id));
     return { ok: true };
   });
 }

@@ -1,8 +1,9 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { characters, users } from "../../db/schema.js";
 import type { CharacterStats, ProfileView, Theme } from "@thekeep/shared";
 import { normalizeTheme } from "@thekeep/shared";
 import { getSettings } from "../../settings.js";
+import { listTitlesForIdentity } from "../../titles/service.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -52,6 +53,7 @@ async function lookupProfile(
         avatarUrl: u.avatarUrl,
         gender: u.gender,
         theme: await parseTheme(db, u.themeJson),
+        titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
         createdAt: +u.createdAt,
       },
     };
@@ -82,6 +84,85 @@ async function lookupProfile(
       stats: parseStats(c.statsJson),
       avatarUrl: c.avatarUrl,
       theme,
+      titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
+      createdAt: +c.createdAt,
+      updatedAt: +c.updatedAt,
+    },
+  };
+}
+
+/**
+ * Pick a uniformly-random profile from the union of (active master accounts) and
+ * (non-deleted characters whose owner is active). We count both pools, draw an
+ * index across the combined total, and OFFSET into whichever pool the index
+ * lands in - so every visible profile has equal probability regardless of how
+ * lopsided the user/character ratio is.
+ */
+async function lookupRandomProfile(
+  db: import("../../db/index.js").Db,
+): Promise<ProfileView | null> {
+  const masterCountRow = (await db
+    .select({ n: sql<number>`count(*)` })
+    .from(users)
+    .where(isNull(users.disabledAt)))[0];
+  const masterCount = masterCountRow?.n ?? 0;
+
+  const charCountRow = (await db
+    .select({ n: sql<number>`count(*)` })
+    .from(characters)
+    .innerJoin(users, eq(users.id, characters.userId))
+    .where(and(isNull(characters.deletedAt), isNull(users.disabledAt))))[0];
+  const charCount = charCountRow?.n ?? 0;
+
+  const total = masterCount + charCount;
+  if (total === 0) return null;
+
+  const idx = Math.floor(Math.random() * total);
+  if (idx < masterCount) {
+    const u = (await db
+      .select()
+      .from(users)
+      .where(isNull(users.disabledAt))
+      .orderBy(users.id)
+      .limit(1)
+      .offset(idx))[0];
+    if (!u) return null;
+    return {
+      kind: "master",
+      profile: {
+        userId: u.id,
+        username: u.username,
+        bioHtml: u.bioHtml,
+        avatarUrl: u.avatarUrl,
+        gender: u.gender,
+        theme: await parseTheme(db, u.themeJson),
+        titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
+        createdAt: +u.createdAt,
+      },
+    };
+  }
+
+  const row = (await db
+    .select({ char: characters, ownerThemeJson: users.themeJson })
+    .from(characters)
+    .innerJoin(users, eq(users.id, characters.userId))
+    .where(and(isNull(characters.deletedAt), isNull(users.disabledAt)))
+    .orderBy(characters.id)
+    .limit(1)
+    .offset(idx - masterCount))[0];
+  if (!row) return null;
+  const c = row.char;
+  return {
+    kind: "character",
+    profile: {
+      id: c.id,
+      userId: c.userId,
+      name: c.name,
+      bioHtml: c.bioHtml,
+      stats: parseStats(c.statsJson),
+      avatarUrl: c.avatarUrl,
+      theme: await parseTheme(db, c.themeJson ?? row.ownerThemeJson),
+      titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
       createdAt: +c.createdAt,
       updatedAt: +c.updatedAt,
     },
@@ -133,18 +214,41 @@ export const profileCommand: CommandHandler = {
 };
 
 /**
- * /whois <name> - view a user's active profile (master fallback).
+ * /whois [name] - view a user's active profile (master fallback).
+ * With no name, picks a random profile (any master or character) - a quick way
+ * to stumble across someone's bio.
  * Aliases: /who (phpMyChat shorthand), /viewprofile.
  */
 export const whoisCommand: CommandHandler = {
   name: "whois",
   aliases: ["who", "viewprofile"],
-  usage: "/whois <username>",
-  description: "View someone's profile (their active character, or master if none).",
+  usage: "/whois [username]",
+  description:
+    "View someone's profile (their active character, or master if none). With no name, opens a random profile.",
+  subcommands: [
+    {
+      verb: "<name>",
+      usage: "/whois <name>",
+      description: "View this user's profile. Master usernames win over character names if both exist.",
+    },
+    {
+      verb: "(no args)",
+      usage: "/whois",
+      description: "Open a uniformly-random profile from all active masters and characters.",
+    },
+  ],
   async run(ctx) {
     const target = ctx.argsText.trim();
     if (!target) {
-      ctx.socket.emit("error:notice", { code: "NEED_NAME", message: "Usage: /whois <username>" });
+      const view = await lookupRandomProfile(ctx.db);
+      if (!view) {
+        ctx.socket.emit("error:notice", {
+          code: "NO_PROFILES",
+          message: "No profiles found.",
+        });
+        return;
+      }
+      ctx.socket.emit("ui:hint", { kind: "open-profile", profile: view });
       return;
     }
     const view = await lookupProfile(ctx.db, target);

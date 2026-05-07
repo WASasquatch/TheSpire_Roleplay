@@ -32,7 +32,7 @@ async function createSubcommand(ctx: CommandContext, name: string) {
     return notice(
       ctx,
       "BAD_CHAR_NAME",
-      "Character name must be 1–40 chars: letters, numbers, spaces, _ - '",
+      "Character name must be 1-40 chars: letters, numbers, spaces, _ - '",
     );
   }
   const existing = await findCharacter(ctx, name);
@@ -56,7 +56,7 @@ async function createSubcommand(ctx: CommandContext, name: string) {
 
 async function switchSubcommand(ctx: CommandContext, name: string) {
   // "OOC" / "master" / "off" / "none" all mean "drop the active character and
-  // become the master account" — this is the natural inverse of /char switch
+  // become the master account" - this is the natural inverse of /char switch
   // that's discoverable without remembering /char clear.
   if (/^(ooc|master|off|none)$/i.test(name)) return clearSubcommand(ctx);
 

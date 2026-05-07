@@ -58,7 +58,7 @@ export function RoomsTree({
         md:bg-keep-banner/30 md:shadow-none
       `}
     >
-      {/* Header row — title + room count, with the mobile-only close
+      {/* Header row - title + room count, with the mobile-only close
           button living inside it (instead of an absolute overlay) so it
           gets real layout space and never covers the room list. */}
       <div className="flex items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-2 md:bg-transparent md:py-1.5">
@@ -125,7 +125,7 @@ function RoomGroup({
         }`}
       >
         <span className="truncate">
-          {isPrivate ? <span title="private — password required" className="mr-1">🔒</span> : null}
+          {isPrivate ? <span title="private - password required" className="mr-1">🔒</span> : null}
           {room.name}
         </span>
         <span className="ml-2 shrink-0 font-normal text-keep-muted">({room.occupants.length})</span>

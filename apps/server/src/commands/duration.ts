@@ -3,7 +3,7 @@
  * milliseconds. Returns null on bad input.
  *
  * Accepted units: s/m/h/d (seconds/minutes/hours/days). Components are
- * additive — "1h20m" is 80 minutes; order doesn't matter ("20m1h" is the
+ * additive - "1h20m" is 80 minutes; order doesn't matter ("20m1h" is the
  * same). Whitespace is allowed between components.
  *
  * Capped at 365 days to refuse pathological values like "9999d".

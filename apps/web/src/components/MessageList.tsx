@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { ChatMessage, RoomOccupant } from "@thekeep/shared";
 import { UserNameTag } from "./UserNameTag.js";
 import type { Gender } from "../lib/gender.js";
+import { parseInline } from "../lib/markdown.js";
 import { splitMentions } from "../lib/mentions.js";
 
 interface Props {
@@ -58,9 +59,11 @@ export function MessageList({ messages, occupants, onIconClick, onNameClick, onM
 
 /**
  * Render pre-split body parts with `@username` substrings turned into
- * clickable profile-open buttons. Plain text is returned as-is so it
- * composes with the surrounding line styles (inline color overrides,
- * italics, etc.).
+ * clickable profile-open buttons. Text segments are run through the inline
+ * markdown parser (lib/markdown.tsx) so `**bold**`, `*italic*`, `` `code` ``,
+ * and bare http(s) URLs / image links render with structure - but always as
+ * React elements, never via `dangerouslySetInnerHTML`, so message bodies
+ * remain XSS-safe.
  */
 function renderParts(
   parts: ReturnType<typeof splitMentions>,
@@ -69,7 +72,7 @@ function renderParts(
   const out: ReactNode[] = [];
   parts.forEach((p, i) => {
     if (p.kind === "text") {
-      out.push(<span key={i}>{p.text}</span>);
+      out.push(<Fragment key={i}>{parseInline(p.text)}</Fragment>);
     } else {
       out.push(
         <button
@@ -96,7 +99,7 @@ function Line({
 }: {
   msg: ChatMessage;
   gender: Gender;
-  /** Unbound — Line binds with the relevant userId/displayName for sender vs recipient. */
+  /** Unbound - Line binds with the relevant userId/displayName for sender vs recipient. */
   onIconClick: (userId: string, displayName: string) => void;
   onNameClick: (userId: string, displayName: string) => void;
   onMentionClick: (name: string) => void;
@@ -113,7 +116,7 @@ function Line({
       color={msg.color}
       onIconClick={() => onIconClick(msg.userId, msg.displayName)}
       onNameClick={() => onNameClick(msg.userId, msg.displayName)}
-      // Chat lines stay compact — viewers open profiles from the userlist.
+      // Chat lines stay compact - viewers open profiles from the userlist.
       hideIcon
     />
   );
@@ -140,7 +143,7 @@ function Line({
         // whitespace-pre-wrap preserves the newlines that /describe authors
         // use to format multi-paragraph world descriptions; ordinary system
         // messages are single-line so this is a no-op for them. No leading
-        // `* ` decoration — the italic + system color already distinguish
+        // `* ` decoration - the italic + system color already distinguish
         // these from chat lines, and descriptions carry their own
         // `[Description]:` prefix when delivered on join.
         <div className="italic text-keep-system">
@@ -173,7 +176,7 @@ function Line({
         ) : (
           <span className="text-keep-muted">someone</span>
         );
-      // Whisper line uses the theme's "action" slot — distinct from say/me
+      // Whisper line uses the theme's "action" slot - distinct from say/me
       // (white-ish text) and from system (muted), and themes cleanly: forest
       // green on Parchment, purple on Twilight, etc.
       return (

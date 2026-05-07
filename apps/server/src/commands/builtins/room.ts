@@ -29,7 +29,7 @@ async function checkRoomCap(ctx: CommandContext): Promise<boolean> {
   if (count >= maxRoomsPerOwner) {
     ctx.socket.emit("error:notice", {
       code: "ROOM_LIMIT",
-      message: `You already own ${count} rooms — the per-user limit is ${maxRoomsPerOwner}.`,
+      message: `You already own ${count} rooms - the per-user limit is ${maxRoomsPerOwner}.`,
     });
     return false;
   }
@@ -51,7 +51,7 @@ async function joinOrCreatePublic(ctx: CommandContext, name: string) {
   if (!NAME_RX.test(name)) {
     ctx.socket.emit("error:notice", {
       code: "BAD_ROOM_NAME",
-      message: "Room name must be 1–40 chars: letters, numbers, spaces, _ - '",
+      message: "Room name must be 1-40 chars: letters, numbers, spaces, _ - '",
     });
     return;
   }
@@ -142,7 +142,8 @@ export const privateRoomCommand: CommandHandler = {
 export const inviteCommand: CommandHandler = {
   name: "invite",
   usage: "/invite <username>",
-  description: "Invite a user to the current private room.",
+  description:
+    "Invite a user to this room. For private rooms they can join without the password. For public rooms it sends them a heads-up notification.",
   async run(ctx) {
     const username = ctx.argsText.trim();
     if (!username) {
@@ -155,7 +156,7 @@ export const inviteCommand: CommandHandler = {
 };
 
 /**
- * Helper — does the caller have authority to edit room metadata (topic,
+ * Helper - does the caller have authority to edit room metadata (topic,
  * description)? Site admins always; otherwise the row's ownerId, the
  * roomMembers role of "owner", or "mod".
  */
@@ -209,9 +210,9 @@ const DESCRIPTION_MAX = 5000;
  * the scene without polluting ongoing chat. Distinct from /topic, which
  * is a short headline always visible above the chat.
  *
- *   /describe                — show the current description (caller only)
- *   /describe <text>         — set or replace the description (owner/mod/admin)
- *   /describe clear          — remove the description (owner/mod/admin)
+ *   /describe                - show the current description (caller only)
+ *   /describe <text>         - set or replace the description (owner/mod/admin)
+ *   /describe clear          - remove the description (owner/mod/admin)
  *
  * Plain text, newlines preserved. Capped at 5000 chars.
  */

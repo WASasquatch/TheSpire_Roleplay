@@ -8,14 +8,14 @@ import type { CommandContext, CommandHandler } from "./types.js";
  *
  * Names AND aliases share one keyspace, so `/me` and `/he` both resolve to the
  * same handler. Custom (admin-authored) commands are loaded from the DB at
- * startup and on edit, and are merged into the same map — built-ins win on
+ * startup and on edit, and are merged into the same map - built-ins win on
  * collision so an admin can't shadow `/kick`.
  */
 export class CommandRegistry {
   private readonly byName = new Map<string, CommandHandler>();
-  /** names that came from built-in handlers — these are protected from custom-command shadowing */
+  /** names that came from built-in handlers - these are protected from custom-command shadowing */
   private readonly builtinNames = new Set<string>();
-  /** names contributed by custom commands — tracked so we can hot-swap on edit */
+  /** names contributed by custom commands - tracked so we can hot-swap on edit */
   private readonly customNames = new Set<string>();
 
   registerBuiltin(handler: CommandHandler): void {
@@ -63,7 +63,7 @@ export class CommandRegistry {
     return this.byName.get(name.toLowerCase());
   }
 
-  /** Best-effort suggestion for unknown commands ("did you mean…"). */
+  /** Best-effort suggestion for unknown commands ("did you mean..."). */
   suggest(name: string, max = 3): string[] {
     const target = name.toLowerCase();
     const scored: Array<[string, number]> = [];
@@ -142,7 +142,7 @@ function makeCustomHandler(
  *   {roll:NdM}                random dice roll
  *   {choose:a|b|c}            pick one at random
  *   {upper:text} {lower:text} case helpers
- *   {if:cond|then|else}       conditional — cond truthy iff non-empty,
+ *   {if:cond|then|else}       conditional - cond truthy iff non-empty,
  *                             non-zero, and not "false"
  *
  * Sugar:
@@ -156,6 +156,15 @@ function makeCustomHandler(
  *
  * The engine rejects anything it doesn't understand by leaving the original
  * tokens in place (so users see what didn't expand and can fix it).
+ *
+ * Safety contract: this function returns a STRING which becomes the
+ * `body` field of a chat message. The web client renders message bodies
+ * through `lib/markdown.tsx` as React elements (never innerHTML), so
+ * anything substituted here - including arbitrary user-controlled values
+ * like display names and free-form args - is text content first and
+ * markdown second. The worst a hostile display name can do is style its
+ * own appearance in bold/italics. Do not change the client to render
+ * bodies via `dangerouslySetInnerHTML` without revisiting this engine.
  */
 function renderTemplate(tpl: string, ctx: CommandContext): string {
   const target = ctx.args[0] ?? "";
@@ -175,7 +184,7 @@ function renderTemplate(tpl: string, ctx: CommandContext): string {
     room: ctx.roomId,
   };
 
-  // Process innermost {…} (no nested braces inside). Loop until stable so
+  // Process innermost {...} (no nested braces inside). Loop until stable so
   // outer expressions can read inner results. Cap iterations as a guard.
   let out = tpl;
   for (let i = 0; i < 16; i++) {
@@ -193,7 +202,7 @@ function renderTemplate(tpl: string, ctx: CommandContext): string {
 }
 
 /**
- * Evaluate a single template node (the contents of a `{…}` with no nested
+ * Evaluate a single template node (the contents of a `{...}` with no nested
  * braces). Returns the replacement string, or null when the node should be
  * left as-is (so users see "{notarealvar}" come through unchanged rather
  * than silently disappear).
@@ -249,7 +258,7 @@ function evalFn(fn: string, arg: string): string | null {
     case "lower":
       return arg.toLowerCase();
     case "if": {
-      // {if:cond|then|else} — cond is truthy unless empty, "0", or "false".
+      // {if:cond|then|else} - cond is truthy unless empty, "0", or "false".
       const parts = arg.split("|");
       if (parts.length < 2) return null;
       const cond = (parts[0] ?? "").trim();
@@ -265,7 +274,7 @@ function evalFn(fn: string, arg: string): string | null {
 
 /**
  * Evaluate a constrained arithmetic expression. Whitelisted to digits,
- * decimal points, parens, and the five binary operators — nothing else can
+ * decimal points, parens, and the five binary operators - nothing else can
  * reach the Function constructor, so eval-style injection is impossible.
  */
 function safeEvalMath(expr: string): string | null {

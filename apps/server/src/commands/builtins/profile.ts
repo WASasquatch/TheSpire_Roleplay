@@ -29,14 +29,14 @@ async function lookupProfile(
   db: import("../../db/index.js").Db,
   name: string,
 ): Promise<ProfileView | null> {
-  // Master username takes precedence — it's globally unique, while character
+  // Master username takes precedence - it's globally unique, while character
   // names are only unique per-owner, so collisions between a master "Kaal"
   // and someone else's character "Kaal" resolve to the master.
   //
   // We deliberately return the master profile here even if the user has an
   // active character: /whois WAS should show WAS's master profile, not their
   // current character's. To view a specific character, use its name (e.g.
-  // /whois Kaal) — looked up below.
+  // /whois Kaal) - looked up below.
   const u = (await db
     .select()
     .from(users)
@@ -57,7 +57,7 @@ async function lookupProfile(
     };
   }
 
-  // Character lookup — by name, regardless of whether the owner is currently
+  // Character lookup - by name, regardless of whether the owner is currently
   // switched to it. Soft-deleted characters and characters whose owner is
   // disabled are filtered out (the data still exists for message history but
   // shouldn't surface in profile lookups).
@@ -97,7 +97,7 @@ function parseStats(json: string): CharacterStats {
 }
 
 /**
- * /profile — opens YOUR editor for the active identity.
+ * /profile - opens YOUR editor for the active identity.
  *   - If you have an active character, edits that character.
  *   - Otherwise, edits your master profile.
  *
@@ -133,7 +133,7 @@ export const profileCommand: CommandHandler = {
 };
 
 /**
- * /whois <name> — view a user's active profile (master fallback).
+ * /whois <name> - view a user's active profile (master fallback).
  * Aliases: /who (phpMyChat shorthand), /viewprofile.
  */
 export const whoisCommand: CommandHandler = {

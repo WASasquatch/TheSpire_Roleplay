@@ -30,7 +30,7 @@ export async function registerNavLinkRoutes(
   db: Db,
   isAdmin: (req: import("fastify").FastifyRequest) => Promise<boolean>,
 ): Promise<void> {
-  // Public read — anyone can list enabled links for the banner.
+  // Public read - anyone can list enabled links for the banner.
   app.get("/nav-links", async () => {
     const rows = await db
       .select()

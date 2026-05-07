@@ -6,7 +6,7 @@ import { UserNameTag } from "./UserNameTag.js";
 interface Props {
   roomName: string;
   occupants: RoomOccupant[];
-  /** All public rooms — rendered as a clickable list at the top of the rail. */
+  /** All public rooms - rendered as a clickable list at the top of the rail. */
   publicRooms: RoomSummary[];
   currentRoomId: string | null;
   onIconClick: (userId: string, displayName: string) => void;

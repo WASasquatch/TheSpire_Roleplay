@@ -97,6 +97,11 @@ stats.html
 .idea/
 *.swp
 *.swo
+
+# Claude Code per-project config (tool permissions, hooks, agents). Local
+# to each developer; not shared via the repo. If the team ever wants to
+# ship a baseline `.claude/settings.json`, allow-list it here with `!`.
+.claude/
 *~
 .history/
 .DS_Store
@@ -113,3 +118,9 @@ fly.toml.local
 # tmp scratch dirs developers sometimes create at the project root
 /tmp/
 /scratch/
+
+# Local-only security audit notes — findings, exploit paths, status of
+# each item. Useful as a working doc but not for the public repo (avoid
+# advertising live issues to attackers).
+SECURITY-AUDIT.md
+SECURITY-NOTES.md

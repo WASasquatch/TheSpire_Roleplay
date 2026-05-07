@@ -26,7 +26,7 @@ interface Props {
 }
 
 /**
- * Render a user's display tag — gender icon + name — with two click targets:
+ * Render a user's display tag - gender icon + name - with two click targets:
  * the icon opens the profile, the name opens a whisper. Used in the userlist
  * (icons visible) and in chat-message lines (icons hidden).
  */

@@ -28,7 +28,7 @@ export interface CommandContext {
   argsText: string;
   /** whitespace-split args; argsText is authoritative for free-form commands like /me */
   args: string[];
-  /** the alias the user actually typed (lowercased), e.g. "he" for /he — handlers can branch on this */
+  /** the alias the user actually typed (lowercased), e.g. "he" for /he - handlers can branch on this */
   invokedAs: string;
 }
 

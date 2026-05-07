@@ -4,7 +4,7 @@ import { isMentioned } from "./mentions.js";
 export type NotifyPref = "off" | "mentions" | "all";
 
 /**
- * Browser support is hit-and-miss — older browsers and Safari embedded webviews
+ * Browser support is hit-and-miss - older browsers and Safari embedded webviews
  * may not have the API. All callers must guard via `isSupported()`.
  */
 export function isSupported(): boolean {
@@ -28,7 +28,7 @@ export async function requestPermission(): Promise<NotificationPermission | "uns
 
 /**
  * Decide whether a given message should fire a desktop toast, given the
- * user's preference and current focus state. Pure function — testable.
+ * user's preference and current focus state. Pure function - testable.
  *
  * Skips:
  *   - your own messages (msg.userId === selfUserId)
@@ -39,7 +39,7 @@ export async function requestPermission(): Promise<NotificationPermission | "uns
  *     @mention of one of `selfNames` (master username / active character).
  *
  * Self-mentions are treated as "mention-grade" alongside whispers and
- * announcements — they ride the same notification budget.
+ * announcements - they ride the same notification budget.
  */
 export function shouldNotify(
   msg: ChatMessage,
@@ -130,6 +130,6 @@ export function fire(msg: ChatMessage, selfNames: ReadonlyArray<string> = []): v
       n.close();
     };
   } catch {
-    /* Some browsers throw on construction in obscure cases — swallow. */
+    /* Some browsers throw on construction in obscure cases - swallow. */
   }
 }

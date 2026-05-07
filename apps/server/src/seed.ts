@@ -10,8 +10,8 @@ import type { Db } from "./db/index.js";
 /**
  * Default system rooms shipped on every fresh install. Each one is a
  * permanent, public, isSystem=true room that survives auto-expiry and admin
- * sweeps. The Spire itself is the canonical landing room — sockets auto-join
- * it on connect — and the others are thematic gathering places that give
+ * sweeps. The Spire itself is the canonical landing room - sockets auto-join
+ * it on connect - and the others are thematic gathering places that give
  * roleplayers somewhere to go beyond the entry point.
  *
  * Re-running the seed is idempotent: if a room with the same name already
@@ -37,9 +37,9 @@ const DEFAULT_ROOMS: Array<{
   },
   {
     name: "Library",
-    topic: "A quiet sanctum of vaulted stone — lore, fragments, forgotten histories.",
+    topic: "A quiet sanctum of vaulted stone - lore, fragments, forgotten histories.",
     description:
-      "The Library is a quiet sanctum of vaulted stone, its endless shelves lined with tomes, scrolls, and stranger relics gathered from countless arrivals. Some volumes catalogue the histories of vanished worlds; others record fragments brought by those who came before. Lamplight flickers on dust-laden pages, and the silence carries a weight — as if the books themselves are listening.",
+      "The Library is a quiet sanctum of vaulted stone, its endless shelves lined with tomes, scrolls, and stranger relics gathered from countless arrivals. Some volumes catalogue the histories of vanished worlds; others record fragments brought by those who came before. Lamplight flickers on dust-laden pages, and the silence carries a weight - as if the books themselves are listening.",
   },
   {
     name: "Garden",
@@ -51,13 +51,13 @@ const DEFAULT_ROOMS: Array<{
     name: "Bazaar",
     topic: "Trade in goods, names, and half-remembered things.",
     description:
-      "The Bazaar sprawls along the Spire's outer terraces in a riot of colored awnings, ringing bells, and competing tongues. Merchants barter in coin and curiosity alike — pieces of broken realms, half-remembered songs, an hour of someone else's name. If something exists, the Bazaar has it for sale; if it doesn't, someone here is willing to invent it.",
+      "The Bazaar sprawls along the Spire's outer terraces in a riot of colored awnings, ringing bells, and competing tongues. Merchants barter in coin and curiosity alike - pieces of broken realms, half-remembered songs, an hour of someone else's name. If something exists, the Bazaar has it for sale; if it doesn't, someone here is willing to invent it.",
   },
 ];
 
 /** System rows we always need to exist (system user, default rooms, settings). */
 export async function ensureSystemSeeds(db: Db): Promise<void> {
-  // System sentinel user — owns server-authored messages, never logs in.
+  // System sentinel user - owns server-authored messages, never logs in.
   const sys = (await db.select().from(users).where(eq(users.username, "system")).limit(1))[0];
   if (!sys) {
     await db.insert(users).values({
@@ -76,7 +76,7 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
   // exists as a system room, rename it in place so message history,
   // memberships, bans, etc. (all keyed on roomId, not name) survive.
   // Topic + description are overwritten because the new lore replaces the
-  // old generic welcome — admins who customized those will need to re-edit.
+  // old generic welcome - admins who customized those will need to re-edit.
   const legacy = (await db.select().from(rooms).where(eq(rooms.name, "MainHall")).limit(1))[0];
   const alreadyHasSpire = (await db.select().from(rooms).where(eq(rooms.name, "The_Spire")).limit(1))[0];
   if (legacy && legacy.isSystem && !alreadyHasSpire) {
@@ -109,31 +109,31 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
 }
 
 /**
- * Periodic janitor: run every hour to delete messages older than the
- * admin-configured retention window AND expired sessions. Both are no-ops
- * when the corresponding setting is 0/forever. Safe to run from a single
- * setInterval at server start; cancellation token returned for graceful
- * shutdown in tests.
+ * Periodic janitor - split into two cadences so idle session expiry is
+ * detected promptly without burning DB writes on the slower retention sweep:
  *
- * `io` is optional so test harnesses can pass `null`; in production, passing
- * the live IoServer lets the janitor force-disconnect any socket whose
- * underlying session was just swept, sending those clients back to the
- * login splash without them having to act first.
+ *   - Session sweep runs every 60 seconds. Deletes any session whose
+ *     `expiresAt` is in the past and force-disconnects connected sockets
+ *     whose underlying row was just swept. With sliding-idle expiry, a
+ *     truly idle user gets kicked within a minute of their idle window
+ *     elapsing, instead of having to wait for the next chat:input.
+ *
+ *   - Retention sweep runs hourly. Deletes messages older than the
+ *     admin-configured retention window. No-op when retention is 0 (forever).
+ *
+ * `io` is optional so test harnesses can pass `null`; in production, the
+ * live IoServer is passed in so the session sweep can boot expired sockets.
  */
 export function startJanitor(
   db: Db,
   log: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void },
   io: IoServer<ClientToServerEvents, ServerToClientEvents> | null = null,
 ): () => void {
-  async function sweep() {
+  async function sweepSessions() {
     try {
-      // Expired sessions — always cleared, no admin setting needed.
       const expired = await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
       if (expired.changes > 0) log.info(`[janitor] cleared ${expired.changes} expired sessions`);
 
-      // Boot any connected socket whose session row no longer exists. The
-      // janitor only runs hourly, so users may stay connected past their
-      // TTL until the next sweep — that's fine; chat:input also re-checks.
       if (io && expired.changes > 0) {
         const liveSids = new Set(
           (await db.select({ id: sessions.id }).from(sessions)).map((r) => r.id),
@@ -150,8 +150,13 @@ export function startJanitor(
         }
         if (kicked > 0) log.info(`[janitor] booted ${kicked} sockets whose sessions expired`);
       }
+    } catch (err) {
+      log.error({ err }, "[janitor] session sweep failed");
+    }
+  }
 
-      // Messages older than retentionMs — only when admin configured a value.
+  async function sweepMessages() {
+    try {
       const { messageRetentionMs } = await getSettings(db);
       if (messageRetentionMs > 0) {
         const cutoff = new Date(Date.now() - messageRetentionMs);
@@ -159,12 +164,17 @@ export function startJanitor(
         if (r.changes > 0) log.info(`[janitor] purged ${r.changes} messages older than retention window`);
       }
     } catch (err) {
-      log.error({ err }, "[janitor] sweep failed");
+      log.error({ err }, "[janitor] message sweep failed");
     }
   }
 
-  // Run once at startup, then every hour.
-  void sweep();
-  const id = setInterval(() => void sweep(), 60 * 60 * 1000);
-  return () => clearInterval(id);
+  // Run both immediately on startup so the first sweep doesn't have to wait.
+  void sweepSessions();
+  void sweepMessages();
+  const sessionId = setInterval(() => void sweepSessions(), 60 * 1000);
+  const messageId = setInterval(() => void sweepMessages(), 60 * 60 * 1000);
+  return () => {
+    clearInterval(sessionId);
+    clearInterval(messageId);
+  };
 }

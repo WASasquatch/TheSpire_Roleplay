@@ -18,7 +18,13 @@ export async function registerStatsRoutes(
   db: Db,
   io: Io,
 ): Promise<void> {
-  app.get("/stats", async () => {
+  // /stats is anonymous + cheap to compute, but completely unrate-limited it
+  // makes a free amplification target. 120/min/IP comfortably covers the
+  // splash polling every 30s across multiple tabs.
+  const limit = {
+    config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+  } as const;
+  app.get("/stats", limit, async () => {
     // Room totals by type.
     const roomCounts = await db
       .select({ type: rooms.type, n: sql<number>`count(*)` })
@@ -27,7 +33,7 @@ export async function registerStatsRoutes(
     const byType: Record<string, number> = { public: 0, private: 0 };
     for (const r of roomCounts) byType[r.type] = r.n;
 
-    // Connected users right now — dedupe by userId across all sockets.
+    // Connected users right now - dedupe by userId across all sockets.
     const sockets = await io.fetchSockets();
     const onlineUsers = new Set<string>();
     for (const s of sockets) {

@@ -22,7 +22,7 @@ interface Props {
  * Top banner.
  *
  * Layout: title on the left; admin-managed links + Admin (admin-only) + Exit
- * on the right. Exit is hard-coded — admins can't delete the logout path.
+ * on the right. Exit is hard-coded - admins can't delete the logout path.
  *
  * The banner background, logo color, and logo font are all driven by the
  * admin-configured site branding (see /admin/settings). Each falls back to

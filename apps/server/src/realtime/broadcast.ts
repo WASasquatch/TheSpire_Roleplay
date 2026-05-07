@@ -76,12 +76,12 @@ export async function addMessage(
 /**
  * Emit a `message:new` to every socket in the room EXCEPT those whose user
  * has `ignores` row pointing at the sender. Looking up ignorers on each
- * send is fine at our scale — `ignores` is keyed by (userId, ignoredUserId)
+ * send is fine at our scale - `ignores` is keyed by (userId, ignoredUserId)
  * and the typical block list is small. If this ever becomes hot, cache by
  * senderId with a short TTL.
  *
  * NOTE: System messages still go through `addSystemMessage` which uses a
- * direct `io.to(...).emit` — those should never be filterable by /ignore.
+ * direct `io.to(...).emit` - those should never be filterable by /ignore.
  */
 async function emitFiltered(
   io: Io,
@@ -210,8 +210,8 @@ export async function joinRoom(
 
   // Capture state BEFORE we mutate socket.rooms so we can tell:
   //   1. whether this is a fresh connect (no prior live socket of this user
-  //      anywhere) — drives "X has connected" vs "X arrived";
-  //   2. which rooms this socket is leaving — drives "X left." in each.
+  //      anywhere) - drives "X has connected" vs "X arrived";
+  //   2. which rooms this socket is leaving - drives "X left." in each.
   const userWasOnlineBefore = await userIsOnline(io, user.id, socket.id);
   const priorRooms = [...socket.rooms]
     .filter((r) => r.startsWith("room:") && r !== `room:${roomId}`)
@@ -237,14 +237,14 @@ export async function joinRoom(
   await broadcastRoomState(io, db, roomId);
   await broadcastPresence(io, db, roomId);
 
-  // Send recent backlog to just this socket — minus history from anyone
+  // Send recent backlog to just this socket - minus history from anyone
   // they have on /ignore. We filter at the DB level (NOT IN subquery) so a
   // user with a long backlog of ignored authors doesn't pay for it client-side.
   //
   // PRIVACY: whispers are persisted in the room they were sent from (so
   // users can scroll back through their own DMs), but they must NEVER leak
   // to a third party. We exclude all whispers except those where this user
-  // is the sender or the recipient. Admins are NOT exempt — even moderation
+  // is the sender or the recipient. Admins are NOT exempt - even moderation
   // tooling never reads private content.
   //
   // The arrival announcement is emitted AFTER the backlog so the joining
@@ -285,7 +285,7 @@ export async function joinRoom(
   socket.emit("message:bulk", backlog);
 
   // If the room has a /describe set, deliver it to JUST this socket as a
-  // one-shot system message — not persisted, not broadcast. New visitors get
+  // one-shot system message - not persisted, not broadcast. New visitors get
   // the world/setting description; ongoing chat stays clean. The
   // `[Description]:` prefix on its own line distinguishes the world prose
   // from regular system events (joins, kicks, mutes) at a glance.
@@ -317,7 +317,7 @@ export async function joinRoom(
 
 /**
  * True iff the user has at least one live socket in the given room.
- * `excludeSocketId` skips the named socket — used at join time so the
+ * `excludeSocketId` skips the named socket - used at join time so the
  * caller's freshly-joined socket doesn't count as a "prior" presence.
  */
 export async function userHasSocketInRoom(
@@ -398,7 +398,7 @@ export async function expireIfEmpty(io: Io, db: Db, roomId: string): Promise<boo
 
 /**
  * Send room state + presence to a single socket without disturbing others in
- * the room. Used by /refresh and its auto-refresh interval — broadcasting to
+ * the room. Used by /refresh and its auto-refresh interval - broadcasting to
  * the whole room every N seconds would create noise for users who didn't
  * opt in.
  */

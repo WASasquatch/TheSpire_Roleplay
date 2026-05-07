@@ -124,7 +124,7 @@ export async function registerRoomsRoutes(
       roleByRoomUser.set(`${m.roomId}::${m.userId}`, m.role);
     }
 
-    // 6. DB member counts (totals — different from currently-online).
+    // 6. DB member counts (totals - different from currently-online).
     const counts = await db
       .select({ roomId: roomMembers.roomId, n: sql<number>`count(*)` })
       .from(roomMembers)

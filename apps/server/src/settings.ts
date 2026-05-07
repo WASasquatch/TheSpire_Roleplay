@@ -7,9 +7,9 @@ import { siteSettings } from "./db/schema.js";
 export interface SiteSettings {
   messageRetentionMs: number;
   sessionTtlMs: number;
-  /** Resolved theme — already falls back to DEFAULT_THEME when unset. */
+  /** Resolved theme - already falls back to DEFAULT_THEME when unset. */
   defaultTheme: Theme;
-  /** Same data as raw row — for serializing to admin endpoints. */
+  /** Same data as raw row - for serializing to admin endpoints. */
   defaultThemeJson: string | null;
   /** Public site name shown in the banner, login screen, tab title. */
   siteName: string;
@@ -35,7 +35,7 @@ export interface SiteSettings {
   welcomeHtml: string;
   /** Sanitized HTML rendered in the Rules modal (admin-editable house rules). */
   rulesHtml: string;
-  /** Sanitized HTML rendered alongside the rules — privacy/safety notice. */
+  /** Sanitized HTML rendered alongside the rules - privacy/safety notice. */
   securityNoticeHtml: string;
   /** Sanitized HTML rendered above the register form. Acceptance is required. */
   registerDisclaimerHtml: string;

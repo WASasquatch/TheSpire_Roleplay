@@ -1,6 +1,6 @@
 /**
- * "public" — anyone can join.
- * "private" — password required; /invite whitelists specific users so they
+ * "public" - anyone can join.
+ * "private" - password required; /invite whitelists specific users so they
  *             skip the password prompt.
  */
 export type RoomType = "public" | "private";
@@ -25,7 +25,7 @@ export interface RoomOccupant {
   awayMessage?: string | null;
   /** Hex chat color (e.g. "#990000") if user has set one */
   chatColor?: string | null;
-  /** Resolved gender — character.stats.gender if active, else user.gender */
+  /** Resolved gender - character.stats.gender if active, else user.gender */
   gender: Gender;
   role: "owner" | "mod" | "member";
 }

@@ -18,26 +18,26 @@ export const users = sqliteTable(
   {
     id: id(),
     email: text("email").notNull(),
-    /** the master/login username — display fallback when no character is active */
+    /** the master/login username - display fallback when no character is active */
     username: text("username").notNull(),
     passwordHash: text("password_hash").notNull(),
     role: text("role", { enum: ["user", "mod", "admin"] }).notNull().default("user"),
     /** master profile body (sanitized HTML) shown when /char clear */
     bioHtml: text("bio_html").notNull().default(""),
     avatarUrl: text("avatar_url"),
-    /** OOC gender — used for the icon next to the master username when no character is active. */
+    /** OOC gender - used for the icon next to the master username when no character is active. */
     gender: text("gender", {
       enum: ["male", "female", "nonbinary", "other", "undisclosed"],
     }).notNull().default("undisclosed"),
     /** Hex color (e.g. "#990000") applied to this user's messages and actions. Null = default. */
     chatColor: text("chat_color"),
-    /** Master account UI theme — JSON-serialized Theme. Null = default. */
+    /** Master account UI theme - JSON-serialized Theme. Null = default. */
     themeJson: text("theme_json"),
     /**
      * Desktop notification preference:
-     *   "off"      — never show toasts
-     *   "mentions" — only whispers + announcements
-     *   "all"      — every message in rooms you're in
+     *   "off"      - never show toasts
+     *   "mentions" - only whispers + announcements
+     *   "all"      - every message in rooms you're in
      */
     notifyPref: text("notify_pref", { enum: ["off", "mentions", "all"] })
       .notNull()
@@ -45,7 +45,7 @@ export const users = sqliteTable(
     /** Free-text "away" reason; null means the user is present. */
     awayMessage: text("away_message"),
     awaySince: integer("away_since", { mode: "timestamp_ms" }),
-    /** FK to characters.id — nullable means "show master profile" */
+    /** FK to characters.id - nullable means "show master profile" */
     activeCharacterId: text("active_character_id"),
     createdAt: ts("created_at"),
     lastLoginAt: integer("last_login_at", { mode: "timestamp_ms" }),
@@ -73,7 +73,7 @@ export const characters = sqliteTable(
     /** structured stats serialized as JSON; see CharacterStats in @thekeep/shared */
     statsJson: text("stats_json").notNull().default("{}"),
     avatarUrl: text("avatar_url"),
-    /** Per-character UI theme — JSON-serialized Theme. Null = inherit master/default. */
+    /** Per-character UI theme - JSON-serialized Theme. Null = inherit master/default. */
     themeJson: text("theme_json"),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
@@ -93,8 +93,8 @@ export const rooms = sqliteTable(
     id: id(),
     name: text("name").notNull(),
     /**
-     * "public" — anyone can join.
-     * "private" — password required (set via /private). The /invite command
+     * "public" - anyone can join.
+     * "private" - password required (set via /private). The /invite command
      *             whitelists a user so they can skip the password prompt.
      */
     type: text("type", { enum: ["public", "private"] })
@@ -173,9 +173,9 @@ export const messages = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    /** snapshot — character may be deleted later but history must remain stable */
+    /** snapshot - character may be deleted later but history must remain stable */
     characterId: text("character_id"),
-    /** snapshot — display name at send time (so renames don't rewrite history) */
+    /** snapshot - display name at send time (so renames don't rewrite history) */
     displayName: text("display_name").notNull(),
     kind: text("kind", {
       enum: ["say", "me", "system", "whisper", "roll", "announce", "ooc"],
@@ -272,9 +272,9 @@ export const ignores = sqliteTable(
  *                   E.g. /tea → "Name pours a cup of tea."
  *
  * Templates support:
- *   {name}    — sender's display name
- *   {target}  — first arg (when present)
- *   {args}    — full remaining text after the command word
+ *   {name}    - sender's display name
+ *   {target}  - first arg (when present)
+ *   {args}    - full remaining text after the command word
  */
 export const customCommands = sqliteTable(
   "custom_commands",
@@ -301,7 +301,7 @@ export const customCommands = sqliteTable(
 );
 
 /* ---------- custom_command_aliases ----------
- * Many-to-one — one canonical command, many aliases. Aliases share the global
+ * Many-to-one - one canonical command, many aliases. Aliases share the global
  * command namespace with built-ins, so collisions are rejected on insert.
  */
 export const customCommandAliases = sqliteTable(
@@ -317,7 +317,7 @@ export const customCommandAliases = sqliteTable(
 
 /* ---------- sessions ----------
  * Server-side session store. We use httpOnly cookies referencing a row here,
- * not JWTs — easier to revoke (e.g. on /banish or password reset).
+ * not JWTs - easier to revoke (e.g. on /banish or password reset).
  */
 export const sessions = sqliteTable(
   "sessions",
@@ -339,7 +339,7 @@ export const sessions = sqliteTable(
 /* ---------- nav_links ----------
  * Banner links rendered next to the user's session controls. Admins manage
  * these; everyone reads them. The Exit link is hard-coded in the client and
- * is NOT modeled here — admins shouldn't be able to remove the logout path.
+ * is NOT modeled here - admins shouldn't be able to remove the logout path.
  */
 export const navLinks = sqliteTable("nav_links", {
   id: id(),
@@ -361,7 +361,7 @@ export const navLinks = sqliteTable("nav_links", {
  *   - default theme (used when a user has no custom theme + no active char
  *     theme; null falls back to the built-in DEFAULT_THEME)
  *
- * The single row is identified by id="singleton" — the seed step ensures
+ * The single row is identified by id="singleton" - the seed step ensures
  * it always exists. PK enforces uniqueness.
  */
 export const siteSettings = sqliteTable("site_settings", {
@@ -403,7 +403,7 @@ export const siteSettings = sqliteTable("site_settings", {
   maxMessageLength: integer("max_message_length").notNull().default(4000),
   /** Hard cap on profile bio HTML length (master + character bios). */
   maxBioLength: integer("max_bio_length").notNull().default(50_000),
-  /** Master switch — when false, /auth/register returns 503. */
+  /** Master switch - when false, /auth/register returns 503. */
   registrationOpen: integer("registration_open", { mode: "boolean" }).notNull().default(true),
   /**
    * Sanitized welcome HTML rendered above the login/register form on the
@@ -413,7 +413,7 @@ export const siteSettings = sqliteTable("site_settings", {
   /**
    * Sanitized HTML rendered in the Rules modal. Migration 0015 seeds a
    * baseline 8-point code of conduct; admins customize freely. The schema
-   * default is empty here — the SQL DEFAULT in the migration is what
+   * default is empty here - the SQL DEFAULT in the migration is what
    * actually populates new rows, so drizzle keeps this column out of
    * inserts and lets SQLite apply the seeded default.
    */

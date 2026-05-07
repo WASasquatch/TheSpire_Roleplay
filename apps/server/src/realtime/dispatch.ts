@@ -72,16 +72,16 @@ export async function dispatchChatInput(args: {
     return;
   }
 
-  // Per-user rate limit (admins exempt — moderation flurries shouldn't get
-  // throttled). The limiter applies to ALL chat:input — slash commands
-  // included — because a flood of /me or /roll is just as disruptive as
+  // Per-user rate limit (admins exempt - moderation flurries shouldn't get
+  // throttled). The limiter applies to ALL chat:input - slash commands
+  // included - because a flood of /me or /roll is just as disruptive as
   // a flood of plain text.
   if (user.role !== "admin") {
     const rate = checkChatRate(user.id, Date.now());
     if (!rate.ok) {
       socket.emit("error:notice", {
         code: "RATE_LIMIT",
-        message: `Slow down — try again in ${Math.ceil(rate.retryMs / 1000)}s.`,
+        message: `Slow down - try again in ${Math.ceil(rate.retryMs / 1000)}s.`,
       });
       return;
     }
@@ -101,7 +101,7 @@ export async function dispatchChatInput(args: {
 
   const parsed = parseInput(text);
 
-  // Mute check — applies to plain chat, /me-style emotes, /whisper, and most
+  // Mute check - applies to plain chat, /me-style emotes, /whisper, and most
   // other speech-producing commands. We deliberately allow some non-speech
   // commands to pass (e.g. /char list, /profile, /help, /refresh, /go) so a
   // muted user isn't completely paralyzed in the room. Anything that emits a

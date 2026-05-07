@@ -1,7 +1,7 @@
 import type { CommandHandler } from "../types.js";
 
 /**
- * /users — open the searchable user directory modal.
+ * /users - open the searchable user directory modal.
  *
  * No args. The actual list is fetched by the modal via GET /users; this
  * command exists so users can open it from the composer (and so the

@@ -34,7 +34,7 @@ export function ToolPanel({ onCommand, activeCharacterId }: Props) {
           label={refreshIntervalSec > 0 ? `Refresh ${refreshIntervalSec}s` : "Refresh"}
           title={
             refreshIntervalSec > 0
-              ? `Auto-refresh every ${refreshIntervalSec}s — click for menu`
+              ? `Auto-refresh every ${refreshIntervalSec}s - click for menu`
               : "Re-fetch userlist + topic (/refresh)"
           }
           onClick={() => setRefreshOpen((v) => !v)}

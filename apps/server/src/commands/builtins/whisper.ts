@@ -9,11 +9,11 @@ function notice(ctx: CommandContext, code: string, message: string) {
 }
 
 /**
- * /whisper <name> <text>      — send a private 1:1 message
+ * /whisper <name> <text>      - send a private 1:1 message
  * Aliases: /wh /to /msg /message /pm /w
  *
  * The message is persisted (so users can scroll back through their own
- * whispers) but only emitted to the sender and recipient sockets — never to
+ * whispers) but only emitted to the sender and recipient sockets - never to
  * the room. Recipient is resolved by master username OR by their currently
  * active character name.
  */
@@ -36,7 +36,7 @@ export const whisperCommand: CommandHandler = {
       return;
     }
 
-    // Resolve recipient — master username first, then active character name.
+    // Resolve recipient - master username first, then active character name.
     const targetLower = targetName.toLowerCase();
     let target = (await ctx.db
       .select()
@@ -71,7 +71,7 @@ export const whisperCommand: CommandHandler = {
       return;
     }
 
-    // Resolve target's display name — prefer their active character name.
+    // Resolve target's display name - prefer their active character name.
     let targetDisplayName = target.username;
     if (target.activeCharacterId) {
       const { characters } = await import("../../db/schema.js");
@@ -118,7 +118,7 @@ export const whisperCommand: CommandHandler = {
 
     // Honor /ignore: if the recipient has the sender on their ignore list,
     // silently drop the delivery to them. The sender still sees their own
-    // line — we don't tell them they were ignored (that signal is the whole
+    // line - we don't tell them they were ignored (that signal is the whole
     // point of one-sided ignores).
     const blocked = (await ctx.db
       .select()

@@ -61,7 +61,7 @@ export function Composer({ value, onChange, onSend, onOpenRail }: Props) {
         ref={inputRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Type a message…"
+        placeholder="Type a message..."
         // text-base on mobile prevents iOS Safari from auto-zooming on focus
         // (anything below 16px triggers zoom). md+ keeps our compact size.
         className="flex-1 rounded border border-keep-rule bg-keep-bg px-3 py-2 text-base outline-none focus:border-keep-action md:py-1 md:text-sm"

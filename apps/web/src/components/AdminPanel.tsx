@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import DOMPurify from "dompurify";
 import type { Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import { ThemePicker } from "./ThemePicker.js";
@@ -150,7 +151,7 @@ function parseDurationMs(s: string): number | null {
  * SITE OVERVIEW (stats panel inside Settings tab)
  * =============================================================
  *
- * Polls /stats every 30s and renders the live snapshot — online users,
+ * Polls /stats every 30s and renders the live snapshot - online users,
  * room counts, and a 7-day message-frequency sparkline. Replaces the
  * previous in-rail MetaBar; admins want this glanceable, regular users
  * don't need it cluttering the rooms drawer on mobile.
@@ -189,7 +190,7 @@ function SiteOverview() {
       {error ? (
         <div className="text-keep-accent">{error}</div>
       ) : !stats ? (
-        <div className="text-keep-muted">loading…</div>
+        <div className="text-keep-muted">loading...</div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-[auto_1fr] sm:items-center">
           {/* Headline numbers */}
@@ -303,7 +304,7 @@ function SettingsTab() {
       const intOrThrow = (label: string, raw: string, min: number, max: number): number => {
         const n = parseInt(raw, 10);
         if (!Number.isFinite(n) || n < min || n > max) {
-          throw new Error(`${label} must be an integer ${min}–${max}`);
+          throw new Error(`${label} must be an integer ${min}-${max}`);
         }
         return n;
       };
@@ -342,6 +343,8 @@ function SettingsTab() {
         registrationOpen: j.registrationOpen,
         welcomeHtml: j.welcomeHtml,
         registerDisclaimerHtml: j.registerDisclaimerHtml,
+        messageRetentionMs: j.messageRetentionMs,
+        sessionTtlMs: j.sessionTtlMs,
         defaultTheme: j.defaultTheme,
       });
       setSavedFlash(true);
@@ -354,7 +357,7 @@ function SettingsTab() {
   }
 
   if (!data) {
-    return <div className="text-keep-muted text-xs">{error ?? "loading…"}</div>;
+    return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
   }
 
   return (
@@ -382,17 +385,17 @@ function SettingsTab() {
       </fieldset>
 
       <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Session lifetime</legend>
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Idle timeout</legend>
         <div className="flex items-baseline gap-2">
           <input
             type="text"
             value={sessionTtl}
             onChange={(e) => setSessionTtl(e.target.value)}
-            placeholder="30d, 7d, 1h"
+            placeholder="30m, 1h, 1d"
             className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
           />
           <span className="text-keep-muted">
-            New logins expire after this. Existing sessions keep their old TTL until renewed. Min 5m.
+            How long a user can be idle before they get bounced back to the login splash. Sliding: any keypress, mousemove, message, or room switch resets the clock. Min 5m.
           </span>
         </div>
       </fieldset>
@@ -448,7 +451,7 @@ function SettingsTab() {
                 checked={regOpen}
                 onChange={(e) => setRegOpen(e.target.checked)}
               />
-              <span>{regOpen ? "Open — anyone can register" : "Closed — login only"}</span>
+              <span>{regOpen ? "Open - anyone can register" : "Closed - login only"}</span>
             </div>
             <span className="mt-0.5 block text-[10px] text-keep-muted">
               When closed, /auth/register returns 503 and the login screen hides the Register tab.
@@ -469,7 +472,7 @@ function SettingsTab() {
           onReset={() => setTheme(null)}
         />
         {!theme ? (
-          <div className="mt-1 italic text-keep-muted">No site default — using built-in Parchment.</div>
+          <div className="mt-1 italic text-keep-muted">No site default - using built-in Parchment.</div>
         ) : null}
       </fieldset>
 
@@ -486,7 +489,7 @@ function SettingsTab() {
           disabled={saving}
           className="rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
         >
-          {saving ? "Saving…" : "Save settings"}
+          {saving ? "Saving..." : "Save settings"}
         </button>
       </div>
     </form>
@@ -577,6 +580,8 @@ function BrandingTab() {
         registrationOpen: j.registrationOpen,
         welcomeHtml: j.welcomeHtml,
         registerDisclaimerHtml: j.registerDisclaimerHtml,
+        messageRetentionMs: j.messageRetentionMs,
+        sessionTtlMs: j.sessionTtlMs,
         defaultTheme: j.defaultTheme,
       });
       setSavedFlash(true);
@@ -589,7 +594,7 @@ function BrandingTab() {
   }
 
   if (!data || !draft) {
-    return <div className="text-keep-muted text-xs">{error ?? "loading…"}</div>;
+    return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
   }
 
   return (
@@ -655,7 +660,7 @@ function BrandingTab() {
             type="button"
             onClick={() => setDraft({ ...draft, logoColor: "" })}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-keep-muted hover:text-keep-text"
-            title="Clear — logo follows the active theme."
+            title="Clear - logo follows the active theme."
           >
             Clear
           </button>
@@ -674,7 +679,7 @@ function BrandingTab() {
         />
         <p className="mt-1 text-keep-muted">
           A CSS <code>font-family</code> stack. Web fonts must be self-hosted
-          or loaded via <code>@import</code> in your stylesheet — this field
+          or loaded via <code>@import</code> in your stylesheet - this field
           only changes the family name, not the loading. Empty to use the
           built-in serif stack.
         </p>
@@ -687,13 +692,13 @@ function BrandingTab() {
           onChange={(e) => setDraft({ ...draft, welcomeHtml: e.target.value })}
           rows={6}
           maxLength={50_000}
-          placeholder="<p>Welcome to <b>The Spire</b> — a roleplay-focused chat sanctuary.</p>&#10;<p>Sign in to enter, or register a new account.</p>"
+          placeholder="<p>Welcome to <b>The Spire</b> - a roleplay-focused chat sanctuary.</p>&#10;<p>Sign in to enter, or register a new account.</p>"
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
           HTML rendered above the splash login/register form. Sanitized
-          server-side using the same allow-list as profile bios — basic
-          formatting tags, links, lists, and headings (h3–h6) are accepted.
+          server-side using the same allow-list as profile bios - basic
+          formatting tags, links, lists, and headings (h3-h6) are accepted.
           Empty hides the welcome block entirely.
         </p>
       </fieldset>
@@ -735,7 +740,7 @@ function BrandingTab() {
           disabled={saving}
           className="rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
         >
-          {saving ? "Saving…" : "Save branding"}
+          {saving ? "Saving..." : "Save branding"}
         </button>
       </div>
     </form>
@@ -747,8 +752,8 @@ function BrandingTab() {
  * =============================================================
  *
  * Edits the two HTML bodies rendered by the Rules modal:
- *   - rulesHtml          — admin-authored house rules
- *   - securityNoticeHtml — privacy/safety notice (defaults to the canonical
+ *   - rulesHtml          - admin-authored house rules
+ *   - securityNoticeHtml - privacy/safety notice (defaults to the canonical
  *                          "private rooms aren't readable by admins" text)
  *
  * Both go through the same sanitizeBio() allow-list as profile bios on save.
@@ -814,6 +819,8 @@ function RulesTab() {
         registrationOpen: j.registrationOpen,
         welcomeHtml: j.welcomeHtml,
         registerDisclaimerHtml: j.registerDisclaimerHtml,
+        messageRetentionMs: j.messageRetentionMs,
+        sessionTtlMs: j.sessionTtlMs,
         defaultTheme: j.defaultTheme,
       });
       setSavedFlash(true);
@@ -826,15 +833,15 @@ function RulesTab() {
   }
 
   if (!data) {
-    return <div className="text-keep-muted text-xs">{error ?? "loading…"}</div>;
+    return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
   }
 
   return (
     <form onSubmit={save} className="space-y-4">
       <p className="text-xs text-keep-muted">
         Rules and the privacy notice shown when users click the Rules button.
-        Both fields accept the same HTML allow-list as profile bios — formatting
-        tags, links, lists, and headings (h3–h6).
+        Both fields accept the same HTML allow-list as profile bios - formatting
+        tags, links, lists, and headings (h3-h6).
       </p>
 
       <fieldset className="rounded border border-keep-rule p-3 text-xs">
@@ -894,13 +901,13 @@ function RulesTab() {
           {securityHtml.trim() ? (
             <div
               className="prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-2"
-              dangerouslySetInnerHTML={{ __html: securityHtml }}
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(securityHtml) }}
             />
           ) : null}
           {rulesHtml.trim() ? (
             <div
               className="prose prose-sm max-w-none"
-              dangerouslySetInnerHTML={{ __html: rulesHtml }}
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(rulesHtml) }}
             />
           ) : (
             <p className="italic text-keep-muted">(no rules set)</p>
@@ -912,7 +919,7 @@ function RulesTab() {
               </div>
               <div
                 className="prose prose-sm max-w-none"
-                dangerouslySetInnerHTML={{ __html: disclaimerHtml }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(disclaimerHtml) }}
               />
               <label className="mt-1 flex items-start gap-2 text-[11px] text-keep-muted">
                 <input type="checkbox" disabled checked className="mt-0.5" />
@@ -922,9 +929,9 @@ function RulesTab() {
           ) : null}
         </div>
         <p className="mt-1 text-[10px] text-keep-muted">
-          The preview renders unsanitized. The server strips disallowed tags
-          on save, so tags missing from the allow-list will disappear after
-          saving.
+          Preview is run through DOMPurify, but tags outside the server's
+          allow-list will still disappear on save (server uses sanitize-html
+          with a stricter list than DOMPurify's default).
         </p>
       </fieldset>
 
@@ -941,7 +948,7 @@ function RulesTab() {
           disabled={saving}
           className="rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
         >
-          {saving ? "Saving…" : "Save rules"}
+          {saving ? "Saving..." : "Save rules"}
         </button>
       </div>
     </form>
@@ -1014,7 +1021,7 @@ function LinksTab({ onLinksChanged }: { onLinksChanged: () => void }) {
       <NewLinkForm onCreate={create} />
 
       {loading ? (
-        <div className="text-keep-muted">loading…</div>
+        <div className="text-keep-muted">loading...</div>
       ) : links.length === 0 ? (
         <div className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">
           No links yet. Add one above.
@@ -1097,7 +1104,7 @@ function NewLinkForm({ onCreate }: { onCreate: (i: NavLinkInput) => Promise<void
           onChange={(e) => setPosition(e.target.value)}
           min={0}
           max={9999}
-          title="Sort order — lower renders first"
+          title="Sort order - lower renders first"
           className="col-span-1 rounded border border-keep-rule px-2 py-1"
         />
         <select
@@ -1113,7 +1120,7 @@ function NewLinkForm({ onCreate }: { onCreate: (i: NavLinkInput) => Promise<void
           disabled={submitting}
           className="col-span-1 rounded border border-keep-rule bg-keep-banner px-2 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
         >
-          {submitting ? "…" : "Add"}
+          {submitting ? "..." : "Add"}
         </button>
       </div>
       {error ? <div className="mt-1 text-keep-accent">{error}</div> : null}
@@ -1335,7 +1342,7 @@ function CommandsTab() {
       ) : null}
 
       {loading ? (
-        <div className="text-keep-muted text-xs">loading…</div>
+        <div className="text-keep-muted text-xs">loading...</div>
       ) : cmds.length === 0 ? (
         <div className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">
           No custom commands yet.
@@ -1358,7 +1365,7 @@ function CommandsTab() {
                 <td className="px-2 py-1 font-mono">/{c.name}</td>
                 <td className="px-2 py-1">{c.kind}</td>
                 <td className="px-2 py-1 font-mono">
-                  {c.aliases.length ? c.aliases.map((a) => `/${a}`).join(" ") : "—"}
+                  {c.aliases.length ? c.aliases.map((a) => `/${a}`).join(" ") : "-"}
                 </td>
                 <td className="px-2 py-1 truncate max-w-xs" title={c.template}>{c.template}</td>
                 <td className="px-2 py-1 text-center">
@@ -1441,7 +1448,7 @@ function CommandForm({
   }
 
   // Live preview using the same substitution rules as the server. {sender}
-  // and {name} are synonyms — both resolve to the sender's display name.
+  // and {name} are synonyms - both resolve to the sender's display name.
   const preview = renderTemplatePreview(template, {
     name: "Sigrid",
     sender: "Sigrid",
@@ -1479,8 +1486,8 @@ function CommandForm({
             onChange={(e) => setKind(e.target.value as "action" | "say")}
             className="w-full rounded border border-keep-rule px-2 py-1"
           >
-            <option value="action">action — renders like /me (no brackets)</option>
-            <option value="say">say — renders as a normal message</option>
+            <option value="action">action - renders like /me (no brackets)</option>
+            <option value="say">say - renders as a normal message</option>
           </select>
         </label>
         <label className="col-span-2">
@@ -1530,7 +1537,7 @@ function CommandForm({
               type="text"
               value={color ?? ""}
               onChange={(e) => setColor(e.target.value || null)}
-              placeholder="(none — sender's chat color flows through)"
+              placeholder="(none - sender's chat color flows through)"
               maxLength={7}
               pattern="^#[0-9a-fA-F]{6}$"
               className="flex-1 rounded border border-keep-rule px-2 py-1 font-mono"
@@ -1539,7 +1546,7 @@ function CommandForm({
               type="button"
               onClick={() => setColor(null)}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-keep-muted hover:text-keep-text"
-              title="Clear — let the sender's /color flow through"
+              title="Clear - let the sender's /color flow through"
             >
               Clear
             </button>
@@ -1556,30 +1563,30 @@ function CommandForm({
           <div>
             <div className="mb-0.5 uppercase tracking-widest text-keep-muted">Variables</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono">
-              <div><b>{"{sender}"}</b> / <b>{"{name}"}</b> — sender</div>
-              <div><b>{"{target}"}</b> — first arg</div>
-              <div><b>{"{args}"}</b> — full args</div>
-              <div><b>{"{rest}"}</b> — args without first</div>
-              <div><b>{"{time}"}</b> — HH:MM</div>
-              <div><b>{"{date}"}</b> — YYYY-MM-DD</div>
-              <div><b>{"{room}"}</b> — current room id</div>
+              <div><b>{"{sender}"}</b> / <b>{"{name}"}</b> - sender</div>
+              <div><b>{"{target}"}</b> - first arg</div>
+              <div><b>{"{args}"}</b> - full args</div>
+              <div><b>{"{rest}"}</b> - args without first</div>
+              <div><b>{"{time}"}</b> - HH:MM</div>
+              <div><b>{"{date}"}</b> - YYYY-MM-DD</div>
+              <div><b>{"{room}"}</b> - current room id</div>
             </div>
           </div>
           <div>
             <div className="mb-0.5 uppercase tracking-widest text-keep-muted">Functions</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono">
-              <div><b>{"{roll:1d20}"}</b> — dice roll</div>
-              <div><b>{"{choose:a|b|c}"}</b> — random pick</div>
-              <div><b>{"{upper:text}"}</b> — uppercase</div>
-              <div><b>{"{lower:text}"}</b> — lowercase</div>
-              <div className="col-span-2"><b>{"{if:cond|then|else}"}</b> — truthy if cond is non-empty &amp; not 0/false</div>
+              <div><b>{"{roll:1d20}"}</b> - dice roll</div>
+              <div><b>{"{choose:a|b|c}"}</b> - random pick</div>
+              <div><b>{"{upper:text}"}</b> - uppercase</div>
+              <div><b>{"{lower:text}"}</b> - lowercase</div>
+              <div className="col-span-2"><b>{"{if:cond|then|else}"}</b> - truthy if cond is non-empty &amp; not 0/false</div>
             </div>
           </div>
           <div>
             <div className="mb-0.5 uppercase tracking-widest text-keep-muted">Sugar</div>
             <div className="grid grid-cols-1 gap-x-4 gap-y-0.5 font-mono">
-              <div><b>{"{a|b|c}"}</b> — bare-pipe random pick (sugar for choose)</div>
-              <div><b>{"{=expr}"}</b> — safe arithmetic, <code>+ - * / % ( )</code> only</div>
+              <div><b>{"{a|b|c}"}</b> - bare-pipe random pick (sugar for choose)</div>
+              <div><b>{"{=expr}"}</b> - safe arithmetic, <code>+ - * / % ( )</code> only</div>
             </div>
           </div>
           <div>
@@ -1630,7 +1637,7 @@ function CommandForm({
             disabled={submitting}
             className="rounded border border-keep-rule bg-keep-banner px-3 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
           >
-            {submitting ? "Saving…" : "Save"}
+            {submitting ? "Saving..." : "Save"}
           </button>
         </div>
       </div>
@@ -1738,7 +1745,7 @@ interface RoomDraft {
   isSystem: boolean;
   /** Empty string keeps existing password (edit) or means "no password" (create + public). */
   password: string;
-  /** True iff editing AND admin clicked "clear password" — sends null. */
+  /** True iff editing AND admin clicked "clear password" - sends null. */
   clearPassword: boolean;
 }
 
@@ -1887,7 +1894,7 @@ function RoomsTab() {
       <div className="flex items-start justify-between gap-2">
         <p className="max-w-[60%] text-xs text-keep-muted">
           Every room with member count and metadata. Admin-created rooms can
-          be flagged as <b>system</b> rooms — they're permanent (don't auto-expire
+          be flagged as <b>system</b> rooms - they're permanent (don't auto-expire
           when empty) and protected from deletion. Private room message logs
           remain unviewable even to admins.
         </p>
@@ -1914,7 +1921,7 @@ function RoomsTab() {
       ) : null}
 
       {loading ? (
-        <div className="text-keep-muted text-xs">loading…</div>
+        <div className="text-keep-muted text-xs">loading...</div>
       ) : (
         <table className="w-full text-xs">
           <thead className="bg-keep-banner/50 text-keep-muted uppercase tracking-widest">
@@ -1933,7 +1940,7 @@ function RoomsTab() {
                 <td className="px-2 py-1 font-semibold" title={r.description ?? ""}>{r.name}</td>
                 <td className="px-2 py-1">
                   {/*
-                    Type badge — derives its tint from the active theme so it
+                    Type badge - derives its tint from the active theme so it
                     stays legible on light and dark palettes alike. Public uses
                     the "action" slot (green on default, accent on dark themes);
                     private uses the "accent" slot to read as "restricted".
@@ -1949,7 +1956,7 @@ function RoomsTab() {
                   </span>
                 </td>
                 <td className="px-2 py-1 text-center tabular-nums">{r.memberCount}</td>
-                <td className="px-2 py-1 truncate max-w-xs" title={r.topic ?? ""}>{r.topic ?? "—"}</td>
+                <td className="px-2 py-1 truncate max-w-xs" title={r.topic ?? ""}>{r.topic ?? "-"}</td>
                 <td className="px-2 py-1 text-center">{r.isSystem ? "✓" : ""}</td>
                 <td className="px-2 py-1 text-right">
                   <button
@@ -1986,7 +1993,7 @@ function RoomsTab() {
       {selected ? (
         <div className="rounded border border-keep-rule bg-keep-bg p-3 text-xs">
           <div className="mb-2 flex items-center justify-between">
-            <div><b>{selected.name}</b> — members</div>
+            <div><b>{selected.name}</b> - members</div>
             <button type="button" onClick={() => setSelected(null)} className="text-keep-muted">close</button>
           </div>
           {occupants.length === 0 ? (
@@ -2065,8 +2072,8 @@ function RoomForm({
             onChange={(e) => setDraft({ ...draft, type: e.target.value as "public" | "private" })}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
-            <option value="public">public — anyone can join</option>
-            <option value="private">private — password required</option>
+            <option value="public">public - anyone can join</option>
+            <option value="private">private - password required</option>
           </select>
         </label>
         {draft.type === "private" ? (
@@ -2097,7 +2104,7 @@ function RoomForm({
                       ? "border-keep-accent/60 bg-keep-accent/10 text-keep-accent"
                       : "border-keep-rule bg-keep-bg text-keep-muted hover:text-keep-text"
                   }`}
-                  title="Clear the password — the room becomes private with no password (membership/invite-only)."
+                  title="Clear the password - the room becomes private with no password (membership/invite-only)."
                 >
                   {draft.clearPassword ? "Clearing" : "Clear"}
                 </button>
@@ -2133,7 +2140,7 @@ function RoomForm({
             onChange={(e) => setDraft({ ...draft, isSystem: e.target.checked })}
           />
           <span>
-            <b>System room</b> — permanent, exempt from auto-expire, protected from deletion until this flag is cleared.
+            <b>System room</b> - permanent, exempt from auto-expire, protected from deletion until this flag is cleared.
           </span>
         </label>
       </div>
@@ -2153,7 +2160,7 @@ function RoomForm({
           disabled={submitting}
           className="rounded border border-keep-rule bg-keep-banner px-3 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
         >
-          {submitting ? "Saving…" : mode === "create" ? "Create room" : "Save changes"}
+          {submitting ? "Saving..." : mode === "create" ? "Create room" : "Save changes"}
         </button>
       </div>
     </form>
@@ -2242,7 +2249,7 @@ function UsersTab() {
         <p className="text-xs text-keep-muted">
           Every registered account, including disabled ones. Search matches
           username and email. Editing role to "admin" grants full sitewide
-          control — same as <code>/promoteadmin</code>.
+          control - same as <code>/promoteadmin</code>.
         </p>
         <input
           value={q}
@@ -2257,7 +2264,7 @@ function UsersTab() {
       ) : null}
 
       {loading ? (
-        <div className="text-keep-muted text-xs">loading…</div>
+        <div className="text-keep-muted text-xs">loading...</div>
       ) : rows.length === 0 ? (
         <div className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">
           No users match.
@@ -2305,7 +2312,7 @@ function UsersTab() {
                   {u.characters.filter((c) => !c.deleted).length}
                 </td>
                 <td className="px-2 py-1 text-center tabular-nums">
-                  {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : "—"}
+                  {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : "-"}
                 </td>
                 <td className="px-2 py-1 text-right">
                   <button
@@ -2441,7 +2448,7 @@ function UserEditForm({
           disabled={submitting}
           className="rounded border border-keep-rule bg-keep-banner px-3 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
         >
-          {submitting ? "Saving…" : "Save"}
+          {submitting ? "Saving..." : "Save"}
         </button>
       </div>
     </form>

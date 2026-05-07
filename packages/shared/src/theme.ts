@@ -1,5 +1,5 @@
 /**
- * UI theme — a small palette applied via CSS variables. Each user (master)
+ * UI theme - a small palette applied via CSS variables. Each user (master)
  * and each character can pick their own. The chat itself uses the caller's
  * active theme; profile modals apply the OWNER's theme so each profile feels
  * like the user's "space" regardless of who's looking.
@@ -24,7 +24,7 @@ export interface Theme {
 }
 
 /**
- * Default theme — closely matches the phpMyChat parchment look:
+ * Default theme - closely matches the phpMyChat parchment look:
  * cream background, slightly darker banner, muted brown borders,
  * forest-green section headers (achieved via the `action` slot in the
  * rooms tree).
@@ -109,7 +109,7 @@ export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
   },
 ];
 
-/** Tolerant of partial/legacy data — anything missing falls back to default. */
+/** Tolerant of partial/legacy data - anything missing falls back to default. */
 export function normalizeTheme(input: unknown): Theme {
   if (!input || typeof input !== "object") return DEFAULT_THEME;
   const o = input as Partial<Theme>;

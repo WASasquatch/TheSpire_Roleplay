@@ -6,23 +6,23 @@ const MAX_SECONDS = 3600;
 const OFF_RX = /^(off|none|stop|cancel|no|0)$/i;
 
 /**
- * /refresh           — one-shot: re-send room state + presence to your socket.
- * /refresh <N>       — set auto-refresh interval (5–3600 seconds). Replaces any prior interval.
- * /refresh off       — disable auto-refresh.
+ * /refresh           - one-shot: re-send room state + presence to your socket.
+ * /refresh <N>       - set auto-refresh interval (5-3600 seconds). Replaces any prior interval.
+ * /refresh off       - disable auto-refresh.
  *
  * Implementation note: the server only emits a `set-refresh-interval` UI hint;
  * the client owns the actual setInterval. This keeps server CPU/IO predictable
- * — we never schedule per-socket timers. The one-shot path also sends only to
+ * - we never schedule per-socket timers. The one-shot path also sends only to
  * the requesting socket, so auto-refresh from one user does not spam everyone.
  */
 export const refreshCommand: CommandHandler = {
   name: "refresh",
   aliases: ["r"],
-  usage: "/refresh [N|off]   (omit for one-shot, N = 5–3600 seconds)",
+  usage: "/refresh [N|off]   (omit for one-shot, N = 5-3600 seconds)",
   description: "Refresh the userlist + topic. With a number, sets an auto-refresh interval.",
   subcommands: [
     { verb: "(none)", usage: "/refresh", description: "One-shot: re-fetch this room's state right now." },
-    { verb: "<seconds>", usage: "/refresh 30", description: "Auto-refresh every N seconds (5–3600)." },
+    { verb: "<seconds>", usage: "/refresh 30", description: "Auto-refresh every N seconds (5-3600)." },
     {
       verb: "off",
       usage: "/refresh off",

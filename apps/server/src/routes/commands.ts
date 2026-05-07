@@ -6,7 +6,7 @@ import { customCommandAliases, customCommands } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 
 /**
- * GET /commands — what the help modal renders.
+ * GET /commands - what the help modal renders.
  *
  * Returns every built-in command (with subcommand info if declared) plus
  * every enabled custom command. Custom commands are flagged with
@@ -51,7 +51,7 @@ export async function registerCommandsRoutes(
       name: c.name,
       aliases: aliasesByCmd.get(c.id) ?? [],
       usage: `/${c.name} [args]`,
-      description: c.description ?? `(custom — ${c.kind})`,
+      description: c.description ?? `(custom - ${c.kind})`,
       subcommands: [],
       isCustom: true,
     }));

@@ -31,7 +31,7 @@ import {
   userIsOnline,
 } from "./realtime/broadcast.js";
 import { lookupProfile } from "./commands/builtins/profile.js";
-import { loadSessionUser } from "./auth/session.js";
+import { extendSession, loadSessionUser } from "./auth/session.js";
 import { registerAuthRoutes, getSessionUser, userIdFromSessionId, SESSION_COOKIE_NAME } from "./routes/auth.js";
 import { registerCharacterRoutes } from "./routes/characters.js";
 import { registerCommandsRoutes } from "./routes/commands.js";
@@ -62,7 +62,7 @@ if (SESSION_SECRET.length < 32) {
 
 // Resolve the built web bundle relative to this file. From either
 // apps/server/src/ (tsx) or apps/server/dist/ (compiled), two `..` levels
-// reach apps/, then over to web/dist. Three was wrong — that climbed
+// reach apps/, then over to web/dist. Three was wrong - that climbed
 // past apps/ to the workspace root and the static-file registration
 // silently no-op'd, leaving every GET as a Fastify 404.
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -115,7 +115,7 @@ async function main() {
 
   // Route registrars use the default FastifyInstance logger type
   // (FastifyBaseLogger). With `loggerInstance: log` Fastify infers a
-  // pino.Logger here, which is structurally incompatible — cast to the
+  // pino.Logger here, which is structurally incompatible - cast to the
   // base instance shape just for the registrar calls.
   const baseApp = app as unknown as FastifyInstance;
   await registerAuthRoutes(baseApp, db);
@@ -128,7 +128,15 @@ async function main() {
   // (Admin routes need io for the room-delete boot-and-redirect flow, so they
   // are registered after the IoServer is constructed below.)
 
-  app.get("/profiles/:name", async (req, reply) => {
+  // Public endpoints. Anonymous + cheap, but unrate-limited they make easy
+  // amplification targets. 120/min/IP is generous (splash polls /site once
+  // per tab + /stats every 30s) but caps spamming. Defined up here so
+  // /profiles/:name can use it too.
+  const publicLimit = {
+    config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+  } as const;
+
+  app.get("/profiles/:name", publicLimit, async (req, reply) => {
     const { name } = req.params as { name: string };
     const profile = await lookupProfile(db, name);
     if (!profile) {
@@ -139,12 +147,13 @@ async function main() {
   });
 
   /**
-   * Public branding endpoint — readable without authentication so the login
+   * Public branding endpoint - readable without authentication so the login
    * screen, boot splash, and tab title can show the site's configured name
    * and logo styling. Returns ONLY the public-facing fields; admin-only
    * settings (retention, session TTL) live behind /admin/settings.
    */
-  app.get("/site", async () => {
+
+  app.get("/site", publicLimit, async () => {
     const s = await getSettings(db);
     return {
       siteName: s.siteName,
@@ -159,14 +168,20 @@ async function main() {
       // Sanitized disclaimer rendered above the register form. Users must
       // tick an "I agree" checkbox before /auth/register accepts the request.
       registerDisclaimerHtml: s.registerDisclaimerHtml,
+      // Retention + session-lifetime values, surfaced so the splash can show
+      // visitors how long their messages and login will persist BEFORE they
+      // commit to creating an account. Both are durations in milliseconds;
+      // messageRetentionMs === 0 means "kept indefinitely".
+      messageRetentionMs: s.messageRetentionMs,
+      sessionTtlMs: s.sessionTtlMs,
     };
   });
 
   /**
-   * Public rules endpoint — returns the admin-configured house rules and the
+   * Public rules endpoint - returns the admin-configured house rules and the
    * privacy/safety notice. Public so the splash screen could surface them too.
    */
-  app.get("/rules", async () => {
+  app.get("/rules", publicLimit, async () => {
     const s = await getSettings(db);
     return {
       rulesHtml: s.rulesHtml,
@@ -182,7 +197,7 @@ async function main() {
   });
 
   // Routes that need io for socket-room introspection (currently-online
-  // occupants per room, etc.) — registered after io is constructed.
+  // occupants per room, etc.) - registered after io is constructed.
   await registerStatsRoutes(baseApp, db, io);
   await registerUsersRoutes(baseApp, db, io);
   await registerRoomsRoutes(baseApp, db, io);
@@ -193,7 +208,7 @@ async function main() {
     getSessionUser: (req) => getSessionUser(req, db),
   });
 
-  /* Socket auth handshake — pull session id from cookie. */
+  /* Socket auth handshake - pull session id from cookie. */
   io.use(async (socket, next) => {
     try {
       const cookieHeader = socket.handshake.headers.cookie ?? "";
@@ -222,26 +237,60 @@ async function main() {
     // Prefers "The_Spire" by name (the seeded default); falls back to any
     // system room so installs with custom landings or pre-migration MainHall
     // still work.
-    const landing =
-      (await db.select().from(rooms).where(eq(rooms.name, "The_Spire")).limit(1))[0]
-      ?? (await db.select().from(rooms).where(eq(rooms.isSystem, true)).limit(1))[0];
-    if (landing) await joinRoom(io, db, socket, user, landing.id);
+    //
+    // Multi-tab sync: if this user already has another live socket parked
+    // in some room, the new tab should follow that room instead of the
+    // landing default — otherwise opening a second tab silently drops you
+    // into The_Spire while your other tab is still in (say) Tavern. Pick
+    // any sibling that's currently in a room: ties are unlikely (a single
+    // user usually has one focused room) and harmless (siblings are by
+    // definition all in the same room post-sync).
+    let initialRoomId: string | null = null;
+    const existingSockets = await io.fetchSockets();
+    for (const s of existingSockets) {
+      if (s.id === socket.id) continue;
+      if ((s.data as { userId?: string }).userId !== user.id) continue;
+      const sib = [...s.rooms].find((r) => r.startsWith("room:"));
+      if (sib) {
+        initialRoomId = sib.slice(5);
+        break;
+      }
+    }
+    if (!initialRoomId) {
+      const landing =
+        (await db.select().from(rooms).where(eq(rooms.name, "The_Spire")).limit(1))[0]
+        ?? (await db.select().from(rooms).where(eq(rooms.isSystem, true)).limit(1))[0];
+      if (landing) initialRoomId = landing.id;
+    }
+    if (initialRoomId) await joinRoom(io, db, socket, user, initialRoomId);
+
+    /**
+     * Validate the session is still alive AND extend its idle window. Returns
+     * true when the caller can proceed; false when the socket has been
+     * kicked (the handler should bail early). Called at the top of every
+     * user-initiated socket event so a single helper governs both checks.
+     */
+    async function checkAndExtendSession(): Promise<boolean> {
+      const sid = (socket.data as { sid?: string }).sid;
+      if (!sid) return true;
+      const row = (await db.select().from(sessions).where(eq(sessions.id, sid)).limit(1))[0];
+      if (!row || +row.expiresAt < Date.now()) {
+        socket.emit("auth:expired");
+        socket.disconnect(true);
+        return false;
+      }
+      // Push expiresAt forward - sliding idle expiry. extendSession reads
+      // the latest sessionTtlMs from settings each call so admin changes
+      // take effect on the next interaction without restart.
+      await extendSession(db, sid);
+      return true;
+    }
 
     socket.on("chat:input", async (payload, ack) => {
       try {
-        // Session-row check — once the janitor sweeps an expired session
-        // (or an admin invalidates it), the next chat input bounces the
-        // socket so the client returns to the splash. Without this, a
-        // long-lived socket happily kept dispatching past its TTL.
-        const sid = (socket.data as { sid?: string }).sid;
-        if (sid) {
-          const row = (await db.select().from(sessions).where(eq(sessions.id, sid)).limit(1))[0];
-          if (!row || +row.expiresAt < Date.now()) {
-            socket.emit("auth:expired");
-            ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
-            socket.disconnect(true);
-            return;
-          }
+        if (!(await checkAndExtendSession())) {
+          ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
+          return;
         }
         const fresh = await loadSessionUser(db, user.id);
         if (!fresh) {
@@ -265,6 +314,24 @@ async function main() {
 
     socket.on("room:join", async (payload, ack) => {
       try {
+        if (!(await checkAndExtendSession())) {
+          ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
+          return;
+        }
+        // Brute-force guard. argon2.verify is intentionally slow (~300ms)
+        // which already throttles a single attacker, but it also means each
+        // failed attempt pins a CPU thread. A per-user sliding window of
+        // failed password attempts caps the abuse: 5 fails / 60s lands the
+        // user in a 60s cooldown, regardless of which room they target.
+        const passwordCooldown = roomPwCooldown(user.id, Date.now());
+        if (passwordCooldown > 0) {
+          ack?.({
+            ok: false,
+            code: "RATE_LIMIT",
+            message: `Too many failed password attempts. Try again in ${Math.ceil(passwordCooldown / 1000)}s.`,
+          });
+          return;
+        }
         const room = (await db.select().from(rooms).where(eq(rooms.id, payload.roomId)).limit(1))[0];
         if (!room) {
           ack?.({ ok: false, code: "NO_ROOM", message: "Room not found." });
@@ -274,11 +341,35 @@ async function main() {
         if (room.type === "private" && room.passwordHash && payload.password) {
           passwordOk = await argon2.verify(room.passwordHash, payload.password).catch(() => false);
           if (!passwordOk) {
+            recordRoomPwFailure(user.id, Date.now());
             ack?.({ ok: false, code: "BAD_PASSWORD", message: "Incorrect password." });
             return;
           }
         }
         await joinRoom(io, db, socket, user, room.id, { passwordOk });
+
+        // Multi-tab single-presence policy: every other socket for this
+        // same user follows the originator into the new room. Without
+        // this, two browser tabs on the same account drift into different
+        // rooms and presence/userlist state diverges. We send a UI hint
+        // rather than directly mutating sibling sockets so all the room
+        // bookkeeping (member upsert, presence broadcasts, backlog,
+        // description-on-join) flows through the same room:join path
+        // and stays correct.
+        //
+        // Loop guard: skip siblings already in this room. The originator's
+        // joinRoom() already moved itself in, so it's filtered out by the
+        // socket.id check; for genuine siblings, the room.has() check
+        // prevents an infinite ping-pong if both tabs were already in the
+        // target room (e.g. on initial connect both auto-join landing).
+        const siblings = await io.fetchSockets();
+        for (const s of siblings) {
+          if (s.id === socket.id) continue;
+          if ((s.data as { userId?: string }).userId !== user.id) continue;
+          if (s.rooms.has(`room:${room.id}`)) continue;
+          s.emit("ui:hint", { kind: "force-room-join", roomId: room.id });
+        }
+
         ack?.({ ok: true });
       } catch (err) {
         ack?.({ ok: false, code: "ERR", message: err instanceof Error ? err.message : "error" });
@@ -286,24 +377,65 @@ async function main() {
     });
 
     socket.on("room:leave", async (payload) => {
+      if (!(await checkAndExtendSession())) return;
       socket.leave(`room:${payload.roomId}`);
       await broadcastPresence(io, db, payload.roomId);
     });
 
+    /**
+     * profile:fetch rate limit. Authenticated, but each call hits the DB
+     * twice (master lookup + character lookup), so spamming it is a cheap
+     * scrape vector. 30 fetches / 10s comfortably covers an admin
+     * interactively browsing the userlist while throttling automation.
+     */
+    let profileFetchTimes: number[] = [];
     socket.on("profile:fetch", async (payload, ack) => {
+      if (!(await checkAndExtendSession())) {
+        ack({ ok: false, code: "AUTH", message: "Session expired." });
+        return;
+      }
+      const now = Date.now();
+      profileFetchTimes = profileFetchTimes.filter((t) => t > now - 10_000);
+      if (profileFetchTimes.length >= 30) {
+        ack({ ok: false, code: "RATE_LIMIT", message: "Slow down - too many profile lookups." });
+        return;
+      }
+      profileFetchTimes.push(now);
       const profile = await lookupProfile(db, payload.username);
       if (!profile) ack({ ok: false, code: "NO_USER", message: "Not found." });
       else ack({ ok: true, profile });
     });
 
+    /**
+     * Activity heartbeat from the client (mouse/keyboard/touch, throttled to
+     * ~30s). Sole purpose: keep the session alive while the user is at the
+     * keyboard but not actively sending events. Without this, an idle reader
+     * would be kicked at the idle-timeout boundary even with the tab open
+     * and being scrolled.
+     *
+     * Server-side debounce: a hostile client could ignore the 30s throttle
+     * and spam this. Each call writes to the sessions table via
+     * extendSession; spamming pins SQLite. We accept at most one effective
+     * heartbeat every 5 seconds per socket, dropping the rest. The session's
+     * own expiresAt also advances on chat:input / room:join etc., so this
+     * doesn't shorten the user's effective idle window.
+     */
+    let lastActiveAt = 0;
+    socket.on("presence:active", async () => {
+      const now = Date.now();
+      if (now - lastActiveAt < 5_000) return;
+      lastActiveAt = now;
+      await checkAndExtendSession();
+    });
+
     // We use `disconnecting` (not `disconnect`) because by the time `disconnect`
-    // fires, socket.rooms is already empty — we'd miss the room ids we need to
+    // fires, socket.rooms is already empty - we'd miss the room ids we need to
     // notify and check for auto-expiry.
     socket.on("disconnecting", () => {
       const roomIds = [...socket.rooms]
         .filter((r) => r.startsWith("room:"))
         .map((r) => r.slice(5));
-      // Snapshot the user identity now — by the time the deferred cleanup
+      // Snapshot the user identity now - by the time the deferred cleanup
       // runs, the SessionUser object on this socket may already be gone.
       const userId = user.id;
       const displayName = user.displayName;
@@ -313,7 +445,7 @@ async function main() {
       // otherwise expireIfEmpty would still see this socket present.
       setTimeout(() => {
         (async () => {
-          // "Has this user gone offline entirely?" — drives the wording of
+          // "Has this user gone offline entirely?" - drives the wording of
           // the system message ("disconnected" vs "left"). When the user has
           // another tab open elsewhere, only the per-room departure shows.
           const fullyOffline = !(await userIsOnline(io, userId, socketId));
@@ -348,14 +480,14 @@ async function main() {
    * Fly.io (or any single-port host) can route external 80/443 to one
    * internal port without an extra reverse-proxy hop.
    *
-   * Order matters: this must register AFTER all API routes — fastify-static
+   * Order matters: this must register AFTER all API routes - fastify-static
    * doesn't shadow earlier routes, and the setNotFoundHandler that follows
    * is the SPA fallback so deep links like /room/foo serve index.html and
    * the React router takes over.
    */
   if (IS_PROD) {
     if (!existsSync(webDistPath)) {
-      log.warn({ webDistPath }, "production mode but web/dist not found — did `pnpm --filter @thekeep/web run build` run?");
+      log.warn({ webDistPath }, "production mode but web/dist not found - did `pnpm --filter @thekeep/web run build` run?");
     } else {
       await app.register(fastifyStatic, {
         root: webDistPath,
@@ -374,14 +506,14 @@ async function main() {
 
       // SPA fallback. Any GET that didn't match an API route or a static file
       // is treated as a client-side route and served index.html so the React
-      // app can resolve it. Non-GET methods get a real 404 — they were
+      // app can resolve it. Non-GET methods get a real 404 - they were
       // genuinely meant for an API endpoint that doesn't exist.
       app.setNotFoundHandler((req, reply) => {
         if (req.method !== "GET") {
           reply.code(404);
           return reply.send({ error: "not found" });
         }
-        // Don't SPA-fallback API-shaped paths — these should genuinely 404
+        // Don't SPA-fallback API-shaped paths - these should genuinely 404
         // so a typo'd /admin/foo doesn't return HTML and confuse a fetch().
         const apiPrefixes = ["/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/me", "/health", "/users", "/site", "/rules", "/socket.io"];
         if (apiPrefixes.some((p) => req.url === p || req.url.startsWith(p + "/") || req.url.startsWith(p + "?"))) {
@@ -403,6 +535,38 @@ function parseCookie(header: string, name: string): string | null {
     if (k === name) return decodeURIComponent(v ?? "");
   }
   return null;
+}
+
+/**
+ * Per-user sliding window for failed room password attempts. Prevents an
+ * attacker from brute-forcing a private-room password and from pinning the
+ * server's CPU on argon2.verify calls.
+ *
+ * Bucket: caller userId. Window: 60s. Max fails before cooldown: 5. Cooldown
+ * after exceeding: 60s. Map keys are pruned implicitly by the slice + cooldown
+ * logic; long-idle users naturally roll out of the window.
+ */
+const ROOM_PW_WINDOW_MS = 60_000;
+const ROOM_PW_MAX_FAILS = 5;
+const ROOM_PW_COOLDOWN_MS = 60_000;
+const roomPwFailures = new Map<string, number[]>();
+const roomPwCooldownUntil = new Map<string, number>();
+
+function roomPwCooldown(userId: string, now: number): number {
+  const until = roomPwCooldownUntil.get(userId) ?? 0;
+  return until > now ? until - now : 0;
+}
+
+function recordRoomPwFailure(userId: string, now: number): void {
+  const cutoff = now - ROOM_PW_WINDOW_MS;
+  const list = (roomPwFailures.get(userId) ?? []).filter((t) => t >= cutoff);
+  list.push(now);
+  if (list.length >= ROOM_PW_MAX_FAILS) {
+    roomPwCooldownUntil.set(userId, now + ROOM_PW_COOLDOWN_MS);
+    roomPwFailures.delete(userId);
+  } else {
+    roomPwFailures.set(userId, list);
+  }
 }
 
 main().catch((err) => {

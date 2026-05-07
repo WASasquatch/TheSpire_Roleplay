@@ -1,11 +1,11 @@
 /**
- * @username mention parsing — pure, used by both the message renderer and
+ * @username mention parsing - pure, used by both the message renderer and
  * the notification decision. Mentions resolve to a master username OR an
  * active character's name; the click handler delegates to profile:fetch
  * which already resolves both forms.
  *
  * Name characters: Unicode letters (\p{L}), numbers (\p{N}), underscore,
- * and hyphen — matching what the username/character validators allow on
+ * and hyphen - matching what the username/character validators allow on
  * the server side. The boundary BEFORE the @ requires a non-name char
  * (so "foo@bar" inside an email doesn't trigger a mention) and the
  * boundary AFTER the name is implicit (the regex is greedy up to a
@@ -34,7 +34,7 @@ export type BodyPart = TextPart | MentionPart;
 
 /**
  * Split a message body into alternating text and mention parts. The output
- * preserves all original characters — concatenating every `text`/`raw`
+ * preserves all original characters - concatenating every `text`/`raw`
  * back together (with `@` prefix for mentions) reproduces the input.
  */
 export function splitMentions(body: string): BodyPart[] {

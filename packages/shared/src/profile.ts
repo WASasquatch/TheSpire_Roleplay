@@ -21,7 +21,7 @@ export interface CharacterProfile {
   bioHtml: string;
   stats: CharacterStats;
   avatarUrl: string | null;
-  /** Owner's chosen UI theme — applied to the profile modal when others view it. */
+  /** Owner's chosen UI theme - applied to the profile modal when others view it. */
   theme: Theme;
   createdAt: number;
   updatedAt: number;
@@ -34,7 +34,7 @@ export interface MasterProfile {
   avatarUrl: string | null;
   /** OOC gender, surfaced as the icon next to the username when no character is active. */
   gender: "male" | "female" | "nonbinary" | "other" | "undisclosed";
-  /** Owner's chosen UI theme — applied to the profile modal when others view it. */
+  /** Owner's chosen UI theme - applied to the profile modal when others view it. */
   theme: Theme;
   createdAt: number;
 }

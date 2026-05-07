@@ -20,7 +20,7 @@ async function resolveTarget(ctx: CommandContext, name: string) {
     .limit(1))[0];
   if (u) return u;
 
-  // Character name resolves to its owning user — regardless of whether that
+  // Character name resolves to its owning user - regardless of whether that
   // character is currently active. Ignoring "Kaal" silences WAS no matter
   // which face they're wearing, which is the intuitive behavior.
   const c = (await ctx.db
@@ -40,14 +40,14 @@ async function resolveTarget(ctx: CommandContext, name: string) {
 }
 
 /**
- * /ignore <name>          — silence a user; their say/me/ooc/roll/whisper
+ * /ignore <name>          - silence a user; their say/me/ooc/roll/whisper
  *                           lines stop reaching you in real time and are
  *                           filtered out of room backlog you fetch.
- * /ignore                 — list everyone you currently ignore.
- * /ignore clear           — clear your entire ignore list.
+ * /ignore                 - list everyone you currently ignore.
+ * /ignore clear           - clear your entire ignore list.
  *
  * The block is one-way and one-sided: the ignored user has no signal that
- * you've ignored them. Admins are NOT exempt — admins who want a user gone
+ * you've ignored them. Admins are NOT exempt - admins who want a user gone
  * for everyone should use /kick or moderation tools, not /ignore.
  */
 export const ignoreCommand: CommandHandler = {
@@ -97,7 +97,7 @@ export const ignoreCommand: CommandHandler = {
 };
 
 /**
- * /unignore <name> — opposite of /ignore. Resolved by master username only
+ * /unignore <name> - opposite of /ignore. Resolved by master username only
  * (since we stored the userId), but accepts character names too for
  * convenience (we resolve both forms).
  */

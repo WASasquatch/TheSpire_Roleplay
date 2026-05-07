@@ -83,7 +83,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Form state — reset whenever target changes
+  // Form state - reset whenever target changes
   const [name, setName] = useState("");
   const [bioHtml, setBioHtml] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
@@ -93,7 +93,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   /** When the form has a theme set; null means "use default / inherit". */
   const [theme, setTheme] = useState<Theme | null>(null);
   const [notifyPref, setNotifyPref] = useState<NotifyPref>("mentions");
-  // Permission state is volatile — re-read on each render via a key bump.
+  // Permission state is volatile - re-read on each render via a key bump.
   const [permVersion, setPermVersion] = useState(0);
 
   // Initial load: master + character list (we always need both for the dropdown).
@@ -236,7 +236,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         );
       }
       // Stay in the editor so the user can switch to another target. Could also
-      // close here — left open by design to support batch edits.
+      // close here - left open by design to support batch edits.
       flashSaved();
       onSaved?.();
     } catch (err) {
@@ -253,7 +253,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   }
 
   /**
-   * Preview pane — opens a ProfileModal showing the current form state as
+   * Preview pane - opens a ProfileModal showing the current form state as
    * other users would see it. Pulled from local state (not the server) so
    * the user can preview unsaved edits while iterating.
    */
@@ -293,7 +293,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
 
   const targetOptions = useMemo(() => {
     return [
-      { value: "master:", label: master ? `Master OOC — ${master.username}` : "Master OOC" },
+      { value: "master:", label: master ? `Master OOC - ${master.username}` : "Master OOC" },
       ...characters.map((c) => ({ value: `character:${c.id}`, label: c.name })),
     ];
   }, [master, characters]);
@@ -313,7 +313,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         onClick={(e) => e.stopPropagation()}
         className="flex h-[92vh] w-[min(1200px,98vw)] flex-col rounded border border-keep-rule bg-keep-parchment shadow-xl"
       >
-        {/* header — fixed */}
+        {/* header - fixed */}
         <div className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
           <div className="flex items-center gap-2">
             <h2 className="font-action text-lg">Edit profile</h2>
@@ -324,7 +324,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm"
             >
               {loadingList ? (
-                <option>loading…</option>
+                <option>loading...</option>
               ) : (
                 targetOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -337,9 +337,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           </button>
         </div>
 
-        {/* body — fills remaining height. Two columns on md+. Each column scrolls independently. */}
+        {/* body - fills remaining height. Two columns on md+. Each column scrolls independently. */}
         {loadingTarget ? (
-          <div className="flex flex-1 items-center justify-center text-keep-muted">loading…</div>
+          <div className="flex flex-1 items-center justify-center text-keep-muted">loading...</div>
         ) : (
           <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[420px_1fr]">
             {/* Left: form fields, scrolls independently */}
@@ -348,7 +348,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                 label={isCharacter ? "Character name" : "Master username"}
                 value={name}
                 readOnly
-                hint={isCharacter ? "Renaming is blocked — message history snapshots the name at send time." : "Set at registration."}
+                hint={isCharacter ? "Renaming is blocked - message history snapshots the name at send time." : "Set at registration."}
               />
               <Field
                 label="Avatar URL"
@@ -406,7 +406,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                               })
                             }
                           >
-                            <option value="">—</option>
+                            <option value="">-</option>
                             {GENDER_OPTIONS.filter((o) => o.value !== "undisclosed").map((o) => (
                               <option key={o.value} value={o.value}>{o.label}</option>
                             ))}
@@ -443,7 +443,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                 />
                 {!theme ? (
                   <div className="mt-1 text-[10px] italic text-keep-muted">
-                    Currently using the system default — change a color or pick a preset to start customizing.
+                    Currently using the system default - change a color or pick a preset to start customizing.
                   </div>
                 ) : null}
               </fieldset>
@@ -455,14 +455,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
               ) : null}
             </div>
 
-            {/* Right: bio editor — textarea fills column. */}
+            {/* Right: bio editor - textarea fills column. */}
             <div className="flex min-h-0 flex-col p-4">
               <div className="mb-1 flex items-center justify-between text-xs">
                 <span className="uppercase tracking-widest text-keep-muted">
                   {isCharacter ? "Character bio" : "OOC bio"}
                 </span>
                 <span className="text-keep-muted">
-                  HTML allowed: b, i, u, em, strong, a, img, br, p, ul/ol/li, blockquote, hr, h3–h6, span style=color
+                  HTML allowed: b, i, u, em, strong, a, img, br, p, ul/ol/li, blockquote, hr, h3-h6, span style=color
                 </span>
               </div>
               <textarea
@@ -482,7 +482,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           </div>
         )}
 
-        {/* footer — fixed */}
+        {/* footer - fixed */}
         <div className="flex shrink-0 items-center justify-between border-t border-keep-rule bg-keep-banner/40 p-2">
           <span className={`text-xs ${savedFlash ? "text-keep-system" : "text-keep-muted"}`}>
             {savedFlash ? "Saved." : ""}
@@ -509,7 +509,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
               disabled={saving || loadingTarget}
               className="rounded border border-keep-rule bg-keep-banner px-4 py-1 text-sm disabled:opacity-50 hover:bg-keep-banner/80"
             >
-              {saving ? "Saving…" : "Save"}
+              {saving ? "Saving..." : "Save"}
             </button>
           </div>
         </div>
@@ -570,14 +570,14 @@ function ColorRow({ current }: { current: string | null }) {
           />
         ) : null}
         <span className="font-mono">{current ?? "(default)"}</span>
-        <span className="text-keep-muted">— change via <code>/color &lt;hex&gt;</code> or the Tools panel.</span>
+        <span className="text-keep-muted">- change via <code>/color &lt;hex&gt;</code> or the Tools panel.</span>
       </div>
     </div>
   );
 }
 
 /**
- * Desktop notification config — preference dropdown + permission status row.
+ * Desktop notification config - preference dropdown + permission status row.
  * Browsers require permission to be requested from a user gesture, so we
  * expose an explicit "Enable" button rather than asking on mount.
  */
@@ -607,7 +607,7 @@ function NotificationsRow({
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
       <legend className="px-1 uppercase tracking-widest text-keep-muted">Desktop notifications</legend>
       <p className="mb-2 text-[10px] text-keep-muted">
-        Toasts appear when this tab is hidden — minimized, on another tab, or in another app.
+        Toasts appear when this tab is hidden - minimized, on another tab, or in another app.
       </p>
       <label className="flex items-center gap-2">
         <span className="w-20 uppercase tracking-widest text-keep-muted">Notify me</span>
@@ -616,7 +616,7 @@ function NotificationsRow({
           onChange={(e) => onChangePref(e.target.value as NotifyPref)}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
         >
-          <option value="off">Off — never</option>
+          <option value="off">Off - never</option>
           <option value="mentions">Whispers &amp; announcements only</option>
           <option value="all">All messages in rooms I'm in</option>
         </select>
@@ -636,7 +636,7 @@ function NotificationsRow({
           </button>
         ) : supported && perm === "denied" ? (
           <span className="text-[10px] text-keep-accent">
-            Denied — re-enable in your browser's site permissions.
+            Denied - re-enable in your browser's site permissions.
           </span>
         ) : null}
       </div>

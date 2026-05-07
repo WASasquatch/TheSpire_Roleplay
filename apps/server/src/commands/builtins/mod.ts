@@ -27,7 +27,7 @@ async function getRoomMember(ctx: CommandContext, roomId: string, userId: string
 }
 
 /**
- * The keymaster — the longest-tenured admin. Untouchable: cannot be demoted,
+ * The keymaster - the longest-tenured admin. Untouchable: cannot be demoted,
  * cannot be kicked or muted by other admins. They're the keys to the keep.
  */
 async function isKeymaster(ctx: CommandContext, userId: string): Promise<boolean> {
@@ -54,7 +54,7 @@ async function callerCanModerateRoom(ctx: CommandContext): Promise<boolean> {
 }
 
 /**
- * Stricter — only the room owner (or a site admin) can manage room roles.
+ * Stricter - only the room owner (or a site admin) can manage room roles.
  * A room mod can /kick or /mute but can't promote others to mod.
  */
 async function callerOwnsRoom(ctx: CommandContext): Promise<boolean> {
@@ -249,7 +249,7 @@ export const demoteCommand: CommandHandler = {
     if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
     const m = await getRoomMember(ctx, ctx.roomId, target.id);
     if (!m) return notice(ctx, "NO_MEMBER", `${target.username} isn't in this room's member list.`);
-    if (m.role === "owner") return notice(ctx, "PERM", "Use /demote on mods only — owners can't be demoted from their own room.");
+    if (m.role === "owner") return notice(ctx, "PERM", "Use /demote on mods only - owners can't be demoted from their own room.");
     if (m.role === "member") return notice(ctx, "NO_MOD", `${target.username} isn't a mod.`);
 
     await ctx.db
@@ -303,7 +303,7 @@ export const demoteAdminCommand: CommandHandler = {
       return notice(ctx, "KEYMASTER", "The keymaster (first admin) cannot be demoted.");
     }
     if (target.id === ctx.user.id) {
-      return notice(ctx, "SELF", "Demote yourself by asking another admin — keeps the chain of custody honest.");
+      return notice(ctx, "SELF", "Demote yourself by asking another admin - keeps the chain of custody honest.");
     }
 
     await ctx.db.update(users).set({ role: "user" }).where(eq(users.id, target.id));
@@ -317,7 +317,7 @@ export const demoteAdminCommand: CommandHandler = {
 /* ---------------------- /ban /unban (room) ----------------------
  *
  * Bans persist in the `bans` table, which `joinRoom` already consults
- * (broadcast.ts) — so a banned user can't re-enter even if they reconnect.
+ * (broadcast.ts) - so a banned user can't re-enter even if they reconnect.
  * The ban also boots them on issue. Optional duration (e.g. /ban Bob 1d
  * spam) is stored on `bans.until`; permanent if omitted.
  */
@@ -374,7 +374,7 @@ export const banCommand: CommandHandler = {
       });
 
     // Boot every live socket of the target out of this room. They go to
-    // MainHall — same flow as /kick but without the auto-rejoin loop, since
+    // MainHall - same flow as /kick but without the auto-rejoin loop, since
     // the ban row will refuse the next /go back.
     const main = (await ctx.db.select().from(rooms).where(eq(rooms.isSystem, true)).limit(1))[0];
     const socks = await ctx.io.fetchSockets();
@@ -438,13 +438,13 @@ export const unbanCommand: CommandHandler = {
 
 /* ---------------------- /announce ----------------------
  *
- * Admin-authored "megaphone" message — renders distinctly in MessageList
+ * Admin-authored "megaphone" message - renders distinctly in MessageList
  * (the kind="announce" branch) and triggers desktop notifications even
  * for users on `notifyPref="mentions"`.
  *
  * Two scopes:
- *   /announce <text>      — current room only (room owners/mods + admins)
- *   /announce all <text>  — every room sitewide (site admins only)
+ *   /announce <text>      - current room only (room owners/mods + admins)
+ *   /announce all <text>  - every room sitewide (site admins only)
  */
 export const announceCommand: CommandHandler = {
   name: "announce",
@@ -459,7 +459,7 @@ export const announceCommand: CommandHandler = {
     const argsText = ctx.argsText.trim();
     if (!argsText) return notice(ctx, "EMPTY", "Usage: /announce [all] <text>");
 
-    // Sitewide variant — recognised by leading "all " (case-insensitive).
+    // Sitewide variant - recognised by leading "all " (case-insensitive).
     const allMatch = /^all\s+(.+)/i.exec(argsText);
     if (allMatch) {
       if (ctx.user.role !== "admin") {
@@ -478,7 +478,7 @@ export const announceCommand: CommandHandler = {
       return;
     }
 
-    // Current-room variant — owner/mod/admin only.
+    // Current-room variant - owner/mod/admin only.
     if (!(await callerCanModerateRoom(ctx))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /announce.");
     }

@@ -24,8 +24,9 @@ export function App() {
   const setAuthChecked = useChat((s) => s.setAuthChecked);
   const branding = useChat((s) => s.branding);
   const setBranding = useChat((s) => s.setBranding);
+  const setKickReason = useChat((s) => s.setKickReason);
 
-  // Public branding fetch — runs unauthenticated so the login screen and
+  // Public branding fetch - runs unauthenticated so the login screen and
   // boot splash can show the configured site name. Admin saves push their
   // result straight into the store, so no version bumper is needed here.
   useEffect(() => {
@@ -48,7 +49,7 @@ export function App() {
   }, [branding.siteName, branding.logoFont]);
 
   // Restore session on mount. Until this resolves we deliberately render
-  // *neither* AuthGate nor Chat — otherwise a logged-in user reloading the
+  // *neither* AuthGate nor Chat - otherwise a logged-in user reloading the
   // page (or following a banner link) sees AuthGate flash for ~100ms before
   // the cookie probe completes.
   useEffect(() => {
@@ -70,19 +71,24 @@ export function App() {
   // (or janitor sweeps) drop the user back to the login splash even if they
   // never type or click. The socket bounces them sooner via `auth:expired`,
   // but this catches cases where the socket disconnected silently.
+  //
+  // /auth/me is intentionally NOT counted as user activity on the server
+  // (see auth/session.ts) - otherwise this poll would keep idle tabs logged
+  // in forever, defeating the idle-timeout feature.
   useEffect(() => {
     if (!me) return;
     const id = window.setInterval(async () => {
       try {
         const r = await fetch("/auth/me", { credentials: "include" });
         if (!r.ok) {
+          setKickReason("Your session expired due to inactivity. Please log in again.");
           disconnectSocket();
           setMe(null);
         }
-      } catch { /* network blip — ignore */ }
+      } catch { /* network blip - ignore */ }
     }, 60_000);
     return () => window.clearInterval(id);
-  }, [me, setMe]);
+  }, [me, setMe, setKickReason]);
 
   if (!authChecked) return <BootSplash />;
   if (!me) return <AuthGate />;
@@ -95,7 +101,7 @@ function BootSplash() {
       <div className="flex flex-col items-center gap-3 py-6 text-center">
         <div className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-keep-muted">
           <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-keep-action" />
-          checking session…
+          checking session...
         </div>
       </div>
     </SplashShell>
@@ -105,6 +111,7 @@ function BootSplash() {
 function Chat() {
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
+  const setKickReason = useChat((s) => s.setKickReason);
   const setRoom = useChat((s) => s.setRoom);
   const setOccupants = useChat((s) => s.setOccupants);
   const appendMessage = useChat((s) => s.appendMessage);
@@ -189,7 +196,49 @@ function Chat() {
   useEffect(() => { applyTheme(activeTheme); }, [activeTheme]);
 
   /**
-   * Desktop notifications — fires when the tab is hidden (minimized OR on
+   * Activity heartbeat for sliding session-idle expiry.
+   *
+   * The server treats `presence:active` as the canonical "user is at the
+   * keyboard" signal and uses it to extend the session row's expiresAt.
+   * Without this, a user who keeps the chat tab open but only reads (no
+   * commands, no room switches) would be considered idle and kicked at
+   * the timeout boundary.
+   *
+   * Throttled to once every 30 seconds so we're not slamming the socket
+   * on every mousemove. Listens on document so any interaction in the chat
+   * UI counts; pointer events cover both desktop mouse and mobile touch.
+   * `visibilitychange` re-pings when the user switches back to the tab so
+   * a long-backgrounded tab gets a fresh extension immediately on return.
+   */
+  useEffect(() => {
+    const HEARTBEAT_MS = 30_000;
+    let lastSent = 0;
+    function ping() {
+      const now = Date.now();
+      if (now - lastSent < HEARTBEAT_MS) return;
+      lastSent = now;
+      socket.emit("presence:active");
+    }
+    function onVisibility() {
+      if (!document.hidden) ping();
+    }
+    document.addEventListener("mousemove", ping, { passive: true });
+    document.addEventListener("keydown", ping);
+    document.addEventListener("pointerdown", ping, { passive: true });
+    document.addEventListener("visibilitychange", onVisibility);
+    // Send one immediately on mount so the session is extended as soon as
+    // the user lands in chat (matches their "I just logged in" intent).
+    ping();
+    return () => {
+      document.removeEventListener("mousemove", ping);
+      document.removeEventListener("keydown", ping);
+      document.removeEventListener("pointerdown", ping);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [socket]);
+
+  /**
+   * Desktop notifications - fires when the tab is hidden (minimized OR on
    * another tab) and the message matches the user's notifyPref. Filtering is
    * pure (in lib/notifications.ts) so it's deterministic per-message.
    *
@@ -240,7 +289,7 @@ function Chat() {
       setOccupants(roomId, occupants);
       // Presence changes in our current room mean other rooms might have
       // changed too (e.g. another user just left a room to join ours), and
-      // /char switch broadcasts presence — refetch the active theme too.
+      // /char switch broadcasts presence - refetch the active theme too.
       setRoomsTreeVersion((v) => v + 1);
       setThemeVersion((v) => v + 1);
     });
@@ -250,9 +299,11 @@ function Chat() {
     });
     socket.on("error:notice", (n) => setNotice(n));
     socket.on("auth:expired", () => {
-      // Server invalidated the session (TTL elapsed, admin disabled the
-      // account, or sweep deleted the row). Hand the client back to the
-      // splash — the cookie is already worthless, so /auth/me would 401.
+      // Server invalidated the session (idle window elapsed, admin disabled
+      // the account, or the janitor sweep deleted the row). Hand the client
+      // back to the splash with an explanation banner - the cookie is
+      // already worthless, so /auth/me would 401 anyway.
+      setKickReason("Your session expired due to inactivity. Please log in again.");
       disconnectSocket();
       setMe(null);
     });
@@ -277,10 +328,24 @@ function Chat() {
           setUsersOpen(h.query ? { query: h.query } : {});
           break;
         case "clear-room-messages": {
-          // Read fresh state — the ui:hint handler is registered once and
+          // Read fresh state - the ui:hint handler is registered once and
           // its closure would otherwise capture a stale currentRoomId.
           const rid = useChat.getState().currentRoomId;
           if (rid) setMessages(rid, []);
+          break;
+        }
+        case "force-room-join": {
+          // A sibling tab/device on this same account just changed rooms;
+          // server is asking us to follow. Fire room:join — the server's
+          // own loop guard skips siblings already in the target room, so
+          // this won't ping-pong. We don't surface a notice here (the
+          // user already initiated the move on the other tab) and we
+          // don't block on the ack (any failure just leaves us where we
+          // were, which the user can correct manually).
+          const targetId = h.roomId;
+          if (useChat.getState().currentRoomId !== targetId) {
+            socket.emit("room:join", { roomId: targetId }, () => {});
+          }
           break;
         }
         default:
@@ -319,7 +384,7 @@ function Chat() {
   }, [refreshIntervalSec, currentRoomId, socket]);
 
   /**
-   * Click on the gender icon — view someone's profile, or open the editor
+   * Click on the gender icon - view someone's profile, or open the editor
    * if it's me. (Slash-command equivalents: /whois <name> and /profile.)
    */
   function onIconClick(userId: string, displayName: string) {
@@ -334,7 +399,7 @@ function Chat() {
   }
 
   /**
-   * Click on the name — pre-fill the composer with `/whisper <name> ` so the
+   * Click on the name - pre-fill the composer with `/whisper <name> ` so the
    * user can finish typing and Enter. For your own name we fall back to the
    * icon behavior (open editor) since whispering yourself is useless.
    */
@@ -348,7 +413,7 @@ function Chat() {
 
   /**
    * Click on an @mention inside a message body. Per the spec this should
-   * open the user's profile (not whisper) — and resolve to their *active*
+   * open the user's profile (not whisper) - and resolve to their *active*
    * character profile when they have one, falling back to master. The
    * existing profile:fetch handler already implements that resolution.
    */

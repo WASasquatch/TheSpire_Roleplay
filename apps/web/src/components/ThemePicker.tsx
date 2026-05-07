@@ -93,7 +93,7 @@ export function ThemePicker({ theme, onChange, onReset }: Props) {
         ))}
       </div>
 
-      {/* Live preview — applies the theme to a mock chat snippet. */}
+      {/* Live preview - applies the theme to a mock chat snippet. */}
       <ThemePreview theme={theme} />
     </div>
   );

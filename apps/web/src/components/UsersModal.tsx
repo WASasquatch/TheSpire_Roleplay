@@ -31,7 +31,7 @@ interface Props {
  * whom. Online accounts float to the top; the search box matches against
  * master usernames AND character names.
  *
- * Only authenticated users can open this — the server gates /users behind
+ * Only authenticated users can open this - the server gates /users behind
  * a session, so the directory isn't exposed to the public internet.
  */
 export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
@@ -58,7 +58,7 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
     return () => { cancelled = true; controller.abort(); window.clearTimeout(handle); };
   }, [q]);
 
-  // Local count for the heading — useful when search narrows the list.
+  // Local count for the heading - useful when search narrows the list.
   const counts = useMemo(() => {
     if (!rows) return { online: 0, total: 0 };
     let online = 0;
@@ -86,7 +86,7 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search master or character names…"
+            placeholder="Search master or character names..."
             autoFocus
             className="flex-1 rounded border border-keep-border bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
           />
@@ -97,7 +97,7 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
           {error ? (
             <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
           ) : !rows ? (
-            <div className="text-keep-muted">loading…</div>
+            <div className="text-keep-muted">loading...</div>
           ) : rows.length === 0 ? (
             <div className="text-keep-muted">No matches.</div>
           ) : (

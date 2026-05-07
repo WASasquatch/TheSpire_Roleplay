@@ -31,7 +31,7 @@ const statsSchema = z.object({
   custom: z.record(z.string().max(40), z.string().max(200)).optional(),
 }).strict();
 
-// Restrict avatarUrl to http(s) — z.string().url() also allows
+// Restrict avatarUrl to http(s) - z.string().url() also allows
 // javascript:, data:, file:, etc., which would let a hostile profile load
 // payloads or leak referrers. Same shape used for both update bodies.
 const httpUrl = z.string().url().max(500).refine(
@@ -109,11 +109,21 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db): Pro
     },
   );
 
+  /**
+   * Fetch the editor view of a character. Owner-only (admins also pass) so the
+   * raw row - which carries `userId` and any other internal columns - never
+   * leaks across accounts. Other users should view characters through
+   * `/profiles/:name`, which returns a curated `ProfileView` instead.
+   */
   app.get<{ Params: { id: string } }>("/characters/:id", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
     const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
     if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
+    if (c.userId !== me.id && me.role !== "admin") {
+      reply.code(403);
+      return { error: "not yours - use /profiles/:name to view another character's public profile" };
+    }
     return c;
   });
 

@@ -73,7 +73,7 @@ export async function registerAdminRoutes(
         ownerId: r.ownerId,
         isSystem: r.isSystem,
         // hasPassword tells the editor whether to show "(replace password)"
-        // vs "(set password)" — the hash itself is never exposed.
+        // vs "(set password)" - the hash itself is never exposed.
         hasPassword: r.passwordHash != null,
         memberCount: countByRoom.get(r.id) ?? 0,
       })),
@@ -97,15 +97,15 @@ export async function registerAdminRoutes(
   });
 
   /**
-   * Messages endpoint — explicitly REFUSES to return:
+   * Messages endpoint - explicitly REFUSES to return:
    *   - any messages from private/password-protected rooms (whole-room privacy)
-   *   - whispers from any room (per-pair privacy — even public rooms persist
+   *   - whispers from any room (per-pair privacy - even public rooms persist
    *     whispers there for sender/recipient scrollback, but those exchanges
    *     are NOT moderation-visible content)
    *
    * Privacy promise: admins never read user-to-user private content. They
    * see what was said in the open, full stop. If a user is being abused
-   * via whispers, they screenshot and report — the server doesn't act as
+   * via whispers, they screenshot and report - the server doesn't act as
    * a backdoor.
    */
   app.get<{ Params: { id: string } }>("/admin/rooms/:id/messages", async (req, reply) => {
@@ -150,7 +150,7 @@ export async function registerAdminRoutes(
     password: z.string().min(1).max(100).optional(),
     topic: z.string().max(200).nullable().optional(),
     description: z.string().max(5000).nullable().optional(),
-    /** Defaults to true — admin-created rooms are permanent unless explicitly opted out. */
+    /** Defaults to true - admin-created rooms are permanent unless explicitly opted out. */
     isSystem: z.boolean().optional(),
   });
   const adminRoomPatchBody = z.object({
@@ -253,7 +253,7 @@ export async function registerAdminRoutes(
       // Same-type update: rotate or clear password explicitly. Clearing on a
       // private room is a no-op (login still requires it via /invite or
       // membership); we treat it as "remove the password but keep the room
-      // private" — admins can clear and set again to rotate.
+      // private" - admins can clear and set again to rotate.
       if (body.password === null) {
         update.passwordHash = null;
       } else {
@@ -274,12 +274,12 @@ export async function registerAdminRoutes(
   });
 
   /**
-   * DELETE /admin/rooms/:id — moderator hatchet. Refuses system rooms.
+   * DELETE /admin/rooms/:id - moderator hatchet. Refuses system rooms.
    *
    * Currently-online occupants are auto-rejoined to MainHall and shown a
    * notice; cascade FKs (room_members, messages, bans, invites) clean up.
    * Even private/password rooms can be deleted (admin moderation overrides
-   * the privacy contract because messages are still never read — only
+   * the privacy contract because messages are still never read - only
    * removed wholesale).
    */
   app.delete<{ Params: { id: string } }>("/admin/rooms/:id", async (req, reply) => {
@@ -373,7 +373,7 @@ export async function registerAdminRoutes(
     /* ----- Limits / capacity controls ----- */
     /** 1..1000. */
     maxCharactersPerUser: z.number().int().min(1).max(1000).optional(),
-    /** 1..50 — admins can lift the email-uniqueness cap for shared accounts. */
+    /** 1..50 - admins can lift the email-uniqueness cap for shared accounts. */
     maxAccountsPerEmail: z.number().int().min(1).max(50).optional(),
     /** 0..1000. 0 = no user-created rooms (public sites that only want admin rooms). */
     maxRoomsPerOwner: z.number().int().min(0).max(1000).optional(),
@@ -422,7 +422,7 @@ export async function registerAdminRoutes(
   app.put<{ Body: unknown }>("/admin/settings", async (req) => {
     const body = settingsBody.parse(req.body);
     const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
-    // Drop undefined keys — exactOptionalPropertyTypes refuses `{ x: undefined }`
+    // Drop undefined keys - exactOptionalPropertyTypes refuses `{ x: undefined }`
     // even on optional properties; we want true omission.
     const patch: Parameters<typeof updateSettings>[1] = {};
     if (body.messageRetentionMs !== undefined) patch.messageRetentionMs = body.messageRetentionMs;
@@ -439,7 +439,7 @@ export async function registerAdminRoutes(
     if (body.maxBioLength !== undefined) patch.maxBioLength = body.maxBioLength;
     if (body.registrationOpen !== undefined) patch.registrationOpen = body.registrationOpen;
     if (body.welcomeHtml !== undefined) {
-      // Sanitize on save (same allow-list as bios) — never trust admin HTML input.
+      // Sanitize on save (same allow-list as bios) - never trust admin HTML input.
       const { sanitizeBio } = await import("../auth/html.js");
       patch.welcomeHtml = sanitizeBio(body.welcomeHtml);
     }

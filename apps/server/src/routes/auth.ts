@@ -9,9 +9,35 @@ import type { Db } from "../db/index.js";
 
 const SESSION_COOKIE = "tk_sess";
 
+/**
+ * Master usernames are login identifiers - they need to be unambiguous when
+ * referenced in chat ("ban @admin") or moderation logs. We restrict them to
+ * an ASCII-only character class AFTER applying NFKC normalization, which:
+ *   - collapses full-width / half-width variants ("ＡＤＭＩＮ" → "ADMIN")
+ *   - blocks full-Unicode-letter homograph attacks (Cyrillic 'а' impersonating
+ *     Latin 'a' to register `аdmin`)
+ *
+ * Character names are NOT subject to this - they're display-only and RP needs
+ * `Æthelred` / `Saorla` / `孫悟空` to be valid. The trade is: master usernames
+ * are boring but trustworthy as identifiers; character names are expressive
+ * but only locally unique per-account.
+ */
+const MASTER_USERNAME_RX = /^[a-zA-Z0-9_-]{2,40}$/;
+export function normalizeMasterUsername(input: string): string {
+  return input.normalize("NFKC");
+}
+const masterUsernameSchema = z
+  .string()
+  .min(2)
+  .max(40)
+  .transform((s) => normalizeMasterUsername(s))
+  .refine((s) => MASTER_USERNAME_RX.test(s), {
+    message: "username must be 2-40 ASCII letters/numbers/_/- (Unicode confusables blocked)",
+  });
+
 const credentialsSchema = z.object({
   email: z.string().email().max(200),
-  username: z.string().min(2).max(40).regex(/^[\p{L}\p{N}_\-]+$/u),
+  username: masterUsernameSchema,
   password: z.string().min(8).max(200),
   /**
    * Defense-in-depth: the client only submits when the user ticks the
@@ -28,7 +54,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
   // Tight per-IP throttles on the credential endpoints. /auth/register caps
   // at 5/minute (sustained signup attack mitigation); /auth/login caps at
   // 10/minute and bumps an extra 30s ban after 3 failures within the window
-  // — handled implicitly by the plugin's bans option.
+  // - handled implicitly by the plugin's bans option.
   const registerLimit = {
     config: { rateLimit: { max: 5, timeWindow: "1 minute" } },
   } as const;
@@ -44,31 +70,24 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     }
     const body = credentialsSchema.parse(req.body);
 
-    // Username remains globally unique at the DB layer.
+    // Username + email cap checks. Both errors collapse to the same generic
+    // message so an attacker can't probe whether a particular email is
+    // registered (or how many accounts share it). The user has to retry with
+    // a different combination if either side trips. Username + email are
+    // checked together so the error wording stays consistent.
     const usernameTaken = (await db
-      .select()
+      .select({ id: users.id })
       .from(users)
       .where(sql`lower(${users.username}) = ${body.username.toLowerCase()}`)
       .limit(1))[0];
-    if (usernameTaken) {
-      reply.code(409);
-      return { error: "username already in use" };
-    }
-
-    // Email cap is enforced in code so admins can lift it without touching
-    // the DB. Counts existing live (non-disabled) users sharing this email.
     const emailCountRow = (await db
       .select({ n: sql<number>`count(*)` })
       .from(users)
       .where(sql`lower(${users.email}) = ${body.email.toLowerCase()}`))[0];
     const emailCount = emailCountRow?.n ?? 0;
-    if (emailCount >= settings.maxAccountsPerEmail) {
+    if (usernameTaken || emailCount >= settings.maxAccountsPerEmail) {
       reply.code(409);
-      return {
-        error: settings.maxAccountsPerEmail === 1
-          ? "email already in use"
-          : `email already used by ${settings.maxAccountsPerEmail} account(s) — the configured limit`,
-      };
+      return { error: "registration conflict - try a different email or username" };
     }
 
     // Bootstrap: if there are no human accounts yet (only the `system`
@@ -82,13 +101,27 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     const isFirstUser = (humanCountRow?.n ?? 0) === 0;
 
     const id = nanoid();
-    await db.insert(users).values({
-      id,
-      email: body.email,
-      username: body.username,
-      passwordHash: await hashPassword(body.password),
-      role: isFirstUser ? "admin" : "user",
-    });
+    try {
+      await db.insert(users).values({
+        id,
+        email: body.email,
+        username: body.username,
+        passwordHash: await hashPassword(body.password),
+        role: isFirstUser ? "admin" : "user",
+      });
+    } catch (err) {
+      // Race: two simultaneous registrations for the same username slip past
+      // the pre-check above. The unique index on lower(username) catches it
+      // here. better-sqlite3 surfaces this as a SQLITE_CONSTRAINT_UNIQUE
+      // error; we map it to the same friendly 409 the pre-check uses so
+      // the user sees a consistent message regardless of which path tripped.
+      const msg = err instanceof Error ? err.message : "";
+      if (/UNIQUE|users_username_uq/i.test(msg)) {
+        reply.code(409);
+        return { error: "registration conflict - try a different email or username" };
+      }
+      throw err;
+    }
 
     await issueSession(reply, db, id, req);
     return {
@@ -104,11 +137,15 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       password: z.string().min(1),
     }).parse(req.body);
 
+    // NFKC-normalize the identifier so a user who types in a different Unicode
+    // form (e.g. their phone autocompleted full-width letters) still finds
+    // their stored ASCII username. Email side passes through unchanged.
+    const lookupKey = normalizeMasterUsername(body.identifier).toLowerCase();
     const u = (await db
       .select()
       .from(users)
       .where(
-        sql`lower(${users.email}) = ${body.identifier.toLowerCase()} OR lower(${users.username}) = ${body.identifier.toLowerCase()}`,
+        sql`lower(${users.email}) = ${lookupKey} OR lower(${users.username}) = ${lookupKey}`,
       )
       .limit(1))[0];
 
@@ -133,7 +170,13 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     return { ok: true };
   });
 
-  app.get("/auth/me", async (req, reply) => {
+  // /auth/me is the silent-poll endpoint: 60s/tab and one initial probe on
+  // page load. Per-IP cap of 60/min comfortably covers 5+ tabs while blocking
+  // an attacker spamming it as a cheap DB-load amplifier.
+  const meLimit = {
+    config: { rateLimit: { max: 60, timeWindow: "1 minute" } },
+  } as const;
+  app.get("/auth/me", meLimit, async (req, reply) => {
     const user = await getSessionUser(req, db);
     if (!user) {
       reply.code(401);
@@ -143,6 +186,16 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
   });
 }
 
+/**
+ * Hard upper bound on the cookie's lifetime in the browser. Decoupled from
+ * the admin-configured idle timeout: the cookie just stores a session id, so
+ * if the underlying row has been swept the cookie is already worthless even
+ * if the browser still has it. A long cookie life means an admin shortening
+ * the idle timeout doesn't drop active users mid-session due to the browser
+ * discarding the cookie before the server-side row would have expired.
+ */
+const COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+
 async function issueSession(
   reply: import("fastify").FastifyReply,
   db: Db,
@@ -150,8 +203,10 @@ async function issueSession(
   req: FastifyRequest,
 ): Promise<string> {
   const id = nanoid(40);
-  // Read TTL from admin-managed site settings — admins can shorten or extend
-  // session lifetime sitewide without redeploys.
+  // Read TTL from admin-managed site settings. The value is now interpreted
+  // as the *idle* window - sliding-extended on every authenticated socket
+  // event in `extendSession` - but the initial expiresAt is still seeded
+  // here so a brand-new session has a valid horizon.
   const { sessionTtlMs } = await getSettings(db);
   const expiresAt = new Date(Date.now() + sessionTtlMs);
   await db.insert(sessions).values({
@@ -164,9 +219,14 @@ async function issueSession(
   reply.setCookie(SESSION_COOKIE, id, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    // Default: secure only in production (where same-origin = HTTPS by
+    // construction). Override with FORCE_SECURE_COOKIES=true when proxying
+    // dev through ngrok / Cloudflare Tunnel / any HTTPS frontend - without
+    // this, the session cookie travels in plaintext over HTTP between the
+    // tunnel terminator and Fastify on localhost.
+    secure: process.env.FORCE_SECURE_COOKIES === "true" || process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: Math.floor(sessionTtlMs / 1000),
+    maxAge: COOKIE_MAX_AGE_SECONDS,
   });
   return id;
 }

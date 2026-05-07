@@ -22,8 +22,8 @@ interface Props {
  *
  * Layout:
  *   - Hero band: avatar (or placeholder), name, kind label, gender, joined
- *   - Action row: whisper / ignore (the modal isn't shown for self — App
- *     diverts self-clicks to the editor — so these are always relevant)
+ *   - Action row: whisper / ignore (the modal isn't shown for self - App
+ *     diverts self-clicks to the editor - so these are always relevant)
  *   - Stats grid (characters only; hidden when empty)
  *   - Bio section with explicit empty-state message
  *
@@ -40,7 +40,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore }: Props) {
   const stats = isChar ? profile.profile.stats : null;
   const gender = resolveGender(profile);
 
-  // Stat entries that actually have a value — empty fields are dropped so
+  // Stat entries that actually have a value - empty fields are dropped so
   // a half-filled character doesn't show a row of dashes.
   const statEntries = stats ? collectStatEntries(stats) : [];
   const isCompletelyBlank = !bio && statEntries.length === 0 && !avatar;
@@ -59,7 +59,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore }: Props) {
         className="flex max-h-[85vh] w-[min(720px,96vw)] flex-col overflow-hidden rounded border border-keep-border bg-keep-bg text-keep-text shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Hero band — always visible, themed with the owner's panel color. */}
+        {/* Hero band - always visible, themed with the owner's panel color. */}
         <div className="flex shrink-0 items-start gap-4 border-b border-keep-rule bg-keep-panel px-5 py-4">
           <Avatar url={avatar} name={name} />
           <div className="min-w-0 flex-1">
@@ -121,7 +121,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore }: Props) {
           </button>
         </div>
 
-        {/* Body — scrolls independently of the hero */}
+        {/* Body - scrolls independently of the hero */}
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {isCompletelyBlank ? (
             <EmptyProfile name={name} kind={isChar ? "character" : "master"} />
@@ -224,7 +224,7 @@ function EmptyProfile({ name, kind }: { name: string; kind: "master" | "characte
 /**
  * Resolve the gender icon to display in the hero. Master profiles carry
  * an explicit OOC gender; characters store theirs in stats.gender (which
- * is free-form text — only normalize the canonical labels).
+ * is free-form text - only normalize the canonical labels).
  */
 function resolveGender(profile: ProfileView): Gender {
   if (profile.kind === "master") return profile.profile.gender;

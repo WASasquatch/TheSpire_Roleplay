@@ -2,7 +2,7 @@
   "name": "thekeep",
   "private": true,
   "version": "0.0.0",
-  "description": "The Spire — a roleplay-focused chat system",
+  "description": "The Spire - a roleplay-focused chat system",
   "type": "module",
   "scripts": {
     "dev": "pnpm -r --parallel run dev",
@@ -10,7 +10,9 @@
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm -r run lint",
     "db:push": "pnpm --filter @thekeep/server run db:push",
-    "db:studio": "pnpm --filter @thekeep/server run db:studio"
+    "db:studio": "pnpm --filter @thekeep/server run db:studio",
+    "ship": "bash scripts/ship.sh",
+    "deploy": "bash scripts/ship.sh --deploy-only"
   },
   "engines": {
     "node": ">=20",

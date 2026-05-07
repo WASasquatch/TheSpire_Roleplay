@@ -56,4 +56,21 @@ export async function invite(ctx: CommandContext, username: string): Promise<voi
     kind: "system",
     body: `${ctx.user.displayName} invited ${target.username} to the room.`,
   });
+
+  // Notify the invitee on every socket they have open. Without this, an
+  // invite to a public room is invisible (the invitee isn't in the room
+  // to see the system message above), and an invite to a private room
+  // only shows up the next time they try to /go to it. The toast lets
+  // them know now, regardless of room type. If the invitee is offline
+  // the roomInvites row above stays for 24h and unlocks them on next
+  // login attempt against that room.
+  const sockets = await ctx.io.fetchSockets();
+  const verb = room.type === "private" ? "(private - no password needed)" : "";
+  const inviteMsg = `${ctx.user.displayName} invited you to "${room.name}". Use /go ${room.name} to head over. ${verb}`.trim();
+  for (const s of sockets) {
+    const uid = (s.data as { userId?: string }).userId;
+    if (uid === target.id) {
+      s.emit("error:notice", { code: "INVITED", message: inviteMsg });
+    }
+  }
 }

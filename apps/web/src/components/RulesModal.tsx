@@ -11,7 +11,7 @@ interface Props {
 }
 
 /**
- * Rules modal — shows admin-authored house rules plus a privacy/safety
+ * Rules modal - shows admin-authored house rules plus a privacy/safety
  * notice. Both bodies are sanitized server-side on save (same allow-list as
  * profile bios); we re-sanitize with DOMPurify on render as defense in depth
  * against any malicious payload that slipped through historical inserts.
@@ -54,7 +54,7 @@ export function RulesModal({ onClose }: Props) {
           {error ? (
             <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
           ) : !data ? (
-            <div className="text-keep-muted">loading…</div>
+            <div className="text-keep-muted">loading...</div>
           ) : (
             <div className="space-y-4">
               {data.securityNoticeHtml.trim() ? (

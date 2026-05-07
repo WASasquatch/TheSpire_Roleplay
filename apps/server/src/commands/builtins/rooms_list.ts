@@ -3,11 +3,11 @@ import { roomMembers, rooms } from "../../db/schema.js";
 import type { CommandHandler } from "../types.js";
 
 /**
- * /list — show all public rooms (name, topic, occupant count). Mirrors the
+ * /list - show all public rooms (name, topic, occupant count). Mirrors the
  * phpMyChat /list shorthand. Emitted as a notice (single message-list line)
  * so it doesn't pollute the room transcript for everyone else.
  *
- * Private rooms are intentionally omitted — listing them by name even
+ * Private rooms are intentionally omitted - listing them by name even
  * without messages would defeat the privacy contract. Use the admin
  * Rooms tab for the full inventory.
  */
@@ -41,7 +41,7 @@ export const listCommand: CommandHandler = {
 
     const lines = allRooms.map((r) => {
       const n = countByRoom.get(r.id) ?? 0;
-      return `  ${r.name} (${n})${r.topic ? ` — ${r.topic}` : ""}`;
+      return `  ${r.name} (${n})${r.topic ? ` - ${r.topic}` : ""}`;
     });
     ctx.socket.emit("error:notice", {
       code: "ROOM_LIST",
@@ -51,7 +51,7 @@ export const listCommand: CommandHandler = {
 };
 
 /**
- * /clear — wipe the local message buffer for the current room. Pure client
+ * /clear - wipe the local message buffer for the current room. Pure client
  * effect; no message history is touched server-side. Useful when a long
  * scrollback is making the page sluggish or the user wants a clean slate.
  */
@@ -66,7 +66,7 @@ export const clearCommand: CommandHandler = {
 };
 
 /**
- * /find <name> — open the users directory pre-filtered by name. Equivalent
+ * /find <name> - open the users directory pre-filtered by name. Equivalent
  * to /users with a prefilled search box. Mirrors phpMyChat's /find.
  */
 export const findCommand: CommandHandler = {

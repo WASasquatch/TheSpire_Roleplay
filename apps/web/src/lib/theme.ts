@@ -9,7 +9,7 @@ import type { Theme } from "@thekeep/shared";
  * Tailwind config maps each `keep-*` color to `rgb(var(--keep-X) / <alpha-value>)`,
  * which means `bg-keep-panel/30` resolves to `rgb(170 187 204 / 0.3)`.
  *
- * If the hex can't be parsed we fall back to "0 0 0" rather than throw — a
+ * If the hex can't be parsed we fall back to "0 0 0" rather than throw - a
  * stray bad theme value shouldn't crash the app.
  */
 export function hexToRgbTriple(hex: string): string {

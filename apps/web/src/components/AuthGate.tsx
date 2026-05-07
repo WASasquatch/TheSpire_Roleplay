@@ -9,7 +9,7 @@ interface SiteStats {
 }
 
 /**
- * Splash shell — shared layout for the unauthenticated experience.
+ * Splash shell - shared layout for the unauthenticated experience.
  *
  * Visual structure:
  *   - Full-viewport background image (the_spire_bg.jpg) with the spire on
@@ -59,7 +59,7 @@ export function SplashShell({
   return (
     // Inline `themeStyle(...)` scopes the site's default theme to the splash
     // subtree. This isolates us from whatever CSS vars a previously-logged-in
-    // user left on documentElement — the splash should always render in the
+    // user left on documentElement - the splash should always render in the
     // admin-configured palette (which the parchment bg image is paired with),
     // not in a leftover Twilight or Forest theme.
     <div
@@ -67,7 +67,7 @@ export function SplashShell({
       className="relative min-h-screen w-full overflow-hidden bg-keep-bg text-keep-text"
     >
       {/*
-        Background layer — absolute so the card sits above it without
+        Background layer - absolute so the card sits above it without
         affecting its sizing. Cover keeps the spire fully visible on common
         16:9 / 16:10 viewports; the image's right edge fades to parchment
         which blends into the modal seamlessly. A subtle parchment overlay
@@ -80,7 +80,7 @@ export function SplashShell({
         // `bg-center` would crop both edges and show the boring middle;
         // pinning to `bg-left` shifts the spire too far right within the
         // visible frame. The negative-x offset (-175px) splits the
-        // difference — the spire sits roughly centered in the viewport
+        // difference - the spire sits roughly centered in the viewport
         // with mountains trailing below. On md+ the viewport is wide
         // enough that the natural cover-center works.
         className="absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
@@ -92,7 +92,7 @@ export function SplashShell({
         // background even where the bg image itself has detail. On mobile
         // the card switches to a translucent glass treatment (see below)
         // and we WANT the artwork showing through, so the veil is much
-        // lighter — just enough to keep the right edge of the screen
+        // lighter - just enough to keep the right edge of the screen
         // from competing with the card.
         className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-keep-bg/30 md:to-keep-bg/70"
       />
@@ -127,7 +127,7 @@ export function SplashShell({
             shadow-[0_20px_60px_-15px_rgba(0,0,0,0.45)]
           "
         >
-          {/* Accent bar — echoes the teal magical light from the spire on
+          {/* Accent bar - echoes the teal magical light from the spire on
               the bg, anchoring the card visually to the artwork. */}
           <div
             aria-hidden
@@ -136,7 +136,7 @@ export function SplashShell({
           />
 
           <div className="px-6 py-6 sm:px-8 sm:py-8">
-            {/* Header — site name, theme-tinted */}
+            {/* Header - site name, theme-tinted */}
             <div className="mb-3 text-center">
               <h1
                 style={logoStyle}
@@ -152,7 +152,11 @@ export function SplashShell({
             {/* Live stats strip */}
             <SplashStats stats={stats} />
 
-            {/* Admin-configurable welcome — only renders when set */}
+            {/* Retention + session TTL - admin-configured, surfaced so
+                visitors know what they're committing to before registering. */}
+            <SplashMeta />
+
+            {/* Admin-configurable welcome - only renders when set */}
             {branding.welcomeHtml.trim() ? (
               <div
                 className="prose prose-sm mb-5 mt-4 max-w-none border-y border-keep-rule/50 py-3 text-keep-text/90"
@@ -186,7 +190,7 @@ function SplashStats({ stats }: { stats: SiteStats | null }) {
     return (
       <div className="my-2 flex items-center justify-center gap-2 text-xs text-keep-muted">
         <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-keep-muted/40" />
-        <span>checking {siteName}…</span>
+        <span>checking {siteName}...</span>
       </div>
     );
   }
@@ -205,6 +209,51 @@ function SplashStats({ stats }: { stats: SiteStats | null }) {
           <Stat label={stats.rooms.private === 1 ? "private chamber" : "private chambers"} value={stats.rooms.private} />
         </>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Format a millisecond duration for human-facing splash copy. Picks the
+ * largest natural unit ("30 days" beats "720 hours") and pluralizes
+ * appropriately. 0 maps to "indefinitely" - only meaningful for retention.
+ */
+function formatHumanDuration(ms: number): string {
+  if (ms <= 0) return "indefinitely";
+  const day = 86_400_000;
+  const hour = 3_600_000;
+  const minute = 60_000;
+  if (ms % day === 0) {
+    const n = ms / day;
+    return n === 1 ? "1 day" : `${n} days`;
+  }
+  if (ms % hour === 0) {
+    const n = ms / hour;
+    return n === 1 ? "1 hour" : `${n} hours`;
+  }
+  if (ms % minute === 0) {
+    const n = ms / minute;
+    return n === 1 ? "1 minute" : `${n} minutes`;
+  }
+  return `${Math.round(ms / 1000)} seconds`;
+}
+
+/**
+ * Retention + session TTL strip rendered below the live stats. Both numbers
+ * come from admin settings via /site so they always reflect the live policy.
+ * Worded conversationally because this is a marketing-adjacent surface, not
+ * the admin's terse "30d" formatting.
+ */
+function SplashMeta() {
+  const retentionMs = useChat((s) => s.branding.messageRetentionMs);
+  const sessionMs = useChat((s) => s.branding.sessionTtlMs);
+  const retentionWord = retentionMs === 0
+    ? "Messages are kept indefinitely"
+    : `Messages are kept for ${formatHumanDuration(retentionMs)}`;
+  const sessionWord = `sessions log out after ${formatHumanDuration(sessionMs)} idle`;
+  return (
+    <div className="my-1 text-center text-[10px] text-keep-muted/80">
+      {retentionWord} <span aria-hidden className="text-keep-rule">·</span> {sessionWord}
     </div>
   );
 }
@@ -246,6 +295,8 @@ export function AuthGate() {
   const [submitting, setSubmitting] = useState(false);
   const setMe = useChat((s) => s.setMe);
   const branding = useChat((s) => s.branding);
+  const kickReason = useChat((s) => s.kickReason);
+  const setKickReason = useChat((s) => s.setKickReason);
   // When the admin closes registration, snap any stale "register" mode back
   // to "login" so the form can't show fields that the server will reject.
   if (!branding.registrationOpen && mode === "register") setMode("login");
@@ -255,6 +306,9 @@ export function AuthGate() {
     setError(null);
     setSubmitting(true);
     try {
+      // Successful submit clears the "session expired" banner so it doesn't
+      // linger after a fresh login.
+      setKickReason(null);
       if (mode === "register") {
         if (password !== passwordConfirm) {
           throw new Error("Passwords don't match. Please retype them.");
@@ -333,6 +387,20 @@ export function AuthGate() {
           {mode === "login" ? "enter the spire" : "create a vessel"}
         </div>
 
+        {kickReason ? (
+          <div className="flex items-start justify-between gap-2 rounded border border-keep-action/40 bg-keep-action/10 px-3 py-2 text-xs text-keep-text/90">
+            <span>{kickReason}</span>
+            <button
+              type="button"
+              onClick={() => setKickReason(null)}
+              aria-label="Dismiss"
+              className="shrink-0 text-keep-muted hover:text-keep-text"
+            >
+              ✕
+            </button>
+          </div>
+        ) : null}
+
         {mode === "register" ? (
           <>
             <Field label="Email" value={email} onChange={setEmail} type="email" autoComplete="email" />
@@ -363,7 +431,7 @@ export function AuthGate() {
               autoComplete="new-password"
             />
             {/*
-              Inline mismatch hint — only fires once the user has typed in the
+              Inline mismatch hint - only fires once the user has typed in the
               confirm field, otherwise the empty initial state would shout at
               them before they even start. Deliberately doesn't block the
               submit button (matching is verified on submit) so the keyboard
@@ -417,7 +485,7 @@ export function AuthGate() {
           className="w-full rounded border border-keep-border bg-keep-panel py-2 text-sm font-semibold tracking-wide hover:bg-keep-panel/80 disabled:opacity-50"
         >
           {submitting
-            ? mode === "login" ? "Logging in…" : "Registering…"
+            ? mode === "login" ? "Logging in..." : "Registering..."
             : mode === "login" ? "Log in" : "Register"}
         </button>
       </form>

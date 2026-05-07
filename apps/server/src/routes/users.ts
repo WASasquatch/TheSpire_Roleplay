@@ -11,7 +11,7 @@ type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 const MAX_LIMIT = 200;
 
 /**
- * Public-facing user directory endpoint. Authenticated users only — we don't
+ * Public-facing user directory endpoint. Authenticated users only - we don't
  * leak the registered population to the public internet. Each row carries
  * the master account plus that account's characters so the UI can render
  * them grouped (master on top, characters indented underneath).
@@ -226,7 +226,7 @@ export async function registerUsersRoutes(
 
   /**
    * Admin user editor. Allows changing username/email/role and toggling
-   * disabled state. Password reset is intentionally out of scope here —
+   * disabled state. Password reset is intentionally out of scope here -
    * users go through their own flow for that. role bump to "admin" is
    * allowed from this endpoint (mirrors /promoteadmin).
    */
@@ -239,8 +239,18 @@ export async function registerUsersRoutes(
     if (!target || target.username === "system") { reply.code(404); return { error: "not found" }; }
 
     const { z } = await import("zod");
+    // Mirror the master-username rule from /auth/register so admins editing a
+    // user's name can't introduce a Unicode-confusable identifier.
+    const masterUsernameSchema = z
+      .string()
+      .min(2)
+      .max(40)
+      .transform((s) => s.normalize("NFKC"))
+      .refine((s) => /^[a-zA-Z0-9_-]{2,40}$/.test(s), {
+        message: "username must be 2-40 ASCII letters/numbers/_/-",
+      });
     const body = z.object({
-      username: z.string().min(2).max(40).regex(/^[\p{L}\p{N}_\-]+$/u).optional(),
+      username: masterUsernameSchema.optional(),
       email: z.string().email().max(200).optional(),
       role: z.enum(["user", "mod", "admin"]).optional(),
       disabled: z.boolean().optional(),
@@ -259,11 +269,28 @@ export async function registerUsersRoutes(
     if (body.disabled !== undefined) update.disabledAt = body.disabled ? new Date() : null;
     await db.update(users).set(update).where(eq(users.id, id));
 
+    // If we just disabled the account or downgraded their role, force-kick
+    // any live sockets they have so they drop back to the splash instead
+    // of lingering in chat with stale permissions until they happen to
+    // interact (which would trigger auth:expired anyway, but only if they
+    // type/click). DELETE already does this - PATCH should mirror it.
+    const justDisabled = body.disabled === true && target.disabledAt == null;
+    const roleChanged = body.role !== undefined && body.role !== target.role;
+    if (justDisabled || roleChanged) {
+      const sockets = await io.fetchSockets();
+      for (const s of sockets) {
+        const uid = (s.data as { userId?: string }).userId;
+        if (uid !== id) continue;
+        s.emit("auth:expired");
+        s.disconnect(true);
+      }
+    }
+
     return { ok: true };
   });
 
   /**
-   * Hard-delete a user. Cascades through every FK — characters, room_members,
+   * Hard-delete a user. Cascades through every FK - characters, room_members,
    * messages (kept by `set null` for displayName history), bans, mutes,
    * sessions. System and self are off-limits.
    */

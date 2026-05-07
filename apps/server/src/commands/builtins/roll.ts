@@ -17,10 +17,10 @@ function parseDice(input: string): ParsedDice | string {
   const count = m[1] ? parseInt(m[1], 10) : 1;
   const sides = parseInt(m[2] ?? "0", 10);
   if (!Number.isFinite(count) || count < 1 || count > MAX_DICE) {
-    return `Dice count must be 1–${MAX_DICE}.`;
+    return `Dice count must be 1-${MAX_DICE}.`;
   }
   if (!Number.isFinite(sides) || sides < 2 || sides > MAX_SIDES) {
-    return `Sides must be 2–${MAX_SIDES}.`;
+    return `Sides must be 2-${MAX_SIDES}.`;
   }
   return { count, sides };
 }
@@ -31,12 +31,12 @@ function notice(ctx: CommandContext, code: string, message: string) {
 
 /**
  * /roll <dice>
- *   /roll 1d20      — roll one twenty-sided
- *   /roll 3d6       — roll three six-siders, returns "[4, 2, 6] = 12"
- *   /roll d20       — defaults count to 1
+ *   /roll 1d20      - roll one twenty-sided
+ *   /roll 3d6       - roll three six-siders, returns "[4, 2, 6] = 12"
+ *   /roll d20       - defaults count to 1
  *
  * Output is a `kind=roll` message so it can be styled distinctly. The body is
- * authoritative — clients should not re-roll. Uses crypto.randomInt for fair,
+ * authoritative - clients should not re-roll. Uses crypto.randomInt for fair,
  * non-predictable values.
  */
 export const rollCommand: CommandHandler = {

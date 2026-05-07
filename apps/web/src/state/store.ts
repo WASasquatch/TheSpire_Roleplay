@@ -32,7 +32,18 @@ export interface SiteBranding {
   /** Sanitized disclaimer HTML rendered above the register form. */
   registerDisclaimerHtml: string;
   /**
-   * Sitewide default theme — used by the splash so the login screen renders
+   * Message retention window in ms; 0 means "kept indefinitely". Surfaced
+   * here so the splash can tell visitors how long their messages will
+   * persist before they commit to registering.
+   */
+  messageRetentionMs: number;
+  /**
+   * Session TTL in ms - how long a login persists before the user is
+   * dropped back to the splash. Same surface rationale as retention.
+   */
+  sessionTtlMs: number;
+  /**
+   * Sitewide default theme - used by the splash so the login screen renders
    * in the admin-configured palette instead of inheriting whatever theme the
    * last logged-in user happened to leave on documentElement.
    */
@@ -47,6 +58,10 @@ export const DEFAULT_BRANDING: SiteBranding = {
   registrationOpen: true,
   welcomeHtml: "",
   registerDisclaimerHtml: "",
+  // Mirrors the schema defaults: retention disabled (0 = forever), session
+  // TTL 30 days. Real values are pushed in by /site on first paint.
+  messageRetentionMs: 0,
+  sessionTtlMs: 30 * 24 * 60 * 60 * 1000,
   defaultTheme: DEFAULT_THEME,
 };
 
@@ -85,6 +100,12 @@ export function loadCachedBranding(): SiteBranding {
       registerDisclaimerHtml: typeof parsed.registerDisclaimerHtml === "string"
         ? parsed.registerDisclaimerHtml
         : DEFAULT_BRANDING.registerDisclaimerHtml,
+      messageRetentionMs: typeof parsed.messageRetentionMs === "number" && parsed.messageRetentionMs >= 0
+        ? parsed.messageRetentionMs
+        : DEFAULT_BRANDING.messageRetentionMs,
+      sessionTtlMs: typeof parsed.sessionTtlMs === "number" && parsed.sessionTtlMs > 0
+        ? parsed.sessionTtlMs
+        : DEFAULT_BRANDING.sessionTtlMs,
       // Theme is structured; fall through to DEFAULT_THEME if the cached
       // payload is malformed instead of letting a partial value slip in.
       defaultTheme: parsed.defaultTheme && typeof parsed.defaultTheme === "object"
@@ -100,7 +121,7 @@ export function saveCachedBranding(b: SiteBranding): void {
   try {
     if (typeof localStorage === "undefined") return;
     localStorage.setItem(BRANDING_CACHE_KEY, JSON.stringify(b));
-  } catch { /* quota or privacy mode — silently skip */ }
+  } catch { /* quota or privacy mode - silently skip */ }
 }
 
 interface ChatState {
@@ -109,6 +130,14 @@ interface ChatState {
   /** False until the initial /auth/me probe resolves. Prevents AuthGate flicker on reload. */
   authChecked: boolean;
   setAuthChecked: (b: boolean) => void;
+  /**
+   * Reason the user was bounced back to the splash, if any. Set by the
+   * `auth:expired` socket handler / 401 backstop poll, cleared when the
+   * splash is dismissed (successful login). Drives a banner on AuthGate
+   * so users don't wonder why they're staring at the login form again.
+   */
+  kickReason: string | null;
+  setKickReason: (r: string | null) => void;
 
   currentRoomId: string | null;
   setCurrentRoom: (id: string | null) => void;
@@ -133,7 +162,7 @@ interface ChatState {
   setOpenProfile: (p: ProfileView | null) => void;
 
   /**
-   * Editor target — null means closed.
+   * Editor target - null means closed.
    * mode "master" → edits the master account (no characterId).
    * mode "character" → edits the character with that id.
    */
@@ -145,11 +174,11 @@ interface ChatState {
   fontStep: 0 | 1 | 2 | 3;
   setFontStep: (n: 0 | 1 | 2 | 3) => void;
 
-  /** 0 = auto-refresh off; otherwise interval in seconds (5–3600). */
+  /** 0 = auto-refresh off; otherwise interval in seconds (5-3600). */
   refreshIntervalSec: number;
   setRefreshIntervalSec: (n: number) => void;
 
-  /** Public site branding — see SiteBranding. */
+  /** Public site branding - see SiteBranding. */
   branding: SiteBranding;
   setBranding: (b: SiteBranding) => void;
 }
@@ -159,6 +188,8 @@ export const useChat = create<ChatState>((set) => ({
   setMe: (me) => set({ me }),
   authChecked: false,
   setAuthChecked: (b) => set({ authChecked: b }),
+  kickReason: null,
+  setKickReason: (r) => set({ kickReason: r }),
 
   currentRoomId: null,
   setCurrentRoom: (id) => set({ currentRoomId: id }),

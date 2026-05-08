@@ -188,6 +188,21 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
                   </p>
                 )}
               </Section>
+
+              {/* Full-size avatar footer - the hero crops to a 96/112px square,
+                  so we show the natural-resolution image down here for users
+                  who want to see the whole portrait. Lives inside the
+                  scrolling body so it doesn't push the bio off-screen on
+                  short viewports. */}
+              {avatar ? (
+                <div className="mt-2 flex justify-center border-t border-keep-rule/60 pt-4">
+                  <img
+                    src={avatar}
+                    alt={`${name} - full portrait`}
+                    className="max-w-full rounded border border-keep-border"
+                  />
+                </div>
+              ) : null}
             </>
           )}
         </div>

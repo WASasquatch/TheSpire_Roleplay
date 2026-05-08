@@ -13,8 +13,12 @@ interface Props {
   onNameClick: (userId: string, displayName: string) => void;
   /** Click handler for @mentions parsed out of the message body. */
   onMentionClick: (name: string) => void;
+  /** Click on the timestamp - pre-fill the composer with /reply <msgid>. Only enabled for chat kinds (say/me/ooc). */
+  onTimeClick: (msgId: string) => void;
   fontStep: 0 | 1 | 2 | 3;
 }
+
+const REPLYABLE_KINDS = new Set(["say", "me", "ooc"]);
 
 const FONT_PX = ["12px", "14px", "16px", "18px"] as const;
 
@@ -26,7 +30,7 @@ function fmtTime(ms: number): string {
   return `${hh}:${mm}:${ss}`;
 }
 
-export function MessageList({ messages, occupants, onIconClick, onNameClick, onMentionClick, fontStep }: Props) {
+export function MessageList({ messages, occupants, onIconClick, onNameClick, onMentionClick, onTimeClick, fontStep }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = ref.current;
@@ -51,6 +55,7 @@ export function MessageList({ messages, occupants, onIconClick, onNameClick, onM
           onIconClick={onIconClick}
           onNameClick={onNameClick}
           onMentionClick={onMentionClick}
+          onTimeClick={onTimeClick}
         />
       ))}
     </div>
@@ -96,6 +101,7 @@ function Line({
   onIconClick,
   onNameClick,
   onMentionClick,
+  onTimeClick,
 }: {
   msg: ChatMessage;
   gender: Gender;
@@ -103,12 +109,36 @@ function Line({
   onIconClick: (userId: string, displayName: string) => void;
   onNameClick: (userId: string, displayName: string) => void;
   onMentionClick: (name: string) => void;
+  onTimeClick: (msgId: string) => void;
 }) {
-  const time = (
+  const canReply = REPLYABLE_KINDS.has(msg.kind);
+  const timeText = fmtTime(msg.createdAt);
+  // Timestamp is the click target for "reply to this message" - turning the
+  // whole line into a button is too aggressive (steals selection, conflicts
+  // with name/mention buttons). The timestamp is a stable, decorative spot
+  // that's already visually separate from the body.
+  const time = canReply ? (
+    <button
+      type="button"
+      onClick={() => onTimeClick(msg.id)}
+      title="Reply to this message"
+      className="mr-2 select-none rounded text-xs text-keep-muted tabular-nums hover:text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action"
+    >
+      {timeText}
+    </button>
+  ) : (
     <span className="mr-2 select-none text-xs text-keep-muted tabular-nums">
-      {fmtTime(msg.createdAt)}
+      {timeText}
     </span>
   );
+  const isReply = !!(msg.replyToId && msg.replyToDisplayName);
+  const quote = isReply ? (
+    <div className="flex items-baseline gap-1 text-xs leading-tight text-keep-muted">
+      <span aria-hidden="true">↪</span>
+      <span className="font-semibold">{msg.replyToDisplayName}:</span>
+      <span className="truncate italic">{msg.replyToBodySnippet ?? ""}</span>
+    </div>
+  ) : null;
   const tag = (
     <UserNameTag
       displayName={msg.displayName}
@@ -125,21 +155,24 @@ function Line({
   const bodyParts = useMemo(() => splitMentions(msg.body), [msg.body]);
   const renderedBody = renderParts(bodyParts, onMentionClick);
 
+  let lineEl: ReactNode;
   switch (msg.kind) {
     case "me":
-      return (
+      lineEl = (
         <div className="font-action" style={msg.color ? { color: msg.color } : { color: "#0b3a8c" }}>
           {time}{tag} <span>{renderedBody}</span>
         </div>
       );
+      break;
     case "roll":
-      return (
+      lineEl = (
         <div className="text-keep-system">
           {time}{tag} <span>🎲 {renderedBody}</span>
         </div>
       );
+      break;
     case "system":
-      return (
+      lineEl = (
         // whitespace-pre-wrap preserves the newlines that /describe authors
         // use to format multi-paragraph world descriptions; ordinary system
         // messages are single-line so this is a no-op for them. No leading
@@ -150,12 +183,14 @@ function Line({
           {time}<span className="whitespace-pre-wrap">{renderedBody}</span>
         </div>
       );
+      break;
     case "announce":
-      return (
+      lineEl = (
         <div className="font-bold text-keep-accent">
           {time}<span>📣 {renderedBody}</span>
         </div>
       );
+      break;
     case "whisper": {
       // Render "<Sender> whispers <Receiver>: <msg>" so both ends of the
       // conversation are visible. Both names are click-targets:
@@ -179,25 +214,41 @@ function Line({
       // Whisper line uses the theme's "action" slot - distinct from say/me
       // (white-ish text) and from system (muted), and themes cleanly: forest
       // green on Parchment, purple on Twilight, etc.
-      return (
+      lineEl = (
         <div className="text-keep-action">
           {time}{tag} <span className="text-keep-muted">whispers</span> {recipientTag}
           <span className="text-keep-muted">:</span> {renderedBody}
         </div>
       );
+      break;
     }
     case "ooc":
-      return (
+      lineEl = (
         <div className="text-keep-muted">
           {time}[{tag}] {renderedBody}
         </div>
       );
+      break;
     case "say":
     default:
-      return (
+      lineEl = (
         <div>
           {time}[{tag}] <span style={msg.color ? { color: msg.color } : undefined}>{renderedBody}</span>
         </div>
       );
+      break;
   }
+
+  // Replies wrap the quote + the line in a single container with a continuous
+  // accent-tinted left border, so the two read as one coupled block instead
+  // of as two stray lines next to each other in the timeline.
+  if (isReply) {
+    return (
+      <div className="my-0.5 border-l-2 border-keep-action/50 pl-2">
+        {quote}
+        {lineEl}
+      </div>
+    );
+  }
+  return lineEl;
 }

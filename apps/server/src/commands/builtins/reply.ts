@@ -1,0 +1,71 @@
+import { and, eq } from "drizzle-orm";
+import { messages } from "../../db/schema.js";
+import { addMessage } from "../../realtime/broadcast.js";
+import type { CommandContext, CommandHandler } from "../types.js";
+
+const SNIPPET_LEN = 80;
+const REPLYABLE_KINDS = new Set(["say", "me", "ooc"]);
+
+function notice(ctx: CommandContext, code: string, message: string) {
+  ctx.socket.emit("error:notice", { code, message });
+}
+
+function snippet(body: string): string {
+  const collapsed = body.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= SNIPPET_LEN) return collapsed;
+  return collapsed.slice(0, SNIPPET_LEN - 1).trimEnd() + "…";
+}
+
+/**
+ * /reply <msgid> <text>
+ *
+ * Posts a normal "say" line that references a prior message. The client UI
+ * pre-fills this command when the user clicks a message's timestamp; users
+ * can also type it by hand.
+ *
+ * Server validates that the parent exists in the same room and is a kind
+ * that's safe to reply to publicly (say/me/ooc). Whispers are intentionally
+ * excluded - replying to a private message in public would leak the content
+ * (or at least its existence) to a third party.
+ */
+export const replyCommand: CommandHandler = {
+  name: "reply",
+  aliases: ["re"],
+  usage: "/reply <message-id> <text>",
+  description:
+    "Reply to a specific message. The reply renders with a small quote of the original above it. Click a message's timestamp to pre-fill this command.",
+  async run(ctx) {
+    if (ctx.args.length < 2) {
+      notice(ctx, "REPLY_USAGE", "Usage: /reply <message-id> <text>");
+      return;
+    }
+    const targetId = ctx.args[0]!;
+    const body = ctx.argsText.replace(/^\S+\s*/, "").trim();
+    if (!body) {
+      notice(ctx, "REPLY_EMPTY", "Reply body is empty.");
+      return;
+    }
+
+    const parent = (await ctx.db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.id, targetId), eq(messages.roomId, ctx.roomId)))
+      .limit(1))[0];
+    if (!parent) {
+      notice(ctx, "REPLY_NO_MSG", "That message is no longer available to reply to.");
+      return;
+    }
+    if (!REPLYABLE_KINDS.has(parent.kind)) {
+      notice(ctx, "REPLY_BAD_KIND", "You can only reply to chat messages.");
+      return;
+    }
+
+    await addMessage(ctx, {
+      kind: "say",
+      body,
+      replyToId: parent.id,
+      replyToDisplayName: parent.displayName,
+      replyToBodySnippet: snippet(parent.body),
+    });
+  },
+};

@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { gte, sql } from "drizzle-orm";
+import { gte, ne, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import { messages, rooms } from "../db/schema.js";
+import { messages, rooms, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -41,6 +41,15 @@ export async function registerStatsRoutes(
       if (uid) onlineUsers.add(uid);
     }
 
+    // Total registered accounts. Excludes the "system" sentinel that owns
+    // server-authored system messages - it's not a real registered user and
+    // surfacing it on the splash would be misleading.
+    const registeredRows = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(users)
+      .where(ne(users.username, "system"));
+    const totalRegistered = registeredRows[0]?.n ?? 0;
+
     // 7-day message frequency, bucketed by UTC day. SQLite stores createdAt
     // as ms-epoch integers; convert to YYYY-MM-DD via strftime.
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -63,6 +72,7 @@ export async function registerStatsRoutes(
 
     return {
       online: onlineUsers.size,
+      totalRegistered,
       rooms: {
         public: byType.public ?? 0,
         private: byType.private ?? 0,

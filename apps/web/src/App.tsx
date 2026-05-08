@@ -433,6 +433,16 @@ function Chat() {
   }
 
   /**
+   * Click on a message's timestamp - pre-fill the composer with `/reply <id> `
+   * so the user can finish typing and Enter. Mirrors the /whisper-on-name
+   * pattern. Only enabled by MessageList for replyable kinds (say/me/ooc);
+   * the server re-validates on submit.
+   */
+  function onTimeClick(msgId: string) {
+    setComposerText(`/reply ${msgId} `);
+  }
+
+  /**
    * Click on an @mention inside a message body. Per the spec this should
    * open the user's profile (not whisper) - and resolve to their *active*
    * character profile when they have one, falling back to master. The
@@ -479,6 +489,7 @@ function Chat() {
             onIconClick={onIconClick}
             onNameClick={onNameClick}
             onMentionClick={onMentionClick}
+            onTimeClick={onTimeClick}
             fontStep={fontStep}
           />
           <MutualPrompts

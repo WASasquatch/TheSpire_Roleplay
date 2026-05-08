@@ -5,6 +5,8 @@ import { themeStyle } from "../lib/theme.js";
 
 interface SiteStats {
   online: number;
+  /** Total registered accounts (excluding the system sentinel). Optional for forward-compat with older servers. */
+  totalRegistered?: number;
   rooms: { public: number; private: number; total: number };
 }
 
@@ -194,13 +196,30 @@ function SplashStats({ stats }: { stats: SiteStats | null }) {
       </div>
     );
   }
+  // When the server reports the registered-account total, render the online
+  // stat with TWO emphasised numbers (e.g. "0 users online out of 2") so the
+  // total matches the bold/tabular-nums styling of the other counts. Falls
+  // back to the single-number Stat helper for older servers without the field.
+  const onlineNoun = stats.online === 1 ? "user online" : "users online";
   return (
     <div className="my-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-keep-muted">
-      <Stat
-        label={stats.online === 1 ? "user online" : "users online"}
-        value={stats.online}
-        emphasised={stats.online > 0}
-      />
+      {typeof stats.totalRegistered === "number" ? (
+        <span className="inline-flex items-baseline gap-1">
+          <span
+            className={`text-base font-semibold tabular-nums ${
+              stats.online > 0 ? "text-keep-action" : "text-keep-text"
+            }`}
+          >
+            {stats.online}
+          </span>
+          <span>{onlineNoun} out of</span>
+          <span className="text-base font-semibold tabular-nums text-keep-text">
+            {stats.totalRegistered}
+          </span>
+        </span>
+      ) : (
+        <Stat label={onlineNoun} value={stats.online} emphasised={stats.online > 0} />
+      )}
       <span aria-hidden className="text-keep-rule">·</span>
       <Stat label={stats.rooms.public === 1 ? "public room" : "public rooms"} value={stats.rooms.public} />
       {stats.rooms.private > 0 ? (

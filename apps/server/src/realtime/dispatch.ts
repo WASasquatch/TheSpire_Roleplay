@@ -125,6 +125,7 @@ export async function dispatchChatInput(args: {
     return [
       "me", "he", "she", "they", "it", "em", "action", "pose", "emote",
       "whisper", "wh", "w", "to", "msg", "message", "pm",
+      "reply", "re",
       "roll", "dice",
       "topic",
     ].includes(cmd);

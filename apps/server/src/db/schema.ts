@@ -191,6 +191,12 @@ export const messages = sqliteTable(
     }),
     /** Snapshot of the recipient's display name at send time (whispers only). */
     toDisplayName: text("to_display_name"),
+    /** Id of the message this one is a reply to. Not a FK - if the parent is deleted we still keep the dangling id and render gracefully. */
+    replyToId: text("reply_to_id"),
+    /** Snapshot of parent author's display name (so renames/deletes don't blank the preview). */
+    replyToDisplayName: text("reply_to_display_name"),
+    /** Truncated snapshot of parent body for the inline quote preview. */
+    replyToBodySnippet: text("reply_to_body_snippet"),
     createdAt: ts("created_at"),
   },
   (t) => ({

@@ -16,6 +16,7 @@ import { awayCommand } from "./away.js";
 import { refreshCommand } from "./refresh.js";
 import { rollCommand } from "./roll.js";
 import { whisperCommand } from "./whisper.js";
+import { replyCommand } from "./reply.js";
 import { ignoreCommand, unignoreCommand } from "./ignore.js";
 import { usersCommand } from "./users.js";
 import { clearCommand, findCommand, listCommand } from "./rooms_list.js";
@@ -51,6 +52,7 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(refreshCommand);
   reg.registerBuiltin(rollCommand);
   reg.registerBuiltin(whisperCommand);
+  reg.registerBuiltin(replyCommand);
   reg.registerBuiltin(ignoreCommand);
   reg.registerBuiltin(unignoreCommand);
   reg.registerBuiltin(usersCommand);

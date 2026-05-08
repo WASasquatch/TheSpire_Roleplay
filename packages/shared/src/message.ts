@@ -24,4 +24,10 @@ export interface ChatMessage {
   toUserId?: string;
   /** present when kind === "whisper" - recipient display name snapshotted at send time */
   toDisplayName?: string;
+  /** Id of the message this one replies to. Absent on non-replies. */
+  replyToId?: string | null;
+  /** Snapshotted display name of the parent message's author (for inline quote preview). */
+  replyToDisplayName?: string | null;
+  /** Truncated snapshot of the parent body, used to render the inline quote preview. */
+  replyToBodySnippet?: string | null;
 }

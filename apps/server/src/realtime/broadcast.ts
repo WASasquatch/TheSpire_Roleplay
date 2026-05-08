@@ -38,6 +38,10 @@ export async function addMessage(
      * chatColor is used (default behavior).
      */
     color?: string | null;
+    /** Reply target. Caller is responsible for snapshotting display name + body snippet. */
+    replyToId?: string;
+    replyToDisplayName?: string;
+    replyToBodySnippet?: string;
   },
 ): Promise<void> {
   const id = nanoid();
@@ -57,6 +61,9 @@ export async function addMessage(
     body: payload.body,
     color: colorSnapshot,
     toUserId: payload.toUserId ?? null,
+    replyToId: payload.replyToId ?? null,
+    replyToDisplayName: payload.replyToDisplayName ?? null,
+    replyToBodySnippet: payload.replyToBodySnippet ?? null,
   });
   const out: ChatMessage = {
     id,
@@ -69,6 +76,9 @@ export async function addMessage(
     color: colorSnapshot,
     createdAt: +now,
     ...(payload.toUserId ? { toUserId: payload.toUserId } : {}),
+    ...(payload.replyToId ? { replyToId: payload.replyToId } : {}),
+    ...(payload.replyToDisplayName ? { replyToDisplayName: payload.replyToDisplayName } : {}),
+    ...(payload.replyToBodySnippet ? { replyToBodySnippet: payload.replyToBodySnippet } : {}),
   };
   await emitFiltered(ctx.io, ctx.db, ctx.roomId, ctx.user.id, out);
 }
@@ -281,6 +291,9 @@ export async function joinRoom(
       createdAt: +m.createdAt,
       ...(m.toUserId ? { toUserId: m.toUserId } : {}),
       ...(m.toDisplayName ? { toDisplayName: m.toDisplayName } : {}),
+      ...(m.replyToId ? { replyToId: m.replyToId } : {}),
+      ...(m.replyToDisplayName ? { replyToDisplayName: m.replyToDisplayName } : {}),
+      ...(m.replyToBodySnippet ? { replyToBodySnippet: m.replyToBodySnippet } : {}),
     }));
   socket.emit("message:bulk", backlog);
 

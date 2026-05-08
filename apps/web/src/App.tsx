@@ -526,14 +526,22 @@ function Chat() {
         <ProfileModal
           profile={openProfile}
           onClose={() => setOpenProfile(null)}
-          onWhisper={(name) => {
-            setOpenProfile(null);
-            setComposerText(`/whisper ${name} `);
-          }}
-          onIgnore={(name) => {
-            setOpenProfile(null);
-            send(`/ignore ${name}`);
-          }}
+          // Whisper / ignore are noise on your own profile - they're for
+          // interacting with someone else. Suppress when the profile's
+          // owning userId matches the viewer (covers your master profile
+          // and any of your characters - both shapes carry userId).
+          {...(me && openProfile.profile.userId !== me.id
+            ? {
+                onWhisper: (name: string) => {
+                  setOpenProfile(null);
+                  setComposerText(`/whisper ${name} `);
+                },
+                onIgnore: (name: string) => {
+                  setOpenProfile(null);
+                  send(`/ignore ${name}`);
+                },
+              }
+            : {})}
           onOpenProfile={(name) => {
             socket.emit("profile:fetch", { username: name }, (res) => {
               if (res.ok) setOpenProfile(res.profile);

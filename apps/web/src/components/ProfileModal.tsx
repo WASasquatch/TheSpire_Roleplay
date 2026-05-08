@@ -88,31 +88,35 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
                 </>
               ) : null}
             </div>
-            {/* Action row */}
-            <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
-              {onWhisper ? (
-                <button
-                  type="button"
-                  onClick={() => onWhisper(name)}
-                  className="rounded border border-keep-border bg-keep-bg px-2 py-1 hover:bg-keep-panel"
-                >
-                  Whisper
-                </button>
-              ) : null}
-              {onIgnore ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (window.confirm(`Ignore ${name}? You won't see their messages until you /unignore.`)) {
-                      onIgnore(name);
-                    }
-                  }}
-                  className="rounded border border-keep-accent/60 bg-keep-bg px-2 py-1 text-keep-accent hover:bg-keep-accent/10"
-                >
-                  Ignore
-                </button>
-              ) : null}
-            </div>
+            {/* Action row - only renders when at least one peer-action
+                handler was passed. Self-views (App suppresses these) get
+                no empty container with stray margins. */}
+            {onWhisper || onIgnore ? (
+              <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
+                {onWhisper ? (
+                  <button
+                    type="button"
+                    onClick={() => onWhisper(name)}
+                    className="rounded border border-keep-border bg-keep-bg px-2 py-1 hover:bg-keep-panel"
+                  >
+                    Whisper
+                  </button>
+                ) : null}
+                {onIgnore ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`Ignore ${name}? You won't see their messages until you /unignore.`)) {
+                        onIgnore(name);
+                      }
+                    }}
+                    className="rounded border border-keep-accent/60 bg-keep-bg px-2 py-1 text-keep-accent hover:bg-keep-accent/10"
+                  >
+                    Ignore
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <button
             type="button"

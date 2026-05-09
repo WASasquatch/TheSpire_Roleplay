@@ -44,5 +44,6 @@ export async function loadSessionUser(db: Db, userId: string): Promise<SessionUs
     displayName,
     chatColor: u.chatColor,
     awayMessage: u.awayMessage,
+    currentMood: u.currentMood,
   };
 }

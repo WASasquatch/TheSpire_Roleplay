@@ -26,12 +26,14 @@ type Sock = Socket<ClientToServerEvents, ServerToClientEvents>;
  * users who disconnect and never come back.
  */
 const RATE_MAX = 12;
+/** Trusted accounts get 2× the headroom - earned via the auto-promotion sweep. */
+const RATE_MAX_TRUSTED = 24;
 const RATE_WINDOW_MS = 10_000;
 const COOLDOWN_MS = 5_000;
 const recentByUser = new Map<string, number[]>();
 const cooldownUntil = new Map<string, number>();
 
-function checkChatRate(userId: string, now: number): { ok: true } | { ok: false; retryMs: number } {
+function checkChatRate(userId: string, now: number, max: number): { ok: true } | { ok: false; retryMs: number } {
   const cooldown = cooldownUntil.get(userId) ?? 0;
   if (cooldown > now) return { ok: false, retryMs: cooldown - now };
 
@@ -42,7 +44,7 @@ function checkChatRate(userId: string, now: number): { ok: true } | { ok: false;
   while (i < window.length && window[i]! < cutoff) i++;
   const fresh = i > 0 ? window.slice(i) : window;
 
-  if (fresh.length >= RATE_MAX) {
+  if (fresh.length >= max) {
     cooldownUntil.set(userId, now + COOLDOWN_MS);
     return { ok: false, retryMs: COOLDOWN_MS };
   }
@@ -72,12 +74,15 @@ export async function dispatchChatInput(args: {
     return;
   }
 
-  // Per-user rate limit (admins exempt - moderation flurries shouldn't get
-  // throttled). The limiter applies to ALL chat:input - slash commands
-  // included - because a flood of /me or /roll is just as disruptive as
-  // a flood of plain text.
-  if (user.role !== "admin") {
-    const rate = checkChatRate(user.id, Date.now());
+  // Per-user rate limit. Site mods and admins are exempt entirely
+  // (moderation flurries shouldn't get throttled). Trusted users (auto-
+  // promoted by the janitor after the trust thresholds are met) get a 2×
+  // budget; everyone else uses the default cap. The limiter applies to ALL
+  // chat:input - slash commands included - because a flood of /me or /roll
+  // is just as disruptive as a flood of plain text.
+  if (user.role !== "admin" && user.role !== "mod") {
+    const max = user.role === "trusted" ? RATE_MAX_TRUSTED : RATE_MAX;
+    const rate = checkChatRate(user.id, Date.now(), max);
     if (!rate.ok) {
       socket.emit("error:notice", {
         code: "RATE_LIMIT",
@@ -128,6 +133,7 @@ export async function dispatchChatInput(args: {
       "reply", "re",
       "roll", "dice",
       "topic",
+      "scene", "npc",
     ].includes(cmd);
   };
   if (mutedFor !== null && isSpeechCommand(parsed.command)) {
@@ -184,6 +190,9 @@ export async function dispatchChatInput(args: {
 }
 
 function hasPermission(user: SessionUser, required: "user" | "mod" | "admin"): boolean {
-  const order = { user: 0, mod: 1, admin: 2 } as const;
+  // `trusted` sits between `user` and `mod` - elevated rate limits / extra
+  // privileges, but no moderation authority. Maps to ordinal 1; the next
+  // tier (`mod`) is 2 so a `mod`-required command still rejects `trusted`.
+  const order = { user: 0, trusted: 1, mod: 2, admin: 3 } as const;
   return order[user.role] >= order[required];
 }

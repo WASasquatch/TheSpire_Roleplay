@@ -72,6 +72,8 @@ export function UserList({
               away={o.away}
               awayMessage={o.awayMessage ?? null}
               rolePrefix={o.role === "owner" ? "♛" : o.role === "mod" ? "★" : ""}
+              italic={o.accountRole === "admin"}
+              mood={o.mood ?? null}
               onIconClick={() => onIconClick(o.userId, o.displayName)}
               onNameClick={() => onNameClick(o.userId, o.displayName)}
             />

@@ -43,6 +43,10 @@ export interface SiteSettings {
   metaDescription: string;
   /** Verbatim HTML injected into <head> on the server-rendered splash (analytics scripts). */
   customHeadHtml: string;
+  /** Web Push VAPID public key. Safe to ship to clients. Null until first boot generates it. */
+  vapidPublicKey: string | null;
+  /** Web Push VAPID private key. NEVER expose to clients. */
+  vapidPrivateKey: string | null;
   updatedAt: number;
 }
 
@@ -168,6 +172,35 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     registerDisclaimerHtml: row.registerDisclaimerHtml,
     metaDescription: row.metaDescription,
     customHeadHtml: row.customHeadHtml,
+    vapidPublicKey: row.vapidPublicKey,
+    vapidPrivateKey: row.vapidPrivateKey,
     updatedAt: +row.updatedAt,
   };
+}
+
+/**
+ * Idempotently ensure VAPID keys exist on the singleton row. Generated at
+ * first boot and persisted so deploys don't churn keys (which would
+ * silently invalidate every existing subscription). Called from the boot
+ * sequence; safe to re-call on every start.
+ *
+ * Returns the public key (never the private one) so callers can hand it to
+ * the front-end without poking through SiteSettings.
+ */
+export async function ensureVapidKeys(db: Db): Promise<{ publicKey: string }> {
+  const s = await ensureSiteSettings(db);
+  if (s.vapidPublicKey && s.vapidPrivateKey) {
+    return { publicKey: s.vapidPublicKey };
+  }
+  // Lazy-import web-push so the dep can stay server-only and the type
+  // import doesn't pull into the shared bundle.
+  const webPush = await import("web-push");
+  const keys = webPush.default.generateVAPIDKeys();
+  await db.update(siteSettings).set({
+    vapidPublicKey: keys.publicKey,
+    vapidPrivateKey: keys.privateKey,
+  }).where(eq(siteSettings.id, "singleton"));
+  cached = null;
+  await getSettings(db);
+  return { publicKey: keys.publicKey };
 }

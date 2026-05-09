@@ -1,12 +1,32 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, isNull, sql } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { z } from "zod";
-import { characters, users } from "../db/schema.js";
+import type { Server as IoServer } from "socket.io";
+import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
+import { characterPortraits, characters, users } from "../db/schema.js";
 import { sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
 import { normalizeTheme } from "@thekeep/shared";
 import { getSettings } from "../settings.js";
+import { broadcastPresence } from "../realtime/broadcast.js";
 import type { Db } from "../db/index.js";
+
+type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
+
+/** Same regex used by `/char create` so the two creation paths stay in lockstep. */
+const CHAR_NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
+const createCharacterBody = z.object({ name: z.string().min(1).max(40) }).strict();
+const activeCharacterBody = z.object({
+  /** null clears the active character (drops the user back to OOC). */
+  characterId: z.string().nullable(),
+}).strict();
+
+/** Per-character portrait gallery cap. Hard upper bound; admins might tune later. */
+const PORTRAIT_CAP_PER_CHARACTER = 12;
+// `createPortraitBody` / `updatePortraitBody` use the same `httpUrl`
+// validator the avatar field uses; both schemas are declared further down
+// the file once httpUrl is in scope.
 
 const HEX_RX = /^#[0-9a-fA-F]{6}$/;
 const themeSchema = z.object({
@@ -61,6 +81,17 @@ const masterUpdateBody = z.object({
   notifyPref: z.enum(["off", "mentions", "all"]).optional(),
 });
 
+const createPortraitBody = z.object({
+  url: httpUrl,
+  label: z.string().max(60).optional(),
+  nsfw: z.boolean().optional(),
+}).strict();
+const updatePortraitBody = z.object({
+  label: z.string().max(60).nullable().optional(),
+  sortOrder: z.number().int().min(0).max(1000).optional(),
+  nsfw: z.boolean().optional(),
+}).strict();
+
 async function checkBioCap(
   db: Db,
   reply: FastifyReply,
@@ -76,7 +107,7 @@ async function checkBioCap(
   return true;
 }
 
-export async function registerCharacterRoutes(app: FastifyInstance, db: Db): Promise<void> {
+export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
   /** Save a character's editor body. */
   app.put<{ Params: { id: string }; Body: unknown }>(
     "/characters/:id",
@@ -137,6 +168,102 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db): Pro
     return { characters: list };
   });
 
+  /**
+   * Create a new character under the authenticated user. Mirrors the validation
+   * in `/char create` (apps/server/src/commands/builtins/char.ts) so both paths
+   * apply the same name rules, duplicate guard, and per-user limit.
+   */
+  app.post<{ Body: unknown }>("/characters", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+
+    let body: { name: string };
+    try { body = createCharacterBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+
+    const name = body.name.trim();
+    if (!CHAR_NAME_RX.test(name)) {
+      reply.code(400);
+      return { error: "Character name must be 1-40 chars: letters, numbers, spaces, _ - '" };
+    }
+
+    const existing = (await db
+      .select()
+      .from(characters)
+      .where(and(
+        eq(characters.userId, me.id),
+        sql`lower(${characters.name}) = ${name.toLowerCase()}`,
+        isNull(characters.deletedAt),
+      ))
+      .limit(1))[0];
+    if (existing) {
+      reply.code(409);
+      return { error: `You already have a character named "${name}".` };
+    }
+
+    const countRows = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(characters)
+      .where(and(eq(characters.userId, me.id), isNull(characters.deletedAt)));
+    const count = countRows[0]?.n ?? 0;
+    const { maxCharactersPerUser } = await getSettings(db);
+    if (count >= maxCharactersPerUser) {
+      reply.code(429);
+      return { error: `Limit of ${maxCharactersPerUser} characters per account.` };
+    }
+
+    const id = nanoid();
+    await db.insert(characters).values({ id, userId: me.id, name });
+    const c = (await db.select().from(characters).where(eq(characters.id, id)).limit(1))[0];
+    reply.code(201);
+    return c;
+  });
+
+  /**
+   * Soft-delete a character. Mirrors the `/char delete` chat command:
+   *   - sets deletedAt (history rows still resolve their snapshotted name)
+   *   - if it was the user's active character, clears it and re-broadcasts
+   *     presence in every room their sockets are joined to so other
+   *     occupants see the rename back to OOC immediately.
+   */
+  app.delete<{ Params: { id: string } }>("/characters/:id", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
+    if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
+    if (c.userId !== me.id && me.role !== "admin") {
+      reply.code(403);
+      return { error: "not yours" };
+    }
+
+    await db.update(characters).set({ deletedAt: new Date() }).where(eq(characters.id, c.id));
+
+    // Look up the owner row so we can detect "was this their active character".
+    // We use c.userId (the owner) rather than me.id because admins can delete
+    // someone else's character - in that case the owner still needs the
+    // active-character cleared if they had switched to it.
+    const owner = (await db.select().from(users).where(eq(users.id, c.userId)).limit(1))[0];
+    if (owner?.activeCharacterId === c.id) {
+      await db.update(users).set({ activeCharacterId: null }).where(eq(users.id, owner.id));
+      // Re-broadcast presence in every room the owner is currently joined to
+      // so other occupants see the displayName fall back to their username.
+      // Different rooms can dedupe themselves; a Set across socket.rooms is enough.
+      const sockets = await io.fetchSockets();
+      const rooms = new Set<string>();
+      for (const s of sockets) {
+        if ((s.data as { userId?: string }).userId !== owner.id) continue;
+        for (const r of s.rooms) {
+          if (r.startsWith("room:")) rooms.add(r.slice(5));
+        }
+      }
+      for (const roomId of rooms) {
+        await broadcastPresence(io, db, roomId);
+      }
+    }
+
+    return { ok: true };
+  });
+
   /** Read your own master profile (used by the editor to populate). */
   app.get("/me/profile", async (req, reply) => {
     const me = await getSessionUser(req, db);
@@ -168,7 +295,168 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db): Pro
       activeCharacterName,
       theme: await parseUserTheme(db, u.themeJson),
       notifyPref: u.notifyPref,
+      role: u.role,
     };
+  });
+
+  /* ===========================================================
+   *  Character portrait gallery (multi-portrait per character)
+   * =========================================================== */
+
+  /** List portraits for a character. Owner-only; admins also pass. */
+  app.get<{ Params: { id: string } }>("/characters/:id/portraits", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
+    if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
+    if (c.userId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+    const list = await db
+      .select()
+      .from(characterPortraits)
+      .where(eq(characterPortraits.characterId, c.id));
+    list.sort((a, b) => a.sortOrder - b.sortOrder || +a.createdAt - +b.createdAt);
+    return { portraits: list };
+  });
+
+  /** Add a new portrait. Validates the URL the same way avatarUrl is validated. */
+  app.post<{ Params: { id: string }; Body: unknown }>("/characters/:id/portraits", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
+    if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
+    if (c.userId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+
+    let body;
+    try { body = createPortraitBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+
+    const countRows = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(characterPortraits)
+      .where(eq(characterPortraits.characterId, c.id));
+    const count = countRows[0]?.n ?? 0;
+    if (count >= PORTRAIT_CAP_PER_CHARACTER) {
+      reply.code(429);
+      return { error: `Limit of ${PORTRAIT_CAP_PER_CHARACTER} extra portraits per character.` };
+    }
+
+    const id = nanoid();
+    // New portraits go to the end of the gallery by default. Caller can
+    // reorder via PATCH afterwards.
+    const sortOrder = count;
+    await db.insert(characterPortraits).values({
+      id,
+      characterId: c.id,
+      url: body.url,
+      label: body.label ?? null,
+      sortOrder,
+      nsfw: body.nsfw ?? false,
+    });
+    const row = (await db
+      .select()
+      .from(characterPortraits)
+      .where(eq(characterPortraits.id, id))
+      .limit(1))[0];
+    reply.code(201);
+    return row;
+  });
+
+  /** Update a portrait's label or position. */
+  app.patch<{ Params: { id: string; portraitId: string }; Body: unknown }>(
+    "/characters/:id/portraits/:portraitId",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
+      if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
+      if (c.userId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+
+      let body;
+      try { body = updatePortraitBody.parse(req.body); }
+      catch { reply.code(400); return { error: "invalid body" }; }
+
+      const p = (await db
+        .select()
+        .from(characterPortraits)
+        .where(eq(characterPortraits.id, req.params.portraitId))
+        .limit(1))[0];
+      if (!p || p.characterId !== c.id) { reply.code(404); return { error: "not found" }; }
+
+      await db
+        .update(characterPortraits)
+        .set({
+          ...(body.label !== undefined ? { label: body.label } : {}),
+          ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+          ...(body.nsfw !== undefined ? { nsfw: body.nsfw } : {}),
+        })
+        .where(eq(characterPortraits.id, p.id));
+      return { ok: true };
+    },
+  );
+
+  /** Delete a portrait. */
+  app.delete<{ Params: { id: string; portraitId: string } }>(
+    "/characters/:id/portraits/:portraitId",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
+      if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
+      if (c.userId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+
+      const p = (await db
+        .select()
+        .from(characterPortraits)
+        .where(eq(characterPortraits.id, req.params.portraitId))
+        .limit(1))[0];
+      if (!p || p.characterId !== c.id) { reply.code(404); return { error: "not found" }; }
+
+      await db.delete(characterPortraits).where(eq(characterPortraits.id, p.id));
+      return { ok: true };
+    },
+  );
+
+  /**
+   * Switch the caller's active character (or clear it with `characterId: null`).
+   * Mirrors the server-side effects of `/char switch <name>`: writes the new
+   * activeCharacterId, then re-broadcasts presence in every room one of the
+   * user's sockets is currently joined to so other occupants see the
+   * displayName change immediately.
+   */
+  app.put<{ Body: unknown }>("/me/active-character", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+
+    let body: { characterId: string | null };
+    try { body = activeCharacterBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+
+    if (body.characterId !== null) {
+      const c = (await db.select().from(characters).where(eq(characters.id, body.characterId)).limit(1))[0];
+      if (!c || c.deletedAt || c.userId !== me.id) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+    }
+
+    await db.update(users).set({ activeCharacterId: body.characterId }).where(eq(users.id, me.id));
+
+    // Re-broadcast presence in every room any of this user's sockets are
+    // currently in so other occupants see the rename without waiting for
+    // their next interaction. Same shape as the character-delete path.
+    const sockets = await io.fetchSockets();
+    const rooms = new Set<string>();
+    for (const s of sockets) {
+      if ((s.data as { userId?: string }).userId !== me.id) continue;
+      for (const r of s.rooms) {
+        if (r.startsWith("room:")) rooms.add(r.slice(5));
+      }
+    }
+    for (const roomId of rooms) {
+      await broadcastPresence(io, db, roomId);
+    }
+
+    return { ok: true };
   });
 
   /** Master account profile editor. */

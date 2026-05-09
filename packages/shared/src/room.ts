@@ -12,6 +12,8 @@ export interface RoomSummary {
   topic: string | null;
   ownerId: string | null;
   memberCount: number;
+  /** When true, /npc is rejected in this room. Owners/mods toggle. Optional for forward-compat. */
+  npcDisabled?: boolean;
 }
 
 export type Gender = "male" | "female" | "nonbinary" | "other" | "undisclosed";
@@ -27,5 +29,10 @@ export interface RoomOccupant {
   chatColor?: string | null;
   /** Resolved gender - character.stats.gender if active, else user.gender */
   gender: Gender;
+  /** Per-room role (room_members.role). */
   role: "owner" | "mod" | "member";
+  /** Account-level role (users.role). Lets the UI mark site admins regardless of room role. Optional for forward-compat. */
+  accountRole?: "user" | "trusted" | "mod" | "admin";
+  /** Free-text current mood/expression set via /mood. Null/absent when unset. */
+  mood?: string | null;
 }

@@ -24,6 +24,7 @@ import { registerBuiltins } from "./commands/builtins/index.js";
 import { dispatchChatInput } from "./realtime/dispatch.js";
 import {
   addSystemMessage,
+  shouldAnnouncePresenceEvent,
   broadcastPresence,
   expireIfEmpty,
   joinRoom,
@@ -43,6 +44,10 @@ import { readFile } from "node:fs/promises";
 import { extendSession, loadSessionUser } from "./auth/session.js";
 import { registerAuthRoutes, getSessionUser, userIdFromSessionId, SESSION_COOKIE_NAME } from "./routes/auth.js";
 import { registerCharacterRoutes } from "./routes/characters.js";
+import { registerMessageRoutes } from "./routes/messages.js";
+import { registerReportRoutes } from "./routes/reports.js";
+import { registerPushRoutes } from "./routes/push.js";
+import { initPush } from "./push.js";
 import { registerCommandsRoutes } from "./routes/commands.js";
 import { registerNavLinkRoutes } from "./routes/nav-links.js";
 import { registerRoomsRoutes } from "./routes/rooms.js";
@@ -128,7 +133,6 @@ async function main() {
   // base instance shape just for the registrar calls.
   const baseApp = app as unknown as FastifyInstance;
   await registerAuthRoutes(baseApp, db);
-  await registerCharacterRoutes(baseApp, db);
   await registerCommandsRoutes(baseApp, db, registry);
   await registerNavLinkRoutes(baseApp, db, async (req) => {
     const u = await getSessionUser(req, db);
@@ -211,7 +215,15 @@ async function main() {
   });
 
   // Routes that need io for socket-room introspection (currently-online
-  // occupants per room, etc.) - registered after io is constructed.
+  // occupants per room, presence rebroadcast on character delete, etc.) -
+  // registered after io is constructed.
+  await registerCharacterRoutes(baseApp, db, io);
+  await registerMessageRoutes(baseApp, db, io);
+  await registerReportRoutes(baseApp, db);
+  await registerPushRoutes(baseApp, db);
+  // Generate VAPID keys at first boot if missing, then configure web-push.
+  // Idempotent on subsequent starts; survives deploys via the persisted keys.
+  await initPush(db);
   await registerStatsRoutes(baseApp, db, io);
   await registerUsersRoutes(baseApp, db, io);
   await registerRoomsRoutes(baseApp, db, io);
@@ -493,7 +505,13 @@ async function main() {
               const body = fullyOffline
                 ? `${displayName} has disconnected.`
                 : `${displayName} left.`;
-              await addSystemMessage(io, db, id, body);
+              // "left." is room-local and uncommon - emit always. "has
+              // disconnected." can race during reconnection storms (multiple
+              // tabs all losing their socket at once after a server reload),
+              // so we gate it through the per-user dedup window so users see
+              // one disconnect line per real session change.
+              const allow = !fullyOffline || shouldAnnouncePresenceEvent(userId, "disconnect");
+              if (allow) await addSystemMessage(io, db, id, body);
             }
             await broadcastPresence(io, db, id);
           }
@@ -603,7 +621,7 @@ async function main() {
         }
         // Don't SPA-fallback API-shaped paths - these should genuinely 404
         // so a typo'd /admin/foo doesn't return HTML and confuse a fetch().
-        const apiPrefixes = ["/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/me", "/health", "/users", "/site", "/rules", "/socket.io"];
+        const apiPrefixes = ["/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/messages", "/reports", "/push", "/me", "/health", "/users", "/site", "/rules", "/socket.io"];
         if (apiPrefixes.some((p) => req.url === p || req.url.startsWith(p + "/") || req.url.startsWith(p + "?"))) {
           reply.code(404);
           return reply.send({ error: "not found" });

@@ -44,6 +44,14 @@ export interface ProfileTitle {
   other: IdentityRef;
 }
 
+export interface CharacterPortrait {
+  id: string;
+  url: string;
+  label: string | null;
+  /** Owner-set NSFW flag. When true, viewers see the tile blurred until they click to reveal. */
+  nsfw: boolean;
+}
+
 export interface CharacterProfile {
   id: string;
   userId: string;
@@ -52,6 +60,8 @@ export interface CharacterProfile {
   bioHtml: string;
   stats: CharacterStats;
   avatarUrl: string | null;
+  /** Additional portraits beyond the primary avatarUrl, in the order the owner set. */
+  portraits: CharacterPortrait[];
   /** Owner's chosen UI theme - applied to the profile modal when others view it. */
   theme: Theme;
   /** Mutual titles (marriages, partnerships, etc.) bound to this character. */
@@ -71,6 +81,8 @@ export interface MasterProfile {
   theme: Theme;
   /** Mutual titles bound to this master account (separate from any character titles). */
   titles: ProfileTitle[];
+  /** Account-level role. Surfaced on the modal so site admins/mods are visibly marked. */
+  role: "user" | "trusted" | "mod" | "admin";
   createdAt: number;
 }
 

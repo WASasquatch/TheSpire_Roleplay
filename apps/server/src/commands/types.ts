@@ -8,7 +8,7 @@ import type { Db } from "../db/index.js";
 export interface SessionUser {
   id: string;
   username: string;
-  role: "user" | "mod" | "admin";
+  role: "user" | "trusted" | "mod" | "admin";
   activeCharacterId: string | null;
   /** display name resolved from active character or master username */
   displayName: string;
@@ -16,6 +16,8 @@ export interface SessionUser {
   chatColor: string | null;
   /** null = present; string = away with reason */
   awayMessage: string | null;
+  /** Free-text mood/expression snapshotted onto outgoing messages; null = none. */
+  currentMood: string | null;
 }
 
 export interface CommandContext {

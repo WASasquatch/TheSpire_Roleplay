@@ -116,6 +116,7 @@ function Chat() {
   const setRoom = useChat((s) => s.setRoom);
   const setOccupants = useChat((s) => s.setOccupants);
   const appendMessage = useChat((s) => s.appendMessage);
+  const updateMessage = useChat((s) => s.updateMessage);
   const setMessages = useChat((s) => s.setMessages);
   const setCurrentRoom = useChat((s) => s.setCurrentRoom);
   const setNotice = useChat((s) => s.setNotice);
@@ -298,6 +299,34 @@ function Chat() {
     socket.on("message:bulk", (msgs: ChatMessage[]) => {
       if (msgs.length) setMessages(msgs[0]!.roomId, msgs);
     });
+    socket.on("message:update", (msg: ChatMessage) => updateMessage(msg));
+    socket.on("watch:online", ({ username, displayName }) => {
+      // Surface a small system line in the current room so the user sees
+      // it inline (and it sticks in the timeline). Desktop toast is fired
+      // separately - watchers usually want both surfaces.
+      const body = displayName === username
+        ? `${username} is online.`
+        : `${displayName} (${username}) is online.`;
+      const id = `watch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const roomId = useChat.getState().currentRoomId;
+      if (roomId) {
+        appendMessage({
+          id,
+          roomId,
+          userId: "system",
+          characterId: null,
+          displayName: "system",
+          kind: "system",
+          body: `☆ ${body}`,
+          color: null,
+          createdAt: Date.now(),
+        });
+      }
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        try { new Notification("Watching", { body, icon: "/favicon.ico", tag: `watch-${username}` }); }
+        catch { /* ignore */ }
+      }
+    });
     socket.on("error:notice", (n) => setNotice(n));
     socket.on("auth:expired", () => {
       // Server invalidated the session (idle window elapsed, admin disabled
@@ -378,12 +407,14 @@ function Chat() {
       socket.off("presence:update");
       socket.off("message:new");
       socket.off("message:bulk");
+      socket.off("message:update");
+      socket.off("watch:online");
       socket.off("error:notice");
       socket.off("auth:expired");
       socket.off("ui:hint");
       socket.off("mutual:settled");
     };
-  }, [socket, setRoom, setOccupants, appendMessage, setMessages, setCurrentRoom, setNotice, setHint, setOpenProfile, openEditor, setRefreshIntervalSec, setMe]);
+  }, [socket, setRoom, setOccupants, appendMessage, updateMessage, setMessages, setCurrentRoom, setNotice, setHint, setOpenProfile, openEditor, setRefreshIntervalSec, setMe]);
 
   function send(text: string) {
     if (!currentRoomId) return;
@@ -486,6 +517,8 @@ function Chat() {
           <MessageList
             messages={messages}
             occupants={occ}
+            selfUserId={me?.id ?? null}
+            roomType={room?.type ?? null}
             onIconClick={onIconClick}
             onNameClick={onNameClick}
             onMentionClick={onMentionClick}
@@ -500,6 +533,7 @@ function Chat() {
             value={composerText}
             onChange={setComposerText}
             onSend={send}
+            occupants={occ}
             onOpenRail={() => setRailOpen(true)}
           />
         </main>
@@ -553,6 +587,60 @@ function Chat() {
                 },
               }
             : {})}
+          // Active-character action — only renders on profiles the viewer
+          // owns. Three cases:
+          //   * master profile + viewer has an active char → "Switch to OOC"
+          //     (clears active character)
+          //   * a non-active character of theirs            → "Switch to <name>"
+          //   * the currently-active character              → "Disable <name>"
+          // All three call the same endpoint the editor uses; afterwards
+          // bump themeVersion so chat re-fetches /me/profile and re-applies
+          // the right theme.
+          {...(() => {
+            if (!me || openProfile.profile.userId !== me.id) return {};
+            const isMaster = openProfile.kind === "master";
+            const isCharacterOpen = openProfile.kind === "character";
+            const openCharId = isCharacterOpen ? openProfile.profile.id : null;
+            const isActiveOpen = isCharacterOpen && openCharId === activeCharacterId;
+
+            let label: string | null = null;
+            let nextCharacterId: string | null | undefined = undefined;
+            if (isMaster && activeCharacterId) {
+              label = "Switch to OOC";
+              nextCharacterId = null;
+            } else if (isCharacterOpen && !isActiveOpen) {
+              label = `Switch to ${openProfile.profile.name}`;
+              nextCharacterId = openCharId;
+            } else if (isCharacterOpen && isActiveOpen) {
+              label = `Disable ${openProfile.profile.name}`;
+              nextCharacterId = null;
+            }
+            if (!label || nextCharacterId === undefined) return {};
+
+            const targetId = nextCharacterId;
+            return {
+              activeCharacterAction: {
+                label,
+                onClick: () => {
+                  fetch("/me/active-character", {
+                    method: "PUT",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ characterId: targetId }),
+                  })
+                    .then(async (r) => {
+                      if (!r.ok) {
+                        const j = (await r.json().catch(() => ({} as { error?: string })));
+                        throw new Error(j.error ?? `HTTP ${r.status}`);
+                      }
+                      setOpenProfile(null);
+                      setThemeVersion((v) => v + 1);
+                    })
+                    .catch((err) => setNotice({ code: "SWITCH_FAILED", message: err instanceof Error ? err.message : "switch failed" }));
+                },
+              },
+            };
+          })()}
           onOpenProfile={(name) => {
             socket.emit("profile:fetch", { username: name }, (res) => {
               if (res.ok) setOpenProfile(res.profile);

@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import {
+  auditLog,
   customCommandAliases,
   customCommands,
   mutualTitles,
@@ -13,16 +14,18 @@ import {
   titleKinds,
   users,
 } from "../db/schema.js";
+import type { AuditEntry } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import type { CommandRegistry } from "../commands/registry.js";
 import { broadcastPresence, broadcastRoomState } from "../realtime/broadcast.js";
 import { getSettings, updateSettings } from "../settings.js";
+import { recordAudit } from "../audit.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
 interface SessionUserCtx {
   id: string;
-  role: "user" | "mod" | "admin";
+  role: "user" | "trusted" | "mod" | "admin";
 }
 
 /**
@@ -312,6 +315,16 @@ export async function registerAdminRoutes(
     }
 
     await db.delete(rooms).where(eq(rooms.id, room.id));
+    const actor = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
+    if (actor) {
+      await recordAudit(db, {
+        actorUserId: actor.id,
+        action: "room_delete",
+        // The room is gone so the FK would set null anyway; we keep the
+        // metadata for queryability instead.
+        metadata: { roomId: room.id, roomName: room.name, type: room.type, isSystem: room.isSystem },
+      });
+    }
 
     if (main && remoteSockets.length > 0) {
       await broadcastRoomState(io, db, main.id);
@@ -478,7 +491,15 @@ export async function registerAdminRoutes(
     if (body.customHeadHtml !== undefined) {
       patch.customHeadHtml = body.customHeadHtml;
     }
-    return settingsResponse(await updateSettings(db, patch, sessionUser.id));
+    const result = settingsResponse(await updateSettings(db, patch, sessionUser.id));
+    await recordAudit(db, {
+      actorUserId: sessionUser.id,
+      action: "settings_update",
+      // Record which fields were touched so the audit reads as "changed
+      // welcomeHtml + maxMessageLength" rather than dumping a 50KB HTML diff.
+      metadata: { keys: Object.keys(patch) },
+    });
+    return result;
   });
 
   /* ---------- custom commands ---------- */
@@ -538,6 +559,11 @@ export async function registerAdminRoutes(
       );
     }
     await registry.reloadCustom(db);
+    await recordAudit(db, {
+      actorUserId: sessionUser.id,
+      action: "custom_command_create",
+      metadata: { id, name: body.name.toLowerCase(), kind: body.kind },
+    });
     return { id };
   });
 
@@ -576,13 +602,26 @@ export async function registerAdminRoutes(
         }
       }
       await registry.reloadCustom(db);
+      const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+      await recordAudit(db, {
+        actorUserId: sessionUser.id,
+        action: "custom_command_update",
+        metadata: { id: req.params.id, keys: Object.keys(body) },
+      });
       return { ok: true };
     },
   );
 
   app.delete<{ Params: { id: string } }>("/admin/custom-commands/:id", async (req) => {
+    const existing = (await db.select().from(customCommands).where(eq(customCommands.id, req.params.id)).limit(1))[0];
     await db.delete(customCommands).where(eq(customCommands.id, req.params.id));
     await registry.reloadCustom(db);
+    const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+    await recordAudit(db, {
+      actorUserId: sessionUser.id,
+      action: "custom_command_delete",
+      metadata: { id: req.params.id, ...(existing ? { name: existing.name } : {}) },
+    });
     return { ok: true };
   });
 
@@ -707,5 +746,76 @@ export async function registerAdminRoutes(
     // Cascade by FK: deletes all mutual_titles rows of this kind too.
     await db.delete(titleKinds).where(eq(titleKinds.id, req.params.id));
     return { ok: true };
+  });
+
+  /* ---------- audit log ---------- */
+  /**
+   * Hydrated audit feed. Resolves actor + target user/room display names so
+   * the panel renders legibly without N+1 client requests. Optional filters:
+   *
+   *   ?action=ban         → exact match
+   *   ?actor=<userId>     → by actor
+   *   ?target=<userId>    → by target user
+   *   ?room=<roomId>      → by target room
+   *   ?limit=200          → cap rows (default 200, max 500)
+   */
+  app.get<{ Querystring: Record<string, string | undefined> }>("/admin/audit", async (req) => {
+    const limit = Math.min(500, parseInt(req.query.limit ?? "200", 10) || 200);
+    const conditions = [] as ReturnType<typeof eq>[];
+    if (req.query.action) conditions.push(eq(auditLog.action, req.query.action));
+    if (req.query.actor) conditions.push(eq(auditLog.actorUserId, req.query.actor));
+    if (req.query.target) conditions.push(eq(auditLog.targetUserId, req.query.target));
+    if (req.query.room) conditions.push(eq(auditLog.targetRoomId, req.query.room));
+
+    const rows = conditions.length === 0
+      ? await db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(limit)
+      : await db.select().from(auditLog).where(and(...conditions)).orderBy(desc(auditLog.createdAt)).limit(limit);
+
+    if (rows.length === 0) return { entries: [] };
+
+    // Hydrate referenced users/rooms in a single batched fetch.
+    const userIds = new Set<string>();
+    const roomIds = new Set<string>();
+    for (const r of rows) {
+      userIds.add(r.actorUserId);
+      if (r.targetUserId) userIds.add(r.targetUserId);
+      if (r.targetRoomId) roomIds.add(r.targetRoomId);
+    }
+    const [userRows, roomRows] = await Promise.all([
+      userIds.size > 0
+        ? db.select().from(users).where(sql`${users.id} IN (${sql.join([...userIds].map((u) => sql`${u}`), sql`, `)})`)
+        : Promise.resolve([] as { id: string; username: string }[]),
+      roomIds.size > 0
+        ? db.select().from(rooms).where(sql`${rooms.id} IN (${sql.join([...roomIds].map((r) => sql`${r}`), sql`, `)})`)
+        : Promise.resolve([] as { id: string; name: string }[]),
+    ]);
+    const userById = new Map(userRows.map((u) => [u.id, u]));
+    const roomById = new Map(roomRows.map((r) => [r.id, r]));
+
+    const entries: AuditEntry[] = rows.map((r) => {
+      const actor = userById.get(r.actorUserId);
+      const target = r.targetUserId ? userById.get(r.targetUserId) : null;
+      const room = r.targetRoomId ? roomById.get(r.targetRoomId) : null;
+      let metadata: Record<string, unknown> | null = null;
+      if (r.metadataJson) {
+        try { metadata = JSON.parse(r.metadataJson) as Record<string, unknown>; }
+        catch { metadata = null; }
+      }
+      return {
+        id: r.id,
+        actorUserId: r.actorUserId,
+        actorDisplayName: actor?.username ?? "(deleted user)",
+        action: r.action as AuditEntry["action"],
+        targetUserId: r.targetUserId,
+        targetDisplayName: target?.username ?? null,
+        targetRoomId: r.targetRoomId,
+        targetRoomName: room?.name ?? null,
+        targetMessageId: r.targetMessageId,
+        reason: r.reason,
+        metadata,
+        createdAt: +r.createdAt,
+      };
+    });
+    return { entries };
   });
 }

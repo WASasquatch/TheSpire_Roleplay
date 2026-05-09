@@ -5,6 +5,8 @@ export type MessageKind =
   | "whisper"  // 1:1 private message - only sender + recipient receive
   | "roll"     // dice roll output: "<DisplayName> rolls 1d20: 17"
   | "announce" // admin broadcast
+  | "scene"    // owner/mod scene-marker banner ("Scene begins: ...")
+  | "npc"      // NPC voiced by a user; rendered with a "voiced by" tag
   | "ooc";     // out-of-character aside
 
 export interface ChatMessage {
@@ -30,4 +32,12 @@ export interface ChatMessage {
   replyToDisplayName?: string | null;
   /** Truncated snapshot of the parent body, used to render the inline quote preview. */
   replyToBodySnippet?: string | null;
+  /** Snapshotted mood/expression of the author at send time. Renders as a chip next to the name. */
+  moodSnapshot?: string | null;
+  /** For `kind === "npc"` only: the master username of the user who voiced this NPC. */
+  npcVoicedBy?: string | null;
+  /** Set when the author edited the message inside the grace window. Epoch ms. */
+  editedAt?: number | null;
+  /** Set when the author deleted the message inside the grace window. Renderer shows "[message removed]". */
+  deletedAt?: number | null;
 }

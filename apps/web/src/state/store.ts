@@ -147,6 +147,8 @@ interface ChatState {
   messagesByRoom: Record<string, ChatMessage[]>;
 
   appendMessage: (msg: ChatMessage) => void;
+  /** Replace an existing message in-place (used for edit/delete grace updates). */
+  updateMessage: (msg: ChatMessage) => void;
   setMessages: (roomId: string, msgs: ChatMessage[]) => void;
   setOccupants: (roomId: string, occ: RoomOccupant[]) => void;
   setRoom: (room: RoomSummary) => void;
@@ -204,6 +206,17 @@ export const useChat = create<ChatState>((set) => ({
       return {
         messagesByRoom: { ...s.messagesByRoom, [msg.roomId]: [...list, msg] },
       };
+    }),
+
+  updateMessage: (msg) =>
+    set((s) => {
+      const list = s.messagesByRoom[msg.roomId];
+      if (!list) return {};
+      const idx = list.findIndex((m) => m.id === msg.id);
+      if (idx < 0) return {};
+      const next = list.slice();
+      next[idx] = msg;
+      return { messagesByRoom: { ...s.messagesByRoom, [msg.roomId]: next } };
     }),
 
   setMessages: (roomId, msgs) =>

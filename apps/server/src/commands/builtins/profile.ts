@@ -1,10 +1,27 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
-import { characters, users } from "../../db/schema.js";
-import type { CharacterStats, ProfileView, Theme } from "@thekeep/shared";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { characterPortraits, characters, users } from "../../db/schema.js";
+import type { CharacterPortrait, CharacterStats, ProfileView, Theme } from "@thekeep/shared";
 import { normalizeTheme } from "@thekeep/shared";
 import { getSettings } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
 import type { CommandHandler } from "../types.js";
+
+/**
+ * Fetch the additional portrait gallery for a character, ordered by the
+ * sortOrder column then created_at. Empty array when the character has no
+ * extra portraits beyond their primary avatarUrl.
+ */
+async function listPortraits(
+  db: import("../../db/index.js").Db,
+  characterId: string,
+): Promise<CharacterPortrait[]> {
+  const rows = await db
+    .select()
+    .from(characterPortraits)
+    .where(eq(characterPortraits.characterId, characterId))
+    .orderBy(asc(characterPortraits.sortOrder), asc(characterPortraits.createdAt));
+  return rows.map((r) => ({ id: r.id, url: r.url, label: r.label, nsfw: r.nsfw }));
+}
 
 /**
  * Parse a stored theme JSON. On null/parse-failure, fall back to the
@@ -54,6 +71,7 @@ async function lookupProfile(
         gender: u.gender,
         theme: await parseTheme(db, u.themeJson),
         titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
+        role: u.role,
         createdAt: +u.createdAt,
       },
     };
@@ -83,6 +101,7 @@ async function lookupProfile(
       bioHtml: c.bioHtml,
       stats: parseStats(c.statsJson),
       avatarUrl: c.avatarUrl,
+      portraits: await listPortraits(db, c.id),
       theme,
       titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
       createdAt: +c.createdAt,
@@ -137,6 +156,7 @@ async function lookupRandomProfile(
         gender: u.gender,
         theme: await parseTheme(db, u.themeJson),
         titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
+        role: u.role,
         createdAt: +u.createdAt,
       },
     };
@@ -161,6 +181,7 @@ async function lookupRandomProfile(
       bioHtml: c.bioHtml,
       stats: parseStats(c.statsJson),
       avatarUrl: c.avatarUrl,
+      portraits: await listPortraits(db, c.id),
       theme: await parseTheme(db, c.themeJson ?? row.ownerThemeJson),
       titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
       createdAt: +c.createdAt,

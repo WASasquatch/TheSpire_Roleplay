@@ -247,3 +247,10 @@ Admins control three SEO-related fields from **Admin → Branding**:
 - **Custom head HTML** — verbatim raw HTML spliced into `<head>` on every splash response. The intended use is analytics tags (Plausible, GA4, Cloudflare Web Analytics, Umami, etc.) — paste from your provider's dashboard. **Not** sanitized; admin-trusted only.
 
 A `robots.txt` and `sitemap.xml` are served from the app at the root. The default `robots.txt` allows everything (the auth wall handles privacy); the sitemap lists only `/` since everything past login is private.
+
+## Known limitations
+
+A short list of small surprises that are intentional in the current build — documented here so future contributors don't re-discover them as bugs:
+
+- **Reply snippets are frozen at the moment of reply.** When the author of a parent message uses the 60-second edit grace to fix typos, any child message's `replyToBodySnippet` keeps the original snippet. This matches the rest of the snapshot-at-send-time pattern (`displayName`, `toDisplayName`, etc.) and keeps the audit trail honest, but it means a reply quote can drift from the live parent body. Revisit only if users complain.
+- **Public-room reports only.** The 🚩 button doesn't show on whispers or private-room messages, and the server rejects reports for either kind. Whispers carry the strongest privacy contract (admins explicitly cannot read them), and private-room participants can already use `/ignore` and the room owner's `/kick`. Surfacing private-room bodies into the admin queue would breach the privacy posture and is not in scope for v1.

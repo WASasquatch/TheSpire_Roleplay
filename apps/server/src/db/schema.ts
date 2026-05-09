@@ -21,7 +21,7 @@ export const users = sqliteTable(
     /** the master/login username - display fallback when no character is active */
     username: text("username").notNull(),
     passwordHash: text("password_hash").notNull(),
-    role: text("role", { enum: ["user", "mod", "admin"] }).notNull().default("user"),
+    role: text("role", { enum: ["user", "trusted", "mod", "admin"] }).notNull().default("user"),
     /** master profile body (sanitized HTML) shown when /char clear */
     bioHtml: text("bio_html").notNull().default(""),
     avatarUrl: text("avatar_url"),
@@ -45,6 +45,8 @@ export const users = sqliteTable(
     /** Free-text "away" reason; null means the user is present. */
     awayMessage: text("away_message"),
     awaySince: integer("away_since", { mode: "timestamp_ms" }),
+    /** Free-text current mood/expression (e.g. "angry", "wounded"). Null = no mood set. Capped at 32 chars; rendered as a chip next to the user's name on outgoing messages. */
+    currentMood: text("current_mood"),
     /** FK to characters.id - nullable means "show master profile" */
     activeCharacterId: text("active_character_id"),
     createdAt: ts("created_at"),
@@ -113,6 +115,8 @@ export const rooms = sqliteTable(
     description: text("description"),
     /** system-rooms (MainHall etc.) survive owner deletion and admin sweeps */
     isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
+    /** When true, /npc is rejected in this room - useful for themed games where everyone must speak as their own character. Owners and mods toggle via the room editor. */
+    npcDisabled: integer("npc_disabled", { mode: "boolean" }).notNull().default(false),
     createdAt: ts("created_at"),
   },
   (t) => ({
@@ -178,7 +182,7 @@ export const messages = sqliteTable(
     /** snapshot - display name at send time (so renames don't rewrite history) */
     displayName: text("display_name").notNull(),
     kind: text("kind", {
-      enum: ["say", "me", "system", "whisper", "roll", "announce", "ooc"],
+      enum: ["say", "me", "system", "whisper", "roll", "announce", "scene", "npc", "ooc"],
     })
       .notNull()
       .default("say"),
@@ -197,10 +201,39 @@ export const messages = sqliteTable(
     replyToDisplayName: text("reply_to_display_name"),
     /** Truncated snapshot of parent body for the inline quote preview. */
     replyToBodySnippet: text("reply_to_body_snippet"),
+    /** Snapshot of the author's mood/expression at send time (or null). */
+    moodSnapshot: text("mood_snapshot"),
+    /** For /npc messages, the master username of the user who voiced this NPC (accountability tag rendered next to the NPC name). */
+    npcVoicedBy: text("npc_voiced_by"),
+    /** Set when the author edits the message inside the grace window (epoch ms). */
+    editedAt: integer("edited_at", { mode: "timestamp_ms" }),
+    /** Set when the author deletes the message inside the grace window (epoch ms). The row is retained so reply snippets and snapshots stay coherent; renderer shows "[message removed]". */
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
     createdAt: ts("created_at"),
   },
   (t) => ({
     roomTimeIdx: index("messages_room_time_idx").on(t.roomId, t.createdAt),
+  }),
+);
+
+/* ---------- character portraits ---------- */
+export const characterPortraits = sqliteTable(
+  "character_portraits",
+  {
+    id: id(),
+    characterId: text("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    label: text("label"),
+    /** Manual ordering for the gallery. Lower values render first. */
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** Owner-set NSFW flag - viewers see a blurred tile with a click-to-reveal overlay. */
+    nsfw: integer("nsfw", { mode: "boolean" }).notNull().default(false),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    charIdx: index("character_portraits_char_idx").on(t.characterId, t.sortOrder),
   }),
 );
 
@@ -451,9 +484,39 @@ export const siteSettings = sqliteTable("site_settings", {
    * surface; non-admin write paths don't exist for this column.
    */
   customHeadHtml: text("custom_head_html").notNull().default(""),
+  /** Web Push VAPID keys. Generated at first server boot and persisted so deploys don't churn keys (which would invalidate every existing subscription). NEVER expose `vapidPrivateKey` to clients. */
+  vapidPublicKey: text("vapid_public_key"),
+  vapidPrivateKey: text("vapid_private_key"),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
 });
+
+/* ---------- push subscriptions (Phase 4) ---------- */
+/**
+ * One row per browser/device a user has opted into push notifications from.
+ * The Push API gives us an `endpoint` URL plus two encryption keys; the
+ * server uses these to encrypt+sign payloads with `web-push`. Subscriptions
+ * become invalid when the user revokes permission or the browser tosses the
+ * registration; we GC by pruning on 410 responses from the push service.
+ */
+export const pushSubscriptions = sqliteTable(
+  "push_subscriptions",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull(),
+    p256dhKey: text("p256dh_key").notNull(),
+    authKey: text("auth_key").notNull(),
+    createdAt: ts("created_at"),
+    lastSeenAt: ts("last_seen_at"),
+  },
+  (t) => ({
+    userIdx: index("push_subscriptions_user_idx").on(t.userId),
+    endpointUq: uniqueIndex("push_subscriptions_endpoint_uq").on(t.userId, t.endpoint),
+  }),
+);
 
 /* ---------- title_kinds ----------
  * Catalog of mutual-title types (marriage, partner, mentor, etc.). Admin-
@@ -536,6 +599,98 @@ export const mutualTitles = sqliteTable(
   }),
 );
 
+/* ---------- audit log (Phase 3) ---------- */
+/**
+ * Append-only log of admin/mod actions. Stores enough metadata to reconstruct
+ * "who did what to whom, when, and why" without ever capturing private chat
+ * content. Free-text fields (`reason`, `metadata_json`) are admin-authored
+ * descriptions, never user-authored bodies.
+ */
+export const auditLog = sqliteTable(
+  "audit_log",
+  {
+    id: id(),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** e.g. "kick", "mute", "ban", "promote_mod", "settings_update", "report_resolve". */
+    action: text("action").notNull(),
+    targetUserId: text("target_user_id").references(() => users.id, { onDelete: "set null" }),
+    targetRoomId: text("target_room_id").references(() => rooms.id, { onDelete: "set null" }),
+    targetMessageId: text("target_message_id").references(() => messages.id, { onDelete: "set null" }),
+    /** Admin-authored note (e.g. "spamming links"). Optional. */
+    reason: text("reason"),
+    /** JSON blob for action-specific extras (duration ms, prior/next role, etc.). */
+    metadataJson: text("metadata_json"),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    createdIdx: index("audit_log_created_idx").on(t.createdAt),
+    actorIdx: index("audit_log_actor_idx").on(t.actorUserId, t.createdAt),
+    targetIdx: index("audit_log_target_idx").on(t.targetUserId, t.createdAt),
+    actionIdx: index("audit_log_action_idx").on(t.action, t.createdAt),
+  }),
+);
+
+/* ---------- reports (Phase 3) ---------- */
+/**
+ * User-filed reports against PUBLIC chat messages. Whispers and private-room
+ * messages are intentionally NOT reportable (admins can't see them anyway,
+ * by design). Status flow: open → reviewed | dismissed.
+ */
+export const reports = sqliteTable(
+  "reports",
+  {
+    id: id(),
+    reporterUserId: text("reporter_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    roomId: text("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    /** Free-text reason from the reporter. Optional; many UIs leave it blank. */
+    reason: text("reason"),
+    status: text("status", { enum: ["open", "reviewed", "dismissed"] })
+      .notNull()
+      .default("open"),
+    resolvedById: text("resolved_by_id").references(() => users.id, { onDelete: "set null" }),
+    resolvedAt: integer("resolved_at", { mode: "timestamp_ms" }),
+    /** Admin's note added on resolve/dismiss; surfaced in the audit entry. */
+    resolutionNote: text("resolution_note"),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    statusIdx: index("reports_status_idx").on(t.status, t.createdAt),
+    reporterMsgUq: uniqueIndex("reports_reporter_msg_uq").on(t.reporterUserId, t.messageId),
+  }),
+);
+
+/* ---------- watches (Phase 3) ---------- */
+/**
+ * Asymmetric "watch" list - "tell me when this user comes online". The
+ * watched user can't enumerate their watchers. Mutual confirmation (proper
+ * friends) is a possible v2.
+ */
+export const watches = sqliteTable(
+  "watches",
+  {
+    watcherUserId: text("watcher_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    watchedUserId: text("watched_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.watcherUserId, t.watchedUserId] }),
+    watchedIdx: index("watches_watched_idx").on(t.watchedUserId),
+  }),
+);
+
 export type DbUser = typeof users.$inferSelect;
 export type DbCharacter = typeof characters.$inferSelect;
 export type DbRoom = typeof rooms.$inferSelect;
@@ -546,3 +701,7 @@ export type DbNavLink = typeof navLinks.$inferSelect;
 export type DbSiteSettings = typeof siteSettings.$inferSelect;
 export type DbTitleKind = typeof titleKinds.$inferSelect;
 export type DbMutualTitle = typeof mutualTitles.$inferSelect;
+export type DbAuditEntry = typeof auditLog.$inferSelect;
+export type DbReport = typeof reports.$inferSelect;
+export type DbWatch = typeof watches.$inferSelect;
+export type DbPushSubscription = typeof pushSubscriptions.$inferSelect;

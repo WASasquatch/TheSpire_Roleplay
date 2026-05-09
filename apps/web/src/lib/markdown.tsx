@@ -8,6 +8,7 @@ import { Fragment, useState, type ReactNode } from "react";
  *   *italic* / _italic_              → <em>
  *   ***both*** / ___both___          → <strong><em>
  *   ~~strikethrough~~                → <s>
+ *   ||spoiler||                      → click-to-reveal hidden text
  *   `code`                           → <code>
  *   [text](https://url)              → <a>  (http/https only)
  *   ![alt](https://image-url)        → image with "Show image" toggle
@@ -216,6 +217,18 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
     }
   }
 
+  // Spoiler: ||hidden text||. Click to reveal. Same shape as ~~ — paired
+  // delimiter, no boundary rules; nested formatting inside still parses.
+  if (ch === "|" && ch2 === "|") {
+    const close = text.indexOf("||", i + 2);
+    if (close > i + 2) {
+      return {
+        end: close + 2,
+        node: <SpoilerSpan>{parseInline(text.slice(i + 2, close), depth + 1)}</SpoilerSpan>,
+      };
+    }
+  }
+
   // ***bold-italic*** (asterisks)
   if (ch === "*" && ch2 === "*" && ch3 === "*") {
     const close = findAsteriskClose(text, i + 3, "***");
@@ -347,6 +360,41 @@ export function parseInline(text: string, depth: number = 0): ReactNode[] {
     out.push(<Fragment key={`t${nodeIdx++}`}>{text.slice(textStart)}</Fragment>);
   }
   return out;
+}
+
+/**
+ * Click-to-reveal span for `||spoiler||` markdown. Renders as a muted
+ * blocked-out chip until clicked; the underlying text is in the DOM so screen
+ * readers and copy/paste still work, but it's visually masked. Once revealed
+ * it stays revealed for that render.
+ */
+function SpoilerSpan({ children }: { children: ReactNode }) {
+  const [revealed, setRevealed] = useState(false);
+  if (revealed) {
+    return (
+      <span
+        className="rounded bg-keep-panel/50 px-1"
+        title="Spoiler revealed - click to hide"
+        onClick={() => setRevealed(false)}
+      >
+        {children}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => setRevealed(true)}
+      // Tailwind `[color:transparent]` zeros the text colour so the children
+      // characters reserve layout space (preventing reflow on reveal) but
+      // can't be read. The background covers them; selection still leaks
+      // them, which is intentional - this is a courtesy mask, not a secret.
+      className="rounded bg-keep-text/85 px-1 text-keep-text [color:transparent] hover:bg-keep-text/70"
+      title="Spoiler - click to reveal"
+    >
+      {children}
+    </button>
+  );
 }
 
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:\?[^\s]*)?(?:#[^\s]*)?$/i;

@@ -18,7 +18,9 @@ import {
   roomMembers,
   rooms,
   users,
+  watches,
 } from "../db/schema.js";
+import { pushToUser } from "../push.js";
 import type { Db } from "../db/index.js";
 import type { CommandContext, SessionUser } from "../commands/types.js";
 
@@ -42,6 +44,10 @@ export async function addMessage(
     replyToId?: string;
     replyToDisplayName?: string;
     replyToBodySnippet?: string;
+    /** Override the displayed name (used by /npc to inject the NPC's name in place of the author's). */
+    displayNameOverride?: string;
+    /** For /npc: the master username of the user who voiced this NPC. Rendered as a "voiced by" tag on the line. */
+    npcVoicedBy?: string;
   },
 ): Promise<void> {
   const id = nanoid();
@@ -51,12 +57,16 @@ export async function addMessage(
   // an explicit override is supplied.
   const baseColor = payload.color !== undefined ? payload.color : ctx.user.chatColor;
   const colorSnapshot = colorForKind(payload.kind, baseColor);
+  const displayName = payload.displayNameOverride ?? ctx.user.displayName;
+  // Mood snapshots only on actually-spoken kinds, never on /npc lines (the
+  // NPC isn't the user — applying their mood would be misleading).
+  const moodSnapshot = payload.kind === "npc" ? null : ctx.user.currentMood ?? null;
   await ctx.db.insert(messages).values({
     id,
     roomId: ctx.roomId,
     userId: ctx.user.id,
     characterId: ctx.user.activeCharacterId,
-    displayName: ctx.user.displayName,
+    displayName,
     kind: payload.kind,
     body: payload.body,
     color: colorSnapshot,
@@ -64,13 +74,15 @@ export async function addMessage(
     replyToId: payload.replyToId ?? null,
     replyToDisplayName: payload.replyToDisplayName ?? null,
     replyToBodySnippet: payload.replyToBodySnippet ?? null,
+    moodSnapshot,
+    npcVoicedBy: payload.npcVoicedBy ?? null,
   });
   const out: ChatMessage = {
     id,
     roomId: ctx.roomId,
     userId: ctx.user.id,
     characterId: ctx.user.activeCharacterId,
-    displayName: ctx.user.displayName,
+    displayName,
     kind: payload.kind,
     body: payload.body,
     color: colorSnapshot,
@@ -79,8 +91,103 @@ export async function addMessage(
     ...(payload.replyToId ? { replyToId: payload.replyToId } : {}),
     ...(payload.replyToDisplayName ? { replyToDisplayName: payload.replyToDisplayName } : {}),
     ...(payload.replyToBodySnippet ? { replyToBodySnippet: payload.replyToBodySnippet } : {}),
+    ...(moodSnapshot ? { moodSnapshot } : {}),
+    ...(payload.npcVoicedBy ? { npcVoicedBy: payload.npcVoicedBy } : {}),
   };
   await emitFiltered(ctx.io, ctx.db, ctx.roomId, ctx.user.id, out);
+
+  // Fire-and-forget push triggers for offline recipients. Privacy contract:
+  // payloads carry only the *kind* of event ("whisper" / "mention") and the
+  // author's display name - never the body. The user has to come back to
+  // the chat to read what was said.
+  void pushTriggers(ctx.io, ctx.db, out, ctx.user, payload.kind);
+}
+
+/**
+ * Push to anyone who would otherwise miss this message because they're not
+ * connected. Currently fires for whispers (always to the recipient) and
+ * @mentions (to each mentioned user who has at least one push subscription
+ * and no live socket). Always best-effort - failures are logged inside
+ * pushToUser, never thrown.
+ */
+async function pushTriggers(
+  io: Io,
+  db: Db,
+  msg: ChatMessage,
+  sender: SessionUser,
+  kind: MessageKind,
+): Promise<void> {
+  try {
+    if (kind === "whisper" && msg.toUserId) {
+      const targetOnline = await userIsOnline(io, msg.toUserId);
+      if (!targetOnline) {
+        await pushToUser(db, msg.toUserId, {
+          title: `${sender.displayName} whispers`,
+          body: "You have a whisper waiting.",
+          tag: `whisper-${sender.id}`,
+        });
+      }
+      return;
+    }
+    // Mention path - skip for system / scene / npc kinds (system has no
+    // human author; scene/npc bodies aren't typically directed at anyone).
+    if (kind !== "say" && kind !== "me" && kind !== "ooc" && kind !== "announce") return;
+
+    const names = extractMentions(msg.body);
+    if (names.length === 0) return;
+
+    // Resolve mention names to user ids. Mentions can match either a master
+    // username OR an active character name; the userlist resolver path
+    // already handles both. Cheap to do per-name since most messages have
+    // zero or one mention.
+    const seen = new Set<string>();
+    for (const name of names) {
+      if (name === sender.username.toLowerCase()) continue;
+      const lower = name.toLowerCase();
+      // Master username first (globally unique).
+      let target = (await db
+        .select()
+        .from(users)
+        .where(sql`lower(${users.username}) = ${lower}`)
+        .limit(1))[0];
+      if (!target) {
+        // Active character name lookup.
+        const c = (await db
+          .select()
+          .from(characters)
+          .where(sql`lower(${characters.name}) = ${lower}`)
+          .limit(1))[0];
+        if (c && !c.deletedAt) {
+          const owner = (await db.select().from(users).where(eq(users.id, c.userId)).limit(1))[0];
+          if (owner && owner.activeCharacterId === c.id) target = owner;
+        }
+      }
+      if (!target || target.disabledAt || target.id === sender.id) continue;
+      if (seen.has(target.id)) continue;
+      seen.add(target.id);
+      const targetOnline = await userIsOnline(io, target.id);
+      if (targetOnline) continue;
+      await pushToUser(db, target.id, {
+        title: `Mention from ${sender.displayName}`,
+        body: "You were mentioned in chat.",
+        tag: `mention-${sender.id}`,
+      });
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[push] trigger failed", { err });
+  }
+}
+
+/** Extract every lowercased @mention name from a body. Mirrors the client `extractMentions`. */
+function extractMentions(body: string): string[] {
+  const NAME_CLASS = "[\\p{L}\\p{N}_\\-]";
+  const RE = new RegExp(`(^|[^\\p{L}\\p{N}_\\-])@(${NAME_CLASS}{1,32})`, "gu");
+  const out: string[] = [];
+  for (const m of body.matchAll(RE)) {
+    if (m[2]) out.push(m[2].toLowerCase());
+  }
+  return out;
 }
 
 /**
@@ -122,6 +229,37 @@ function colorForKind(kind: MessageKind, color: string | null): string | null {
   if (color == null) return null;
   if (kind === "say" || kind === "me") return color;
   return null;
+}
+
+/**
+ * Per-user dedup for "has connected" / "has disconnected" announcements.
+ *
+ * The room-scoped check (`userHasSocketInRoom`) runs *after* `socket.join`
+ * and a chain of awaits, so during a reconnection storm (tsx-watch reload,
+ * server restart, transient network blip with multiple tabs) several sockets
+ * can each pass it concurrently and all emit. We add a short-window guard:
+ * if we already announced this user's connect/disconnect in the last
+ * PRESENCE_EVENT_DEDUP_MS, skip subsequent identical events. The presence
+ * sidebar still updates via `broadcastPresence` - only the chat log line is
+ * suppressed.
+ *
+ * The map grows by one entry per (user, kind) pair. With a chat-sized
+ * userbase that's negligible; if it ever needs pruning the cleanest hook is
+ * to drop entries older than the TTL on each call.
+ */
+const PRESENCE_EVENT_DEDUP_MS = 10_000;
+const lastPresenceEvent = new Map<string, number>();
+
+export function shouldAnnouncePresenceEvent(
+  userId: string,
+  kind: "connect" | "disconnect",
+): boolean {
+  const key = `${userId}:${kind}`;
+  const now = Date.now();
+  const last = lastPresenceEvent.get(key) ?? 0;
+  if (now - last < PRESENCE_EVENT_DEDUP_MS) return false;
+  lastPresenceEvent.set(key, now);
+  return true;
 }
 
 /** Server-authored system message (no associated user/character). */
@@ -286,7 +424,10 @@ export async function joinRoom(
       characterId: m.characterId,
       displayName: m.displayName,
       kind: m.kind,
-      body: m.body,
+      // Soft-deleted messages render as a "[message removed]" placeholder
+      // on the client. Strip the body server-side so the original text never
+      // touches the wire after deletion.
+      body: m.deletedAt ? "" : m.body,
       color: m.color,
       createdAt: +m.createdAt,
       ...(m.toUserId ? { toUserId: m.toUserId } : {}),
@@ -294,6 +435,10 @@ export async function joinRoom(
       ...(m.replyToId ? { replyToId: m.replyToId } : {}),
       ...(m.replyToDisplayName ? { replyToDisplayName: m.replyToDisplayName } : {}),
       ...(m.replyToBodySnippet ? { replyToBodySnippet: m.replyToBodySnippet } : {}),
+      ...(m.moodSnapshot ? { moodSnapshot: m.moodSnapshot } : {}),
+      ...(m.npcVoicedBy ? { npcVoicedBy: m.npcVoicedBy } : {}),
+      ...(m.editedAt ? { editedAt: +m.editedAt } : {}),
+      ...(m.deletedAt ? { deletedAt: +m.deletedAt } : {}),
     }));
   socket.emit("message:bulk", backlog);
 
@@ -324,7 +469,17 @@ export async function joinRoom(
     const body = userWasOnlineBefore
       ? `${user.displayName} arrived.`
       : `${user.displayName} has connected.`;
-    await addSystemMessage(io, db, roomId, body);
+    // "arrived" is room-local and rare; we let it through. "has connected" is
+    // the one that fires from fresh sockets and races during reconnect storms,
+    // so it goes through the per-user dedup window.
+    const allow = userWasOnlineBefore || shouldAnnouncePresenceEvent(user.id, "connect");
+    if (allow) await addSystemMessage(io, db, roomId, body);
+    // Fan-out to watchers iff this is a true online transition (no other
+    // socket of this user existed). Same dedup window as "has connected" so
+    // a reconnection storm doesn't ping every watcher repeatedly.
+    if (!userWasOnlineBefore && allow) {
+      await pingWatchers(io, db, user);
+    }
   }
 }
 
@@ -383,6 +538,7 @@ export async function broadcastRoomState(
     topic: room.topic,
     ownerId: room.ownerId,
     memberCount: memberCountRows[0]?.n ?? 0,
+    npcDisabled: room.npcDisabled,
   };
   const occupants = await currentOccupants(io, db, roomId);
   io.to(`room:${roomId}`).emit("room:state", { room: summary, occupants });
@@ -391,6 +547,33 @@ export async function broadcastRoomState(
 export async function broadcastPresence(io: Io, db: Db, roomId: string): Promise<void> {
   const occupants = await currentOccupants(io, db, roomId);
   io.to(`room:${roomId}`).emit("presence:update", { roomId, occupants });
+}
+
+/**
+ * Fan out a `watch:online` push to every live socket of every user who
+ * watches the user that just came online. Quiet failures are logged via the
+ * caller (we don't want one stale watcher's socket failure to block the
+ * connect path).
+ */
+async function pingWatchers(io: Io, db: Db, user: SessionUser): Promise<void> {
+  const watchers = await db
+    .select({ watcherUserId: watches.watcherUserId })
+    .from(watches)
+    .where(eq(watches.watchedUserId, user.id));
+  if (watchers.length === 0) return;
+  const watcherSet = new Set(watchers.map((w) => w.watcherUserId));
+  const sockets = await io.fetchSockets();
+  const payload = {
+    userId: user.id,
+    username: user.username,
+    displayName: user.displayName,
+  };
+  for (const s of sockets) {
+    const uid = (s.data as { userId?: string }).userId;
+    if (uid && watcherSet.has(uid)) {
+      s.emit("watch:online", payload);
+    }
+  }
 }
 
 /**
@@ -434,6 +617,7 @@ export async function sendRoomStateTo(
     topic: room.topic,
     ownerId: room.ownerId,
     memberCount: memberCountRows[0]?.n ?? 0,
+    npcDisabled: room.npcDisabled,
   };
   const occupants = await currentOccupants(io, db, roomId);
   socket.emit("room:state", { room: summary, occupants });
@@ -483,6 +667,8 @@ async function currentOccupants(io: Io, db: Db, roomId: string): Promise<RoomOcc
       chatColor: u.chatColor,
       gender: resolveGender(u.gender, c?.statsJson),
       role: roleByUser.get(u.id) ?? "member",
+      accountRole: u.role,
+      mood: u.currentMood,
     };
   });
 }

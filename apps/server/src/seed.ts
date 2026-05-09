@@ -1,10 +1,11 @@
-import { eq, lt } from "drizzle-orm";
+import { eq, lt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { messages, rooms, sessions, users } from "./db/schema.js";
 import { hashPassword } from "./auth/passwords.js";
 import { ensureSiteSettings, getSettings } from "./settings.js";
+import { recordAudit } from "./audit.js";
 import type { Db } from "./db/index.js";
 
 /**
@@ -187,13 +188,78 @@ export function startJanitor(
     }
   }
 
-  // Run both immediately on startup so the first sweep doesn't have to wait.
+  /**
+   * Auto-promote `user` accounts to `trusted` when they pass low-spam, low-
+   * abuse thresholds. Cheap heuristic: account age + message count + no open
+   * reports + not currently muted or banned anywhere. Manual demote remains
+   * available via the admin user editor.
+   *
+   * Thresholds are constants for v1; making them admin-tunable is a follow-up.
+   */
+  const TRUST_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+  const TRUST_MIN_MESSAGES = 50;
+  async function sweepTrustPromotions() {
+    try {
+      const cutoff = Date.now() - TRUST_AGE_MS;
+      // One SQL pass picks all eligible accounts. The NOT EXISTS clauses
+      // intentionally use string literals because the enum values aren't
+      // user input. Mute "until" is in epoch ms; checking > now skips
+      // already-expired mutes that haven't been swept yet.
+      const eligible = await db.all<{ id: string; username: string }>(sql`
+        SELECT u.id AS id, u.username AS username
+        FROM users u
+        WHERE u.role = 'user'
+          AND u.disabled_at IS NULL
+          AND u.created_at < ${cutoff}
+          AND u.username != 'system'
+          AND (
+            SELECT COUNT(*) FROM messages m
+            WHERE m.user_id = u.id
+              AND m.kind IN ('say', 'me', 'ooc')
+          ) >= ${TRUST_MIN_MESSAGES}
+          AND NOT EXISTS (
+            SELECT 1 FROM reports r
+            INNER JOIN messages m2 ON m2.id = r.message_id
+            WHERE m2.user_id = u.id
+              AND r.status = 'open'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM mutes mu
+            WHERE mu.user_id = u.id
+              AND mu.until > ${Date.now()}
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM bans b
+            WHERE b.user_id = u.id
+              AND (b.until IS NULL OR b.until > ${Date.now()})
+          )
+      `);
+      if (eligible.length === 0) return;
+      for (const row of eligible) {
+        await db.update(users).set({ role: "trusted" }).where(eq(users.id, row.id));
+        await recordAudit(db, {
+          actorUserId: row.id, // self-attributed; no human actor
+          action: "auto_promote_trusted",
+          targetUserId: row.id,
+          metadata: { trigger: "janitor", thresholdAgeDays: 7, thresholdMessages: TRUST_MIN_MESSAGES },
+        });
+      }
+      log.info(`[janitor] auto-promoted ${eligible.length} users to trusted`);
+    } catch (err) {
+      log.error({ err }, "[janitor] trust sweep failed");
+    }
+  }
+
+  // Run all three immediately on startup so the first sweep doesn't have to wait.
   void sweepSessions();
   void sweepMessages();
+  void sweepTrustPromotions();
   const sessionId = setInterval(() => void sweepSessions(), 60 * 1000);
   const messageId = setInterval(() => void sweepMessages(), 60 * 60 * 1000);
+  const trustId = setInterval(() => void sweepTrustPromotions(), 60 * 60 * 1000);
   return () => {
     clearInterval(sessionId);
     clearInterval(messageId);
+    clearInterval(trustId);
   };
 }

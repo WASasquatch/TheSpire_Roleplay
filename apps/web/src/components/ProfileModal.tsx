@@ -1,5 +1,6 @@
+import { useState } from "react";
 import DOMPurify from "dompurify";
-import type { ProfileView } from "@thekeep/shared";
+import type { CharacterPortrait, ProfileView } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
 import { genderGlyph } from "../lib/gender.js";
 import type { Gender } from "../lib/gender.js";
@@ -13,6 +14,19 @@ interface Props {
   onIgnore?: (name: string) => void;
   /** Open another profile by name (used to follow a mutual-title link). */
   onOpenProfile?: (name: string) => void;
+  /**
+   * Active-character action to expose on the viewer's own profiles. Parent
+   * decides the label + behaviour based on viewer state:
+   *   - master profile + viewer has an active character → "Switch to OOC"
+   *     (clears the active character)
+   *   - non-active character of yours                  → "Switch to <name>"
+   *     (activates this character)
+   *   - your currently-active character                → "Disable <name>"
+   *     (clears the active character)
+   *   - master profile + no active character           → omit (no-op)
+   *   - someone else's profile                         → omit (caller filters)
+   */
+  activeCharacterAction?: { label: string; onClick: () => void };
 }
 
 /**
@@ -32,7 +46,7 @@ interface Props {
  * Every section degrades gracefully: characters with nothing filled out
  * still get a clean modal that says "X hasn't filled out their profile yet."
  */
-export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProfile }: Props) {
+export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProfile, activeCharacterAction }: Props) {
   const isChar = profile.kind === "character";
   const name = isChar ? profile.profile.name : profile.profile.username;
   const bio = profile.profile.bioHtml.trim();
@@ -80,7 +94,24 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
               </span>
             </div>
             <div className="mt-0.5 text-xs uppercase tracking-widest text-keep-muted">
-              {isChar ? "Character" : "Master account"}
+              {isChar ? (
+                "Character"
+              ) : (
+                <>
+                  Master account
+                  {/* Account-level role marker - only meaningful on the master
+                      profile (characters are owned by a master that already
+                      shows it). Site admins/mods are surfaced so visitors can
+                      tell who's staff at a glance. */}
+                  {profile.profile.role === "admin" ? (
+                    <span className="ml-1 italic text-keep-action">· Admin</span>
+                  ) : profile.profile.role === "mod" ? (
+                    <span className="ml-1 italic text-keep-action">· Moderator</span>
+                  ) : profile.profile.role === "trusted" ? (
+                    <span className="ml-1 italic text-keep-system" title="Trusted account - elevated rate limits earned through participation.">· Trusted</span>
+                  ) : null}
+                </>
+              )}
               {createdAt ? (
                 <>
                   {" · "}
@@ -88,11 +119,21 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
                 </>
               ) : null}
             </div>
-            {/* Action row - only renders when at least one peer-action
-                handler was passed. Self-views (App suppresses these) get
-                no empty container with stray margins. */}
-            {onWhisper || onIgnore ? (
+            {/* Action row - renders when there's at least one action to
+                offer. Self-views (App suppresses whisper/ignore) still get
+                this row when there's a Switch / Disable action to take. */}
+            {onWhisper || onIgnore || activeCharacterAction ? (
               <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
+                {activeCharacterAction ? (
+                  <button
+                    type="button"
+                    onClick={activeCharacterAction.onClick}
+                    title="Change your active identity - chat name and theme update immediately."
+                    className="rounded border border-keep-action/60 bg-keep-bg px-2 py-1 text-keep-action hover:bg-keep-action/10"
+                  >
+                    {activeCharacterAction.label}
+                  </button>
+                ) : null}
                 {onWhisper ? (
                   <button
                     type="button"
@@ -203,6 +244,14 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
                   />
                 </div>
               ) : null}
+
+              {/* Additional portraits (character profiles only). Renders as a
+                  responsive grid so a character with multiple looks/forms
+                  shows them all without dominating the modal. Each tile is a
+                  click-to-zoom that swaps the large image inline. */}
+              {isChar && profile.profile.portraits.length > 0 ? (
+                <PortraitGallery portraits={profile.profile.portraits} alt={name} />
+              ) : null}
             </>
           )}
         </div>
@@ -235,9 +284,103 @@ function Avatar({ url, name }: { url: string | null; name: string }) {
     <div
       className="flex h-24 w-24 shrink-0 items-center justify-center rounded border border-keep-border bg-keep-bg text-2xl font-semibold uppercase tracking-wide text-keep-muted sm:h-28 sm:w-28"
       aria-hidden
-      title={`${name} hasn't set an avatar yet.`}
+      title={`${name} hasn't set a main profile image yet.`}
     >
       {initials}
+    </div>
+  );
+}
+
+/**
+ * Multi-portrait gallery footer for character profiles. Tiles are 88px square
+ * thumbnails; clicking a tile swaps a larger preview inline above the strip
+ * so viewers can study individual portraits without leaving the modal.
+ */
+function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; alt: string }) {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  // Per-portrait reveal state for owner-marked NSFW tiles. Resets on profile
+  // re-open (the modal remounts), so a viewer who reveals here doesn't stay
+  // revealed after closing and reopening the profile.
+  const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
+  const active = portraits.find((p) => p.id === activeId) ?? null;
+  const activeIsCensored = !!active && active.nsfw && !revealed.has(active.id);
+
+  function reveal(id: string) {
+    setRevealed((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <div className="mt-4 border-t border-keep-rule/60 pt-3">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
+        Gallery
+      </h3>
+      {active ? (
+        <div className="mb-2 flex flex-col items-center gap-1">
+          <div className="relative inline-block max-w-full">
+            <img
+              src={active.url}
+              alt={active.label || `${alt} portrait`}
+              className={`max-w-full rounded border border-keep-border transition ${
+                activeIsCensored ? "blur-2xl scale-105" : ""
+              }`}
+            />
+            {activeIsCensored ? (
+              <button
+                type="button"
+                onClick={() => reveal(active.id)}
+                className="absolute inset-0 flex flex-col items-center justify-center gap-1 rounded bg-black/40 text-xs uppercase tracking-widest text-white hover:bg-black/30"
+              >
+                <span>NSFW</span>
+                <span className="rounded border border-white/60 bg-black/40 px-2 py-0.5 text-[10px]">click to reveal</span>
+              </button>
+            ) : null}
+          </div>
+          {active.label ? (
+            <span className="text-xs italic text-keep-muted">{active.label}</span>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-2">
+        {portraits.map((p) => {
+          const tileCensored = p.nsfw && !revealed.has(p.id);
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => {
+                // First click on a censored tile reveals it (don't expand
+                // yet). Subsequent click expands. Non-NSFW tiles toggle
+                // expansion as before.
+                if (tileCensored) {
+                  reveal(p.id);
+                  return;
+                }
+                setActiveId((prev) => (prev === p.id ? null : p.id));
+              }}
+              title={p.nsfw ? `${p.label ?? "Portrait"} (NSFW — click to reveal)` : p.label ?? "Portrait"}
+              className={`relative aspect-square overflow-hidden rounded border ${
+                activeId === p.id ? "border-keep-action ring-2 ring-keep-action/40" : "border-keep-border hover:border-keep-action"
+              }`}
+            >
+              <img
+                src={p.url}
+                alt={p.label || `${alt} portrait`}
+                loading="lazy"
+                className={`h-full w-full object-cover transition ${tileCensored ? "blur-xl scale-110" : ""}`}
+              />
+              {tileCensored ? (
+                <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-[10px] font-semibold uppercase tracking-widest text-white">
+                  NSFW
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -262,7 +405,7 @@ function EmptyProfile({ name, kind }: { name: string; kind: "master" | "characte
       </div>
       {kind === "character" ? (
         <div className="text-xs text-keep-muted/80">
-          They could add stats, a bio, and an avatar to bring this character to life.
+          They could add stats, a bio, and a main profile image to bring this character to life.
         </div>
       ) : null}
     </div>

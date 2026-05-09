@@ -1,6 +1,7 @@
 import type { ChatMessage } from "./message.js";
 import type { RoomOccupant, RoomSummary } from "./room.js";
 import type { IdentityRef, ProfileView } from "./profile.js";
+import type { WatchOnlineEvent } from "./moderation.js";
 
 /** Events emitted by the client → server. */
 export interface ClientToServerEvents {
@@ -34,6 +35,8 @@ export interface ClientToServerEvents {
 export interface ServerToClientEvents {
   "message:new": (msg: ChatMessage) => void;
   "message:bulk": (msgs: ChatMessage[]) => void;
+  /** A message was edited or soft-deleted (within its grace window). The client replaces the row with this updated version. */
+  "message:update": (msg: ChatMessage) => void;
   "room:state": (payload: { room: RoomSummary; occupants: RoomOccupant[] }) => void;
   "room:list": (rooms: RoomSummary[]) => void;
   "presence:update": (payload: { roomId: string; occupants: RoomOccupant[] }) => void;
@@ -73,6 +76,12 @@ export interface ServerToClientEvents {
    * socket is force-disconnected by the server.
    */
   "auth:expired": () => void;
+  /**
+   * Pushed to a watcher's sockets when one of their watched accounts comes
+   * online (transitions from no-sockets to first-socket). Carries no
+   * private-room/whisper info - just identity + display name.
+   */
+  "watch:online": (payload: WatchOnlineEvent) => void;
 }
 
 export type UiHint =

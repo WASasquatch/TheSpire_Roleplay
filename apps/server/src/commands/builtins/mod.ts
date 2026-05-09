@@ -2,6 +2,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { bans, mutes, roomMembers, rooms, users } from "../../db/schema.js";
 import { addMessage, broadcastPresence, broadcastRoomState } from "../../realtime/broadcast.js";
 import { formatDuration, parseDuration } from "../duration.js";
+import { recordAudit } from "../../audit.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -131,6 +132,13 @@ export const kickCommand: CommandHandler = {
         ? `${ctx.user.displayName} kicked ${target.username}: ${reason}`
         : `${ctx.user.displayName} kicked ${target.username}.`,
     });
+    await recordAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "kick",
+      targetUserId: target.id,
+      targetRoomId: ctx.roomId,
+      reason: reason || null,
+    });
     await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
     if (main && booted > 0) await broadcastPresence(ctx.io, ctx.db, main.id);
   },
@@ -199,6 +207,14 @@ export const muteCommand: CommandHandler = {
         ? `${ctx.user.displayName} muted ${target.username} for ${formatDuration(ms)}: ${reason}`
         : `${ctx.user.displayName} muted ${target.username} for ${formatDuration(ms)}.`,
     });
+    await recordAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "mute",
+      targetUserId: target.id,
+      targetRoomId: ctx.roomId,
+      reason: reason || null,
+      metadata: { durationMs: ms },
+    });
   },
 };
 
@@ -223,6 +239,12 @@ export const unmuteCommand: CommandHandler = {
     await addMessage(ctx, {
       kind: "system",
       body: `${ctx.user.displayName} lifted the mute on ${target.username}.`,
+    });
+    await recordAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "unmute",
+      targetUserId: target.id,
+      targetRoomId: ctx.roomId,
     });
   },
 };
@@ -255,6 +277,12 @@ export const promoteCommand: CommandHandler = {
       kind: "system",
       body: `${ctx.user.displayName} promoted ${target.username} to room mod.`,
     });
+    await recordAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "promote_mod",
+      targetUserId: target.id,
+      targetRoomId: ctx.roomId,
+    });
     await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
   },
 };
@@ -284,6 +312,12 @@ export const demoteCommand: CommandHandler = {
       kind: "system",
       body: `${ctx.user.displayName} demoted ${target.username} to member.`,
     });
+    await recordAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "demote_mod",
+      targetUserId: target.id,
+      targetRoomId: ctx.roomId,
+    });
     await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
   },
 };
@@ -303,10 +337,17 @@ export const promoteAdminCommand: CommandHandler = {
     if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
     if (target.role === "admin") return notice(ctx, "ALREADY", `${target.username} is already a site admin.`);
 
+    const priorRole = target.role;
     await ctx.db.update(users).set({ role: "admin" }).where(eq(users.id, target.id));
     await addMessage(ctx, {
       kind: "system",
       body: `${ctx.user.displayName} promoted ${target.username} to site admin.`,
+    });
+    await recordAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "promote_admin",
+      targetUserId: target.id,
+      metadata: { priorRole, nextRole: "admin" },
     });
   },
 };
@@ -334,6 +375,12 @@ export const demoteAdminCommand: CommandHandler = {
     await addMessage(ctx, {
       kind: "system",
       body: `${ctx.user.displayName} demoted ${target.username} from site admin.`,
+    });
+    await recordAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "demote_admin",
+      targetUserId: target.id,
+      metadata: { priorRole: "admin", nextRole: "user" },
     });
   },
 };
@@ -445,6 +492,14 @@ export const banCommand: CommandHandler = {
         ? `${ctx.user.displayName} banned ${target.username}${durStr}: ${reason}`
         : `${ctx.user.displayName} banned ${target.username}${durStr}.`,
     });
+    await recordAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "ban",
+      targetUserId: target.id,
+      targetRoomId: ctx.roomId,
+      reason: reason || null,
+      metadata: durationMs ? { durationMs } : { permanent: true },
+    });
     await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
     if (main && booted > 0) await broadcastPresence(ctx.io, ctx.db, main.id);
   },
@@ -473,6 +528,12 @@ export const unbanCommand: CommandHandler = {
     await addMessage(ctx, {
       kind: "system",
       body: `${ctx.user.displayName} lifted the ban on ${target.username}.`,
+    });
+    await recordAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "unban",
+      targetUserId: target.id,
+      targetRoomId: ctx.roomId,
     });
   },
 };
@@ -516,6 +577,11 @@ export const announceCommand: CommandHandler = {
         const roomCtx = { ...ctx, roomId: r.id };
         await addMessage(roomCtx, { kind: "announce", body });
       }
+      await recordAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: "announce",
+        metadata: { scope: "all", body },
+      });
       return;
     }
 
@@ -524,5 +590,11 @@ export const announceCommand: CommandHandler = {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /announce.");
     }
     await addMessage(ctx, { kind: "announce", body: argsText });
+    await recordAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "announce",
+      targetRoomId: ctx.roomId,
+      metadata: { scope: "room", body: argsText },
+    });
   },
 };

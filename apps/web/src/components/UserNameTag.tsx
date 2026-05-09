@@ -23,6 +23,10 @@ interface Props {
    * authoritative place to open someone's profile from).
    */
   hideIcon?: boolean;
+  /** Render the name in italics (used to mark site admins). */
+  italic?: boolean;
+  /** Free-text mood/expression chip rendered after the name (e.g. "[angry]"). */
+  mood?: string | null;
 }
 
 /**
@@ -40,6 +44,8 @@ export function UserNameTag({
   onNameClick,
   rolePrefix,
   hideIcon,
+  italic,
+  mood,
 }: Props) {
   const g = genderGlyph(gender);
   return (
@@ -61,12 +67,23 @@ export function UserNameTag({
       <button
         type="button"
         onClick={onNameClick}
-        title={away && awayMessage ? `away: ${awayMessage}` : `whisper ${displayName}`}
-        className="rounded px-1 py-0.5 font-semibold hover:bg-keep-panel hover:underline"
+        title={
+          (italic ? `${displayName} - admin` : `whisper ${displayName}`) +
+          (away && awayMessage ? ` (away: ${awayMessage})` : "")
+        }
+        className={`rounded px-1 py-0.5 font-semibold hover:bg-keep-panel hover:underline${italic ? " italic" : ""}`}
         style={color ? { color } : undefined}
       >
         {displayName}
       </button>
+      {mood ? (
+        <span
+          className="ml-1 rounded bg-keep-action/15 px-1 text-[10px] uppercase tracking-wide text-keep-action"
+          title={`mood: ${mood}`}
+        >
+          {mood}
+        </span>
+      ) : null}
       {away ? <span className="ml-1 text-keep-muted">[away]</span> : null}
     </span>
   );

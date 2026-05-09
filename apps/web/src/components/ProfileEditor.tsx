@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { CharacterStats, ProfileView, Theme } from "@thekeep/shared";
+import type { CharacterPortrait, CharacterStats, ProfileView, Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import { GENDER_OPTIONS, type Gender } from "../lib/gender.js";
 import {
@@ -8,6 +8,12 @@ import {
   requestPermission as notifyRequestPermission,
   type NotifyPref,
 } from "../lib/notifications.js";
+import {
+  disablePush,
+  enablePush,
+  readPushState,
+  type PushState,
+} from "../lib/push.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
 
@@ -33,6 +39,7 @@ interface MasterData {
   activeCharacterId: string | null;
   theme?: Theme;
   notifyPref?: NotifyPref;
+  role?: "user" | "mod" | "admin";
 }
 
 interface CharacterRow {
@@ -93,8 +100,25 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   /** When the form has a theme set; null means "use default / inherit". */
   const [theme, setTheme] = useState<Theme | null>(null);
   const [notifyPref, setNotifyPref] = useState<NotifyPref>("mentions");
+  /** Extra portraits beyond the primary avatarUrl (character targets only). */
+  const [portraits, setPortraits] = useState<CharacterPortrait[]>([]);
   // Permission state is volatile - re-read on each render via a key bump.
   const [permVersion, setPermVersion] = useState(0);
+
+  // Mobile tab. The mobile viewport (<md) can't fit both columns side-by-side
+  // and shrinking either makes the form unusable - especially the bio textarea.
+  // On md+ both panels render together as before; this state is ignored.
+  const [mobileTab, setMobileTab] = useState<"settings" | "description">("settings");
+
+  // "+ New character" modal toggle. When the user creates a character we POST
+  // /characters, splice the row into the local list, and switch the editor's
+  // target to the new character so the user lands in its editor.
+  const [createOpen, setCreateOpen] = useState(false);
+  // Per-character delete in-flight flag. The button stays disabled while
+  // DELETE /characters/:id is pending so users can't double-submit and have
+  // the second call return 404.
+  const [deleting, setDeleting] = useState(false);
+  const [switching, setSwitching] = useState(false);
 
   // Initial load: master + character list (we always need both for the dropdown).
   useEffect(() => {
@@ -139,6 +163,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setStats({});
           setTheme(master.theme ? normalizeTheme(master.theme) : null);
           setNotifyPref(master.notifyPref ?? "mentions");
+          setPortraits([]); // master has no gallery; only characters do
           setLoadingTarget(false);
         } else {
           // Always re-fetch on switch so we have fresh statsJson; the list endpoint
@@ -162,6 +187,16 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           } else {
             setTheme(null);
           }
+          // Pull the gallery in parallel with the row fetch above? We do it
+          // sequentially here to keep the early-return-on-error simple; the
+          // payload is small (under 12 rows in the worst case).
+          try {
+            const pr = await fetch(`/characters/${target.id}/portraits`, { credentials: "include" });
+            if (pr.ok) {
+              const pj = (await pr.json()) as { portraits: Array<{ id: string; url: string; label: string | null; nsfw?: boolean }> };
+              if (!cancelled) setPortraits(pj.portraits.map((p) => ({ id: p.id, url: p.url, label: p.label, nsfw: !!p.nsfw })));
+            }
+          } catch { /* gallery is non-fatal */ }
           setLoadingTarget(false);
         }
       } catch (err) {
@@ -253,6 +288,66 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   }
 
   /**
+   * Switch the user's active character to the one currently being edited.
+   * Equivalent to typing `/char switch <name>` from chat. After success
+   * onSaved fires so the chat re-fetches /me/profile and re-applies the
+   * character's theme.
+   */
+  async function switchToCharacter() {
+    if (target.kind !== "character") return;
+    setError(null);
+    setSwitching(true);
+    try {
+      const res = await fetch("/me/active-character", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ characterId: target.id }),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      // Track the change locally so the Switch button hides without waiting
+      // for a re-fetch of /me/profile.
+      setMaster((prev) => (prev ? { ...prev, activeCharacterId: target.id } : prev));
+      onSaved?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "switch failed");
+    } finally {
+      setSwitching(false);
+    }
+  }
+
+  /**
+   * Delete the currently-targeted character. Soft-delete on the server so
+   * past chat history keeps its snapshotted name. After success we drop the
+   * row from the local list and switch back to the master target.
+   */
+  async function deleteCharacter() {
+    if (target.kind !== "character") return;
+    const charName = characters.find((c) => c.id === target.id)?.name ?? "this character";
+    if (!window.confirm(
+      `Delete "${charName}"? Past chat history keeps the name; the character can't be restored.`,
+    )) return;
+    setError(null);
+    setDeleting(true);
+    try {
+      const res = await fetch(`/characters/${target.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      setCharacters((prev) => prev.filter((c) => c.id !== target.id));
+      setTarget({ kind: "master" });
+      // The active theme may change if the deleted char was active (server
+      // cleared activeCharacterId, so chat falls back to the master theme).
+      onSaved?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  /**
    * Preview pane - opens a ProfileModal showing the current form state as
    * other users would see it. Pulled from local state (not the server) so
    * the user can preview unsaved edits while iterating.
@@ -274,6 +369,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           // Titles are populated server-side from accepted relationships;
           // the editor preview shows the form's contents only.
           titles: [],
+          role: master.role ?? "user",
           createdAt: Date.now(),
         },
       };
@@ -287,13 +383,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         bioHtml,
         stats,
         avatarUrl: avatarUrl.trim() || null,
+        portraits,
         theme: previewTheme,
         titles: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
       },
     };
-  }, [target, master, name, bioHtml, avatarUrl, gender, stats, theme]);
+  }, [target, master, name, bioHtml, avatarUrl, gender, stats, theme, portraits]);
 
   const targetOptions = useMemo(() => {
     return [
@@ -318,14 +415,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         className="flex h-[92vh] w-[min(1200px,98vw)] flex-col rounded border border-keep-rule bg-keep-parchment shadow-xl"
       >
         {/* header - fixed */}
-        <div className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <div className="flex items-center gap-2">
-            <h2 className="font-action text-lg">Edit profile</h2>
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-keep-rule bg-keep-banner px-4 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <h2 className="shrink-0 font-action text-lg">Edit profile</h2>
             <select
               value={targetValue}
               onChange={(e) => onSelectTarget(e.target.value)}
               disabled={loadingList}
-              className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm"
+              className="min-w-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm"
             >
               {loadingList ? (
                 <option>loading...</option>
@@ -335,9 +432,72 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                 ))
               )}
             </select>
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              disabled={loadingList}
+              title="Create a new character under your account"
+              className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner disabled:opacity-50"
+            >
+              + New
+            </button>
+            {isCharacter && master && master.activeCharacterId !== (target.kind === "character" ? target.id : null) ? (
+              <button
+                type="button"
+                onClick={switchToCharacter}
+                disabled={switching || loadingTarget}
+                title="Switch to this character - your chat name and theme update immediately."
+                className="shrink-0 rounded border border-keep-action/60 bg-keep-bg px-2 py-0.5 text-sm text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
+              >
+                {switching ? "Switching..." : "Switch"}
+              </button>
+            ) : null}
+            {isCharacter ? (
+              <button
+                type="button"
+                onClick={deleteCharacter}
+                disabled={deleting || loadingTarget}
+                title="Delete this character. Past message history keeps the snapshotted name."
+                className="shrink-0 rounded border border-keep-accent/60 bg-keep-bg px-2 py-0.5 text-sm text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
+              >
+                {deleting ? "Deleting..." : "Delete"}
+              </button>
+            ) : null}
           </div>
-          <button type="button" onClick={onClose} className="text-sm text-keep-muted hover:text-keep-text">
+          <button type="button" onClick={onClose} className="shrink-0 text-sm text-keep-muted hover:text-keep-text">
             close
+          </button>
+        </div>
+
+        {/* Mobile-only tab strip. The two panels would otherwise stack and
+            crush each other on narrow viewports. md+ keeps the side-by-side
+            layout and ignores this strip. */}
+        <div className="flex shrink-0 border-b border-keep-rule bg-keep-banner/40 md:hidden" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileTab === "settings"}
+            onClick={() => setMobileTab("settings")}
+            className={`flex-1 px-3 py-2 text-xs uppercase tracking-widest ${
+              mobileTab === "settings"
+                ? "border-b-2 border-keep-action text-keep-text"
+                : "text-keep-muted hover:text-keep-text"
+            }`}
+          >
+            Settings
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileTab === "description"}
+            onClick={() => setMobileTab("description")}
+            className={`flex-1 px-3 py-2 text-xs uppercase tracking-widest ${
+              mobileTab === "description"
+                ? "border-b-2 border-keep-action text-keep-text"
+                : "text-keep-muted hover:text-keep-text"
+            }`}
+          >
+            Description
           </button>
         </div>
 
@@ -345,9 +505,12 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         {loadingTarget ? (
           <div className="flex flex-1 items-center justify-center text-keep-muted">loading...</div>
         ) : (
-          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[420px_1fr]">
-            {/* Left: form fields, scrolls independently */}
-            <div className="space-y-3 overflow-y-auto border-keep-rule p-4 md:border-r">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:grid md:grid-cols-[420px_1fr]">
+            {/* Left: form fields, scrolls independently. On mobile this only
+                renders when the Settings tab is active and takes the full
+                remaining height; on md+ it's always-visible in its grid cell.
+                `md:block` overrides the mobile `hidden` at the breakpoint. */}
+            <div className={`${mobileTab === "settings" ? "flex-1" : "hidden"} space-y-3 overflow-y-auto border-keep-rule p-4 md:block md:flex-initial md:border-r`}>
               <Field
                 label={isCharacter ? "Character name" : "Master username"}
                 value={name}
@@ -355,10 +518,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                 hint={isCharacter ? "Renaming is blocked - message history snapshots the name at send time." : "Set at registration."}
               />
               <Field
-                label="Avatar URL"
+                label="Main Profile Image URL"
                 value={avatarUrl}
                 onChange={setAvatarUrl}
                 placeholder="https://example.com/portrait.png"
+                hint="Drives the userlist icon, the modal hero, and the full-size footer image."
               />
 
               {!isCharacter ? (
@@ -431,6 +595,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                 </fieldset>
               ) : null}
 
+              {isCharacter && target.kind === "character" ? (
+                <PortraitGalleryEditor
+                  characterId={target.id}
+                  portraits={portraits}
+                  onChange={setPortraits}
+                />
+              ) : null}
+
               <fieldset className="rounded border border-keep-rule p-3">
                 <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
                   {isCharacter ? "Character theme" : "OOC theme"}
@@ -459,13 +631,16 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
               ) : null}
             </div>
 
-            {/* Right: bio editor - textarea fills column. */}
-            <div className="flex min-h-0 flex-col p-4">
+            {/* Right: bio editor - textarea fills column. On mobile only
+                renders when the Description tab is active. `md:flex` overrides
+                the mobile `hidden` so on md+ it always shows alongside the
+                settings column. */}
+            <div className={`${mobileTab === "description" ? "flex flex-1" : "hidden"} min-h-0 flex-col p-4 md:flex md:flex-initial`}>
               <div className="mb-1 flex items-center justify-between text-xs">
                 <span className="uppercase tracking-widest text-keep-muted">
                   {isCharacter ? "Character bio" : "OOC bio"}
                 </span>
-                <span className="text-keep-muted">
+                <span className="hidden text-keep-muted md:inline">
                   HTML allowed: b, i, u, em, strong, a, img, br, p, ul/ol/li, blockquote, hr, h3-h6, span style=color
                 </span>
               </div>
@@ -525,7 +700,300 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           <ProfileModal profile={previewProfile} onClose={() => setPreviewing(false)} />
         </div>
       ) : null}
+      {createOpen ? (
+        <div onClick={(e) => e.stopPropagation()}>
+          <CreateCharacterModal
+            onCancel={() => setCreateOpen(false)}
+            onCreated={(c) => {
+              setCharacters((prev) => [...prev, c]);
+              setTarget({ kind: "character", id: c.id });
+              // Drop the user onto the description tab so they can start
+              // writing immediately on mobile - the settings tab is mostly
+              // empty for a brand-new character.
+              setMobileTab("description");
+              setCreateOpen(false);
+            }}
+          />
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Name-prompt modal for creating a new character. POSTs /characters and on
+ * success returns the new row to the parent so the editor can navigate to it.
+ * Server is authoritative on validation; the client-side regex is a fast
+ * pre-check so users get immediate feedback for bad chars.
+ */
+function CreateCharacterModal({
+  onCancel,
+  onCreated,
+}: {
+  onCancel: () => void;
+  onCreated: (c: CharacterRow) => void;
+}) {
+  const [name, setName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const trimmed = name.trim();
+  const localValid = /^[\p{L}\p{N}_\-' ]{1,40}$/u.test(trimmed);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!localValid || submitting) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const res = await fetch("/characters", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      const c = (await res.json()) as CharacterRow;
+      onCreated(c);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "create failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+      onClick={onCancel}
+      onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
+    >
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={submit}
+        className="w-[min(420px,96vw)] rounded border border-keep-rule bg-keep-parchment p-4 shadow-xl"
+      >
+        <h3 className="mb-2 font-action text-lg">New character</h3>
+        <label className="block text-xs">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Character name</span>
+          <input
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. JohnSmith"
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-base outline-none focus:border-keep-action md:text-sm"
+          />
+        </label>
+        <p className="mt-1 text-[10px] text-keep-muted">
+          1-40 chars: letters, numbers, spaces, _ - '. Character names can't be changed, choose wisely.
+        </p>
+        {error ? (
+          <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">
+            {error}
+          </div>
+        ) : null}
+        <div className="mt-3 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!localValid || submitting}
+            className="rounded border border-keep-rule bg-keep-banner px-3 py-1 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
+          >
+            {submitting ? "Creating..." : "Create"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/**
+ * Multi-portrait gallery management UI for character targets. Add by URL,
+ * label, delete. Reordering deferred — most galleries are small and the
+ * primary avatarUrl already drives the hero/userlist icon.
+ *
+ * Each mutation hits the server immediately so the gallery stays consistent
+ * with what others see — no "save" button per portrait.
+ */
+function PortraitGalleryEditor({
+  characterId,
+  portraits,
+  onChange,
+}: {
+  characterId: string;
+  portraits: CharacterPortrait[];
+  onChange: (next: CharacterPortrait[]) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [url, setUrl] = useState("");
+  const [label, setLabel] = useState("");
+  const [nsfw, setNsfw] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function add(e: FormEvent) {
+    e.preventDefault();
+    const u = url.trim();
+    if (!u) return;
+    setErr(null);
+    setBusy(true);
+    try {
+      const res = await fetch(`/characters/${characterId}/portraits`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: u,
+          ...(label.trim() ? { label: label.trim() } : {}),
+          ...(nsfw ? { nsfw: true } : {}),
+        }),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      const row = (await res.json()) as { id: string; url: string; label: string | null; nsfw: boolean };
+      onChange([...portraits, { id: row.id, url: row.url, label: row.label, nsfw: !!row.nsfw }]);
+      setUrl("");
+      setLabel("");
+      setNsfw(false);
+      setAdding(false);
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "add failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(id: string) {
+    if (!window.confirm("Remove this portrait from the gallery?")) return;
+    try {
+      const res = await fetch(`/characters/${characterId}/portraits/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      onChange(portraits.filter((p) => p.id !== id));
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "delete failed");
+    }
+  }
+
+  /** Toggle a portrait's NSFW flag in-place. */
+  async function toggleNsfw(id: string, next: boolean) {
+    try {
+      const res = await fetch(`/characters/${characterId}/portraits/${id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nsfw: next }),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      onChange(portraits.map((p) => (p.id === id ? { ...p, nsfw: next } : p)));
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "toggle failed");
+    }
+  }
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Gallery</legend>
+      <p className="mb-2 text-[10px] text-keep-muted">
+        Extra portraits shown beneath the bio on this character's profile. The Main Profile Image above is the one rendered first (userlist, modal hero, full-size footer). Mark a tile NSFW to blur it for viewers (they can click to reveal).
+      </p>
+      {portraits.length > 0 ? (
+        <div className="mb-2 grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-2">
+          {portraits.map((p) => (
+            <div key={p.id} className="relative">
+              <img
+                src={p.url}
+                alt={p.label ?? "portrait"}
+                className={`aspect-square w-full rounded border border-keep-border object-cover ${p.nsfw ? "blur-md scale-105" : ""}`}
+              />
+              <button
+                type="button"
+                onClick={() => toggleNsfw(p.id, !p.nsfw)}
+                title={p.nsfw ? "Marked NSFW (blurred for viewers) - click to unmark." : "Mark NSFW so viewers see this tile blurred until they reveal."}
+                aria-label="Toggle NSFW"
+                aria-pressed={p.nsfw}
+                className={`absolute bottom-0 left-0 rounded-bl rounded-tr border border-keep-rule px-1 text-[10px] ${
+                  p.nsfw ? "bg-keep-accent text-white" : "bg-keep-bg/80 text-keep-muted hover:bg-keep-banner"
+                }`}
+              >
+                NSFW
+              </button>
+              <button
+                type="button"
+                onClick={() => remove(p.id)}
+                title="Remove portrait"
+                aria-label="Remove portrait"
+                className="absolute right-0 top-0 rounded-bl rounded-tr border border-keep-rule bg-keep-bg/80 px-1 text-[10px] text-keep-accent hover:bg-keep-accent/10"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mb-2 italic text-keep-muted">No extra portraits yet.</p>
+      )}
+      {adding ? (
+        <form onSubmit={add} className="space-y-1">
+          <input
+            type="text"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://example.com/portrait.png"
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+          />
+          <input
+            type="text"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Label (optional - e.g. 'transformed')"
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+          />
+          <label className="flex items-center gap-1 text-[11px] text-keep-muted">
+            <input
+              type="checkbox"
+              checked={nsfw}
+              onChange={(e) => setNsfw(e.target.checked)}
+              className="h-3 w-3"
+            />
+            <span>Mark NSFW (viewers see this blurred until they reveal it)</span>
+          </label>
+          {err ? <div className="text-[10px] text-keep-accent">{err}</div> : null}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setAdding(false); setUrl(""); setLabel(""); setNsfw(false); setErr(null); }}
+              className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !url.trim()}
+              className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+            >
+              {busy ? "Adding..." : "Add"}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+        >
+          + Add portrait
+        </button>
+      )}
+    </fieldset>
   );
 }
 
@@ -644,7 +1112,99 @@ function NotificationsRow({
           </span>
         ) : null}
       </div>
+      <PushRow />
     </fieldset>
+  );
+}
+
+/**
+ * Web Push (offline notifications) opt-in. Sits inside NotificationsRow so
+ * the user sees both surfaces in one place: foreground toasts (browser
+ * Notification API) and background pushes (service worker).
+ *
+ * Privacy reminder rendered alongside the toggle: payloads carry no message
+ * body, only "you have a whisper / mention waiting".
+ */
+function PushRow() {
+  const [state, setState] = useState<PushState | "loading">("loading");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    readPushState().then((s) => { if (!cancelled) setState(s); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function turnOn() {
+    setError(null);
+    setBusy(true);
+    try {
+      const next = await enablePush();
+      setState(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "enable failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function turnOff() {
+    setError(null);
+    setBusy(true);
+    try {
+      const next = await disablePush();
+      setState(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "disable failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (state === "unsupported") {
+    return (
+      <div className="mt-2 text-[10px] italic text-keep-muted">
+        Browser push isn't available in this browser.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 border-t border-keep-rule/50 pt-2">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-keep-text">Browser push (offline)</div>
+          <div className="text-[10px] text-keep-muted">
+            Pings even when this tab is closed. Privacy: payloads carry no message body — just "whisper waiting" / "mention waiting".
+          </div>
+        </div>
+        {state === "loading" ? (
+          <span className="text-[10px] text-keep-muted">…</span>
+        ) : state === "denied" ? (
+          <span className="text-[10px] text-keep-accent">Permission denied</span>
+        ) : state === "subscribed" ? (
+          <button
+            type="button"
+            onClick={turnOff}
+            disabled={busy}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs hover:bg-keep-banner disabled:opacity-50"
+          >
+            {busy ? "..." : "Disable"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={turnOn}
+            disabled={busy}
+            className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-xs hover:bg-keep-banner/80 disabled:opacity-50"
+          >
+            {busy ? "..." : "Enable"}
+          </button>
+        )}
+      </div>
+      {error ? <div className="mt-1 text-[10px] text-keep-accent">{error}</div> : null}
+    </div>
   );
 }
 

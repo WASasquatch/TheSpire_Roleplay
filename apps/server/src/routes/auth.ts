@@ -239,7 +239,7 @@ function readSessionCookie(req: FastifyRequest): string | null {
 export async function getSessionUser(
   req: FastifyRequest,
   db: Db,
-): Promise<{ id: string; username: string; role: "user" | "mod" | "admin" } | null> {
+): Promise<{ id: string; username: string; role: "user" | "trusted" | "mod" | "admin" } | null> {
   const sid = readSessionCookie(req);
   if (!sid) return null;
   const row = (await db.select().from(sessions).where(eq(sessions.id, sid)).limit(1))[0];

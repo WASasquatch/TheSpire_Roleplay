@@ -4,6 +4,7 @@ import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { characters, users } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
+import { recordAudit } from "../audit.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -252,7 +253,7 @@ export async function registerUsersRoutes(
     const body = z.object({
       username: masterUsernameSchema.optional(),
       email: z.string().email().max(200).optional(),
-      role: z.enum(["user", "mod", "admin"]).optional(),
+      role: z.enum(["user", "trusted", "mod", "admin"]).optional(),
       disabled: z.boolean().optional(),
     }).parse(req.body);
 
@@ -275,6 +276,7 @@ export async function registerUsersRoutes(
     // interact (which would trigger auth:expired anyway, but only if they
     // type/click). DELETE already does this - PATCH should mirror it.
     const justDisabled = body.disabled === true && target.disabledAt == null;
+    const justEnabled = body.disabled === false && target.disabledAt != null;
     const roleChanged = body.role !== undefined && body.role !== target.role;
     if (justDisabled || roleChanged) {
       const sockets = await io.fetchSockets();
@@ -284,6 +286,38 @@ export async function registerUsersRoutes(
         s.emit("auth:expired");
         s.disconnect(true);
       }
+    }
+
+    if (justDisabled) {
+      await recordAudit(db, {
+        actorUserId: me.id,
+        action: "user_disable",
+        targetUserId: id,
+      });
+    } else if (justEnabled) {
+      await recordAudit(db, {
+        actorUserId: me.id,
+        action: "user_enable",
+        targetUserId: id,
+      });
+    }
+    if (roleChanged && body.role) {
+      // Map role transitions to the most-specific audit action so reports
+      // can filter cleanly. Trust transitions get their own actions; admin
+      // bumps share `promote_admin`/`demote_admin` with the chat command.
+      let action: import("@thekeep/shared").AuditAction = "promote_mod";
+      if (body.role === "admin") action = "promote_admin";
+      else if (target.role === "admin") action = "demote_admin";
+      else if (body.role === "trusted") action = "promote_trusted";
+      else if (target.role === "trusted") action = "demote_trusted";
+      else if (body.role === "mod") action = "promote_mod";
+      else action = "demote_mod";
+      await recordAudit(db, {
+        actorUserId: me.id,
+        action,
+        targetUserId: id,
+        metadata: { priorRole: target.role, nextRole: body.role },
+      });
     }
 
     return { ok: true };
@@ -310,6 +344,12 @@ export async function registerUsersRoutes(
     }
 
     await db.delete(users).where(eq(users.id, id));
+    await recordAudit(db, {
+      actorUserId: me.id,
+      action: "user_disable",
+      // The user row is gone (cascade); store enough metadata to reconstruct.
+      metadata: { hardDelete: true, username: target.username, email: target.email },
+    });
     return { ok: true };
   });
 }

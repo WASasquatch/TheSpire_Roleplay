@@ -29,3 +29,68 @@
     color: rgb(var(--keep-text) / 1);
   }
 }
+
+/*
+ * Lightweight `prose` styling for sanitized HTML bodies (profile bios, the
+ * welcome blurb on the splash, rules, admin previews). We don't ship the
+ * @tailwindcss/typography plugin - so the `prose` / `prose-sm` class names
+ * sprinkled across the codebase were no-ops, leaving Tailwind preflight's
+ * zeroed-out margins in place. This restores the basic block spacing,
+ * lists, and link/quote conventions that authors expect when they write
+ * paragraphs in <p> tags. Scoped to `.prose` so it only kicks in where
+ * the surrounding code opted into it.
+ *
+ * Allowed bio tags (mirror sanitizeBio): b, i, u, em, strong, a, img, br,
+ * p, ul/ol/li, blockquote, hr, h3-h6, span style=color.
+ */
+.prose p,
+.prose ul,
+.prose ol,
+.prose blockquote,
+.prose pre {
+  margin: 0.6em 0;
+}
+.prose p:first-child,
+.prose ul:first-child,
+.prose ol:first-child,
+.prose blockquote:first-child,
+.prose h3:first-child,
+.prose h4:first-child,
+.prose h5:first-child,
+.prose h6:first-child {
+  margin-top: 0;
+}
+.prose p:last-child,
+.prose ul:last-child,
+.prose ol:last-child,
+.prose blockquote:last-child {
+  margin-bottom: 0;
+}
+.prose h3, .prose h4, .prose h5, .prose h6 {
+  margin: 1em 0 0.4em;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.prose h3 { font-size: 1.15em; }
+.prose h4 { font-size: 1.05em; }
+.prose h5, .prose h6 { font-size: 1em; }
+.prose ul { list-style: disc; padding-left: 1.5em; }
+.prose ol { list-style: decimal; padding-left: 1.5em; }
+.prose li { margin: 0.2em 0; }
+.prose blockquote {
+  border-left: 3px solid rgb(var(--keep-border) / 0.7);
+  padding-left: 0.75em;
+  color: rgb(var(--keep-muted) / 1);
+  font-style: italic;
+}
+.prose hr {
+  border: 0;
+  border-top: 1px solid rgb(var(--keep-border) / 0.6);
+  margin: 1em 0;
+}
+.prose a {
+  color: rgb(var(--keep-action) / 1);
+  text-decoration: underline;
+}
+.prose a:hover { opacity: 0.85; }
+.prose img { max-width: 100%; height: auto; }

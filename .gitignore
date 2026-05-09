@@ -124,3 +124,6 @@ fly.toml.local
 # advertising live issues to attackers).
 SECURITY-AUDIT.md
 SECURITY-NOTES.md
+
+# Local-only working doc tracking in-flight feature scope across sessions.
+plan.md

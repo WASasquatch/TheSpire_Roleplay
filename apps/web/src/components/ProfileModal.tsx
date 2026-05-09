@@ -1,6 +1,6 @@
 import { useState } from "react";
 import DOMPurify from "dompurify";
-import type { CharacterPortrait, ProfileView } from "@thekeep/shared";
+import type { CharacterPortrait, ProfileLink, ProfileView } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
 import { genderGlyph } from "../lib/gender.js";
 import type { Gender } from "../lib/gender.js";
@@ -56,11 +56,12 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
   const stats = isChar ? profile.profile.stats : null;
   const gender = resolveGender(profile);
   const titles = profile.profile.titles ?? [];
+  const links = profile.profile.links ?? [];
 
   // Stat entries that actually have a value - empty fields are dropped so
   // a half-filled character doesn't show a row of dashes.
   const statEntries = stats ? collectStatEntries(stats) : [];
-  const isCompletelyBlank = !bio && statEntries.length === 0 && !avatar && titles.length === 0;
+  const isCompletelyBlank = !bio && statEntries.length === 0 && !avatar && titles.length === 0 && links.length === 0;
 
   return (
     <div
@@ -217,6 +218,18 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
                 </Section>
               ) : null}
 
+              {links.length > 0 ? (
+                <Section title="Links">
+                  <ul className="flex flex-wrap gap-1.5 text-sm">
+                    {links.map((l) => (
+                      <li key={l.id}>
+                        <LinkChip link={l} />
+                      </li>
+                    ))}
+                  </ul>
+                </Section>
+              ) : null}
+
               <Section title="Bio">
                 {bio ? (
                   <div
@@ -288,6 +301,33 @@ function Avatar({ url, name }: { url: string | null; name: string }) {
     >
       {initials}
     </div>
+  );
+}
+
+/**
+ * Owner-set link chip rendered in the Links section. Optional inline colors
+ * override the theme defaults (border-keep-rule, bg-keep-panel, text-keep-
+ * action). Always opens in a new tab with `noopener noreferrer ugc` per the
+ * rest of the codebase's external-link convention.
+ */
+function LinkChip({ link }: { link: ProfileLink }) {
+  const style: React.CSSProperties = {};
+  if (link.borderColor) style.borderColor = link.borderColor;
+  if (link.bgColor) style.backgroundColor = link.bgColor;
+  if (link.textColor) style.color = link.textColor;
+  // Custom border keeps a 1px rule visible regardless of theme.
+  if (link.borderColor) style.borderWidth = "1px";
+  return (
+    <a
+      href={link.url}
+      target="_blank"
+      rel="noopener noreferrer ugc"
+      title={link.url}
+      style={style}
+      className="inline-block rounded border border-keep-rule bg-keep-panel/60 px-2 py-0.5 font-medium text-keep-action hover:underline"
+    >
+      {link.title}
+    </a>
   );
 }
 

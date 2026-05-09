@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { characterPortraits, characters, users } from "../../db/schema.js";
-import type { CharacterPortrait, CharacterStats, ProfileView, Theme } from "@thekeep/shared";
+import { characterPortraits, characters, profileLinks, users } from "../../db/schema.js";
+import type { CharacterPortrait, CharacterStats, ProfileLink, ProfileView, Theme } from "@thekeep/shared";
 import { normalizeTheme } from "@thekeep/shared";
 import { getSettings } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
@@ -21,6 +21,34 @@ async function listPortraits(
     .where(eq(characterPortraits.characterId, characterId))
     .orderBy(asc(characterPortraits.sortOrder), asc(characterPortraits.createdAt));
   return rows.map((r) => ({ id: r.id, url: r.url, label: r.label, nsfw: r.nsfw }));
+}
+
+/**
+ * Fetch the owner-set links for a profile, ordered by sortOrder then created.
+ *   - master/OOC profile: characterId IS NULL.
+ *   - character profile : characterId = the given id.
+ */
+async function listLinks(
+  db: import("../../db/index.js").Db,
+  userId: string,
+  characterId: string | null,
+): Promise<ProfileLink[]> {
+  const where = characterId === null
+    ? and(eq(profileLinks.userId, userId), isNull(profileLinks.characterId))
+    : and(eq(profileLinks.userId, userId), eq(profileLinks.characterId, characterId));
+  const rows = await db
+    .select()
+    .from(profileLinks)
+    .where(where)
+    .orderBy(asc(profileLinks.sortOrder), asc(profileLinks.createdAt));
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    url: r.url,
+    borderColor: r.borderColor,
+    bgColor: r.bgColor,
+    textColor: r.textColor,
+  }));
 }
 
 /**
@@ -71,6 +99,7 @@ async function lookupProfile(
         gender: u.gender,
         theme: await parseTheme(db, u.themeJson),
         titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
+        links: await listLinks(db, u.id, null),
         role: u.role,
         createdAt: +u.createdAt,
       },
@@ -102,6 +131,7 @@ async function lookupProfile(
       stats: parseStats(c.statsJson),
       avatarUrl: c.avatarUrl,
       portraits: await listPortraits(db, c.id),
+      links: await listLinks(db, c.userId, c.id),
       theme,
       titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
       createdAt: +c.createdAt,
@@ -156,6 +186,7 @@ async function lookupRandomProfile(
         gender: u.gender,
         theme: await parseTheme(db, u.themeJson),
         titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
+        links: await listLinks(db, u.id, null),
         role: u.role,
         createdAt: +u.createdAt,
       },
@@ -182,6 +213,7 @@ async function lookupRandomProfile(
       stats: parseStats(c.statsJson),
       avatarUrl: c.avatarUrl,
       portraits: await listPortraits(db, c.id),
+      links: await listLinks(db, c.userId, c.id),
       theme: await parseTheme(db, c.themeJson ?? row.ownerThemeJson),
       titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
       createdAt: +c.createdAt,

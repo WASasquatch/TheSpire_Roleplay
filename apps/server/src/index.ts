@@ -35,6 +35,7 @@ import { lookupProfile } from "./commands/builtins/profile.js";
 import { emitMutualSettled, respondToPrompt } from "./titles/service.js";
 import {
   originFromRequest,
+  render404Html,
   renderRobotsTxt,
   renderSitemapXml,
   renderSplashHtml,
@@ -44,6 +45,7 @@ import { readFile } from "node:fs/promises";
 import { extendSession, loadSessionUser } from "./auth/session.js";
 import { registerAuthRoutes, getSessionUser, userIdFromSessionId, SESSION_COOKIE_NAME } from "./routes/auth.js";
 import { registerCharacterRoutes } from "./routes/characters.js";
+import { registerLinkRoutes } from "./routes/links.js";
 import { registerMessageRoutes } from "./routes/messages.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerPushRoutes } from "./routes/push.js";
@@ -113,6 +115,19 @@ async function main() {
     timeWindow: "1 minute",
     max: 60,
   });
+
+  // HTTP Strict Transport Security. Production only - Fly already forces
+  // HTTPS at the edge, but the explicit header tells browsers to remember
+  // the preference and refuse plaintext for a year (with includeSubDomains
+  // so any *.thespire.fly.dev sub also stays HTTPS-only). Skipped in dev
+  // because localhost runs on plain HTTP and browsers would otherwise
+  // refuse to load it after the first encounter with the header.
+  if (IS_PROD) {
+    app.addHook("onSend", async (_req, reply, payload) => {
+      reply.header("strict-transport-security", "max-age=31536000; includeSubDomains");
+      return payload;
+    });
+  }
 
   // ZodError → 400 with a readable list of issues. Without this, our routes'
   // `schema.parse(req.body)` calls bubble up as 500s.
@@ -218,6 +233,7 @@ async function main() {
   // occupants per room, presence rebroadcast on character delete, etc.) -
   // registered after io is constructed.
   await registerCharacterRoutes(baseApp, db, io);
+  await registerLinkRoutes(baseApp, db);
   await registerMessageRoutes(baseApp, db, io);
   await registerReportRoutes(baseApp, db);
   await registerPushRoutes(baseApp, db);
@@ -609,24 +625,35 @@ async function main() {
         },
       });
 
-      // SPA fallback. Any GET that didn't match an API route or a static file
-      // is treated as a client-side route and served the SEO-rewritten
-      // index.html so the React app can resolve it. Non-GET methods get a
-      // real 404 - they were genuinely meant for an API endpoint that
-      // doesn't exist.
+      // 404 handler for any GET that didn't match a registered route or
+      // a static asset. The Spire is single-page (everything past login is
+      // auth-walled UI internal to /), so unknown paths are genuinely
+      // missing - we render a themed 404 page rather than the SPA shell.
+      // That prevents duplicate-content SEO penalties (every weird URL
+      // returning index.html), gives visitors a clear "back to chat" link,
+      // and matches the noindex meta on the 404 body.
+      //
+      // Non-GET methods and API-shaped paths still get a JSON 404 so a
+      // typo'd /admin/foo doesn't return HTML and confuse a fetch().
       app.setNotFoundHandler(async (req, reply) => {
         if (req.method !== "GET") {
           reply.code(404);
           return reply.send({ error: "not found" });
         }
-        // Don't SPA-fallback API-shaped paths - these should genuinely 404
-        // so a typo'd /admin/foo doesn't return HTML and confuse a fetch().
         const apiPrefixes = ["/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/messages", "/reports", "/push", "/me", "/health", "/users", "/site", "/rules", "/socket.io"];
         if (apiPrefixes.some((p) => req.url === p || req.url.startsWith(p + "/") || req.url.startsWith(p + "?"))) {
           reply.code(404);
           return reply.send({ error: "not found" });
         }
-        return serveSplash(req, reply);
+        const html = await render404Html(db, originFromRequest(req));
+        reply.code(404);
+        reply.type("text/html; charset=utf-8");
+        // Tell crawlers and shared caches not to retain the 404 body. With
+        // an SPA there's no risk of a real route silently 404'ing for long
+        // (deploys ship a fresh process), but the directive is the SEO-
+        // hygienic answer.
+        reply.header("cache-control", "no-cache");
+        return html;
       });
     }
   }

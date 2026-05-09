@@ -295,14 +295,23 @@ export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Pro
           // (anything below 16px triggers zoom). md+ keeps our compact size.
           // resize-none + auto-grow effect manages height; leading-snug keeps
           // line spacing tight so multi-line posts don't waste vertical room.
-          className="block min-h-0 w-full resize-none rounded border border-keep-rule bg-keep-bg px-3 py-2 text-base leading-snug outline-none focus:border-keep-action md:py-1 md:text-sm"
+          //
+          // min-h-10 / md:min-h-8 match the rail-toggle and Send-button
+          // heights so a single-line textarea sits flush with both. The
+          // auto-grow effect freely sets a larger inline `style.height` for
+          // multi-line input - min-height is a floor, not a cap.
+          className="block min-h-10 w-full resize-none rounded border border-keep-rule bg-keep-bg px-3 py-2 text-base leading-snug outline-none focus:border-keep-action md:min-h-8 md:py-1 md:text-sm"
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
         />
       </div>
       <button
         type="submit"
-        className="shrink-0 rounded border border-keep-rule bg-keep-bg px-4 py-2 text-sm hover:bg-keep-banner md:py-1"
+        // Pinned to h-10 (mobile) / md:h-8 so the button's height matches
+        // the rail toggle and the textarea's single-line floor exactly.
+        // Without an explicit height, padding-driven sizing was a couple of
+        // pixels shy of the rail toggle and the misalignment was visible.
+        className="h-10 shrink-0 rounded border border-keep-rule bg-keep-bg px-4 text-sm hover:bg-keep-banner md:h-8"
       >
         Send
       </button>

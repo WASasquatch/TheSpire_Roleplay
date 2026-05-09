@@ -52,6 +52,20 @@ export interface CharacterPortrait {
   nsfw: boolean;
 }
 
+/**
+ * A player-set link rendered as a styled chip on a profile. Capped at 6 per
+ * profile server-side. Colors are optional hex (#rrggbb); null falls back to
+ * theme-default styling on the client.
+ */
+export interface ProfileLink {
+  id: string;
+  title: string;
+  url: string;
+  borderColor: string | null;
+  bgColor: string | null;
+  textColor: string | null;
+}
+
 export interface CharacterProfile {
   id: string;
   userId: string;
@@ -62,6 +76,8 @@ export interface CharacterProfile {
   avatarUrl: string | null;
   /** Additional portraits beyond the primary avatarUrl, in the order the owner set. */
   portraits: CharacterPortrait[];
+  /** Owner-set external links (other profiles, world docs, refs). */
+  links: ProfileLink[];
   /** Owner's chosen UI theme - applied to the profile modal when others view it. */
   theme: Theme;
   /** Mutual titles (marriages, partnerships, etc.) bound to this character. */
@@ -81,6 +97,8 @@ export interface MasterProfile {
   theme: Theme;
   /** Mutual titles bound to this master account (separate from any character titles). */
   titles: ProfileTitle[];
+  /** Owner-set external links (other profiles, OOC docs, refs). */
+  links: ProfileLink[];
   /** Account-level role. Surfaced on the modal so site admins/mods are visibly marked. */
   role: "user" | "trusted" | "mod" | "admin";
   createdAt: number;

@@ -81,6 +81,9 @@
   <body>
     <!-- Theme is applied via a React-controlled wrapper inside #root, not on body. -->
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <!-- `type="module"` already implies defer per spec, but the explicit
+         attribute satisfies SEO auditors that score render-blocking by
+         pattern-matching the script tag. -->
+    <script type="module" defer src="/src/main.tsx"></script>
   </body>
 </html>

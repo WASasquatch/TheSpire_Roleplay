@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { CharacterPortrait, CharacterStats, ProfileView, Theme } from "@thekeep/shared";
+import type { CharacterPortrait, CharacterStats, ProfileLink, ProfileView, Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import { GENDER_OPTIONS, type Gender } from "../lib/gender.js";
 import {
@@ -102,6 +102,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   const [notifyPref, setNotifyPref] = useState<NotifyPref>("mentions");
   /** Extra portraits beyond the primary avatarUrl (character targets only). */
   const [portraits, setPortraits] = useState<CharacterPortrait[]>([]);
+  /** Owner-set external links rendered as styled chips on the profile. */
+  const [links, setLinks] = useState<ProfileLink[]>([]);
   // Permission state is volatile - re-read on each render via a key bump.
   const [permVersion, setPermVersion] = useState(0);
 
@@ -164,6 +166,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setTheme(master.theme ? normalizeTheme(master.theme) : null);
           setNotifyPref(master.notifyPref ?? "mentions");
           setPortraits([]); // master has no gallery; only characters do
+          // Master/OOC links live under /me/links (characterId IS NULL).
+          try {
+            const lr = await fetch("/me/links", { credentials: "include" });
+            if (lr.ok) {
+              const lj = (await lr.json()) as { links: ProfileLink[] };
+              if (!cancelled) setLinks(lj.links);
+            }
+          } catch { /* links section is non-fatal */ }
           setLoadingTarget(false);
         } else {
           // Always re-fetch on switch so we have fresh statsJson; the list endpoint
@@ -197,6 +207,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
               if (!cancelled) setPortraits(pj.portraits.map((p) => ({ id: p.id, url: p.url, label: p.label, nsfw: !!p.nsfw })));
             }
           } catch { /* gallery is non-fatal */ }
+          try {
+            const lr = await fetch(`/characters/${target.id}/links`, { credentials: "include" });
+            if (lr.ok) {
+              const lj = (await lr.json()) as { links: ProfileLink[] };
+              if (!cancelled) setLinks(lj.links);
+            }
+          } catch { /* links section is non-fatal */ }
           setLoadingTarget(false);
         }
       } catch (err) {
@@ -369,6 +386,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           // Titles are populated server-side from accepted relationships;
           // the editor preview shows the form's contents only.
           titles: [],
+          links,
           role: master.role ?? "user",
           createdAt: Date.now(),
         },
@@ -384,13 +402,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         stats,
         avatarUrl: avatarUrl.trim() || null,
         portraits,
+        links,
         theme: previewTheme,
         titles: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
       },
     };
-  }, [target, master, name, bioHtml, avatarUrl, gender, stats, theme, portraits]);
+  }, [target, master, name, bioHtml, avatarUrl, gender, stats, theme, portraits, links]);
 
   const targetOptions = useMemo(() => {
     return [
@@ -602,6 +621,12 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                   onChange={setPortraits}
                 />
               ) : null}
+
+              <LinksEditor
+                scope={target.kind === "character" ? { kind: "character", id: target.id } : { kind: "master" }}
+                links={links}
+                onChange={setLinks}
+              />
 
               <fieldset className="rounded border border-keep-rule p-3">
                 <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
@@ -991,6 +1016,220 @@ function PortraitGalleryEditor({
           className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
         >
           + Add portrait
+        </button>
+      )}
+    </fieldset>
+  );
+}
+
+/* ============================================================
+ *  LinksEditor — owner-set external links rendered as styled
+ *  chips on the profile. Up to 6 per profile (server-enforced).
+ * ============================================================ */
+
+type LinksScope = { kind: "master" } | { kind: "character"; id: string };
+
+const LINKS_CAP = 6;
+const LINK_DEFAULT_BORDER = "#a89572";
+const LINK_DEFAULT_BG = "#e2d6b8";
+const LINK_DEFAULT_TEXT = "#2c5d2c";
+
+function linksEndpoint(scope: LinksScope): string {
+  return scope.kind === "master" ? "/me/links" : `/characters/${scope.id}/links`;
+}
+
+function LinksEditor({
+  scope,
+  links,
+  onChange,
+}: {
+  scope: LinksScope;
+  links: ProfileLink[];
+  onChange: (next: ProfileLink[]) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [title, setTitle] = useState("");
+  const [url, setUrl] = useState("");
+  const [customColors, setCustomColors] = useState(false);
+  const [borderColor, setBorderColor] = useState(LINK_DEFAULT_BORDER);
+  const [bgColor, setBgColor] = useState(LINK_DEFAULT_BG);
+  const [textColor, setTextColor] = useState(LINK_DEFAULT_TEXT);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function resetForm() {
+    setTitle("");
+    setUrl("");
+    setCustomColors(false);
+    setBorderColor(LINK_DEFAULT_BORDER);
+    setBgColor(LINK_DEFAULT_BG);
+    setTextColor(LINK_DEFAULT_TEXT);
+    setErr(null);
+  }
+
+  async function add(e: FormEvent) {
+    e.preventDefault();
+    if (!title.trim() || !url.trim()) return;
+    setErr(null);
+    setBusy(true);
+    try {
+      const body: Record<string, unknown> = { title: title.trim(), url: url.trim() };
+      if (customColors) {
+        body.borderColor = borderColor;
+        body.bgColor = bgColor;
+        body.textColor = textColor;
+      }
+      const res = await fetch(linksEndpoint(scope), {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      const row = (await res.json()) as ProfileLink;
+      onChange([...links, row]);
+      resetForm();
+      setAdding(false);
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "add failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(id: string) {
+    if (!window.confirm("Remove this link?")) return;
+    try {
+      const res = await fetch(`${linksEndpoint(scope)}/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      onChange(links.filter((l) => l.id !== id));
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "delete failed");
+    }
+  }
+
+  const atCap = links.length >= LINKS_CAP;
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Profile links</legend>
+      <p className="mb-2 text-[10px] text-keep-muted">
+        Up to {LINKS_CAP} external links rendered as styled chips on this profile. Useful for cross-site character profiles, world docs, refs. They open in a new tab.
+      </p>
+      {links.length > 0 ? (
+        <ul className="mb-2 space-y-1">
+          {links.map((l) => (
+            <li key={l.id} className="flex items-center justify-between gap-2 rounded border border-keep-rule/60 bg-keep-bg px-2 py-1">
+              <span
+                className="inline-block truncate rounded border px-1.5 py-0.5 text-[11px]"
+                style={{
+                  borderColor: l.borderColor ?? "rgb(var(--keep-border))",
+                  backgroundColor: l.bgColor ?? "rgb(var(--keep-panel))",
+                  color: l.textColor ?? "rgb(var(--keep-action))",
+                }}
+                title={l.url}
+              >
+                {l.title}
+              </span>
+              <span className="truncate text-[10px] text-keep-muted">{l.url}</span>
+              <button
+                type="button"
+                onClick={() => remove(l.id)}
+                title="Remove link"
+                aria-label="Remove link"
+                className="shrink-0 rounded border border-keep-accent/50 bg-keep-bg px-1.5 py-0 text-[10px] text-keep-accent hover:bg-keep-accent/10"
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mb-2 italic text-keep-muted">No links yet.</p>
+      )}
+      {adding ? (
+        <form onSubmit={add} className="space-y-1">
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Title (e.g. 'F-List profile')"
+            maxLength={60}
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+          />
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://example.com/your-profile"
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+          />
+          <label className="flex items-center gap-1 text-[11px] text-keep-muted">
+            <input
+              type="checkbox"
+              checked={customColors}
+              onChange={(e) => setCustomColors(e.target.checked)}
+              className="h-3 w-3"
+            />
+            <span>Customize chip colors</span>
+          </label>
+          {customColors ? (
+            <div className="grid grid-cols-3 gap-2">
+              <label className="flex flex-col text-[10px] text-keep-muted">
+                <span className="uppercase tracking-widest">Border</span>
+                <input type="color" value={borderColor} onChange={(e) => setBorderColor(e.target.value)} className="h-6 w-full rounded border border-keep-rule" />
+              </label>
+              <label className="flex flex-col text-[10px] text-keep-muted">
+                <span className="uppercase tracking-widest">Background</span>
+                <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} className="h-6 w-full rounded border border-keep-rule" />
+              </label>
+              <label className="flex flex-col text-[10px] text-keep-muted">
+                <span className="uppercase tracking-widest">Text</span>
+                <input type="color" value={textColor} onChange={(e) => setTextColor(e.target.value)} className="h-6 w-full rounded border border-keep-rule" />
+              </label>
+            </div>
+          ) : null}
+          {customColors ? (
+            <div className="mt-1 text-[10px] text-keep-muted">
+              Preview:{" "}
+              <span
+                className="inline-block rounded border px-1.5 py-0.5 text-[11px]"
+                style={{ borderColor, backgroundColor: bgColor, color: textColor }}
+              >
+                {title.trim() || "Sample link"}
+              </span>
+            </div>
+          ) : null}
+          {err ? <div className="text-[10px] text-keep-accent">{err}</div> : null}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setAdding(false); resetForm(); }}
+              className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !title.trim() || !url.trim()}
+              className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+            >
+              {busy ? "Adding..." : "Add"}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          disabled={atCap}
+          title={atCap ? `Limit of ${LINKS_CAP} links per profile.` : undefined}
+          className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner disabled:opacity-50"
+        >
+          + Add link
         </button>
       )}
     </fieldset>

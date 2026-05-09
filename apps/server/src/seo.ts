@@ -87,7 +87,7 @@ export function originFromRequest(req: FastifyRequest): string {
 export async function renderSplashHtml(
   db: Db,
   origin: string,
-  pathname: string,
+  _pathname: string,
   sourceHtml: string,
 ): Promise<string> {
   let html = sourceHtml;
@@ -102,7 +102,11 @@ export async function renderSplashHtml(
     s.metaDescription?.trim() ||
     (s.welcomeHtml ? stripToText(s.welcomeHtml) : "") ||
     "A roleplay-focused chat sanctuary.";
-  const canonicalUrl = `${origin}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
+  // The Spire is single-page - everything past login is auth-walled and
+  // shouldn't be indexed. Pin canonical / og:url to the origin root so SPA-
+  // fallback hits (which we now 404, but kept defensively) and any indexer
+  // that crawled an old non-/ URL roll up to the same canonical.
+  const canonicalUrl = `${origin}/`;
 
   const titleAttr = escapeHtmlAttr(title);
   const descAttr = escapeHtmlAttr(description);
@@ -214,4 +218,75 @@ export function renderSitemapXml(origin: string): string {
  *  path math fastify-static uses elsewhere in index.ts. */
 export function resolveIndexHtmlPath(serverDir: string): string {
   return resolve(serverDir, "..", "..", "web", "dist", "index.html");
+}
+
+/**
+ * Themed 404 page rendered for unknown non-API GETs. Carries the same
+ * stylesheet + favicon as the splash so it doesn't look like a stranded
+ * server error page; offers a single link back to the chat.
+ *
+ * Note: this is a one-off HTML string rather than a React render — keeping
+ * the 404 path simple (no SPA boot) matters for crawlers and for the
+ * pathological case where the bundle itself fails to load.
+ */
+export async function render404Html(db: Db, origin: string): Promise<string> {
+  const s = await getSettings(db);
+  const title = escapeHtmlAttr(s.siteName?.trim() || "The Spire");
+  const home = escapeHtmlAttr(`${origin}/`);
+  // Inline minimal CSS so the page looks themed even if the main bundle is
+  // stale or unreachable. Colors mirror the parchment default theme.
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex" />
+<link rel="icon" href="/favicon.ico" />
+<link rel="canonical" href="${home}" />
+<title>404 — ${title}</title>
+<style>
+  :root { color-scheme: light; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: #f4efe2;
+    color: #1a1a1a;
+  }
+  .card {
+    max-width: 28rem;
+    padding: 2.5rem 2rem;
+    text-align: center;
+    background: #fff8;
+    border: 1px solid #a89572;
+    border-radius: 6px;
+    box-shadow: 0 20px 60px -15px rgba(0,0,0,0.25);
+  }
+  h1 { font-family: Georgia, Cambria, serif; font-size: 2rem; margin: 0 0 0.5rem; }
+  p { margin: 0.5rem 0; color: #6b6256; }
+  a {
+    display: inline-block;
+    margin-top: 1.25rem;
+    padding: 0.5rem 1rem;
+    border: 1px solid #a89572;
+    border-radius: 4px;
+    background: #e2d6b8;
+    color: #1a1a1a;
+    text-decoration: none;
+  }
+  a:hover { background: #d6c8a4; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1>Lost the path</h1>
+    <p>That URL isn't part of ${title}. The chat lives at the entrance.</p>
+    <a href="${home}">Back to ${title}</a>
+  </main>
+</body>
+</html>
+`;
 }

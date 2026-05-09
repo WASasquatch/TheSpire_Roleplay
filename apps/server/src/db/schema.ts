@@ -599,6 +599,39 @@ export const mutualTitles = sqliteTable(
   }),
 );
 
+/* ---------- profile links ---------- */
+/**
+ * Player-set links surfaced as styled chips on a profile. Each row is owned
+ * by a user; `characterId` discriminates scope:
+ *   - characterId IS NULL → link belongs to the user's master/OOC profile
+ *   - characterId = <id>  → link belongs to that specific character
+ *
+ * Per-profile cap (6) is enforced in the route handler, not at the DB layer.
+ */
+export const profileLinks = sqliteTable(
+  "profile_links",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    characterId: text("character_id").references(() => characters.id, {
+      onDelete: "cascade",
+    }),
+    title: text("title").notNull(),
+    url: text("url").notNull(),
+    /** Optional hex color (#rrggbb). Null = render with theme defaults. */
+    borderColor: text("border_color"),
+    bgColor: text("bg_color"),
+    textColor: text("text_color"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    userIdx: index("profile_links_user_idx").on(t.userId, t.characterId, t.sortOrder),
+  }),
+);
+
 /* ---------- audit log (Phase 3) ---------- */
 /**
  * Append-only log of admin/mod actions. Stores enough metadata to reconstruct
@@ -701,6 +734,7 @@ export type DbNavLink = typeof navLinks.$inferSelect;
 export type DbSiteSettings = typeof siteSettings.$inferSelect;
 export type DbTitleKind = typeof titleKinds.$inferSelect;
 export type DbMutualTitle = typeof mutualTitles.$inferSelect;
+export type DbProfileLink = typeof profileLinks.$inferSelect;
 export type DbAuditEntry = typeof auditLog.$inferSelect;
 export type DbReport = typeof reports.$inferSelect;
 export type DbWatch = typeof watches.$inferSelect;

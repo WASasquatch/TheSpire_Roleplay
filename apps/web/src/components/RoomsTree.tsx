@@ -143,6 +143,7 @@ function RoomGroup({
                 away={o.away}
                 awayMessage={o.awayMessage ?? null}
                 rolePrefix={o.role === "owner" ? "♛" : o.role === "mod" ? "★" : ""}
+                ooc={o.characterId === null}
                 onIconClick={() => onIconClick(o.userId, o.displayName)}
                 onNameClick={() => onNameClick(o.userId, o.displayName)}
               />

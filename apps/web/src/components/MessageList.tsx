@@ -176,6 +176,10 @@ function Line({
       color={msg.color}
       italic={isSenderAdmin}
       mood={msg.moodSnapshot ?? null}
+      // Deliberately NOT passing `ooc` here. It'd repeat on every utterance
+      // and stack with mood/away into a wall of chips. The userlist (and
+      // rooms tree) carries the OOC marker - that's the canonical "who's
+      // here" board; chat lines stay tight.
       onIconClick={() => onIconClick(msg.userId, msg.displayName)}
       onNameClick={() => onNameClick(msg.userId, msg.displayName)}
       // Chat lines stay compact - viewers open profiles from the userlist.
@@ -336,26 +340,38 @@ function Line({
   // history otherwise). Controls are absolutely positioned so they don't
   // disturb existing layout for any kind.
   const showReport = canReport && !isOwn && REPORTABLE_KINDS.has(msg.kind);
-  const wrapped = (
-    <div className="group relative">
+
+  // Hover row-highlight. `bg-keep-muted/25` uses the theme's "secondary
+  // text" tone (warm gray on light palettes, soft gray on dark ones) so
+  // the hover lands a tint that's palette-consistent without the harsh
+  // contrast of `--keep-text` (which is essentially black on light themes
+  // and read as too dark even at low alpha). `-mx-4 px-4` extends the
+  // hover edge-to-edge of the chat column (matches MessageList's px-4
+  // padding) so the strip looks intentional rather than floating mid-row.
+  const hoverRow = "-mx-4 px-4 transition-colors hover:bg-keep-muted/25";
+
+  // Replies wrap the quote + the line in a single container with a continuous
+  // accent-tinted left border, so the two read as one coupled block instead
+  // of as two stray lines next to each other in the timeline. The hover
+  // tint goes on the OUTER container so hovering anywhere over the reply
+  // (including its quote preview) lights the whole block.
+  if (isReply) {
+    return (
+      <div className={`group relative my-0.5 border-l-2 border-keep-action/50 pl-2 ${hoverRow}`}>
+        {quote}
+        {lineEl}
+        {showOwnControls ? <OwnControls msg={msg} /> : null}
+        {showReport && !showOwnControls ? <ReportButton msg={msg} /> : null}
+      </div>
+    );
+  }
+  return (
+    <div className={`group relative ${hoverRow}`}>
       {lineEl}
       {showOwnControls ? <OwnControls msg={msg} /> : null}
       {showReport && !showOwnControls ? <ReportButton msg={msg} /> : null}
     </div>
   );
-
-  // Replies wrap the quote + the line in a single container with a continuous
-  // accent-tinted left border, so the two read as one coupled block instead
-  // of as two stray lines next to each other in the timeline.
-  if (isReply) {
-    return (
-      <div className="my-0.5 border-l-2 border-keep-action/50 pl-2">
-        {quote}
-        {wrapped}
-      </div>
-    );
-  }
-  return wrapped;
 }
 
 /**

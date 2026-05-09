@@ -27,6 +27,13 @@ interface Props {
   italic?: boolean;
   /** Free-text mood/expression chip rendered after the name (e.g. "[angry]"). */
   mood?: string | null;
+  /**
+   * True when the speaker / occupant is on their master account (no active
+   * character). Renders a small muted "(ooc)" suffix - same convention as
+   * `[away]`, kept lowercase + parenthesised so it reads as a quiet aside
+   * rather than a badge that competes with mood/role markers.
+   */
+  ooc?: boolean;
 }
 
 /**
@@ -46,6 +53,7 @@ export function UserNameTag({
   hideIcon,
   italic,
   mood,
+  ooc,
 }: Props) {
   const g = genderGlyph(gender);
   return (
@@ -82,6 +90,14 @@ export function UserNameTag({
           title={`mood: ${mood}`}
         >
           {mood}
+        </span>
+      ) : null}
+      {ooc ? (
+        <span
+          className="ml-1 text-[10px] text-keep-muted"
+          title="Speaking from their master / OOC account, not as a character"
+        >
+          (ooc)
         </span>
       ) : null}
       {away ? <span className="ml-1 text-keep-muted">[away]</span> : null}

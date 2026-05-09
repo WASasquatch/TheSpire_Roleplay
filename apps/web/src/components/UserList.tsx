@@ -74,6 +74,7 @@ export function UserList({
               rolePrefix={o.role === "owner" ? "♛" : o.role === "mod" ? "★" : ""}
               italic={o.accountRole === "admin"}
               mood={o.mood ?? null}
+              ooc={o.characterId === null}
               onIconClick={() => onIconClick(o.userId, o.displayName)}
               onNameClick={() => onNameClick(o.userId, o.displayName)}
             />

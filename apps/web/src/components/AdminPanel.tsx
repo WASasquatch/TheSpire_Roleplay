@@ -1004,21 +1004,22 @@ function RulesTab() {
       </fieldset>
 
       <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Welcome / announcement (post-login)</legend>
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">New-user welcome (post-login)</legend>
         <textarea
           value={welcomeHtml}
           onChange={(e) => setWelcomeHtml(e.target.value)}
           rows={10}
           maxLength={50_000}
-          placeholder="<h3>Welcome to The Spire</h3><p>We just shipped...</p>"
+          placeholder="<h3>Welcome to The Spire</h3><p>Quick orientation...</p>"
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
-          Shown as a one-time modal to logged-in users after sign-in. Editing the
-          text here re-shows the modal to <b>everyone</b> on their next page load
-          (we hash the content; a new hash means "new message"). Empty text = no
-          modal shown. Good for deployment news, "we just shipped X", or onboarding
-          tips for fresh accounts.
+          Onboarding modal shown once to users who register <b>after</b> the most
+          recent save here. Existing users (registered before the welcome was
+          set or last edited) never see it - this is for fresh accounts only,
+          not a broadcast channel. Re-saving with the same text doesn't
+          re-shift the audience cutoff; only changing the text does. Empty
+          text = no welcome shown.
         </p>
       </fieldset>
 
@@ -1058,7 +1059,7 @@ function RulesTab() {
           {welcomeHtml.trim() ? (
             <div className="rounded border border-keep-action/40 bg-keep-action/5 p-2">
               <div className="mb-1 text-[10px] uppercase tracking-[0.25em] text-keep-muted">
-                post-login welcome modal
+                new-user welcome modal (shown only to accounts registered after this is saved)
               </div>
               <div
                 className="prose prose-sm max-w-none"

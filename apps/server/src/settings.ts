@@ -68,6 +68,8 @@ export interface SiteSettings {
   newUserWelcomeHtml: string;
   /** SHA hash of the current welcome HTML; clients compare against the user's `welcomeSeenHash` to decide whether to surface the modal. Empty when welcome HTML is empty. */
   newUserWelcomeHash: string;
+  /** Timestamp the welcome text was last edited (ms epoch), or null when never set. Audience gate: `user.createdAt > newUserWelcomeUpdatedAt`. */
+  newUserWelcomeUpdatedAt: number | null;
   updatedAt: number;
 }
 
@@ -169,7 +171,20 @@ export async function updateSettings(
   if (patch.customHeadHtml !== undefined) update.customHeadHtml = patch.customHeadHtml;
   if (patch.activityFeedsEnabled !== undefined) update.activityFeedsEnabled = patch.activityFeedsEnabled;
   if (patch.featuredWorldsEnabled !== undefined) update.featuredWorldsEnabled = patch.featuredWorldsEnabled;
-  if (patch.newUserWelcomeHtml !== undefined) update.newUserWelcomeHtml = patch.newUserWelcomeHtml;
+  if (patch.newUserWelcomeHtml !== undefined) {
+    // Only bump the welcome's edit timestamp when the text actually changed.
+    // The audience filter (`user.createdAt > newUserWelcomeUpdatedAt`)
+    // depends on this being a true content-change marker - re-saving
+    // unchanged settings shouldn't re-broadcast the modal to a fresh
+    // cohort of "users registered after right now".
+    const current = (await db.select({ html: siteSettings.newUserWelcomeHtml }).from(siteSettings).where(eq(siteSettings.id, "singleton")).limit(1))[0];
+    update.newUserWelcomeHtml = patch.newUserWelcomeHtml;
+    if ((current?.html ?? "") !== patch.newUserWelcomeHtml) {
+      // Empty-string clear -> set the timestamp to null too, so a stale
+      // user.createdAt comparison can't accidentally surface old text.
+      update.newUserWelcomeUpdatedAt = patch.newUserWelcomeHtml.trim() === "" ? null : new Date();
+    }
+  }
   await db.update(siteSettings).set(update).where(eq(siteSettings.id, "singleton"));
   cached = null;
   return getSettings(db);
@@ -208,6 +223,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     featuredWorldsEnabled: row.featuredWorldsEnabled,
     newUserWelcomeHtml: row.newUserWelcomeHtml,
     newUserWelcomeHash: hashWelcome(row.newUserWelcomeHtml),
+    newUserWelcomeUpdatedAt: row.newUserWelcomeUpdatedAt ? +row.newUserWelcomeUpdatedAt : null,
     updatedAt: +row.updatedAt,
   };
 }

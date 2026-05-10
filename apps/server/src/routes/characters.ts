@@ -297,12 +297,16 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       if (c && !c.deletedAt) activeCharacterName = c.name;
     }
 
-    // Welcome modal: surface the admin-configured welcome HTML iff the
-    // user's stored hash differs from the current content's hash. Empty
-    // welcome string short-circuits hash to "" so we never show nothing.
+    // Welcome modal audience: the user must have registered AFTER the
+    // welcome's most recent edit (so existing users don't get retroactively
+    // spammed when an admin sets or updates the welcome text). Plus the
+    // usual "non-empty welcome" + "user hasn't acknowledged this hash" gates.
     const settings = await getSettings(db);
+    const userCreatedMs = +u.createdAt;
     const wantsWelcome =
       settings.newUserWelcomeHash !== "" &&
+      settings.newUserWelcomeUpdatedAt !== null &&
+      userCreatedMs > settings.newUserWelcomeUpdatedAt &&
       u.welcomeSeenHash !== settings.newUserWelcomeHash;
     return {
       userId: u.id,

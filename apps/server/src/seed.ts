@@ -129,14 +129,16 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
   // safe to run regardless of SKIP_DEFAULT_SEED.
   await ensureSiteSettings(db);
 
-  // Default open worlds. Same idempotent contract as the rooms loop above:
-  // we only insert worlds whose (system, slug) pair isn't already present,
-  // and only seed pages into a world that has zero pages. Once anyone
-  // (admin, future moderator, the world's eventual owner) edits a world
-  // or adds a page, every subsequent boot leaves it alone.
-  if (!skipDefaults) {
-    await ensureDefaultWorlds(db);
-  }
+  // Default open worlds. Always-on, intentionally NOT gated by
+  // SKIP_DEFAULT_SEED. The flag exists to handle the rooms-renamed case
+  // (where a re-seed would create a duplicate "Tavern" alongside an admin's
+  // renamed "The Bar"). Worlds key on slug instead of display name, so the
+  // insert-if-missing-per-slug loop can never duplicate or overwrite a
+  // world that's already there - even after admin edits, even if the
+  // world's name was changed entirely. The system simply ships any
+  // newly-added DEFAULT_WORLDS entries on the next boot and leaves
+  // everything else alone.
+  await ensureDefaultWorlds(db);
 }
 
 /**

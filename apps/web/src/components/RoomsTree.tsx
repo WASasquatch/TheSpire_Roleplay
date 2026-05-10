@@ -15,6 +15,8 @@ interface Props {
   onNameClick: (userId: string, displayName: string) => void;
   onRoomClick: (roomId: string) => void;
   onCommand: (text: string) => void;
+  /** Open the world viewer modal for a given world id (clicking a primary-world section header). */
+  onWorldClick: (worldId: string) => void;
   /**
    * Mobile drawer state. On md+ screens the rail is always visible regardless;
    * isOpen only controls the slide-in/out at sub-md widths.
@@ -37,6 +39,7 @@ export function RoomsTree({
   onNameClick,
   onRoomClick,
   onCommand,
+  onWorldClick,
   isOpen,
   onClose,
 }: Props) {
@@ -90,6 +93,7 @@ export function RoomsTree({
                 onIconClick={onIconClick}
                 onNameClick={onNameClick}
                 onRoomClick={onRoomClick}
+                onWorldClick={onWorldClick}
               />
             ))}
           </ul>
@@ -106,14 +110,22 @@ function RoomGroup({
   onIconClick,
   onNameClick,
   onRoomClick,
+  onWorldClick,
 }: {
   room: RoomWithOccupants;
   isCurrent: boolean;
   onIconClick: (userId: string, displayName: string) => void;
   onNameClick: (userId: string, displayName: string) => void;
   onRoomClick: (roomId: string) => void;
+  onWorldClick: (worldId: string) => void;
 }) {
   const isPrivate = room.type === "private";
+  // Group occupants by primary world. Unaffiliated bucket keys "_none" so
+  // it sorts to the end deterministically. Within a world, sort by display
+  // name; world buckets sort by world name; "_none" is always last.
+  const groups = groupByPrimaryWorld(room.occupants);
+  const showHeaders = groups.length > 1; // a single bucket is just a flat list
+
   return (
     <li className={`border-b border-keep-rule/40 ${isCurrent ? "bg-keep-banner/40" : ""}`}>
       <button
@@ -134,23 +146,96 @@ function RoomGroup({
         <div className="px-5 pb-2 text-[11px] italic text-keep-muted md:pb-1">empty</div>
       ) : (
         <ul className="pb-1">
-          {room.occupants.map((o) => (
-            <li key={o.userId} className="truncate px-3 py-1.5 pl-5 md:py-0.5">
-              <UserNameTag
-                displayName={o.displayName}
-                gender={o.gender}
-                color={o.chatColor ?? null}
-                away={o.away}
-                awayMessage={o.awayMessage ?? null}
-                rolePrefix={o.role === "owner" ? "♛" : o.role === "mod" ? "★" : ""}
-                ooc={o.characterId === null}
-                onIconClick={() => onIconClick(o.userId, o.displayName)}
-                onNameClick={() => onNameClick(o.userId, o.displayName)}
-              />
+          {groups.map((g) => (
+            <li key={g.world?.id ?? "_none"}>
+              {showHeaders ? (
+                g.world ? (
+                  <button
+                    type="button"
+                    onClick={() => onWorldClick(g.world!.id)}
+                    title={`Open ${g.world.name} (by ${g.world.ownerUsername})`}
+                    // py-1.5 mobile / py-0.5 desktop. Section banding via
+                    // muted/25 - same pattern used for hover highlights.
+                    className="flex w-full items-baseline justify-between bg-keep-muted/25 px-3 py-1.5 text-left text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-muted/40 md:py-0.5"
+                  >
+                    <span className="truncate">{g.world.name}</span>
+                    <span className="ml-2 shrink-0">{g.users.length}</span>
+                  </button>
+                ) : (
+                  <div className="bg-keep-muted/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-keep-muted/70 md:py-0.5">
+                    Unaffiliated
+                    <span className="ml-2">{g.users.length}</span>
+                  </div>
+                )
+              ) : null}
+              <ul>
+                {g.users.map((o) => (
+                  <li key={o.userId} className="truncate px-3 py-1.5 pl-5 md:py-0.5">
+                    <UserNameTag
+                      displayName={o.displayName}
+                      gender={o.gender}
+                      color={o.chatColor ?? null}
+                      away={o.away}
+                      awayMessage={o.awayMessage ?? null}
+                      rolePrefix={resolveRolePrefix(o)}
+                      ooc={o.characterId === null}
+                      onIconClick={() => onIconClick(o.userId, o.displayName)}
+                      onNameClick={() => onNameClick(o.userId, o.displayName)}
+                    />
+                  </li>
+                ))}
+              </ul>
             </li>
           ))}
         </ul>
       )}
     </li>
   );
+}
+
+interface OccupantGroup {
+  /** Null = the unaffiliated bucket. */
+  world: { id: string; slug: string; name: string; ownerUsername: string } | null;
+  users: RoomOccupant[];
+}
+
+/**
+ * Bucket occupants by their primary world. World buckets sort by world name;
+ * the unaffiliated bucket always lands at the end. Within a bucket, sort by
+ * display name (case-insensitive) so the list is stable as users come and go.
+ */
+function groupByPrimaryWorld(occupants: RoomOccupant[]): OccupantGroup[] {
+  const buckets = new Map<string, OccupantGroup>();
+  for (const o of occupants) {
+    const key = o.primaryWorld?.id ?? "_none";
+    let g = buckets.get(key);
+    if (!g) {
+      g = { world: o.primaryWorld ?? null, users: [] };
+      buckets.set(key, g);
+    }
+    g.users.push(o);
+  }
+  for (const g of buckets.values()) {
+    g.users.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
+  }
+  return [...buckets.values()].sort((a, b) => {
+    if (!a.world && !b.world) return 0;
+    if (!a.world) return 1;
+    if (!b.world) return -1;
+    return a.world.name.toLowerCase().localeCompare(b.world.name.toLowerCase());
+  });
+}
+
+/**
+ * Resolve the small role chip rendered before a user's name. Owner takes
+ * precedence; otherwise either a per-room mod OR a site-level mod gets a
+ * star (a site mod is conceptually "a mod for every room", so it makes
+ * sense to share the marker). Site admins use italics instead - handled
+ * elsewhere via UserNameTag's `italic` prop - so admin doesn't need a
+ * prefix here.
+ */
+export function resolveRolePrefix(o: RoomOccupant): string {
+  if (o.role === "owner") return "♛";
+  if (o.role === "mod" || o.accountRole === "mod") return "★";
+  return "";
 }

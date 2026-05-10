@@ -48,6 +48,18 @@ export interface SiteBranding {
    * last logged-in user happened to leave on documentElement.
    */
   defaultTheme: Theme;
+  /**
+   * Master toggle for surfacing live community activity. When false the
+   * splash hides its user/room counters (cold-start posture so the site
+   * doesn't telegraph "dead community" to first visitors).
+   */
+  activityFeedsEnabled: boolean;
+  /**
+   * Splash featured-worlds carousel toggle. When true, the splash fetches a
+   * randomized slice of open worlds from /worlds/featured and renders them
+   * as a small browse strip below the welcome card.
+   */
+  featuredWorldsEnabled: boolean;
 }
 
 export const DEFAULT_BRANDING: SiteBranding = {
@@ -63,6 +75,11 @@ export const DEFAULT_BRANDING: SiteBranding = {
   messageRetentionMs: 0,
   sessionTtlMs: 30 * 24 * 60 * 60 * 1000,
   defaultTheme: DEFAULT_THEME,
+  // Off by default. Admin flips it on once there are real users to surface.
+  activityFeedsEnabled: false,
+  // Off by default. Admin flips it on after deciding the seeded worlds are
+  // representative or after seeding the catalog with their own.
+  featuredWorldsEnabled: false,
 };
 
 const BRANDING_CACHE_KEY = "tk:branding:v1";
@@ -111,6 +128,12 @@ export function loadCachedBranding(): SiteBranding {
       defaultTheme: parsed.defaultTheme && typeof parsed.defaultTheme === "object"
         ? { ...DEFAULT_BRANDING.defaultTheme, ...parsed.defaultTheme }
         : DEFAULT_BRANDING.defaultTheme,
+      activityFeedsEnabled: typeof parsed.activityFeedsEnabled === "boolean"
+        ? parsed.activityFeedsEnabled
+        : DEFAULT_BRANDING.activityFeedsEnabled,
+      featuredWorldsEnabled: typeof parsed.featuredWorldsEnabled === "boolean"
+        ? parsed.featuredWorldsEnabled
+        : DEFAULT_BRANDING.featuredWorldsEnabled,
     };
   } catch {
     return DEFAULT_BRANDING;

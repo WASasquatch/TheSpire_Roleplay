@@ -97,6 +97,12 @@ export type UiHint =
   | { kind: "set-refresh-interval"; seconds: number }
   /** Open the help modal, optionally focused on a specific command. */
   | { kind: "open-help"; filter?: string }
+  /** Open the World Viewer modal for the given world id. */
+  | { kind: "open-world"; worldId: string }
+  /** Open the Worlds manager modal (the caller's own worlds). */
+  | { kind: "open-worlds-list" }
+  /** Open the World Catalog modal (browse open worlds). */
+  | { kind: "open-world-catalog" }
   /** Open the searchable users directory. Optional `query` pre-fills the search box. */
   | { kind: "open-users"; query?: string }
   /** Clear the local message buffer for the current room (no server effect). */

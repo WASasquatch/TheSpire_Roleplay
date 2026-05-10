@@ -11,7 +11,7 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "settings" | "branding" | "rules" | "links" | "rooms" | "commands" | "titles" | "users" | "reports" | "audit";
+type Tab = "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "users" | "reports" | "audit";
 
 export function AdminPanel({ onClose, onLinksChanged }: Props) {
   const [tab, setTab] = useState<Tab>("settings");
@@ -30,6 +30,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
               <TabBtn active={tab === "branding"} onClick={() => setTab("branding")}>Branding</TabBtn>
               <TabBtn active={tab === "rules"} onClick={() => setTab("rules")}>Rules</TabBtn>
               <TabBtn active={tab === "links"} onClick={() => setTab("links")}>Nav Links</TabBtn>
+              <TabBtn active={tab === "affiliates"} onClick={() => setTab("affiliates")}>Affiliates</TabBtn>
               <TabBtn active={tab === "commands"} onClick={() => setTab("commands")}>Commands</TabBtn>
               <TabBtn active={tab === "titles"} onClick={() => setTab("titles")}>Titles</TabBtn>
               <TabBtn active={tab === "rooms"} onClick={() => setTab("rooms")}>Rooms</TabBtn>
@@ -48,6 +49,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
           {tab === "branding" ? <BrandingTab /> : null}
           {tab === "rules" ? <RulesTab /> : null}
           {tab === "links" ? <LinksTab onLinksChanged={onLinksChanged} /> : null}
+          {tab === "affiliates" ? <AffiliatesTab /> : null}
           {tab === "commands" ? <CommandsTab /> : null}
           {tab === "titles" ? <TitleKindsTab /> : null}
           {tab === "rooms" ? <RoomsTab /> : null}
@@ -118,6 +120,8 @@ interface SettingsRow {
   registerDisclaimerHtml: string;
   metaDescription: string;
   customHeadHtml: string;
+  activityFeedsEnabled: boolean;
+  featuredWorldsEnabled: boolean;
   updatedAt: number;
 }
 
@@ -274,6 +278,8 @@ function SettingsTab() {
   const [maxMsgLen, setMaxMsgLen] = useState("");
   const [maxBioLen, setMaxBioLen] = useState("");
   const [regOpen, setRegOpen] = useState(true);
+  const [activityFeedsEnabled, setActivityFeedsEnabled] = useState(false);
+  const [featuredWorldsEnabled, setFeaturedWorldsEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -294,6 +300,8 @@ function SettingsTab() {
       setMaxMsgLen(String(j.maxMessageLength));
       setMaxBioLen(String(j.maxBioLength));
       setRegOpen(j.registrationOpen);
+      setActivityFeedsEnabled(j.activityFeedsEnabled);
+      setFeaturedWorldsEnabled(j.featuredWorldsEnabled);
     } catch (err) {
       setError(err instanceof Error ? err.message : "load failed");
     }
@@ -325,6 +333,8 @@ function SettingsTab() {
         maxMessageLength: intOrThrow("Max message length", maxMsgLen, 100, 50_000),
         maxBioLength: intOrThrow("Max bio length", maxBioLen, 1000, 200_000),
         registrationOpen: regOpen,
+        activityFeedsEnabled,
+        featuredWorldsEnabled,
       };
       // Send theme only when admin actually changed it from the loaded value.
       if (theme === null && data?.defaultThemeJson) body.defaultTheme = null;
@@ -354,6 +364,8 @@ function SettingsTab() {
         messageRetentionMs: j.messageRetentionMs,
         sessionTtlMs: j.sessionTtlMs,
         defaultTheme: j.defaultTheme,
+        activityFeedsEnabled: j.activityFeedsEnabled,
+        featuredWorldsEnabled: j.featuredWorldsEnabled,
       });
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
@@ -463,6 +475,34 @@ function SettingsTab() {
             </div>
             <span className="mt-0.5 block text-[10px] text-keep-muted">
               When closed, /auth/register returns 503 and the login screen hides the Register tab.
+            </span>
+          </label>
+          <label className="text-xs">
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Activity feeds</span>
+            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+              <input
+                type="checkbox"
+                checked={activityFeedsEnabled}
+                onChange={(e) => setActivityFeedsEnabled(e.target.checked)}
+              />
+              <span>{activityFeedsEnabled ? "On - splash shows live counters" : "Off - cold-start posture"}</span>
+            </div>
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              When off, the splash hides the "X users online" / room counters so an empty community doesn't telegraph "dead site" to first visitors. Flip on once there's a real pulse to surface.
+            </span>
+          </label>
+          <label className="text-xs">
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Featured worlds carousel</span>
+            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+              <input
+                type="checkbox"
+                checked={featuredWorldsEnabled}
+                onChange={(e) => setFeaturedWorldsEnabled(e.target.checked)}
+              />
+              <span>{featuredWorldsEnabled ? "On - splash rotates open worlds" : "Off - splash hides the carousel"}</span>
+            </div>
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              Splash page picks up to 10 random open worlds and rotates them as a "settings you can play in" strip. Off by default; the seeded defaults plus any community open worlds will fill the rotation once enabled.
             </span>
           </label>
         </div>
@@ -600,6 +640,8 @@ function BrandingTab() {
         messageRetentionMs: j.messageRetentionMs,
         sessionTtlMs: j.sessionTtlMs,
         defaultTheme: j.defaultTheme,
+        activityFeedsEnabled: j.activityFeedsEnabled,
+        featuredWorldsEnabled: j.featuredWorldsEnabled,
       });
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
@@ -881,6 +923,8 @@ function RulesTab() {
         messageRetentionMs: j.messageRetentionMs,
         sessionTtlMs: j.sessionTtlMs,
         defaultTheme: j.defaultTheme,
+        activityFeedsEnabled: j.activityFeedsEnabled,
+        featuredWorldsEnabled: j.featuredWorldsEnabled,
       });
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
@@ -3131,5 +3175,289 @@ function AuditTab() {
         </ul>
       )}
     </section>
+  );
+}
+
+/* =========================================================
+ *  Affiliates tab — partners / sponsors carousel manager
+ * =========================================================
+ *
+ * Each row is admin-trusted raw HTML (topsite networks like toprpsites
+ * require a specific anchor + tracking-pixel snippet). The HTML is rendered
+ * verbatim on the splash via dangerouslySetInnerHTML; sanitizing it would
+ * strip the very tracking pixels these networks are validating against.
+ *
+ * Same trust posture as customHeadHtml in Settings - if an admin pastes
+ * hostile HTML, that's an admin-account-compromise problem.
+ */
+interface AffiliateRow {
+  id: string;
+  label: string;
+  html: string;
+  enabled: boolean;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+function AffiliatesTab() {
+  const [rows, setRows] = useState<AffiliateRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  async function load() {
+    setError(null);
+    try {
+      const r = await fetch("/admin/affiliates", { credentials: "include" });
+      if (!r.ok) throw new Error(await readError(r));
+      const j = (await r.json()) as { affiliates: AffiliateRow[] };
+      setRows(j.affiliates);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "load failed");
+    }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function remove(id: string) {
+    if (!window.confirm("Delete this affiliate entry?")) return;
+    try {
+      const r = await fetch(`/admin/affiliates/${id}`, { method: "DELETE", credentials: "include" });
+      if (!r.ok) throw new Error(await readError(r));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "delete failed");
+    }
+  }
+
+  async function patch(id: string, body: Partial<{ label: string; html: string; enabled: boolean; sortOrder: number }>) {
+    try {
+      const r = await fetch(`/admin/affiliates/${id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "save failed");
+    }
+  }
+
+  return (
+    <section className="space-y-3 text-sm">
+      <header className="flex items-center justify-between">
+        <h3 className="font-action text-base">Affiliates / Partners / Sponsors</h3>
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-xs hover:bg-keep-banner/80"
+        >
+          + Add
+        </button>
+      </header>
+      <p className="text-[11px] text-keep-muted">
+        Each entry is rendered as raw HTML in the splash carousel. Topsite networks (toprpsites etc.) require their
+        own anchor and tracking-pixel snippet, so the HTML you paste is NOT sanitized. Treat the field the same as
+        analytics scripts in Settings: only paste HTML you trust.
+      </p>
+      {error ? (
+        <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
+      ) : null}
+      {creating ? (
+        <AffiliateForm
+          mode="create"
+          onCancel={() => setCreating(false)}
+          onSaved={async () => { setCreating(false); await load(); }}
+        />
+      ) : null}
+      {rows === null ? (
+        <p className="italic text-keep-muted">Loading...</p>
+      ) : rows.length === 0 ? (
+        <p className="italic text-keep-muted">No affiliates yet. Add one to surface it on the splash.</p>
+      ) : (
+        <ul className="space-y-2">
+          {rows.map((r) => (
+            <AffiliateListItem
+              key={r.id}
+              row={r}
+              onPatch={(body) => patch(r.id, body)}
+              onDelete={() => remove(r.id)}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function AffiliateListItem({
+  row,
+  onPatch,
+  onDelete,
+}: {
+  row: AffiliateRow;
+  onPatch: (body: Partial<{ label: string; html: string; enabled: boolean; sortOrder: number }>) => Promise<void>;
+  onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  if (editing) {
+    return (
+      <li>
+        <AffiliateForm
+          mode="edit"
+          initial={row}
+          onCancel={() => setEditing(false)}
+          onSaved={async (body) => { await onPatch(body); setEditing(false); }}
+        />
+      </li>
+    );
+  }
+  return (
+    <li className="rounded border border-keep-rule/60 bg-keep-bg p-2 text-xs">
+      <div className="flex items-baseline justify-between gap-2">
+        <div>
+          <span className={`mr-2 inline-block h-2 w-2 rounded-full ${row.enabled ? "bg-keep-action" : "bg-keep-rule"}`} />
+          <span className="font-semibold">{row.label}</span>
+          <span className="ml-2 text-[10px] text-keep-muted">order: {row.sortOrder}</span>
+        </div>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => onPatch({ enabled: !row.enabled })}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+          >
+            {row.enabled ? "Disable" : "Enable"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+      <details className="mt-1">
+        <summary className="cursor-pointer text-[10px] uppercase tracking-widest text-keep-muted">HTML preview</summary>
+        <div
+          className="mt-1 rounded border border-keep-rule/40 bg-keep-panel/30 p-2 [&_img]:max-h-12"
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: row.html }}
+        />
+        <pre className="mt-1 overflow-x-auto rounded bg-keep-panel/30 p-2 text-[10px] text-keep-muted">{row.html}</pre>
+      </details>
+    </li>
+  );
+}
+
+function AffiliateForm({
+  mode,
+  initial,
+  onCancel,
+  onSaved,
+}: {
+  mode: "create" | "edit";
+  initial?: AffiliateRow;
+  onCancel: () => void;
+  onSaved: (body: { label: string; html: string; enabled: boolean; sortOrder: number }) => Promise<void>;
+}) {
+  const [label, setLabel] = useState(initial?.label ?? "");
+  const [html, setHtml] = useState(initial?.html ?? "");
+  const [enabled, setEnabled] = useState(initial?.enabled ?? true);
+  const [sortOrder, setSortOrder] = useState(initial?.sortOrder ?? 0);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!label.trim() || !html.trim()) return;
+    setBusy(true);
+    try {
+      if (mode === "create") {
+        const r = await fetch("/admin/affiliates", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ label: label.trim(), html, enabled, sortOrder }),
+        });
+        if (!r.ok) throw new Error(await readError(r));
+        await onSaved({ label: label.trim(), html, enabled, sortOrder });
+      } else {
+        await onSaved({ label: label.trim(), html, enabled, sortOrder });
+      }
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-2 rounded border border-keep-action/40 bg-keep-bg p-2 text-xs">
+      <label className="block">
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Label (admin-only)</span>
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          maxLength={80}
+          placeholder="e.g. Top RP Sites"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">HTML snippet</span>
+        <textarea
+          value={html}
+          onChange={(e) => setHtml(e.target.value)}
+          rows={6}
+          placeholder='<a href="..."><img src="..." alt="..." /></a>'
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px] outline-none focus:border-keep-action"
+        />
+        <span className="mt-0.5 block text-[10px] text-keep-muted">
+          Paste verbatim from the affiliate's provided code. Tracking pixels and similar pass through unchanged.
+        </span>
+      </label>
+      <div className="flex items-center gap-3">
+        <label className="flex items-center gap-1">
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          <span>Enabled</span>
+        </label>
+        <label className="flex items-center gap-1">
+          <span className="text-keep-muted">Sort order:</span>
+          <input
+            type="number"
+            min={0}
+            max={1000}
+            value={sortOrder}
+            onChange={(e) => setSortOrder(parseInt(e.target.value, 10) || 0)}
+            className="w-16 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 outline-none focus:border-keep-action"
+          />
+        </label>
+      </div>
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded border border-keep-rule bg-keep-bg px-3 py-0.5 hover:bg-keep-banner"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={busy || !label.trim() || !html.trim()}
+          className="rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+        >
+          {busy ? "Saving..." : mode === "create" ? "Create" : "Save"}
+        </button>
+      </div>
+    </form>
   );
 }

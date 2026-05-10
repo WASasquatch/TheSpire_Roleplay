@@ -13,6 +13,10 @@ import { ProfileModal } from "./components/ProfileModal.js";
 import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
 import { RulesModal } from "./components/RulesModal.js";
 import { UsersModal } from "./components/UsersModal.js";
+import { WorldCatalogModal } from "./components/WorldCatalogModal.js";
+import { WorldEditorModal } from "./components/WorldEditorModal.js";
+import { WorldViewerModal } from "./components/WorldViewerModal.js";
+import { WorldsListModal } from "./components/WorldsListModal.js";
 import { getSocket, disconnect as disconnectSocket } from "./lib/socket.js";
 import { applyTheme } from "./lib/theme.js";
 import { fire as fireNotification, shouldNotify, type NotifyPref } from "./lib/notifications.js";
@@ -140,6 +144,12 @@ function Chat() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState<{ filter?: string } | null>(null);
   const [usersOpen, setUsersOpen] = useState<{ query?: string } | null>(null);
+  // Worldbuilding modals. Only one is visible at a time but state lives
+  // independently so e.g. closing the viewer doesn't tear down the list.
+  const [worldsListOpen, setWorldsListOpen] = useState(false);
+  const [worldEditorId, setWorldEditorId] = useState<string | null>(null);
+  const [worldViewerId, setWorldViewerId] = useState<string | null>(null);
+  const [worldCatalogOpen, setWorldCatalogOpen] = useState(false);
   const [navLinksVersion, setNavLinksVersion] = useState(0);
   const [composerText, setComposerText] = useState("");
   // Rooms drawer on mobile (md breakpoint and below). Always-open on desktop.
@@ -357,6 +367,15 @@ function Chat() {
         case "open-users":
           setUsersOpen(h.query ? { query: h.query } : {});
           break;
+        case "open-worlds-list":
+          setWorldsListOpen(true);
+          break;
+        case "open-world-catalog":
+          setWorldCatalogOpen(true);
+          break;
+        case "open-world":
+          setWorldViewerId(h.worldId);
+          break;
         case "clear-room-messages": {
           // Read fresh state - the ui:hint handler is registered once and
           // its closure would otherwise capture a stale currentRoomId.
@@ -507,9 +526,26 @@ function Chat() {
         onOpenRules={() => setRulesOpen(true)}
         {...(me?.role === "admin" ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
+      {room?.linkedWorld ? (
+        <button
+          type="button"
+          onClick={() => setWorldViewerId(room.linkedWorld!.id)}
+          className="flex w-full items-center justify-center gap-2 border-b border-keep-rule bg-keep-action/10 px-4 py-1 text-xs text-keep-action hover:bg-keep-action/20"
+          title="Open this room's linked world"
+        >
+          <span className="uppercase tracking-widest">World</span>
+          <span className="font-semibold normal-case tracking-normal">{room.linkedWorld.name}</span>
+          <span className="text-[10px] text-keep-muted">by {room.linkedWorld.ownerUsername}</span>
+        </button>
+      ) : null}
       {room?.topic ? (
         <div className="border-b border-keep-rule bg-keep-banner/40 px-4 py-1 text-center text-sm italic text-keep-muted">
           {room.topic}
+        </div>
+      ) : null}
+      {room?.messageExpiryMinutes && room.messageExpiryMinutes > 0 ? (
+        <div className="border-b border-keep-rule/60 bg-keep-banner/20 px-4 py-0.5 text-center text-[10px] uppercase tracking-widest text-keep-muted">
+          Messages auto-expire after {formatExpiry(room.messageExpiryMinutes)}
         </div>
       ) : null}
       <div className="relative flex flex-1 overflow-hidden">
@@ -519,9 +555,11 @@ function Chat() {
             occupants={occ}
             selfUserId={me?.id ?? null}
             roomType={room?.type ?? null}
+            replyMode={room?.replyMode ?? "flat"}
             onIconClick={onIconClick}
             onNameClick={onNameClick}
             onMentionClick={onMentionClick}
+            onWorldClick={(slug) => setWorldViewerId(slug)}
             onTimeClick={onTimeClick}
             fontStep={fontStep}
           />
@@ -560,6 +598,10 @@ function Chat() {
           }}
           onCommand={(text) => {
             send(text);
+            setRailOpen(false);
+          }}
+          onWorldClick={(worldId) => {
+            setWorldViewerId(worldId);
             setRailOpen(false);
           }}
           isOpen={railOpen}
@@ -688,8 +730,73 @@ function Chat() {
           }}
         />
       ) : null}
+      {worldsListOpen ? (
+        <WorldsListModal
+          onClose={() => setWorldsListOpen(false)}
+          onOpenEditor={(worldId) => {
+            setWorldsListOpen(false);
+            setWorldEditorId(worldId);
+          }}
+          onOpenViewer={(worldId) => {
+            setWorldsListOpen(false);
+            setWorldViewerId(worldId);
+          }}
+          onOpenCatalog={() => {
+            setWorldsListOpen(false);
+            setWorldCatalogOpen(true);
+          }}
+        />
+      ) : null}
+      {worldEditorId ? (
+        <WorldEditorModal
+          worldId={worldEditorId}
+          onClose={() => setWorldEditorId(null)}
+          onDeleted={() => {
+            // After delete, drop back to the list so they can pick another
+            // world (or close out).
+            setWorldEditorId(null);
+            setWorldsListOpen(true);
+          }}
+        />
+      ) : null}
+      {worldViewerId ? (
+        <WorldViewerModal
+          worldId={worldViewerId}
+          onClose={() => setWorldViewerId(null)}
+          // Only owners get the "Edit" button. The server enforces the same
+          // check on PATCH/DELETE; this is just for UI affordance. We don't
+          // know ownership without inspecting the loaded WorldDetail, so
+          // expose the action only when we can plausibly succeed: the viewer
+          // is logged in. The editor itself will show an error if they
+          // aren't actually the owner.
+          {...(me ? { onEdit: () => { const id = worldViewerId; setWorldViewerId(null); setWorldEditorId(id); } } : {})}
+        />
+      ) : null}
+      {worldCatalogOpen ? (
+        <WorldCatalogModal
+          currentRoomId={currentRoomId}
+          onClose={() => setWorldCatalogOpen(false)}
+          onOpenViewer={(worldId) => {
+            setWorldCatalogOpen(false);
+            setWorldViewerId(worldId);
+          }}
+        />
+      ) : null}
     </div>
   );
+}
+
+/** Display the per-room expiry window in the most natural unit. Pure helper. */
+function formatExpiry(mins: number): string {
+  if (mins >= 1440 && mins % 1440 === 0) {
+    const d = mins / 1440;
+    return `${d} ${d === 1 ? "day" : "days"}`;
+  }
+  if (mins >= 60 && mins % 60 === 0) {
+    const h = mins / 60;
+    return `${h} ${h === 1 ? "hour" : "hours"}`;
+  }
+  return `${mins} ${mins === 1 ? "minute" : "minutes"}`;
 }
 
 function Toast({ notice, onDismiss }: { notice: { code: string; message: string }; onDismiss: () => void }) {

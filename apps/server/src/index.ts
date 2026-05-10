@@ -24,10 +24,10 @@ import { registerBuiltins } from "./commands/builtins/index.js";
 import { dispatchChatInput } from "./realtime/dispatch.js";
 import {
   addSystemMessage,
-  shouldAnnouncePresenceEvent,
   broadcastPresence,
   expireIfEmpty,
   joinRoom,
+  schedulePendingDisconnect,
   userHasSocketInRoom,
   userIsOnline,
 } from "./realtime/broadcast.js";
@@ -45,7 +45,10 @@ import { readFile } from "node:fs/promises";
 import { extendSession, loadSessionUser } from "./auth/session.js";
 import { registerAuthRoutes, getSessionUser, userIdFromSessionId, SESSION_COOKIE_NAME } from "./routes/auth.js";
 import { registerCharacterRoutes } from "./routes/characters.js";
+import { registerAffiliateRoutes } from "./routes/affiliates.js";
+import { registerJournalRoutes } from "./routes/journal.js";
 import { registerLinkRoutes } from "./routes/links.js";
+import { registerWorldRoutes } from "./routes/worlds.js";
 import { registerMessageRoutes } from "./routes/messages.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerPushRoutes } from "./routes/push.js";
@@ -207,6 +210,13 @@ async function main() {
       // messageRetentionMs === 0 means "kept indefinitely".
       messageRetentionMs: s.messageRetentionMs,
       sessionTtlMs: s.sessionTtlMs,
+      // Master toggle for surfacing live community activity. The splash
+      // hides its user/room counters when this is false (default during
+      // cold-start so an empty community doesn't telegraph "dead site").
+      activityFeedsEnabled: s.activityFeedsEnabled,
+      // Splash carousel toggle. When true the AuthGate fetches a
+      // randomized slice of open worlds via /worlds/featured.
+      featuredWorldsEnabled: s.featuredWorldsEnabled,
     };
   });
 
@@ -234,6 +244,9 @@ async function main() {
   // registered after io is constructed.
   await registerCharacterRoutes(baseApp, db, io);
   await registerLinkRoutes(baseApp, db);
+  await registerJournalRoutes(baseApp, db);
+  await registerAffiliateRoutes(baseApp, db);
+  await registerWorldRoutes(baseApp, db, io);
   await registerMessageRoutes(baseApp, db, io);
   await registerReportRoutes(baseApp, db);
   await registerPushRoutes(baseApp, db);
@@ -513,23 +526,45 @@ async function main() {
           // another tab open elsewhere, only the per-room departure shows.
           const fullyOffline = !(await userIsOnline(io, userId, socketId));
 
-          for (const id of roomIds) {
-            const expired = await expireIfEmpty(io, db, id);
-            if (expired) continue;
-            const stillThere = await userHasSocketInRoom(io, userId, id, socketId);
-            if (!stillThere) {
-              const body = fullyOffline
-                ? `${displayName} has disconnected.`
-                : `${displayName} left.`;
-              // "left." is room-local and uncommon - emit always. "has
-              // disconnected." can race during reconnection storms (multiple
-              // tabs all losing their socket at once after a server reload),
-              // so we gate it through the per-user dedup window so users see
-              // one disconnect line per real session change.
-              const allow = !fullyOffline || shouldAnnouncePresenceEvent(userId, "disconnect");
-              if (allow) await addSystemMessage(io, db, id, body);
+          if (fullyOffline) {
+            // Reconnect-grace path: don't announce or rebroadcast yet. If the
+            // user reconnects inside the grace window, joinRoom() consumes
+            // the pending entry and this whole block never fires - the chat
+            // log + userlist look like the blip never happened. Otherwise
+            // the timer fires after the grace window and the announcement
+            // goes out then.
+            //
+            // We re-resolve room state inside the deferred callback so that
+            // (a) expireIfEmpty sees the user truly gone, not just leaving,
+            // and (b) per-room "still there" checks reflect any racing
+            // reconnect that arrived in a different room.
+            schedulePendingDisconnect(userId, async () => {
+              for (const id of roomIds) {
+                const expired = await expireIfEmpty(io, db, id);
+                if (expired) continue;
+                const stillThere = await userHasSocketInRoom(io, userId, id);
+                if (!stillThere) {
+                  await addSystemMessage(io, db, id, `${displayName} has disconnected.`);
+                }
+                await broadcastPresence(io, db, id);
+              }
+            });
+          } else {
+            // Other tabs of this user are still alive: this is a tab close /
+            // room switch, not a session-level disconnect. Emit "left." per
+            // affected room immediately - this is room-local, doesn't affect
+            // the user's overall online status, and never fires from a
+            // transient socket reconnect (those go through the fullyOffline
+            // branch since the reconnecting socket is the only one).
+            for (const id of roomIds) {
+              const expired = await expireIfEmpty(io, db, id);
+              if (expired) continue;
+              const stillThere = await userHasSocketInRoom(io, userId, id, socketId);
+              if (!stillThere) {
+                await addSystemMessage(io, db, id, `${displayName} left.`);
+              }
+              await broadcastPresence(io, db, id);
             }
-            await broadcastPresence(io, db, id);
           }
         })().catch((err) => log.error({ err }, "disconnecting cleanup failed"));
       }, 0);
@@ -640,7 +675,7 @@ async function main() {
           reply.code(404);
           return reply.send({ error: "not found" });
         }
-        const apiPrefixes = ["/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/messages", "/reports", "/push", "/me", "/health", "/users", "/site", "/rules", "/socket.io"];
+        const apiPrefixes = ["/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/messages", "/reports", "/push", "/affiliates", "/worlds", "/me", "/health", "/users", "/site", "/rules", "/socket.io"];
         if (apiPrefixes.some((p) => req.url === p || req.url.startsWith(p + "/") || req.url.startsWith(p + "?"))) {
           reply.code(404);
           return reply.send({ error: "not found" });

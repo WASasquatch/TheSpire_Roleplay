@@ -337,7 +337,7 @@ const DESCRIPTION_MAX = 5000;
  */
 export const describeCommand: CommandHandler = {
   name: "describe",
-  aliases: ["description", "world"],
+  aliases: ["description"],
   usage: "/describe [<text>|clear]",
   description: "Show or set the room's long-form description (shown to users on join). Owner/mod only to edit.",
   subcommands: [

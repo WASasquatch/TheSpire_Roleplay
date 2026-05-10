@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
-import type { CharacterPortrait, ProfileLink, ProfileView } from "@thekeep/shared";
+import type { CharacterPortrait, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
 import { genderGlyph } from "../lib/gender.js";
 import type { Gender } from "../lib/gender.js";
@@ -57,11 +57,12 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
   const gender = resolveGender(profile);
   const titles = profile.profile.titles ?? [];
   const links = profile.profile.links ?? [];
+  const journal = isChar ? (profile.profile.journalEntries ?? []) : [];
 
   // Stat entries that actually have a value - empty fields are dropped so
   // a half-filled character doesn't show a row of dashes.
   const statEntries = stats ? collectStatEntries(stats) : [];
-  const isCompletelyBlank = !bio && statEntries.length === 0 && !avatar && titles.length === 0 && links.length === 0;
+  const isCompletelyBlank = !bio && statEntries.length === 0 && !avatar && titles.length === 0 && links.length === 0 && journal.length === 0;
 
   return (
     <div
@@ -202,6 +203,9 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
                 </Section>
               ) : null}
 
+              <WorldsSection userId={profile.profile.userId} />
+
+
               {statEntries.length > 0 ? (
                 <Section title="Stats">
                   <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
@@ -264,6 +268,33 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
                   click-to-zoom that swaps the large image inline. */}
               {isChar && profile.profile.portraits.length > 0 ? (
                 <PortraitGallery portraits={profile.profile.portraits} alt={name} />
+              ) : null}
+
+              {/* Character journal (public entries only - private ones are
+                  filtered server-side and only ever appear in the owner's
+                  editor). Reads chronologically (oldest first) so a
+                  character's diary works as a timeline. */}
+              {journal.length > 0 ? (
+                <Section title="Journal">
+                  <ol className="space-y-3">
+                    {journal.map((e) => (
+                      <li key={e.id} className="rounded border border-keep-rule/50 bg-keep-panel/30 p-3">
+                        <header className="mb-1 flex items-baseline justify-between gap-2">
+                          <span className="font-semibold">
+                            {e.title || <span className="italic text-keep-muted">untitled</span>}
+                          </span>
+                          <time className="text-[10px] uppercase tracking-widest text-keep-muted" title={new Date(e.createdAt).toLocaleString()}>
+                            {new Date(e.createdAt).toLocaleDateString()}
+                          </time>
+                        </header>
+                        <div
+                          className="prose prose-sm max-w-none break-words"
+                          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(e.bodyHtml) }}
+                        />
+                      </li>
+                    ))}
+                  </ol>
+                </Section>
               ) : null}
             </>
           )}
@@ -433,6 +464,51 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       </h3>
       {children}
     </section>
+  );
+}
+
+/**
+ * World memberships for the profile being viewed. Lazily fetched per-profile;
+ * renders nothing while loading and nothing if the user has no visible
+ * memberships (private worlds the viewer can't see are filtered server-side).
+ * The primary membership gets a small "primary" chip so visitors can tell at
+ * a glance which world this user identifies with most.
+ */
+function WorldsSection({ userId }: { userId: string }) {
+  const [memberships, setMemberships] = useState<WorldMembership[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/users/${encodeURIComponent(userId)}/world-memberships`, { credentials: "include" })
+      .then((r) => (r.ok ? (r.json() as Promise<{ memberships: WorldMembership[] }>) : null))
+      .then((j) => { if (!cancelled && j) setMemberships(j.memberships); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [userId]);
+  if (!memberships || memberships.length === 0) return null;
+  return (
+    <Section title="Worlds">
+      <ul className="flex flex-wrap gap-1.5 text-sm">
+        {memberships.map((m) => (
+          <li
+            key={m.worldId}
+            className={`rounded border px-2 py-0.5 ${
+              m.isPrimary
+                ? "border-keep-action/50 bg-keep-action/10"
+                : "border-keep-rule/60 bg-keep-panel/60"
+            }`}
+            title={`by ${m.ownerUsername}${m.isPrimary ? " (primary)" : ""}`}
+          >
+            <span className="font-medium">{m.worldName}</span>
+            <span className="ml-1 text-[10px] text-keep-muted">/{m.worldSlug}</span>
+            {m.isPrimary ? (
+              <span className="ml-1 rounded bg-keep-action/20 px-1 text-[9px] uppercase tracking-widest text-keep-action">
+                primary
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </Section>
   );
 }
 

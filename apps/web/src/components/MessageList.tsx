@@ -13,14 +13,25 @@ interface Props {
   selfUserId: string | null;
   /** Current room's type. Reporting is a public-room-only feature. */
   roomType?: "public" | "private" | null;
+  /**
+   * "flat" (default) - chronological timeline. "nested" - replies group
+   * under their parent in a thread container with the latest 5 visible
+   * by default. Owner/mod sets via /replymode.
+   */
+  replyMode?: "flat" | "nested";
   onIconClick: (userId: string, displayName: string) => void;
   onNameClick: (userId: string, displayName: string) => void;
   /** Click handler for @mentions parsed out of the message body. */
   onMentionClick: (name: string) => void;
+  /** Click handler for @world:slug mentions parsed out of the message body. */
+  onWorldClick: (slug: string) => void;
   /** Click on the timestamp - pre-fill the composer with /reply <msgid>. Only enabled for chat kinds (say/me/ooc). */
   onTimeClick: (msgId: string) => void;
   fontStep: 0 | 1 | 2 | 3;
 }
+
+/** Replies past this count get hidden behind a "View More" expander in nested mode. */
+const NESTED_VISIBLE_REPLIES = 5;
 
 /** Kinds eligible for /reports - mirrors the server's privacy gate. */
 const REPORTABLE_KINDS = new Set(["say", "me", "ooc", "announce", "npc"]);
@@ -40,7 +51,7 @@ function fmtTime(ms: number): string {
   return `${hh}:${mm}:${ss}`;
 }
 
-export function MessageList({ messages, occupants, selfUserId, roomType, onIconClick, onNameClick, onMentionClick, onTimeClick, fontStep }: Props) {
+export function MessageList({ messages, occupants, selfUserId, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, fontStep }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = ref.current;
@@ -59,6 +70,53 @@ export function MessageList({ messages, occupants, selfUserId, roomType, onIconC
     if (o.accountRole === "admin") adminUserIds.add(o.userId);
   }
 
+  // Shared per-line prop bundle so the flat and nested branches can both
+  // hand the same callbacks down without repeating themselves.
+  function lineFor(m: ChatMessage) {
+    return (
+      <Line
+        msg={m}
+        gender={genderByUser.get(m.userId) ?? "undisclosed"}
+        isSenderAdmin={adminUserIds.has(m.userId)}
+        isRecipientAdmin={!!m.toUserId && adminUserIds.has(m.toUserId)}
+        isOwn={!!selfUserId && m.userId === selfUserId}
+        canReport={roomType === "public"}
+        onIconClick={onIconClick}
+        onNameClick={onNameClick}
+        onMentionClick={onMentionClick}
+        onWorldClick={onWorldClick}
+        onTimeClick={onTimeClick}
+      />
+    );
+  }
+
+  // Nested mode: bucket replies under their parent. See groupForNested for
+  // the exact policy (orphan replies whose parent isn't in the visible
+  // backlog still render at their natural chronological position).
+  if (replyMode === "nested") {
+    const { ordered, repliesByParent } = groupForNested(messages);
+    return (
+      <div
+        ref={ref}
+        className="flex-1 overflow-y-auto px-4 py-2 leading-relaxed"
+        style={{ fontSize: FONT_PX[fontStep] }}
+      >
+        {ordered.map((m) => {
+          const replies = repliesByParent.get(m.id) ?? [];
+          return (
+            <Fragment key={m.id}>
+              {lineFor(m)}
+              {replies.length > 0 ? (
+                <NestedReplyThread parentId={m.id} replies={replies} render={lineFor} />
+              ) : null}
+            </Fragment>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Flat mode: existing chronological rendering.
   return (
     <div
       ref={ref}
@@ -66,19 +124,79 @@ export function MessageList({ messages, occupants, selfUserId, roomType, onIconC
       style={{ fontSize: FONT_PX[fontStep] }}
     >
       {messages.map((m) => (
-        <Line
-          key={m.id}
-          msg={m}
-          gender={genderByUser.get(m.userId) ?? "undisclosed"}
-          isSenderAdmin={adminUserIds.has(m.userId)}
-          isRecipientAdmin={!!m.toUserId && adminUserIds.has(m.toUserId)}
-          isOwn={!!selfUserId && m.userId === selfUserId}
-          canReport={roomType === "public"}
-          onIconClick={onIconClick}
-          onNameClick={onNameClick}
-          onMentionClick={onMentionClick}
-          onTimeClick={onTimeClick}
-        />
+        <Fragment key={m.id}>{lineFor(m)}</Fragment>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Group messages for nested rendering. We walk the timeline once and:
+ *   - bucket reply messages whose parent is also in `messages` under that
+ *     parent's id;
+ *   - keep everything else in the linear ordering, so non-chat kinds
+ *     (system, announce, etc.) and replies whose parent has scrolled off
+ *     the backlog still render where they would have under flat mode.
+ *
+ * Within a parent's bucket, replies stay in their original chronological
+ * order so a thread reads top-to-bottom.
+ */
+function groupForNested(messages: ChatMessage[]): {
+  ordered: ChatMessage[];
+  repliesByParent: Map<string, ChatMessage[]>;
+} {
+  const idSet = new Set(messages.map((m) => m.id));
+  const repliesByParent = new Map<string, ChatMessage[]>();
+  const ordered: ChatMessage[] = [];
+  for (const m of messages) {
+    const parentId = m.replyToId;
+    if (parentId && idSet.has(parentId)) {
+      const arr = repliesByParent.get(parentId) ?? [];
+      arr.push(m);
+      repliesByParent.set(parentId, arr);
+      continue;
+    }
+    ordered.push(m);
+  }
+  return { ordered, repliesByParent };
+}
+
+/**
+ * Thread container for nested-mode reply chains. Always shows the latest
+ * NESTED_VISIBLE_REPLIES at the bottom; the rest collapse behind a "View
+ * earlier replies" toggle. Indented and bordered so it's visually distinct
+ * from the parent post above it.
+ */
+function NestedReplyThread({
+  parentId,
+  replies,
+  render,
+}: {
+  parentId: string;
+  replies: ChatMessage[];
+  render: (m: ChatMessage) => ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const total = replies.length;
+  const hidden = Math.max(0, total - NESTED_VISIBLE_REPLIES);
+  const visible = expanded ? replies : replies.slice(-NESTED_VISIBLE_REPLIES);
+  return (
+    <div
+      className="my-1 ml-3 border-l-2 border-keep-rule/40 pl-3"
+      data-thread-parent={parentId}
+    >
+      {hidden > 0 && !expanded ? (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="mb-1 rounded text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-action"
+          title={`Show ${hidden} earlier ${hidden === 1 ? "reply" : "replies"}`}
+        >
+          ↑ View {hidden} earlier {hidden === 1 ? "reply" : "replies"}
+        </button>
+      ) : null}
+      {visible.map((r) => (
+        <Fragment key={r.id}>{render(r)}</Fragment>
       ))}
     </div>
   );
@@ -95,11 +213,26 @@ export function MessageList({ messages, occupants, selfUserId, roomType, onIconC
 function renderParts(
   parts: ReturnType<typeof splitMentions>,
   onMentionClick: (name: string) => void,
+  onWorldClick: (slug: string) => void,
 ): ReactNode[] {
   const out: ReactNode[] = [];
   parts.forEach((p, i) => {
     if (p.kind === "text") {
       out.push(<Fragment key={i}>{parseInline(p.text)}</Fragment>);
+    } else if (p.kind === "world-mention") {
+      // World mention chip - styled distinctly from @user mentions so the
+      // two are visually separable mid-sentence. Opens the world viewer.
+      out.push(
+        <button
+          key={i}
+          type="button"
+          onClick={() => onWorldClick(p.slug)}
+          className="rounded border border-keep-action/40 bg-keep-action/10 px-1 text-[0.95em] font-semibold text-keep-action hover:bg-keep-action/20 focus:outline-none focus:ring-1 focus:ring-keep-action"
+          title={`Open the ${p.slug} world`}
+        >
+          @world:{p.slug}
+        </button>,
+      );
     } else {
       out.push(
         <button
@@ -127,6 +260,7 @@ function Line({
   onIconClick,
   onNameClick,
   onMentionClick,
+  onWorldClick,
   onTimeClick,
 }: {
   msg: ChatMessage;
@@ -139,6 +273,7 @@ function Line({
   onIconClick: (userId: string, displayName: string) => void;
   onNameClick: (userId: string, displayName: string) => void;
   onMentionClick: (name: string) => void;
+  onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
 }) {
   const canReply = REPLYABLE_KINDS.has(msg.kind);
@@ -201,7 +336,7 @@ function Line({
   // Memoize the parsed parts on body so the splitMentions regex doesn't
   // re-run on every parent render (only when the body changes).
   const bodyParts = useMemo(() => splitMentions(msg.body), [msg.body]);
-  const renderedBody = renderParts(bodyParts, onMentionClick);
+  const renderedBody = renderParts(bodyParts, onMentionClick, onWorldClick);
 
   // Edit/delete controls only apply to the author's own chat-shaped lines
   // and only inside the grace window. The server re-validates both rules,

@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { characterPortraits, characters, profileLinks, users } from "../../db/schema.js";
-import type { CharacterPortrait, CharacterStats, ProfileLink, ProfileView, Theme } from "@thekeep/shared";
+import { characterJournalEntries, characterPortraits, characters, profileLinks, users } from "../../db/schema.js";
+import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileLink, ProfileView, Theme } from "@thekeep/shared";
 import { normalizeTheme } from "@thekeep/shared";
 import { getSettings } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
@@ -48,6 +48,33 @@ async function listLinks(
     borderColor: r.borderColor,
     bgColor: r.bgColor,
     textColor: r.textColor,
+  }));
+}
+
+/**
+ * Public journal entries for a character, oldest first (reads like a diary).
+ * Private entries are deliberately filtered here - those only show in the
+ * owner's editor view, never in lookupProfile responses.
+ */
+async function listPublicJournal(
+  db: import("../../db/index.js").Db,
+  characterId: string,
+): Promise<CharacterJournalEntry[]> {
+  const rows = await db
+    .select()
+    .from(characterJournalEntries)
+    .where(and(
+      eq(characterJournalEntries.characterId, characterId),
+      eq(characterJournalEntries.privacy, "public"),
+    ))
+    .orderBy(asc(characterJournalEntries.createdAt));
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    bodyHtml: r.bodyHtml,
+    privacy: r.privacy as "public" | "private",
+    createdAt: +r.createdAt,
+    updatedAt: +r.updatedAt,
   }));
 }
 
@@ -132,6 +159,7 @@ async function lookupProfile(
       avatarUrl: c.avatarUrl,
       portraits: await listPortraits(db, c.id),
       links: await listLinks(db, c.userId, c.id),
+      journalEntries: await listPublicJournal(db, c.id),
       theme,
       titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
       createdAt: +c.createdAt,
@@ -214,6 +242,7 @@ async function lookupRandomProfile(
       avatarUrl: c.avatarUrl,
       portraits: await listPortraits(db, c.id),
       links: await listLinks(db, c.userId, c.id),
+      journalEntries: await listPublicJournal(db, c.id),
       theme: await parseTheme(db, c.themeJson ?? row.ownerThemeJson),
       titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
       createdAt: +c.createdAt,

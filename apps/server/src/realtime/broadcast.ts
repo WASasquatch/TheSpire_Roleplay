@@ -16,10 +16,14 @@ import {
   messages,
   roomInvites,
   roomMembers,
+  roomWorldLinks,
   rooms,
   users,
   watches,
+  worldMembers,
+  worlds,
 } from "../db/schema.js";
+import type { LinkedWorldRef } from "@thekeep/shared";
 import { pushToUser } from "../push.js";
 import type { Db } from "../db/index.js";
 import type { CommandContext, SessionUser } from "../commands/types.js";
@@ -232,34 +236,66 @@ function colorForKind(kind: MessageKind, color: string | null): string | null {
 }
 
 /**
- * Per-user dedup for "has connected" / "has disconnected" announcements.
+ * Reconnect grace period for "has connected" / "has disconnected".
  *
- * The room-scoped check (`userHasSocketInRoom`) runs *after* `socket.join`
- * and a chain of awaits, so during a reconnection storm (tsx-watch reload,
- * server restart, transient network blip with multiple tabs) several sockets
- * can each pass it concurrently and all emit. We add a short-window guard:
- * if we already announced this user's connect/disconnect in the last
- * PRESENCE_EVENT_DEDUP_MS, skip subsequent identical events. The presence
- * sidebar still updates via `broadcastPresence` - only the chat log line is
- * suppressed.
+ * Socket-level lifecycles don't map cleanly to user-level lifecycles. A user
+ * sitting in a room can have their socket transiently drop and reconnect for
+ * many reasons that have nothing to do with them logging in or out:
+ * background-throttled tabs, brief network blips, server reload in dev, even
+ * the socket.io heartbeat misfiring once. With no grace, every blip emits
+ * "X has disconnected" + "X has connected" + a description re-broadcast,
+ * which is misleading both to the affected user and to everyone else in the
+ * room (it looks like they came and went, when actually they were here the
+ * whole time).
  *
- * The map grows by one entry per (user, kind) pair. With a chat-sized
- * userbase that's negligible; if it ever needs pruning the cleanest hook is
- * to drop entries older than the TTL on each call.
+ * The mechanism: when a user's last socket disconnects, we don't announce it
+ * immediately - we schedule the announcement (and the userlist re-broadcast)
+ * for PRESENCE_GRACE_MS in the future. If the user reconnects inside that
+ * window, joinRoom() consumes the pending entry, the timer is canceled, and
+ * we skip the "has connected" message + the room description re-emit. The
+ * net effect: a transient reconnect leaves no visible artifact in the chat
+ * log or the userlist. A genuine disconnect (browser closed, user went away)
+ * still surfaces - just delayed by the grace window.
+ *
+ * Map size is bounded by the number of users currently in their grace
+ * window. Entries self-clear via the timer or via consumePendingDisconnect.
  */
-const PRESENCE_EVENT_DEDUP_MS = 10_000;
-const lastPresenceEvent = new Map<string, number>();
+const PRESENCE_GRACE_MS = 20_000;
+type PendingDisconnect = { timer: NodeJS.Timeout };
+const pendingDisconnects = new Map<string, PendingDisconnect>();
 
-export function shouldAnnouncePresenceEvent(
-  userId: string,
-  kind: "connect" | "disconnect",
-): boolean {
-  const key = `${userId}:${kind}`;
-  const now = Date.now();
-  const last = lastPresenceEvent.get(key) ?? 0;
-  if (now - last < PRESENCE_EVENT_DEDUP_MS) return false;
-  lastPresenceEvent.set(key, now);
+/**
+ * Cancel a pending disconnect for this user, if any. Returns true when one
+ * was canceled - meaning this connect is a reconnect inside the grace window
+ * and the caller should suppress the "has connected" announcement.
+ */
+export function consumePendingDisconnect(userId: string): boolean {
+  const pd = pendingDisconnects.get(userId);
+  if (!pd) return false;
+  clearTimeout(pd.timer);
+  pendingDisconnects.delete(userId);
   return true;
+}
+
+/**
+ * Defer the user's "has disconnected" work by PRESENCE_GRACE_MS. The caller
+ * provides a `fire` function that emits the per-room system messages and
+ * broadcasts presence. If the user reconnects in the meantime,
+ * consumePendingDisconnect cancels the timer and `fire` never runs.
+ */
+export function schedulePendingDisconnect(
+  userId: string,
+  fire: () => Promise<void> | void,
+): void {
+  // Replace any existing entry. With single-presence this rarely matters,
+  // but it's the safe behavior under racing disconnects.
+  const existing = pendingDisconnects.get(userId);
+  if (existing) clearTimeout(existing.timer);
+  const timer = setTimeout(() => {
+    pendingDisconnects.delete(userId);
+    Promise.resolve(fire()).catch(() => {});
+  }, PRESENCE_GRACE_MS);
+  pendingDisconnects.set(userId, { timer });
 }
 
 /** Server-authored system message (no associated user/character). */
@@ -361,6 +397,12 @@ export async function joinRoom(
   //      anywhere) - drives "X has connected" vs "X arrived";
   //   2. which rooms this socket is leaving - drives "X left." in each.
   const userWasOnlineBefore = await userIsOnline(io, user.id, socket.id);
+  // Reconnect detection: if a "has disconnected" was scheduled for this user
+  // and hasn't fired yet, this connect is a reconnect inside the grace window.
+  // Cancel the pending disconnect; further down we use this flag to suppress
+  // the "has connected" message + the room description re-emit so the chat
+  // log shows nothing happened.
+  const isReconnect = consumePendingDisconnect(user.id);
   const priorRooms = [...socket.rooms]
     .filter((r) => r.startsWith("room:") && r !== `room:${roomId}`)
     .map((r) => r.slice(5));
@@ -447,7 +489,12 @@ export async function joinRoom(
   // the world/setting description; ongoing chat stays clean. The
   // `[Description]:` prefix on its own line distinguishes the world prose
   // from regular system events (joins, kicks, mutes) at a glance.
-  if (room.description) {
+  //
+  // Suppressed on reconnect: the user just saw it before the blip, no point
+  // showing it again. (If a reconnect lands them in a different room than
+  // they were in, they don't get the description there either - acceptable
+  // edge case; description is a lightweight nice-to-have, not load-bearing.)
+  if (room.description && !isReconnect) {
     socket.emit("message:new", {
       id: `desc-${nanoid()}`,
       roomId,
@@ -464,20 +511,19 @@ export async function joinRoom(
   // Announce arrival only if this is the user's first socket in this room
   // (multi-tab users don't spam "arrived" each time they switch tabs). The
   // wording distinguishes a fresh connect from a room switch.
+  //
+  // Reconnects inside the grace window skip this entirely - the matching
+  // "has disconnected" was canceled by consumePendingDisconnect above, so
+  // the chat log reads as if the blip never happened.
   const otherSocketHere = await userHasSocketInRoom(io, user.id, roomId, socket.id);
-  if (!otherSocketHere) {
+  if (!otherSocketHere && !isReconnect) {
     const body = userWasOnlineBefore
       ? `${user.displayName} arrived.`
       : `${user.displayName} has connected.`;
-    // "arrived" is room-local and rare; we let it through. "has connected" is
-    // the one that fires from fresh sockets and races during reconnect storms,
-    // so it goes through the per-user dedup window.
-    const allow = userWasOnlineBefore || shouldAnnouncePresenceEvent(user.id, "connect");
-    if (allow) await addSystemMessage(io, db, roomId, body);
+    await addSystemMessage(io, db, roomId, body);
     // Fan-out to watchers iff this is a true online transition (no other
-    // socket of this user existed). Same dedup window as "has connected" so
-    // a reconnection storm doesn't ping every watcher repeatedly.
-    if (!userWasOnlineBefore && allow) {
+    // socket of this user existed before this one).
+    if (!userWasOnlineBefore) {
       await pingWatchers(io, db, user);
     }
   }
@@ -539,6 +585,9 @@ export async function broadcastRoomState(
     ownerId: room.ownerId,
     memberCount: memberCountRows[0]?.n ?? 0,
     npcDisabled: room.npcDisabled,
+    linkedWorld: await loadLinkedWorld(db, room.id),
+    messageExpiryMinutes: room.messageExpiryMinutes,
+    replyMode: room.replyMode,
   };
   const occupants = await currentOccupants(io, db, roomId);
   io.to(`room:${roomId}`).emit("room:state", { room: summary, occupants });
@@ -547,6 +596,25 @@ export async function broadcastRoomState(
 export async function broadcastPresence(io: Io, db: Db, roomId: string): Promise<void> {
   const occupants = await currentOccupants(io, db, roomId);
   io.to(`room:${roomId}`).emit("presence:update", { roomId, occupants });
+}
+
+/**
+ * Resolve the world linked to a room, if any. Returns the brief identity
+ * record the client uses to render the chat banner. Cheap join (no page
+ * data; the viewer modal fetches that on demand).
+ */
+async function loadLinkedWorld(db: Db, roomId: string): Promise<LinkedWorldRef | null> {
+  const link = (await db.select().from(roomWorldLinks).where(eq(roomWorldLinks.roomId, roomId)).limit(1))[0];
+  if (!link) return null;
+  const w = (await db.select().from(worlds).where(eq(worlds.id, link.worldId)).limit(1))[0];
+  if (!w) return null;
+  const owner = (await db.select({ username: users.username }).from(users).where(eq(users.id, w.ownerUserId)).limit(1))[0];
+  return {
+    id: w.id,
+    slug: w.slug,
+    name: w.name,
+    ownerUsername: owner?.username ?? "(deleted user)",
+  };
 }
 
 /**
@@ -618,6 +686,9 @@ export async function sendRoomStateTo(
     ownerId: room.ownerId,
     memberCount: memberCountRows[0]?.n ?? 0,
     npcDisabled: room.npcDisabled,
+    linkedWorld: await loadLinkedWorld(db, room.id),
+    messageExpiryMinutes: room.messageExpiryMinutes,
+    replyMode: room.replyMode,
   };
   const occupants = await currentOccupants(io, db, roomId);
   socket.emit("room:state", { room: summary, occupants });
@@ -656,6 +727,47 @@ async function currentOccupants(io: Io, db: Db, roomId: string): Promise<RoomOcc
     );
   const roleByUser = new Map(memberRows.map((m) => [m.userId, m.role]));
 
+  // Primary-world lookup for the userlist's grouping. One query joining
+  // world_members → worlds, filtered to is_primary = 1 + the active users.
+  // The map keys on userId so the render loop can attach a LinkedWorldRef
+  // (or leave it null for unaffiliated users).
+  const primaryWorldRows = await db
+    .select({
+      userId: worldMembers.userId,
+      worldId: worlds.id,
+      slug: worlds.slug,
+      name: worlds.name,
+      ownerUserId: worlds.ownerUserId,
+    })
+    .from(worldMembers)
+    .innerJoin(worlds, eq(worlds.id, worldMembers.worldId))
+    .where(and(
+      eq(worldMembers.isPrimary, 1),
+      sql`${worldMembers.userId} IN (${sql.join(userIds.map((u) => sql`${u}`), sql`, `)})`,
+    ));
+  // Owner-username lookup for primary worlds (so the userlist banner can
+  // show "by <owner>"). Resolved once per distinct owner across the batch.
+  const ownerIds = [...new Set(primaryWorldRows.map((r) => r.ownerUserId))];
+  const ownerUsernameById = new Map<string, string>();
+  if (ownerIds.length) {
+    const ownerRows = await db
+      .select({ id: users.id, username: users.username })
+      .from(users)
+      .where(sql`${users.id} IN (${sql.join(ownerIds.map((u) => sql`${u}`), sql`, `)})`);
+    for (const o of ownerRows) ownerUsernameById.set(o.id, o.username);
+  }
+  const primaryWorldByUser = new Map<string, LinkedWorldRef>(
+    primaryWorldRows.map((r) => [
+      r.userId,
+      {
+        id: r.worldId,
+        slug: r.slug,
+        name: r.name,
+        ownerUsername: ownerUsernameById.get(r.ownerUserId) ?? "(deleted user)",
+      },
+    ]),
+  );
+
   return userRows.map<RoomOccupant>((u) => {
     const c = u.activeCharacterId ? charById.get(u.activeCharacterId) : undefined;
     return {
@@ -669,6 +781,7 @@ async function currentOccupants(io: Io, db: Db, roomId: string): Promise<RoomOcc
       role: roleByUser.get(u.id) ?? "member",
       accountRole: u.role,
       mood: u.currentMood,
+      primaryWorld: primaryWorldByUser.get(u.id) ?? null,
     };
   });
 }

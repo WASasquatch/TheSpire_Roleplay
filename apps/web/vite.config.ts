@@ -17,6 +17,8 @@ export default defineConfig({
       "/messages": "http://localhost:3001",
       "/reports": "http://localhost:3001",
       "/push": "http://localhost:3001",
+      "/affiliates": "http://localhost:3001",
+      "/worlds": "http://localhost:3001",
       "/me": "http://localhost:3001",
       "/health": "http://localhost:3001",
       "/users": "http://localhost:3001",

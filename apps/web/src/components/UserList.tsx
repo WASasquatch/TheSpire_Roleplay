@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { RoomOccupant, RoomSummary } from "@thekeep/shared";
 import { ToolPanel } from "./ToolPanel.js";
 import { UserNameTag } from "./UserNameTag.js";
+import { resolveRolePrefix } from "./RoomsTree.js";
 
 interface Props {
   roomName: string;
@@ -71,7 +72,7 @@ export function UserList({
               color={o.chatColor ?? null}
               away={o.away}
               awayMessage={o.awayMessage ?? null}
-              rolePrefix={o.role === "owner" ? "♛" : o.role === "mod" ? "★" : ""}
+              rolePrefix={resolveRolePrefix(o)}
               italic={o.accountRole === "admin"}
               mood={o.mood ?? null}
               ooc={o.characterId === null}

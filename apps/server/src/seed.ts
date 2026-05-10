@@ -1,11 +1,13 @@
-import { eq, lt, sql } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import { messages, rooms, sessions, users } from "./db/schema.js";
+import { messages, rooms, sessions, users, worldPages, worlds } from "./db/schema.js";
 import { hashPassword } from "./auth/passwords.js";
 import { ensureSiteSettings, getSettings } from "./settings.js";
 import { recordAudit } from "./audit.js";
+import { sanitizeBio } from "./auth/html.js";
+import { DEFAULT_WORLDS } from "./seed_worlds.js";
 import type { Db } from "./db/index.js";
 
 /**
@@ -126,6 +128,63 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
   // insert-if-missing only - it never overwrites customized values - so it's
   // safe to run regardless of SKIP_DEFAULT_SEED.
   await ensureSiteSettings(db);
+
+  // Default open worlds. Same idempotent contract as the rooms loop above:
+  // we only insert worlds whose (system, slug) pair isn't already present,
+  // and only seed pages into a world that has zero pages. Once anyone
+  // (admin, future moderator, the world's eventual owner) edits a world
+  // or adds a page, every subsequent boot leaves it alone.
+  if (!skipDefaults) {
+    await ensureDefaultWorlds(db);
+  }
+}
+
+/**
+ * Insert the system-owned default worlds. Idempotent on (owner=system, slug):
+ *   - Existing world (any data)  -> skip entirely. Pages may have been edited;
+ *     we never touch them.
+ *   - World missing entirely     -> insert world + all starter pages.
+ *
+ * The "world missing entirely" check is keyed on slug, so a renamed default
+ * world appears as missing and gets re-seeded next boot. SKIP_DEFAULT_SEED
+ * (the existing rooms escape hatch) also gates this, so admins who renamed
+ * defaults can flip the flag to stop the duplicate from coming back.
+ */
+async function ensureDefaultWorlds(db: Db): Promise<void> {
+  for (const def of DEFAULT_WORLDS) {
+    const existing = (await db
+      .select({ id: worlds.id })
+      .from(worlds)
+      .where(and(eq(worlds.ownerUserId, "system"), eq(worlds.slug, def.slug)))
+      .limit(1))[0];
+    if (existing) continue;
+
+    const worldId = nanoid();
+    await db.insert(worlds).values({
+      id: worldId,
+      ownerUserId: "system",
+      slug: def.slug,
+      name: def.name,
+      description: def.description,
+      visibility: "open",
+    });
+    // Starter pages share the world's createdAt order (we increment sortOrder
+    // monotonically so the natural sort matches the DEFAULT_WORLDS authoring
+    // order - Overview first, hooks last).
+    let sortOrder = 0;
+    for (const page of def.pages) {
+      await db.insert(worldPages).values({
+        id: nanoid(),
+        worldId,
+        parentPageId: null,
+        slug: page.slug,
+        title: page.title,
+        bodyHtml: sanitizeBio(page.bodyHtml),
+        sortOrder,
+      });
+      sortOrder += 1;
+    }
+  }
 }
 
 /**
@@ -182,6 +241,25 @@ export function startJanitor(
         const cutoff = new Date(Date.now() - messageRetentionMs);
         const r = await db.delete(messages).where(lt(messages.createdAt, cutoff));
         if (r.changes > 0) log.info(`[janitor] purged ${r.changes} messages older than retention window`);
+      }
+
+      // Per-room expiry sweep. Only rooms with messageExpiryMinutes set
+      // participate; the global sweep above already covers the rest.
+      // We process room-by-room because each one has its own cutoff and
+      // the alternative (a CTE / correlated subquery) doesn't buy us much
+      // at chat-size scale and complicates the SQL.
+      const expiringRooms = await db
+        .select({ id: rooms.id, name: rooms.name, mins: rooms.messageExpiryMinutes })
+        .from(rooms)
+        .where(sql`${rooms.messageExpiryMinutes} IS NOT NULL`);
+      for (const room of expiringRooms) {
+        const mins = room.mins;
+        if (!mins || mins <= 0) continue;
+        const cutoff = new Date(Date.now() - mins * 60 * 1000);
+        const r = await db
+          .delete(messages)
+          .where(and(eq(messages.roomId, room.id), lt(messages.createdAt, cutoff)));
+        if (r.changes > 0) log.info(`[janitor] purged ${r.changes} messages from "${room.name}" older than ${mins}m`);
       }
     } catch (err) {
       log.error({ err }, "[janitor] message sweep failed");

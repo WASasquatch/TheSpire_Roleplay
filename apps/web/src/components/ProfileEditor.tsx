@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { CharacterPortrait, CharacterStats, ProfileLink, ProfileView, Theme } from "@thekeep/shared";
+import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileLink, ProfileView, Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import { GENDER_OPTIONS, type Gender } from "../lib/gender.js";
 import {
@@ -403,6 +403,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         avatarUrl: avatarUrl.trim() || null,
         portraits,
         links,
+        // Journal entries are managed inline in the editor (not via preview).
+        // The preview ProfileModal shows the character preview as others
+        // would see it, but live-fetching journal here would mix the
+        // editor's "all entries" view with the modal's "public only" view.
+        // Easier to leave the preview empty and let the user open the
+        // actual profile to verify.
+        journalEntries: [],
         theme: previewTheme,
         titles: [],
         createdAt: Date.now(),
@@ -620,6 +627,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                   portraits={portraits}
                   onChange={setPortraits}
                 />
+              ) : null}
+
+              {isCharacter && target.kind === "character" ? (
+                <JournalEditor characterId={target.id} />
               ) : null}
 
               <LinksEditor
@@ -1454,4 +1465,236 @@ async function readError(r: Response): Promise<string> {
   } catch {
     return `${r.status} ${r.statusText}`;
   }
+}
+
+/* ============================================================
+ *  JournalEditor — owner-only solo writing attached to a
+ *  character. Public entries surface on the profile in
+ *  chronological order; private entries only show here.
+ * ============================================================ */
+function JournalEditor({ characterId }: { characterId: string }) {
+  const [entries, setEntries] = useState<CharacterJournalEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  async function load() {
+    setError(null);
+    try {
+      const r = await fetch(`/characters/${characterId}/journal`, { credentials: "include" });
+      if (!r.ok) throw new Error(await readError(r));
+      const j = (await r.json()) as { entries: CharacterJournalEntry[] };
+      setEntries(j.entries);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "load failed");
+    }
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [characterId]);
+
+  async function remove(id: string) {
+    if (!window.confirm("Delete this journal entry?")) return;
+    try {
+      const r = await fetch(`/characters/${characterId}/journal/${id}`, { method: "DELETE", credentials: "include" });
+      if (!r.ok) throw new Error(await readError(r));
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "delete failed");
+    }
+  }
+
+  async function save(body: { title: string | null; bodyHtml: string; privacy: "public" | "private" }, id?: string) {
+    try {
+      const url = id
+        ? `/characters/${characterId}/journal/${id}`
+        : `/characters/${characterId}/journal`;
+      const method = id ? "PATCH" : "POST";
+      const r = await fetch(url, {
+        method,
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      await load();
+      setCreating(false);
+      setEditingId(null);
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Journal</legend>
+      <p className="mb-2 text-[10px] text-keep-muted">
+        Solo writing attached to this character. Backstory, in-world diary, world notes. Public entries surface on
+        the profile chronologically. Private entries are only visible to you.
+      </p>
+      {error ? <div className="mb-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-keep-accent">{error}</div> : null}
+      {creating ? (
+        <JournalEntryForm
+          mode="create"
+          onCancel={() => setCreating(false)}
+          onSave={(body) => save(body)}
+        />
+      ) : null}
+      {entries === null ? (
+        <p className="italic text-keep-muted">Loading entries...</p>
+      ) : entries.length === 0 ? (
+        <p className="italic text-keep-muted">No entries yet.</p>
+      ) : (
+        <ol className="space-y-2">
+          {entries.map((e) => (
+            <li key={e.id} className="rounded border border-keep-rule/60 bg-keep-bg p-2">
+              {editingId === e.id ? (
+                <JournalEntryForm
+                  mode="edit"
+                  initial={e}
+                  onCancel={() => setEditingId(null)}
+                  onSave={(body) => save(body, e.id)}
+                />
+              ) : (
+                <>
+                  <header className="flex items-baseline justify-between gap-2">
+                    <span className="font-semibold">
+                      {e.title || <span className="italic text-keep-muted">untitled</span>}
+                      <span
+                        className={`ml-2 rounded px-1 text-[10px] uppercase tracking-widest ${
+                          e.privacy === "public"
+                            ? "bg-keep-action/15 text-keep-action"
+                            : "bg-keep-rule/30 text-keep-muted"
+                        }`}
+                      >
+                        {e.privacy}
+                      </span>
+                    </span>
+                    <span className="text-[10px] text-keep-muted">
+                      {new Date(e.createdAt).toLocaleDateString()}
+                    </span>
+                  </header>
+                  <details className="mt-1">
+                    <summary className="cursor-pointer text-[10px] uppercase tracking-widest text-keep-muted">Preview</summary>
+                    <div className="mt-1 max-h-40 overflow-y-auto rounded border border-keep-rule/40 bg-keep-panel/30 p-2 font-mono text-[11px]">
+                      {e.bodyHtml}
+                    </div>
+                  </details>
+                  <div className="mt-2 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditingId(e.id)}
+                      className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => remove(e.id)}
+                      className="rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+      {!creating && editingId === null ? (
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          className="mt-2 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+        >
+          + Add entry
+        </button>
+      ) : null}
+    </fieldset>
+  );
+}
+
+function JournalEntryForm({
+  mode,
+  initial,
+  onCancel,
+  onSave,
+}: {
+  mode: "create" | "edit";
+  initial?: CharacterJournalEntry;
+  onCancel: () => void;
+  onSave: (body: { title: string | null; bodyHtml: string; privacy: "public" | "private" }) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [bodyHtml, setBodyHtml] = useState(initial?.bodyHtml ?? "");
+  const [privacy, setPrivacy] = useState<"public" | "private">(initial?.privacy ?? "public");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!bodyHtml.trim()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await onSave({
+        title: title.trim() || null,
+        bodyHtml: bodyHtml,
+        privacy,
+      });
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-1">
+      <input
+        type="text"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        maxLength={120}
+        placeholder="Title (optional)"
+        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+      />
+      <textarea
+        value={bodyHtml}
+        onChange={(e) => setBodyHtml(e.target.value)}
+        rows={8}
+        placeholder={"<p>Write your entry here. The same HTML allow-list as your bio applies (b, i, em, p, ul/ol/li, blockquote, h3-h6, etc.).</p>"}
+        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px] outline-none focus:border-keep-action"
+      />
+      <div className="flex items-center justify-between">
+        <label className="flex items-center gap-1 text-[11px] text-keep-muted">
+          <span>Visibility:</span>
+          <select
+            value={privacy}
+            onChange={(e) => setPrivacy(e.target.value as "public" | "private")}
+            className="rounded border border-keep-rule bg-keep-bg px-1 py-0.5"
+          >
+            <option value="public">Public (on profile)</option>
+            <option value="private">Private (only you)</option>
+          </select>
+        </label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy || !bodyHtml.trim()}
+            className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+          >
+            {busy ? "Saving..." : mode === "create" ? "Create" : "Save"}
+          </button>
+        </div>
+      </div>
+      {err ? <div className="text-[10px] text-keep-accent">{err}</div> : null}
+    </form>
+  );
 }

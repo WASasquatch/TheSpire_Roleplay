@@ -117,6 +117,22 @@ export const rooms = sqliteTable(
     isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
     /** When true, /npc is rejected in this room - useful for themed games where everyone must speak as their own character. Owners and mods toggle via the room editor. */
     npcDisabled: integer("npc_disabled", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Per-room message lifetime in minutes. Null = honor only the global
+     * retention setting. When set, the hourly retention sweep deletes
+     * messages older than this window IN THIS ROOM regardless of the
+     * global value. Use case: LFG / bulletin rooms that should auto-clear
+     * stale posts. Owners/mods set via /expiry.
+     */
+    messageExpiryMinutes: integer("message_expiry_minutes"),
+    /**
+     * "flat" (default) - replies render at the chronological end of chat.
+     * "nested" - replies render under their parent in a collapsible thread
+     * with a "View More" expander past the latest 5. Owner/mod toggleable.
+     */
+    replyMode: text("reply_mode", { enum: ["flat", "nested"] })
+      .notNull()
+      .default("flat"),
     createdAt: ts("created_at"),
   },
   (t) => ({
@@ -213,6 +229,37 @@ export const messages = sqliteTable(
   },
   (t) => ({
     roomTimeIdx: index("messages_room_time_idx").on(t.roomId, t.createdAt),
+  }),
+);
+
+/* ---------- character journal entries ---------- */
+/**
+ * Solo writing the owner attaches to a character: backstory fragments,
+ * in-world diary entries, world notes, scenes too quiet for chat. Public
+ * entries surface on the character's profile chronologically (oldest
+ * first - reads like a diary). Private entries are owner-only.
+ *
+ * `bodyHtml` is run through `sanitizeBio` on save (same allow-list as
+ * the bio). Rendered as React via the prose styles, never via
+ * dangerouslySetInnerHTML.
+ */
+export const characterJournalEntries = sqliteTable(
+  "character_journal_entries",
+  {
+    id: id(),
+    characterId: text("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    title: text("title"),
+    bodyHtml: text("body_html").notNull(),
+    privacy: text("privacy", { enum: ["public", "private"] })
+      .notNull()
+      .default("public"),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    charIdx: index("character_journal_char_idx").on(t.characterId, t.createdAt),
   }),
 );
 
@@ -487,6 +534,10 @@ export const siteSettings = sqliteTable("site_settings", {
   /** Web Push VAPID keys. Generated at first server boot and persisted so deploys don't churn keys (which would invalidate every existing subscription). NEVER expose `vapidPrivateKey` to clients. */
   vapidPublicKey: text("vapid_public_key"),
   vapidPrivateKey: text("vapid_private_key"),
+  /** Master toggle for surfacing live community activity (splash counters, future rails). Default off so cold-start installs don't telegraph "dead community" to first visitors. */
+  activityFeedsEnabled: integer("activity_feeds_enabled", { mode: "boolean" }).notNull().default(false),
+  /** Splash page renders a randomized carousel of up to 10 open worlds when enabled. Off by default so brand-new installs with a thin catalog don't show empty rotation. */
+  featuredWorldsEnabled: integer("featured_worlds_enabled", { mode: "boolean" }).notNull().default(false),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
 });
@@ -599,6 +650,33 @@ export const mutualTitles = sqliteTable(
   }),
 );
 
+/* ---------- affiliates / partners / sponsors ---------- */
+/**
+ * Splash-page carousel entries pointing at affiliate / partner / sponsor
+ * sites. Stores raw HTML rather than a structured (url, image, alt) shape
+ * because topsite networks like toprpsites require their own anchor +
+ * tracking-pixel snippet that has to be pasted verbatim.
+ *
+ * `html` is admin-trusted and NOT sanitized server-side - admins paste from
+ * the affiliate's own provided code. Same trust posture as customHeadHtml.
+ * `label` is an admin-only nickname for sorting/identification; never rendered.
+ */
+export const affiliates = sqliteTable(
+  "affiliates",
+  {
+    id: id(),
+    label: text("label").notNull(),
+    html: text("html").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    sortIdx: index("affiliates_sort_idx").on(t.enabled, t.sortOrder, t.createdAt),
+  }),
+);
+
 /* ---------- profile links ---------- */
 /**
  * Player-set links surfaced as styled chips on a profile. Each row is owned
@@ -629,6 +707,123 @@ export const profileLinks = sqliteTable(
   },
   (t) => ({
     userIdx: index("profile_links_user_idx").on(t.userId, t.characterId, t.sortOrder),
+  }),
+);
+
+/* ---------- worldbuilding (worlds + pages + room links) ---------- */
+/**
+ * Top-level world container owned by a user. Visibility tiers:
+ *   - private: owner only
+ *   - public:  anyone with the URL or who sees it linked from a room
+ *   - open:    public + listed in the world catalog + non-owners can link
+ *              it to rooms they own/mod
+ *
+ * Slug is unique per owner; routes use slug for friendly URLs and walk
+ * back to id for joins. Cascade deletes the pages and any room links.
+ */
+export const worlds = sqliteTable(
+  "worlds",
+  {
+    id: id(),
+    ownerUserId: text("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    visibility: text("visibility", { enum: ["private", "public", "open"] })
+      .notNull()
+      .default("private"),
+    /**
+     * Per-world theme JSON. Applied only when rendering the world's editor /
+     * viewer modals - never bleeds into chat or the userlist. Null = use the
+     * viewer's chat theme as a fallback.
+     */
+    theme: text("theme"),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    ownerSlugUq: uniqueIndex("worlds_owner_slug_uq").on(t.ownerUserId, sql`lower(${t.slug})`),
+    visibilityIdx: index("worlds_visibility_idx").on(t.visibility, t.updatedAt),
+  }),
+);
+
+/**
+ * Tree-structured pages inside a world. parent_page_id NULL = top-level.
+ * Cascade deletes children when a parent is removed (matches the "delete
+ * cascades with confirmation" decision). Depth cap of 10 enforced in code.
+ */
+export const worldPages = sqliteTable(
+  "world_pages",
+  {
+    id: id(),
+    worldId: text("world_id")
+      .notNull()
+      .references(() => worlds.id, { onDelete: "cascade" }),
+    parentPageId: text("parent_page_id"),
+    slug: text("slug").notNull(),
+    title: text("title").notNull(),
+    bodyHtml: text("body_html").notNull().default(""),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    treeIdx: index("world_pages_tree_idx").on(t.worldId, t.parentPageId, t.sortOrder),
+    slugIdx: index("world_pages_slug_idx").on(t.worldId, sql`lower(${t.slug})`),
+  }),
+);
+
+/**
+ * Room → world link. One-world-per-room (PK on roomId). Surfaces a banner
+ * above the chat topic so participants can open the linked wiki.
+ */
+export const roomWorldLinks = sqliteTable(
+  "room_world_links",
+  {
+    roomId: text("room_id")
+      .primaryKey()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    worldId: text("world_id")
+      .notNull()
+      .references(() => worlds.id, { onDelete: "cascade" }),
+    linkedByUserId: text("linked_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    linkedAt: ts("linked_at"),
+  },
+  (t) => ({
+    worldIdx: index("room_world_links_world_idx").on(t.worldId),
+  }),
+);
+
+/**
+ * User → world membership. A user can belong to many worlds, and at most
+ * one membership per user is `isPrimary`. Primary membership drives the
+ * userlist grouping (everyone with the same primary world bands together).
+ *
+ * Joining is gated by world.visibility = "open" in the route layer; the
+ * table itself doesn't enforce that, so admin tooling can still seed
+ * memberships for private/public worlds if needed.
+ */
+export const worldMembers = sqliteTable(
+  "world_members",
+  {
+    worldId: text("world_id")
+      .notNull()
+      .references(() => worlds.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    joinedAt: ts("joined_at"),
+    /** stored as 0/1 in SQLite. */
+    isPrimary: integer("is_primary").notNull().default(0),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.worldId, t.userId] }),
+    userIdx: index("world_members_user_idx").on(t.userId),
+    // The actual "at most one primary per user" is enforced via a partial
+    // unique index in the migration (drizzle's typed builder doesn't expose
+    // partial indexes, so the migration is the source of truth).
   }),
 );
 
@@ -735,6 +930,12 @@ export type DbSiteSettings = typeof siteSettings.$inferSelect;
 export type DbTitleKind = typeof titleKinds.$inferSelect;
 export type DbMutualTitle = typeof mutualTitles.$inferSelect;
 export type DbProfileLink = typeof profileLinks.$inferSelect;
+export type DbAffiliate = typeof affiliates.$inferSelect;
+export type DbCharacterJournalEntry = typeof characterJournalEntries.$inferSelect;
+export type DbWorld = typeof worlds.$inferSelect;
+export type DbWorldPage = typeof worldPages.$inferSelect;
+export type DbRoomWorldLink = typeof roomWorldLinks.$inferSelect;
+export type DbWorldMember = typeof worldMembers.$inferSelect;
 export type DbAuditEntry = typeof auditLog.$inferSelect;
 export type DbReport = typeof reports.$inferSelect;
 export type DbWatch = typeof watches.$inferSelect;

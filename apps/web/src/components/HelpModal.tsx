@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CommandDoc } from "@thekeep/shared";
 import { parseInline } from "../lib/markdown.js";
+import { HelpGuides } from "./HelpGuides.js";
 
 interface Props {
   /** Initial filter - pre-fills the search box (e.g. /help char). */
@@ -8,7 +9,7 @@ interface Props {
   onClose: () => void;
 }
 
-type HelpTab = "commands" | "formatting";
+type HelpTab = "guides" | "commands" | "formatting";
 
 /**
  * Help modal - searchable command reference with subcommand details.
@@ -19,7 +20,10 @@ type HelpTab = "commands" | "formatting";
  * subcommand verbs/usage so users can find by example.
  */
 export function HelpModal({ initialFilter, onClose }: Props) {
-  const [tab, setTab] = useState<HelpTab>("commands");
+  // /help <something> jumps straight to the Commands tab so the filter applies;
+  // bare /help opens on Guides since most newcomers want concept walkthroughs
+  // before they want to grep slash commands.
+  const [tab, setTab] = useState<HelpTab>(initialFilter ? "commands" : "guides");
   const [commands, setCommands] = useState<CommandDoc[] | null>(null);
   const [filter, setFilter] = useState(initialFilter ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +80,9 @@ export function HelpModal({ initialFilter, onClose }: Props) {
           <div className="flex items-center gap-2">
             <h2 className="font-action text-lg">Help</h2>
             <nav className="flex gap-1 text-xs uppercase tracking-widest">
+              <TabBtn active={tab === "guides"} onClick={() => setTab("guides")}>
+                Guides
+              </TabBtn>
               <TabBtn active={tab === "commands"} onClick={() => setTab("commands")}>
                 Commands
               </TabBtn>
@@ -113,8 +120,10 @@ export function HelpModal({ initialFilter, onClose }: Props) {
                 ))}
               </ul>
             )
-          ) : (
+          ) : tab === "formatting" ? (
             <FormattingHelp />
+          ) : (
+            <HelpGuides />
           )}
         </div>
 
@@ -172,6 +181,7 @@ const FORMATTING_ROWS: Array<{ syntax: string; example: string; note?: string }>
   { syntax: "![alt](https://image-url)", example: "![cat](https://example.com/cat.png)", note: "renders as a link with a Show image toggle - opt-in so loading the image doesn't leak your IP to the host" },
   { syntax: "https://.../photo.png", example: "screenshot: https://example.com/screenshot.png", note: "image URLs ending in png/jpg/jpeg/gif/webp/svg/bmp/avif also get the Show image toggle" },
   { syntax: "@username", example: "thanks @sigrid!", note: "click to open their profile; matches a master account or active character" },
+  { syntax: "@world:slug", example: "anyone for a game in @world:ironreach?", note: "click to open the world viewer; slug is the world's URL slug (lowercase + hyphens)" },
 ];
 
 function FormattingHelp() {

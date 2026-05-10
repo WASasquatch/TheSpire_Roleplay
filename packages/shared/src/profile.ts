@@ -53,6 +53,23 @@ export interface CharacterPortrait {
 }
 
 /**
+ * A solo writing entry attached to a character — backstory fragment,
+ * in-world diary, world notes. Public entries are visible on the
+ * character's profile to anyone; private entries are only included in
+ * the response when the viewer owns the character.
+ */
+export interface CharacterJournalEntry {
+  id: string;
+  /** Optional title; null/empty means "untitled". */
+  title: string | null;
+  /** Sanitized HTML body. Rendered via the prose styles, never raw. */
+  bodyHtml: string;
+  privacy: "public" | "private";
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
  * A player-set link rendered as a styled chip on a profile. Capped at 6 per
  * profile server-side. Colors are optional hex (#rrggbb); null falls back to
  * theme-default styling on the client.
@@ -78,6 +95,8 @@ export interface CharacterProfile {
   portraits: CharacterPortrait[];
   /** Owner-set external links (other profiles, world docs, refs). */
   links: ProfileLink[];
+  /** Public-visibility journal entries in chronological order (oldest first). Private entries are NEVER included in this array - they only surface in the owner's editor. */
+  journalEntries: CharacterJournalEntry[];
   /** Owner's chosen UI theme - applied to the profile modal when others view it. */
   theme: Theme;
   /** Mutual titles (marriages, partnerships, etc.) bound to this character. */

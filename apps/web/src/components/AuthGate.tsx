@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import DOMPurify from "dompurify";
 import { useChat } from "../state/store.js";
 import { themeStyle } from "../lib/theme.js";
+import { AffiliatesCarousel } from "./AffiliatesCarousel.js";
+import { FeaturedWorldsCarousel } from "./FeaturedWorldsCarousel.js";
 
 interface SiteStats {
   online: number;
@@ -38,8 +40,14 @@ export function SplashShell({
   const [stats, setStats] = useState<SiteStats | null>(null);
 
   // Live stats so visitors see the chat is alive before they log in. /stats
-  // is unauthenticated; we refresh every 30s to track ebb and flow.
+  // is unauthenticated; we refresh every 30s to track ebb and flow. Skipped
+  // entirely when the admin has disabled activity feeds (cold-start posture
+  // so empty counters don't telegraph "dead community" to first visitors).
   useEffect(() => {
+    if (!branding.activityFeedsEnabled) {
+      setStats(null);
+      return;
+    }
     let cancelled = false;
     function load() {
       fetch("/stats")
@@ -50,7 +58,7 @@ export function SplashShell({
     load();
     const id = window.setInterval(load, 30_000);
     return () => { cancelled = true; window.clearInterval(id); };
-  }, []);
+  }, [branding.activityFeedsEnabled]);
 
   // Logo text styling mirrors the in-app banner so the brand stays
   // consistent. Both color and font fall back to the theme when unset.
@@ -151,8 +159,10 @@ export function SplashShell({
               </div>
             </div>
 
-            {/* Live stats strip */}
-            <SplashStats stats={stats} />
+            {/* Live stats strip - omitted entirely when the admin toggle is
+                off, so the splash sells the IDEA of the place rather than its
+                (potentially empty) current activity. */}
+            {branding.activityFeedsEnabled ? <SplashStats stats={stats} /> : null}
 
             {/* Retention + session TTL - admin-configured, surfaced so
                 visitors know what they're committing to before registering. */}
@@ -172,6 +182,17 @@ export function SplashShell({
             <div>{children}</div>
 
             {footer ? <div className="mt-4">{footer}</div> : null}
+
+            {/* Featured-worlds carousel. Same posture as activity feeds:
+                hidden entirely until the admin flips the toggle, so a brand-
+                new install with a thin catalog doesn't surface mostly-empty
+                worlds to first-time visitors. */}
+            {branding.featuredWorldsEnabled ? <FeaturedWorldsCarousel /> : null}
+
+            {/* Affiliates / partners / sponsors carousel. Renders nothing
+                when there are no enabled entries, so empty installs don't
+                show an empty box. */}
+            <AffiliatesCarousel />
           </div>
 
           {/* Footer credit row */}

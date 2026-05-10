@@ -47,6 +47,10 @@ export interface SiteSettings {
   vapidPublicKey: string | null;
   /** Web Push VAPID private key. NEVER expose to clients. */
   vapidPrivateKey: string | null;
+  /** Master toggle for surfacing live community activity. Off during cold-start so an empty community doesn't telegraph "dead place" to first-time visitors. Splash + future activity rails honor this. */
+  activityFeedsEnabled: boolean;
+  /** Splash page shows a randomized carousel of up to 10 open worlds when on. Off by default. */
+  featuredWorldsEnabled: boolean;
   updatedAt: number;
 }
 
@@ -105,6 +109,10 @@ export interface SettingsPatch {
   metaDescription?: string;
   /** Raw HTML, NOT sanitized (analytics scripts must remain intact). Admin-only. */
   customHeadHtml?: string;
+  /** Master toggle for surfacing live activity counters. */
+  activityFeedsEnabled?: boolean;
+  /** Splash page featured-worlds carousel toggle. */
+  featuredWorldsEnabled?: boolean;
 }
 
 export async function updateSettings(
@@ -140,6 +148,8 @@ export async function updateSettings(
   if (patch.registerDisclaimerHtml !== undefined) update.registerDisclaimerHtml = patch.registerDisclaimerHtml;
   if (patch.metaDescription !== undefined) update.metaDescription = patch.metaDescription;
   if (patch.customHeadHtml !== undefined) update.customHeadHtml = patch.customHeadHtml;
+  if (patch.activityFeedsEnabled !== undefined) update.activityFeedsEnabled = patch.activityFeedsEnabled;
+  if (patch.featuredWorldsEnabled !== undefined) update.featuredWorldsEnabled = patch.featuredWorldsEnabled;
   await db.update(siteSettings).set(update).where(eq(siteSettings.id, "singleton"));
   cached = null;
   return getSettings(db);
@@ -174,6 +184,8 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     customHeadHtml: row.customHeadHtml,
     vapidPublicKey: row.vapidPublicKey,
     vapidPrivateKey: row.vapidPrivateKey,
+    activityFeedsEnabled: row.activityFeedsEnabled,
+    featuredWorldsEnabled: row.featuredWorldsEnabled,
     updatedAt: +row.updatedAt,
   };
 }

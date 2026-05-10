@@ -414,6 +414,10 @@ export async function registerAdminRoutes(
      * check; the UI warns the field is admin-trusted raw HTML.
      */
     customHeadHtml: z.string().max(20_000).optional(),
+    /** Surfaces live community activity counters on the splash + future feed rails. Off during cold-start. */
+    activityFeedsEnabled: z.boolean().optional(),
+    /** Splash page featured-worlds carousel toggle. */
+    featuredWorldsEnabled: z.boolean().optional(),
   });
 
   function settingsResponse(s: Awaited<ReturnType<typeof getSettings>>) {
@@ -438,6 +442,8 @@ export async function registerAdminRoutes(
       registerDisclaimerHtml: s.registerDisclaimerHtml,
       metaDescription: s.metaDescription,
       customHeadHtml: s.customHeadHtml,
+      activityFeedsEnabled: s.activityFeedsEnabled,
+      featuredWorldsEnabled: s.featuredWorldsEnabled,
       updatedAt: s.updatedAt,
     };
   }
@@ -490,6 +496,12 @@ export async function registerAdminRoutes(
     // 20KB cap on the input schema is the only guard.
     if (body.customHeadHtml !== undefined) {
       patch.customHeadHtml = body.customHeadHtml;
+    }
+    if (body.activityFeedsEnabled !== undefined) {
+      patch.activityFeedsEnabled = body.activityFeedsEnabled;
+    }
+    if (body.featuredWorldsEnabled !== undefined) {
+      patch.featuredWorldsEnabled = body.featuredWorldsEnabled;
     }
     const result = settingsResponse(await updateSettings(db, patch, sessionUser.id));
     await recordAudit(db, {

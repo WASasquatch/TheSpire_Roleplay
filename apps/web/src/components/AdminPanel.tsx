@@ -122,6 +122,8 @@ interface SettingsRow {
   customHeadHtml: string;
   activityFeedsEnabled: boolean;
   featuredWorldsEnabled: boolean;
+  /** Sanitized HTML for the post-login welcome modal. "" = no welcome shown. */
+  newUserWelcomeHtml: string;
   updatedAt: number;
 }
 
@@ -865,6 +867,7 @@ function RulesTab() {
   const [rulesHtml, setRulesHtml] = useState("");
   const [securityHtml, setSecurityHtml] = useState("");
   const [disclaimerHtml, setDisclaimerHtml] = useState("");
+  const [welcomeHtml, setWelcomeHtml] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -879,6 +882,7 @@ function RulesTab() {
       setRulesHtml(j.rulesHtml ?? "");
       setSecurityHtml(j.securityNoticeHtml ?? "");
       setDisclaimerHtml(j.registerDisclaimerHtml ?? "");
+      setWelcomeHtml(j.newUserWelcomeHtml ?? "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "load failed");
     }
@@ -899,6 +903,7 @@ function RulesTab() {
           rulesHtml,
           securityNoticeHtml: securityHtml,
           registerDisclaimerHtml: disclaimerHtml,
+          newUserWelcomeHtml: welcomeHtml,
         }),
       });
       if (!r.ok) throw new Error(await readError(r));
@@ -909,6 +914,7 @@ function RulesTab() {
       setRulesHtml(j.rulesHtml ?? "");
       setSecurityHtml(j.securityNoticeHtml ?? "");
       setDisclaimerHtml(j.registerDisclaimerHtml ?? "");
+      setWelcomeHtml(j.newUserWelcomeHtml ?? "");
       // The disclaimer is part of public branding (consumed by AuthGate); push
       // the new copy into the store so other open tabs / the splash see it
       // without waiting for the next /site fetch.
@@ -997,6 +1003,25 @@ function RulesTab() {
         </p>
       </fieldset>
 
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Welcome / announcement (post-login)</legend>
+        <textarea
+          value={welcomeHtml}
+          onChange={(e) => setWelcomeHtml(e.target.value)}
+          rows={10}
+          maxLength={50_000}
+          placeholder="<h3>Welcome to The Spire</h3><p>We just shipped...</p>"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+        />
+        <p className="mt-1 text-keep-muted">
+          Shown as a one-time modal to logged-in users after sign-in. Editing the
+          text here re-shows the modal to <b>everyone</b> on their next page load
+          (we hash the content; a new hash means "new message"). Empty text = no
+          modal shown. Good for deployment news, "we just shipped X", or onboarding
+          tips for fresh accounts.
+        </p>
+      </fieldset>
+
       {/* Live preview */}
       <fieldset className="rounded border border-keep-rule p-3 text-xs">
         <legend className="px-1 uppercase tracking-widest text-keep-muted">Preview</legend>
@@ -1028,6 +1053,17 @@ function RulesTab() {
                 <input type="checkbox" disabled checked className="mt-0.5" />
                 <span>I have read and accept the disclaimer above and the house rules.</span>
               </label>
+            </div>
+          ) : null}
+          {welcomeHtml.trim() ? (
+            <div className="rounded border border-keep-action/40 bg-keep-action/5 p-2">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.25em] text-keep-muted">
+                post-login welcome modal
+              </div>
+              <div
+                className="prose prose-sm max-w-none"
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(welcomeHtml) }}
+              />
             </div>
           ) : null}
         </div>

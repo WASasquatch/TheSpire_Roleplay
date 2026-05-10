@@ -1,8 +1,21 @@
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
 import { siteSettings } from "./db/schema.js";
+
+/**
+ * Stable, short hash of the welcome HTML used to decide whether a user has
+ * acknowledged the CURRENT version. Sha-256 truncated to 16 hex chars is
+ * collision-resistant in practice (~64 bits) and short enough to store
+ * comfortably on `users.welcome_seen_hash`. Empty input returns "" so the
+ * client can shortcut "no welcome to render" without any hash math.
+ */
+export function hashWelcome(html: string): string {
+  if (!html.trim()) return "";
+  return createHash("sha256").update(html).digest("hex").slice(0, 16);
+}
 
 export interface SiteSettings {
   messageRetentionMs: number;
@@ -51,6 +64,10 @@ export interface SiteSettings {
   activityFeedsEnabled: boolean;
   /** Splash page shows a randomized carousel of up to 10 open worlds when on. Off by default. */
   featuredWorldsEnabled: boolean;
+  /** Sanitized HTML for the post-login welcome/announcement modal. Empty string = no welcome to show. */
+  newUserWelcomeHtml: string;
+  /** SHA hash of the current welcome HTML; clients compare against the user's `welcomeSeenHash` to decide whether to surface the modal. Empty when welcome HTML is empty. */
+  newUserWelcomeHash: string;
   updatedAt: number;
 }
 
@@ -113,6 +130,8 @@ export interface SettingsPatch {
   activityFeedsEnabled?: boolean;
   /** Splash page featured-worlds carousel toggle. */
   featuredWorldsEnabled?: boolean;
+  /** Pre-sanitized HTML; route handler sanitizes before invoking. Empty string clears it. */
+  newUserWelcomeHtml?: string;
 }
 
 export async function updateSettings(
@@ -150,6 +169,7 @@ export async function updateSettings(
   if (patch.customHeadHtml !== undefined) update.customHeadHtml = patch.customHeadHtml;
   if (patch.activityFeedsEnabled !== undefined) update.activityFeedsEnabled = patch.activityFeedsEnabled;
   if (patch.featuredWorldsEnabled !== undefined) update.featuredWorldsEnabled = patch.featuredWorldsEnabled;
+  if (patch.newUserWelcomeHtml !== undefined) update.newUserWelcomeHtml = patch.newUserWelcomeHtml;
   await db.update(siteSettings).set(update).where(eq(siteSettings.id, "singleton"));
   cached = null;
   return getSettings(db);
@@ -186,6 +206,8 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     vapidPrivateKey: row.vapidPrivateKey,
     activityFeedsEnabled: row.activityFeedsEnabled,
     featuredWorldsEnabled: row.featuredWorldsEnabled,
+    newUserWelcomeHtml: row.newUserWelcomeHtml,
+    newUserWelcomeHash: hashWelcome(row.newUserWelcomeHtml),
     updatedAt: +row.updatedAt,
   };
 }

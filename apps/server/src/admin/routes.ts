@@ -418,6 +418,8 @@ export async function registerAdminRoutes(
     activityFeedsEnabled: z.boolean().optional(),
     /** Splash page featured-worlds carousel toggle. */
     featuredWorldsEnabled: z.boolean().optional(),
+    /** Sanitized HTML for the post-login welcome modal. Empty string clears the welcome. Same 50KB cap as other rich-text settings. */
+    newUserWelcomeHtml: z.string().max(50_000).optional(),
   });
 
   function settingsResponse(s: Awaited<ReturnType<typeof getSettings>>) {
@@ -444,6 +446,7 @@ export async function registerAdminRoutes(
       customHeadHtml: s.customHeadHtml,
       activityFeedsEnabled: s.activityFeedsEnabled,
       featuredWorldsEnabled: s.featuredWorldsEnabled,
+      newUserWelcomeHtml: s.newUserWelcomeHtml,
       updatedAt: s.updatedAt,
     };
   }
@@ -502,6 +505,13 @@ export async function registerAdminRoutes(
     }
     if (body.featuredWorldsEnabled !== undefined) {
       patch.featuredWorldsEnabled = body.featuredWorldsEnabled;
+    }
+    if (body.newUserWelcomeHtml !== undefined) {
+      // Sanitize via the bio allow-list (same trust posture as welcomeHtml /
+      // rulesHtml). Empty string passes through and represents "no welcome
+      // to show".
+      const { sanitizeBio } = await import("../auth/html.js");
+      patch.newUserWelcomeHtml = sanitizeBio(body.newUserWelcomeHtml);
     }
     const result = settingsResponse(await updateSettings(db, patch, sessionUser.id));
     await recordAudit(db, {

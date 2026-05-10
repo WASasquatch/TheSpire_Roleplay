@@ -17,6 +17,7 @@ import { WorldCatalogModal } from "./components/WorldCatalogModal.js";
 import { WorldEditorModal } from "./components/WorldEditorModal.js";
 import { WorldViewerModal } from "./components/WorldViewerModal.js";
 import { WorldsListModal } from "./components/WorldsListModal.js";
+import { WelcomeModal } from "./components/WelcomeModal.js";
 import { getSocket, disconnect as disconnectSocket } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
@@ -278,6 +279,13 @@ function Chat() {
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
   const [activeCharacterName, setActiveCharacterName] = useState<string | null>(null);
   const [notifyPref, setNotifyPref] = useState<NotifyPref>("mentions");
+  /**
+   * Admin-configured one-shot welcome modal. /me/profile returns this only
+   * when the user hasn't acknowledged the current welcome's content hash;
+   * dismissing POSTs the hash so they don't see it again until the admin
+   * edits the welcome text (which rotates the hash and re-shows to all).
+   */
+  const [welcome, setWelcome] = useState<{ html: string; hash: string } | null>(null);
   const [themeVersion, setThemeVersion] = useState(0);
 
   const socket = useMemo(() => getSocket(), []);
@@ -323,6 +331,7 @@ function Chat() {
           activeCharacterId: string | null;
           activeCharacterName?: string | null;
           notifyPref?: NotifyPref;
+          welcome?: { html: string; hash: string } | null;
         };
         let theme = normalizeTheme(u.theme);
         if (u.activeCharacterId) {
@@ -339,6 +348,10 @@ function Chat() {
           setActiveCharacterId(u.activeCharacterId);
           setActiveCharacterName(u.activeCharacterName ?? null);
           if (u.notifyPref) setNotifyPref(u.notifyPref);
+          // Server-side gating: only present when there's an unseen
+          // welcome to surface. Dismissal flips the user's stored hash
+          // server-side, so re-fetches stop returning this field.
+          if (u.welcome) setWelcome(u.welcome);
         }
       } catch { /* ignore */ }
     }
@@ -928,6 +941,17 @@ function Chat() {
             setWorldCatalogOpen(false);
             setWorldViewerId(worldId);
           }}
+        />
+      ) : null}
+      {/* One-shot welcome / announcement modal. Server decides when to send
+          this; we just render and forward dismissal. Sits above other
+          modals via its own z-50 so a deploy announcement isn't hidden
+          behind a stale profile / world overlay. */}
+      {welcome ? (
+        <WelcomeModal
+          html={welcome.html}
+          hash={welcome.hash}
+          onDismissed={() => setWelcome(null)}
         />
       ) : null}
     </div>

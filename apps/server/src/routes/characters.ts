@@ -297,6 +297,13 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       if (c && !c.deletedAt) activeCharacterName = c.name;
     }
 
+    // Welcome modal: surface the admin-configured welcome HTML iff the
+    // user's stored hash differs from the current content's hash. Empty
+    // welcome string short-circuits hash to "" so we never show nothing.
+    const settings = await getSettings(db);
+    const wantsWelcome =
+      settings.newUserWelcomeHash !== "" &&
+      u.welcomeSeenHash !== settings.newUserWelcomeHash;
     return {
       userId: u.id,
       username: u.username,
@@ -312,7 +319,32 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       role: u.role,
       isPublic: u.isPublic,
       isNsfw: u.isNsfw,
+      welcome: wantsWelcome
+        ? { html: settings.newUserWelcomeHtml, hash: settings.newUserWelcomeHash }
+        : null,
     };
+  });
+
+  /**
+   * Mark the current welcome message as acknowledged for this user. Stores
+   * the hash so future loads where the admin hasn't edited the welcome
+   * skip the modal. If the hash in the request doesn't match the current
+   * one (e.g. the admin updated mid-session), we still record what the
+   * user actually saw - they'll get the new version on the next load.
+   */
+  app.post<{ Body: unknown }>("/me/welcome/dismiss", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let body: { hash?: string } = {};
+    try { body = req.body as { hash?: string }; } catch { /* tolerate */ }
+    const settings = await getSettings(db);
+    // Default to the current hash so a client that omits the field still
+    // dismisses the live welcome. Bound the length to avoid stuffing.
+    const hash = (typeof body.hash === "string" && body.hash.length <= 64)
+      ? body.hash
+      : settings.newUserWelcomeHash;
+    await db.update(users).set({ welcomeSeenHash: hash }).where(eq(users.id, me.id));
+    return { ok: true };
   });
 
   /* ===========================================================

@@ -64,6 +64,13 @@ export const users = sqliteTable(
      *   - The owner + admins always see the content without the gate.
      */
     isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Hash of the new-user welcome message this user has acknowledged.
+     * Compared against the current site-settings hash on /me/profile to
+     * decide whether to surface the welcome modal. Null = never seen any
+     * welcome (any non-empty message will show on next load).
+     */
+    welcomeSeenHash: text("welcome_seen_hash"),
     createdAt: ts("created_at"),
     lastLoginAt: integer("last_login_at", { mode: "timestamp_ms" }),
     disabledAt: integer("disabled_at", { mode: "timestamp_ms" }),
@@ -557,6 +564,8 @@ export const siteSettings = sqliteTable("site_settings", {
   activityFeedsEnabled: integer("activity_feeds_enabled", { mode: "boolean" }).notNull().default(false),
   /** Splash page renders a randomized carousel of up to 10 open worlds when enabled. Off by default so brand-new installs with a thin catalog don't show empty rotation. */
   featuredWorldsEnabled: integer("featured_worlds_enabled", { mode: "boolean" }).notNull().default(false),
+  /** Sanitized HTML shown once to logged-in users (one-shot welcome / announcement modal). Editing the text rotates a hash so all users see the new version on their next load. */
+  newUserWelcomeHtml: text("new_user_welcome_html").notNull().default(""),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
 });

@@ -439,7 +439,11 @@ function PublicViewerShell({
       <div aria-hidden className="absolute inset-0 bg-keep-bg/70" />
       <a
         href="/"
-        className="fixed right-4 top-3 z-[60] rounded border border-keep-rule bg-keep-bg/90 px-3 py-1 text-xs uppercase tracking-widest text-keep-action shadow hover:bg-keep-bg"
+        // Mobile: pinned bottom-right so it can't collide with the
+        // full-screen modal's header (the modal's own close button lives
+        // top-right on small screens). Desktop: top-right corner where the
+        // modal has natural margin around it.
+        className="fixed bottom-3 right-4 z-[60] rounded border border-keep-rule bg-keep-bg/90 px-3 py-1 text-xs uppercase tracking-widest text-keep-action shadow hover:bg-keep-bg md:bottom-auto md:top-3"
       >
         {isAuthenticated ? `Open ${siteName}` : `Sign in to ${siteName}`}
       </a>

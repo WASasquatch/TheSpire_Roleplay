@@ -126,10 +126,20 @@ export function SplashShell({
           //     maximum legibility and only a hint of blur. The artwork
           //     stays visible to the *left* of the card; we don't need it
           //     showing through the card itself.
+          // The outer container is `overflow-hidden` (so the bg image
+          // can't bleed outside the viewport when the artwork is taller
+          // than the available space). That clips anything growing past
+          // the viewport - including the optional FeaturedWorldsCarousel
+          // and AffiliatesCarousel rows below the form. Cap the card's
+          // height to the viewport (less margin) and let the card scroll
+          // internally so additional sections stay reachable on shorter
+          // screens.
           className="
             mx-4 my-8
             w-[min(560px,92vw)]
+            max-h-[calc(100vh-4rem)] overflow-y-auto
             md:absolute md:top-1/2 md:left-[75%] md:my-0 md:-translate-x-1/2 md:-translate-y-1/2
+            md:max-h-[calc(100vh-2rem)]
             rounded-md border
             bg-keep-bg/55 backdrop-blur-xl border-keep-border/60
             ring-1 ring-keep-bg/40 ring-inset

@@ -44,3 +44,48 @@ export function deriveSlug(input: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
 }
+
+/** URL pattern used for shareable world links: /w/<slug>. */
+const WORLD_URL_RX = /^\/w\/([a-z0-9](?:[a-z0-9-]{0,58}[a-z0-9])?)\/?$/i;
+
+/**
+ * Parse the current location for a world deep-link. Returns the slug-or-id
+ * captured from the path, or null if the URL isn't a world link. Consumed
+ * on first paint and on popstate so back/forward navigation works.
+ */
+export function parseWorldFromUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  const m = window.location.pathname.match(WORLD_URL_RX);
+  return m?.[1] ?? null;
+}
+
+/**
+ * Sync the browser URL to reflect whether a world viewer is open.
+ *   - Opening a world  -> push /w/<slug>
+ *   - Closing a world  -> push /
+ *   - Already in sync  -> no-op (avoids double history entries)
+ *
+ * Uses pushState so the back button takes the user to the previous state
+ * (typically: chat). Callers that want to *replace* the current URL
+ * without adding history (e.g. normalizing /w/<id> -> /w/<slug>) should
+ * use the replace flag.
+ */
+export function syncWorldUrl(slug: string | null, opts: { replace?: boolean } = {}): void {
+  if (typeof window === "undefined") return;
+  const current = parseWorldFromUrl();
+  const target = slug ? `/w/${slug}` : "/";
+  // Avoid pushing identical state (would clutter history with duplicates).
+  if (slug && current === slug) return;
+  if (!slug && !current) return;
+  if (opts.replace) {
+    window.history.replaceState({}, "", target);
+  } else {
+    window.history.pushState({}, "", target);
+  }
+}
+
+/** Build the absolute URL for a world (used by Copy Link). */
+export function worldShareUrl(slug: string): string {
+  if (typeof window === "undefined") return `/w/${slug}`;
+  return `${window.location.origin}/w/${slug}`;
+}

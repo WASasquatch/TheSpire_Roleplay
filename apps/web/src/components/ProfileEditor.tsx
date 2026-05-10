@@ -40,6 +40,8 @@ interface MasterData {
   theme?: Theme;
   notifyPref?: NotifyPref;
   role?: "user" | "mod" | "admin";
+  isPublic?: boolean;
+  isNsfw?: boolean;
 }
 
 interface CharacterRow {
@@ -49,6 +51,8 @@ interface CharacterRow {
   statsJson: string;
   avatarUrl: string | null;
   themeJson: string | null;
+  isPublic?: boolean;
+  isNsfw?: boolean;
 }
 
 type Target = { kind: "master" } | { kind: "character"; id: string };
@@ -100,6 +104,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   /** When the form has a theme set; null means "use default / inherit". */
   const [theme, setTheme] = useState<Theme | null>(null);
   const [notifyPref, setNotifyPref] = useState<NotifyPref>("mentions");
+  // Public + NSFW visibility flags. Default isPublic=true, isNsfw=false to
+  // match the schema. NSFW=true forces isPublic=false on save (server
+  // enforces this too); the UI mirrors that by disabling the Public box.
+  const [isPublic, setIsPublic] = useState<boolean>(true);
+  const [isNsfw, setIsNsfw] = useState<boolean>(false);
   /** Extra portraits beyond the primary avatarUrl (character targets only). */
   const [portraits, setPortraits] = useState<CharacterPortrait[]>([]);
   /** Owner-set external links rendered as styled chips on the profile. */
@@ -165,6 +174,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setStats({});
           setTheme(master.theme ? normalizeTheme(master.theme) : null);
           setNotifyPref(master.notifyPref ?? "mentions");
+          setIsPublic(master.isPublic ?? true);
+          setIsNsfw(master.isNsfw ?? false);
           setPortraits([]); // master has no gallery; only characters do
           // Master/OOC links live under /me/links (characterId IS NULL).
           try {
@@ -197,6 +208,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           } else {
             setTheme(null);
           }
+          setIsPublic(c.isPublic ?? true);
+          setIsNsfw(c.isNsfw ?? false);
           // Pull the gallery in parallel with the row fetch above? We do it
           // sequentially here to keep the early-return-on-error simple; the
           // payload is small (under 12 rows in the worst case).
@@ -242,6 +255,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             gender,
             theme,
             notifyPref,
+            isPublic,
+            isNsfw,
           }),
         });
         if (!r.ok) throw new Error(await readError(r));
@@ -254,6 +269,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             avatarUrl: avatarUrl.trim() || null,
             gender,
             notifyPref,
+            // NSFW=true forces isPublic=false on the server. Mirror that
+            // implication client-side so the cached MasterData stays
+            // consistent with what the next /me/profile load would return.
+            isPublic: isNsfw ? false : isPublic,
+            isNsfw,
           };
           if (theme) next.theme = theme;
           else delete next.theme;
@@ -269,6 +289,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             stats,
             avatarUrl: avatarUrl.trim() || null,
             theme,
+            isPublic,
+            isNsfw,
           }),
         });
         if (!r.ok) throw new Error(await readError(r));
@@ -282,6 +304,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                   statsJson: JSON.stringify(stats),
                   avatarUrl: avatarUrl.trim() || null,
                   themeJson: theme ? JSON.stringify(theme) : null,
+                  isPublic: isNsfw ? false : isPublic,
+                  isNsfw,
                 }
               : c,
           ),
@@ -388,6 +412,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           titles: [],
           links,
           role: master.role ?? "user",
+          isPublic: isNsfw ? false : isPublic,
+          isNsfw,
           createdAt: Date.now(),
         },
       };
@@ -412,11 +438,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         journalEntries: [],
         theme: previewTheme,
         titles: [],
+        isPublic: isNsfw ? false : isPublic,
+        isNsfw,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       },
     };
-  }, [target, master, name, bioHtml, avatarUrl, gender, stats, theme, portraits, links]);
+  }, [target, master, name, bioHtml, avatarUrl, gender, stats, theme, portraits, links, isPublic, isNsfw]);
 
   const targetOptions = useMemo(() => {
     return [
@@ -579,6 +607,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                   onPermissionChange={() => setPermVersion((v) => v + 1)}
                 />
               ) : null}
+
+              <VisibilityRow
+                isPublic={isPublic}
+                isNsfw={isNsfw}
+                onChangePublic={setIsPublic}
+                onChangeNsfw={setIsNsfw}
+                kind={isCharacter ? "character" : "master"}
+              />
 
               {isCharacter ? (
                 <fieldset className="rounded border border-keep-rule p-3">
@@ -1363,6 +1399,77 @@ function NotificationsRow({
         ) : null}
       </div>
       <PushRow />
+    </fieldset>
+  );
+}
+
+/**
+ * Profile visibility + NSFW gate.
+ *
+ * Two checkboxes:
+ *   - Public: when off, the profile is hidden from anonymous viewers
+ *     (logged-out visitors get 404 from /profiles/:name).
+ *   - NSFW: pre-gates the whole profile. Logged-in viewers see a warning
+ *     splash with a "View Profile" button before the content renders.
+ *     The owner + admins always skip the gate.
+ *
+ * NSFW=true forces Public=false (server enforces; the UI mirrors by
+ * disabling and unchecking the Public box). Independent of the per-portrait
+ * NSFW flag we already shipped, which only blurs individual gallery images.
+ */
+function VisibilityRow({
+  isPublic,
+  isNsfw,
+  onChangePublic,
+  onChangeNsfw,
+  kind,
+}: {
+  isPublic: boolean;
+  isNsfw: boolean;
+  onChangePublic: (v: boolean) => void;
+  onChangeNsfw: (v: boolean) => void;
+  kind: "master" | "character";
+}) {
+  const subject = kind === "master" ? "your master profile" : "this character's profile";
+  // When NSFW is on, the Public box is disabled and visually shows as
+  // unchecked - matches the server's normalization on save.
+  const effectivePublic = isNsfw ? false : isPublic;
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Visibility</legend>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={effectivePublic}
+          disabled={isNsfw}
+          onChange={(e) => onChangePublic(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="font-semibold">Public</span>
+          <span className="block text-[10px] text-keep-muted">
+            Anyone (including logged-out visitors) can view {subject} via{" "}
+            <code>/profiles/{kind === "master" ? "<username>" : "<character>"}</code>. Uncheck to
+            require login.
+          </span>
+        </span>
+      </label>
+      <label className="mt-2 flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={isNsfw}
+          onChange={(e) => onChangeNsfw(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="font-semibold">NSFW (whole profile)</span>
+          <span className="block text-[10px] text-keep-muted">
+            Forces non-public to anonymous viewers, and shows a warning splash with a "View
+            Profile" button to logged-in viewers before the content renders. Use when the
+            profile itself is explicit (independent of marking individual gallery images NSFW).
+          </span>
+        </span>
+      </label>
     </fieldset>
   );
 }

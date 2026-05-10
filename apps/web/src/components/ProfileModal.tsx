@@ -4,6 +4,7 @@ import type { CharacterPortrait, ProfileLink, ProfileView, WorldMembership } fro
 import { themeStyle } from "../lib/theme.js";
 import { genderGlyph } from "../lib/gender.js";
 import type { Gender } from "../lib/gender.js";
+import { profileShareUrl } from "../lib/profiles.js";
 
 interface Props {
   profile: ProfileView;
@@ -14,6 +15,12 @@ interface Props {
   onIgnore?: (name: string) => void;
   /** Open another profile by name (used to follow a mutual-title link). */
   onOpenProfile?: (name: string) => void;
+  /**
+   * When true, skip the NSFW gate splash that otherwise blocks viewing of
+   * profiles with isNsfw=true. Parent passes this when the viewer is the
+   * profile's owner OR a site admin - they're trusted to skip the warning.
+   */
+  bypassNsfwGate?: boolean;
   /**
    * Active-character action to expose on the viewer's own profiles. Parent
    * decides the label + behaviour based on viewer state:
@@ -46,7 +53,7 @@ interface Props {
  * Every section degrades gracefully: characters with nothing filled out
  * still get a clean modal that says "X hasn't filled out their profile yet."
  */
-export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProfile, activeCharacterAction }: Props) {
+export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProfile, activeCharacterAction, bypassNsfwGate }: Props) {
   const isChar = profile.kind === "character";
   const name = isChar ? profile.profile.name : profile.profile.username;
   const bio = profile.profile.bioHtml.trim();
@@ -58,6 +65,15 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
   const titles = profile.profile.titles ?? [];
   const links = profile.profile.links ?? [];
   const journal = isChar ? (profile.profile.journalEntries ?? []) : [];
+
+  // NSFW gate: a warning splash that blocks viewing until the user clicks
+  // "View Profile". Trusted viewers (owner + admin) skip the gate via the
+  // bypassNsfwGate prop. State is per-modal-mount, so closing + reopening
+  // re-prompts (intentional - "I confirmed once 20 minutes ago" isn't a
+  // strong enough signal to skip the gate forever).
+  const requiresGate = profile.profile.isNsfw && !bypassNsfwGate;
+  const [gateAccepted, setGateAccepted] = useState(false);
+  const gated = requiresGate && !gateAccepted;
 
   // Stat entries that actually have a value - empty fields are dropped so
   // a half-filled character doesn't show a row of dashes.
@@ -78,7 +94,89 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
         className="flex max-h-[85vh] w-[min(720px,96vw)] flex-col overflow-hidden rounded border border-keep-border bg-keep-bg text-keep-text shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Hero band - always visible, themed with the owner's panel color. */}
+        {gated ? (
+          <NsfwGate
+            name={name}
+            kind={isChar ? "character" : "master"}
+            onAccept={() => setGateAccepted(true)}
+            onCancel={onClose}
+          />
+        ) : (
+          <ProfileBody
+            profile={profile}
+            name={name}
+            bio={bio}
+            avatar={avatar}
+            createdAt={createdAt}
+            stats={stats}
+            gender={gender}
+            titles={titles}
+            links={links}
+            journal={journal}
+            statEntries={statEntries}
+            isCompletelyBlank={isCompletelyBlank}
+            onClose={onClose}
+            onWhisper={onWhisper}
+            onIgnore={onIgnore}
+            onOpenProfile={onOpenProfile}
+            activeCharacterAction={activeCharacterAction}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================ *
+ *  ProfileBody - everything that was in the modal before the
+ *  NSFW gate landed. Lifted out so the gated branch can return
+ *  cleanly without juggling fragments.
+ * ============================================================ */
+
+function ProfileBody({
+  profile,
+  name,
+  bio,
+  avatar,
+  createdAt,
+  stats,
+  gender,
+  titles,
+  links,
+  journal,
+  statEntries,
+  isCompletelyBlank,
+  onClose,
+  onWhisper,
+  onIgnore,
+  onOpenProfile,
+  activeCharacterAction,
+}: {
+  /** Discriminated union; ProfileBody narrows on `profile.kind` to access master-only or character-only fields. */
+  profile: ProfileView;
+  name: string;
+  bio: string;
+  avatar: string | null;
+  createdAt: number;
+  stats: { age?: string; race?: string; gender?: string; height?: string; weight?: string; alignment?: string; occupation?: string; custom?: Record<string, string> } | null;
+  gender: Gender;
+  titles: ProfileView["profile"]["titles"];
+  links: ProfileLink[];
+  journal: NonNullable<Extract<ProfileView, { kind: "character" }>["profile"]["journalEntries"]>;
+  statEntries: Array<[string, string]>;
+  isCompletelyBlank: boolean;
+  onClose: () => void;
+  // `| undefined` (rather than `?:`) so callers can spread the value
+  // straight through without exactOptionalPropertyTypes complaining.
+  onWhisper: ((name: string) => void) | undefined;
+  onIgnore: ((name: string) => void) | undefined;
+  onOpenProfile: ((name: string) => void) | undefined;
+  activeCharacterAction: { label: string; onClick: () => void } | undefined;
+}) {
+  const isChar = profile.kind === "character";
+  return (
+    <>
+      {/* Hero band - always visible, themed with the owner's panel color. */}
         <div className="flex shrink-0 items-start gap-4 border-b border-keep-rule bg-keep-panel px-5 py-4">
           <Avatar url={avatar} name={name} />
           <div className="min-w-0 flex-1">
@@ -96,7 +194,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
               </span>
             </div>
             <div className="mt-0.5 text-xs uppercase tracking-widest text-keep-muted">
-              {isChar ? (
+              {profile.kind === "character" ? (
                 "Character"
               ) : (
                 <>
@@ -120,6 +218,8 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
                   joined {new Date(createdAt).toLocaleDateString()}
                 </>
               ) : null}
+              <span className="mx-1">·</span>
+              <CopyProfileLink name={name} />
             </div>
             {/* Action row - renders when there's at least one action to
                 offer. Self-views (App suppresses whisper/ignore) still get
@@ -266,7 +366,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
                   responsive grid so a character with multiple looks/forms
                   shows them all without dominating the modal. Each tile is a
                   click-to-zoom that swaps the large image inline. */}
-              {isChar && profile.profile.portraits.length > 0 ? (
+              {profile.kind === "character" && profile.profile.portraits.length > 0 ? (
                 <PortraitGallery portraits={profile.profile.portraits} alt={name} />
               ) : null}
 
@@ -299,12 +399,89 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
             </>
           )}
         </div>
+    </>
+  );
+}
+
+/* ---------- helpers ---------- */
+
+/**
+ * Pre-content gate for NSFW profiles. Logged-in viewers (other than the
+ * owner / admins, who bypass via parent prop) get a warning splash with a
+ * "View Profile" button before the modal renders the body. State lives in
+ * the modal mount, so closing + reopening re-prompts (one explicit
+ * confirmation per session, not "I clicked once weeks ago").
+ */
+function NsfwGate({
+  name,
+  kind,
+  onAccept,
+  onCancel,
+}: {
+  name: string;
+  kind: "master" | "character";
+  onAccept: () => void;
+  onCancel: () => void;
+}) {
+  const subject = kind === "character" ? `${name}'s character profile` : `${name}'s profile`;
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 px-6 py-10 text-center">
+      <div aria-hidden className="text-4xl text-keep-accent">⚠</div>
+      <h2 className="font-action text-xl">NSFW content ahead</h2>
+      <p className="max-w-prose text-sm text-keep-text/80">
+        {subject} is marked <b>NSFW</b> by its owner. Click{" "}
+        <span className="font-semibold">View Profile</span> to confirm you want to see it.
+        Closing this modal and re-opening will prompt again.
+      </p>
+      <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
+        >
+          Back
+        </button>
+        <button
+          type="button"
+          onClick={onAccept}
+          className="rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-sm font-semibold text-keep-accent hover:bg-keep-accent/20"
+        >
+          View Profile
+        </button>
       </div>
     </div>
   );
 }
 
-/* ---------- helpers ---------- */
+/**
+ * Inline "Copy link" affordance shown next to the profile metadata. Mirrors
+ * the world viewer's Copy Link pattern. Falls back to a window.prompt with
+ * the URL when navigator.clipboard isn't available (Safari pre-13.1, some
+ * sandboxed iframes).
+ */
+function CopyProfileLink({ name }: { name: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    const url = profileShareUrl(name);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      window.prompt("Copy this link:", url);
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title={`Copy ${profileShareUrl(name)}`}
+      className="rounded border border-keep-rule/60 px-1 font-mono text-[10px] hover:border-keep-action hover:text-keep-action"
+    >
+      {copied ? "copied!" : `/p/${name}`}
+    </button>
+  );
+}
 
 function Avatar({ url, name }: { url: string | null; name: string }) {
   if (url) {

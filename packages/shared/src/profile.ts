@@ -101,6 +101,19 @@ export interface CharacterProfile {
   theme: Theme;
   /** Mutual titles (marriages, partnerships, etc.) bound to this character. */
   titles: ProfileTitle[];
+  /**
+   * True iff this character is visible to anonymous (logged-out) viewers.
+   * Default true. NSFW characters are forced to behave as non-public to
+   * anonymous regardless of this flag (server enforces).
+   */
+  isPublic: boolean;
+  /**
+   * Whole-profile NSFW flag. Authenticated viewers see a warning splash
+   * before the content renders; the owner + admins skip the gate.
+   * Independent of per-portrait NSFW blurring (which still applies to
+   * individual gallery images even on a SFW profile).
+   */
+  isNsfw: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -120,6 +133,9 @@ export interface MasterProfile {
   links: ProfileLink[];
   /** Account-level role. Surfaced on the modal so site admins/mods are visibly marked. */
   role: "user" | "trusted" | "mod" | "admin";
+  /** Same semantics as on CharacterProfile. */
+  isPublic: boolean;
+  isNsfw: boolean;
   createdAt: number;
 }
 

@@ -128,6 +128,8 @@ async function lookupProfile(
         titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
         links: await listLinks(db, u.id, null),
         role: u.role,
+        isPublic: u.isPublic,
+        isNsfw: u.isNsfw,
         createdAt: +u.createdAt,
       },
     };
@@ -162,6 +164,8 @@ async function lookupProfile(
       journalEntries: await listPublicJournal(db, c.id),
       theme,
       titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
+      isPublic: c.isPublic,
+      isNsfw: c.isNsfw,
       createdAt: +c.createdAt,
       updatedAt: +c.updatedAt,
     },
@@ -178,17 +182,26 @@ async function lookupProfile(
 async function lookupRandomProfile(
   db: import("../../db/index.js").Db,
 ): Promise<ProfileView | null> {
+  // Random discovery deliberately filters out non-public and NSFW profiles:
+  // non-public means the owner explicitly opted out of the open index, and
+  // NSFW is too jarring to surface without explicit intent. Use /whois <name>
+  // to bypass these filters when you know who you're looking for.
   const masterCountRow = (await db
     .select({ n: sql<number>`count(*)` })
     .from(users)
-    .where(isNull(users.disabledAt)))[0];
+    .where(and(isNull(users.disabledAt), eq(users.isPublic, true), eq(users.isNsfw, false))))[0];
   const masterCount = masterCountRow?.n ?? 0;
 
   const charCountRow = (await db
     .select({ n: sql<number>`count(*)` })
     .from(characters)
     .innerJoin(users, eq(users.id, characters.userId))
-    .where(and(isNull(characters.deletedAt), isNull(users.disabledAt))))[0];
+    .where(and(
+      isNull(characters.deletedAt),
+      isNull(users.disabledAt),
+      eq(characters.isPublic, true),
+      eq(characters.isNsfw, false),
+    )))[0];
   const charCount = charCountRow?.n ?? 0;
 
   const total = masterCount + charCount;
@@ -199,7 +212,7 @@ async function lookupRandomProfile(
     const u = (await db
       .select()
       .from(users)
-      .where(isNull(users.disabledAt))
+      .where(and(isNull(users.disabledAt), eq(users.isPublic, true), eq(users.isNsfw, false)))
       .orderBy(users.id)
       .limit(1)
       .offset(idx))[0];
@@ -216,6 +229,8 @@ async function lookupRandomProfile(
         titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
         links: await listLinks(db, u.id, null),
         role: u.role,
+        isPublic: u.isPublic,
+        isNsfw: u.isNsfw,
         createdAt: +u.createdAt,
       },
     };
@@ -225,7 +240,12 @@ async function lookupRandomProfile(
     .select({ char: characters, ownerThemeJson: users.themeJson })
     .from(characters)
     .innerJoin(users, eq(users.id, characters.userId))
-    .where(and(isNull(characters.deletedAt), isNull(users.disabledAt)))
+    .where(and(
+      isNull(characters.deletedAt),
+      isNull(users.disabledAt),
+      eq(characters.isPublic, true),
+      eq(characters.isNsfw, false),
+    ))
     .orderBy(characters.id)
     .limit(1)
     .offset(idx - masterCount))[0];
@@ -245,6 +265,8 @@ async function lookupRandomProfile(
       journalEntries: await listPublicJournal(db, c.id),
       theme: await parseTheme(db, c.themeJson ?? row.ownerThemeJson),
       titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
+      isPublic: c.isPublic,
+      isNsfw: c.isNsfw,
       createdAt: +c.createdAt,
       updatedAt: +c.updatedAt,
     },

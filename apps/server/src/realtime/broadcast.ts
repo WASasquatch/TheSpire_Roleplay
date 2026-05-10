@@ -265,6 +265,28 @@ type PendingDisconnect = { timer: NodeJS.Timeout };
 const pendingDisconnects = new Map<string, PendingDisconnect>();
 
 /**
+ * Server-boot quiet window. The pendingDisconnects map above only survives
+ * inside a single process lifetime - any restart (tsx-watch reload in dev,
+ * a real Fly deploy in prod) wipes it. Without a boot-grace, every client
+ * that reconnects after the restart shows up looking like a fresh connect
+ * and we paint a "has connected" line for each one - which is wrong both
+ * semantically (they never left, the SERVER left) and visually (a single
+ * dev-loop edit can spam dozens of these into the chat).
+ *
+ * So: for the first BOOT_GRACE_MS after this process starts, we suppress
+ * "has connected" announcements entirely. Real fresh connects after the
+ * window starts behaving normally. The trade-off in prod is that the very
+ * first cohort of reconnects after a deploy aren't announced - which is
+ * the desired behavior anyway, since those users were already in the room
+ * before the deploy.
+ */
+const BOOT_GRACE_MS = 30_000;
+const BOOT_TIME_MS = Date.now();
+function isInBootGrace(): boolean {
+  return Date.now() - BOOT_TIME_MS < BOOT_GRACE_MS;
+}
+
+/**
  * Cancel a pending disconnect for this user, if any. Returns true when one
  * was canceled - meaning this connect is a reconnect inside the grace window
  * and the caller should suppress the "has connected" announcement.
@@ -512,11 +534,17 @@ export async function joinRoom(
   // (multi-tab users don't spam "arrived" each time they switch tabs). The
   // wording distinguishes a fresh connect from a room switch.
   //
-  // Reconnects inside the grace window skip this entirely - the matching
-  // "has disconnected" was canceled by consumePendingDisconnect above, so
-  // the chat log reads as if the blip never happened.
+  // Three suppression cases:
+  //   - inside the per-user grace window after a recent disconnect (covers
+  //     transient blips during steady-state operation);
+  //   - inside the server-boot quiet window (covers reconnect cohorts after
+  //     a process restart, which would otherwise spam "has connected" once
+  //     per client that returns);
+  //   - room-switches: the user already had a socket here ("arrived") goes
+  //     through, but only when they were online before this socket existed.
   const otherSocketHere = await userHasSocketInRoom(io, user.id, roomId, socket.id);
-  if (!otherSocketHere && !isReconnect) {
+  const suppressed = isReconnect || (!userWasOnlineBefore && isInBootGrace());
+  if (!otherSocketHere && !suppressed) {
     const body = userWasOnlineBefore
       ? `${user.displayName} arrived.`
       : `${user.displayName} has connected.`;

@@ -174,6 +174,29 @@ async function main() {
       reply.code(404);
       return { error: "no profile" };
     }
+    // Visibility gate. Two states matter:
+    //   - Anonymous viewer + (not public OR NSFW): return a "private" stub
+    //     instead of 404 so the client can render a friendly "this profile
+    //     is private, please sign in or register" splash. We deliberately
+    //     return HTTP 200 so anonymous fetchers don't treat it as an error;
+    //     the discriminating shape is the `private: true` field.
+    //   - Logged-in viewer of a non-public profile: see it normally
+    //     (private == "logged-in members can view", per the spec). The NSFW
+    //     warning splash is layered on top client-side via isNsfw flag.
+    //   - Owner / admin: always see the full profile.
+    const me = await getSessionUser(req, db);
+    const restricted = !profile.profile.isPublic || profile.profile.isNsfw;
+    if (restricted && !me) {
+      // Stub keeps the display name (the caller already typed it, so no
+      // info leak) so the splash can address the visitor by who they were
+      // looking for: "Sigrid's profile is private."
+      return {
+        private: true as const,
+        name: profile.kind === "master" ? profile.profile.username : profile.profile.name,
+        kind: profile.kind,
+        requiresAuth: true,
+      };
+    }
     return profile;
   });
 

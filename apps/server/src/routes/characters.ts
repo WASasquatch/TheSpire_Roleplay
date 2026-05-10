@@ -70,6 +70,10 @@ const updateBody = z.object({
   avatarUrl: httpUrl.nullable().optional(),
   /** null = inherit master/default theme */
   theme: themeSchema.nullable().optional(),
+  /** Public visibility - anonymous viewers can fetch this character. */
+  isPublic: z.boolean().optional(),
+  /** NSFW gate: forces non-public to anonymous + adds a viewer warning splash. */
+  isNsfw: z.boolean().optional(),
 });
 
 const masterUpdateBody = z.object({
@@ -79,6 +83,8 @@ const masterUpdateBody = z.object({
   /** null = revert to system default */
   theme: themeSchema.nullable().optional(),
   notifyPref: z.enum(["off", "mentions", "all"]).optional(),
+  isPublic: z.boolean().optional(),
+  isNsfw: z.boolean().optional(),
 });
 
 const createPortraitBody = z.object({
@@ -124,6 +130,13 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
 
       const body = updateBody.parse(req.body);
       if (!(await checkBioCap(db, reply, body.bioHtml))) return;
+      // NSFW implies non-public to anonymous viewers (server enforces this in
+      // the /profiles/:name route too, but normalizing on write keeps the row
+      // self-consistent so admin queries don't need to special-case the
+      // implication). When NSFW flips on, force isPublic to false; when NSFW
+      // flips off, leave isPublic alone (the user can re-enable separately).
+      const isNsfw = body.isNsfw ?? c.isNsfw;
+      const isPublic = isNsfw ? false : (body.isPublic ?? c.isPublic);
       await db
         .update(characters)
         .set({
@@ -133,6 +146,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
           ...(body.theme !== undefined
             ? { themeJson: body.theme === null ? null : JSON.stringify(body.theme) }
             : {}),
+          ...(body.isPublic !== undefined || body.isNsfw !== undefined ? { isPublic, isNsfw } : {}),
           updatedAt: new Date(),
         })
         .where(eq(characters.id, c.id));
@@ -296,6 +310,8 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       theme: await parseUserTheme(db, u.themeJson),
       notifyPref: u.notifyPref,
       role: u.role,
+      isPublic: u.isPublic,
+      isNsfw: u.isNsfw,
     };
   });
 
@@ -465,6 +481,12 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     if (!me) { reply.code(401); return { error: "auth" }; }
     const body = masterUpdateBody.parse(req.body);
     if (!(await checkBioCap(db, reply, body.bioHtml))) return;
+    // Same NSFW-implies-private normalization as the character handler. We
+    // need the current row to compute the resulting state when only one of
+    // the two flags is in the patch.
+    const current = (await db.select().from(users).where(eq(users.id, me.id)).limit(1))[0];
+    const isNsfw = body.isNsfw ?? current?.isNsfw ?? false;
+    const isPublic = isNsfw ? false : (body.isPublic ?? current?.isPublic ?? true);
     await db
       .update(users)
       .set({
@@ -475,6 +497,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
           ? { themeJson: body.theme === null ? null : JSON.stringify(body.theme) }
           : {}),
         ...(body.notifyPref !== undefined ? { notifyPref: body.notifyPref } : {}),
+        ...(body.isPublic !== undefined || body.isNsfw !== undefined ? { isPublic, isNsfw } : {}),
       })
       .where(eq(users.id, me.id));
     return { ok: true };

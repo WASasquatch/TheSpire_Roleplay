@@ -49,6 +49,21 @@ export const users = sqliteTable(
     currentMood: text("current_mood"),
     /** FK to characters.id - nullable means "show master profile" */
     activeCharacterId: text("active_character_id"),
+    /**
+     * Public visibility flag for the master profile. When true (default),
+     * /profiles/:username is readable by anonymous viewers. When false,
+     * only the owner + admins can view; anonymous viewers get 404.
+     */
+    isPublic: integer("is_public", { mode: "boolean" }).notNull().default(true),
+    /**
+     * Whole-profile NSFW flag. Independent of per-portrait nsfw blurring.
+     * When true:
+     *   - Forces non-public to anonymous viewers (404 regardless of isPublic).
+     *   - Logged-in viewers see a warning gate splash before the content
+     *     renders (the "View Profile" button accepts the gate).
+     *   - The owner + admins always see the content without the gate.
+     */
+    isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
     createdAt: ts("created_at"),
     lastLoginAt: integer("last_login_at", { mode: "timestamp_ms" }),
     disabledAt: integer("disabled_at", { mode: "timestamp_ms" }),
@@ -77,6 +92,10 @@ export const characters = sqliteTable(
     avatarUrl: text("avatar_url"),
     /** Per-character UI theme - JSON-serialized Theme. Null = inherit master/default. */
     themeJson: text("theme_json"),
+    /** Same semantics as users.is_public - public = anonymous can view this character's profile. */
+    isPublic: integer("is_public", { mode: "boolean" }).notNull().default(true),
+    /** Same semantics as users.is_nsfw - forces private + adds a viewer gate splash. */
+    isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
     deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),

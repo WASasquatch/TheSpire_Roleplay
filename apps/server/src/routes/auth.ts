@@ -48,7 +48,72 @@ const credentialsSchema = z.object({
   acceptDisclaimer: z.literal(true, {
     errorMap: () => ({ message: "you must accept the disclaimer to register" }),
   }),
+  /**
+   * Age + mature content acknowledgment. Combined into one field because the
+   * UI presents them as a single statement: "I am 18 or older and understand
+   * this site may contain mature content." Same literal-true posture as the
+   * disclaimer above so a coerced truthy value can't slip through.
+   */
+  acceptAgeMature: z.literal(true, {
+    errorMap: () => ({ message: "you must confirm you are 18+ and understand this site may contain mature content" }),
+  }),
+  /**
+   * Captcha token issued by GET /auth/captcha. Single-use; the server
+   * deletes the entry on validation, so a leaked token can't be replayed.
+   */
+  captchaId: z.string().min(1).max(64),
+  captchaAnswer: z.string().min(1).max(16),
+  /**
+   * Honeypot. Real users never see this field (display:none in the form).
+   * Bots that fill in every input post a value; we silently 400 them.
+   */
+  hp: z.string().max(200).optional(),
 });
+
+/**
+ * In-memory captcha store. Single-use math challenges with a 5-minute TTL.
+ *
+ * We keep this in-memory deliberately - there's no value in persisting:
+ *   - tokens are throwaway (one registration each), so durability is moot;
+ *   - the 5-min window is short enough that a process restart just makes
+ *     the user fetch a fresh challenge, which costs nothing;
+ *   - persisting to SQLite would write/delete on every register attempt
+ *     and add a janitor sweep for nothing.
+ *
+ * Bounded growth: each entry holds a tiny payload and self-expires; we also
+ * sweep expired entries on every issue so the map can't bloat indefinitely
+ * even under attack (the rate limiter caps the issue rate).
+ */
+const CAPTCHA_TTL_MS = 5 * 60 * 1000;
+interface CaptchaEntry { answer: string; expiresAt: number }
+const captchas = new Map<string, CaptchaEntry>();
+
+function makeCaptcha(): { id: string; question: string } {
+  // Single-digit addition - low friction for humans, just structured enough
+  // to defeat naive form-fillers that don't run JS or read the question.
+  const a = Math.floor(Math.random() * 9) + 1;
+  const b = Math.floor(Math.random() * 9) + 1;
+  const id = nanoid();
+  // Opportunistic GC: drop expired entries when issuing new ones. Cheap
+  // (the map is small) and avoids needing a separate sweep timer.
+  const now = Date.now();
+  for (const [k, v] of captchas) {
+    if (v.expiresAt < now) captchas.delete(k);
+  }
+  captchas.set(id, { answer: String(a + b), expiresAt: now + CAPTCHA_TTL_MS });
+  return { id, question: `What is ${a} + ${b}?` };
+}
+
+function consumeCaptcha(id: string, rawAnswer: string): boolean {
+  const entry = captchas.get(id);
+  if (!entry) return false;
+  // Single-use: always delete, even on a wrong answer. Forces a fresh
+  // fetch per attempt, which combines with the rate limiter to make
+  // brute-forcing the answer space impractical.
+  captchas.delete(id);
+  if (entry.expiresAt < Date.now()) return false;
+  return entry.answer === rawAnswer.trim();
+}
 
 export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<void> {
   // Tight per-IP throttles on the credential endpoints. /auth/register caps
@@ -62,6 +127,15 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
   } as const;
 
+  /**
+   * Captcha issue endpoint. Public + cheap; rate-limited via the same
+   * registerLimit bucket below would be too tight (a single mistyped
+   * answer needs a fresh challenge), so we use a more lenient cap here.
+   */
+  app.get("/auth/captcha", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async () => {
+    return makeCaptcha();
+  });
+
   app.post<{ Body: unknown }>("/auth/register", registerLimit, async (req, reply) => {
     const settings = await getSettings(db);
     if (!settings.registrationOpen) {
@@ -69,6 +143,21 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       return { error: "registration is closed" };
     }
     const body = credentialsSchema.parse(req.body);
+
+    // Honeypot: real users never see the `hp` field (display:none on the
+    // form). Bots that fill in every input get silently rejected with a
+    // generic 400 so they can't tell they tripped the trap.
+    if (body.hp && body.hp.trim().length > 0) {
+      reply.code(400);
+      return { error: "registration failed" };
+    }
+
+    // Captcha. Validated before the more expensive DB queries so a bad
+    // answer doesn't cost us a username/email lookup.
+    if (!consumeCaptcha(body.captchaId, body.captchaAnswer)) {
+      reply.code(400);
+      return { error: "captcha was wrong or expired - please try again" };
+    }
 
     // Username + email cap checks. Both errors collapse to the same generic
     // message so an attacker can't probe whether a particular email is

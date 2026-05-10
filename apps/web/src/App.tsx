@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ChatMessage, Theme } from "@thekeep/shared";
+import type { ChatMessage, ProfileView, Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
@@ -18,6 +18,8 @@ import { WorldEditorModal } from "./components/WorldEditorModal.js";
 import { WorldViewerModal } from "./components/WorldViewerModal.js";
 import { WorldsListModal } from "./components/WorldsListModal.js";
 import { getSocket, disconnect as disconnectSocket } from "./lib/socket.js";
+import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
+import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
 import { applyTheme } from "./lib/theme.js";
 import { fire as fireNotification, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { useChat, type SiteBranding } from "./state/store.js";
@@ -95,8 +97,121 @@ export function App() {
     return () => window.clearInterval(id);
   }, [me, setMe, setKickReason]);
 
+  // /p/<username> deep-link state. Lives at App level (not Chat) so it's
+  // available to AuthGate too: anonymous visitors landing on /p/<X> see a
+  // banner above the login form telling them which profile they're trying
+  // to view, with the appropriate copy for public-vs-private.
+  const setOpenProfile = useChat((s) => s.setOpenProfile);
+  const [pendingProfile, setPendingProfile] = useState<{
+    name: string;
+    /** null = still loading; PrivateProfileStub = anonymous-restricted; ProfileView = ready to open. */
+    data: PrivateProfileStub | { kind: "view"; view: ProfileView } | null;
+  } | null>(() => {
+    const name = parseProfileFromUrl();
+    return name ? { name, data: null } : null;
+  });
+
+  // Mount-time fetch for the deep-link target. Uses HTTP (works whether the
+  // viewer is authed or not) so the AuthGate can decide what banner to show
+  // before any session is established.
+  useEffect(() => {
+    if (!pendingProfile || pendingProfile.data) return;
+    let cancelled = false;
+    fetch(`/profiles/${encodeURIComponent(pendingProfile.name)}`, { credentials: "include" })
+      .then(async (r) => {
+        if (!r.ok) return null;
+        return (await r.json()) as PrivateProfileStub | ProfileView;
+      })
+      .then((j) => {
+        if (cancelled || !j) return;
+        if ("private" in j) {
+          setPendingProfile((cur) => (cur ? { ...cur, data: j } : cur));
+        } else {
+          setPendingProfile((cur) => (cur ? { ...cur, data: { kind: "view", view: j } } : cur));
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [pendingProfile]);
+
+  // Once the viewer is authenticated AND we have a fetched profile, open
+  // the modal automatically. For the private-stub case we leave the
+  // pending state set so the AuthGate hint stays visible until the user
+  // logs in. After login, this effect re-fires (HTTP fetch retries with
+  // credentials and now returns the full profile).
+  useEffect(() => {
+    if (!me || !pendingProfile?.data) return;
+    if ("private" in pendingProfile.data) {
+      // Logged in but the cached fetch was the public-anonymous one - retry
+      // with credentials to get the full profile.
+      fetch(`/profiles/${encodeURIComponent(pendingProfile.name)}`, { credentials: "include" })
+        .then((r) => (r.ok ? (r.json() as Promise<PrivateProfileStub | ProfileView>) : null))
+        .then((j) => {
+          if (!j) return;
+          if ("private" in j) {
+            // Still private after login (e.g. NSFW stub for some flow we
+            // don't yet have); leave the hint up so the user can dismiss.
+            return;
+          }
+          setOpenProfile(j);
+          setPendingProfile(null);
+        })
+        .catch(() => {});
+      return;
+    }
+    setOpenProfile(pendingProfile.data.view);
+    setPendingProfile(null);
+  }, [me, pendingProfile, setOpenProfile]);
+
+  // Keep the URL in sync with the open profile modal so the deep-link is
+  // bookmarkable and the back button closes the modal naturally.
+  const openProfileForSync = useChat((s) => s.openProfile);
+  useEffect(() => {
+    if (!openProfileForSync) {
+      // Only clear the URL if it's currently a /p/ URL - don't stomp /w/ etc.
+      if (parseProfileFromUrl()) syncProfileUrl(null);
+      return;
+    }
+    const name = openProfileForSync.kind === "master"
+      ? openProfileForSync.profile.username
+      : openProfileForSync.profile.name;
+    syncProfileUrl(name);
+  }, [openProfileForSync]);
+
+  // popstate: back/forward navigation. If the URL points to a profile,
+  // re-trigger the deep-link load (via setPendingProfile). If it points
+  // away from /p/<X>, close the open modal.
+  useEffect(() => {
+    function onPop() {
+      const name = parseProfileFromUrl();
+      if (!name) {
+        if (useChat.getState().openProfile) setOpenProfile(null);
+        return;
+      }
+      // Same name as the currently-open modal? No-op.
+      const open = useChat.getState().openProfile;
+      const openName = open
+        ? (open.kind === "master" ? open.profile.username : open.profile.name)
+        : null;
+      if (openName === name) return;
+      setPendingProfile({ name, data: null });
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [setOpenProfile]);
+
   if (!authChecked) return <BootSplash />;
-  if (!me) return <AuthGate />;
+  if (!me) {
+    return (
+      <AuthGate
+        {...(pendingProfile?.data && "private" in pendingProfile.data
+          ? { pendingProfileHint: { name: pendingProfile.name, isPrivate: true } }
+          : pendingProfile
+            ? { pendingProfileHint: { name: pendingProfile.name, isPrivate: false } }
+            : {})}
+      />
+    );
+  }
   return <Chat />;
 }
 
@@ -148,7 +263,10 @@ function Chat() {
   // independently so e.g. closing the viewer doesn't tear down the list.
   const [worldsListOpen, setWorldsListOpen] = useState(false);
   const [worldEditorId, setWorldEditorId] = useState<string | null>(null);
-  const [worldViewerId, setWorldViewerId] = useState<string | null>(null);
+  // Seed from the URL: if the page loaded at /w/<slug>, the viewer opens
+  // immediately so deep-links work pre- and post-login. WorldViewerModal
+  // normalizes the URL to the canonical slug after the world detail loads.
+  const [worldViewerId, setWorldViewerId] = useState<string | null>(() => parseWorldFromUrl());
   const [worldCatalogOpen, setWorldCatalogOpen] = useState(false);
   const [navLinksVersion, setNavLinksVersion] = useState(0);
   const [composerText, setComposerText] = useState("");
@@ -163,6 +281,31 @@ function Chat() {
   const [themeVersion, setThemeVersion] = useState(0);
 
   const socket = useMemo(() => getSocket(), []);
+
+  /**
+   * Keep the URL in sync with the open world viewer so deep-links survive
+   * refresh + are bookmarkable. Pushing to history (rather than replacing)
+   * means the browser back button closes the viewer naturally instead of
+   * navigating off the app.
+   */
+  useEffect(() => {
+    syncWorldUrl(worldViewerId);
+  }, [worldViewerId]);
+
+  /**
+   * Browser back/forward navigation - read the URL and adjust state to
+   * match. Without this, popstate would change the URL but leave the
+   * viewer state stale (open viewer + URL says /, or closed viewer + URL
+   * says /w/...).
+   */
+  useEffect(() => {
+    function onPop() {
+      const slug = parseWorldFromUrl();
+      setWorldViewerId(slug);
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   /**
    * Resolve and apply the caller's *active* theme: the active character's
@@ -613,6 +756,11 @@ function Chat() {
         <ProfileModal
           profile={openProfile}
           onClose={() => setOpenProfile(null)}
+          // The owner + site admins skip the NSFW gate splash. Owners
+          // wouldn't gain anything from being warned about their own
+          // content; admins need to see profiles for moderation regardless
+          // of how the author marked them.
+          bypassNsfwGate={!!me && (me.id === openProfile.profile.userId || me.role === "admin")}
           // Whisper / ignore are noise on your own profile - they're for
           // interacting with someone else. Suppress when the profile's
           // owning userId matches the viewer (covers your master profile

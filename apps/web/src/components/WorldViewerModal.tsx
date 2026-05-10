@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import DOMPurify from "dompurify";
 import type { WorldDetail, WorldPage } from "@thekeep/shared";
-import { buildWorldTree, type WorldTreeNode } from "../lib/worlds.js";
+import { buildWorldTree, syncWorldUrl, worldShareUrl, type WorldTreeNode } from "../lib/worlds.js";
 import { themeStyle } from "../lib/theme.js";
 
 interface Props {
@@ -45,6 +45,11 @@ export function WorldViewerModal({ worldId, onClose, onEdit }: Props) {
           .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt)[0];
         if (firstTop) setSelectedPageId(firstTop.id);
       }
+      // Normalize the URL: callers may have opened the viewer with the
+      // world's id (chat banner, primary-world chip) but the canonical
+      // shareable form is /w/<slug>. Replace - not push - so back button
+      // behaviour stays sane (one history entry per viewer open).
+      syncWorldUrl(j.world.slug, { replace: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : "load failed");
     }
@@ -91,6 +96,25 @@ export function WorldViewerModal({ worldId, onClose, onEdit }: Props) {
   const tree = useMemo(() => (detail ? buildWorldTree(detail.pages) : []), [detail]);
   const selectedPage = detail?.pages.find((p) => p.id === selectedPageId) ?? null;
 
+  // "Copy link" feedback: brief flash so the user knows the click did
+  // something, since clipboard APIs are silent by default.
+  const [copied, setCopied] = useState(false);
+  async function copyLink() {
+    if (!detail) return;
+    const url = worldShareUrl(detail.world.slug);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Fallback: drop the URL into a temporary input the user can copy
+      // manually. Most modern browsers grant clipboard-write to user-
+      // initiated handlers, but some (Safari pre-13.1, sandboxed iframes)
+      // don't, so we surface the URL inline as a backstop.
+      window.prompt("Copy this link:", url);
+    }
+  }
+
   // Scope the world's theme to this modal only via CSS-var override on the
   // card root. Falls back to the viewer's chat theme when the author hasn't
   // set one (theme === null).
@@ -108,9 +132,17 @@ export function WorldViewerModal({ worldId, onClose, onEdit }: Props) {
             {detail ? (
               <div className="text-[11px] text-keep-muted">
                 by {detail.world.ownerUsername}
-                <span className="mx-1">·</span>/{detail.world.slug}
                 <span className="mx-1">·</span>
                 {detail.world.pageCount} {detail.world.pageCount === 1 ? "page" : "pages"}
+                <span className="mx-1">·</span>
+                <button
+                  type="button"
+                  onClick={copyLink}
+                  title={`Copy ${worldShareUrl(detail.world.slug)}`}
+                  className="rounded border border-keep-rule/60 px-1 font-mono text-[10px] hover:border-keep-action hover:text-keep-action"
+                >
+                  {copied ? "copied!" : `/w/${detail.world.slug}`}
+                </button>
               </div>
             ) : null}
           </div>

@@ -313,7 +313,16 @@ function Stat({ label, value, emphasised }: { label: string; value: number; emph
   );
 }
 
-export function AuthGate() {
+interface AuthGateProps {
+  /**
+   * When the user landed via /p/<username> deep-link, parent passes this
+   * so the splash can tell them which profile they're trying to view and
+   * adjust the copy for public-vs-private.
+   */
+  pendingProfileHint?: { name: string; isPrivate: boolean };
+}
+
+export function AuthGate({ pendingProfileHint }: AuthGateProps = {}) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -331,6 +340,25 @@ export function AuthGate() {
    * stale tick from a prior session doesn't carry over.
    */
   const [accepted, setAccepted] = useState(false);
+  /**
+   * Age + mature-content acknowledgment, register-mode only. Server
+   * enforces a literal `true`; this checkbox is the UX surface. Reset on
+   * mode switch (same posture as the disclaimer checkbox).
+   */
+  const [acceptedAgeMature, setAcceptedAgeMature] = useState(false);
+  /**
+   * In-house basic CAPTCHA: a single-digit math question issued by
+   * GET /auth/captcha. The id is single-use server-side; if the user
+   * submits a wrong answer or lets the 5-minute TTL expire, we re-fetch.
+   */
+  const [captcha, setCaptcha] = useState<{ id: string; question: string } | null>(null);
+  const [captchaAnswer, setCaptchaAnswer] = useState("");
+  /**
+   * Honeypot. Real users never see this field (display:none in the form);
+   * bots that auto-fill every input land here and we silently 400 them
+   * server-side.
+   */
+  const [hp, setHp] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const setMe = useChat((s) => s.setMe);
@@ -340,6 +368,27 @@ export function AuthGate() {
   // When the admin closes registration, snap any stale "register" mode back
   // to "login" so the form can't show fields that the server will reject.
   if (!branding.registrationOpen && mode === "register") setMode("login");
+
+  // Fetch a fresh captcha when entering register mode (or after a failed
+  // submit consumed the previous one). Tokens are single-use server-side,
+  // so refetching is the right behavior whenever we don't have a current
+  // one cached.
+  useEffect(() => {
+    if (mode !== "register") return;
+    if (captcha) return;
+    let cancelled = false;
+    fetch("/auth/captcha")
+      .then((r) => (r.ok ? (r.json() as Promise<{ id: string; question: string }>) : null))
+      .then((j) => { if (!cancelled && j) setCaptcha(j); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [mode, captcha]);
+
+  /** Re-fetch a captcha after a submit attempt consumed the current one. */
+  function refreshCaptcha() {
+    setCaptcha(null);
+    setCaptchaAnswer("");
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -356,13 +405,34 @@ export function AuthGate() {
         if (!accepted) {
           throw new Error("Please accept the disclaimer to register.");
         }
+        if (!acceptedAgeMature) {
+          throw new Error("Please confirm you are 18+ and understand this site may contain mature content.");
+        }
+        if (!captcha || !captchaAnswer.trim()) {
+          throw new Error("Please answer the verification question.");
+        }
         const res = await fetch("/auth/register", {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, username, password, acceptDisclaimer: true }),
+          body: JSON.stringify({
+            email,
+            username,
+            password,
+            acceptDisclaimer: true,
+            acceptAgeMature: true,
+            captchaId: captcha.id,
+            captchaAnswer: captchaAnswer.trim(),
+            hp,
+          }),
         });
-        if (!res.ok) throw new Error((await res.json()).error ?? "register failed");
+        if (!res.ok) {
+          // The captcha is single-use server-side, so any failed submit
+          // (wrong answer, dup username, expired token, etc.) leaves the
+          // current id consumed. Drop it so the next render re-fetches.
+          refreshCaptcha();
+          throw new Error((await res.json()).error ?? "register failed");
+        }
         const j = await res.json();
         // The server returns role:"admin" for the very first registrant
         // (bootstrap path). Trust the server response so the Admin button
@@ -393,7 +463,11 @@ export function AuthGate() {
     // to agree to; that case is handled separately below.)
     if (next !== "register") {
       setAccepted(false);
+      setAcceptedAgeMature(false);
       setPasswordConfirm("");
+      setCaptcha(null);
+      setCaptchaAnswer("");
+      setHp("");
     }
     setMode(next);
   }
@@ -402,7 +476,11 @@ export function AuthGate() {
   // nothing to agree to, so we don't block the user behind a meaningless tick.
   const disclaimerText = branding.registerDisclaimerHtml.trim();
   const needsAcceptance = mode === "register" && disclaimerText !== "";
-  const canSubmit = !submitting && (mode === "login" || !needsAcceptance || accepted);
+  const canSubmit = !submitting && (
+    mode === "login"
+      ? true
+      : (!needsAcceptance || accepted) && acceptedAgeMature && !!captcha && captchaAnswer.trim() !== ""
+  );
 
   return (
     <SplashShell
@@ -426,6 +504,28 @@ export function AuthGate() {
         <div className="text-center text-[10px] uppercase tracking-[0.25em] text-keep-muted">
           {mode === "login" ? "enter the spire" : "create a vessel"}
         </div>
+
+        {/* Deep-link hint: when the visitor arrived via /p/<username>, tell
+            them which profile they're trying to view. The copy varies
+            depending on whether the profile is private (the user explicitly
+            asked for "this profile is private, please sign in or register"
+            wording) or just a regular public profile (just "you're trying
+            to view X"). After login the modal opens automatically. */}
+        {pendingProfileHint ? (
+          <div className="rounded border border-keep-action/40 bg-keep-action/10 px-3 py-2 text-xs text-keep-text/90">
+            {pendingProfileHint.isPrivate ? (
+              <>
+                <b>{pendingProfileHint.name}</b>'s profile is <b>private</b>. Please sign in or
+                register to view it.
+              </>
+            ) : (
+              <>
+                You're trying to view <b>{pendingProfileHint.name}</b>'s profile. Sign in or
+                register to continue.
+              </>
+            )}
+          </div>
+        ) : null}
 
         {kickReason ? (
           <div className="flex items-start justify-between gap-2 rounded border border-keep-action/40 bg-keep-action/10 px-3 py-2 text-xs text-keep-text/90">
@@ -506,6 +606,72 @@ export function AuthGate() {
               </span>
             </label>
           </div>
+        ) : null}
+
+        {mode === "register" ? (
+          <>
+            {/* Age + mature content acknowledgment. Always required (not
+                admin-toggleable) since it's a baseline content-rating
+                gate, not site-specific policy. */}
+            <label className="flex cursor-pointer items-start gap-2 rounded border border-keep-border/60 bg-keep-bg/40 px-3 py-2 text-xs">
+              <input
+                type="checkbox"
+                checked={acceptedAgeMature}
+                onChange={(e) => setAcceptedAgeMature(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                I am <b>18 years or older</b>, and I understand this site may contain mature
+                content (in user profiles, room descriptions, and roleplay).
+              </span>
+            </label>
+
+            {/* In-house basic CAPTCHA. The question is server-issued and
+                single-use; if the answer is wrong or stale, we re-fetch
+                automatically on the next render. */}
+            <div className="space-y-1 rounded border border-keep-border/60 bg-keep-bg/40 px-3 py-2 text-xs">
+              <div className="text-[10px] uppercase tracking-[0.25em] text-keep-muted">
+                Quick check (anti-bot)
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold tabular-nums">
+                  {captcha?.question ?? "loading..."}
+                </span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={captchaAnswer}
+                  onChange={(e) => setCaptchaAnswer(e.target.value)}
+                  placeholder="answer"
+                  className="w-24 rounded border border-keep-border bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+                  disabled={!captcha}
+                />
+                <button
+                  type="button"
+                  onClick={refreshCaptcha}
+                  className="text-[10px] text-keep-muted underline-offset-2 hover:text-keep-action hover:underline"
+                  title="Get a different question"
+                >
+                  new question
+                </button>
+              </div>
+            </div>
+
+            {/* Honeypot. Hidden from sighted + assistive users; bots that
+                fill every input land here and we silently reject the form
+                server-side. Tabindex=-1 keeps keyboard users from focusing
+                it accidentally. */}
+            <input
+              type="text"
+              tabIndex={-1}
+              autoComplete="off"
+              aria-hidden="true"
+              value={hp}
+              onChange={(e) => setHp(e.target.value)}
+              style={{ position: "absolute", left: "-10000px", width: "1px", height: "1px", opacity: 0 }}
+            />
+          </>
         ) : null}
 
         {error ? (

@@ -85,6 +85,20 @@ export interface WorldDetail {
   viewerPrimary: boolean;
 }
 
+/**
+ * Returned by GET /worlds/:idOrSlug when an anonymous viewer asks for a
+ * private world that exists. Mirrors the profile-private-stub pattern so
+ * the client can prompt sign-in instead of treating it as a 404. HTTP 200,
+ * discriminated by the `private: true` flag.
+ */
+export interface PrivateWorldStub {
+  private: true;
+  name: string;
+  slug: string;
+  /** True iff the viewer is anonymous and signing in might unlock access. */
+  requiresAuth: boolean;
+}
+
 /** A row in the public world catalog (visibility="open"). */
 export interface WorldCatalogEntry {
   id: string;

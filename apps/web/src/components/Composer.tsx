@@ -23,6 +23,7 @@ interface Props {
 
 const MAX_VISIBLE_LINES = 6;
 const MAX_COMPLETIONS = 8;
+const HISTORY_MAX = 50;
 
 interface Trigger {
   kind: "/" | "@";
@@ -78,6 +79,21 @@ function detectTrigger(text: string, caret: number): Trigger | null {
 export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Props) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastValueRef = useRef(value);
+
+  // Input history. Each successful send pushes its trimmed body onto a ring
+  // buffer (deduped against the most recent entry). ArrowUp/ArrowDown walk
+  // the buffer when the value is single-line and the autocomplete popup
+  // isn't active, mimicking the IRC / terminal convention. The draft you
+  // had typed before entering history mode is restored when ArrowDown
+  // takes you past the newest entry, so casually browsing history doesn't
+  // cost you in-progress text.
+  //
+  // Refs (not state) since none of this affects rendering directly — the
+  // visible text already lives in the parent's `value`. Lives for the
+  // Composer's lifetime; logging out unmounts the chat and clears it.
+  const historyRef = useRef<string[]>([]);
+  const historyIndexRef = useRef<number | null>(null);
+  const draftBeforeHistoryRef = useRef<string>("");
 
   // Cache the command list. Fetched once per session; HelpModal hits the
   // same endpoint when opened, but the duplicated cost is negligible.
@@ -177,10 +193,33 @@ export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Pro
     e?.preventDefault();
     const t = value.trim();
     if (!t) return;
+    const buf = historyRef.current;
+    if (buf[buf.length - 1] !== t) {
+      buf.push(t);
+      if (buf.length > HISTORY_MAX) buf.shift();
+    }
+    historyIndexRef.current = null;
+    draftBeforeHistoryRef.current = "";
     onSend(t);
     onChange("");
     setCaret(0);
   }
+
+  // Replace the composer text with a recalled (or restored) value and park
+  // the caret at the end. Used by ArrowUp/ArrowDown history navigation.
+  // requestAnimationFrame waits for the controlled value to flush before
+  // we reposition the caret — same pattern acceptItem uses.
+  const recallText = useCallback((text: string) => {
+    onChange(text);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      const len = el.value.length;
+      el.setSelectionRange(len, len);
+      setCaret(len);
+    });
+  }, [onChange]);
 
   // Replace the active trigger token with the chosen completion, append a
   // trailing space, and restore the caret right after the inserted text.
@@ -228,6 +267,47 @@ export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Pro
         // no trigger. Setting caret to 0 (no preceding `@`/`/`) is the
         // simplest signal; subsequent typing re-opens it.
         setCaret(0);
+        return;
+      }
+    }
+
+    // History navigation. Only kicks in for single-line input so it
+    // doesn't fight cursor movement inside a multi-line draft, and only
+    // when no modifier keys are held (Shift+Arrow selects, Ctrl/Alt+Arrow
+    // word-jumps - both should pass through). The popup branch above has
+    // already returned for its own arrow handling.
+    if (!e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !value.includes("\n")) {
+      if (e.key === "ArrowUp") {
+        const buf = historyRef.current;
+        if (buf.length === 0) return; // nothing to recall - let the key through
+        e.preventDefault();
+        const cur = historyIndexRef.current;
+        if (cur === null) {
+          // Entering history mode - stash whatever was being typed so
+          // ArrowDown past the newest entry can restore it.
+          draftBeforeHistoryRef.current = value;
+          historyIndexRef.current = 0;
+        } else {
+          historyIndexRef.current = Math.min(cur + 1, buf.length - 1);
+        }
+        recallText(buf[buf.length - 1 - historyIndexRef.current]!);
+        return;
+      }
+      if (e.key === "ArrowDown" && historyIndexRef.current !== null) {
+        e.preventDefault();
+        const buf = historyRef.current;
+        const next = historyIndexRef.current - 1;
+        if (next < 0) {
+          // Past the newest entry - exit history mode and restore the
+          // draft the user had typed before they started browsing.
+          const draft = draftBeforeHistoryRef.current;
+          historyIndexRef.current = null;
+          draftBeforeHistoryRef.current = "";
+          recallText(draft);
+        } else {
+          historyIndexRef.current = next;
+          recallText(buf[buf.length - 1 - next]!);
+        }
         return;
       }
     }

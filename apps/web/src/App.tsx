@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ChatMessage, ProfileView, Theme } from "@thekeep/shared";
+import type { ChatMessage, PrivateWorldStub, ProfileView, Theme, WorldDetail } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
@@ -21,7 +21,7 @@ import { WelcomeModal } from "./components/WelcomeModal.js";
 import { getSocket, disconnect as disconnectSocket } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
-import { applyTheme } from "./lib/theme.js";
+import { applyTheme, themeStyle } from "./lib/theme.js";
 import { fire as fireNotification, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { useChat, type SiteBranding } from "./state/store.js";
 
@@ -112,6 +112,17 @@ export function App() {
     return name ? { name, data: null } : null;
   });
 
+  // Standalone-hotlink-view flag. True iff the page first loaded at a
+  // /p/<X> or /w/<X> URL. While set, App renders the modal in a clean
+  // standalone shell regardless of auth state (so an off-site share is a
+  // stable artifact, not a chat overlay). Cleared the first time the user
+  // dismisses or the verdict comes back as 404. Detailed effect-by-effect
+  // explanation lives at the world-state block below — declared up here
+  // so the profile fetch effect can call its setter.
+  const [arrivedViaDeepLink, setArrivedViaDeepLink] = useState<boolean>(() => {
+    return parseProfileFromUrl() !== null || parseWorldFromUrl() !== null;
+  });
+
   // Mount-time fetch for the deep-link target. Uses HTTP (works whether the
   // viewer is authed or not) so the AuthGate can decide what banner to show
   // before any session is established.
@@ -124,7 +135,16 @@ export function App() {
         return (await r.json()) as PrivateProfileStub | ProfileView;
       })
       .then((j) => {
-        if (cancelled || !j) return;
+        if (cancelled) return;
+        if (!j) {
+          // 404 / fetch failure — drop the pending state and exit
+          // standalone view (if we were in it) so the normal app flow can
+          // take over. The URL stays /p/<name> in the address bar; the
+          // user can navigate away or refresh.
+          setPendingProfile(null);
+          setArrivedViaDeepLink(false);
+          return;
+        }
         if ("private" in j) {
           setPendingProfile((cur) => (cur ? { ...cur, data: j } : cur));
         } else {
@@ -135,14 +155,16 @@ export function App() {
     return () => { cancelled = true; };
   }, [pendingProfile]);
 
-  // Once the viewer is authenticated AND we have a fetched profile, open
-  // the modal automatically. For the private-stub case we leave the
-  // pending state set so the AuthGate hint stays visible until the user
-  // logs in. After login, this effect re-fires (HTTP fetch retries with
-  // credentials and now returns the full profile).
+  // Once we have a fetched profile, open the modal. Public profiles open
+  // for everyone (including anonymous visitors — the point is that profile
+  // links are hotlinkable off-site). Private stubs require auth; for those
+  // we leave the pending state set so the AuthGate hint stays visible until
+  // the user logs in, then re-fetch with credentials to get the full data.
   useEffect(() => {
-    if (!me || !pendingProfile?.data) return;
+    if (!pendingProfile?.data) return;
     if ("private" in pendingProfile.data) {
+      // Stub case. If anonymous, leave it for the AuthGate to surface.
+      if (!me) return;
       // Logged in but the cached fetch was the public-anonymous one - retry
       // with credentials to get the full profile.
       fetch(`/profiles/${encodeURIComponent(pendingProfile.name)}`, { credentials: "include" })
@@ -201,19 +223,229 @@ export function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, [setOpenProfile]);
 
+  /* ========================================================================
+   * Standalone hotlink view (/p/<X> and /w/<X> direct navigation).
+   *
+   * The point of these URLs is that they're shareable off-site: someone
+   * pastes a profile or world link into Discord / a forum / wherever, and
+   * the recipient lands on a clean view of that content — not the full
+   * chat with the modal floating over it. This applies regardless of auth
+   * state: an authed user clicking a shared link should also get the
+   * standalone view rather than chat-with-overlay, since the URL is meant
+   * to be a stable artifact.
+   *
+   * Mechanism: at mount we record whether the page arrived via a deep
+   * link. While that flag is set, App renders the PublicViewerShell with
+   * the resolved modal(s). The first time the user closes a modal or the
+   * fetch resolves to "no content" (404), we drop the flag and fall
+   * through to the normal app for the rest of the session — so in-app
+   * navigation (clicking a name in chat, etc.) keeps the modal-over-chat
+   * behavior the rest of the codebase expects.
+   *
+   * The world fetch effect runs in any auth state because Chat's own
+   * world-viewer plumbing only kicks in once we've left the deep-link
+   * flag, by which point this state is null and harmless.
+   *
+   * (`arrivedViaDeepLink` is declared up near `pendingProfile` so the
+   * profile fetch effect can call its setter from above this block.)
+   * ====================================================================== */
+  const [pendingPublicWorld, setPendingPublicWorld] = useState<{
+    slug: string;
+    data: PrivateWorldStub | { kind: "view"; detail: WorldDetail } | null;
+  } | null>(() => {
+    const slug = parseWorldFromUrl();
+    return slug ? { slug, data: null } : null;
+  });
+
+  // Mount-time fetch for the public-world deep-link. Skipped once we've
+  // left the standalone view (Chat owns the world viewer state from that
+  // point on) or when we already have a verdict.
+  useEffect(() => {
+    if (!arrivedViaDeepLink || !pendingPublicWorld || pendingPublicWorld.data) return;
+    let cancelled = false;
+    fetch(`/worlds/${encodeURIComponent(pendingPublicWorld.slug)}`, { credentials: "include" })
+      .then(async (r) => {
+        if (!r.ok) return null;
+        return (await r.json()) as PrivateWorldStub | WorldDetail;
+      })
+      .then((j) => {
+        if (cancelled) return;
+        if (!j) {
+          // 404 / fetch failure — drop standalone mode and let normal app
+          // flow take over. URL stays /w/<slug> in the address bar; the
+          // user can navigate away or refresh.
+          setPendingPublicWorld(null);
+          setArrivedViaDeepLink(false);
+          return;
+        }
+        if ("private" in j) {
+          setPendingPublicWorld((cur) => (cur ? { ...cur, data: j } : cur));
+        } else {
+          setPendingPublicWorld((cur) => (cur ? { ...cur, data: { kind: "view", detail: j } } : cur));
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [arrivedViaDeepLink, pendingPublicWorld]);
+
+  // popstate for the world flow. Only listens during the standalone-view
+  // window; once the user has dismissed, Chat's own popstate handler runs.
+  useEffect(() => {
+    if (!arrivedViaDeepLink) return;
+    function onPop() {
+      const slug = parseWorldFromUrl();
+      if (!slug) {
+        setPendingPublicWorld(null);
+        return;
+      }
+      setPendingPublicWorld((cur) => (cur && cur.slug === slug ? cur : { slug, data: null }));
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [arrivedViaDeepLink]);
+
   if (!authChecked) return <BootSplash />;
+
+  // Resolve deep-link verdicts shared by every code path below.
+  const publicWorldDetail = pendingPublicWorld?.data && !("private" in pendingPublicWorld.data)
+    ? pendingPublicWorld.data.detail
+    : null;
+  const profileStub = pendingProfile?.data && "private" in pendingProfile.data
+    ? pendingProfile
+    : null;
+  const worldStub = pendingPublicWorld?.data && "private" in pendingPublicWorld.data
+    ? pendingPublicWorld.data
+    : null;
+
+  // Deep-link still resolving — show the standalone shell with a loading
+  // indicator so authed users don't see Chat flash for ~100ms before the
+  // modal pops in. Without this, the render between auth-check completion
+  // and verdict-fetch completion would briefly land on Chat.
+  if (arrivedViaDeepLink && !openProfileForSync && !publicWorldDetail && !profileStub && !worldStub) {
+    return (
+      <PublicViewerShell isAuthenticated={!!me}>
+        <div className="fixed inset-0 z-40 flex items-center justify-center">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-keep-muted">
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-keep-action" />
+            loading...
+          </div>
+        </div>
+      </PublicViewerShell>
+    );
+  }
+
+  // Standalone hotlink view. Triggered by direct navigation to /p/<X> or
+  // /w/<X> for ANY auth state — the URL is meant to be a stable shareable
+  // artifact, so an authed user clicking a shared link sees the modal
+  // alone too, not chat-with-overlay. Once the user dismisses, we drop
+  // out to the normal app for the rest of the session.
+  if (arrivedViaDeepLink && (openProfileForSync || publicWorldDetail)) {
+    return (
+      <PublicViewerShell isAuthenticated={!!me}>
+        {openProfileForSync ? (
+          <ProfileModal
+            profile={openProfileForSync}
+            onClose={() => {
+              setOpenProfile(null);
+              setPendingProfile(null);
+              // If there's nothing else to view, drop out of standalone
+              // mode so the rest of the session uses normal in-app flow.
+              if (!publicWorldDetail) setArrivedViaDeepLink(false);
+            }}
+            // Bond clicks load another profile while keeping standalone
+            // mode active. World chips do the same via the world path.
+            onOpenProfile={(name) => setPendingProfile({ name, data: null })}
+            onOpenWorld={(slug) => setPendingPublicWorld({ slug, data: null })}
+          />
+        ) : null}
+        {publicWorldDetail ? (
+          <WorldViewerModal
+            worldId={publicWorldDetail.world.id}
+            initialDetail={publicWorldDetail}
+            // Authed visitors get the full controls; anon viewers get a
+            // read-only view. The fetch already filtered by visibility,
+            // so this is purely about hiding buttons that would 401.
+            isAuthenticated={!!me}
+            onClose={() => {
+              setPendingPublicWorld(null);
+              // Address-bar housekeeping: if a profile is still open
+              // underneath, replace /w/<slug> with /p/<name>; otherwise
+              // replace with /. Replace (not push) so the back button
+              // doesn't re-open the world the user just dismissed.
+              if (openProfileForSync) {
+                const profileName = openProfileForSync.kind === "master"
+                  ? openProfileForSync.profile.username
+                  : openProfileForSync.profile.name;
+                syncProfileUrl(profileName, { replace: true });
+              } else {
+                syncWorldUrl(null, { replace: true });
+              }
+              // No other modal? Exit standalone mode for the rest of
+              // the session.
+              if (!openProfileForSync) setArrivedViaDeepLink(false);
+            }}
+          />
+        ) : null}
+      </PublicViewerShell>
+    );
+  }
+
   if (!me) {
+    // Anonymous + private deep-link stub → AuthGate with a hint banner so
+    // the visitor knows why they hit the wall. Or anon with no deep-link
+    // at all → plain AuthGate.
     return (
       <AuthGate
-        {...(pendingProfile?.data && "private" in pendingProfile.data
-          ? { pendingProfileHint: { name: pendingProfile.name, isPrivate: true } }
-          : pendingProfile
-            ? { pendingProfileHint: { name: pendingProfile.name, isPrivate: false } }
+        {...(profileStub
+          ? { pendingProfileHint: { name: profileStub.name, isPrivate: true } }
+          : worldStub
+            ? { pendingWorldHint: { name: worldStub.name, slug: worldStub.slug } }
             : {})}
       />
     );
   }
   return <Chat />;
+}
+
+/**
+ * Standalone shell for direct-link content viewing. Applies the site's
+ * default theme so the modal renders against the configured palette and
+ * pins a small action link in the corner so the visitor has a clear path
+ * forward — sign-in for anonymous viewers, or "open chat" for already-
+ * authed users who landed here from a shared link.
+ */
+function PublicViewerShell({
+  children,
+  isAuthenticated,
+}: {
+  children: React.ReactNode;
+  isAuthenticated: boolean;
+}) {
+  const branding = useChat((s) => s.branding);
+  const siteName = branding.siteName || "The Spire";
+  return (
+    <div
+      style={themeStyle(branding.defaultTheme)}
+      className="relative min-h-screen w-full bg-keep-bg text-keep-text"
+    >
+      {/* Subtle backdrop image, same as the login splash, so the standalone
+          page still feels like part of the site rather than a stripped
+          modal floating on a flat color. */}
+      <div
+        aria-hidden
+        className="absolute inset-0 bg-cover bg-[position:-175px_center] opacity-40 md:bg-center"
+        style={{ backgroundImage: "url(/the_spire_bg.jpg)" }}
+      />
+      <div aria-hidden className="absolute inset-0 bg-keep-bg/70" />
+      <a
+        href="/"
+        className="fixed right-4 top-3 z-[60] rounded border border-keep-rule bg-keep-bg/90 px-3 py-1 text-xs uppercase tracking-widest text-keep-action shadow hover:bg-keep-bg"
+      >
+        {isAuthenticated ? `Open ${siteName}` : `Sign in to ${siteName}`}
+      </a>
+      {children}
+    </div>
+  );
 }
 
 function BootSplash() {
@@ -850,6 +1082,11 @@ function Chat() {
               else setNotice({ code: res.code, message: res.message });
             });
           }}
+          // Worlds chips on the profile open the viewer on top of the
+          // profile modal. Closing the world viewer drops the user back to
+          // the profile they were reading, which matches how the room
+          // banner's world button stacks above other open modals.
+          onOpenWorld={(slug) => setWorldViewerId(slug)}
         />
       ) : null}
       {editor ? (

@@ -509,8 +509,8 @@ export async function joinRoom(
   // If the room has a /describe set, deliver it to JUST this socket as a
   // one-shot system message - not persisted, not broadcast. New visitors get
   // the world/setting description; ongoing chat stays clean. The
-  // `[Description]:` prefix on its own line distinguishes the world prose
-  // from regular system events (joins, kicks, mutes) at a glance.
+  // `[Description]:` prefix runs inline with the prose so the line reads
+  // like the other system events (joins, kicks, mutes) at a glance.
   //
   // Suppressed on reconnect: the user just saw it before the blip, no point
   // showing it again. (If a reconnect lands them in a different room than
@@ -524,7 +524,7 @@ export async function joinRoom(
       characterId: null,
       displayName: "system",
       kind: "system",
-      body: `[Description]:\n${room.description}`,
+      body: `[Description]: ${room.description}`,
       color: null,
       createdAt: Date.now(),
     });

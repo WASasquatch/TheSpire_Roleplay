@@ -391,7 +391,33 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
   app.get<{ Params: { idOrSlug: string } }>("/worlds/:idOrSlug", async (req, reply) => {
     const me = await getSessionUser(req, db);
     const w = await resolveWorld(db, req.params.idOrSlug, me?.id ?? null, me?.role ?? null);
-    if (!w) { reply.code(404); return { error: "not found" }; }
+    if (!w) {
+      // Anonymous deep-link to a private world: surface a "private" stub so
+      // the splash can render a "this world is private — sign in to view"
+      // hint, mirroring the profile flow. We deliberately return HTTP 200
+      // so a fetch() doesn't treat it as an error; the discriminating shape
+      // is the `private: true` field. Truly missing slugs still 404.
+      if (!me) {
+        const raw = (await db
+          .select()
+          .from(worlds)
+          .where(or(
+            eq(worlds.id, req.params.idOrSlug),
+            sql`lower(${worlds.slug}) = ${req.params.idOrSlug.toLowerCase()}`,
+          ))
+          .limit(1))[0];
+        if (raw && raw.visibility === "private") {
+          return {
+            private: true as const,
+            name: raw.name,
+            slug: raw.slug,
+            requiresAuth: true,
+          };
+        }
+      }
+      reply.code(404);
+      return { error: "not found" };
+    }
     const pages = await db
       .select()
       .from(worldPages)

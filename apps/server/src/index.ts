@@ -664,6 +664,17 @@ async function main() {
       // wins over the static plugin's default index.html serving.
       app.get("/", publicLimit, serveSplash);
 
+      // SPA deep-link routes. /p/<username> (canonical) and /u/<username>
+      // (alias) both open the profile modal; /w/<slug> opens a world
+      // viewer. All three are parsed client-side on first paint (see
+      // lib/profiles.ts and lib/worlds.ts). Without these explicit
+      // handlers, the setNotFoundHandler below would serve the themed 404
+      // page and the React app would never boot. Single-segment params
+      // only — /p/foo/bar still falls through to the 404.
+      app.get("/p/:name", publicLimit, serveSplash);
+      app.get("/u/:name", publicLimit, serveSplash);
+      app.get("/w/:slug", publicLimit, serveSplash);
+
       await app.register(fastifyStatic, {
         root: webDistPath,
         // We render index.html ourselves; tell fastify-static not to

@@ -15,6 +15,8 @@ interface Props {
   onIgnore?: (name: string) => void;
   /** Open another profile by name (used to follow a mutual-title link). */
   onOpenProfile?: (name: string) => void;
+  /** Open a world viewer by slug. Used by the Worlds section chips. */
+  onOpenWorld?: (slug: string) => void;
   /**
    * When true, skip the NSFW gate splash that otherwise blocks viewing of
    * profiles with isNsfw=true. Parent passes this when the viewer is the
@@ -53,7 +55,7 @@ interface Props {
  * Every section degrades gracefully: characters with nothing filled out
  * still get a clean modal that says "X hasn't filled out their profile yet."
  */
-export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProfile, activeCharacterAction, bypassNsfwGate }: Props) {
+export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProfile, onOpenWorld, activeCharacterAction, bypassNsfwGate }: Props) {
   const isChar = profile.kind === "character";
   const name = isChar ? profile.profile.name : profile.profile.username;
   const bio = profile.profile.bioHtml.trim();
@@ -82,7 +84,10 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
+      // Mobile: no padding, modal goes edge-to-edge for a full-screen sheet.
+      // Desktop (md+): standard backdrop padding so the card has breathing
+      // room on the sides.
+      className="fixed inset-0 z-40 flex items-stretch justify-stretch bg-black/40 md:items-center md:justify-center md:p-4"
       onClick={onClose}
       onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
     >
@@ -90,8 +95,16 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
         // Inline-style override scopes the theme to this card only. The
         // explicit bg/color use rgb(var()) because the variables now hold
         // RGB triples (see lib/theme.ts), not direct color values.
+        //
+        // Mobile: full-viewport sheet (h-dvh handles the iOS address-bar
+        // shrink so the close button stays reachable). No border / rounded
+        // corners since we sit edge-to-edge. Dismiss is via the close
+        // button only — backdrop tap doesn't reach us at this size.
+        // Desktop (md+): 75vw on widescreens with a ceiling so it doesn't
+        // become absurd on ultra-wide monitors, capped at 85vh tall, with
+        // the original border / rounded / shadow treatment.
         style={themeStyle(ownerTheme)}
-        className="flex max-h-[85vh] w-[min(720px,96vw)] flex-col overflow-hidden rounded border border-keep-border bg-keep-bg text-keep-text shadow-xl"
+        className="flex h-dvh w-full flex-col overflow-hidden bg-keep-bg text-keep-text md:h-auto md:max-h-[85vh] md:w-[75vw] md:max-w-[1400px] md:rounded md:border md:border-keep-border md:shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {gated ? (
@@ -119,6 +132,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
             onWhisper={onWhisper}
             onIgnore={onIgnore}
             onOpenProfile={onOpenProfile}
+            onOpenWorld={onOpenWorld}
             activeCharacterAction={activeCharacterAction}
           />
         )}
@@ -150,6 +164,7 @@ function ProfileBody({
   onWhisper,
   onIgnore,
   onOpenProfile,
+  onOpenWorld,
   activeCharacterAction,
 }: {
   /** Discriminated union; ProfileBody narrows on `profile.kind` to access master-only or character-only fields. */
@@ -171,6 +186,7 @@ function ProfileBody({
   onWhisper: ((name: string) => void) | undefined;
   onIgnore: ((name: string) => void) | undefined;
   onOpenProfile: ((name: string) => void) | undefined;
+  onOpenWorld: ((slug: string) => void) | undefined;
   activeCharacterAction: { label: string; onClick: () => void } | undefined;
 }) {
   const isChar = profile.kind === "character";
@@ -303,7 +319,7 @@ function ProfileBody({
                 </Section>
               ) : null}
 
-              <WorldsSection userId={profile.profile.userId} />
+              <WorldsSection userId={profile.profile.userId} onOpenWorld={onOpenWorld} />
 
 
               {statEntries.length > 0 ? (
@@ -651,7 +667,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * The primary membership gets a small "primary" chip so visitors can tell at
  * a glance which world this user identifies with most.
  */
-function WorldsSection({ userId }: { userId: string }) {
+function WorldsSection({ userId, onOpenWorld }: { userId: string; onOpenWorld: ((slug: string) => void) | undefined }) {
   const [memberships, setMemberships] = useState<WorldMembership[] | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -665,25 +681,43 @@ function WorldsSection({ userId }: { userId: string }) {
   return (
     <Section title="Worlds">
       <ul className="flex flex-wrap gap-1.5 text-sm">
-        {memberships.map((m) => (
-          <li
-            key={m.worldId}
-            className={`rounded border px-2 py-0.5 ${
-              m.isPrimary
-                ? "border-keep-action/50 bg-keep-action/10"
-                : "border-keep-rule/60 bg-keep-panel/60"
-            }`}
-            title={`by ${m.ownerUsername}${m.isPrimary ? " (primary)" : ""}`}
-          >
-            <span className="font-medium">{m.worldName}</span>
-            <span className="ml-1 text-[10px] text-keep-muted">/{m.worldSlug}</span>
-            {m.isPrimary ? (
-              <span className="ml-1 rounded bg-keep-action/20 px-1 text-[9px] uppercase tracking-widest text-keep-action">
-                primary
-              </span>
-            ) : null}
-          </li>
-        ))}
+        {memberships.map((m) => {
+          const chipClass = `rounded border px-2 py-0.5 ${
+            m.isPrimary
+              ? "border-keep-action/50 bg-keep-action/10"
+              : "border-keep-rule/60 bg-keep-panel/60"
+          }`;
+          const title = `Open ${m.worldName} (by ${m.ownerUsername}${m.isPrimary ? ", primary" : ""})`;
+          const inner = (
+            <>
+              <span className="font-medium">{m.worldName}</span>
+              <span className="ml-1 text-[10px] text-keep-muted">/{m.worldSlug}</span>
+              {m.isPrimary ? (
+                <span className="ml-1 rounded bg-keep-action/20 px-1 text-[9px] uppercase tracking-widest text-keep-action">
+                  primary
+                </span>
+              ) : null}
+            </>
+          );
+          return (
+            <li key={m.worldId}>
+              {onOpenWorld ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenWorld(m.worldSlug)}
+                  className={`${chipClass} hover:border-keep-action hover:text-keep-action`}
+                  title={title}
+                >
+                  {inner}
+                </button>
+              ) : (
+                <span className={chipClass} title={`by ${m.ownerUsername}${m.isPrimary ? " (primary)" : ""}`}>
+                  {inner}
+                </span>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </Section>
   );

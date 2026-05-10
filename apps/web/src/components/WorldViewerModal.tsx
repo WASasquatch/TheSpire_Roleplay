@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import DOMPurify from "dompurify";
 import type { WorldDetail, WorldPage } from "@thekeep/shared";
-import { buildWorldTree, syncWorldUrl, worldShareUrl, type WorldTreeNode } from "../lib/worlds.js";
+import { buildWorldTree, parseWorldFromUrl, syncWorldUrl, worldShareUrl, type WorldTreeNode } from "../lib/worlds.js";
 import { themeStyle } from "../lib/theme.js";
 
 interface Props {
@@ -9,6 +9,19 @@ interface Props {
   onClose: () => void;
   /** Shown only when the viewer is the owner; lets them jump to the editor. */
   onEdit?: () => void;
+  /**
+   * Pre-fetched world detail. When provided we skip the initial /worlds/:id
+   * fetch and render directly from this data. Used by the anonymous public-
+   * viewer path where App.tsx already fetched the detail to decide between
+   * standalone-view vs auth-gate; passing it through avoids a duplicate hit.
+   */
+  initialDetail?: WorldDetail;
+  /**
+   * When false, hide membership/edit/primary controls — anonymous viewers
+   * have no way to call those endpoints (the server rejects them) so the
+   * buttons would just produce 401s. Defaults true.
+   */
+  isAuthenticated?: boolean;
 }
 
 async function readError(r: Response): Promise<string> {
@@ -26,10 +39,18 @@ async function readError(r: Response): Promise<string> {
  * sanitized HTML instead of an editor. Public/open worlds are reachable by
  * non-owners; private ones only resolve for the owner.
  */
-export function WorldViewerModal({ worldId, onClose, onEdit }: Props) {
-  const [detail, setDetail] = useState<WorldDetail | null>(null);
+export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAuthenticated = true }: Props) {
+  const [detail, setDetail] = useState<WorldDetail | null>(initialDetail ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
+  const [selectedPageId, setSelectedPageId] = useState<string | null>(() => {
+    // Seed the selected page from initialDetail so the standalone view doesn't
+    // flash the "pick a page" placeholder before useEffect runs.
+    if (!initialDetail) return null;
+    const firstTop = initialDetail.pages
+      .filter((p) => p.parentPageId === null)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt)[0];
+    return firstTop?.id ?? null;
+  });
   const [busy, setBusy] = useState(false);
 
   async function load() {
@@ -54,7 +75,21 @@ export function WorldViewerModal({ worldId, onClose, onEdit }: Props) {
       setError(e instanceof Error ? e.message : "load failed");
     }
   }
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [worldId]);
+  useEffect(() => {
+    if (initialDetail) {
+      // Caller pre-fetched (anon public-view path). The detail is already
+      // seeded into state via useState init; just align the URL with the
+      // canonical slug. If we arrived from another /w/<X> URL (the deep-
+      // link case) replace so /w/<id> rewrites to /w/<slug>; if we're
+      // transitioning from a non-world URL (e.g. a profile's world chip)
+      // push so back-button returns to the underlying view.
+      const fromWorldUrl = parseWorldFromUrl() !== null;
+      syncWorldUrl(initialDetail.world.slug, fromWorldUrl ? { replace: true } : {});
+      return;
+    }
+    load();
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [worldId]);
 
   async function join() {
     setBusy(true);
@@ -120,10 +155,18 @@ export function WorldViewerModal({ worldId, onClose, onEdit }: Props) {
   // set one (theme === null).
   const modalStyle = detail?.world.theme ? themeStyle(detail.world.theme) : undefined;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div
+      // Mobile: edge-to-edge sheet (no backdrop padding); dismiss via the
+      // close button in the header. Desktop (md+): 75vw with breathing
+      // room from the screen edge. See ProfileModal for the matching
+      // sizing rationale — both modals follow the same shape so a viewer
+      // moving between profile and world doesn't see a layout jump.
+      className="fixed inset-0 z-50 flex items-stretch justify-stretch bg-black/40 md:items-center md:justify-center md:p-4"
+      onClick={onClose}
+    >
       <div
         style={modalStyle}
-        className="flex max-h-[92vh] w-[min(1100px,98vw)] flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg text-keep-text shadow-xl"
+        className="flex h-dvh w-full flex-col overflow-hidden bg-keep-bg text-keep-text md:h-auto md:max-h-[92vh] md:w-[75vw] md:max-w-[1600px] md:rounded md:border md:border-keep-rule md:shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-keep-rule bg-keep-banner px-4 py-2">
@@ -147,7 +190,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit }: Props) {
             ) : null}
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {detail ? (
+            {detail && isAuthenticated ? (
               <MembershipControls
                 detail={detail}
                 busy={busy}
@@ -156,7 +199,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit }: Props) {
                 onSetPrimary={setPrimary}
               />
             ) : null}
-            {onEdit ? (
+            {onEdit && isAuthenticated ? (
               <button
                 type="button"
                 onClick={onEdit}

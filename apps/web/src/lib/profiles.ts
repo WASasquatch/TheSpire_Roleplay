@@ -9,9 +9,14 @@
  * mention regex): Unicode letters, digits, underscore, hyphen. We keep the
  * route greedy on shape so a typo'd path still hits the SPA fallback rather
  * than the static-file 404 page.
+ *
+ * /u/<username> is accepted as an alias on parse so the more conventional
+ * "user page" URL also opens the modal; syncProfileUrl canonicalizes back
+ * to /p/<username> via replaceState when an alias is loaded, so share
+ * links and bookmarks all converge on a single form.
  */
 
-const PROFILE_URL_RX = /^\/p\/([\p{L}\p{N}_\-]{1,32})\/?$/u;
+const PROFILE_URL_RX = /^\/[pu]\/([\p{L}\p{N}_\-]{1,32})\/?$/u;
 
 /** What the API returns for a restricted profile (HTTP 200, signaled by the `private` flag). */
 export interface PrivateProfileStub {
@@ -36,11 +41,17 @@ export function parseProfileFromUrl(): string | null {
  */
 export function syncProfileUrl(name: string | null, opts: { replace?: boolean } = {}): void {
   if (typeof window === "undefined") return;
-  const current = parseProfileFromUrl();
   const target = name ? `/p/${encodeURIComponent(name)}` : "/";
-  if (name && current === name) return;
-  if (!name && !current) return;
-  if (opts.replace) {
+  if (window.location.pathname === target) return;
+  // Closing modal: if we aren't currently on a profile path at all, don't
+  // stomp the URL (preserves /w/foo etc.).
+  const currentName = parseProfileFromUrl();
+  if (!name && currentName === null) return;
+  // If we're already viewing this same profile via an alias (e.g. /u/<name>
+  // canonicalizing to /p/<name>), replace rather than push so the alias
+  // doesn't leave a stray "back" entry.
+  const replace = opts.replace || (name !== null && currentName === name);
+  if (replace) {
     window.history.replaceState({}, "", target);
   } else {
     window.history.pushState({}, "", target);

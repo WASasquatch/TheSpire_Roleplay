@@ -330,9 +330,15 @@ interface AuthGateProps {
    * adjust the copy for public-vs-private.
    */
   pendingProfileHint?: { name: string; isPrivate: boolean };
+  /**
+   * Symmetric hint for /w/<slug> deep-links to private worlds. Public
+   * worlds open in the standalone PublicViewerShell instead and don't
+   * fall through to the gate, so we only need a "private" variant here.
+   */
+  pendingWorldHint?: { name: string; slug: string };
 }
 
-export function AuthGate({ pendingProfileHint }: AuthGateProps = {}) {
+export function AuthGate({ pendingProfileHint, pendingWorldHint }: AuthGateProps = {}) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -534,6 +540,13 @@ export function AuthGate({ pendingProfileHint }: AuthGateProps = {}) {
                 register to continue.
               </>
             )}
+          </div>
+        ) : null}
+
+        {pendingWorldHint ? (
+          <div className="rounded border border-keep-action/40 bg-keep-action/10 px-3 py-2 text-xs text-keep-text/90">
+            <b>{pendingWorldHint.name}</b> is a <b>private</b> world. Please sign in or register
+            to view it.
           </div>
         ) : null}
 

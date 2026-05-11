@@ -914,14 +914,17 @@ function Chat() {
   const occ = currentRoomId ? occupants[currentRoomId] ?? [] : [];
 
   return (
-    // h-dvh (dynamic viewport height) so mobile keyboards reflow properly
-    // instead of the chat being pushed off-screen when the on-screen keyboard
-    // appears. Falls back to h-screen on browsers that don't support `dvh`.
-    // `overflow-hidden` is what makes the shell *own* its scrollable region:
-    // without it, any flex child whose min-height isn't constrained spills
-    // past h-dvh and the document itself becomes scrollable on mobile,
-    // pushing the banner above the viewport.
-    <div className="flex h-screen h-dvh flex-col overflow-hidden">
+    // Pin the entire chat shell to the viewport with position: fixed so
+    // document-level scroll (autoFocus on the composer scrolling things
+    // into view, mobile chrome address-bar resize, etc.) can't shift it
+    // out from under the user. inset-0 (top/right/bottom/left = 0) anchors
+    // it to all four edges of the layout viewport, which is what older
+    // browsers fall back to. h-dvh overrides the height where supported,
+    // so on mobile keyboards the shell shrinks with the visual viewport
+    // and the composer follows instead of being pushed beneath the
+    // keyboard. overflow-hidden keeps any internal flex child that grows
+    // past its allocated height from leaking back into document overflow.
+    <div className="fixed inset-0 flex h-dvh flex-col overflow-hidden">
       <Banner
         navLinksVersion={navLinksVersion}
         onOpenRules={() => setRulesOpen(true)}

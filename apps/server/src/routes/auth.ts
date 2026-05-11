@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import type { Role } from "@thekeep/shared";
 import { sessions, users } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../auth/passwords.js";
 import { getSettings } from "../settings.js";
@@ -328,7 +329,7 @@ function readSessionCookie(req: FastifyRequest): string | null {
 export async function getSessionUser(
   req: FastifyRequest,
   db: Db,
-): Promise<{ id: string; username: string; role: "user" | "trusted" | "mod" | "admin" } | null> {
+): Promise<{ id: string; username: string; role: Role } | null> {
   const sid = readSessionCookie(req);
   if (!sid) return null;
   const row = (await db.select().from(sessions).where(eq(sessions.id, sid)).limit(1))[0];

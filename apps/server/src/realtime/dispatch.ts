@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import type { Server as IoServer, Socket } from "socket.io";
 import type {
   ClientToServerEvents,
+  Role,
   ServerToClientEvents,
 } from "@thekeep/shared";
 import { parseInput } from "../commands/parser.js";
@@ -189,7 +190,7 @@ export async function dispatchChatInput(args: {
   }
 }
 
-function hasPermission(user: SessionUser, required: "user" | "mod" | "admin"): boolean {
+function hasPermission(user: SessionUser, required: Role): boolean {
   // `trusted` sits between `user` and `mod` - elevated rate limits / extra
   // privileges, but no moderation authority. Maps to ordinal 1; the next
   // tier (`mod`) is 2 so a `mod`-required command still rejects `trusted`.

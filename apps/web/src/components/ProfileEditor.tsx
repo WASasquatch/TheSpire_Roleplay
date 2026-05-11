@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileLink, ProfileView, Theme } from "@thekeep/shared";
+import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import { GENDER_OPTIONS, type Gender } from "../lib/gender.js";
 import {
@@ -14,6 +14,8 @@ import {
   readPushState,
   type PushState,
 } from "../lib/push.js";
+import { readError } from "../lib/http.js";
+import { Modal } from "./Modal.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
 
@@ -39,9 +41,11 @@ interface MasterData {
   activeCharacterId: string | null;
   theme?: Theme;
   notifyPref?: NotifyPref;
-  role?: "user" | "mod" | "admin";
+  role?: Role;
   isPublic?: boolean;
   isNsfw?: boolean;
+  /** Admin-tunable input caps. Surfaced so the bio counter matches the server's accept threshold. */
+  limits?: { maxBioLength: number; maxMessageLength: number };
 }
 
 interface CharacterRow {
@@ -462,7 +466,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   const targetValue = target.kind === "master" ? "master:" : `character:${target.id}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <Modal onClose={onClose} zIndex={50}>
       <form
         onSubmit={save}
         onClick={(e) => e.stopPropagation()}
@@ -727,7 +731,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                 }
               />
               <div className="mt-1 text-right text-[10px] text-keep-muted tabular-nums">
-                {bioHtml.length.toLocaleString()} / 50,000
+                {bioHtml.length.toLocaleString()} / {(master?.limits?.maxBioLength ?? 50_000).toLocaleString()}
               </div>
             </div>
           </div>
@@ -788,7 +792,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           />
         </div>
       ) : null}
-    </div>
+    </Modal>
   );
 }
 
@@ -834,11 +838,7 @@ function CreateCharacterModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-      onClick={onCancel}
-      onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
-    >
+    <Modal onClose={onCancel} zIndex={60}>
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
@@ -882,7 +882,7 @@ function CreateCharacterModal({
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }
 
@@ -1563,15 +1563,6 @@ function PushRow() {
       {error ? <div className="mt-1 text-[10px] text-keep-accent">{error}</div> : null}
     </div>
   );
-}
-
-async function readError(r: Response): Promise<string> {
-  try {
-    const j = (await r.json()) as { error?: string; message?: string };
-    return j.error ?? j.message ?? `${r.status} ${r.statusText}`;
-  } catch {
-    return `${r.status} ${r.statusText}`;
-  }
 }
 
 /* ============================================================

@@ -2,17 +2,17 @@ import { create } from "zustand";
 import type {
   ChatMessage,
   ProfileView,
+  Role,
   RoomOccupant,
   RoomSummary,
   Theme,
-  UiHint,
 } from "@thekeep/shared";
 import { DEFAULT_THEME } from "@thekeep/shared";
 
 export interface AuthMe {
   id: string;
   username: string;
-  role: "user" | "mod" | "admin";
+  role: Role;
 }
 
 /**
@@ -175,13 +175,9 @@ interface ChatState {
   setMessages: (roomId: string, msgs: ChatMessage[]) => void;
   setOccupants: (roomId: string, occ: RoomOccupant[]) => void;
   setRoom: (room: RoomSummary) => void;
-  upsertRoomList: (rooms: RoomSummary[]) => void;
 
   notice: { code: string; message: string } | null;
   setNotice: (n: { code: string; message: string } | null) => void;
-
-  pendingHint: UiHint | null;
-  setHint: (h: UiHint | null) => void;
 
   openProfile: ProfileView | null;
   setOpenProfile: (p: ProfileView | null) => void;
@@ -250,18 +246,8 @@ export const useChat = create<ChatState>((set) => ({
 
   setRoom: (room) => set((s) => ({ rooms: { ...s.rooms, [room.id]: room } })),
 
-  upsertRoomList: (list) =>
-    set((s) => {
-      const next = { ...s.rooms };
-      for (const r of list) next[r.id] = r;
-      return { rooms: next };
-    }),
-
   notice: null,
   setNotice: (n) => set({ notice: n }),
-
-  pendingHint: null,
-  setHint: (h) => set({ pendingHint: h }),
 
   openProfile: null,
   setOpenProfile: (p) => set({ openProfile: p }),

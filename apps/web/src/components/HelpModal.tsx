@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CommandDoc } from "@thekeep/shared";
 import { parseInline } from "../lib/markdown.js";
 import { HelpGuides } from "./HelpGuides.js";
+import { Modal } from "./Modal.js";
 
 interface Props {
   /** Initial filter - pre-fills the search box (e.g. /help char). */
@@ -67,11 +68,7 @@ export function HelpModal({ initialFilter, onClose }: Props) {
   }, [commands, filter]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-      onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
-    >
+    <Modal onClose={onClose} zIndex={50}>
       <div
         onClick={(e) => e.stopPropagation()}
         className="flex h-[90vh] w-[min(900px,98vw)] flex-col rounded border border-keep-border bg-keep-bg shadow-xl"
@@ -136,7 +133,7 @@ export function HelpModal({ initialFilter, onClose }: Props) {
           </div>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

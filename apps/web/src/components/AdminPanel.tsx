@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import DOMPurify from "dompurify";
-import type { AuditEntry, ReportEntry, Theme } from "@thekeep/shared";
+import type { AuditEntry, ReportEntry, Role, Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
+import { readError } from "../lib/http.js";
+import { Modal } from "./Modal.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { useChat } from "../state/store.js";
 
@@ -17,7 +19,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
   const [tab, setTab] = useState<Tab>("settings");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+    <Modal onClose={onClose} zIndex={50}>
       <div
         onClick={(e) => e.stopPropagation()}
         className="max-h-[92vh] w-[min(900px,95vw)] overflow-hidden rounded border border-keep-rule bg-keep-parchment shadow-xl"
@@ -58,7 +60,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
           {tab === "audit" ? <AuditTab /> : null}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -2303,7 +2305,7 @@ function RoomsTab() {
   async function deleteRoom(room: AdminRoom) {
     if (room.isSystem) return; // server refuses, but disable in UI too
     const ok = window.confirm(
-      `Delete the room "${room.name}"?\n\nAll messages will be removed and any occupants will be moved to MainHall. This cannot be undone.`,
+      `Delete the room "${room.name}"?\n\nAll messages will be removed and any occupants will be moved to the landing room. This cannot be undone.`,
     );
     if (!ok) return;
     try {
@@ -2468,7 +2470,7 @@ function RoomsTab() {
                     type="button"
                     onClick={() => deleteRoom(r)}
                     disabled={r.isSystem}
-                    title={r.isSystem ? "System rooms cannot be deleted. Toggle the System flag off via Edit first." : "Delete this room (occupants are moved to MainHall)."}
+                    title={r.isSystem ? "System rooms cannot be deleted. Toggle the System flag off via Edit first." : "Delete this room (occupants are moved to the landing room)."}
                     className="rounded border border-keep-accent/60 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     Delete
@@ -2665,7 +2667,7 @@ interface AdminUserRow {
   userId: string;
   username: string;
   email: string;
-  role: "user" | "mod" | "admin";
+  role: Role;
   online: boolean;
   away: boolean;
   awayMessage: string | null;
@@ -2848,7 +2850,7 @@ function UserEditForm({
 }) {
   const [username, setUsername] = useState(user.username);
   const [email, setEmail] = useState(user.email);
-  const [role, setRole] = useState<"user" | "mod" | "admin">(user.role);
+  const [role, setRole] = useState<Role>(user.role);
   const [disabled, setDisabled] = useState(user.disabled);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -2905,10 +2907,11 @@ function UserEditForm({
           <span className="mb-1 block uppercase tracking-widest text-keep-muted">Role</span>
           <select
             value={role}
-            onChange={(e) => setRole(e.target.value as "user" | "mod" | "admin")}
+            onChange={(e) => setRole(e.target.value as Role)}
             className="w-full rounded border border-keep-rule px-2 py-1"
           >
             <option value="user">user</option>
+            <option value="trusted">trusted</option>
             <option value="mod">mod</option>
             <option value="admin">admin</option>
           </select>
@@ -2975,15 +2978,6 @@ function LimitField({
       <span className="mt-0.5 block text-[10px] text-keep-muted">{hint}</span>
     </label>
   );
-}
-
-async function readError(r: Response): Promise<string> {
-  try {
-    const j = (await r.json()) as { error?: string; message?: string };
-    return j.error ?? j.message ?? `${r.status} ${r.statusText}`;
-  } catch {
-    return `${r.status} ${r.statusText}`;
-  }
 }
 
 /* =========================================================

@@ -1,5 +1,6 @@
 import DOMPurify from "dompurify";
 import { useState } from "react";
+import { Modal } from "./Modal.js";
 
 interface Props {
   /** Sanitized HTML body. Server already ran this through the bio allow-list; we DOMPurify a second time as defense-in-depth. */
@@ -41,17 +42,13 @@ export function WelcomeModal({ html, hash, onDismissed }: Props) {
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="welcome-modal-title"
-    >
+    // Backdrop click and Esc are both disabled — this is intentional. The
+    // server records `hash` only when the user clicks "Got it", so a
+    // dismissive Esc/backdrop tap could leave them in a state where the
+    // welcome re-renders next page load. The button is the only path out.
+    <Modal onClose={onDismissed} closeOnBackdrop={false} closeOnEscape={false} zIndex={50}>
       <div
         className="flex max-h-[85vh] w-[min(640px,96vw)] flex-col overflow-hidden rounded border border-keep-border bg-keep-bg text-keep-text shadow-2xl"
-        // Clicking the backdrop should NOT dismiss - this is intentional.
-        // The user explicitly clicks "Got it" so we know they've seen the
-        // content (and the server records the acknowledgment).
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
@@ -76,6 +73,6 @@ export function WelcomeModal({ html, hash, onDismissed }: Props) {
           </button>
         </footer>
       </div>
-    </div>
+    </Modal>
   );
 }

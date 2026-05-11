@@ -14,10 +14,14 @@ import {
   titleKinds,
   users,
 } from "../db/schema.js";
-import type { AuditEntry } from "@thekeep/shared";
+import type { AuditEntry, Role } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import type { CommandRegistry } from "../commands/registry.js";
-import { broadcastPresence, broadcastRoomState } from "../realtime/broadcast.js";
+import {
+  broadcastRoomState,
+  findCanonicalLanding,
+  sendRoomBacklogTo,
+} from "../realtime/broadcast.js";
 import { getSettings, updateSettings } from "../settings.js";
 import { recordAudit } from "../audit.js";
 
@@ -25,7 +29,7 @@ type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
 interface SessionUserCtx {
   id: string;
-  role: "user" | "trusted" | "mod" | "admin";
+  role: Role;
 }
 
 /**
@@ -281,11 +285,11 @@ export async function registerAdminRoutes(
   /**
    * DELETE /admin/rooms/:id - moderator hatchet. Refuses system rooms.
    *
-   * Currently-online occupants are auto-rejoined to MainHall and shown a
-   * notice; cascade FKs (room_members, messages, bans, invites) clean up.
-   * Even private/password rooms can be deleted (admin moderation overrides
-   * the privacy contract because messages are still never read - only
-   * removed wholesale).
+   * Currently-online occupants are relocated to the canonical landing room
+   * and shown a notice; cascade FKs (room_members, messages, bans,
+   * invites) clean up. Even private/password rooms can be deleted (admin
+   * moderation overrides the privacy contract because messages are still
+   * never read — only removed wholesale).
    */
   app.delete<{ Params: { id: string } }>("/admin/rooms/:id", async (req, reply) => {
     const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
@@ -298,8 +302,7 @@ export async function registerAdminRoutes(
       return { error: "system rooms cannot be deleted" };
     }
 
-    const { messages: messagesTable } = await import("../db/schema.js");
-    const main = (await db.select().from(rooms).where(eq(rooms.isSystem, true)).limit(1))[0];
+    const landing = await findCanonicalLanding(db);
     const remoteSockets = await io.in(`room:${room.id}`).fetchSockets();
 
     for (const s of remoteSockets) {
@@ -308,9 +311,11 @@ export async function registerAdminRoutes(
         code: "ROOM_DELETED",
         message: `Room "${room.name}" was removed by an administrator.`,
       });
-      if (main) {
-        s.join(`room:${main.id}`);
-        (s.data as { roomId?: string }).roomId = main.id;
+      if (landing) {
+        s.join(`room:${landing.id}`);
+        (s.data as { roomId?: string }).roomId = landing.id;
+        const userId = (s.data as { userId?: string }).userId;
+        if (userId) await sendRoomBacklogTo(s, db, landing.id, userId);
       }
     }
 
@@ -326,30 +331,8 @@ export async function registerAdminRoutes(
       });
     }
 
-    if (main && remoteSockets.length > 0) {
-      await broadcastRoomState(io, db, main.id);
-      await broadcastPresence(io, db, main.id);
-      // Backlog so booted users see recent MainHall context immediately.
-      const recent = await db
-        .select()
-        .from(messagesTable)
-        .where(eq(messagesTable.roomId, main.id))
-        .orderBy(desc(messagesTable.createdAt))
-        .limit(50);
-      const backlog = recent.reverse().map((m) => ({
-        id: m.id,
-        roomId: m.roomId,
-        userId: m.userId,
-        characterId: m.characterId,
-        displayName: m.displayName,
-        kind: m.kind,
-        body: m.body,
-        color: m.color,
-        createdAt: +m.createdAt,
-        ...(m.toUserId ? { toUserId: m.toUserId } : {}),
-        ...(m.toDisplayName ? { toDisplayName: m.toDisplayName } : {}),
-      }));
-      for (const s of remoteSockets) s.emit("message:bulk", backlog);
+    if (landing && remoteSockets.length > 0) {
+      await broadcastRoomState(io, db, landing.id);
     }
 
     return { ok: true, deleted: room.id, name: room.name };

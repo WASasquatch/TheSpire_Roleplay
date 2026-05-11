@@ -3,6 +3,7 @@ import { asc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { affiliates } from "../db/schema.js";
+import type { Role } from "@thekeep/shared";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
 import type { Db } from "../db/index.js";
@@ -23,7 +24,7 @@ const updateBody = z.object({
 
 interface SessionUserCtx {
   id: string;
-  role: "user" | "trusted" | "mod" | "admin";
+  role: Role;
 }
 
 async function requireAdmin(req: FastifyRequest, db: Db): Promise<SessionUserCtx | null> {

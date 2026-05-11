@@ -5,10 +5,12 @@ import type {
 } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 
+import type { Role } from "@thekeep/shared";
+
 export interface SessionUser {
   id: string;
   username: string;
-  role: "user" | "trusted" | "mod" | "admin";
+  role: Role;
   activeCharacterId: string | null;
   /** display name resolved from active character or master username */
   displayName: string;
@@ -59,6 +61,6 @@ export interface CommandHandler {
   /** subcommand reference, surfaced by /help <name> in the modal */
   subcommands?: readonly SubcommandDoc[];
   /** restricts who can run it */
-  permission?: "user" | "mod" | "admin";
+  permission?: Role;
   run(ctx: CommandContext): CommandResult;
 }

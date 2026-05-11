@@ -76,7 +76,7 @@ console.log(`\n[4] PUT /me/profile saves bio`);
   assert(j.bioHtml.includes("OOC bio"), "OOC bio persisted");
 }
 
-console.log(`\n[5] socket connection + auto-join MainHall`);
+console.log(`\n[5] socket connection + auto-join The_Spire`);
 const sock = io(BASE, { extraHeaders: { Cookie: cookieJar[0] }, transports: ["websocket"] });
 const events = [];
 sock.onAny((ev, ...payload) => events.push({ ev, payload }));
@@ -88,7 +88,7 @@ await wait(400);
 const roomState0 = events.find((e) => e.ev === "room:state");
 assert(roomState0 != null, "received room:state on connect");
 let currentRoomId = roomState0.payload[0].room.id;
-assert(roomState0.payload[0].room.name === "MainHall", "auto-joined MainHall");
+assert(roomState0.payload[0].room.name === "The_Spire", "auto-joined The_Spire");
 
 // /go and /private move the socket to a new room. Track the latest from
 // every room:state so subsequent sends use the correct id.
@@ -387,7 +387,7 @@ console.log(`\n[20b] HTTP /rooms returns tree with occupants`);
   assert(r.ok, "/rooms ok");
   const j = await readJson(r);
   assert(Array.isArray(j.rooms), "rooms is array");
-  assert(j.rooms.some((r) => r.name === "MainHall"), "MainHall in public rooms");
+  assert(j.rooms.some((r) => r.name === "The_Spire"), "The_Spire in public rooms");
   assert(j.rooms.every((r) => Array.isArray(r.occupants)), "every room carries occupants[]");
   assert(j.rooms.every((r) => r.type !== "private"), "no private rooms in unauthenticated list");
 }
@@ -487,7 +487,7 @@ console.log(`\n[25] /color presence broadcast`);
 
 console.log(`\n[25b] /whisper round-trip with a second connection`);
 {
-  // Register and connect a second user, both join MainHall.
+  // Register and connect a second user, both join The_Spire.
   const u2 = `Audit2_${Math.floor(Math.random() * 1e6)}`;
   const reg = await fetch(`${BASE}/auth/register`, {
     method: "POST",
@@ -506,13 +506,13 @@ console.log(`\n[25b] /whisper round-trip with a second connection`);
   });
   await wait(300);
 
-  // Move our main socket back to MainHall so we can whisper u2.
-  // Find MainHall id from u2's room:state.
+  // Move our main socket back to The_Spire so we can whisper u2.
+  // Find The_Spire id from u2's room:state.
   const u2Room = ev2.find((e) => e.ev === "room:state");
   const mainHallId = u2Room.payload[0].room.id;
   await new Promise((res) => sock.emit("room:join", { roomId: mainHallId }, res));
   await wait(200);
-  // Now currentRoomId is MainHall.
+  // Now currentRoomId is The_Spire.
 
   const before = events.length;
   const before2 = ev2.length;
@@ -553,7 +553,7 @@ console.log(`\n[27] HTTP /admin/* refuses non-admin`);
 
 console.log(`\n[27a] auto-expire: room is removed when its last socket leaves`);
 {
-  // Create a fresh public room, leave it (by joining MainHall), and verify
+  // Create a fresh public room, leave it (by joining The_Spire), and verify
   // the server deleted it.
   const ephName = `Eph${Math.floor(Math.random() * 1e6)}Room`;
   await send(`/go ${ephName}`);
@@ -562,9 +562,9 @@ console.log(`\n[27a] auto-expire: room is removed when its last socket leaves`);
   let listed = (await readJson(await fetch(`${BASE}/rooms`))).rooms.find((r) => r.name === ephName);
   assert(listed != null, "ephemeral room created and visible");
 
-  // Leave by joining a different existing public room (MainHall)
+  // Leave by joining a different existing public room (The_Spire)
   const allRooms = (await readJson(await fetch(`${BASE}/rooms`))).rooms;
-  const main = allRooms.find((r) => r.name === "MainHall");
+  const main = allRooms.find((r) => r.name === "The_Spire");
   await new Promise((res) => sock.emit("room:join", { roomId: main.id }, res));
   await wait(400);
 
@@ -572,7 +572,7 @@ console.log(`\n[27a] auto-expire: room is removed when its last socket leaves`);
   assert(listed == null, "ephemeral room auto-expired after last socket left");
 }
 
-console.log(`\n[27b] admin can delete non-system rooms; refuses MainHall`);
+console.log(`\n[27b] admin can delete non-system rooms; refuses The_Spire`);
 {
   // Promote a fresh user to admin via the helper script. Easier: reuse the
   // 'WAS' admin set up earlier — log in as them with the dev password.
@@ -608,19 +608,19 @@ console.log(`\n[27b] admin can delete non-system rooms; refuses MainHall`);
 
     // System room refusal
     const allRooms = (await readJson(await fetch(`${BASE}/rooms`))).rooms;
-    const main = allRooms.find((r) => r.name === "MainHall");
+    const main = allRooms.find((r) => r.name === "The_Spire");
     const mainDel = await fetch(`${BASE}/admin/rooms/${main.id}`, {
       method: "DELETE",
       headers: { Cookie: adminCookie },
     });
-    assert(mainDel.status === 400, "admin cannot delete system room (MainHall)");
+    assert(mainDel.status === 400, "admin cannot delete system room (The_Spire)");
   }
 }
 
 console.log(`\n[27c] mod commands: /kick + /mute + /unmute (admin → target)`);
 {
   // Use NavSmoke as admin, the audit user as target. NavSmoke mutes audit
-  // user in MainHall, then audit user's plain say is rejected with MUTED.
+  // user in The_Spire, then audit user's plain say is rejected with MUTED.
   const navLogin = await fetch(`${BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -642,7 +642,7 @@ console.log(`\n[27c] mod commands: /kick + /mute + /unmute (admin → target)`);
     const mainHallId = adminRoom.payload[0].room.id;
     const adminSend = (text) => new Promise((res) => adminSock.emit("chat:input", { roomId: mainHallId, text }, res));
 
-    // Audit user joins MainHall too
+    // Audit user joins The_Spire too
     await new Promise((res) => sock.emit("room:join", { roomId: mainHallId }, res));
     await wait(300);
 

@@ -17,6 +17,22 @@ export function hashWelcome(html: string): string {
   return createHash("sha256").update(html).digest("hex").slice(0, 16);
 }
 
+/**
+ * Parse a stored theme JSON (from `users.themeJson` / `characters.themeJson`)
+ * and return a normalized Theme. On null or parse failure, falls back to the
+ * sitewide admin-configured default theme. Used by the profile-fetch paths
+ * that need to embed a viewable theme into a ProfileView. Worlds use a
+ * separate parser (`parseStoredTheme` in routes/worlds.ts) because they
+ * surface "no theme set" as null rather than substituting the default.
+ */
+export async function parseUserThemeJson(db: Db, json: string | null): Promise<Theme> {
+  if (json) {
+    try { return normalizeTheme(JSON.parse(json)); }
+    catch { /* fall through */ }
+  }
+  return (await getSettings(db)).defaultTheme;
+}
+
 export interface SiteSettings {
   messageRetentionMs: number;
   sessionTtlMs: number;

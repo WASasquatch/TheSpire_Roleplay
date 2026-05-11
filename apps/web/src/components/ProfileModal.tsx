@@ -5,6 +5,7 @@ import { themeStyle } from "../lib/theme.js";
 import { genderGlyph } from "../lib/gender.js";
 import type { Gender } from "../lib/gender.js";
 import { profileShareUrl } from "../lib/profiles.js";
+import { Modal } from "./Modal.js";
 
 interface Props {
   profile: ProfileView;
@@ -83,14 +84,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
   const isCompletelyBlank = !bio && statEntries.length === 0 && !avatar && titles.length === 0 && links.length === 0 && journal.length === 0;
 
   return (
-    <div
-      // Mobile: no padding, modal goes edge-to-edge for a full-screen sheet.
-      // Desktop (md+): standard backdrop padding so the card has breathing
-      // room on the sides.
-      className="fixed inset-0 z-40 flex items-stretch justify-stretch bg-black/40 md:items-center md:justify-center md:p-4"
-      onClick={onClose}
-      onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
-    >
+    <Modal onClose={onClose} variant="mobile-fullscreen">
       <div
         // Inline-style override scopes the theme to this card only. The
         // explicit bg/color use rgb(var()) because the variables now hold
@@ -137,7 +131,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
           />
         )}
       </div>
-    </div>
+    </Modal>
   );
 }
 

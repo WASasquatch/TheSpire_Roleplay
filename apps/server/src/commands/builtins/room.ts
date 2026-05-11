@@ -142,7 +142,7 @@ async function joinExistingWithPassword(
  * /go <room> [password]
  *
  * Unified entry into a room:
- *   - /go MainHall            join existing public room
+ *   - /go The_Spire          join existing public room
  *   - /go MyRoom              create a public room (and join) if it doesn't exist
  *   - /go SecretRoom hunter2  same as /private: create a private room with this
  *                             password if it doesn't exist, OR join an existing
@@ -166,7 +166,7 @@ export const goCommand: CommandHandler = {
   subcommands: [
     {
       verb: "<room>",
-      usage: "/go MainHall",
+      usage: "/go The_Spire",
       description: "Join an existing room, or create a new PUBLIC room with this name. Multi-word names allowed.",
     },
     {

@@ -3,6 +3,7 @@ import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type {
+  Role,
   Theme,
   WorldCatalogEntry,
   WorldDetail,
@@ -12,7 +13,7 @@ import type {
   WorldSummary,
   WorldVisibility,
 } from "@thekeep/shared";
-import { WORLD_PAGE_DEPTH_CAP, normalizeTheme } from "@thekeep/shared";
+import { WORLD_PAGE_DEPTH_CAP, deriveSlug, normalizeTheme } from "@thekeep/shared";
 import {
   roomMembers,
   roomWorldLinks,
@@ -37,14 +38,6 @@ type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
  * lives in URLs and slash commands, so we keep it tight.
  */
 const SLUG_RX = /^[a-z0-9](?:[a-z0-9-]{0,58}[a-z0-9])?$/;
-
-function deriveSlug(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
-}
 
 const visibilityEnum = z.enum(["private", "public", "open"]);
 
@@ -190,7 +183,7 @@ async function resolveWorld(
   db: Db,
   idOrSlug: string,
   viewerUserId: string | null,
-  viewerRole: "user" | "trusted" | "mod" | "admin" | null,
+  viewerRole: Role | null,
 ): Promise<typeof worlds.$inferSelect | null> {
   // Try id first (cheap; slugs are friendlier but ids are uuid-shaped).
   let w = (await db.select().from(worlds).where(eq(worlds.id, idOrSlug)).limit(1))[0];

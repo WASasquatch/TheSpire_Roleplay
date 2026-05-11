@@ -50,18 +50,24 @@ export const users = sqliteTable(
     /** FK to characters.id - nullable means "show master profile" */
     activeCharacterId: text("active_character_id"),
     /**
-     * Public visibility flag for the master profile. When true (default),
-     * /profiles/:username is readable by anonymous viewers. When false,
-     * only the owner + admins can view; anonymous viewers get 404.
+     * Public visibility flag for the master profile.
+     *   - true (default): /profiles/:username returns the full profile to
+     *     anyone, including anonymous viewers.
+     *   - false: anonymous viewers get a `private: true` stub (HTTP 200,
+     *     so the splash can render a "this profile is private — sign in"
+     *     hint without confusing fetch() error handling); logged-in
+     *     viewers always see the full profile (private == "members can
+     *     view"); the owner and admins always see the full profile.
      */
     isPublic: integer("is_public", { mode: "boolean" }).notNull().default(true),
     /**
      * Whole-profile NSFW flag. Independent of per-portrait nsfw blurring.
-     * When true:
-     *   - Forces non-public to anonymous viewers (404 regardless of isPublic).
-     *   - Logged-in viewers see a warning gate splash before the content
-     *     renders (the "View Profile" button accepts the gate).
-     *   - The owner + admins always see the content without the gate.
+     * Anonymous viewers of an NSFW profile get the same `private: true`
+     * stub as a non-public profile. Logged-in viewers see the full
+     * profile but with a "View Profile" warning gate before the body
+     * renders — the gate is per-modal-mount so closing and reopening
+     * re-prompts. The owner and admins always see the content with no
+     * gate.
      */
     isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
     /**
@@ -139,7 +145,7 @@ export const rooms = sqliteTable(
      * may include newlines. Null = no description sent on join.
      */
     description: text("description"),
-    /** system-rooms (MainHall etc.) survive owner deletion and admin sweeps */
+    /** system-rooms (The_Spire and any admin-flagged landings) survive owner deletion and admin sweeps */
     isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
     /** When true, /npc is rejected in this room - useful for themed games where everyone must speak as their own character. Owners and mods toggle via the room editor. */
     npcDisabled: integer("npc_disabled", { mode: "boolean" }).notNull().default(false),

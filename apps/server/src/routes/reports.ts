@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { ReportEntry, ReportStatus } from "@thekeep/shared";
@@ -109,13 +109,13 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
       messageIds.add(r.messageId);
     }
     const userRows = userIds.size > 0
-      ? await db.select().from(users).where(inIds(users.id, [...userIds]))
+      ? await db.select().from(users).where(inArray(users.id, [...userIds]))
       : [];
     const roomRows = roomIds.size > 0
-      ? await db.select().from(rooms).where(inIds(rooms.id, [...roomIds]))
+      ? await db.select().from(rooms).where(inArray(rooms.id, [...roomIds]))
       : [];
     const messageRows = messageIds.size > 0
-      ? await db.select().from(messages).where(inIds(messages.id, [...messageIds]))
+      ? await db.select().from(messages).where(inArray(messages.id, [...messageIds]))
       : [];
     const userById = new Map(userRows.map((u) => [u.id, u]));
     const roomById = new Map(roomRows.map((r) => [r.id, r]));
@@ -188,11 +188,3 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
   });
 }
 
-/**
- * `id IN (val, val, ...)` clause. Mirrors the pattern used elsewhere in the
- * codebase (broadcast.ts.currentOccupants); avoids pulling in drizzle's
- * `inArray` for the two call sites here.
- */
-function inIds<T>(col: T, ids: string[]) {
-  return sql`${col} IN (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})`;
-}

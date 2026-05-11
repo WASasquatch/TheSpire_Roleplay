@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import DOMPurify from "dompurify";
 import type { WorldDetail, WorldPage } from "@thekeep/shared";
 import { buildWorldTree, parseWorldFromUrl, syncWorldUrl, worldShareUrl, type WorldTreeNode } from "../lib/worlds.js";
+import { readError } from "../lib/http.js";
 import { themeStyle } from "../lib/theme.js";
+import { Modal } from "./Modal.js";
 
 interface Props {
   worldId: string;
@@ -22,15 +24,6 @@ interface Props {
    * buttons would just produce 401s. Defaults true.
    */
   isAuthenticated?: boolean;
-}
-
-async function readError(r: Response): Promise<string> {
-  try {
-    const j = (await r.json()) as { error?: string; message?: string };
-    return j.error ?? j.message ?? `${r.status} ${r.statusText}`;
-  } catch {
-    return `${r.status} ${r.statusText}`;
-  }
 }
 
 /**
@@ -155,15 +148,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
   // set one (theme === null).
   const modalStyle = detail?.world.theme ? themeStyle(detail.world.theme) : undefined;
   return (
-    <div
-      // Mobile: edge-to-edge sheet (no backdrop padding); dismiss via the
-      // close button in the header. Desktop (md+): 75vw with breathing
-      // room from the screen edge. See ProfileModal for the matching
-      // sizing rationale — both modals follow the same shape so a viewer
-      // moving between profile and world doesn't see a layout jump.
-      className="fixed inset-0 z-50 flex items-stretch justify-stretch bg-black/40 md:items-center md:justify-center md:p-4"
-      onClick={onClose}
-    >
+    <Modal onClose={onClose} variant="mobile-fullscreen" zIndex={50}>
       <div
         style={modalStyle}
         className="flex h-dvh w-full flex-col overflow-hidden bg-keep-bg text-keep-text md:h-auto md:max-h-[92vh] md:w-[75vw] md:max-w-[1600px] md:rounded md:border md:border-keep-rule md:shadow-xl"
@@ -258,7 +243,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
           </div>
         ) : null}
       </div>
-    </div>
+    </Modal>
   );
 }
 

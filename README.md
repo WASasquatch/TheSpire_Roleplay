@@ -58,7 +58,7 @@ Titles attach to **identities**, not accounts. Master-Alice married to Master-Bo
 - **`/refresh [N]`** — re-fetch the userlist + topic. Pass `N` (5–3600) to set an auto-refresh interval; `/refresh off` disables it.
 - **Custom commands** — admins author their own slash commands at runtime (`/blush`, `/grin`, `/tea`, etc.) with a small template language. They appear in `/help` alongside built-ins, and can default to a custom color.
 
-Type `/help` or click **Help** in the banner for the full searchable reference with subcommand options. `/help <command>` jumps to a specific command's card.
+Type `/help` for the full searchable reference with subcommand options. `/help <command>` jumps to a specific command's card.
 
 ### Rooms
 
@@ -79,7 +79,7 @@ The Spire's privacy guarantees are enforced **in code**, not by policy. The inva
 
 ### What admins can NOT see
 
-- **Whispers are never readable by admins.** Sender and recipient can scroll back through their own; no admin endpoint will return them. The `/admin/messages` route filters whispers out of every room regardless of room type.
+- **Whispers are never readable by admins.** Sender and recipient can scroll back through their own; no admin endpoint will return them. The `/admin/rooms/:id/messages` route filters whispers out of every room regardless of room type.
 - **Private-room messages are never readable by admins.** Admins can list private rooms, see who's in them, and view their metadata (name, topic, owner, member count) — but the message contents are walled off at the data layer. Whatever you say in a private room stays between the people who were there.
 - **Soft-deleted characters keep their message history under the snapshotted name.** Admins see the name as-it-was-then in moderation views, not whatever the owner renames to later.
 
@@ -96,6 +96,7 @@ If you have abuse to report, screenshot and contact an admin — the privacy con
 
 ### Other guarantees
 
+- **NSFW flagging is multi-layered and independent.** A profile can be marked NSFW (gates anonymous viewers behind a "private" stub and surfaces a content warning before the modal opens). Individual character portraits in the gallery carry their own `nsfw` flag — these blur with click-to-reveal regardless of the parent profile's flag. The two are intentionally decoupled so a SFW character can carry an NSFW reference image, or an NSFW character's safe portraits don't all blur. The profile-level flag does NOT cascade into per-portrait flags and vice versa.
 - **`/ignore` is one-way and silent.** The ignored user has no signal you've done it. Your scrollback is filtered locally; their incoming messages are dropped server-side before they reach your socket.
 - **Sessions are server-side.** They live in a database row referenced by an `httpOnly` cookie — admins (and the periodic janitor) can revoke them. No JWTs. Idle expiry is sliding; typing or scrolling keeps your session alive while you're at the keyboard.
 - **The keymaster is untouchable.** The longest-tenured admin (the first registered user, by default) cannot be demoted, kicked, muted, or banned by anyone. The keys to the keep stay with the original holder. Worth choosing carefully on a fresh install.

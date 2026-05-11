@@ -1,8 +1,7 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { characterJournalEntries, characterPortraits, characters, profileLinks, users } from "../../db/schema.js";
-import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileLink, ProfileView, Theme } from "@thekeep/shared";
-import { normalizeTheme } from "@thekeep/shared";
-import { getSettings } from "../../settings.js";
+import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileLink, ProfileView } from "@thekeep/shared";
+import { parseUserThemeJson } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
 import type { CommandHandler } from "../types.js";
 
@@ -79,21 +78,6 @@ async function listPublicJournal(
 }
 
 /**
- * Parse a stored theme JSON. On null/parse-failure, fall back to the
- * sitewide admin-configured default theme.
- */
-async function parseTheme(
-  db: import("../../db/index.js").Db,
-  json: string | null,
-): Promise<Theme> {
-  if (json) {
-    try { return normalizeTheme(JSON.parse(json)); }
-    catch { /* fall through */ }
-  }
-  return (await getSettings(db)).defaultTheme;
-}
-
-/**
  * Resolve a name (master username OR character name) to a ProfileView.
  * Used by both /whois and the HTTP profile endpoint, plus the click-to-view
  * flow on the userlist.
@@ -124,7 +108,7 @@ async function lookupProfile(
         bioHtml: u.bioHtml,
         avatarUrl: u.avatarUrl,
         gender: u.gender,
-        theme: await parseTheme(db, u.themeJson),
+        theme: await parseUserThemeJson(db, u.themeJson),
         titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
         links: await listLinks(db, u.id, null),
         role: u.role,
@@ -149,7 +133,7 @@ async function lookupProfile(
   const owner = (await db.select().from(users).where(eq(users.id, c.userId)).limit(1))[0];
   if (!owner || owner.disabledAt) return null;
 
-  const theme = await parseTheme(db, c.themeJson ?? owner.themeJson);
+  const theme = await parseUserThemeJson(db, c.themeJson ?? owner.themeJson);
   return {
     kind: "character",
     profile: {
@@ -225,7 +209,7 @@ async function lookupRandomProfile(
         bioHtml: u.bioHtml,
         avatarUrl: u.avatarUrl,
         gender: u.gender,
-        theme: await parseTheme(db, u.themeJson),
+        theme: await parseUserThemeJson(db, u.themeJson),
         titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
         links: await listLinks(db, u.id, null),
         role: u.role,
@@ -263,7 +247,7 @@ async function lookupRandomProfile(
       portraits: await listPortraits(db, c.id),
       links: await listLinks(db, c.userId, c.id),
       journalEntries: await listPublicJournal(db, c.id),
-      theme: await parseTheme(db, c.themeJson ?? row.ownerThemeJson),
+      theme: await parseUserThemeJson(db, c.themeJson ?? row.ownerThemeJson),
       titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
       isPublic: c.isPublic,
       isNsfw: c.isNsfw,

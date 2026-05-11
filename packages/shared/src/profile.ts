@@ -118,6 +118,18 @@ export interface CharacterProfile {
   updatedAt: number;
 }
 
+/**
+ * Canonical account-role union. Ordered loosely from least to most powerful;
+ * `trusted` is a participation-earned auto-promotion that grants elevated
+ * rate limits, `mod` and `admin` are manually granted.
+ *
+ * Single source of truth — every server route, web component, and API
+ * response that types a `role` field must import from here so the four
+ * tiers stay in lockstep. Adding a new tier means changing one symbol
+ * and letting the compiler surface every site that needs to handle it.
+ */
+export type Role = "user" | "trusted" | "mod" | "admin";
+
 export interface MasterProfile {
   userId: string;
   username: string;
@@ -132,7 +144,7 @@ export interface MasterProfile {
   /** Owner-set external links (other profiles, OOC docs, refs). */
   links: ProfileLink[];
   /** Account-level role. Surfaced on the modal so site admins/mods are visibly marked. */
-  role: "user" | "trusted" | "mod" | "admin";
+  role: Role;
   /** Same semantics as on CharacterProfile. */
   isPublic: boolean;
   isNsfw: boolean;

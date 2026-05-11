@@ -9,7 +9,6 @@ export interface ClientToServerEvents {
   "chat:input": (payload: { roomId: string; text: string }, ack?: AckFn<{ ok: true } | AckError>) => void;
   "room:join": (payload: { roomId: string; password?: string }, ack?: AckFn<{ ok: true } | AckError>) => void;
   "room:leave": (payload: { roomId: string }) => void;
-  "presence:away": (payload: { away: boolean; reason?: string }) => void;
   /**
    * Client-side activity heartbeat. Emitted (throttled to ~30s) when the
    * user moves their mouse, types, or otherwise interacts with the page.
@@ -38,7 +37,6 @@ export interface ServerToClientEvents {
   /** A message was edited or soft-deleted (within its grace window). The client replaces the row with this updated version. */
   "message:update": (msg: ChatMessage) => void;
   "room:state": (payload: { room: RoomSummary; occupants: RoomOccupant[] }) => void;
-  "room:list": (rooms: RoomSummary[]) => void;
   "presence:update": (payload: { roomId: string; occupants: RoomOccupant[] }) => void;
   /** Server-driven UI hints - open the character editor, prompt for password, etc. */
   "ui:hint": (hint: UiHint) => void;
@@ -117,8 +115,7 @@ export type UiHint =
    * target room, so a sibling re-emitting room:join doesn't ping the
    * originator back.
    */
-  | { kind: "force-room-join"; roomId: string }
-  | { kind: "open-admin-panel" };
+  | { kind: "force-room-join"; roomId: string };
 
 /** Wire shape served by GET /commands. The help modal renders this. */
 export interface CommandDoc {

@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { ChatMessage } from "@thekeep/shared";
 import { ignores, messages, users } from "../../db/schema.js";
+import { pushTriggers } from "../../realtime/broadcast.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -141,5 +142,12 @@ export const whisperCommand: CommandHandler = {
         s.emit("message:new", out);
       }
     }
+
+    // Offline-recipient push. pushTriggers internally checks userIsOnline
+    // and skips when the recipient is connected, so calling unconditionally
+    // is correct. Without this, whisper push notifications (Phase 4) never
+    // fire — whispers don't route through addMessage, so the in-line
+    // pushTriggers call there doesn't see them.
+    void pushTriggers(ctx.io, ctx.db, out, ctx.user, "whisper");
   },
 };

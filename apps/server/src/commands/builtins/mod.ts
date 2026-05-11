@@ -1,6 +1,12 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { bans, mutes, roomMembers, rooms, users } from "../../db/schema.js";
-import { addMessage, broadcastPresence, broadcastRoomState } from "../../realtime/broadcast.js";
+import {
+  addMessage,
+  broadcastPresence,
+  broadcastRoomState,
+  findCanonicalLanding,
+  sendRoomBacklogTo,
+} from "../../realtime/broadcast.js";
 import { formatDuration, parseDuration } from "../duration.js";
 import { recordAudit } from "../../audit.js";
 import type { CommandContext, CommandHandler } from "../types.js";
@@ -73,7 +79,7 @@ export const kickCommand: CommandHandler = {
   name: "kick",
   aliases: ["boot"],
   usage: "/kick <username> [reason]",
-  description: "Boot a user from the current room (back to MainHall). Mod/owner/admin only.",
+  description: "Boot a user from the current room (back to the landing room). Mod/owner/admin only.",
   subcommands: [
     {
       verb: "<username>",
@@ -104,8 +110,11 @@ export const kickCommand: CommandHandler = {
       return notice(ctx, "PERM", "The keymaster can't be kicked.");
     }
 
-    // Boot every socket of the target out of this room and into MainHall.
-    const main = (await ctx.db.select().from(rooms).where(eq(rooms.isSystem, true)).limit(1))[0];
+    // Boot every socket of the target out of this room and into the
+    // canonical landing. After s.join we also push a fresh room:state and
+    // backlog to the booted socket — without those it's stuck on the old
+    // room's UI even though it's now joined the landing channel.
+    const landing = await findCanonicalLanding(ctx.db);
     const socks = await ctx.io.fetchSockets();
     let booted = 0;
     for (const s of socks) {
@@ -119,9 +128,10 @@ export const kickCommand: CommandHandler = {
           ? `You were kicked from this room by ${ctx.user.displayName}: ${reason}`
           : `You were kicked from this room by ${ctx.user.displayName}.`,
       });
-      if (main) {
-        s.join(`room:${main.id}`);
-        (s.data as { roomId?: string }).roomId = main.id;
+      if (landing) {
+        s.join(`room:${landing.id}`);
+        (s.data as { roomId?: string }).roomId = landing.id;
+        await sendRoomBacklogTo(s, ctx.db, landing.id, target.id);
       }
       booted++;
     }
@@ -140,7 +150,11 @@ export const kickCommand: CommandHandler = {
       reason: reason || null,
     });
     await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
-    if (main && booted > 0) await broadcastPresence(ctx.io, ctx.db, main.id);
+    // Landing destination needs full room state (membership + occupants),
+    // not just presence, so the booted socket's UI shows the right room
+    // metadata. broadcastRoomState fans out room:state to all in the
+    // channel — the booted socket included.
+    if (landing && booted > 0) await broadcastRoomState(ctx.io, ctx.db, landing.id);
   },
 };
 
@@ -402,7 +416,7 @@ export const banCommand: CommandHandler = {
     {
       verb: "<username>",
       usage: "/ban Bob",
-      description: "Permanent ban with no reason note. Boots their sockets to MainHall and refuses re-entry.",
+      description: "Permanent ban with no reason note. Boots their sockets to the landing room and refuses re-entry.",
     },
     {
       verb: "<duration>",
@@ -462,9 +476,11 @@ export const banCommand: CommandHandler = {
       });
 
     // Boot every live socket of the target out of this room. They go to
-    // MainHall - same flow as /kick but without the auto-rejoin loop, since
-    // the ban row will refuse the next /go back.
-    const main = (await ctx.db.select().from(rooms).where(eq(rooms.isSystem, true)).limit(1))[0];
+    // the canonical landing — same flow as /kick but without the auto-
+    // rejoin loop, since the ban row refuses the next /go back. Each
+    // booted socket also gets a fresh backlog so its message list
+    // matches the new room.
+    const landing = await findCanonicalLanding(ctx.db);
     const socks = await ctx.io.fetchSockets();
     let booted = 0;
     for (const s of socks) {
@@ -478,9 +494,10 @@ export const banCommand: CommandHandler = {
           ? `You were banned from this room for ${formatDuration(until.getTime() - Date.now())} by ${ctx.user.displayName}${reason ? `: ${reason}` : "."}`
           : `You were banned from this room by ${ctx.user.displayName}${reason ? `: ${reason}` : "."}`,
       });
-      if (main) {
-        s.join(`room:${main.id}`);
-        (s.data as { roomId?: string }).roomId = main.id;
+      if (landing) {
+        s.join(`room:${landing.id}`);
+        (s.data as { roomId?: string }).roomId = landing.id;
+        await sendRoomBacklogTo(s, ctx.db, landing.id, target.id);
       }
       booted++;
     }
@@ -501,7 +518,7 @@ export const banCommand: CommandHandler = {
       metadata: durationMs ? { durationMs } : { permanent: true },
     });
     await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
-    if (main && booted > 0) await broadcastPresence(ctx.io, ctx.db, main.id);
+    if (landing && booted > 0) await broadcastRoomState(ctx.io, ctx.db, landing.id);
   },
 };
 

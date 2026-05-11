@@ -1,4 +1,5 @@
 import type { WorldPage } from "@thekeep/shared";
+export { deriveSlug } from "@thekeep/shared";
 
 export interface WorldTreeNode {
   page: WorldPage;
@@ -30,19 +31,6 @@ export function buildWorldTree(pages: WorldPage[]): WorldTreeNode[] {
     }));
   }
   return build(null, 0);
-}
-
-/**
- * Slug derivation matching the server: lowercase, non-alphanumerics → `-`,
- * trim leading/trailing dashes, cap 60 chars. Used by the editor to
- * preview the slug before sending the create request.
- */
-export function deriveSlug(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
 }
 
 /** URL pattern used for shareable world links: /w/<slug>. */

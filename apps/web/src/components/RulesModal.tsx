@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
+import { Modal } from "./Modal.js";
 
 interface RulesPayload {
   rulesHtml: string;
@@ -36,11 +37,7 @@ export function RulesModal({ onClose }: Props) {
   }, []);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-      onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
-    >
+    <Modal onClose={onClose} zIndex={50}>
       <div
         onClick={(e) => e.stopPropagation()}
         className="flex h-[85vh] w-[min(720px,98vw)] flex-col rounded border border-keep-border bg-keep-bg shadow-xl"
@@ -79,6 +76,6 @@ export function RulesModal({ onClose }: Props) {
           Press <kbd className="rounded border border-keep-border bg-keep-bg px-1">Esc</kbd> to close.
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

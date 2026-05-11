@@ -9,6 +9,7 @@ import type {
   RoomSummary,
   ServerToClientEvents,
 } from "@thekeep/shared";
+import { extractMentions } from "@thekeep/shared";
 import {
   bans,
   characters,
@@ -113,8 +114,13 @@ export async function addMessage(
  * @mentions (to each mentioned user who has at least one push subscription
  * and no live socket). Always best-effort - failures are logged inside
  * pushToUser, never thrown.
+ *
+ * Exported so the whisper handler can fire push directly — whispers don't
+ * route through `addMessage` (which would broadcast to the whole room),
+ * so without an explicit call here offline-recipient push notifications
+ * never fire.
  */
-async function pushTriggers(
+export async function pushTriggers(
   io: Io,
   db: Db,
   msg: ChatMessage,
@@ -183,16 +189,6 @@ async function pushTriggers(
   }
 }
 
-/** Extract every lowercased @mention name from a body. Mirrors the client `extractMentions`. */
-function extractMentions(body: string): string[] {
-  const NAME_CLASS = "[\\p{L}\\p{N}_\\-]";
-  const RE = new RegExp(`(^|[^\\p{L}\\p{N}_\\-])@(${NAME_CLASS}{1,32})`, "gu");
-  const out: string[] = [];
-  for (const m of body.matchAll(RE)) {
-    if (m[2]) out.push(m[2].toLowerCase());
-  }
-  return out;
-}
 
 /**
  * Emit a `message:new` to every socket in the room EXCEPT those whose user
@@ -355,6 +351,88 @@ export async function addSystemMessage(
   });
 }
 
+/**
+ * Resolve the canonical landing room — `The_Spire` by name, falling back to
+ * the alphabetically-first system room if the canonical name has been
+ * renamed away. Used by every "where do we put this user" path: cold-
+ * connect with no sibling tab, kick/ban-relocation, and admin room-delete.
+ *
+ * Without the explicit name lookup the previous code grabbed
+ * `(rooms.where(isSystem)).limit(1)[0]` — SQLite's natural row order —
+ * which after a write reorder could land users in Tavern or Bazaar.
+ */
+export async function findCanonicalLanding(db: Db): Promise<typeof rooms.$inferSelect | null> {
+  const named = (await db.select().from(rooms).where(eq(rooms.name, "The_Spire")).limit(1))[0];
+  if (named) return named;
+  const fallback = (await db
+    .select()
+    .from(rooms)
+    .where(eq(rooms.isSystem, true))
+    .orderBy(asc(rooms.name))
+    .limit(1))[0];
+  return fallback ?? null;
+}
+
+/**
+ * Send the per-viewer-filtered recent backlog for `roomId` to a single
+ * socket. Mirrors the slice joinRoom assembles on a fresh join: ignored
+ * authors are dropped, whispers are visible only to sender/recipient,
+ * deleted bodies are blanked. Extracted so the moderation-relocate path
+ * (kick / ban / admin room-delete) can land the booted socket on a
+ * properly-populated chat log instead of leaving it stuck on the room
+ * they were just removed from.
+ *
+ * Accepts a structural type so it works with both `Socket` (from event
+ * handlers) and `RemoteSocket` (from `io.fetchSockets()`).
+ */
+export async function sendRoomBacklogTo(
+  socket: { emit(event: "message:bulk", payload: ChatMessage[]): unknown },
+  db: Db,
+  roomId: string,
+  viewerUserId: string,
+): Promise<void> {
+  const ignoredIds = new Set(
+    (await db
+      .select({ ignoredUserId: ignores.ignoredUserId })
+      .from(ignores)
+      .where(eq(ignores.userId, viewerUserId))).map((r) => r.ignoredUserId),
+  );
+  const recent = await db
+    .select()
+    .from(messages)
+    .where(eq(messages.roomId, roomId))
+    .orderBy(desc(messages.createdAt))
+    .limit(50);
+  const backlog: ChatMessage[] = recent
+    .filter((m) => !ignoredIds.has(m.userId))
+    .filter((m) => {
+      if (m.kind !== "whisper") return true;
+      return m.userId === viewerUserId || m.toUserId === viewerUserId;
+    })
+    .reverse()
+    .map((m) => ({
+      id: m.id,
+      roomId: m.roomId,
+      userId: m.userId,
+      characterId: m.characterId,
+      displayName: m.displayName,
+      kind: m.kind,
+      body: m.deletedAt ? "" : m.body,
+      color: m.color,
+      createdAt: +m.createdAt,
+      ...(m.toUserId ? { toUserId: m.toUserId } : {}),
+      ...(m.toDisplayName ? { toDisplayName: m.toDisplayName } : {}),
+      ...(m.replyToId ? { replyToId: m.replyToId } : {}),
+      ...(m.replyToDisplayName ? { replyToDisplayName: m.replyToDisplayName } : {}),
+      ...(m.replyToBodySnippet ? { replyToBodySnippet: m.replyToBodySnippet } : {}),
+      ...(m.moodSnapshot ? { moodSnapshot: m.moodSnapshot } : {}),
+      ...(m.npcVoicedBy ? { npcVoicedBy: m.npcVoicedBy } : {}),
+      ...(m.editedAt ? { editedAt: +m.editedAt } : {}),
+      ...(m.deletedAt ? { deletedAt: +m.deletedAt } : {}),
+    }));
+  socket.emit("message:bulk", backlog);
+}
+
 export async function joinRoom(
   io: Io,
   db: Db,
@@ -449,62 +527,13 @@ export async function joinRoom(
   await broadcastRoomState(io, db, roomId);
   await broadcastPresence(io, db, roomId);
 
-  // Send recent backlog to just this socket - minus history from anyone
-  // they have on /ignore. We filter at the DB level (NOT IN subquery) so a
-  // user with a long backlog of ignored authors doesn't pay for it client-side.
-  //
-  // PRIVACY: whispers are persisted in the room they were sent from (so
-  // users can scroll back through their own DMs), but they must NEVER leak
-  // to a third party. We exclude all whispers except those where this user
-  // is the sender or the recipient. Admins are NOT exempt - even moderation
-  // tooling never reads private content.
+  // Send recent backlog to just this socket. Whisper privacy + ignore
+  // filtering + soft-delete blanking all live in sendRoomBacklogTo so the
+  // moderation-relocate path uses the same logic.
   //
   // The arrival announcement is emitted AFTER the backlog so the joining
   // socket doesn't see it twice (once in backlog, once via room broadcast).
-  const ignoredIds = new Set(
-    (await db
-      .select({ ignoredUserId: ignores.ignoredUserId })
-      .from(ignores)
-      .where(eq(ignores.userId, user.id))).map((r) => r.ignoredUserId),
-  );
-  const recent = await db
-    .select()
-    .from(messages)
-    .where(eq(messages.roomId, roomId))
-    .orderBy(desc(messages.createdAt))
-    .limit(50);
-  const backlog: ChatMessage[] = recent
-    .filter((m) => !ignoredIds.has(m.userId))
-    .filter((m) => {
-      if (m.kind !== "whisper") return true;
-      // Whispers: only sender + recipient see them. Everyone else is excluded.
-      return m.userId === user.id || m.toUserId === user.id;
-    })
-    .reverse()
-    .map((m) => ({
-      id: m.id,
-      roomId: m.roomId,
-      userId: m.userId,
-      characterId: m.characterId,
-      displayName: m.displayName,
-      kind: m.kind,
-      // Soft-deleted messages render as a "[message removed]" placeholder
-      // on the client. Strip the body server-side so the original text never
-      // touches the wire after deletion.
-      body: m.deletedAt ? "" : m.body,
-      color: m.color,
-      createdAt: +m.createdAt,
-      ...(m.toUserId ? { toUserId: m.toUserId } : {}),
-      ...(m.toDisplayName ? { toDisplayName: m.toDisplayName } : {}),
-      ...(m.replyToId ? { replyToId: m.replyToId } : {}),
-      ...(m.replyToDisplayName ? { replyToDisplayName: m.replyToDisplayName } : {}),
-      ...(m.replyToBodySnippet ? { replyToBodySnippet: m.replyToBodySnippet } : {}),
-      ...(m.moodSnapshot ? { moodSnapshot: m.moodSnapshot } : {}),
-      ...(m.npcVoicedBy ? { npcVoicedBy: m.npcVoicedBy } : {}),
-      ...(m.editedAt ? { editedAt: +m.editedAt } : {}),
-      ...(m.deletedAt ? { deletedAt: +m.deletedAt } : {}),
-    }));
-  socket.emit("message:bulk", backlog);
+  await sendRoomBacklogTo(socket, db, roomId, user.id);
 
   // If the room has a /describe set, deliver it to JUST this socket as a
   // one-shot system message - not persisted, not broadcast. New visitors get
@@ -594,18 +623,23 @@ export async function userIsOnline(
   return false;
 }
 
-export async function broadcastRoomState(
-  io: Io,
+/**
+ * Single source of truth for the wire-shape of a room. Used by every
+ * surface that emits a RoomSummary (the websocket broadcasts AND the
+ * `GET /rooms` HTTP route) so the optional `linkedWorld`/`npcDisabled`/
+ * `messageExpiryMinutes`/`replyMode` fields always land populated. When
+ * /rooms used to construct its own summary inline, those fields were
+ * silently undefined, which broke the rail's primary-world grouping.
+ */
+export async function buildRoomSummary(
   db: Db,
-  roomId: string,
-): Promise<void> {
-  const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
-  if (!room) return;
+  room: typeof rooms.$inferSelect,
+): Promise<RoomSummary> {
   const memberCountRows = await db
     .select({ n: sql<number>`count(*)` })
     .from(roomMembers)
-    .where(eq(roomMembers.roomId, roomId));
-  const summary: RoomSummary = {
+    .where(eq(roomMembers.roomId, room.id));
+  return {
     id: room.id,
     name: room.name,
     type: room.type,
@@ -617,6 +651,16 @@ export async function broadcastRoomState(
     messageExpiryMinutes: room.messageExpiryMinutes,
     replyMode: room.replyMode,
   };
+}
+
+export async function broadcastRoomState(
+  io: Io,
+  db: Db,
+  roomId: string,
+): Promise<void> {
+  const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
+  if (!room) return;
+  const summary = await buildRoomSummary(db, room);
   const occupants = await currentOccupants(io, db, roomId);
   io.to(`room:${roomId}`).emit("room:state", { room: summary, occupants });
 }
@@ -674,9 +718,9 @@ async function pingWatchers(io: Io, db: Db, user: SessionUser): Promise<void> {
 
 /**
  * If a user-created room has no live sockets in it, delete it. System rooms
- * (MainHall and friends with isSystem=true) are exempt so users always have
- * a default landing place. Cascade FKs clean up room_members, messages,
- * bans, invites. Returns true if the room was actually removed.
+ * (those with isSystem=true, e.g. The_Spire) are exempt so users always
+ * have a default landing place. Cascade FKs clean up room_members,
+ * messages, bans, invites. Returns true if the room was actually removed.
  */
 export async function expireIfEmpty(io: Io, db: Db, roomId: string): Promise<boolean> {
   const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
@@ -702,28 +746,13 @@ export async function sendRoomStateTo(
 ): Promise<void> {
   const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
   if (!room) return;
-  const memberCountRows = await db
-    .select({ n: sql<number>`count(*)` })
-    .from(roomMembers)
-    .where(eq(roomMembers.roomId, roomId));
-  const summary: RoomSummary = {
-    id: room.id,
-    name: room.name,
-    type: room.type,
-    topic: room.topic,
-    ownerId: room.ownerId,
-    memberCount: memberCountRows[0]?.n ?? 0,
-    npcDisabled: room.npcDisabled,
-    linkedWorld: await loadLinkedWorld(db, room.id),
-    messageExpiryMinutes: room.messageExpiryMinutes,
-    replyMode: room.replyMode,
-  };
+  const summary = await buildRoomSummary(db, room);
   const occupants = await currentOccupants(io, db, roomId);
   socket.emit("room:state", { room: summary, occupants });
   socket.emit("presence:update", { roomId, occupants });
 }
 
-async function currentOccupants(io: Io, db: Db, roomId: string): Promise<RoomOccupant[]> {
+export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<RoomOccupant[]> {
   const sockets = await io.in(`room:${roomId}`).fetchSockets();
   const userIds = [...new Set(sockets.map((s) => (s.data as { userId?: string }).userId).filter(Boolean) as string[])];
   if (!userIds.length) return [];

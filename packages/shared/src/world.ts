@@ -121,3 +121,19 @@ export interface LinkedWorldRef {
 
 /** Hard upper bound on world page tree depth (root = depth 0). Enforced server-side. */
 export const WORLD_PAGE_DEPTH_CAP = 10;
+
+/**
+ * Slug derivation for worlds and pages: lowercase, non-alphanumerics → `-`,
+ * trim leading/trailing dashes, cap at 60 chars. The server uses this as a
+ * fallback when the user doesn't supply an explicit slug; the editor uses
+ * it for the live preview the user sees while typing a name. Both sides
+ * import from here so the preview never lies about what the server will
+ * accept.
+ */
+export function deriveSlug(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}

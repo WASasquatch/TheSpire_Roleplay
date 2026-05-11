@@ -26,6 +26,7 @@ import {
   addSystemMessage,
   broadcastPresence,
   expireIfEmpty,
+  findCanonicalLanding,
   joinRoom,
   schedulePendingDisconnect,
   userHasSocketInRoom,
@@ -335,9 +336,7 @@ async function main() {
       }
     }
     if (!initialRoomId) {
-      const landing =
-        (await db.select().from(rooms).where(eq(rooms.name, "The_Spire")).limit(1))[0]
-        ?? (await db.select().from(rooms).where(eq(rooms.isSystem, true)).limit(1))[0];
+      const landing = await findCanonicalLanding(db);
       if (landing) initialRoomId = landing.id;
     }
     if (initialRoomId) await joinRoom(io, db, socket, user, initialRoomId);

@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Theme, WorldDetail, WorldPage, WorldVisibility } from "@thekeep/shared";
 import { DEFAULT_THEME, WORLD_PAGE_DEPTH_CAP } from "@thekeep/shared";
 import { buildWorldTree, deriveSlug, type WorldTreeNode } from "../lib/worlds.js";
+import { readError } from "../lib/http.js";
 import { themeStyle } from "../lib/theme.js";
+import { Modal } from "./Modal.js";
 import { ThemePicker } from "./ThemePicker.js";
 
 interface Props {
@@ -80,7 +82,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
   // the world author's palette without leaking into the chat behind us.
   const modalStyle = detail?.world.theme ? themeStyle(detail.world.theme) : undefined;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <Modal onClose={onClose} zIndex={50}>
       <div
         style={modalStyle}
         className="flex max-h-[92vh] w-[min(1100px,98vw)] flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg text-keep-text shadow-xl"
@@ -187,7 +189,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
           </div>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -715,11 +717,3 @@ function collectDescendants(pages: WorldPage[], rootId: string): Set<string> {
   return out;
 }
 
-async function readError(r: Response): Promise<string> {
-  try {
-    const j = (await r.json()) as { error?: string; message?: string };
-    return j.error ?? j.message ?? `${r.status} ${r.statusText}`;
-  } catch {
-    return `${r.status} ${r.statusText}`;
-  }
-}

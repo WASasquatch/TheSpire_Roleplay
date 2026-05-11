@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Gender } from "../lib/gender.js";
 import { genderGlyph } from "../lib/gender.js";
+import { Modal } from "./Modal.js";
 
 export interface UserRow {
   userId: string;
@@ -67,11 +68,7 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
   }, [rows]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-      onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
-    >
+    <Modal onClose={onClose} zIndex={50}>
       <div
         onClick={(e) => e.stopPropagation()}
         className="flex h-[90vh] w-[min(720px,98vw)] flex-col rounded border border-keep-border bg-keep-bg shadow-xl"
@@ -177,6 +174,6 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
           master profile.
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

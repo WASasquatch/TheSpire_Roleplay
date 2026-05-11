@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { RoomOccupant, RoomSummary } from "@thekeep/shared";
 import { ToolPanel } from "./ToolPanel.js";
 import { UserNameTag } from "./UserNameTag.js";
@@ -47,6 +48,18 @@ export function RoomsTree({
   // back to the original static, always-visible rail. We avoid a separate
   // mobile component by toggling via Tailwind's responsive variants.
   const drawerOpen = isOpen ?? false;
+
+  // Pin the caller's current room to the top of the rail so it stays
+  // visible on installs with many rooms. The server returns rooms in
+  // alphabetical order; we partition just enough to lift the active
+  // room out and leave the rest in their original order. No-op when
+  // the user isn't in any room or the room isn't in this list.
+  const orderedRooms = useMemo(() => {
+    if (!currentRoomId) return rooms;
+    const idx = rooms.findIndex((r) => r.id === currentRoomId);
+    if (idx <= 0) return rooms;
+    return [rooms[idx]!, ...rooms.slice(0, idx), ...rooms.slice(idx + 1)];
+  }, [rooms, currentRoomId]);
   return (
     <aside
       // Solid bg-keep-bg on mobile so the chat doesn't bleed through the
@@ -85,7 +98,7 @@ export function RoomsTree({
           <div className="px-3 py-2 text-xs text-keep-muted">(no rooms)</div>
         ) : (
           <ul>
-            {rooms.map((r) => (
+            {orderedRooms.map((r) => (
               <RoomGroup
                 key={r.id}
                 room={r}
@@ -234,7 +247,7 @@ function groupByPrimaryWorld(occupants: RoomOccupant[]): OccupantGroup[] {
  * elsewhere via UserNameTag's `italic` prop - so admin doesn't need a
  * prefix here.
  */
-export function resolveRolePrefix(o: RoomOccupant): string {
+function resolveRolePrefix(o: RoomOccupant): string {
   if (o.role === "owner") return "♛";
   if (o.role === "mod" || o.accountRole === "mod") return "★";
   return "";

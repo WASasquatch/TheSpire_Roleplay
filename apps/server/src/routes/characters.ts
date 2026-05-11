@@ -7,8 +7,7 @@ import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared
 import { characterPortraits, characters, users } from "../db/schema.js";
 import { sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
-import { normalizeTheme } from "@thekeep/shared";
-import { getSettings } from "../settings.js";
+import { parseUserThemeJson } from "../settings.js";
 import { broadcastPresence } from "../realtime/broadcast.js";
 import type { Db } from "../db/index.js";
 
@@ -318,7 +317,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       awayMessage: u.awayMessage,
       activeCharacterId: u.activeCharacterId,
       activeCharacterName,
-      theme: await parseUserTheme(db, u.themeJson),
+      theme: await parseUserThemeJson(db, u.themeJson),
       notifyPref: u.notifyPref,
       role: u.role,
       isPublic: u.isPublic,
@@ -326,6 +325,13 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       welcome: wantsWelcome
         ? { html: settings.newUserWelcomeHtml, hash: settings.newUserWelcomeHash }
         : null,
+      // Admin-tunable input caps surfaced to the editor so the bio counter
+      // matches whatever the server will accept on save. Without these the
+      // UI hardcoded "50,000" and silently lied after admin tuning.
+      limits: {
+        maxBioLength: settings.maxBioLength,
+        maxMessageLength: settings.maxMessageLength,
+      },
     };
   });
 
@@ -540,10 +546,3 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
   });
 }
 
-async function parseUserTheme(db: Db, json: string | null) {
-  if (json) {
-    try { return normalizeTheme(JSON.parse(json)); }
-    catch { /* fall through */ }
-  }
-  return (await getSettings(db)).defaultTheme;
-}

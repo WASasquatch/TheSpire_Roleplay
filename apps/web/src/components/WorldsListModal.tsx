@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { WorldMembership, WorldSummary, WorldVisibility } from "@thekeep/shared";
 import { deriveSlug } from "../lib/worlds.js";
+import { readError } from "../lib/http.js";
+import { Modal } from "./Modal.js";
 
 interface Props {
   onClose: () => void;
@@ -91,7 +93,7 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <Modal onClose={onClose} zIndex={50}>
       <div
         className="flex max-h-[88vh] w-[min(720px,96vw)] flex-col overflow-hidden rounded border border-keep-rule bg-keep-parchment shadow-xl"
         onClick={(e) => e.stopPropagation()}
@@ -256,7 +258,7 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
           ) : null}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -375,11 +377,3 @@ function NewWorldForm({
   );
 }
 
-async function readError(r: Response): Promise<string> {
-  try {
-    const j = (await r.json()) as { error?: string; message?: string };
-    return j.error ?? j.message ?? `${r.status} ${r.statusText}`;
-  } catch {
-    return `${r.status} ${r.statusText}`;
-  }
-}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ChatMessage, PrivateWorldStub, ProfileView, Theme, WorldDetail } from "@thekeep/shared";
+import type { ChatMessage, PrivateWorldStub, ProfileView, Role, Theme, WorldDetail } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
@@ -10,6 +10,7 @@ import { MessageList } from "./components/MessageList.js";
 import { MutualPrompts } from "./components/MutualPrompts.js";
 import { ProfileEditor } from "./components/ProfileEditor.js";
 import { ProfileModal } from "./components/ProfileModal.js";
+import { RoomPasswordModal } from "./components/RoomPasswordModal.js";
 import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
 import { RulesModal } from "./components/RulesModal.js";
 import { UsersModal } from "./components/UsersModal.js";
@@ -63,7 +64,7 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     fetch("/auth/me", { credentials: "include" })
-      .then(async (r) => (r.ok ? (r.json() as Promise<{ id: string; username: string; role: "user" | "mod" | "admin" }>) : null))
+      .then(async (r) => (r.ok ? (r.json() as Promise<{ id: string; username: string; role: Role }>) : null))
       .then((j) => {
         if (cancelled) return;
         if (j) setMe({ id: j.id, username: j.username, role: j.role });
@@ -476,7 +477,6 @@ function Chat() {
   const setMessages = useChat((s) => s.setMessages);
   const setCurrentRoom = useChat((s) => s.setCurrentRoom);
   const setNotice = useChat((s) => s.setNotice);
-  const setHint = useChat((s) => s.setHint);
   const setOpenProfile = useChat((s) => s.setOpenProfile);
   const openEditor = useChat((s) => s.openEditor);
   const closeEditor = useChat((s) => s.closeEditor);
@@ -496,6 +496,10 @@ function Chat() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState<{ filter?: string } | null>(null);
   const [usersOpen, setUsersOpen] = useState<{ query?: string } | null>(null);
+  // Password prompt for private rooms — set when the server emits a
+  // `prompt-room-password` ui:hint (rail click → server says "needs
+  // password"). Cleared on cancel or successful join.
+  const [pwPrompt, setPwPrompt] = useState<{ roomId: string; roomName: string } | null>(null);
   // Worldbuilding modals. Only one is visible at a time but state lives
   // independently so e.g. closing the viewer doesn't tear down the list.
   const [worldsListOpen, setWorldsListOpen] = useState(false);
@@ -789,8 +793,9 @@ function Chat() {
           }
           break;
         }
-        default:
-          setHint(h);
+        case "prompt-room-password":
+          setPwPrompt({ roomId: h.roomId, roomName: h.roomName });
+          break;
       }
     });
 
@@ -825,7 +830,7 @@ function Chat() {
       socket.off("ui:hint");
       socket.off("mutual:settled");
     };
-  }, [socket, setRoom, setOccupants, appendMessage, updateMessage, setMessages, setCurrentRoom, setNotice, setHint, setOpenProfile, openEditor, setRefreshIntervalSec, setMe]);
+  }, [socket, setRoom, setOccupants, appendMessage, updateMessage, setMessages, setCurrentRoom, setNotice, setOpenProfile, openEditor, setRefreshIntervalSec, setMe]);
 
   function send(text: string) {
     if (!currentRoomId) return;
@@ -1113,6 +1118,14 @@ function Chat() {
         />
       ) : null}
       {rulesOpen ? <RulesModal onClose={() => setRulesOpen(false)} /> : null}
+      {pwPrompt ? (
+        <RoomPasswordModal
+          roomId={pwPrompt.roomId}
+          roomName={pwPrompt.roomName}
+          socket={socket}
+          onClose={() => setPwPrompt(null)}
+        />
+      ) : null}
       {helpOpen ? (
         <HelpModal
           onClose={() => setHelpOpen(null)}

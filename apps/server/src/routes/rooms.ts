@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import type {
   ClientToServerEvents,
@@ -7,9 +7,10 @@ import type {
   RoomSummary,
   ServerToClientEvents,
 } from "@thekeep/shared";
-import { characters, roomMembers, rooms, users } from "../db/schema.js";
+import { rooms } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
+import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -70,113 +71,21 @@ export async function registerRoomsRoutes(
     const allRooms = [...publicRows, ...extraPrivate];
     if (allRooms.length === 0) return { rooms: [] };
 
-    const allRoomIds = allRooms.map((r) => r.id);
-
-    // 3. Pull socket occupants per room. We do one fetchSockets() and bucket
-    //    by room.
-    const allSockets = await io.fetchSockets();
-    const userIdsByRoom = new Map<string, Set<string>>();
-    const allOnlineUserIds = new Set<string>();
-    for (const s of allSockets) {
-      const uid = (s.data as { userId?: string }).userId;
-      if (!uid) continue;
-      for (const r of s.rooms) {
-        if (!r.startsWith("room:")) continue;
-        const rid = r.slice(5);
-        if (!allRoomIds.includes(rid)) continue;
-        let set = userIdsByRoom.get(rid);
-        if (!set) {
-          set = new Set();
-          userIdsByRoom.set(rid, set);
-        }
-        set.add(uid);
-        allOnlineUserIds.add(uid);
-      }
-    }
-
-    // 4. Fetch user + active-character data for everyone online.
-    let userRowsById = new Map<string, typeof users.$inferSelect>();
-    let charById = new Map<string, typeof characters.$inferSelect>();
-    if (allOnlineUserIds.size) {
-      const userRows = await db
-        .select()
-        .from(users)
-        .where(inArray(users.id, [...allOnlineUserIds]));
-      userRowsById = new Map(userRows.map((u) => [u.id, u]));
-
-      const charIds = userRows.map((u) => u.activeCharacterId).filter((v): v is string => !!v);
-      if (charIds.length) {
-        const charRows = await db
-          .select()
-          .from(characters)
-          .where(and(inArray(characters.id, charIds), isNull(characters.deletedAt)));
-        charById = new Map(charRows.map((c) => [c.id, c]));
-      }
-    }
-
-    // 5. Member roles per room (for the ♛/★ glyphs on occupants).
-    const memberRows = await db
-      .select()
-      .from(roomMembers)
-      .where(inArray(roomMembers.roomId, allRoomIds));
-    const roleByRoomUser = new Map<string, "owner" | "mod" | "member">();
-    for (const m of memberRows) {
-      roleByRoomUser.set(`${m.roomId}::${m.userId}`, m.role);
-    }
-
-    // 6. DB member counts (totals - different from currently-online).
-    const counts = await db
-      .select({ roomId: roomMembers.roomId, n: sql<number>`count(*)` })
-      .from(roomMembers)
-      .where(inArray(roomMembers.roomId, allRoomIds))
-      .groupBy(roomMembers.roomId);
-    const countByRoom = new Map(counts.map((r) => [r.roomId, r.n]));
-
-    // 7. Assemble.
-    const result: RoomWithOccupants[] = allRooms.map((r) => {
-      const onlineIds = userIdsByRoom.get(r.id) ?? new Set<string>();
-      const occupants: RoomOccupant[] = [...onlineIds]
-        .map((uid) => userRowsById.get(uid))
-        .filter((u): u is NonNullable<typeof u> => !!u)
-        .map((u) => {
-          const c = u.activeCharacterId ? charById.get(u.activeCharacterId) : undefined;
-          return {
-            userId: u.id,
-            displayName: c ? c.name : u.username,
-            characterId: c?.id ?? null,
-            away: u.awayMessage != null,
-            awayMessage: u.awayMessage,
-            chatColor: u.chatColor,
-            gender: resolveGender(u.gender, c?.statsJson),
-            role: roleByRoomUser.get(`${r.id}::${u.id}`) ?? "member",
-          };
-        })
-        .sort((a, b) => a.displayName.localeCompare(b.displayName));
-
-      return {
-        id: r.id,
-        name: r.name,
-        type: r.type,
-        topic: r.topic,
-        ownerId: r.ownerId,
-        memberCount: countByRoom.get(r.id) ?? 0,
-        occupants,
-      };
-    });
+    // Delegate summary + occupant assembly to the shared builders so this
+    // route returns the same shape as the websocket `room:state`/
+    // `presence:update` events. Without unification, fields like
+    // `linkedWorld`/`primaryWorld`/`accountRole`/`mood` were silently
+    // missing from /rooms and the rail UI lost half its features.
+    const result: RoomWithOccupants[] = await Promise.all(
+      allRooms.map(async (r): Promise<RoomWithOccupants> => {
+        const summary = await buildRoomSummary(db, r);
+        const occupants = (await currentOccupants(io, db, r.id))
+          .slice()
+          .sort((a, b) => a.displayName.localeCompare(b.displayName));
+        return { ...summary, occupants };
+      }),
+    );
 
     return { rooms: result };
   });
-}
-
-function resolveGender(
-  userGender: "male" | "female" | "nonbinary" | "other" | "undisclosed",
-  characterStatsJson?: string | null,
-): "male" | "female" | "nonbinary" | "other" | "undisclosed" {
-  if (!characterStatsJson) return userGender;
-  try {
-    const parsed = JSON.parse(characterStatsJson) as { gender?: string };
-    const g = parsed.gender?.toLowerCase();
-    if (g === "male" || g === "female" || g === "nonbinary" || g === "other") return g;
-  } catch { /* fall through */ }
-  return userGender;
 }

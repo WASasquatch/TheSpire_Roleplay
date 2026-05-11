@@ -98,7 +98,7 @@ export function MessageList({ messages, occupants, selfUserId, roomType, replyMo
     return (
       <div
         ref={ref}
-        className="flex-1 overflow-y-auto px-4 py-2 leading-relaxed"
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-2 leading-relaxed"
         style={{ fontSize: FONT_PX[fontStep] }}
       >
         {ordered.map((m) => {

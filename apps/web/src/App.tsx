@@ -945,8 +945,8 @@ function Chat() {
           Messages auto-expire after {formatExpiry(room.messageExpiryMinutes)}
         </div>
       ) : null}
-      <div className="relative flex flex-1 overflow-hidden">
-        <main className="flex flex-1 flex-col">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <main className="flex min-h-0 flex-1 flex-col">
           <MessageList
             messages={messages}
             occupants={occ}

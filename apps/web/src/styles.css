@@ -27,6 +27,21 @@
     margin: 0;
     background-color: rgb(var(--keep-bg) / 1);
     color: rgb(var(--keep-text) / 1);
+    /*
+     * Lock the document to the viewport so the chat shell (h-dvh) owns
+     * scrolling internally. Without this, any flex child whose min-height
+     * isn't constrained pushes the page taller than the viewport and the
+     * document itself becomes scrollable — meaning on mobile you have to
+     * swipe past the chat history before the top banner / bottom composer
+     * become reachable. Modals all use `fixed inset-0` and scroll
+     * internally so this doesn't clip them.
+     */
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  #root {
+    height: 100%;
   }
 }
 

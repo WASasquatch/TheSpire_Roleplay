@@ -330,6 +330,28 @@ export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Pro
     setCaret(el.selectionStart ?? value.length);
   }
 
+  // Mobile newline insertion. On-screen keyboards don't have Shift+Enter,
+  // and the Enter key on most mobile keyboards is bound to submit — so
+  // multi-line posters need an explicit button. Inserts at the caret (or
+  // replaces the selection) and restores the caret one char past the
+  // inserted newline. Visible only on mobile via `md:hidden`.
+  function insertNewline() {
+    const el = inputRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? start;
+    const next = value.slice(0, start) + "\n" + value.slice(end);
+    onChange(next);
+    const newCaret = start + 1;
+    requestAnimationFrame(() => {
+      const el2 = inputRef.current;
+      if (!el2) return;
+      el2.focus();
+      el2.setSelectionRange(newCaret, newCaret);
+      setCaret(newCaret);
+    });
+  }
+
   return (
     <form
       onSubmit={submit}
@@ -370,6 +392,11 @@ export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Pro
           onSelect={syncCaret}
           onKeyDown={onKeyDown}
           rows={1}
+          // enterKeyHint relabels the on-screen keyboard's return key to
+          // "Send" so mobile users see the right affordance — Enter
+          // submits, the dedicated ↵ button (mobile-only) inserts a
+          // newline.
+          enterKeyHint="send"
           placeholder="Type a message... (Shift+Enter for a new line)"
           // text-base on mobile prevents iOS Safari from auto-zooming on focus
           // (anything below 16px triggers zoom). md+ keeps our compact size.
@@ -385,6 +412,18 @@ export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Pro
           autoFocus
         />
       </div>
+      {/* Mobile-only newline button — fills in for Shift+Enter which the
+          on-screen keyboard can't produce. Matches the rail-toggle's
+          height so the row stays flush. */}
+      <button
+        type="button"
+        onClick={insertNewline}
+        aria-label="Insert line break"
+        title="Insert line break"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-base hover:bg-keep-banner md:hidden"
+      >
+        ↵
+      </button>
       <button
         type="submit"
         // Pinned to h-10 (mobile) / md:h-8 so the button's height matches

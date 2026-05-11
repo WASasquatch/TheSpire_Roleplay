@@ -917,7 +917,11 @@ function Chat() {
     // h-dvh (dynamic viewport height) so mobile keyboards reflow properly
     // instead of the chat being pushed off-screen when the on-screen keyboard
     // appears. Falls back to h-screen on browsers that don't support `dvh`.
-    <div className="flex h-screen h-dvh flex-col">
+    // `overflow-hidden` is what makes the shell *own* its scrollable region:
+    // without it, any flex child whose min-height isn't constrained spills
+    // past h-dvh and the document itself becomes scrollable on mobile,
+    // pushing the banner above the viewport.
+    <div className="flex h-screen h-dvh flex-col overflow-hidden">
       <Banner
         navLinksVersion={navLinksVersion}
         onOpenRules={() => setRulesOpen(true)}

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import DOMPurify from "dompurify";
 import type { AuditEntry, ReportEntry, Role, Theme, ThreadCategory } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
@@ -25,25 +25,34 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
         onClick={(e) => e.stopPropagation()}
         className="keep-frame max-h-[92vh] w-[min(900px,95vw)] overflow-hidden rounded bg-keep-parchment"
       >
-        <div className="flex items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <div className="flex items-center gap-3">
-            <h2 className="font-action text-lg">Admin</h2>
-            <nav className="flex gap-1 text-xs uppercase tracking-widest">
-              <TabBtn active={tab === "overview"} onClick={() => setTab("overview")}>Overview</TabBtn>
-              <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>Settings</TabBtn>
-              <TabBtn active={tab === "branding"} onClick={() => setTab("branding")}>Branding</TabBtn>
-              <TabBtn active={tab === "rules"} onClick={() => setTab("rules")}>Rules</TabBtn>
-              <TabBtn active={tab === "links"} onClick={() => setTab("links")}>Nav Links</TabBtn>
-              <TabBtn active={tab === "affiliates"} onClick={() => setTab("affiliates")}>Affiliates</TabBtn>
-              <TabBtn active={tab === "commands"} onClick={() => setTab("commands")}>Commands</TabBtn>
-              <TabBtn active={tab === "titles"} onClick={() => setTab("titles")}>Titles</TabBtn>
-              <TabBtn active={tab === "rooms"} onClick={() => setTab("rooms")}>Rooms</TabBtn>
-              <TabBtn active={tab === "users"} onClick={() => setTab("users")}>Users</TabBtn>
-              <TabBtn active={tab === "reports"} onClick={() => setTab("reports")}>Reports</TabBtn>
-              <TabBtn active={tab === "audit"} onClick={() => setTab("audit")}>Audit</TabBtn>
-            </nav>
-          </div>
-          <button onClick={onClose} className="text-sm text-keep-muted hover:text-keep-text">
+        {/* Header. Three flex children: Admin title (shrink-0), the tab
+            strip (flex-1 + min-w-0 + overflow-x-auto so it scrolls
+            horizontally on narrow viewports), and the close button
+            (shrink-0 so it's always reachable no matter how many tabs
+            are defined). Previously the close button got pushed off the
+            right edge on mobile because the tab strip's intrinsic width
+            grew past the viewport. */}
+        <div className="flex items-center gap-2 border-b border-keep-rule bg-keep-banner px-4 py-2">
+          <h2 className="shrink-0 font-action text-lg">Admin</h2>
+          {/* `keep-scroll-strip` (defined in styles.css) hides the
+              scrollbar on mobile so swipe is the only affordance, and
+              swaps in a thin themed scrollbar with reserved bottom
+              padding on md+ so it never underlines the tab labels. */}
+          <nav className="keep-scroll-strip flex min-w-0 flex-1 gap-1 overflow-x-auto text-xs uppercase tracking-widest">
+            <TabBtn active={tab === "overview"} onClick={() => setTab("overview")}>Overview</TabBtn>
+            <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>Settings</TabBtn>
+            <TabBtn active={tab === "branding"} onClick={() => setTab("branding")}>Branding</TabBtn>
+            <TabBtn active={tab === "rules"} onClick={() => setTab("rules")}>Rules</TabBtn>
+            <TabBtn active={tab === "links"} onClick={() => setTab("links")}>Nav Links</TabBtn>
+            <TabBtn active={tab === "affiliates"} onClick={() => setTab("affiliates")}>Affiliates</TabBtn>
+            <TabBtn active={tab === "commands"} onClick={() => setTab("commands")}>Commands</TabBtn>
+            <TabBtn active={tab === "titles"} onClick={() => setTab("titles")}>Titles</TabBtn>
+            <TabBtn active={tab === "rooms"} onClick={() => setTab("rooms")}>Rooms</TabBtn>
+            <TabBtn active={tab === "users"} onClick={() => setTab("users")}>Users</TabBtn>
+            <TabBtn active={tab === "reports"} onClick={() => setTab("reports")}>Reports</TabBtn>
+            <TabBtn active={tab === "audit"} onClick={() => setTab("audit")}>Audit</TabBtn>
+          </nav>
+          <button onClick={onClose} className="shrink-0 text-sm text-keep-muted hover:text-keep-text">
             close
           </button>
         </div>
@@ -72,7 +81,10 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
     <button
       type="button"
       onClick={onClick}
-      className={`rounded border border-keep-rule px-2 py-0.5 ${active ? "bg-keep-bg" : "bg-keep-banner/40 hover:bg-keep-banner"}`}
+      // `shrink-0 whitespace-nowrap` keeps each tab at its intrinsic
+      // size inside the scrolling nav — without these, tabs would
+      // squish to single letters before the strip would start scrolling.
+      className={`shrink-0 whitespace-nowrap rounded border border-keep-rule px-2 py-0.5 ${active ? "bg-keep-bg" : "bg-keep-banner/40 hover:bg-keep-banner"}`}
     >
       {children}
     </button>
@@ -2476,6 +2488,22 @@ function RoomsTab() {
   const [occupants, setOccupants] = useState<Array<{ userId: string; username: string; role: string }>>([]);
   /** Open form: { mode: "create" } | { mode: "edit", room: AdminRoom } | null */
   const [editing, setEditing] = useState<{ mode: "create" } | { mode: "edit"; room: AdminRoom } | null>(null);
+  // Scroll the form into view whenever `editing` flips to a non-null
+  // value. Without this the form mounts above the rooms table (where
+  // it logically belongs in the markup) and a mobile user who clicked
+  // "Edit" on a row near the bottom of the table sees no visible
+  // change — the form is offscreen above the current scroll position.
+  const formRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!editing) return;
+    // Defer one frame so the form has actually rendered before we try
+    // to scroll to it; scrollIntoView on a not-yet-mounted ref is a
+    // no-op.
+    const id = window.requestAnimationFrame(() => {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [editing]);
 
   async function reload() {
     setLoading(true);
@@ -2609,14 +2637,16 @@ function RoomsTab() {
       {error ? <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div> : null}
 
       {editing ? (
-        <RoomForm
-          mode={editing.mode}
-          {...(editing.mode === "edit" ? { initial: draftFromRoom(editing.room), original: editing.room } : {})}
-          onCancel={() => setEditing(null)}
-          onSubmit={editing.mode === "create"
-            ? submitCreate
-            : (draft: RoomDraft) => submitEdit(editing.room, draft)}
-        />
+        <div ref={formRef}>
+          <RoomForm
+            mode={editing.mode}
+            {...(editing.mode === "edit" ? { initial: draftFromRoom(editing.room), original: editing.room } : {})}
+            onCancel={() => setEditing(null)}
+            onSubmit={editing.mode === "create"
+              ? submitCreate
+              : (draft: RoomDraft) => submitEdit(editing.room, draft)}
+          />
+        </div>
       ) : null}
 
       {loading ? (

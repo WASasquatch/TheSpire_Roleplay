@@ -87,26 +87,45 @@ export function originFromRequest(req: FastifyRequest): string {
 export async function renderSplashHtml(
   db: Db,
   origin: string,
-  _pathname: string,
+  pathname: string,
   sourceHtml: string,
 ): Promise<string> {
   let html = sourceHtml;
 
   const s = await getSettings(db);
 
-  // Title falls back to "The Spire" if siteName was cleared. metaDescription
-  // falls back to a stripped welcomeHtml summary if admin hasn't written
-  // one - either is better than an empty description.
-  const title = s.siteName?.trim() || "The Spire";
-  const description =
+  const siteName = s.siteName?.trim() || "The Spire";
+  const siteDescription =
     s.metaDescription?.trim() ||
     (s.welcomeHtml ? stripToText(s.welcomeHtml) : "") ||
     "A roleplay-focused chat sanctuary.";
-  // The Spire is single-page - everything past login is auth-walled and
-  // shouldn't be indexed. Pin canonical / og:url to the origin root so SPA-
-  // fallback hits (which we now 404, but kept defensively) and any indexer
-  // that crawled an old non-/ URL roll up to the same canonical.
-  const canonicalUrl = `${origin}/`;
+
+  // Per-route SEO. /login and /register are bookmarkable form pages, so
+  // each gets its own title + description + canonical URL — otherwise
+  // crawlers see three identical pages and duplicate-content rules
+  // collapse them into one, costing us the targeted keyword space.
+  // Deep-link routes (/p/, /u/, /w/) keep the site-level defaults
+  // because their content is rendered client-side and the actual public
+  // profile/world pages serve their own meta from the routes that
+  // populate the modal — the SPA shell here is just a loader.
+  let title: string;
+  let description: string;
+  let canonicalUrl: string;
+  if (pathname === "/login") {
+    title = `Log in — ${siteName}`;
+    description = `Sign in to ${siteName} to continue your stories, manage characters, and rejoin your circles.`;
+    canonicalUrl = `${origin}/login`;
+  } else if (pathname === "/register") {
+    title = `Create your character — ${siteName}`;
+    description = `Join ${siteName}. Build a character, step into the worlds, and find your roleplay circle.`;
+    canonicalUrl = `${origin}/register`;
+  } else {
+    // `/`, deep links, anything else — site-level defaults. Canonical
+    // points to `/` so crawler-side dedup folds non-canonical hits up.
+    title = siteName;
+    description = siteDescription;
+    canonicalUrl = `${origin}/`;
+  }
 
   const titleAttr = escapeHtmlAttr(title);
   const descAttr = escapeHtmlAttr(description);
@@ -196,8 +215,12 @@ export function renderRobotsTxt(origin: string): string {
   ].join("\n");
 }
 
-/** Minimal sitemap.xml. Only the splash URL is exposed - everything past
- *  login is auth-walled and shouldn't be indexed. */
+/** Sitemap.xml. Exposes the three public entrance URLs: the marketing
+ *  splash at `/`, the login form at `/login`, and the registration form
+ *  at `/register`. Everything past auth is walled and intentionally
+ *  omitted. Priorities reflect intent: `/` is the canonical entrance,
+ *  `/register` is the conversion target, `/login` is the returning-user
+ *  destination. */
 export function renderSitemapXml(origin: string): string {
   const today = new Date().toISOString().slice(0, 10);
   return [
@@ -208,6 +231,18 @@ export function renderSitemapXml(origin: string): string {
     `    <lastmod>${today}</lastmod>`,
     `    <changefreq>weekly</changefreq>`,
     `    <priority>1.0</priority>`,
+    `  </url>`,
+    `  <url>`,
+    `    <loc>${origin}/register</loc>`,
+    `    <lastmod>${today}</lastmod>`,
+    `    <changefreq>monthly</changefreq>`,
+    `    <priority>0.9</priority>`,
+    `  </url>`,
+    `  <url>`,
+    `    <loc>${origin}/login</loc>`,
+    `    <lastmod>${today}</lastmod>`,
+    `    <changefreq>monthly</changefreq>`,
+    `    <priority>0.6</priority>`,
     `  </url>`,
     `</urlset>`,
     "",

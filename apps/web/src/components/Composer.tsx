@@ -866,8 +866,13 @@ export function Composer({
       ) : null}
 
       <div className="flex items-end gap-2">
-      {/* Mobile-only rooms drawer toggle. Hidden on md+ where the rail is
-          always visible. */}
+      {/* Mobile-only rooms drawer toggle. Hidden on md+ where the rail
+          is always visible. Uses a chat-bubble glyph (not ☰) so it
+          reads as "rooms / chat" and stays visually distinct from the
+          banner's top-right hamburger, which is the site nav (Rules /
+          Admin / Exit). Two hamburgers in opposite corners read as the
+          same control to users; differentiating the glyph by purpose
+          fixes the confusion. */}
       {onOpenRail ? (
         <button
           type="button"
@@ -876,7 +881,7 @@ export function Composer({
           title="Rooms"
           className="keep-button flex h-10 w-10 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-base hover:bg-keep-banner md:hidden"
         >
-          ☰
+          💬
         </button>
       ) : null}
       <div className="relative flex-1">
@@ -988,7 +993,15 @@ function FmtButton({
       aria-label={title}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
-      className="flex h-7 min-w-7 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 px-1.5 text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+      // Square `h-8 w-8` (32px) — previously `h-7 min-w-7 px-1.5`,
+      // which let the `<>` button stretch wider than the single-char
+      // buttons and let emoji glyphs (👁 ❝ 🔗 🖼) inflate the visual
+      // bounds inconsistently across single-char text labels (B I S).
+      // Forcing equal dimensions + `text-sm leading-none` normalizes
+      // the row on mobile (which is where the misalignment was most
+      // visible, because mobile renders emoji and text with bigger
+      // baseline differences than desktop).
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none text-keep-muted hover:bg-keep-banner hover:text-keep-text"
     >
       {children}
     </button>

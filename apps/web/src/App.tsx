@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, WorldDetail } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
+import { SplashLanding } from "./components/SplashLanding.js";
 import { Banner } from "./components/Banner.js";
 import { Composer } from "./components/Composer.js";
 import { HelpModal } from "./components/HelpModal.js";
@@ -395,11 +396,8 @@ export function App() {
   }
 
   if (!me) {
-    // Anonymous + private deep-link stub → AuthGate with a hint banner so
-    // the visitor knows why they hit the wall. Or anon with no deep-link
-    // at all → plain AuthGate.
     return (
-      <AuthGate
+      <UnauthRouter
         {...(profileStub
           ? { pendingProfileHint: { name: profileStub.name, isPrivate: true } }
           : worldStub
@@ -409,6 +407,64 @@ export function App() {
     );
   }
   return <Chat />;
+}
+
+/**
+ * Unauth-side router. Drives which face of the entrance the visitor sees
+ * based on `window.location.pathname`:
+ *
+ *   - `/` (and anything we don't otherwise route)  → SplashLanding (marketing)
+ *   - `/login`                                     → AuthGate (login form)
+ *   - `/register`                                  → AuthGate (register form)
+ *   - deep-link gates (/p/, /w/) come in with a    → AuthGate with hint
+ *     `pending*Hint` from the parent; we always
+ *     route those to AuthGate regardless of path
+ *     so the hint actually surfaces.
+ *
+ * SPA navigation between these uses pushState + a synthetic popstate so
+ * the parent re-renders without a full page reload, keeping bundle warm
+ * and theme/state alive across the transition. Hard refresh / direct
+ * navigation still works because the server registers `/login` and
+ * `/register` as serveSplash routes that ship the same index.html.
+ */
+function UnauthRouter(props: {
+  pendingProfileHint?: { name: string; isPrivate: boolean };
+  pendingWorldHint?: { name: string; slug: string };
+}) {
+  const [path, setPath] = useState<string>(() => window.location.pathname);
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // Centralized client-side nav: pushState changes the URL, dispatching
+  // popstate manually fires every listener (including this router's) so
+  // the page re-renders without a hard reload.
+  const navigate = (next: string) => {
+    if (window.location.pathname === next) return;
+    window.history.pushState(null, "", next);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  };
+
+  // Deep-link hints always force AuthGate so the visitor sees the
+  // "this profile is private, sign in to view" banner regardless of
+  // which URL slot they happen to be on.
+  const hasDeepLinkHint = !!(props.pendingProfileHint || props.pendingWorldHint);
+
+  if (!hasDeepLinkHint && path === "/") {
+    return <SplashLanding onNavigate={navigate} />;
+  }
+
+  const initialMode: "login" | "register" = path === "/register" ? "register" : "login";
+  return (
+    <AuthGate
+      initialMode={initialMode}
+      onNavigate={navigate}
+      {...(props.pendingProfileHint ? { pendingProfileHint: props.pendingProfileHint } : {})}
+      {...(props.pendingWorldHint ? { pendingWorldHint: props.pendingWorldHint } : {})}
+    />
+  );
 }
 
 /**
@@ -986,15 +1042,32 @@ function Chat() {
   // catch our own optimistic appends too. The check is constrained to
   // "the user just submitted a topic-create" via topicCreateMode so we
   // don't auto-activate every topic anyone else creates.
+  //
+  // We also stamp the moment topicCreateMode flipped on and only count
+  // topics created AFTER that timestamp. Without this guard, clicking
+  // "+ New Topic" on a different section while your own older topic is
+  // sitting in the buffer would instantly satisfy the "found my own
+  // topic" check and silently flip you into reply mode for that older
+  // topic — defeating the whole point of opening the create form.
+  const topicCreateModeAt = useRef(0);
+  useEffect(() => {
+    if (topicCreateMode) topicCreateModeAt.current = Date.now();
+  }, [topicCreateMode]);
   useEffect(() => {
     if (!topicCreateMode || !me) return;
+    const startedAt = topicCreateModeAt.current;
     const buf = messagesByRoom[currentRoomId ?? ""] ?? [];
     // Walk from the newest end backwards looking for our own most-
     // recent topic post. We don't need to look far; the topic create
     // mode is only active while the request is pending.
     for (let i = buf.length - 1; i >= Math.max(0, buf.length - 5); i--) {
       const m = buf[i]!;
-      if (m.userId === me.id && m.title && !m.replyToId) {
+      if (
+        m.userId === me.id &&
+        m.title &&
+        !m.replyToId &&
+        m.createdAt > startedAt
+      ) {
         setActiveTopicId(m.id);
         setTopicCreateMode(false);
         return;

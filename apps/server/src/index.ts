@@ -745,7 +745,19 @@ async function main() {
           await getIndexHtml(),
         );
         reply.type("text/html; charset=utf-8");
-        reply.header("cache-control", "public, max-age=60");
+        // The SPA shell references content-hashed asset filenames that
+        // change on every build. If we let browsers (or any intermediary
+        // cache: ISP, corporate proxy, Fly's edge) hold onto an old copy
+        // of this HTML, a returning visitor's `index.html` will point at
+        // /assets/index-OLDHASH.js — which no longer exists on the new
+        // deploy — and the app silently breaks. Previously we shipped
+        // `public, max-age=60`, which combined with Chrome's heuristic
+        // cache extension routinely held the shell for hours and forced
+        // users to clear history to recover. `no-cache` (NOT `no-store`)
+        // permits caching but requires revalidation on every use, so the
+        // hashed assets underneath still get their year-long immutable
+        // caching — only the thin HTML shell pays the round-trip cost.
+        reply.header("cache-control", "no-cache, must-revalidate");
         return html;
       };
 
@@ -756,13 +768,18 @@ async function main() {
       // SPA deep-link routes. /p/<username> (canonical) and /u/<username>
       // (alias) both open the profile modal; /w/<slug> opens a world
       // viewer. All three are parsed client-side on first paint (see
-      // lib/profiles.ts and lib/worlds.ts). Without these explicit
-      // handlers, the setNotFoundHandler below would serve the themed 404
-      // page and the React app would never boot. Single-segment params
-      // only — /p/foo/bar still falls through to the 404.
+      // lib/profiles.ts and lib/worlds.ts). /login and /register are
+      // the bookmarkable entrance pages — the React app picks them off
+      // window.location.pathname and mounts the right form. Without
+      // these explicit handlers, the setNotFoundHandler below would
+      // serve the themed 404 page and the React app would never boot.
+      // Single-segment params only — /p/foo/bar still falls through to
+      // the 404.
       app.get("/p/:name", publicLimit, serveSplash);
       app.get("/u/:name", publicLimit, serveSplash);
       app.get("/w/:slug", publicLimit, serveSplash);
+      app.get("/login", publicLimit, serveSplash);
+      app.get("/register", publicLimit, serveSplash);
 
       await app.register(fastifyStatic, {
         root: webDistPath,

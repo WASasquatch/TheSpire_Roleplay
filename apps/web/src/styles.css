@@ -50,6 +50,57 @@
 }
 
 /* ============================================================
+ * SCROLLBAR — touch-first horizontal strips
+ * ============================================================
+ *
+ * Used by the admin panel's tab nav (and any future strip-style nav).
+ * Hides the scrollbar entirely on touch viewports so a swipe is the
+ * only affordance — a visible scrollbar on a horizontal mobile nav
+ * just adds chrome that doesn't help. On md+ (where the user is
+ * almost certainly on a pointing device) a thin themed scrollbar
+ * appears with reserved bottom padding so it never overlaps the
+ * tab labels.
+ *
+ * Browser support quirks the rules below cover:
+ *  - Firefox uses `scrollbar-width` / `scrollbar-color` (no pseudo-
+ *    elements).
+ *  - WebKit / Blink use `::-webkit-scrollbar*` pseudo-elements.
+ *  - Both code paths are needed because no browser supports both.
+ */
+.keep-scroll-strip {
+  scrollbar-width: none; /* Firefox / modern Edge: hide entirely */
+}
+.keep-scroll-strip::-webkit-scrollbar {
+  display: none; /* WebKit / Blink: hide entirely */
+}
+@media (min-width: 768px) {
+  .keep-scroll-strip {
+    /* `thin` + a translucent border color gives a slim themed track
+     * that fades into the banner rather than competing with it. */
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--keep-border-500) / 0.5) transparent;
+    /* Reserve a strip below the tabs so the scrollbar lives in its
+     * own gutter instead of underlining the labels. 6px height
+     * scrollbar + 2px breathing room ≈ 8px. */
+    padding-bottom: 6px;
+  }
+  .keep-scroll-strip::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+  }
+  .keep-scroll-strip::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .keep-scroll-strip::-webkit-scrollbar-thumb {
+    background-color: rgb(var(--keep-border-500) / 0.5);
+    border-radius: 3px;
+  }
+  .keep-scroll-strip::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--keep-border-500) / 0.85);
+  }
+}
+
+/* ============================================================
  * Design languages.
  *
  * Three styles, each a complete visual vocabulary applied to every

@@ -1,9 +1,12 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import DOMPurify from "dompurify";
+import { VERSION } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { themeStyle } from "../lib/theme.js";
 import { AffiliatesCarousel } from "./AffiliatesCarousel.js";
 import { FeaturedWorldsCarousel } from "./FeaturedWorldsCarousel.js";
+
+const PROJECT_URL = "https://github.com/WASasquatch/TheSpire_Roleplay";
 
 interface SiteStats {
   online: number;
@@ -234,9 +237,19 @@ export function SplashShell({
             </div>
           </div>
 
-          {/* Footer credit row */}
+          {/* Upstream project credit + version link. Always the project
+              name (not the admin-configured site name) so self-hosted
+              installs trace back to source. Version single-sourced from
+              packages/shared/src/version.ts. */}
           <div className="border-t border-keep-rule/60 bg-keep-panel/40 px-6 py-2 text-center text-[10px] uppercase tracking-widest text-keep-muted">
-            powered by {branding.siteName}
+            <a
+              href={PROJECT_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-keep-action"
+            >
+              The Spire Roleplay Chat v{VERSION}
+            </a>
           </div>
         </div>
       </div>
@@ -365,10 +378,31 @@ interface AuthGateProps {
    * fall through to the gate, so we only need a "private" variant here.
    */
   pendingWorldHint?: { name: string; slug: string };
+  /**
+   * Initial form mode. The parent picks this off the URL so /login mounts
+   * the login form and /register mounts the registration form, each
+   * bookmarkable as its own page. Defaults to "login" for callers that
+   * don't care (deep-link gates, legacy routes).
+   */
+  initialMode?: "login" | "register";
+  /**
+   * Optional SPA-style navigation helper. When set, mode-toggling
+   * (the "Need an account? Register." / "Already have one? Log in."
+   * links) updates the address bar via pushState + popstate instead of
+   * just flipping local state. Lets a user bookmark whichever form
+   * they end up on and have the back button rewind through it.
+   */
+  onNavigate?: (path: string) => void;
 }
 
-export function AuthGate({ pendingProfileHint, pendingWorldHint }: AuthGateProps = {}) {
-  const [mode, setMode] = useState<"login" | "register">("login");
+export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "login", onNavigate }: AuthGateProps = {}) {
+  const [mode, setMode] = useState<"login" | "register">(initialMode);
+  // Keep local mode in sync with `initialMode` so a popstate-driven URL
+  // change (back/forward between /login and /register) flips the form
+  // without re-mounting the component.
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode]);
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -515,6 +549,13 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint }: AuthGateProps
       setHp("");
     }
     setMode(next);
+    // Reflect the toggle in the address bar so /login and /register are
+    // both bookmarkable and the back button rewinds between them. Only
+    // when a parent supplied a navigator — internal callers (deep-link
+    // gates) that don't pass one keep the legacy state-only behavior.
+    if (onNavigate) {
+      onNavigate(next === "register" ? "/register" : "/login");
+    }
   }
 
   // Server enforces this too; the gate here is UX. Empty disclaimer text =

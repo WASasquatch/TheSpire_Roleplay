@@ -7,4 +7,5 @@ export * from "./message.js";
 export * from "./theme.js";
 export * from "./moderation.js";
 export * from "./threadCategory.js";
+export * from "./version.js";
 export * from "./world.js";

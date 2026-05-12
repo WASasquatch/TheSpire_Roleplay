@@ -1,10 +1,15 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useChat } from "../state/store.js";
+import { SearchBar } from "./SearchBar.js";
 
 interface Props {
   onCommand: (text: string) => void;
   /** When set, the rail shows a "Leave Character" button to drop back to OOC. */
   activeCharacterId?: string | null;
+  /** Current room; the search bar scopes to it. Null disables the bar. */
+  currentRoomId: string | null;
+  /** Jump to a specific message id in the given room. Search bar wires this. */
+  onJumpToMessage: (roomId: string, messageId: string) => void;
 }
 
 /**
@@ -19,7 +24,7 @@ interface Props {
  * is a fixed-position slide-out), so the drawer here just expands upward
  * within that container - works the same as desktop.
  */
-export function ToolPanel({ onCommand, activeCharacterId }: Props) {
+export function ToolPanel({ onCommand, activeCharacterId, currentRoomId, onJumpToMessage }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
   const [refreshOpen, setRefreshOpen] = useState(false);
@@ -75,10 +80,16 @@ export function ToolPanel({ onCommand, activeCharacterId }: Props) {
             className="fixed inset-0 z-30 bg-black/20 md:bg-black/10"
           />
           {/* Drawer body. Anchored to the trigger bar's top edge and grows
-              upward; max-h is intentionally large since it holds many
-              sections. Scrolls inside its own bounds so the chat layout
-              isn't pushed around. */}
-          <div className="absolute inset-x-0 bottom-full z-40 max-h-[80vh] overflow-y-auto rounded-t border-x border-t border-keep-rule bg-keep-bg shadow-2xl">
+              upward; max-h is sized to fit inside the rail's available
+              space (~14rem reserved for the chat banner + room-topic
+              strip + a small safety margin). Without this cap the
+              drawer can extend ABOVE the rail and get clipped by the
+              parent's overflow-hidden — at which point its sticky
+              header sits in the clipped region and the user sees the
+              top section title disappear behind the chat banner.
+              The internal overflow-y-auto handles any overflow from
+              tools sections themselves. */}
+          <div className="absolute inset-x-0 bottom-full z-40 max-h-[calc(100dvh-14rem)] overflow-y-auto rounded-t border-x border-t border-keep-rule bg-keep-bg shadow-2xl">
             <header className="sticky top-0 flex items-center justify-between border-b border-keep-rule bg-keep-banner px-3 py-2">
               <span className="text-xs font-action uppercase tracking-widest">Tools</span>
               <button
@@ -202,8 +213,23 @@ export function ToolPanel({ onCommand, activeCharacterId }: Props) {
 
             <Section title="Account">
               <DrawerBtn label="Edit Profile" hint="Open your profile editor (/profile)" onClick={() => fire("/profile")} />
+              <DrawerBtn label="Bookmarks" hint="Your saved chat messages (/bookmarks)" onClick={() => fire("/bookmarks")} />
               <DrawerBtn label="Toggle Away" hint="Mark yourself away (/away)" onClick={() => fire("/away")} />
               <DrawerBtn label="Help / Commands" hint="Browse all commands (/help)" onClick={() => fire("/help")} />
+            </Section>
+
+            {/* Search lives at the bottom of the drawer so the input is
+                close to the user's resting touch position on mobile.
+                Results render upward (most-relevant nearest the bar) — see
+                SearchBar for the spatial-proximity-to-action rationale. */}
+            <Section title="Search this room">
+              <SearchBar
+                roomId={currentRoomId}
+                onJump={(messageId) => {
+                  if (currentRoomId) onJumpToMessage(currentRoomId, messageId);
+                }}
+                onClose={() => setDrawerOpen(false)}
+              />
             </Section>
           </div>
         </>
@@ -312,7 +338,7 @@ function InlineForm({
       <div className="flex gap-1">
         <button
           type="submit"
-          className="flex-1 rounded border border-keep-rule bg-keep-banner px-2 py-1.5 text-xs hover:bg-keep-banner/80 md:py-1"
+          className="keep-button flex-1 rounded border border-keep-rule bg-keep-banner px-2 py-1.5 text-xs hover:bg-keep-banner/80 md:py-1"
         >
           {submitLabel}
         </button>
@@ -321,7 +347,7 @@ function InlineForm({
             key={b.label}
             type="button"
             onClick={b.onClick}
-            className="rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs hover:bg-keep-banner md:py-1"
+            className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs hover:bg-keep-banner md:py-1"
           >
             {b.label}
           </button>
@@ -362,7 +388,7 @@ function PrivateForm({ onSubmit }: { onSubmit: (name: string, password: string) 
       <button
         type="submit"
         disabled={!name.trim() || !password.trim()}
-        className="w-full rounded border border-keep-rule bg-keep-banner px-2 py-1.5 text-xs hover:bg-keep-banner/80 disabled:opacity-50 md:py-1"
+        className="keep-button w-full rounded border border-keep-rule bg-keep-banner px-2 py-1.5 text-xs hover:bg-keep-banner/80 disabled:opacity-50 md:py-1"
       >
         Create room
       </button>
@@ -479,7 +505,7 @@ function ColorPicker({ onPick, onClear }: { onPick: (hex: string) => void; onCle
       <button
         type="button"
         onClick={onClear}
-        className="mt-1 w-full rounded border border-keep-rule bg-keep-bg py-1.5 hover:bg-keep-banner md:py-1"
+        className="keep-button mt-1 w-full rounded border border-keep-rule bg-keep-bg py-1.5 hover:bg-keep-banner md:py-1"
       >
         Clear
       </button>

@@ -108,24 +108,34 @@ export function SplashShell({
       />
 
       {/*
-        Card position. On md+ we pin the card's center at 75% of the
-        viewport (i.e. between the 3rd and 4th vertical quarters per the
-        spec) using the standard left-50% / -translate-x-50% trick offset
-        to 75%. On mobile we fall back to centered.
+        Card position. On wide desktops (lg+) we visually center the
+        card in the right third of the viewport (its center sits at
+        ~75% horizontal), so it floats over the parchment-fade side of
+        the bg image while the spire art stays clear on the left. The
+        `right` offset is computed as `max(2rem, 25% - 17.5rem)` —
+        17.5rem is half the 560px card width, and the floor of 2rem
+        keeps the card from clipping when 25% of the viewport would
+        otherwise leave no room. Below lg — portrait phones, landscape
+        phones, small tablets — we fall back to centered flex layout
+        (with a 2-column landscape-phone grid handled by the card's
+        own classes). The previous `md:left-[75%]` math clipped at
+        landscape-phone widths because half the card extended past the
+        viewport; this max(...) replaces that without losing the
+        intentional "card centered in the right third" desktop feel.
       */}
-      <div className="relative flex min-h-screen items-center justify-center md:block">
+      <div className="relative flex min-h-screen items-center justify-center lg:block">
         <div
           // Mobile vs desktop card treatment:
-          //   - Mobile (default): glass / frosted treatment. The card is
-          //     translucent (~55% parchment) with a strong backdrop blur so
-          //     the spire artwork shows through softly without distracting
-          //     from the form. Lighter border + ring give it a subtle
-          //     "pane of glass" edge.
-          //   - md+ (desktop): the card sits on the right where the bg
-          //     already fades to parchment, so we go opaque-ish (95%) for
-          //     maximum legibility and only a hint of blur. The artwork
-          //     stays visible to the *left* of the card; we don't need it
-          //     showing through the card itself.
+          //   - <lg (default): glass / frosted treatment. The card is
+          //     translucent (~55% parchment) with a strong backdrop blur
+          //     so the spire artwork shows through softly without
+          //     distracting from the form. Lighter border + ring give it
+          //     a subtle "pane of glass" edge.
+          //   - lg+ (wide desktop): the card sits anchored to the right
+          //     where the bg already fades to parchment, so we go
+          //     opaque-ish (95%) for maximum legibility and only a hint
+          //     of blur. The artwork stays visible to the *left* of the
+          //     card; we don't need it showing through the card itself.
           // The outer container is `overflow-hidden` (so the bg image
           // can't bleed outside the viewport when the artwork is taller
           // than the available space). That clips anything growing past
@@ -137,13 +147,15 @@ export function SplashShell({
           className="
             mx-4 my-8
             w-[min(560px,92vw)]
+            max-lg:landscape:w-[min(900px,96vw)] max-lg:landscape:mx-2 max-lg:landscape:my-2
             max-h-[calc(100vh-4rem)] overflow-y-auto
-            md:absolute md:top-1/2 md:left-[75%] md:my-0 md:-translate-x-1/2 md:-translate-y-1/2
-            md:max-h-[calc(100vh-2rem)]
+            max-lg:landscape:max-h-[calc(100vh-1rem)]
+            lg:absolute lg:top-1/2 lg:right-[max(2rem,calc(25%-17.5rem))] lg:my-0 lg:mx-0 lg:-translate-y-1/2
+            lg:max-h-[calc(100vh-2rem)]
             rounded-md border
             bg-keep-bg/55 backdrop-blur-xl border-keep-border/60
             ring-1 ring-keep-bg/40 ring-inset
-            md:bg-keep-bg/95 md:backdrop-blur-sm md:border-keep-border md:ring-0
+            lg:bg-keep-bg/95 lg:backdrop-blur-sm lg:border-keep-border lg:ring-0
             shadow-[0_20px_60px_-15px_rgba(0,0,0,0.45)]
           "
         >
@@ -155,54 +167,71 @@ export function SplashShell({
             style={{ background: "linear-gradient(90deg, transparent, #3fa5a0 30%, #3fa5a0 70%, transparent)" }}
           />
 
-          <div className="px-6 py-6 sm:px-8 sm:py-8">
-            {/* Header - site name, theme-tinted */}
-            <div className="mb-3 text-center">
-              <h1
-                style={logoStyle}
-                className="font-action text-3xl tracking-wide text-keep-text sm:text-4xl"
-              >
-                {branding.siteName}
-              </h1>
-              <div className="mt-1 text-[10px] uppercase tracking-[0.3em] text-keep-muted">
-                a chat sanctuary
+          <div className="px-6 py-6 sm:px-8 sm:py-8 max-lg:landscape:p-4 max-lg:landscape:grid max-lg:landscape:grid-cols-2 max-lg:landscape:gap-x-6 max-lg:landscape:gap-y-2">
+            {/* INFO COLUMN — title, stats, meta, welcome blurb. Stays
+                left in landscape phones; stacks above the form in
+                portrait / wide-desktop layouts. */}
+            <div className="max-lg:landscape:min-w-0">
+              {/* Header - site name, theme-tinted */}
+              <div className="mb-3 text-center max-lg:landscape:mb-1">
+                <h1
+                  style={logoStyle}
+                  className="font-action text-3xl tracking-wide text-keep-text sm:text-4xl max-lg:landscape:text-2xl"
+                >
+                  {branding.siteName}
+                </h1>
+                <div className="mt-1 text-[10px] uppercase tracking-[0.3em] text-keep-muted">
+                  a chat sanctuary
+                </div>
               </div>
+
+              {/* Live stats strip - omitted entirely when the admin toggle is
+                  off, so the splash sells the IDEA of the place rather than its
+                  (potentially empty) current activity. */}
+              {branding.activityFeedsEnabled ? <SplashStats stats={stats} /> : null}
+
+              {/* Retention + session TTL - admin-configured, surfaced so
+                  visitors know what they're committing to before registering. */}
+              <SplashMeta />
+
+              {/* Admin-configurable welcome - only renders when set. The
+                  horizontal dividers separate it visually in the stacked
+                  layout; in landscape 2-col we drop the top divider so
+                  the welcome flows from the meta strip above without a
+                  hard rule. */}
+              {branding.welcomeHtml.trim() ? (
+                <div
+                  className="prose prose-sm mb-5 mt-4 max-w-none border-y border-keep-rule/50 py-3 text-keep-text/90 max-lg:landscape:mb-0 max-lg:landscape:mt-2 max-lg:landscape:border-t-0 max-lg:landscape:pt-2"
+                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(branding.welcomeHtml) }}
+                />
+              ) : (
+                <div className="my-5 border-t border-keep-rule/50 max-lg:landscape:hidden" />
+              )}
             </div>
 
-            {/* Live stats strip - omitted entirely when the admin toggle is
-                off, so the splash sells the IDEA of the place rather than its
-                (potentially empty) current activity. */}
-            {branding.activityFeedsEnabled ? <SplashStats stats={stats} /> : null}
+            {/* FORM COLUMN — the actual sign-in / register UI. Right
+                column in landscape phones; below the info in other
+                layouts. */}
+            <div className="max-lg:landscape:min-w-0">
+              {/* Body content (form or "checking session..." indicator) */}
+              <div>{children}</div>
 
-            {/* Retention + session TTL - admin-configured, surfaced so
-                visitors know what they're committing to before registering. */}
-            <SplashMeta />
+              {footer ? <div className="mt-4">{footer}</div> : null}
+            </div>
 
-            {/* Admin-configurable welcome - only renders when set */}
-            {branding.welcomeHtml.trim() ? (
-              <div
-                className="prose prose-sm mb-5 mt-4 max-w-none border-y border-keep-rule/50 py-3 text-keep-text/90"
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(branding.welcomeHtml) }}
-              />
-            ) : (
-              <div className="my-5 border-t border-keep-rule/50" />
-            )}
-
-            {/* Body content (form or "checking session..." indicator) */}
-            <div>{children}</div>
-
-            {footer ? <div className="mt-4">{footer}</div> : null}
-
-            {/* Featured-worlds carousel. Same posture as activity feeds:
-                hidden entirely until the admin flips the toggle, so a brand-
-                new install with a thin catalog doesn't surface mostly-empty
-                worlds to first-time visitors. */}
-            {branding.featuredWorldsEnabled ? <FeaturedWorldsCarousel /> : null}
-
-            {/* Affiliates / partners / sponsors carousel. Renders nothing
-                when there are no enabled entries, so empty installs don't
-                show an empty box. */}
-            <AffiliatesCarousel />
+            {/* Featured-worlds + Affiliates carousels span the full
+                card width when present (col-span-2 in the landscape
+                grid). Both honor their admin toggles; carousels render
+                nothing when empty so empty installs don't show a strip
+                of blank rows. */}
+            {branding.featuredWorldsEnabled ? (
+              <div className="max-lg:landscape:col-span-2">
+                <FeaturedWorldsCarousel />
+              </div>
+            ) : null}
+            <div className="max-lg:landscape:col-span-2">
+              <AffiliatesCarousel />
+            </div>
           </div>
 
           {/* Footer credit row */}

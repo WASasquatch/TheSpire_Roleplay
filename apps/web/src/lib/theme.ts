@@ -65,12 +65,130 @@ export function themeStyle(theme: Theme): CSSProperties {
  * against the default values declared in styles.css :root. Also sets
  * `color-scheme` so native form controls (select menus, scrollbars,
  * checkboxes) render in the matching light/dark variant.
+ *
+ * In addition to the 8 base slots, we emit a 5-step lightness ramp for
+ * each — `--keep-<slot>-100/200/300/400/500`. 300 is the user-picked
+ * value; 100/200 are lighter, 400/500 darker. Ramps give components a
+ * way to layer depth (panel-200 highlights, panel-400 shadow rims)
+ * without the renderer having to hard-code alpha-blended approximations.
  */
 export function applyTheme(theme: Theme): void {
   const root = document.documentElement;
   for (const slot of VAR_KEYS) {
-    root.style.setProperty(`--keep-${slot}`, hexToRgbTriple(theme[slot]));
+    const base = theme[slot];
+    root.style.setProperty(`--keep-${slot}`, hexToRgbTriple(base));
+    const ramp = buildRamp(base);
+    for (let i = 0; i < ramp.length; i++) {
+      const step = (i + 1) * 100; // 100, 200, 300, 400, 500
+      root.style.setProperty(`--keep-${slot}-${step}`, ramp[i]!);
+    }
   }
   root.style.colorScheme = isDarkTheme(theme) ? "dark" : "light";
   document.body.setAttribute("data-theme-bg", theme.bg);
+}
+
+/* ============================================================
+ * Color ramp utilities
+ * ============================================================ */
+
+/**
+ * Build a 5-step lightness ramp from a base hex. Returns RGB triples
+ * (space-separated, Tailwind-compatible) ordered light → dark:
+ *   [100, 200, 300, 400, 500] where 300 is the input.
+ *
+ * Lightness offsets are applied in HSL space so hue + saturation are
+ * preserved. Offsets are symmetric so light bases compress on the
+ * lighter end (clamped at 95%) and dark bases compress on the darker
+ * end (clamped at 5%) — graceful at the extremes.
+ *
+ * Tuning rationale for the offsets:
+ *   100/200: meaningful highlight steps (top bevel, hover lift)
+ *   300:     the user-picked value, no shift
+ *   400/500: meaningful shadow steps (sunken edges, drop shadows)
+ * +/- 18% is broad enough to read as a distinct tier in the UI
+ * without crossing into a perceptually different color.
+ */
+export function buildRamp(baseHex: string): string[] {
+  const rgb = hexToRgb(baseHex);
+  if (!rgb) return ["0 0 0", "0 0 0", "0 0 0", "0 0 0", "0 0 0"];
+  const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+  const offsets = [+18, +9, 0, -9, -18];
+  return offsets.map((d) => {
+    const l = clamp(hsl.l + d, 5, 95);
+    const out = hslToRgb(hsl.h, hsl.s, l);
+    return `${out.r} ${out.g} ${out.b}`;
+  });
+}
+
+/** Parse `#abc` / `#aabbcc` to `{ r, g, b }` in 0-255 range. Null on parse failure. */
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const m = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!m) return null;
+  let h = m[1]!;
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+}
+
+/** RGB (0-255) → HSL (h 0-360, s 0-100, l 0-100). Standard formula. */
+function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
+  const rn = r / 255, gn = g / 255, bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  let h = 0, s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case rn: h = ((gn - bn) / d + (gn < bn ? 6 : 0)); break;
+      case gn: h = ((bn - rn) / d + 2); break;
+      case bn: h = ((rn - gn) / d + 4); break;
+    }
+    h /= 6;
+  }
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+
+/** HSL (h 0-360, s 0-100, l 0-100) → RGB (0-255 ints). Standard formula. */
+function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+  const hh = ((h % 360) + 360) % 360 / 360;
+  const ss = s / 100, ll = l / 100;
+  let r: number, g: number, b: number;
+  if (ss === 0) { r = g = b = ll; }
+  else {
+    const q = ll < 0.5 ? ll * (1 + ss) : ll + ss - ll * ss;
+    const p = 2 * ll - q;
+    const hueToRgb = (p: number, q: number, t: number): number => {
+      let tt = t;
+      if (tt < 0) tt += 1;
+      if (tt > 1) tt -= 1;
+      if (tt < 1 / 6) return p + (q - p) * 6 * tt;
+      if (tt < 1 / 2) return q;
+      if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
+      return p;
+    };
+    r = hueToRgb(p, q, hh + 1 / 3);
+    g = hueToRgb(p, q, hh);
+    b = hueToRgb(p, q, hh - 1 / 3);
+  }
+  return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v));
+}
+
+/** "r g b" triple → "#rrggbb" hex. Used by ornament generators that want hex strings. */
+export function rgbTripleToHex(triple: string): string {
+  const [r, g, b] = triple.trim().split(/\s+/).map((s) => parseInt(s, 10));
+  if (
+    typeof r !== "number" || typeof g !== "number" || typeof b !== "number"
+    || Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)
+  ) return "#000000";
+  const hex = (n: number) => clamp(n, 0, 255).toString(16).padStart(2, "0");
+  return `#${hex(r)}${hex(g)}${hex(b)}`;
 }

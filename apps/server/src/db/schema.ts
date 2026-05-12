@@ -34,6 +34,13 @@ export const users = sqliteTable(
     /** Master account UI theme - JSON-serialized Theme. Null = default. */
     themeJson: text("theme_json"),
     /**
+     * Per-user override for the theme style axis ('medieval', 'modern',
+     * 'scifi'). Null = follow `site_settings.default_style_key`. Style is
+     * orthogonal to palette — picking a style doesn't change which colors
+     * the user sees, just how the ornaments are drawn.
+     */
+    styleKey: text("style_key"),
+    /**
      * Desktop notification preference:
      *   "off"      - never show toasts
      *   "mentions" - only whispers + announcements
@@ -77,6 +84,21 @@ export const users = sqliteTable(
      * welcome (any non-empty message will show on next load).
      */
     welcomeSeenHash: text("welcome_seen_hash"),
+    /**
+     * Last room the user occupied when their previous session disconnected
+     * or idled out. Set on disconnect / room switch; consumed on the next
+     * connect to drop them back where they were. Null = first connect, or
+     * the previous room has since been deleted.
+     *
+     * FK enforcement: the `REFERENCES rooms(id) ON DELETE SET NULL` clause
+     * is declared at the DB layer in migration 0036 — not modeled here in
+     * Drizzle's TS schema because pairing it with `rooms.ownerId → users.id`
+     * forms a mutual-reference cycle that collapses both tables' inferred
+     * types to `any`. The runtime constraint is unchanged; only the type-
+     * level FK metadata is omitted, and no `relations()` API consumers
+     * depend on it in this codebase.
+     */
+    lastRoomId: text("last_room_id"),
     createdAt: ts("created_at"),
     lastLoginAt: integer("last_login_at", { mode: "timestamp_ms" }),
     disabledAt: integer("disabled_at", { mode: "timestamp_ms" }),
@@ -147,6 +169,15 @@ export const rooms = sqliteTable(
     description: text("description"),
     /** system-rooms (The_Spire and any admin-flagged landings) survive owner deletion and admin sweeps */
     isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Admin-flagged default landing room. Exactly one row in the table is
+     * expected to carry isDefault=true (enforced by partial unique index in
+     * the migration). All "where should we put this user?" flows resolve
+     * via findCanonicalLanding which prefers this flag; the legacy
+     * `name === "The_Spire"` lookup is a fallback for installs that
+     * haven't flipped the flag yet.
+     */
+    isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
     /** When true, /npc is rejected in this room - useful for themed games where everyone must speak as their own character. Owners and mods toggle via the room editor. */
     npcDisabled: integer("npc_disabled", { mode: "boolean" }).notNull().default(false),
     /**
@@ -253,10 +284,56 @@ export const messages = sqliteTable(
     moodSnapshot: text("mood_snapshot"),
     /** For /npc messages, the master username of the user who voiced this NPC (accountability tag rendered next to the NPC name). */
     npcVoicedBy: text("npc_voiced_by"),
+    /**
+     * Thread category bucket — only meaningful for top-level messages in
+     * a nested-mode room. Replies inherit their parent's bucket
+     * implicitly via the thread the client groups. FK is SET NULL so
+     * deleting a category preserves the thread history; the client
+     * renders null as "Uncategorized".
+     */
+    threadCategoryId: text("thread_category_id"),
+    /**
+     * Forum topic title. Non-null on top-level "topic" messages in
+     * nested-mode rooms; null on replies (they inherit their parent's
+     * thread) and on every message in flat rooms. The forum renderer
+     * uses this as the collapsible thread header.
+     */
+    title: text("title"),
+    /**
+     * Snapshot of the author's avatar URL at send time so renames /
+     * character deletes don't blank out past forum posts. Pulled from
+     * the active character when set, else the master account's
+     * avatarUrl. Null = author had no avatar configured.
+     */
+    avatarUrl: text("avatar_url"),
     /** Set when the author edits the message inside the grace window (epoch ms). */
     editedAt: integer("edited_at", { mode: "timestamp_ms" }),
     /** Set when the author deletes the message inside the grace window (epoch ms). The row is retained so reply snippets and snapshots stay coherent; renderer shows "[message removed]". */
     deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
+    /**
+     * Set when the topic has been locked (author or moderator action).
+     * Only meaningful for top-level topics in nested-mode rooms — the
+     * server rejects new replies under a locked topic. Stored as a
+     * timestamp (ms) instead of a boolean so future audit surfaces can
+     * show "locked at..."; the client only reads the truthiness.
+     */
+    lockedAt: integer("locked_at", { mode: "timestamp_ms" }),
+    /**
+     * Timestamp of the most recent reply under this row (or its own
+     * createdAt when no replies exist). Only meaningful for top-level
+     * topics in nested-mode rooms — the forum-topics endpoint orders
+     * by this DESC so the most-recently-active threads surface first.
+     * `addMessage` updates the parent's value on every reply insert.
+     */
+    lastActivityAt: integer("last_activity_at", { mode: "timestamp_ms" }),
+    /**
+     * Admin-pinned flag for forum topics. Stickies always sort above
+     * non-stickies in their category and are returned on every page
+     * of the topics endpoint so they stay visible no matter how far
+     * back the user paginates. Toggle-able only by site admins via
+     * `PATCH /messages/:id/sticky`.
+     */
+    isSticky: integer("is_sticky", { mode: "boolean" }).notNull().default(false),
     createdAt: ts("created_at"),
   },
   (t) => ({
@@ -574,6 +651,14 @@ export const siteSettings = sqliteTable("site_settings", {
   newUserWelcomeHtml: text("new_user_welcome_html").notNull().default(""),
   /** Timestamp of the most recent welcome-text edit. Null = never set. The audience filter is `users.created_at > new_user_welcome_updated_at`, so existing users at the time of the edit don't get retroactively spammed. */
   newUserWelcomeUpdatedAt: integer("new_user_welcome_updated_at", { mode: "timestamp_ms" }),
+  /**
+   * Site-wide default theme STYLE — orthogonal to the palette (`defaultThemeJson`).
+   * Where palette decides colors, style decides visual treatment ('medieval',
+   * 'modern', 'scifi' — each a full design language). Users who haven't picked
+   * a per-user override (users.style_key IS NULL) inherit this. Migrations
+   * seed 'medieval' as the launch flagship.
+   */
+  defaultStyleKey: text("default_style_key").notNull().default("medieval"),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
 });
@@ -955,6 +1040,55 @@ export const watches = sqliteTable(
   }),
 );
 
+/* ---------- room thread categories ---------- */
+/**
+ * Per-room admin-defined buckets for organizing top-level threads in
+ * nested-mode rooms. The unique (room_id, lower(name)) index in the
+ * migration enforces case-insensitive uniqueness within a room — no two
+ * "Active Scenes" / "active scenes" categories side by side. Replies
+ * inherit their parent's category implicitly; only top-level messages
+ * carry a `thread_category_id` reference.
+ */
+export const roomThreadCategories = sqliteTable(
+  "room_thread_categories",
+  {
+    id: id(),
+    roomId: text("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Admin-set ordering within a room; ties broken by createdAt for stability. */
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    roomIdx: index("room_thread_categories_room_idx").on(t.roomId),
+  }),
+);
+
+/* ---------- bookmarks ---------- */
+export const bookmarks = sqliteTable(
+  "bookmarks",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    /** Free-form user-defined category; empty string is treated as "Uncategorized". */
+    category: text("category").notNull().default(""),
+    /** Optional user-authored note for context — "why I bookmarked this". */
+    note: text("note"),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    userMsgUq: uniqueIndex("bookmarks_user_msg_uq").on(t.userId, t.messageId),
+    userIdx: index("bookmarks_user_idx").on(t.userId),
+  }),
+);
+
 export type DbUser = typeof users.$inferSelect;
 export type DbCharacter = typeof characters.$inferSelect;
 export type DbRoom = typeof rooms.$inferSelect;
@@ -976,3 +1110,5 @@ export type DbAuditEntry = typeof auditLog.$inferSelect;
 export type DbReport = typeof reports.$inferSelect;
 export type DbWatch = typeof watches.$inferSelect;
 export type DbPushSubscription = typeof pushSubscriptions.$inferSelect;
+export type DbBookmark = typeof bookmarks.$inferSelect;
+export type DbRoomThreadCategory = typeof roomThreadCategories.$inferSelect;

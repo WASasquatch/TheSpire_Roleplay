@@ -24,24 +24,43 @@ export interface Theme {
 }
 
 /**
- * Default theme - closely matches the phpMyChat parchment look:
- * cream background, slightly darker banner, muted brown borders,
- * forest-green section headers (achieved via the `action` slot in the
- * rooms tree).
+ * Default theme — the "Spire Modern" palette adopted as the install
+ * default. Light neutral gray surfaces, near-black text, two-blue
+ * accents (deeper indigo for primary actions, lighter steel-blue for
+ * accent highlights), and a warm earth-tone system color. Picked to
+ * read well under any of the three style families (medieval, modern,
+ * scifi) without forcing a personality before the operator picks
+ * one. Operators are free to repaint via /admin → Default Theme.
  */
 export const DEFAULT_THEME: Theme = {
-  bg: "#f4efe2",
-  panel: "#e2d6b8",
-  border: "#a89572",
-  text: "#1a1a1a",
-  muted: "#6b6256",
-  action: "#2c5d2c",
-  accent: "#8a1f1f",
+  bg: "#ebebeb",
+  panel: "#d8d8d8",
+  border: "#a3a3a3",
+  text: "#1e1e1e",
+  muted: "#666666",
+  action: "#1e5fb8",
+  accent: "#3574a2",
   system: "#7a5a1a",
 };
 
 export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
-  { name: "Parchment", theme: DEFAULT_THEME },
+  {
+    // Original phpMyChat-inspired parchment palette. Inlined here
+    // because `DEFAULT_THEME` is now the gray-blue install seed
+    // rather than parchment; we still want operators to pick this
+    // palette by name when they want the warm-paper look.
+    name: "Parchment",
+    theme: {
+      bg: "#f4efe2",
+      panel: "#e2d6b8",
+      border: "#a89572",
+      text: "#1a1a1a",
+      muted: "#6b6256",
+      action: "#2c5d2c",
+      accent: "#8a1f1f",
+      system: "#7a5a1a",
+    },
+  },
   {
     name: "Twilight",
     theme: {

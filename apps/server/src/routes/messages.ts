@@ -7,7 +7,7 @@ import type {
   ClientToServerEvents,
   ServerToClientEvents,
 } from "@thekeep/shared";
-import { messages } from "../db/schema.js";
+import { messages, rooms } from "../db/schema.js";
 import { sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
 import { getSettings } from "../settings.js";
@@ -16,13 +16,25 @@ import type { Db } from "../db/index.js";
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
 /**
- * Edit / delete grace window for the author. After this many ms have passed
- * since the message was created, edits and deletes are rejected. Picked to
- * be long enough for typo fixes and "wait, that wasn't the right window"
- * second thoughts, short enough that long-tail edits can't quietly rewrite
- * established history.
+ * Edit / delete grace window for chat (flat) rooms. After this many ms have
+ * passed since the message was created, edits and deletes are rejected.
+ * Picked to be long enough for typo fixes and "wait, that wasn't the right
+ * window" second thoughts, short enough that long-tail edits can't quietly
+ * rewrite established history. Forum rooms (replyMode="nested") bypass this
+ * cap entirely — posts there are long-lived and the author is expected to
+ * be able to refine them indefinitely, with the (edited) badge providing
+ * transparency.
  */
 const GRACE_MS = 60_000;
+
+/**
+ * Look up whether the message's room is a forum (nested-mode). Forum posts
+ * skip the edit/delete grace window. Cached single-row lookup; cheap.
+ */
+async function isForumMessage(db: Db, roomId: string): Promise<boolean> {
+  const row = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
+  return row?.replyMode === "nested";
+}
 
 const editBody = z.object({ body: z.string().min(1).max(20_000) }).strict();
 
@@ -48,8 +60,14 @@ function toWire(m: typeof messages.$inferSelect): ChatMessage {
     ...(m.replyToBodySnippet ? { replyToBodySnippet: m.replyToBodySnippet } : {}),
     ...(m.moodSnapshot ? { moodSnapshot: m.moodSnapshot } : {}),
     ...(m.npcVoicedBy ? { npcVoicedBy: m.npcVoicedBy } : {}),
+    ...(m.threadCategoryId ? { threadCategoryId: m.threadCategoryId } : {}),
+    ...(m.title ? { title: m.title } : {}),
+    ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
     ...(m.editedAt ? { editedAt: +m.editedAt } : {}),
     ...(m.deletedAt ? { deletedAt: +m.deletedAt } : {}),
+    ...(m.lockedAt ? { lockedAt: +m.lockedAt } : {}),
+    ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
+    ...(m.isSticky ? { isSticky: true } : {}),
   };
 }
 
@@ -85,7 +103,8 @@ export async function registerMessageRoutes(
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
 
     const now = Date.now();
-    if (now - +m.createdAt > GRACE_MS) {
+    const forum = await isForumMessage(db, m.roomId);
+    if (!forum && now - +m.createdAt > GRACE_MS) {
       reply.code(403);
       return { error: `Edit window has closed (${Math.round(GRACE_MS / 1000)}s after sending).` };
     }
@@ -121,9 +140,15 @@ export async function registerMessageRoutes(
   });
 
   /**
-   * Soft-delete your own message inside the grace window. Body is stripped
-   * server-side from any future emission; the row is retained so reply
-   * snapshots and ordering stay coherent.
+   * Soft-delete a message. Permitted for:
+   *   * the author (within 60s in flat rooms, anytime in forum rooms)
+   *   * any moderator or admin (no time gate — moderation action)
+   *
+   * The body is preserved on the row server-side so admin/report review
+   * can still see the original content; `toWire` returns body="" to all
+   * end-user surfaces (the renderer paints "[message removed]"). Reply
+   * snippets in children stay coherent regardless since they were
+   * frozen at reply time.
    */
   app.delete<{ Params: { id: string } }>("/messages/:id", async (req, reply) => {
     const me = await getSessionUser(req, db);
@@ -131,22 +156,108 @@ export async function registerMessageRoutes(
 
     const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
     if (!m) { reply.code(404); return { error: "not found" }; }
-    if (m.userId !== me.id) { reply.code(403); return { error: "not yours" }; }
+
+    const isAuthor = m.userId === me.id;
+    const isMod = me.role === "mod" || me.role === "admin";
+    if (!isAuthor && !isMod) { reply.code(403); return { error: "not yours" }; }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
 
     const now = Date.now();
-    if (now - +m.createdAt > GRACE_MS) {
+    const forum = await isForumMessage(db, m.roomId);
+    // Mods/admins bypass the grace window entirely; authors only get the
+    // bypass in forum rooms (and in flat-chat rooms within 60s).
+    if (!isMod && !forum && now - +m.createdAt > GRACE_MS) {
       reply.code(403);
       return { error: `Delete window has closed (${Math.round(GRACE_MS / 1000)}s after sending).` };
     }
 
     const deletedAt = new Date(now);
-    // Wipe the body so it never re-emits. The row is kept so reply snippets
-    // (which were snapshotted at the moment of the reply) stay coherent
-    // and so ordering on backlog is preserved.
     await db
       .update(messages)
-      .set({ deletedAt, body: "" })
+      .set({ deletedAt })
+      .where(eq(messages.id, m.id));
+
+    const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
+    if (!updated) { reply.code(404); return { error: "not found" }; }
+    io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    return { ok: true };
+  });
+
+  /**
+   * Lock or unlock a forum topic. Locked topics still display normally
+   * but reject new replies server-side (`dispatch.ts` checks
+   * `parent.lockedAt` and returns LOCKED). Permitted for:
+   *   * the topic's author (close-my-own-thread)
+   *   * any mod or admin (moderation)
+   *
+   * Only works on top-level topics (`replyToId IS NULL`) in nested-mode
+   * rooms — locking a reply or a flat-chat message is a category error
+   * and is rejected with 400.
+   */
+  const lockBody = z.object({ locked: z.boolean() }).strict();
+  app.patch<{ Params: { id: string }; Body: unknown }>("/messages/:id/lock", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+
+    let parsed;
+    try { parsed = lockBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+
+    const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
+    if (!m) { reply.code(404); return { error: "not found" }; }
+    if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
+    if (m.replyToId) { reply.code(400); return { error: "Only top-level topics can be locked." }; }
+
+    const forum = await isForumMessage(db, m.roomId);
+    if (!forum) { reply.code(400); return { error: "Locking applies only to forum-mode rooms." }; }
+
+    const isAuthor = m.userId === me.id;
+    const isMod = me.role === "mod" || me.role === "admin";
+    if (!isAuthor && !isMod) { reply.code(403); return { error: "not yours" }; }
+
+    const lockedAt = parsed.locked ? new Date() : null;
+    await db
+      .update(messages)
+      .set({ lockedAt })
+      .where(eq(messages.id, m.id));
+
+    const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
+    if (!updated) { reply.code(404); return { error: "not found" }; }
+    io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    return { ok: true };
+  });
+
+  /**
+   * Pin or unpin a forum topic (admin-only). Sticky topics float to
+   * the top of their category section regardless of `lastActivityAt`
+   * ordering and stay loaded on every page of `/rooms/:id/topics`.
+   * Mods can lock/delete but NOT pin — pinning is a persistent
+   * room-furniture decision reserved for site admins.
+   *
+   * Same shape as the lock route: forum rooms only, topics only,
+   * non-deleted only, `{ sticky: boolean }` body.
+   */
+  const stickyBody = z.object({ sticky: z.boolean() }).strict();
+  app.patch<{ Params: { id: string }; Body: unknown }>("/messages/:id/sticky", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    if (me.role !== "admin") { reply.code(403); return { error: "admins only" }; }
+
+    let parsed;
+    try { parsed = stickyBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+
+    const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
+    if (!m) { reply.code(404); return { error: "not found" }; }
+    if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
+    if (m.replyToId) { reply.code(400); return { error: "Only top-level topics can be pinned." }; }
+
+    const forum = await isForumMessage(db, m.roomId);
+    if (!forum) { reply.code(400); return { error: "Pinning applies only to forum-mode rooms." }; }
+
+    await db
+      .update(messages)
+      .set({ isSticky: parsed.sticky })
       .where(eq(messages.id, m.id));
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];

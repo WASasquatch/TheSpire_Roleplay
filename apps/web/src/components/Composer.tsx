@@ -8,22 +8,111 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import type { CommandDoc, RoomOccupant } from "@thekeep/shared";
+import type { CommandDoc, RoomOccupant, ThreadCategory } from "@thekeep/shared";
 import { CompleterPopup, type CompletionItem } from "./CompleterPopup.js";
 
 interface Props {
   value: string;
   onChange: (text: string) => void;
-  onSend: (text: string) => void;
+  /**
+   * Submit handler. The forum-mode options route through the same
+   * socket payload extensions: `threadTitle` starts a new topic,
+   * `replyToId` posts a reply under one. `threadCategoryId` is the
+   * legacy carrier for the topic's bucket; the server now also reads
+   * it from any new top-level send.
+   */
+  onSend: (
+    text: string,
+    opts?: { threadCategoryId?: string | null; threadTitle?: string; replyToId?: string },
+  ) => void;
   /** Current room occupants - used to populate @-mention autocomplete. */
   occupants?: RoomOccupant[];
   /** Mobile-only: open the rooms drawer. Hidden on md+. */
   onOpenRail?: () => void;
+  /** Current room id; used as the localStorage key for last-used category. */
+  roomId?: string | null;
+  /**
+   * Available thread categories for the current room. Undefined when the
+   * room isn't nested or the list hasn't loaded yet; empty array means
+   * "nested but no categories defined" — the picker is hidden in both
+   * cases since there's nothing to choose.
+   */
+  threadCategories?: ThreadCategory[];
+  /**
+   * Forum-mode controls. When the host room is nested-mode the composer
+   * is one of three states:
+   *   - `isForumRoom && !activeTopic && !topicCreateMode` → DISABLED,
+   *     with a hint + "New Topic" button.
+   *   - `isForumRoom && topicCreateMode` → title input + body + category;
+   *     submit calls onSend with `threadTitle`.
+   *   - `isForumRoom && activeTopic` → reply mode; submit calls onSend
+   *     with `replyToId`.
+   * In flat-chat rooms `isForumRoom` is false and these props are
+   * ignored — the composer behaves like the historic chat input.
+   */
+  isForumRoom?: boolean;
+  /**
+   * Active topic the user is reading / replying to. Passed in as the
+   * topic message itself (we need `title` + `id` to render the
+   * "Replying to" indicator). `locked` mirrors the server-side
+   * `messages.locked_at` state — when true the composer renders a
+   * "topic locked" notice and disables the textarea instead of the
+   * usual reply indicator. Null = no topic selected.
+   */
+  activeTopic?: { id: string; title: string | null; body: string; locked: boolean } | null;
+  /** True iff the user clicked "New Topic" and the composer is in topic-create mode. */
+  topicCreateMode?: boolean;
+  /** Open the topic-create form (toggles topicCreateMode on at the App level). */
+  onStartTopicCreate?: () => void;
+  /** Cancel topic-create mode (revert to the disabled/active-topic state). */
+  onCancelTopicCreate?: () => void;
+  /** Clear the active topic (leave the thread). */
+  onLeaveThread?: () => void;
+  /**
+   * Override the textarea placeholder. When unset, the composer picks a
+   * sensible contextual default (forum-disabled hint / "Reply to ..." /
+   * "Type a message..."). Set this when embedding the composer in a
+   * context where the contextual defaults don't fit — e.g. the focused
+   * thread modal, which is itself the reply context and wants its own
+   * "Reply to <topic>..." prompt instead of the chat default.
+   */
+  placeholder?: string;
+  /**
+   * Viewer is a moderator (role mod or admin). Moderators bypass the
+   * locked-topic input disable — they can still post in locked
+   * threads to leave verdicts / notices, matching the server's
+   * mod-bypass on the reply gate. The composer renders a distinct
+   * "🔒 Locked — replying as moderator" hint when this is true and
+   * the active topic is locked.
+   */
+  canModerate?: boolean;
+  /**
+   * Parent-supplied "preferred category for the next new topic" signal,
+   * typically wired to the forum view's last-clicked section. Tristate:
+   *   - `undefined` (or omitted) → no signal, the dropdown reads its
+   *     own persisted localStorage default
+   *   - `null` → user nominated the Uncategorized bucket
+   *   - `string` → user nominated the given category id
+   * Each *change* to this prop syncs the dropdown to the new value (and
+   * persists it). Steady-state re-renders with an unchanged value do
+   * nothing, so a manual select-dropdown override still wins until the
+   * user clicks another section.
+   */
+  preferredCategoryId?: string | null;
 }
 
 const MAX_VISIBLE_LINES = 6;
 const MAX_COMPLETIONS = 8;
 const HISTORY_MAX = 50;
+
+/** Short label for the "Replying to" indicator: title if present, else a body excerpt. */
+function topicLabel(t: { title: string | null; body: string }): string {
+  const title = t.title?.trim();
+  if (title) return title;
+  const body = t.body.trim();
+  if (body.length <= 60) return body || "(untitled topic)";
+  return `${body.slice(0, 60)}…`;
+}
 
 interface Trigger {
   kind: "/" | "@";
@@ -76,7 +165,24 @@ function detectTrigger(text: string, caret: number): Trigger | null {
  * When the value changes from outside (parent sets it), we re-focus and
  * place the caret at the end so the user can keep typing immediately.
  */
-export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Props) {
+export function Composer({
+  value,
+  onChange,
+  onSend,
+  occupants,
+  onOpenRail,
+  roomId,
+  threadCategories,
+  isForumRoom,
+  activeTopic,
+  topicCreateMode,
+  onStartTopicCreate,
+  onCancelTopicCreate,
+  onLeaveThread,
+  placeholder,
+  canModerate,
+  preferredCategoryId,
+}: Props) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastValueRef = useRef(value);
 
@@ -94,6 +200,73 @@ export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Pro
   const historyRef = useRef<string[]>([]);
   const historyIndexRef = useRef<number | null>(null);
   const draftBeforeHistoryRef = useRef<string>("");
+
+  // Thread-category picker state. Only meaningful for nested-mode rooms
+  // with at least one category. `selectedCategoryId === null` ==
+  // "Uncategorized". Persisted per-room in localStorage so repeat
+  // posters in the same bucket don't re-pick on every send.
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  // Topic-title draft used only while topicCreateMode is on. Cleared
+  // whenever the composer leaves create mode so a half-typed title
+  // doesn't leak into the next new-topic session.
+  const [topicTitle, setTopicTitle] = useState("");
+  useEffect(() => {
+    if (!topicCreateMode) setTopicTitle("");
+  }, [topicCreateMode]);
+
+  useEffect(() => {
+    if (!roomId) {
+      setSelectedCategoryId(null);
+      return;
+    }
+    try {
+      const saved = window.localStorage.getItem(`thespire.thread-cat.${roomId}`);
+      // Saved id may have been removed by an admin since last visit; we
+      // validate against the current categories list on render and silently
+      // ignore stale values, so a missing-category id just falls back to
+      // "Uncategorized" without erroring.
+      setSelectedCategoryId(saved && saved !== "" ? saved : null);
+    } catch { /* storage may be disabled */ }
+  }, [roomId]);
+
+  function setAndPersistCategory(catId: string | null) {
+    setSelectedCategoryId(catId);
+    if (!roomId) return;
+    try {
+      if (catId) window.localStorage.setItem(`thespire.thread-cat.${roomId}`, catId);
+      else window.localStorage.removeItem(`thespire.thread-cat.${roomId}`);
+    } catch { /* ignore */ }
+  }
+
+  // Sync the dropdown to the parent's "preferred" signal when (and only
+  // when) it changes. Ref-guarded so an unchanged prop on re-renders
+  // doesn't repeatedly clobber a manual select-dropdown override the
+  // user made after their last section click. `undefined` means "no
+  // signal" — distinct from `null` (Uncategorized).
+  const prevPreferredRef = useRef(preferredCategoryId);
+  useEffect(() => {
+    if (preferredCategoryId === prevPreferredRef.current) return;
+    prevPreferredRef.current = preferredCategoryId;
+    if (preferredCategoryId === undefined) return;
+    setAndPersistCategory(preferredCategoryId);
+  // setAndPersistCategory closes over roomId and state setters which
+  // are stable; including only the prop keeps the deps list honest.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preferredCategoryId]);
+
+  // Hide the picker for replies/whispers — they inherit the parent
+  // thread's category implicitly server-side. Also hide for any slash
+  // command (the picker only governs plain-say top-level messages).
+  const isTopLevelSay = !value.trimStart().startsWith("/");
+  const showCategoryPicker =
+    isTopLevelSay && threadCategories !== undefined && threadCategories.length > 0;
+
+  // Validate the persisted id against the current list; if the admin
+  // deleted the category since last visit we silently null it.
+  const effectiveCategoryId =
+    selectedCategoryId && threadCategories?.some((c) => c.id === selectedCategoryId)
+      ? selectedCategoryId
+      : null;
 
   // Cache the command list. Fetched once per session; HelpModal hits the
   // same endpoint when opened, but the duplicated cost is negligible.
@@ -200,7 +373,34 @@ export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Pro
     }
     historyIndexRef.current = null;
     draftBeforeHistoryRef.current = "";
-    onSend(t);
+
+    // Forum-mode routing. Server enforces these structurally; here we
+    // just pick the right payload shape based on which UI mode we're
+    // in. Both modes still need the body (`t`) — a topic with no body
+    // is treated as the first post AND the topic anchor, same row.
+    if (isForumRoom && topicCreateMode) {
+      const title = topicTitle.trim();
+      if (!title) return; // submit-button is disabled in this case too
+      onSend(t, {
+        threadTitle: title,
+        threadCategoryId: effectiveCategoryId,
+      });
+      onChange("");
+      setTopicTitle("");
+      setCaret(0);
+      return;
+    }
+    if (isForumRoom && activeTopic) {
+      onSend(t, { replyToId: activeTopic.id });
+      onChange("");
+      setCaret(0);
+      return;
+    }
+
+    // Flat-room / non-forum path. threadCategoryId only forwards when
+    // the picker is visible (i.e. a categorized nested room before the
+    // forum rewrite; defensively kept for installs in flat mode).
+    onSend(t, showCategoryPicker ? { threadCategoryId: effectiveCategoryId } : undefined);
     onChange("");
     setCaret(0);
   }
@@ -352,11 +552,320 @@ export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Pro
     });
   }
 
+  /**
+   * Wrap the current selection with `before` / `after` markers. If no
+   * selection, insert `before + placeholder + after` and place the
+   * caret around the placeholder so the user can immediately type
+   * over it. Used by the formatting buttons (Bold / Italic / etc).
+   */
+  function wrapSelection(before: string, after: string, placeholder: string = "text"): void {
+    const el = inputRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? start;
+    const selected = value.slice(start, end);
+    const content = selected || placeholder;
+    const inserted = `${before}${content}${after}`;
+    const next = value.slice(0, start) + inserted + value.slice(end);
+    onChange(next);
+    // Caret placement: if we used the placeholder (no original
+    // selection), select the placeholder text so the user can type
+    // straight over it. If we wrapped a real selection, place the
+    // caret right after the closing marker.
+    const selStart = start + before.length;
+    const selEnd = selStart + content.length;
+    requestAnimationFrame(() => {
+      const el2 = inputRef.current;
+      if (!el2) return;
+      el2.focus();
+      if (selected) {
+        el2.setSelectionRange(selEnd, selEnd);
+        setCaret(selEnd);
+      } else {
+        el2.setSelectionRange(selStart, selEnd);
+        setCaret(selEnd);
+      }
+    });
+  }
+
+  /**
+   * Prefix every line of the current selection (or the current line
+   * if no selection) with `prefix`. Used by the Quote button: turns
+   * a multi-line selection into a `> ` blockquote.
+   */
+  function prefixLines(prefix: string): void {
+    const el = inputRef.current;
+    if (!el) return;
+    let start = el.selectionStart ?? value.length;
+    let end = el.selectionEnd ?? start;
+    // Snap selection to whole lines so the prefix applies cleanly.
+    while (start > 0 && value[start - 1] !== "\n") start--;
+    while (end < value.length && value[end] !== "\n") end++;
+    const block = value.slice(start, end);
+    const next = value.slice(0, start)
+      + block.split("\n").map((l) => `${prefix}${l}`).join("\n")
+      + value.slice(end);
+    onChange(next);
+    const newCaret = end + (block.split("\n").length * prefix.length);
+    requestAnimationFrame(() => {
+      const el2 = inputRef.current;
+      if (!el2) return;
+      el2.focus();
+      el2.setSelectionRange(newCaret, newCaret);
+      setCaret(newCaret);
+    });
+  }
+
+  /**
+   * Link / image insertion: prompts for a URL (rejects empty),
+   * wraps the selection (or a placeholder) as `[text](url)` or
+   * `![alt](url)` depending on `kind`. Reuses `wrapSelection`'s
+   * before/after model, then patches the URL into the suffix.
+   */
+  function insertLinkOrImage(kind: "link" | "image"): void {
+    const url = window.prompt(kind === "image" ? "Image URL (http:// or https://):" : "Link URL (http:// or https://):");
+    if (!url) return;
+    const trimmed = url.trim();
+    if (!/^https?:\/\//i.test(trimmed)) {
+      window.alert("URL must start with http:// or https://");
+      return;
+    }
+    const before = kind === "image" ? "![" : "[";
+    const after = `](${trimmed})`;
+    wrapSelection(before, after, kind === "image" ? "alt" : "link text");
+  }
+
+  // Forum-mode state derivations. The composer has four distinct
+  // shapes in a forum room: disabled (no topic), topic-create, reply,
+  // and locked (topic exists but won't accept replies from this
+  // viewer). Flat rooms ignore all of this and fall through to the
+  // chat composer.
+  //
+  // Moderators bypass the locked-state input disable — they can still
+  // post moderation notes in locked threads. `forumReplying` covers
+  // both the "topic isn't locked" and "topic IS locked but I'm a mod"
+  // cases so the textarea behaves identically; the indicator strip
+  // changes copy when locked + canModerate to make the override
+  // visible.
+  const forumDisabled = !!isForumRoom && !topicCreateMode && !activeTopic;
+  const forumLockedForViewer =
+    !!isForumRoom && !!activeTopic && activeTopic.locked && !topicCreateMode && !canModerate;
+  const forumLockedModOverride =
+    !!isForumRoom && !!activeTopic && activeTopic.locked && !topicCreateMode && !!canModerate;
+  const forumReplying =
+    !!isForumRoom && !!activeTopic && !topicCreateMode && !forumLockedForViewer;
+  const forumCreating = !!isForumRoom && !!topicCreateMode;
+  // Textarea / Send are inert when the surrounding context can't
+  // accept input. Locked threads block sending for non-mods; the
+  // server is authoritative and re-rejects on submit anyway.
+  const inputDisabled = forumDisabled || forumLockedForViewer;
+  const submitDisabled =
+    inputDisabled ||
+    (forumCreating && !topicTitle.trim()) ||
+    !value.trim();
+
   return (
     <form
       onSubmit={submit}
-      className="flex items-end gap-2 border-t border-keep-rule bg-keep-banner/50 p-2"
+      className="keep-composer flex flex-col gap-1 border-t border-keep-rule bg-keep-banner/50 p-2"
     >
+      {/* Forum-mode disabled state — composer is locked until the user
+          picks a topic or starts a new one. The "New Topic" button is
+          the primary call-to-action in this state. */}
+      {forumDisabled ? (
+        <div className="flex items-center justify-between gap-2 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1 text-xs text-keep-muted">
+          {/* `min-w-0 flex-1` lets the long hint shrink + wrap on narrow
+              viewports instead of pushing the "+ New Topic" button off
+              the right edge. Default flex items have `min-width: auto`
+              which means "as wide as the intrinsic content" — and a
+              one-line sentence in English has no good wrap point, so
+              without this it forces horizontal overflow on mobile. */}
+          <span className="min-w-0 flex-1">This room is a forum — pick a topic to reply, or start a new one.</span>
+          {onStartTopicCreate ? (
+            <button
+              type="button"
+              onClick={onStartTopicCreate}
+              className="shrink-0 rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
+            >
+              + New Topic
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Forum-mode "locked, can't reply" indicator. The viewer has an
+          active topic but it's been locked AND they aren't a mod, so
+          input is disabled. Leave-thread is still offered so they can
+          back out and pick another topic. */}
+      {forumLockedForViewer ? (
+        <div className="flex items-center justify-between gap-2 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1 text-xs text-keep-muted">
+          <span className="min-w-0 truncate">
+            <span className="mr-1" aria-hidden>🔒</span>
+            <b>{topicLabel(activeTopic!)}</b> is locked — no new replies.
+          </span>
+          {onLeaveThread ? (
+            <button
+              type="button"
+              onClick={onLeaveThread}
+              className="keep-button shrink-0 rounded border border-keep-rule/60 bg-keep-bg px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+              title="Leave this topic"
+            >
+              Leave thread
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Forum-mode "replying" indicator. Two variants:
+            - normal:  active topic is unlocked — standard accent strip.
+            - mod override: active topic is locked but the viewer is a
+              moderator. Input stays enabled so they can post a verdict
+              or notice, but the strip swaps to a muted-amber lock
+              indicator so the override is unmistakable. */}
+      {forumReplying ? (
+        forumLockedModOverride ? (
+          <div className="flex items-center justify-between gap-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">
+            <span className="min-w-0 truncate">
+              <span className="mr-1" aria-hidden>🔒</span>
+              <span className="mr-1 text-[10px] uppercase tracking-widest opacity-70">Locked — replying as moderator</span>
+              <b>{topicLabel(activeTopic!)}</b>
+            </span>
+            {onLeaveThread ? (
+              <button
+                type="button"
+                onClick={onLeaveThread}
+                className="keep-button shrink-0 rounded border border-keep-rule/60 bg-keep-bg px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+                title="Leave this topic"
+              >
+                Leave thread
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2 rounded border border-keep-action/40 bg-keep-action/10 px-2 py-1 text-xs text-keep-action">
+            <span className="min-w-0 truncate">
+              <span className="mr-1 text-[10px] uppercase tracking-widest opacity-70">Replying to</span>
+              <b>{topicLabel(activeTopic!)}</b>
+            </span>
+            {onLeaveThread ? (
+              <button
+                type="button"
+                onClick={onLeaveThread}
+                className="keep-button shrink-0 rounded border border-keep-rule/60 bg-keep-bg px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+                title="Stop replying to this topic"
+              >
+                Leave thread
+              </button>
+            ) : null}
+          </div>
+        )
+      ) : null}
+
+      {/* Forum-mode "create topic" form — title input + category select
+          stacked above the body textarea below. */}
+      {forumCreating ? (
+        <div className="flex flex-col gap-1 rounded border border-keep-action/40 bg-keep-action/5 p-2">
+          <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-keep-action">
+            <span>New topic</span>
+            {onCancelTopicCreate ? (
+              <button
+                type="button"
+                onClick={onCancelTopicCreate}
+                // Tap-target sizing: comfortable 32px height on mobile
+                // so the cancel-out path is easy to hit; md+ stays
+                // compact since pointer precision is higher.
+                className="keep-button flex h-8 items-center rounded border border-keep-rule/60 bg-keep-bg px-3 normal-case tracking-normal text-keep-muted hover:bg-keep-banner hover:text-keep-text md:h-6 md:px-2"
+              >
+                Cancel
+              </button>
+            ) : null}
+          </div>
+          <input
+            type="text"
+            value={topicTitle}
+            onChange={(e) => setTopicTitle(e.target.value)}
+            maxLength={120}
+            placeholder="Topic title"
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
+          />
+          {threadCategories && threadCategories.length > 0 ? (
+            <label className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-keep-muted">
+              <span>Category:</span>
+              <select
+                value={effectiveCategoryId ?? ""}
+                onChange={(e) => setAndPersistCategory(e.target.value || null)}
+                className="rounded border border-keep-rule bg-keep-bg px-1 py-0.5 normal-case tracking-normal text-keep-text"
+              >
+                <option value="">Uncategorized</option>
+                {threadCategories.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Legacy thread-category picker for FLAT rooms that still have
+          categories defined (a nested room that was flipped back, or
+          a flat room with stale category rows). In nested rooms the
+          picker now lives inside the topic-create form above; here
+          it only renders for the legacy / flat case. */}
+      {!isForumRoom && showCategoryPicker ? (
+        <label className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-keep-muted">
+          <span aria-hidden>🧵</span>
+          <span>Thread:</span>
+          <select
+            value={effectiveCategoryId ?? ""}
+            onChange={(e) => setAndPersistCategory(e.target.value || null)}
+            className="rounded border border-keep-rule bg-keep-bg px-1 py-0.5 normal-case tracking-normal text-keep-text"
+          >
+            <option value="">Uncategorized</option>
+            {threadCategories!.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
+      {/* Formatting toolbar. Compact icon row above the textarea —
+          each button wraps the current selection with the relevant
+          markdown markers, or inserts the markers around a placeholder
+          when nothing is selected. Hidden when the input is disabled
+          (forum-locked-for-viewer or no-active-topic states) since
+          formatting a blocked compose makes no sense. */}
+      {!inputDisabled ? (
+        <div className="flex flex-wrap items-center gap-0.5 text-xs">
+          <FmtButton title="Bold (Ctrl+B)" onClick={() => wrapSelection("**", "**", "bold")}>
+            <b>B</b>
+          </FmtButton>
+          <FmtButton title="Italic (Ctrl+I)" onClick={() => wrapSelection("*", "*", "italic")}>
+            <i>I</i>
+          </FmtButton>
+          <FmtButton title="Strikethrough" onClick={() => wrapSelection("~~", "~~", "strikethrough")}>
+            <s>S</s>
+          </FmtButton>
+          <FmtButton title="Inline code" onClick={() => wrapSelection("`", "`", "code")}>
+            <span className="font-mono">{"<>"}</span>
+          </FmtButton>
+          <FmtButton title="Spoiler (click to reveal)" onClick={() => wrapSelection("||", "||", "spoiler")}>
+            <span aria-hidden>👁</span>
+          </FmtButton>
+          <FmtButton title="Blockquote — prefixes selected lines with '> '" onClick={() => prefixLines("> ")}>
+            <span aria-hidden>❝</span>
+          </FmtButton>
+          <FmtButton title="Link — wraps selection as [text](url)" onClick={() => insertLinkOrImage("link")}>
+            <span aria-hidden>🔗</span>
+          </FmtButton>
+          <FmtButton title="Image — inserts ![alt](url)" onClick={() => insertLinkOrImage("image")}>
+            <span aria-hidden>🖼</span>
+          </FmtButton>
+        </div>
+      ) : null}
+
+      <div className="flex items-end gap-2">
       {/* Mobile-only rooms drawer toggle. Hidden on md+ where the rail is
           always visible. */}
       {onOpenRail ? (
@@ -365,7 +874,7 @@ export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Pro
           onClick={onOpenRail}
           aria-label="Open rooms"
           title="Rooms"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-base hover:bg-keep-banner md:hidden"
+          className="keep-button flex h-10 w-10 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-base hover:bg-keep-banner md:hidden"
         >
           ☰
         </button>
@@ -397,7 +906,21 @@ export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Pro
           // submits, the dedicated ↵ button (mobile-only) inserts a
           // newline.
           enterKeyHint="send"
-          placeholder="Type a message... (Shift+Enter for a new line)"
+          disabled={inputDisabled}
+          placeholder={
+            placeholder ??
+            (forumDisabled
+              ? "Pick a topic or start a new one to post."
+              : forumLockedForViewer
+                ? "This topic is locked — no new replies."
+                : forumCreating
+                  ? "First post of the new topic..."
+                  : forumLockedModOverride
+                    ? `Post a moderator reply to "${topicLabel(activeTopic!)}"...`
+                    : forumReplying
+                      ? `Reply to "${topicLabel(activeTopic!)}"...`
+                      : "Type a message... (Shift+Enter for a new line)")
+          }
           // text-base on mobile prevents iOS Safari from auto-zooming on focus
           // (anything below 16px triggers zoom). md+ keeps our compact size.
           // resize-none + auto-grow effect manages height; leading-snug keeps
@@ -407,7 +930,7 @@ export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Pro
           // heights so a single-line textarea sits flush with both. The
           // auto-grow effect freely sets a larger inline `style.height` for
           // multi-line input - min-height is a floor, not a cap.
-          className="block min-h-10 w-full resize-none rounded border border-keep-rule bg-keep-bg px-3 py-2 text-base leading-snug outline-none focus:border-keep-action md:min-h-8 md:py-1 md:text-sm"
+          className="block min-h-10 w-full resize-none rounded border border-keep-rule bg-keep-bg px-3 py-2 text-base leading-snug outline-none focus:border-keep-action disabled:cursor-not-allowed disabled:opacity-50 md:min-h-8 md:py-1 md:text-sm"
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
         />
@@ -418,22 +941,56 @@ export function Composer({ value, onChange, onSend, occupants, onOpenRail }: Pro
       <button
         type="button"
         onClick={insertNewline}
+        disabled={inputDisabled}
         aria-label="Insert line break"
         title="Insert line break"
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-base hover:bg-keep-banner md:hidden"
+        className="keep-button flex h-10 w-10 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-base hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50 md:hidden"
       >
         ↵
       </button>
       <button
         type="submit"
+        disabled={submitDisabled}
         // Pinned to h-10 (mobile) / md:h-8 so the button's height matches
         // the rail toggle and the textarea's single-line floor exactly.
         // Without an explicit height, padding-driven sizing was a couple of
         // pixels shy of the rail toggle and the misalignment was visible.
-        className="h-10 shrink-0 rounded border border-keep-rule bg-keep-bg px-4 text-sm hover:bg-keep-banner md:h-8"
+        className="keep-button h-10 shrink-0 rounded border border-keep-rule bg-keep-bg px-4 text-sm hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50 md:h-8"
       >
-        Send
+        {forumCreating ? "Post topic" : forumReplying ? "Reply" : "Send"}
       </button>
+      </div>
     </form>
+  );
+}
+
+/**
+ * Compact formatting-button helper for the Composer toolbar. Matches
+ * the visual weight of the rail toggle / Send button (subtle border +
+ * banner-tinted hover) so the strip reads as part of the same input.
+ * onMouseDown.preventDefault keeps focus on the textarea — without it,
+ * clicking a button would steal focus and the selection would
+ * disappear before the wrap-handler runs.
+ */
+function FmtButton({
+  title,
+  onClick,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onClick}
+      className="flex h-7 min-w-7 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 px-1.5 text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+    >
+      {children}
+    </button>
   );
 }

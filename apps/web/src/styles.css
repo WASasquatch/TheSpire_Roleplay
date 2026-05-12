@@ -2,22 +2,41 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+ * Theme style ornament fallbacks. Default `none` so any component
+ * that opts into an `--orn-*` background gracefully renders flat
+ * color when no style is active. `lib/ornaments/applyStyle` sets
+ * these to data: URLs at theme-apply time.
+ * ============================================================ */
+:root {
+  --orn-texture: none;
+  --orn-divider: none;
+  --orn-corner-tl: none;
+  --orn-corner-tr: none;
+  --orn-corner-bl: none;
+  --orn-corner-br: none;
+  --orn-bg-overlay: none;
+}
+
 /*
- * Default theme — closely matches the phpMyChat parchment aesthetic. Each
- * value is a *space-separated RGB triple* so Tailwind opacity modifiers
- * (bg-keep-panel/30, border-keep-border/40, ...) compose correctly with
- * `rgb(var(--keep-X) / <alpha-value>)`.
+ * Default theme — "Spire Modern" gray-blue palette (the install
+ * seed; mirrors `DEFAULT_THEME` in packages/shared/src/theme.ts).
+ * Each value is a *space-separated RGB triple* so Tailwind opacity
+ * modifiers (bg-keep-panel/30, border-keep-border/40, ...) compose
+ * correctly with `rgb(var(--keep-X) / <alpha-value>)`.
  *
- * lib/theme.ts converts hex theme values to this format at apply time.
+ * lib/theme.ts converts hex theme values to this format at apply
+ * time and additionally emits a 5-step ramp per slot:
+ *   --keep-<slot>-100 (lightest) … 500 (darkest), with 300 == base.
  */
 :root {
-  --keep-bg: 244 239 226;       /* #f4efe2 */
-  --keep-panel: 226 214 184;    /* #e2d6b8 */
-  --keep-border: 168 149 114;   /* #a89572 */
-  --keep-text: 26 26 26;        /* #1a1a1a */
-  --keep-muted: 107 98 86;      /* #6b6256 */
-  --keep-action: 44 93 44;      /* #2c5d2c */
-  --keep-accent: 138 31 31;     /* #8a1f1f */
+  --keep-bg: 235 235 235;       /* #ebebeb */
+  --keep-panel: 216 216 216;    /* #d8d8d8 */
+  --keep-border: 163 163 163;   /* #a3a3a3 */
+  --keep-text: 30 30 30;        /* #1e1e1e */
+  --keep-muted: 102 102 102;    /* #666666 */
+  --keep-action: 30 95 184;     /* #1e5fb8 */
+  --keep-accent: 53 116 162;    /* #3574a2 */
   --keep-system: 122 90 26;     /* #7a5a1a */
 }
 
@@ -30,18 +49,701 @@
   }
 }
 
-/*
- * Lightweight `prose` styling for sanitized HTML bodies (profile bios, the
- * welcome blurb on the splash, rules, admin previews). We don't ship the
- * @tailwindcss/typography plugin - so the `prose` / `prose-sm` class names
- * sprinkled across the codebase were no-ops, leaving Tailwind preflight's
- * zeroed-out margins in place. This restores the basic block spacing,
- * lists, and link/quote conventions that authors expect when they write
- * paragraphs in <p> tags. Scoped to `.prose` so it only kicks in where
- * the surrounding code opted into it.
+/* ============================================================
+ * Design languages.
  *
- * Allowed bio tags (mirror sanitizeBio): b, i, u, em, strong, a, img, br,
- * p, ul/ol/li, blockquote, hr, h3-h6, span style=color.
+ * Three styles, each a complete visual vocabulary applied to every
+ * surface (body, panels, buttons, inputs, lists, headers). The CSS
+ * leans on attribute selectors on <html data-theme-style="…"> so we
+ * never have to touch component markup to re-skin.
+ *
+ *   medieval  — flat warm parchment, soft inset highlights, drop
+ *               shadows directly below (0deg from top, soft blur),
+ *               square-ish corners (2px). Ink-toned borders.
+ *   modern    — soft two-tone linear gradients, rounded corners
+ *               (8px), airy shadows, action accents for interactive
+ *               surfaces.
+ *   scifi     — multi-color radial bokeh, glass surfaces, sharp
+ *               corners, neon action-color edges that intensify on
+ *               focus/hover.
+ *
+ * Selectors target raw elements (button, input, h1-h6) so styling
+ * applies without per-component changes. Specificity = 0,1,1 which
+ * beats the 0,1,0 of single Tailwind utility classes (`bg-keep-bg`
+ * etc.). Where a component absolutely needs to opt out, it can add
+ * a `.keep-no-style` class which our rules ignore.
+ * ============================================================ */
+
+/* ----------------------------------------------------------------
+ *   M E D I E V A L
+ * ---------------------------------------------------------------- */
+
+[data-theme-style="medieval"] body {
+  background:
+    radial-gradient(ellipse at top, rgb(var(--keep-bg-100)) 0%, rgb(var(--keep-bg)) 55%, rgb(var(--keep-bg-400)) 100%);
+}
+
+/* Frames (modals, topic cards, composer rails). Flat panel, double
+ * inset rule, dropshadow directly below the surface to read as a
+ * tome page resting on the desk. */
+[data-theme-style="medieval"] .keep-frame,
+[data-theme-style="medieval"] .keep-panel {
+  background-color: rgb(var(--keep-panel));
+  border: 1px solid rgb(var(--keep-border-500));
+  border-radius: 2px;
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--keep-bg-100) / 0.55),
+    inset 0 0 0 3px rgb(var(--keep-border-300) / 0.35),
+    inset 0 1px 0 rgb(var(--keep-panel-100) / 0.7),
+    0 4px 0 rgb(var(--keep-border-500) / 0.12),
+    0 8px 18px -6px rgb(var(--keep-border-500) / 0.25);
+}
+
+/* Buttons — opt-in via `.keep-button`. Link-style banner / nav
+ * buttons stay text-only by not adding the class. Default is a
+ * flat warm tile with an ink-colored border; hover lifts to bg-100
+ * with a deeper drop, active sinks slightly. */
+[data-theme-style="medieval"] .keep-button:not([disabled]) {
+  background-color: rgb(var(--keep-panel-100));
+  color: rgb(var(--keep-text));
+  border: 1px solid rgb(var(--keep-border-500) / 0.7);
+  border-radius: 2px;
+  box-shadow:
+    inset 0 1px 0 rgb(var(--keep-bg-100) / 0.55),
+    0 2px 0 rgb(var(--keep-border-500) / 0.18),
+    0 4px 8px -2px rgb(var(--keep-border-500) / 0.20);
+  transition: background-color 120ms ease, box-shadow 120ms ease,
+              transform 60ms ease;
+}
+[data-theme-style="medieval"] .keep-button:not([disabled]):hover {
+  background-color: rgb(var(--keep-bg-100));
+  border-color: rgb(var(--keep-border-500));
+  box-shadow:
+    inset 0 1px 0 rgb(var(--keep-bg-100) / 0.85),
+    0 3px 0 rgb(var(--keep-border-500) / 0.22),
+    0 6px 10px -2px rgb(var(--keep-border-500) / 0.25);
+}
+[data-theme-style="medieval"] .keep-button:not([disabled]):active {
+  transform: translateY(1px);
+  box-shadow:
+    inset 0 1px 2px rgb(var(--keep-border-500) / 0.35),
+    0 1px 0 rgb(var(--keep-border-500) / 0.18);
+}
+
+/* Inputs — fresh slip of vellum laid on the page. */
+[data-theme-style="medieval"] input,
+[data-theme-style="medieval"] textarea,
+[data-theme-style="medieval"] select {
+  background-color: rgb(var(--keep-bg-100));
+  color: rgb(var(--keep-text));
+  border: 1px solid rgb(var(--keep-border-300));
+  border-radius: 2px;
+  box-shadow:
+    inset 0 1px 0 rgb(var(--keep-panel-100) / 0.6),
+    inset 0 -1px 0 rgb(var(--keep-border-300) / 0.18);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+[data-theme-style="medieval"] input:focus,
+[data-theme-style="medieval"] textarea:focus,
+[data-theme-style="medieval"] select:focus {
+  outline: none;
+  border-color: rgb(var(--keep-border-500));
+  box-shadow:
+    inset 0 1px 0 rgb(var(--keep-panel-100) / 0.6),
+    0 0 0 2px rgb(var(--keep-border-300) / 0.45);
+}
+
+/* Headers — semibold, slight tracking. Sits over panel without a
+ * background of its own. The serif feel comes from font-chat
+ * (already configured in tailwind). */
+[data-theme-style="medieval"] h1,
+[data-theme-style="medieval"] h2,
+[data-theme-style="medieval"] h3 {
+  color: rgb(var(--keep-text));
+  letter-spacing: 0.02em;
+}
+
+/* List rows — rooms list, thread list. Border-300 hairlines, hover
+ * lifts to bg-100, active row marked by accent border. */
+[data-theme-style="medieval"] .keep-row {
+  background-color: transparent;
+  border-bottom: 1px solid rgb(var(--keep-border-300) / 0.35);
+  transition: background-color 120ms ease;
+}
+[data-theme-style="medieval"] .keep-row:hover {
+  background-color: rgb(var(--keep-bg-100) / 0.8);
+}
+[data-theme-style="medieval"] .keep-row[data-active="true"] {
+  background-color: rgb(var(--keep-bg-100));
+  border-left: 3px solid rgb(var(--keep-action));
+}
+
+/* Shell surfaces — chat banner, rooms sidebar, composer. Each
+ * style paints these consistently so the whole app reads as one
+ * piece. These are opt-in via specific classes (rather than bare
+ * `header` / `aside`) because modal sub-components also use those
+ * element tags and would otherwise inherit the chat-banner look. */
+[data-theme-style="medieval"] .keep-app-banner {
+  background-color: rgb(var(--keep-panel-200)) !important;
+  border-bottom: 1px solid rgb(var(--keep-border-500)) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(var(--keep-bg-100) / 0.45),
+    inset 0 -1px 0 rgb(var(--keep-panel-500) / 0.3),
+    0 4px 12px -4px rgb(var(--keep-border-500) / 0.30);
+}
+[data-theme-style="medieval"] .keep-app-sidebar {
+  background-color: rgb(var(--keep-panel-200)) !important;
+  border-left: 1px solid rgb(var(--keep-border-500)) !important;
+  box-shadow:
+    inset 1px 0 0 rgb(var(--keep-bg-100) / 0.45),
+    -4px 0 12px -4px rgb(var(--keep-border-500) / 0.18);
+}
+[data-theme-style="medieval"] .keep-composer {
+  background-color: rgb(var(--keep-panel-200)) !important;
+  border-top: 1px solid rgb(var(--keep-border-500)) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(var(--keep-bg-100) / 0.45),
+    0 -4px 12px -4px rgb(var(--keep-border-500) / 0.18);
+}
+
+/* ----------------------------------------------------------------
+ *   M O D E R N
+ * ---------------------------------------------------------------- */
+
+[data-theme-style="modern"] body {
+  background:
+    linear-gradient(160deg, rgb(var(--keep-bg-100)) 0%, rgb(var(--keep-bg)) 45%, rgb(var(--keep-bg-400)) 100%);
+}
+
+/* Frames — subtle white-to-black overlay (~3% intensity) on top
+ * of the base panel color, giving a barely-perceptible bevel that
+ * reads as "light from above" regardless of palette. The crisp
+ * highlight line sits on the inside-top via box-shadow inset, and
+ * the underside reads as a very gentle shadow. */
+[data-theme-style="modern"] .keep-frame,
+[data-theme-style="modern"] .keep-panel {
+  background-color: rgb(var(--keep-panel));
+  background-image: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.05) 0%,
+    rgb(255 255 255 / 0) 45%,
+    rgb(0 0 0 / 0.03) 100%
+  );
+  border: 1px solid rgb(var(--keep-border-200) / 0.55);
+  border-radius: 10px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.45),
+    inset 0 -1px 0 rgb(0 0 0 / 0.04),
+    0 2px 4px rgb(var(--keep-border-500) / 0.06),
+    0 12px 24px -8px rgb(var(--keep-border-500) / 0.15);
+}
+
+/* Buttons (opt-in via `.keep-button`) — soft-gradient pill. */
+[data-theme-style="modern"] .keep-button:not([disabled]) {
+  background:
+    linear-gradient(180deg, rgb(var(--keep-panel-100)) 0%, rgb(var(--keep-panel)) 100%);
+  color: rgb(var(--keep-text));
+  border: 1px solid rgb(var(--keep-border-200) / 0.6);
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px 0 rgb(var(--keep-panel-100)),
+    0 1px 2px rgb(var(--keep-border-500) / 0.08),
+    0 4px 10px -3px rgb(var(--keep-border-500) / 0.12);
+  transition: background 160ms ease, box-shadow 160ms ease,
+              border-color 160ms ease, transform 80ms ease;
+}
+[data-theme-style="modern"] .keep-button:not([disabled]):hover {
+  background:
+    linear-gradient(180deg, rgb(var(--keep-bg-100)) 0%, rgb(var(--keep-panel-100)) 100%);
+  border-color: rgb(var(--keep-border-200));
+  box-shadow:
+    inset 0 1px 0 rgb(var(--keep-bg-100)),
+    0 2px 4px rgb(var(--keep-border-500) / 0.10),
+    0 8px 18px -4px rgb(var(--keep-border-500) / 0.18);
+  transform: translateY(-1px);
+}
+[data-theme-style="modern"] .keep-button:not([disabled]):active {
+  transform: translateY(0);
+  background:
+    linear-gradient(180deg, rgb(var(--keep-panel)) 0%, rgb(var(--keep-panel-200)) 100%);
+}
+[data-theme-style="modern"] .keep-button:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 1px 0 rgb(var(--keep-panel-100)),
+    0 0 0 3px rgb(var(--keep-action) / 0.25);
+}
+
+/* Inputs — clean rounded with action-color focus ring. */
+[data-theme-style="modern"] input,
+[data-theme-style="modern"] textarea,
+[data-theme-style="modern"] select {
+  background-color: rgb(var(--keep-bg-100));
+  color: rgb(var(--keep-text));
+  border: 1px solid rgb(var(--keep-border-200) / 0.6);
+  border-radius: 6px;
+  box-shadow: inset 0 1px 2px rgb(var(--keep-border-500) / 0.05);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+[data-theme-style="modern"] input:focus,
+[data-theme-style="modern"] textarea:focus,
+[data-theme-style="modern"] select:focus {
+  outline: none;
+  border-color: rgb(var(--keep-action) / 0.7);
+  box-shadow:
+    inset 0 1px 2px rgb(var(--keep-border-500) / 0.05),
+    0 0 0 3px rgb(var(--keep-action) / 0.18);
+}
+
+[data-theme-style="modern"] h1,
+[data-theme-style="modern"] h2,
+[data-theme-style="modern"] h3 {
+  color: rgb(var(--keep-text));
+  letter-spacing: -0.005em;
+}
+
+[data-theme-style="modern"] .keep-row {
+  background-color: transparent;
+  transition: background-color 160ms ease;
+}
+[data-theme-style="modern"] .keep-row:hover {
+  background-color: rgb(var(--keep-bg-100) / 0.8);
+}
+[data-theme-style="modern"] .keep-row[data-active="true"] {
+  background:
+    linear-gradient(90deg, rgb(var(--keep-action) / 0.1) 0%, rgb(var(--keep-panel-100)) 100%);
+  box-shadow: inset 3px 0 0 rgb(var(--keep-action));
+}
+
+/* Banner — the marquee shell surface. Solid crisp 1px borders top
+ * (highlight) and bottom (shadow); the body of the bar is the
+ * panel color with a *very* subtle 4-5% white→black overlay so
+ * there's a perceptible bevel without anything looking gradiented.
+ * This is the "modern professional toolbar" recipe used by macOS
+ * Big Sur titlebars, GitHub headers, etc. */
+[data-theme-style="modern"] .keep-app-banner {
+  background-color: rgb(var(--keep-panel)) !important;
+  background-image: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.05) 0%,
+    rgb(255 255 255 / 0) 40%,
+    rgb(0 0 0 / 0) 60%,
+    rgb(0 0 0 / 0.04) 100%
+  ) !important;
+  border-top: 1px solid rgb(255 255 255 / 0.35) !important;
+  border-bottom: 1px solid rgb(var(--keep-border-300) / 0.45) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.30),
+    0 4px 14px -8px rgb(var(--keep-border-500) / 0.18);
+}
+/* Sidebar — same bevel recipe, just oriented along the left edge.
+ * Top is bright (light from above), bottom is shadowed. */
+[data-theme-style="modern"] .keep-app-sidebar {
+  background-color: rgb(var(--keep-panel)) !important;
+  background-image: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.04) 0%,
+    rgb(255 255 255 / 0) 50%,
+    rgb(0 0 0 / 0.03) 100%
+  ) !important;
+  border-left: 1px solid rgb(var(--keep-border-300) / 0.45) !important;
+  box-shadow:
+    inset 1px 0 0 rgb(255 255 255 / 0.20),
+    -4px 0 14px -8px rgb(var(--keep-border-500) / 0.10);
+}
+/* Composer — sits at the bottom of the chat, so its top edge is
+ * the bright highlight (light from above) and the bottom touches
+ * the viewport edge. Same overlay recipe as the banner. */
+[data-theme-style="modern"] .keep-composer {
+  background-color: rgb(var(--keep-panel)) !important;
+  background-image: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.05) 0%,
+    rgb(255 255 255 / 0) 40%,
+    rgb(0 0 0 / 0.03) 100%
+  ) !important;
+  border-top: 1px solid rgb(255 255 255 / 0.35) !important;
+  border-bottom: 1px solid rgb(var(--keep-border-300) / 0.45) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.30),
+    0 -4px 14px -8px rgb(var(--keep-border-500) / 0.10);
+}
+
+/* ----------------------------------------------------------------
+ *   S C I F I
+ * ---------------------------------------------------------------- */
+
+/* Bokeh-glass backdrop. Six overlapping radial blobs — bigger,
+ * more saturated, mixing the user-picked action + accent + system
+ * colors plus their lighter ramp steps. Action is the primary
+ * (cyan / blue / etc) and accent provides the secondary pop
+ * (typically a complementary pink/magenta), so on a Slate or
+ * Twilight repaint the chat backdrop reads as a cyberpunk skyline
+ * rather than one flat dark color. */
+[data-theme-style="scifi"] body {
+  background:
+    radial-gradient(circle 950px at 12% 8%, rgb(var(--keep-action) / 0.45) 0%, transparent 55%),
+    radial-gradient(circle 850px at 90% 94%, rgb(var(--keep-accent) / 0.42) 0%, transparent 55%),
+    radial-gradient(circle 700px at 68% 28%, rgb(var(--keep-system) / 0.32) 0%, transparent 60%),
+    radial-gradient(circle 600px at 22% 76%, rgb(var(--keep-accent-100) / 0.28) 0%, transparent 60%),
+    radial-gradient(circle 750px at 82% 48%, rgb(var(--keep-action-100) / 0.22) 0%, transparent 65%),
+    radial-gradient(circle 500px at 50% 62%, rgb(var(--keep-action) / 0.18) 0%, transparent 70%),
+    linear-gradient(180deg, rgb(var(--keep-bg-500)) 0%, rgb(var(--keep-bg-400)) 50%, rgb(var(--keep-bg)) 100%);
+  background-attachment: fixed;
+}
+
+/* Frames — frosted glass with a real tube-light edge. The 1px
+ * border is a near-white tint of the user's action color (mixed
+ * 30%/70% action/white via color-mix) — this is the "hot core"
+ * of a fluorescent tube, which reads bright regardless of which
+ * palette the user picked. The halo expands outward in the
+ * saturated base action color across multiple blur radii.
+ * Sharp corners. */
+[data-theme-style="scifi"] .keep-frame,
+[data-theme-style="scifi"] .keep-panel {
+  background-color: rgb(var(--keep-panel) / 0.5);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  border: 1px solid color-mix(in srgb, rgb(var(--keep-action)) 30%, white);
+  border-radius: 0;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, rgb(var(--keep-action)) 25%, white) ,
+    inset 0 0 28px rgb(var(--keep-action) / 0.12),
+    0 0 0 1px rgb(var(--keep-action) / 0.45),
+    0 0 14px color-mix(in srgb, rgb(var(--keep-action)) 50%, white) ,
+    0 0 32px rgb(var(--keep-action) / 0.45),
+    0 0 64px -8px rgb(var(--keep-accent) / 0.35),
+    0 18px 56px -12px rgb(var(--keep-bg-500) / 0.55);
+}
+
+/* Buttons (opt-in via `.keep-button`) — glass tile with a true
+ * neon tube-light border. The 1px border is near-white (action
+ * mixed with white via color-mix), so it always reads as a bright
+ * core regardless of how saturated the user's action color is.
+ * The halo is in saturated base action; on hover the accent color
+ * also enters the bloom so the button momentarily reads in two
+ * colors. */
+[data-theme-style="scifi"] .keep-button:not([disabled]) {
+  background-color: rgb(var(--keep-panel) / 0.35);
+  color: rgb(var(--keep-text));
+  border: 1px solid color-mix(in srgb, rgb(var(--keep-action)) 35%, white);
+  border-radius: 0;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow:
+    inset 0 0 10px rgb(var(--keep-action) / 0.12),
+    0 0 0 1px rgb(var(--keep-action) / 0.40),
+    0 0 8px color-mix(in srgb, rgb(var(--keep-action)) 50%, white),
+    0 0 24px -2px rgb(var(--keep-action) / 0.35);
+  transition: background-color 160ms ease, box-shadow 160ms ease,
+              border-color 160ms ease, color 160ms ease;
+}
+[data-theme-style="scifi"] .keep-button:not([disabled]):hover {
+  background-color: rgb(var(--keep-action) / 0.18);
+  border-color: color-mix(in srgb, rgb(var(--keep-action)) 15%, white);
+  color: rgb(var(--keep-text));
+  box-shadow:
+    inset 0 0 14px rgb(var(--keep-action) / 0.22),
+    0 0 0 1px rgb(var(--keep-action) / 0.70),
+    0 0 12px color-mix(in srgb, rgb(var(--keep-action)) 30%, white),
+    0 0 32px rgb(var(--keep-action) / 0.55),
+    0 0 56px -8px rgb(var(--keep-accent) / 0.40);
+}
+[data-theme-style="scifi"] .keep-button:not([disabled]):active {
+  background-color: rgb(var(--keep-action) / 0.32);
+  box-shadow:
+    inset 0 0 18px rgb(var(--keep-action) / 0.32),
+    0 0 0 1px white,
+    0 0 16px color-mix(in srgb, rgb(var(--keep-action)) 20%, white),
+    0 0 42px rgb(var(--keep-action) / 0.70);
+}
+
+/* Inputs — recessed glass pits with a near-white tube-light core
+ * on focus. Idle border is dimmer (40% mix toward white) so
+ * inactive fields don't compete with focused ones; focused border
+ * goes hot-white (15% mix) and grows a strong halo. */
+[data-theme-style="scifi"] input,
+[data-theme-style="scifi"] textarea,
+[data-theme-style="scifi"] select {
+  background-color: rgb(var(--keep-bg-500) / 0.55);
+  color: rgb(var(--keep-text));
+  border: 1px solid color-mix(in srgb, rgb(var(--keep-action)) 55%, white);
+  border-radius: 0;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  box-shadow:
+    inset 0 0 8px rgb(var(--keep-action) / 0.10),
+    inset 0 1px 2px rgb(var(--keep-bg-500) / 0.5),
+    0 0 6px rgb(var(--keep-action) / 0.20);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+[data-theme-style="scifi"] input:focus,
+[data-theme-style="scifi"] textarea:focus,
+[data-theme-style="scifi"] select:focus {
+  outline: none;
+  border-color: color-mix(in srgb, rgb(var(--keep-action)) 15%, white);
+  box-shadow:
+    inset 0 0 14px rgb(var(--keep-action) / 0.22),
+    0 0 0 1px color-mix(in srgb, rgb(var(--keep-action)) 30%, white),
+    0 0 12px color-mix(in srgb, rgb(var(--keep-action)) 40%, white),
+    0 0 28px rgb(var(--keep-action) / 0.55);
+}
+
+[data-theme-style="scifi"] h1,
+[data-theme-style="scifi"] h2,
+[data-theme-style="scifi"] h3 {
+  color: rgb(var(--keep-text));
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Forum section headers ("LOOKING FOR RP", "RP THREADS", etc.) —
+ * the most visible chunk of UI in the chat area. In scifi these
+ * read as the accent (pink) terminal section dividers with a
+ * fading neon underline, so the secondary palette color is
+ * prominent in the chat content area, not just at the composer. */
+[data-theme-style="scifi"] .keep-section-header {
+  background-color: rgb(var(--keep-panel) / 0.4) !important;
+  background-image:
+    linear-gradient(90deg,
+      rgb(var(--keep-accent) / 0.18) 0%,
+      rgb(var(--keep-accent) / 0.08) 50%,
+      rgb(var(--keep-accent) / 0) 100%) !important;
+  color: color-mix(in srgb, rgb(var(--keep-accent)) 30%, white) !important;
+  border-top: 1px solid color-mix(in srgb, rgb(var(--keep-accent)) 35%, white) !important;
+  border-bottom: 1px solid color-mix(in srgb, rgb(var(--keep-accent)) 35%, white) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, rgb(var(--keep-accent)) 10%, white),
+    inset 0 -1px 0 color-mix(in srgb, rgb(var(--keep-accent)) 10%, white),
+    0 0 12px rgb(var(--keep-accent) / 0.30),
+    0 4px 18px -4px rgb(var(--keep-accent) / 0.25);
+  text-shadow: 0 0 8px rgb(var(--keep-accent) / 0.55);
+}
+/* The chevron + count children of the section header need their own
+ * color override — the parent rule's `color: ...` only sets the
+ * default text node color, and these spans have explicit
+ * `text-keep-muted` from tailwind that wins on specificity. */
+[data-theme-style="scifi"] .keep-section-header .text-keep-muted {
+  color: color-mix(in srgb, rgb(var(--keep-accent)) 45%, white) !important;
+  text-shadow: 0 0 6px rgb(var(--keep-accent) / 0.45);
+}
+
+[data-theme-style="scifi"] .keep-row {
+  background-color: transparent;
+  border-bottom: 1px solid rgb(var(--keep-action) / 0.15);
+  transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+/* Hover lights up in the SECONDARY accent color (pink in Twilight,
+ * etc.) so the chat shell has two neons in active use, not just
+ * one. Cyan stays for active/current; pink fires on hover. */
+[data-theme-style="scifi"] .keep-row:hover {
+  background-color: rgb(var(--keep-accent) / 0.08);
+  box-shadow:
+    inset 0 0 14px rgb(var(--keep-accent) / 0.14),
+    inset 3px 0 0 color-mix(in srgb, rgb(var(--keep-accent)) 30%, white);
+}
+/* Active row stays in the primary (action) neon but gains an outer
+ * accent-color halo so the active state reads as dual-tone. */
+[data-theme-style="scifi"] .keep-row[data-active="true"] {
+  background-color: rgb(var(--keep-action) / 0.20);
+  box-shadow:
+    inset 3px 0 0 color-mix(in srgb, rgb(var(--keep-action)) 25%, white),
+    inset 0 0 20px rgb(var(--keep-action) / 0.20),
+    0 0 24px -4px rgb(var(--keep-accent) / 0.30);
+}
+
+/* Banner — tube-light bottom edge in the ACTION color (the
+ * primary neon — cyan/blue/green depending on palette). Real
+ * fluorescent tube anatomy: a 1px near-white "hot core" followed
+ * by three blur falloffs in saturated action. The bright core
+ * uses color-mix to land on white-tinted-with-action regardless
+ * of how saturated the user's action color is, so it always reads
+ * as a glowing tube and never as a flat colored line. */
+[data-theme-style="scifi"] .keep-app-banner {
+  background-color: rgb(var(--keep-panel) / 0.30) !important;
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  border-top: 1px solid color-mix(in srgb, rgb(var(--keep-action)) 60%, white) !important;
+  border-bottom: 1px solid color-mix(in srgb, rgb(var(--keep-action)) 15%, white) !important;
+  box-shadow:
+    inset 0 -1px 0 color-mix(in srgb, rgb(var(--keep-action)) 10%, white),
+    inset 0 -6px 14px rgb(var(--keep-action) / 0.28),
+    0 1px 0 color-mix(in srgb, rgb(var(--keep-action)) 25%, white),
+    0 3px 12px color-mix(in srgb, rgb(var(--keep-action)) 40%, white),
+    0 8px 28px rgb(var(--keep-action) / 0.55),
+    0 20px 64px -4px rgb(var(--keep-action) / 0.28) !important;
+}
+/* Sidebar — action-colored tube on the left edge facing the chat.
+ * Same recipe rotated 90°, glow projects right into the chat. */
+[data-theme-style="scifi"] .keep-app-sidebar {
+  background-color: rgb(var(--keep-panel) / 0.28) !important;
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  border-left: 1px solid color-mix(in srgb, rgb(var(--keep-action)) 15%, white) !important;
+  box-shadow:
+    inset 1px 0 0 color-mix(in srgb, rgb(var(--keep-action)) 10%, white),
+    inset 6px 0 14px rgb(var(--keep-action) / 0.28),
+    -1px 0 0 color-mix(in srgb, rgb(var(--keep-action)) 25%, white),
+    -3px 0 12px color-mix(in srgb, rgb(var(--keep-action)) 40%, white),
+    -8px 0 28px rgb(var(--keep-action) / 0.55),
+    -20px 0 64px -4px rgb(var(--keep-action) / 0.28) !important;
+}
+/* Composer — ACCENT-colored tube on the top edge (the secondary
+ * neon — typically pink/magenta complementing the action color).
+ * Banner's cyan top + composer's pink bottom = the classic two-
+ * tone cyberpunk pairing. Same hot-core recipe swapping action
+ * → accent, with the inside of the bar tinted accent so even the
+ * BODY of the composer reads pink, not just the edge. */
+[data-theme-style="scifi"] .keep-composer {
+  background-color: rgb(var(--keep-panel) / 0.30) !important;
+  background-image:
+    linear-gradient(180deg, rgb(var(--keep-accent) / 0.12) 0%, rgb(var(--keep-accent) / 0.02) 100%) !important;
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border-top: 2px solid color-mix(in srgb, rgb(var(--keep-accent)) 15%, white) !important;
+  border-bottom: 1px solid color-mix(in srgb, rgb(var(--keep-accent)) 60%, white) !important;
+  box-shadow:
+    inset 0 2px 0 color-mix(in srgb, rgb(var(--keep-accent)) 5%, white),
+    inset 0 8px 18px rgb(var(--keep-accent) / 0.32),
+    0 -1px 0 color-mix(in srgb, rgb(var(--keep-accent)) 20%, white),
+    0 -4px 14px color-mix(in srgb, rgb(var(--keep-accent)) 35%, white),
+    0 -10px 32px rgb(var(--keep-accent) / 0.60),
+    0 -24px 72px -4px rgb(var(--keep-accent) / 0.35) !important;
+}
+
+/* ============================================================
+ * Cross-style utilities & ornament glue.
+ * ============================================================ */
+
+/* `keep-accent-rail` — 3px tall standalone strip that sits between
+ * major UI sections (header zone vs chat, chat vs composer). Body
+ * color is a LIGHT tint of the user's `accent` palette slot so the
+ * rail reads as a colored separator regardless of palette. Per-
+ * style rules below add the appropriate glow / matte treatment:
+ *
+ *   medieval — flat dusty-rose tint, very subtle drop shadow
+ *   modern   — horizontal fade with a soft halo
+ *   scifi    — glowing neon tube with 4-stage falloff
+ *
+ * Width fills its parent; height is fixed so it always looks like
+ * a deliberate band rather than a hairline border. */
+.keep-accent-rail {
+  height: 3px;
+  pointer-events: none;
+  position: relative;
+  z-index: 5;
+  flex-shrink: 0;
+}
+/* Medieval — solid colored stripe, no glow. Reads as a printed
+ * separator on a tome page. */
+[data-theme-style="medieval"] .keep-accent-rail {
+  background-color: color-mix(in srgb, rgb(var(--keep-accent)) 50%, white);
+}
+/* Modern — solid colored stripe edge-to-edge (no edge-fade
+ * gradient) + a soft 0.3-alpha drop shadow projecting straight
+ * down at 90° from top. No glow halo. */
+[data-theme-style="modern"] .keep-accent-rail {
+  background-color: color-mix(in srgb, rgb(var(--keep-accent)) 50%, white);
+  box-shadow: 0 4px 8px -2px rgb(var(--keep-accent) / 0.30);
+}
+[data-theme-style="scifi"] .keep-accent-rail {
+  background-color: color-mix(in srgb, rgb(var(--keep-accent)) 20%, white);
+  box-shadow:
+    0 0 6px color-mix(in srgb, rgb(var(--keep-accent)) 30%, white),
+    0 0 12px rgb(var(--keep-accent) / 0.85),
+    0 0 28px rgb(var(--keep-accent) / 0.55),
+    0 0 56px rgb(var(--keep-accent) / 0.30),
+    0 0 96px -4px rgb(var(--keep-accent) / 0.18);
+}
+
+/* Anchor / no-op for components that opt into the frame system
+ * without committing to a specific style. Per-style rules above
+ * fill in the actual decoration. */
+.keep-frame { position: relative; }
+.keep-panel { position: relative; }
+
+/* `keep-panel-texture` survives as a no-op so old markup doesn't
+ * have to change in lockstep with the texture removal. */
+.keep-panel-texture { position: relative; }
+
+/* Ornament-driven corner sprites (set by lib/ornaments). Used by
+ * the medieval style on modals to add inked filigree at each
+ * corner; other styles either don't emit the urls or hide them. */
+.keep-panel-corners { position: relative; }
+.keep-panel-corners::before,
+.keep-panel-corners::after {
+  content: "";
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  pointer-events: none;
+  background-repeat: no-repeat;
+  background-size: 32px 32px;
+  image-rendering: pixelated;
+  z-index: 3;
+}
+.keep-panel-corners::before {
+  top: 0; left: 0;
+  background-image: var(--orn-corner-tl);
+}
+.keep-panel-corners::after {
+  top: 0; right: 0;
+  background-image: var(--orn-corner-tr);
+}
+.keep-panel-corners > .keep-corner-bl,
+.keep-panel-corners > .keep-corner-br {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  pointer-events: none;
+  background-repeat: no-repeat;
+  background-size: 32px 32px;
+  image-rendering: pixelated;
+  z-index: 3;
+}
+.keep-panel-corners > .keep-corner-bl {
+  bottom: 0; left: 0;
+  background-image: var(--orn-corner-bl);
+}
+.keep-panel-corners > .keep-corner-br {
+  bottom: 0; right: 0;
+  background-image: var(--orn-corner-br);
+}
+
+/* Horizontal divider sprite (medieval-style flourish line). Hidden
+ * for non-medieval styles where the ornament generator emits
+ * `none`. */
+.keep-divider {
+  height: 14px;
+  background-image: var(--orn-divider);
+  background-repeat: repeat-x;
+  background-position: center;
+  background-size: auto 14px;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+/* Full-app ambient overlay. Applied to a fixed pseudo-element on
+ * <body> so it sits behind all content but above the body bg. */
+.keep-bg-overlay {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-image: var(--orn-bg-overlay);
+  background-size: cover;
+  background-position: center;
+  opacity: 0.85;
+}
+
+/*
+ * Lightweight `prose` styling for sanitized HTML bodies (bios, the
+ * welcome blurb, rules, admin previews). We don't ship the
+ * @tailwindcss/typography plugin, so the `prose` class is otherwise
+ * a no-op. Scoped to `.prose` so it only kicks in where opted into.
+ *
+ * Allowed bio tags (mirror sanitizeBio): b, i, u, em, strong, a,
+ * img, br, p, ul/ol/li, blockquote, hr, h3-h6, span style=color.
  */
 .prose p,
 .prose ul,

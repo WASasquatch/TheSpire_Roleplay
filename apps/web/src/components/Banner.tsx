@@ -34,6 +34,11 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
   const setMe = useChat((s) => s.setMe);
   const branding = useChat((s) => s.branding);
   const [links, setLinks] = useState<NavLinkRow[]>([]);
+  // Mobile-only dropdown state. The desktop inline nav is always
+  // rendered; this just toggles a hamburger panel that mirrors the
+  // links on narrow screens where the inline strip would overflow or
+  // crowd the brand.
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,6 +50,17 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
       .catch(() => {});
     return () => { cancelled = true; };
   }, [navLinksVersion]);
+
+  // Esc closes the dropdown when it's open. Listener only registered
+  // while open so global keydown behavior stays untouched otherwise.
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenuOpen(false);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
 
   async function logout() {
     try {
@@ -68,17 +84,28 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
   if (branding.logoColor) logoStyle.color = branding.logoColor;
   if (branding.logoFont) logoStyle.fontFamily = branding.logoFont;
 
+  // Click handlers that fire the action then close the mobile dropdown.
+  // Dropdown stays alive past the click on desktop (it isn't rendered
+  // there), so these no-op the close on md+ — the inline nav doesn't
+  // need it.
+  function fireRules() { onOpenRules(); setMenuOpen(false); }
+  function fireAdmin() { if (onOpenAdmin) onOpenAdmin(); setMenuOpen(false); }
+  function fireLogout() { setMenuOpen(false); void logout(); }
+
   return (
     <header
       style={headerStyle}
-      className={`flex items-center justify-between border-b border-keep-rule px-4 py-2 ${
+      className={`keep-app-banner relative flex items-center justify-between border-b border-keep-rule px-4 py-2 ${
         branding.bannerCoverCss ? "" : "bg-keep-banner"
       }`}
     >
       <h1 style={logoStyle} className="font-action text-xl tracking-wide">
         {branding.siteName}
       </h1>
-      <nav className="flex items-center gap-3 text-xs uppercase tracking-widest text-keep-muted">
+
+      {/* Desktop nav. Hidden below md+; the hamburger button + dropdown
+          below handle narrow screens. */}
+      <nav className="hidden items-center gap-3 text-xs uppercase tracking-widest text-keep-muted md:flex">
         {links.map((l, i) => (
           <span key={l.id} className="flex items-center gap-3">
             {i > 0 ? <span className="text-keep-rule">|</span> : null}
@@ -124,6 +151,79 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
           Exit
         </button>
       </nav>
+
+      {/* Mobile hamburger trigger. The same actions live in a dropdown
+          panel underneath the header so we don't overflow the narrow
+          banner with a strip of inline links. */}
+      <button
+        type="button"
+        onClick={() => setMenuOpen((o) => !o)}
+        aria-expanded={menuOpen}
+        aria-label={menuOpen ? "Close menu" : "Open menu"}
+        title="Menu"
+        className="flex h-9 w-9 items-center justify-center rounded border border-keep-rule bg-keep-bg/60 text-lg text-keep-text hover:bg-keep-banner md:hidden"
+      >
+        {menuOpen ? "✕" : "☰"}
+      </button>
+
+      {/* Mobile dropdown. Fixed-viewport backdrop catches outside-clicks
+          so tapping the chat closes the menu. The panel itself sits
+          absolutely under the header, right-aligned, with stacked
+          rows. Z is above the chat content but below modals (z-40/50). */}
+      {menuOpen ? (
+        <>
+          <button
+            type="button"
+            aria-label="Close menu"
+            onClick={() => setMenuOpen(false)}
+            className="fixed inset-0 z-30 cursor-default bg-transparent md:hidden"
+          />
+          <nav
+            className="absolute right-2 top-full z-40 mt-1 flex w-56 flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg text-sm shadow-2xl md:hidden"
+          >
+            {links.map((l) => (
+              <a
+                key={l.id}
+                href={l.href}
+                target={l.target}
+                rel={l.target === "_blank" ? "noopener noreferrer" : undefined}
+                onClick={() => setMenuOpen(false)}
+                className="border-b border-keep-rule/40 px-3 py-2 text-keep-text hover:bg-keep-banner"
+              >
+                {l.label}
+              </a>
+            ))}
+            {/* These are menu items, not buttons. Drop the `keep-button`
+                class so they don't pick up the pill/lift styling — they
+                render as flat link-style rows matching the <a> siblings
+                above. The shared <nav> already gives them a rounded outer
+                container; individual items have no border-radius. */}
+            <button
+              type="button"
+              onClick={fireRules}
+              className="border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
+            >
+              Rules
+            </button>
+            {me?.role === "admin" && onOpenAdmin ? (
+              <button
+                type="button"
+                onClick={fireAdmin}
+                className="border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
+              >
+                Admin
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={fireLogout}
+              className="bg-transparent px-3 py-2 text-left font-semibold text-keep-accent hover:bg-keep-accent/10"
+            >
+              Exit
+            </button>
+          </nav>
+        </>
+      ) : null}
     </header>
   );
 }

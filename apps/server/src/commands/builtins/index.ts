@@ -25,6 +25,7 @@ import { worldCommand, worldsCommand } from "./world.js";
 import { expiryCommand, replyModeCommand } from "./room_modes.js";
 import { ignoreCommand, unignoreCommand } from "./ignore.js";
 import { usersCommand } from "./users.js";
+import { bookmarksCommand } from "./bookmarks.js";
 import { clearCommand, findCommand, listCommand } from "./rooms_list.js";
 import {
   announceCommand,
@@ -73,6 +74,7 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(ignoreCommand);
   reg.registerBuiltin(unignoreCommand);
   reg.registerBuiltin(usersCommand);
+  reg.registerBuiltin(bookmarksCommand);
   reg.registerBuiltin(listCommand);
   reg.registerBuiltin(clearCommand);
   reg.registerBuiltin(findCommand);

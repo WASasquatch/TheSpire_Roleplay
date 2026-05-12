@@ -60,6 +60,14 @@ export interface SiteBranding {
    * as a small browse strip below the welcome card.
    */
   featuredWorldsEnabled: boolean;
+  /**
+   * Site-wide default theme style. Orthogonal to `defaultTheme` (palette).
+   * Users without a per-user override (Profile.styleKey === null) inherit
+   * this. Possible values come from the client-side style registry in
+   * `lib/ornaments` ('medieval', 'modern', 'scifi'); unknown values fall
+   * back to 'medieval'.
+   */
+  defaultStyleKey: string;
 }
 
 export const DEFAULT_BRANDING: SiteBranding = {
@@ -80,6 +88,10 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // Off by default. Admin flips it on after deciding the seeded worlds are
   // representative or after seeding the catalog with their own.
   featuredWorldsEnabled: false,
+  // Flagship style. Site admins can change this to any registered style
+  // key ('medieval', 'modern', 'scifi'); unknown keys fall back to this
+  // value at render time.
+  defaultStyleKey: "medieval",
 };
 
 const BRANDING_CACHE_KEY = "tk:branding:v1";
@@ -134,6 +146,9 @@ export function loadCachedBranding(): SiteBranding {
       featuredWorldsEnabled: typeof parsed.featuredWorldsEnabled === "boolean"
         ? parsed.featuredWorldsEnabled
         : DEFAULT_BRANDING.featuredWorldsEnabled,
+      defaultStyleKey: typeof parsed.defaultStyleKey === "string" && parsed.defaultStyleKey.length > 0
+        ? parsed.defaultStyleKey
+        : DEFAULT_BRANDING.defaultStyleKey,
     };
   } catch {
     return DEFAULT_BRANDING;
@@ -173,6 +188,54 @@ interface ChatState {
   /** Replace an existing message in-place (used for edit/delete grace updates). */
   updateMessage: (msg: ChatMessage) => void;
   setMessages: (roomId: string, msgs: ChatMessage[]) => void;
+
+  /**
+   * Paginated forum topics, keyed by roomId then by category key.
+   * categoryKey is the threadCategoryId for a real category or
+   * `"_uncat"` for the synthetic Uncategorized bucket.
+   *
+   * Why separate from `messagesByRoom`:
+   *   - The forum view in nested-mode rooms shows topics ordered by
+   *     `lastActivityAt DESC` and paginated 20-at-a-time via
+   *     `GET /rooms/:id/topics`. The chat backlog (last 50 messages
+   *     via room:join) is the wrong substrate — busy threads can
+   *     push every topic out of the window, and we want explicit
+   *     "Load older" navigation, not implicit "scroll up".
+   *   - `messagesByRoom` is still the source of truth for REPLIES
+   *     (the topic's live conversation). Both buffers update in
+   *     parallel: new topic ⟶ here; new reply ⟶ messagesByRoom AND
+   *     `bumpTopicActivity` here.
+   *
+   * `pending` holds topics arrived from other users while the user
+   * was reading. We don't insert them inline (that would reflow what
+   * they're reading); instead the renderer shows a "X new topics"
+   * pill, and flushing the pill prepends them to `topics`.
+   */
+  forumTopicsByRoom: Record<string, Record<string, {
+    topics: ChatMessage[];
+    hasMore: boolean;
+    loading: boolean;
+    /** Topics from socket events waiting behind a "X new topics" pill. */
+    pending: ChatMessage[];
+  }>>;
+  /** Replace a category bucket entirely (used on first page load). */
+  setForumTopicsPage: (roomId: string, categoryKey: string, topics: ChatMessage[], hasMore: boolean) => void;
+  /** Append the next page to the end of a bucket (used on "Load older"). */
+  appendForumTopicsPage: (roomId: string, categoryKey: string, topics: ChatMessage[], hasMore: boolean) => void;
+  /** Mark a bucket as in-flight (UI shows a spinner / disables the button). */
+  setForumTopicsLoading: (roomId: string, categoryKey: string, loading: boolean) => void;
+  /** Prepend a brand-new topic that the *viewer themselves* just created. Inserts directly, no pill. */
+  prependOwnForumTopic: (roomId: string, categoryKey: string, topic: ChatMessage) => void;
+  /** Queue a topic that arrived from another user behind the "new topics" pill. */
+  queuePendingForumTopic: (roomId: string, categoryKey: string, topic: ChatMessage) => void;
+  /** Flush pending → topics (user clicked the pill). */
+  flushPendingForumTopics: (roomId: string, categoryKey: string) => void;
+  /** Re-emit an existing topic with updated fields (edit/lock/unlock). Searches every bucket of the room. */
+  updateForumTopic: (msg: ChatMessage) => void;
+  /** Bump a topic's lastActivityAt + re-sort its bucket (called when a reply lands). */
+  bumpTopicActivity: (roomId: string, topicId: string, lastActivityAt: number) => void;
+  /** Drop a topic from every bucket of a room (called when a topic is soft-deleted). */
+  removeForumTopic: (roomId: string, topicId: string) => void;
   setOccupants: (roomId: string, occ: RoomOccupant[]) => void;
   setRoom: (room: RoomSummary) => void;
 
@@ -202,6 +265,21 @@ interface ChatState {
   /** Public site branding - see SiteBranding. */
   branding: SiteBranding;
   setBranding: (b: SiteBranding) => void;
+}
+
+/**
+ * Sort comparator for forum-topic buckets. The invariant the store
+ * maintains across every mutation:
+ *   1. Stickies first (admin-pinned), within stickies by lastActivityAt DESC.
+ *   2. Then non-stickies, by lastActivityAt DESC.
+ * `createdAt` is the fallback when lastActivityAt is somehow absent
+ * (shouldn't happen on data from the topics endpoint, but defensive).
+ */
+function compareTopicsForBucket(a: ChatMessage, b: ChatMessage): number {
+  const aSticky = a.isSticky ? 1 : 0;
+  const bSticky = b.isSticky ? 1 : 0;
+  if (aSticky !== bSticky) return bSticky - aSticky;
+  return (b.lastActivityAt ?? b.createdAt) - (a.lastActivityAt ?? a.createdAt);
 }
 
 export const useChat = create<ChatState>((set) => ({
@@ -240,6 +318,210 @@ export const useChat = create<ChatState>((set) => ({
 
   setMessages: (roomId, msgs) =>
     set((s) => ({ messagesByRoom: { ...s.messagesByRoom, [roomId]: msgs } })),
+
+  forumTopicsByRoom: {},
+
+  setForumTopicsPage: (roomId, categoryKey, topics, hasMore) =>
+    set((s) => {
+      const room = s.forumTopicsByRoom[roomId] ?? {};
+      const prev = room[categoryKey];
+      return {
+        forumTopicsByRoom: {
+          ...s.forumTopicsByRoom,
+          [roomId]: {
+            ...room,
+            [categoryKey]: {
+              topics,
+              hasMore,
+              loading: false,
+              // Preserve pending across a first-page refetch — a topic
+              // queued behind the pill is still "new" relative to what
+              // the user has seen.
+              pending: prev?.pending ?? [],
+            },
+          },
+        },
+      };
+    }),
+
+  appendForumTopicsPage: (roomId, categoryKey, topics, hasMore) =>
+    set((s) => {
+      const room = s.forumTopicsByRoom[roomId] ?? {};
+      const prev = room[categoryKey];
+      if (!prev) {
+        // Defensive: append on an empty bucket behaves like setPage.
+        return {
+          forumTopicsByRoom: {
+            ...s.forumTopicsByRoom,
+            [roomId]: {
+              ...room,
+              [categoryKey]: { topics, hasMore, loading: false, pending: [] },
+            },
+          },
+        };
+      }
+      // De-dup by id: a topic could already be in the bucket if a live
+      // event slipped in between the page boundary and this append.
+      const seen = new Set(prev.topics.map((t) => t.id));
+      const extra = topics.filter((t) => !seen.has(t.id));
+      return {
+        forumTopicsByRoom: {
+          ...s.forumTopicsByRoom,
+          [roomId]: {
+            ...room,
+            [categoryKey]: {
+              topics: [...prev.topics, ...extra],
+              hasMore,
+              loading: false,
+              pending: prev.pending,
+            },
+          },
+        },
+      };
+    }),
+
+  setForumTopicsLoading: (roomId, categoryKey, loading) =>
+    set((s) => {
+      const room = s.forumTopicsByRoom[roomId] ?? {};
+      const prev = room[categoryKey] ?? { topics: [], hasMore: false, loading: false, pending: [] };
+      return {
+        forumTopicsByRoom: {
+          ...s.forumTopicsByRoom,
+          [roomId]: { ...room, [categoryKey]: { ...prev, loading } },
+        },
+      };
+    }),
+
+  prependOwnForumTopic: (roomId, categoryKey, topic) =>
+    set((s) => {
+      const room = s.forumTopicsByRoom[roomId] ?? {};
+      const prev = room[categoryKey] ?? { topics: [], hasMore: false, loading: false, pending: [] };
+      // Don't double-insert if the topic is already at the head.
+      if (prev.topics.some((t) => t.id === topic.id)) return {};
+      return {
+        forumTopicsByRoom: {
+          ...s.forumTopicsByRoom,
+          [roomId]: {
+            ...room,
+            [categoryKey]: { ...prev, topics: [topic, ...prev.topics] },
+          },
+        },
+      };
+    }),
+
+  queuePendingForumTopic: (roomId, categoryKey, topic) =>
+    set((s) => {
+      const room = s.forumTopicsByRoom[roomId] ?? {};
+      const prev = room[categoryKey] ?? { topics: [], hasMore: false, loading: false, pending: [] };
+      // De-dup: ignore if already pending OR already visible (the
+      // user might have just flushed and this is a late echo).
+      if (prev.pending.some((t) => t.id === topic.id)) return {};
+      if (prev.topics.some((t) => t.id === topic.id)) return {};
+      return {
+        forumTopicsByRoom: {
+          ...s.forumTopicsByRoom,
+          [roomId]: {
+            ...room,
+            [categoryKey]: { ...prev, pending: [topic, ...prev.pending] },
+          },
+        },
+      };
+    }),
+
+  flushPendingForumTopics: (roomId, categoryKey) =>
+    set((s) => {
+      const room = s.forumTopicsByRoom[roomId];
+      const prev = room?.[categoryKey];
+      if (!prev || prev.pending.length === 0) return {};
+      return {
+        forumTopicsByRoom: {
+          ...s.forumTopicsByRoom,
+          [roomId]: {
+            ...room,
+            [categoryKey]: {
+              ...prev,
+              topics: [...prev.pending, ...prev.topics],
+              pending: [],
+            },
+          },
+        },
+      };
+    }),
+
+  updateForumTopic: (msg) =>
+    set((s) => {
+      const room = s.forumTopicsByRoom[msg.roomId];
+      if (!room) return {};
+      // Update in whichever bucket holds the topic, then re-sort that
+      // bucket so a sticky toggle (the field most likely to change
+      // ordering) lifts the row to / drops it from the top tier.
+      // Other field changes (lock, edit) don't affect order but the
+      // sort is idempotent so a no-op resort is harmless.
+      let touched = false;
+      const nextRoom: typeof room = {};
+      for (const [key, bucket] of Object.entries(room)) {
+        const idx = bucket.topics.findIndex((t) => t.id === msg.id);
+        if (idx < 0) {
+          nextRoom[key] = bucket;
+          continue;
+        }
+        const next = bucket.topics.slice();
+        next[idx] = msg;
+        next.sort(compareTopicsForBucket);
+        nextRoom[key] = { ...bucket, topics: next };
+        touched = true;
+      }
+      if (!touched) return {};
+      return { forumTopicsByRoom: { ...s.forumTopicsByRoom, [msg.roomId]: nextRoom } };
+    }),
+
+  bumpTopicActivity: (roomId, topicId, lastActivityAt) =>
+    set((s) => {
+      const room = s.forumTopicsByRoom[roomId];
+      if (!room) return {};
+      // Find which bucket holds the topic, mutate its lastActivityAt,
+      // and re-sort that bucket so the bucket-wide invariant holds:
+      //   1. stickies first (isSticky=true), ordered by lastActivityAt DESC
+      //   2. then non-stickies, ordered by lastActivityAt DESC
+      // A full sort is cheap at typical bucket sizes (≤ a few hundred
+      // topics after several Load-Older clicks) and trivially handles
+      // edge cases like a sticky receiving a reply.
+      let touchedKey: string | null = null;
+      const nextRoom: typeof room = {};
+      for (const [key, bucket] of Object.entries(room)) {
+        const idx = bucket.topics.findIndex((t) => t.id === topicId);
+        if (idx < 0) {
+          nextRoom[key] = bucket;
+          continue;
+        }
+        const updated: ChatMessage = { ...bucket.topics[idx]!, lastActivityAt };
+        const next = bucket.topics.slice();
+        next[idx] = updated;
+        next.sort(compareTopicsForBucket);
+        nextRoom[key] = { ...bucket, topics: next };
+        touchedKey = key;
+      }
+      if (!touchedKey) return {};
+      return { forumTopicsByRoom: { ...s.forumTopicsByRoom, [roomId]: nextRoom } };
+    }),
+
+  removeForumTopic: (roomId, topicId) =>
+    set((s) => {
+      const room = s.forumTopicsByRoom[roomId];
+      if (!room) return {};
+      let touched = false;
+      const nextRoom: typeof room = {};
+      for (const [key, bucket] of Object.entries(room)) {
+        if (!bucket.topics.some((t) => t.id === topicId)) {
+          nextRoom[key] = bucket;
+          continue;
+        }
+        nextRoom[key] = { ...bucket, topics: bucket.topics.filter((t) => t.id !== topicId) };
+        touched = true;
+      }
+      if (!touched) return {};
+      return { forumTopicsByRoom: { ...s.forumTopicsByRoom, [roomId]: nextRoom } };
+    }),
 
   setOccupants: (roomId, occ) =>
     set((s) => ({ occupants: { ...s.occupants, [roomId]: occ } })),

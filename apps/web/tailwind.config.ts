@@ -15,6 +15,26 @@ import type { Config } from "tailwindcss";
  */
 const c = (name: string) => `rgb(var(--keep-${name}) / <alpha-value>)`;
 
+/**
+ * Ramp helper — emits the 5-step lightness ramp Tailwind tokens for a
+ * slot. e.g. `ramp("panel")` returns `{ 100: ..., 200: ..., 300: ...,
+ * 400: ..., 500: ..., DEFAULT: ... }` so callers can use both
+ * `bg-keep-panel` (the user-picked value, == 300) AND
+ * `bg-keep-panel-200` (one tier lighter, for highlights), `bg-keep-panel-400`
+ * (one tier darker, for shadow rims), etc.
+ *
+ * The CSS vars driving these (`--keep-<slot>-100` ... `--keep-<slot>-500`)
+ * are set by `applyTheme` in lib/theme.ts using HSL lightness offsets.
+ */
+const ramp = (name: string): Record<string, string> => ({
+  DEFAULT: c(name),
+  100: c(`${name}-100`),
+  200: c(`${name}-200`),
+  300: c(`${name}-300`),
+  400: c(`${name}-400`),
+  500: c(`${name}-500`),
+});
+
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
@@ -33,20 +53,24 @@ export default {
       },
       colors: {
         keep: {
-          // canonical names
-          bg: c("bg"),
-          panel: c("panel"),
-          border: c("border"),
-          text: c("text"),
-          muted: c("muted"),
-          action: c("action"),
-          accent: c("accent"),
-          system: c("system"),
+          // canonical names — each is a ramp so `bg-keep-panel` (the
+          // user-picked tone) AND `bg-keep-panel-200` (lighter highlight)
+          // / `bg-keep-panel-400` (darker shadow rim) both compose.
+          bg: ramp("bg"),
+          panel: ramp("panel"),
+          border: ramp("border"),
+          text: ramp("text"),
+          muted: ramp("muted"),
+          action: ramp("action"),
+          accent: ramp("accent"),
+          system: ramp("system"),
 
-          // legacy aliases — same canonical vars, just different spelling
-          parchment: c("bg"),
-          banner: c("panel"),
-          rule: c("border"),
+          // legacy aliases — same canonical vars, just different spelling.
+          // Kept ramp-aware so existing call sites still benefit from
+          // the new tiers (e.g. `bg-keep-banner-200`).
+          parchment: ramp("bg"),
+          banner: ramp("panel"),
+          rule: ramp("border"),
         },
       },
     },

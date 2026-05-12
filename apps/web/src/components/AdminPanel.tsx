@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import DOMPurify from "dompurify";
-import type { AuditEntry, ReportEntry, Role, Theme } from "@thekeep/shared";
+import type { AuditEntry, ReportEntry, Role, Theme, ThreadCategory } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import { readError } from "../lib/http.js";
+import { listStyles } from "../lib/ornaments/index.js";
 import { Modal } from "./Modal.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { useChat } from "../state/store.js";
@@ -13,21 +14,22 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "users" | "reports" | "audit";
+type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "users" | "reports" | "audit";
 
 export function AdminPanel({ onClose, onLinksChanged }: Props) {
-  const [tab, setTab] = useState<Tab>("settings");
+  const [tab, setTab] = useState<Tab>("overview");
 
   return (
     <Modal onClose={onClose} zIndex={50}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[92vh] w-[min(900px,95vw)] overflow-hidden rounded border border-keep-rule bg-keep-parchment shadow-xl"
+        className="keep-frame max-h-[92vh] w-[min(900px,95vw)] overflow-hidden rounded bg-keep-parchment"
       >
         <div className="flex items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
           <div className="flex items-center gap-3">
             <h2 className="font-action text-lg">Admin</h2>
             <nav className="flex gap-1 text-xs uppercase tracking-widest">
+              <TabBtn active={tab === "overview"} onClick={() => setTab("overview")}>Overview</TabBtn>
               <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>Settings</TabBtn>
               <TabBtn active={tab === "branding"} onClick={() => setTab("branding")}>Branding</TabBtn>
               <TabBtn active={tab === "rules"} onClick={() => setTab("rules")}>Rules</TabBtn>
@@ -47,6 +49,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
         </div>
 
         <div className="max-h-[78vh] overflow-y-auto p-4">
+          {tab === "overview" ? <OverviewTab /> : null}
           {tab === "settings" ? <SettingsTab /> : null}
           {tab === "branding" ? <BrandingTab /> : null}
           {tab === "rules" ? <RulesTab /> : null}
@@ -73,6 +76,43 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * Shared style-key picker. Reads available styles from the ornaments
+ * registry so the catalog stays single-sourced — adding a style file
+ * automatically surfaces it here without UI changes.
+ *
+ * Caller controls value semantics:
+ *  - Admin: required, defaults to "medieval"
+ *  - Profile: nullable; null means "follow site default", represented
+ *    by the empty-string sentinel in the <select>.
+ */
+export function StylePicker({
+  value,
+  onChange,
+  allowInherit = false,
+}: {
+  value: string | null;
+  onChange: (key: string | null) => void;
+  /** When true, prepend a "(use site default)" option whose value is null. */
+  allowInherit?: boolean;
+}) {
+  const styles = listStyles();
+  return (
+    <select
+      value={value ?? ""}
+      onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
+      className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+    >
+      {allowInherit ? (
+        <option value="">(use site default)</option>
+      ) : null}
+      {styles.map((s) => (
+        <option key={s.key} value={s.key}>{s.label}</option>
+      ))}
+    </select>
   );
 }
 
@@ -126,6 +166,8 @@ interface SettingsRow {
   featuredWorldsEnabled: boolean;
   /** Sanitized HTML for the post-login welcome modal. "" = no welcome shown. */
   newUserWelcomeHtml: string;
+  /** Site-wide default theme style key. Users without an override inherit this. */
+  defaultStyleKey: string;
   updatedAt: number;
 }
 
@@ -164,33 +206,57 @@ function parseDurationMs(s: string): number | null {
 }
 
 /* =============================================================
- * SITE OVERVIEW (stats panel inside Settings tab)
+ * OVERVIEW TAB
  * =============================================================
  *
- * Polls /stats every 30s and renders the live snapshot - online users,
- * room counts, and a 7-day message-frequency sparkline. Replaces the
- * previous in-rail MetaBar; admins want this glanceable, regular users
- * don't need it cluttering the rooms drawer on mobile.
+ * Admin dashboard. Polls /admin/overview every 30s and renders a card
+ * grid of headline counters plus a 7-day daily-series block covering
+ * messages, topics, logins, and registrations. Distinct from the public
+ * /stats endpoint — this one carries DAU/WAU/MAU, moderation volume,
+ * and per-day login/registration counts that aren't appropriate for
+ * the anonymous splash view.
  */
 
-interface OverviewStats {
-  online: number;
-  rooms: { public: number; private: number; total: number };
-  messagesPerDay: { day: string; count: number }[];
+interface OverviewDayPoint {
+  day: string;
+  count: number;
 }
 
-function SiteOverview() {
-  const [stats, setStats] = useState<OverviewStats | null>(null);
+interface AdminOverview {
+  online: number;
+  users: {
+    total: number;
+    newLast7d: number;
+    newLast30d: number;
+    dau: number;
+    wau: number;
+    mau: number;
+  };
+  rooms: { public: number; private: number; total: number };
+  messages: { last24h: number; last7d: number; last30d: number };
+  forum: { topics: number; replies: number; topicsLast7d: number; repliesLast7d: number };
+  content: { characters: number; worlds: number };
+  moderation: { reportsLast7d: number; auditLast7d: number };
+  series: {
+    messages: OverviewDayPoint[];
+    topics: OverviewDayPoint[];
+    logins: OverviewDayPoint[];
+    registrations: OverviewDayPoint[];
+  };
+}
+
+function OverviewTab() {
+  const [data, setData] = useState<AdminOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
-        const r = await fetch("/stats", { credentials: "include" });
-        if (!r.ok) throw new Error(`status ${r.status}`);
-        const j = (await r.json()) as OverviewStats;
-        if (!cancelled) { setStats(j); setError(null); }
+        const r = await fetch("/admin/overview", { credentials: "include" });
+        if (!r.ok) throw new Error(await readError(r));
+        const j = (await r.json()) as AdminOverview;
+        if (!cancelled) { setData(j); setError(null); }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "load failed");
       }
@@ -200,72 +266,175 @@ function SiteOverview() {
     return () => { cancelled = true; window.clearInterval(id); };
   }, []);
 
+  if (!data) {
+    return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
+  }
+
   return (
-    <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Site overview</legend>
-      {error ? (
-        <div className="text-keep-accent">{error}</div>
-      ) : !stats ? (
-        <div className="text-keep-muted">loading...</div>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-[auto_1fr] sm:items-center">
-          {/* Headline numbers */}
-          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            <Headline value={stats.online} label="online" emphasised={stats.online > 0} />
-            <Divider />
-            <Headline value={stats.rooms.public} label={stats.rooms.public === 1 ? "public room" : "public rooms"} />
-            {stats.rooms.private > 0 ? (
-              <>
-                <Divider />
-                <Headline value={stats.rooms.private} label={stats.rooms.private === 1 ? "private chamber" : "private chambers"} />
-              </>
-            ) : null}
-          </div>
-          {/* 7-day sparkline */}
-          <MessageSparkline days={stats.messagesPerDay} />
+    <div className="space-y-4">
+      <p className="text-xs text-keep-muted">
+        Live snapshot of activity across the site. Auto-refreshes every 30 seconds.
+      </p>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <OverviewCard title="Online now" hint="Connected sockets, deduped per user.">
+          <BigStat value={data.online} accent={data.online > 0} />
+        </OverviewCard>
+
+        <OverviewCard title="Registered users" hint="Total accounts, excluding the system sentinel.">
+          <BigStat value={data.users.total} />
+          <SubStats items={[
+            { label: "new 7d", value: data.users.newLast7d },
+            { label: "new 30d", value: data.users.newLast30d },
+          ]} />
+        </OverviewCard>
+
+        <OverviewCard title="Active users" hint="Distinct logins inside each window. Older buckets undercount if session TTL is shorter than the window.">
+          <SubStats items={[
+            { label: "DAU", value: data.users.dau },
+            { label: "WAU", value: data.users.wau },
+            { label: "MAU", value: data.users.mau },
+          ]} />
+        </OverviewCard>
+
+        <OverviewCard title="Rooms" hint="Public chambers + private rooms.">
+          <BigStat value={data.rooms.total} />
+          <SubStats items={[
+            { label: "public", value: data.rooms.public },
+            { label: "private", value: data.rooms.private },
+          ]} />
+        </OverviewCard>
+
+        <OverviewCard title="Chat messages" hint="Chat volume, excludes presence/system rows and soft-deleted messages.">
+          <SubStats items={[
+            { label: "24h", value: data.messages.last24h },
+            { label: "7d", value: data.messages.last7d },
+            { label: "30d", value: data.messages.last30d },
+          ]} />
+        </OverviewCard>
+
+        <OverviewCard title="Forum activity" hint="Topics and replies across all nested-mode rooms.">
+          <SubStats items={[
+            { label: "topics", value: data.forum.topics },
+            { label: "replies", value: data.forum.replies },
+            { label: "topics 7d", value: data.forum.topicsLast7d },
+            { label: "replies 7d", value: data.forum.repliesLast7d },
+          ]} />
+        </OverviewCard>
+
+        <OverviewCard title="Content" hint="User-authored material across the site.">
+          <SubStats items={[
+            { label: "characters", value: data.content.characters },
+            { label: "worlds", value: data.content.worlds },
+          ]} />
+        </OverviewCard>
+
+        <OverviewCard title="Moderation (7d)" hint="Reports filed and audit-log actions in the last week.">
+          <SubStats items={[
+            { label: "reports", value: data.moderation.reportsLast7d },
+            { label: "audit", value: data.moderation.auditLast7d },
+          ]} />
+        </OverviewCard>
+      </div>
+
+      <fieldset className="rounded border border-keep-rule p-3">
+        <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">This week</legend>
+        <div className="space-y-2">
+          <SparklineRow label="Messages" series={data.series.messages} colorClass="bg-keep-action/70" />
+          <SparklineRow label="Topics" series={data.series.topics} colorClass="bg-keep-accent/70" />
+          <SparklineRow label="Logins" series={data.series.logins} colorClass="bg-keep-action/70" />
+          <SparklineRow label="Registrations" series={data.series.registrations} colorClass="bg-keep-accent/70" />
+          <SparklineAxis days={data.series.messages.map((d) => d.day)} />
         </div>
-      )}
+      </fieldset>
+
+      {error ? <div className="text-xs text-keep-accent">{error}</div> : null}
+    </div>
+  );
+}
+
+function OverviewCard({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <fieldset className="rounded border border-keep-rule p-3" title={hint}>
+      <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">{title}</legend>
+      <div className="space-y-2">{children}</div>
     </fieldset>
   );
 }
 
-function Headline({ value, label, emphasised }: { value: number; label: string; emphasised?: boolean }) {
+function BigStat({ value, accent }: { value: number; accent?: boolean }) {
   return (
-    <span className="inline-flex items-baseline gap-1">
-      <span className={`text-lg font-semibold tabular-nums ${emphasised ? "text-keep-action" : "text-keep-text"}`}>
-        {value}
-      </span>
-      <span className="text-keep-muted">{label}</span>
-    </span>
+    <div className={`text-2xl font-semibold tabular-nums ${accent ? "text-keep-action" : "text-keep-text"}`}>
+      {value.toLocaleString()}
+    </div>
   );
 }
 
-function Divider() {
-  return <span aria-hidden className="text-keep-rule">·</span>;
+function SubStats({ items }: { items: { label: string; value: number }[] }) {
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+      {items.map((it) => (
+        <div key={it.label} className="flex items-baseline gap-1.5">
+          <span className="font-semibold tabular-nums text-keep-text">{it.value.toLocaleString()}</span>
+          <span className="text-keep-muted">{it.label}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
-function MessageSparkline({ days }: { days: { day: string; count: number }[] }) {
-  if (days.length === 0) return null;
-  const max = Math.max(1, ...days.map((d) => d.count));
-  const total = days.reduce((s, d) => s + d.count, 0);
+/**
+ * One labeled sparkline row in the "This week" panel. The plot area is a
+ * fixed-height (`h-8`) box so every row occupies the same vertical extent
+ * regardless of its peak — otherwise quiet rows shrink and busy rows grow
+ * and the panel gets a ragged baseline. Per-day date labels live once at
+ * the bottom in `SparklineAxis` rather than under every row.
+ */
+function SparklineRow({ label, series, colorClass }: { label: string; series: OverviewDayPoint[]; colorClass: string }) {
+  if (series.length === 0) return null;
+  const max = Math.max(1, ...series.map((d) => d.count));
+  const total = series.reduce((s, d) => s + d.count, 0);
   return (
-    <div className="flex items-end gap-1 sm:justify-self-end" title={`${total} messages in the last 7 days`}>
-      {days.map((d) => {
-        // Bars get a minimum height (2px) so a zero-day still shows as a
-        // visible "no traffic" baseline instead of disappearing entirely.
-        const h = Math.max(2, Math.round((d.count / max) * 28));
-        return (
-          <div key={d.day} className="flex flex-col items-center" title={`${d.day}: ${d.count} messages`}>
+    <div
+      className="grid items-center gap-2 text-xs sm:grid-cols-[110px_1fr_64px]"
+      title={`${total.toLocaleString()} this week`}
+    >
+      <span className="uppercase tracking-widest text-keep-muted">{label}</span>
+      <div className="flex h-8 items-end gap-1">
+        {series.map((d) => {
+          // Floor each bar at 2px so a zero-day still reads as a visible
+          // "no traffic" baseline instead of vanishing into the row.
+          const h = Math.max(2, Math.round((d.count / max) * 28));
+          return (
             <div
-              className="w-3 rounded-sm bg-keep-action/70"
-              style={{ height: `${h}px` }}
-            />
-            <span className="mt-0.5 text-[9px] tabular-nums text-keep-muted">
-              {d.day.slice(5)}
-            </span>
-          </div>
-        );
-      })}
+              key={d.day}
+              className="flex flex-1 items-end"
+              title={`${d.day}: ${d.count.toLocaleString()}`}
+            >
+              <div className={`${colorClass} w-full rounded-sm`} style={{ height: `${h}px` }} />
+            </div>
+          );
+        })}
+      </div>
+      <span className="text-right font-semibold tabular-nums text-keep-text">
+        {total.toLocaleString()}
+      </span>
+    </div>
+  );
+}
+
+function SparklineAxis({ days }: { days: string[] }) {
+  return (
+    <div className="grid gap-2 text-[9px] sm:grid-cols-[110px_1fr_64px]">
+      <span aria-hidden />
+      <div className="flex gap-1">
+        {days.map((d) => (
+          <span key={d} className="flex-1 text-center tabular-nums text-keep-muted">
+            {d.slice(5)}
+          </span>
+        ))}
+      </div>
+      <span aria-hidden />
     </div>
   );
 }
@@ -284,6 +453,7 @@ function SettingsTab() {
   const [regOpen, setRegOpen] = useState(true);
   const [activityFeedsEnabled, setActivityFeedsEnabled] = useState(false);
   const [featuredWorldsEnabled, setFeaturedWorldsEnabled] = useState(false);
+  const [defaultStyleKey, setDefaultStyleKey] = useState<string>("medieval");
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -306,6 +476,7 @@ function SettingsTab() {
       setRegOpen(j.registrationOpen);
       setActivityFeedsEnabled(j.activityFeedsEnabled);
       setFeaturedWorldsEnabled(j.featuredWorldsEnabled);
+      setDefaultStyleKey(j.defaultStyleKey || "medieval");
     } catch (err) {
       setError(err instanceof Error ? err.message : "load failed");
     }
@@ -339,6 +510,7 @@ function SettingsTab() {
         registrationOpen: regOpen,
         activityFeedsEnabled,
         featuredWorldsEnabled,
+        defaultStyleKey,
       };
       // Send theme only when admin actually changed it from the loaded value.
       if (theme === null && data?.defaultThemeJson) body.defaultTheme = null;
@@ -370,6 +542,7 @@ function SettingsTab() {
         defaultTheme: j.defaultTheme,
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
+        defaultStyleKey: j.defaultStyleKey,
       });
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
@@ -389,8 +562,6 @@ function SettingsTab() {
       <p className="text-xs text-keep-muted">
         Sitewide configuration. Changes apply immediately for new sessions and the next hourly retention sweep.
       </p>
-
-      <SiteOverview />
 
       <fieldset className="rounded border border-keep-rule p-3 text-xs">
         <legend className="px-1 uppercase tracking-widest text-keep-muted">Message retention</legend>
@@ -528,6 +699,23 @@ function SettingsTab() {
         ) : null}
       </fieldset>
 
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Theme style</legend>
+        <p className="mb-2 text-keep-muted">
+          The site-wide visual treatment (ornaments, borders, textures).
+          Orthogonal to the palette above — picking a style doesn't change
+          which colors are used, just how they're rendered. Users can
+          override this in their profile.
+        </p>
+        <StylePicker
+          value={defaultStyleKey}
+          // Admin requires a non-null value; if the user manages to
+          // pick "(use site default)" (only shown with allowInherit)
+          // fall through to the launch flagship.
+          onChange={(k) => setDefaultStyleKey(k ?? "medieval")}
+        />
+      </fieldset>
+
       {error ? (
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
       ) : null}
@@ -539,7 +727,7 @@ function SettingsTab() {
         <button
           type="submit"
           disabled={saving}
-          className="rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
+          className="keep-button rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
         >
           {saving ? "Saving..." : "Save settings"}
         </button>
@@ -646,6 +834,7 @@ function BrandingTab() {
         defaultTheme: j.defaultTheme,
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
+        defaultStyleKey: j.defaultStyleKey,
       });
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
@@ -843,7 +1032,7 @@ function BrandingTab() {
         <button
           type="submit"
           disabled={saving}
-          className="rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
+          className="keep-button rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
         >
           {saving ? "Saving..." : "Save branding"}
         </button>
@@ -933,6 +1122,7 @@ function RulesTab() {
         defaultTheme: j.defaultTheme,
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
+        defaultStyleKey: j.defaultStyleKey,
       });
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
@@ -1088,7 +1278,7 @@ function RulesTab() {
         <button
           type="submit"
           disabled={saving}
-          className="rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
+          className="keep-button rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
         >
           {saving ? "Saving..." : "Save rules"}
         </button>
@@ -1260,7 +1450,7 @@ function NewLinkForm({ onCreate }: { onCreate: (i: NavLinkInput) => Promise<void
         <button
           type="submit"
           disabled={submitting}
-          className="col-span-1 rounded border border-keep-rule bg-keep-banner px-2 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
+          className="keep-button col-span-1 rounded border border-keep-rule bg-keep-banner px-2 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
         >
           {submitting ? "..." : "Add"}
         </button>
@@ -1345,7 +1535,7 @@ function LinkRow({
           <button
             type="button"
             onClick={commit}
-            className="mr-1 rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80"
+            className="keep-button mr-1 rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80"
           >
             Save
           </button>
@@ -1760,7 +1950,7 @@ function CommandForm({
             <button
               type="button"
               onClick={onDelete}
-              className="rounded border border-keep-accent/60 bg-keep-bg px-3 py-1 text-keep-accent hover:bg-keep-accent/10"
+              className="keep-button rounded border border-keep-accent/60 bg-keep-bg px-3 py-1 text-keep-accent hover:bg-keep-accent/10"
             >
               Delete
             </button>
@@ -1770,14 +1960,14 @@ function CommandForm({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner"
+            className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={submitting}
-            className="rounded border border-keep-rule bg-keep-banner px-3 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
+            className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
           >
             {submitting ? "Saving..." : "Save"}
           </button>
@@ -1875,6 +2065,8 @@ interface AdminRoom {
   description: string | null;
   ownerId: string | null;
   isSystem: boolean;
+  isDefault: boolean;
+  replyMode: "flat" | "nested";
   hasPassword: boolean;
   memberCount: number;
 }
@@ -1885,6 +2077,13 @@ interface RoomDraft {
   topic: string;
   description: string;
   isSystem: boolean;
+  isDefault: boolean;
+  /**
+   * "flat" = chronological chat; "nested" = forum-style threads with
+   * persistent top-level posts and grouped replies. Choosing "nested"
+   * unlocks the thread-categories panel for organizing those threads.
+   */
+  replyMode: "flat" | "nested";
   /** Empty string keeps existing password (edit) or means "no password" (create + public). */
   password: string;
   /** True iff editing AND admin clicked "clear password" - sends null. */
@@ -1898,6 +2097,8 @@ function emptyDraft(): RoomDraft {
     topic: "",
     description: "",
     isSystem: true,
+    isDefault: false,
+    replyMode: "flat",
     password: "",
     clearPassword: false,
   };
@@ -1910,6 +2111,8 @@ function draftFromRoom(r: AdminRoom): RoomDraft {
     topic: r.topic ?? "",
     description: r.description ?? "",
     isSystem: r.isSystem,
+    isDefault: r.isDefault,
+    replyMode: r.replyMode,
     password: "",
     clearPassword: false,
   };
@@ -2238,7 +2441,7 @@ function TitleKindForm({
             <button
               type="button"
               onClick={onDelete}
-              className="rounded border border-keep-accent/60 bg-keep-bg px-3 py-1 text-keep-accent hover:bg-keep-accent/10"
+              className="keep-button rounded border border-keep-accent/60 bg-keep-bg px-3 py-1 text-keep-accent hover:bg-keep-accent/10"
             >
               Delete
             </button>
@@ -2248,14 +2451,14 @@ function TitleKindForm({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-keep-muted hover:bg-keep-banner"
+            className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-keep-muted hover:bg-keep-banner"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={busy}
-            className="rounded border border-keep-rule bg-keep-banner px-3 py-1 hover:bg-keep-banner/80 disabled:opacity-50"
+            className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-1 hover:bg-keep-banner/80 disabled:opacity-50"
           >
             {mode === "create" ? "Create" : "Save"}
           </button>
@@ -2329,6 +2532,8 @@ function RoomsTab() {
       name: draft.name.trim(),
       type: draft.type,
       isSystem: draft.isSystem,
+      isDefault: draft.isDefault,
+      replyMode: draft.replyMode,
     };
     if (draft.topic.trim()) body.topic = draft.topic.trim();
     if (draft.description.trim()) body.description = draft.description.trim();
@@ -2355,6 +2560,8 @@ function RoomsTab() {
       body.description = draft.description.trim() === "" ? null : draft.description.trim();
     }
     if (draft.isSystem !== room.isSystem) body.isSystem = draft.isSystem;
+    if (draft.isDefault !== room.isDefault) body.isDefault = draft.isDefault;
+    if (draft.replyMode !== room.replyMode) body.replyMode = draft.replyMode;
     if (draft.type !== room.type) {
       body.type = draft.type;
       if (draft.type === "private" && draft.password) body.password = draft.password;
@@ -2423,6 +2630,7 @@ function RoomsTab() {
               <th className="px-2 py-1">Members</th>
               <th className="px-2 py-1 text-left">Topic</th>
               <th className="px-2 py-1">System</th>
+              <th className="px-2 py-1">Default</th>
               <th className="px-2 py-1"></th>
             </tr>
           </thead>
@@ -2450,6 +2658,9 @@ function RoomsTab() {
                 <td className="px-2 py-1 text-center tabular-nums">{r.memberCount}</td>
                 <td className="px-2 py-1 truncate max-w-xs" title={r.topic ?? ""}>{r.topic ?? "-"}</td>
                 <td className="px-2 py-1 text-center">{r.isSystem ? "✓" : ""}</td>
+                <td className="px-2 py-1 text-center" title={r.isDefault ? "Default landing room" : ""}>
+                  {r.isDefault ? "★" : ""}
+                </td>
                 <td className="px-2 py-1 text-right">
                   <button
                     type="button"
@@ -2635,7 +2846,54 @@ function RoomForm({
             <b>System room</b> - permanent, exempt from auto-expire, protected from deletion until this flag is cleared.
           </span>
         </label>
+        <label className="col-span-2 flex items-center gap-2 pt-1">
+          <input
+            type="checkbox"
+            checked={draft.isDefault}
+            onChange={(e) => setDraft({ ...draft, isDefault: e.target.checked })}
+          />
+          <span>
+            <b>Default landing room</b> - new users and reconnecting users with no remembered room land here. Flipping this on automatically clears the flag off whichever room currently holds it.
+          </span>
+        </label>
+
+        {/* Reply / thread mode. Flat = ephemeral chronological chat;
+            nested = forum-style with persistent threads and the
+            thread-categories panel below. Toggling here saves on form
+            submit and re-broadcasts room state so anyone currently in
+            the room flips renderers without a refresh. */}
+        <label className="col-span-2">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Reply mode</span>
+          <select
+            value={draft.replyMode}
+            onChange={(e) => setDraft({ ...draft, replyMode: e.target.value as "flat" | "nested" })}
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+          >
+            <option value="flat">flat — chronological chat (messages may auto-expire per retention)</option>
+            <option value="nested">nested — forum-style threads (persistent topics, replies group under their parent, supports categories)</option>
+          </select>
+          <span className="mt-1 block text-[10px] text-keep-muted">
+            {draft.replyMode === "nested"
+              ? "Threads in this room read like a forum: top-level posts persist, replies group under their parent, and admins can add categories to organize them."
+              : "Standard chat timeline. /replymode in chat is the equivalent toggle for room owners and mods."}
+          </span>
+        </label>
       </div>
+
+      {/* Thread categories — only meaningful for nested-mode rooms.
+          We branch on the DRAFT replyMode (not the saved value) so
+          flipping the select above immediately reveals the panel; the
+          panel itself hits the API directly, independent of the
+          room-form save. New rooms have no id yet, so we hint that
+          categories can be added after the first save. */}
+      {mode === "edit" && original && draft.replyMode === "nested" ? (
+        <ThreadCategoriesEditor roomId={original.id} />
+      ) : null}
+      {mode === "create" && draft.replyMode === "nested" ? (
+        <div className="mt-3 rounded border border-keep-action/40 bg-keep-action/10 p-2 text-[10px] uppercase tracking-widest text-keep-action">
+          Thread categories can be added after the room is created — save this form, then re-open the room's Edit panel and the categories editor will appear here.
+        </div>
+      ) : null}
 
       {error ? <div className="mt-2 text-keep-accent">{error}</div> : null}
 
@@ -2643,19 +2901,207 @@ function RoomForm({
         <button
           type="button"
           onClick={onCancel}
-          className="rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner"
+          className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={submitting}
-          className="rounded border border-keep-rule bg-keep-banner px-3 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
+          className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
         >
           {submitting ? "Saving..." : mode === "create" ? "Create room" : "Save changes"}
         </button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Inline editor for a nested-mode room's thread categories. Lives inside
+ * the room-edit form so admins manage everything for a room in one
+ * place. CRUD hits `/admin/rooms/:id/thread-categories`; the list refresh
+ * happens locally without round-tripping the whole room edit form so the
+ * admin doesn't lose draft state on unrelated changes.
+ */
+function ThreadCategoriesEditor({ roomId }: { roomId: string }) {
+  const [cats, setCats] = useState<ThreadCategory[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+
+  async function load() {
+    setError(null);
+    try {
+      const r = await fetch(`/rooms/${encodeURIComponent(roomId)}/thread-categories`, {
+        credentials: "include",
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      const j = (await r.json()) as { categories: ThreadCategory[] };
+      setCats(j.categories);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "load failed");
+    }
+  }
+  useEffect(() => { load(); }, [roomId]);
+
+  async function add() {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/admin/rooms/${encodeURIComponent(roomId)}/thread-categories`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed, sortOrder: (cats?.length ?? 0) }),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      setNewName("");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "add failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveRename(catId: string) {
+    const trimmed = editName.trim();
+    if (!trimmed) { setEditingId(null); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/admin/rooms/${encodeURIComponent(roomId)}/thread-categories/${encodeURIComponent(catId)}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      setEditingId(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "rename failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function move(catId: string, direction: -1 | 1) {
+    if (!cats) return;
+    const idx = cats.findIndex((c) => c.id === catId);
+    const swapIdx = idx + direction;
+    if (idx < 0 || swapIdx < 0 || swapIdx >= cats.length) return;
+    const a = cats[idx]!;
+    const b = cats[swapIdx]!;
+    setBusy(true);
+    setError(null);
+    try {
+      // Two PATCHes: swap the sortOrder of the adjacent rows. We only
+      // touch two records per move so a long category list doesn't
+      // require a full re-shuffle on every reorder click.
+      await Promise.all([
+        fetch(`/admin/rooms/${encodeURIComponent(roomId)}/thread-categories/${encodeURIComponent(a.id)}`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sortOrder: b.sortOrder }),
+        }),
+        fetch(`/admin/rooms/${encodeURIComponent(roomId)}/thread-categories/${encodeURIComponent(b.id)}`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sortOrder: a.sortOrder }),
+        }),
+      ]);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "reorder failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(catId: string) {
+    if (!window.confirm("Delete this category? Existing threads in it fall back to Uncategorized.")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/admin/rooms/${encodeURIComponent(roomId)}/thread-categories/${encodeURIComponent(catId)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded border border-keep-rule bg-keep-banner/20 p-2 text-xs">
+      <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Thread categories</div>
+      {error ? <div className="mb-1 text-keep-accent">{error}</div> : null}
+      {cats === null ? <div className="italic text-keep-muted">loading…</div> : null}
+      {cats && cats.length === 0 ? (
+        <div className="italic text-keep-muted">No categories yet. Threads will all land in "Uncategorized" until you add one.</div>
+      ) : null}
+      {cats && cats.length > 0 ? (
+        <ul className="mb-2 space-y-1">
+          {cats.map((c, idx) => (
+            <li key={c.id} className="flex items-center gap-1 rounded border border-keep-rule/60 bg-keep-bg px-2 py-1">
+              {editingId === c.id ? (
+                <>
+                  <input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Escape") setEditingId(null); }}
+                    maxLength={40}
+                    className="flex-1 rounded border border-keep-rule px-1 py-0.5"
+                    // eslint-disable-next-line jsx-a11y/no-autofocus
+                    autoFocus
+                  />
+                  <button type="button" onClick={() => saveRename(c.id)} disabled={busy} className="rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-keep-action hover:bg-keep-action/20 disabled:opacity-50">Save</button>
+                  <button type="button" onClick={() => setEditingId(null)} className="rounded border border-keep-rule px-2 py-0.5 hover:bg-keep-banner">Cancel</button>
+                </>
+              ) : (
+                <>
+                  <span className="flex-1 truncate">{c.name}</span>
+                  <button type="button" onClick={() => move(c.id, -1)} disabled={busy || idx === 0} className="rounded border border-keep-rule px-1 py-0.5 hover:bg-keep-banner disabled:opacity-40" title="Move up">▲</button>
+                  <button type="button" onClick={() => move(c.id, 1)} disabled={busy || idx === cats.length - 1} className="rounded border border-keep-rule px-1 py-0.5 hover:bg-keep-banner disabled:opacity-40" title="Move down">▼</button>
+                  <button type="button" onClick={() => { setEditingId(c.id); setEditName(c.name); }} className="rounded border border-keep-rule px-2 py-0.5 hover:bg-keep-banner">Rename</button>
+                  <button type="button" onClick={() => remove(c.id)} disabled={busy} className="rounded border border-keep-accent/60 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50">Delete</button>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="flex items-center gap-1">
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          maxLength={40}
+          placeholder="New category name"
+          className="flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1"
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+        />
+        <button
+          type="button"
+          onClick={add}
+          disabled={busy || !newName.trim()}
+          className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-1 hover:bg-keep-banner/80 disabled:opacity-50"
+        >
+          Add
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2932,14 +3378,14 @@ function UserEditForm({
         <button
           type="button"
           onClick={onCancel}
-          className="rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner"
+          className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={submitting}
-          className="rounded border border-keep-rule bg-keep-banner px-3 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
+          className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
         >
           {submitting ? "Saving..." : "Save"}
         </button>
@@ -3370,7 +3816,7 @@ function AffiliateListItem({
           <button
             type="button"
             onClick={onDelete}
-            className="rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
+            className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
           >
             Delete
           </button>
@@ -3477,14 +3923,14 @@ function AffiliateForm({
         <button
           type="button"
           onClick={onCancel}
-          className="rounded border border-keep-rule bg-keep-bg px-3 py-0.5 hover:bg-keep-banner"
+          className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-0.5 hover:bg-keep-banner"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={busy || !label.trim() || !html.trim()}
-          className="rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+          className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
         >
           {busy ? "Saving..." : mode === "create" ? "Create" : "Save"}
         </button>

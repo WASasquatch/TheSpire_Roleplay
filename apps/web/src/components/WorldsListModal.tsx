@@ -104,7 +104,7 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
             <button
               type="button"
               onClick={onOpenCatalog}
-              className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner"
+              className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner"
               title="Browse open worlds you can use in your rooms"
             >
               Browse catalog
@@ -361,14 +361,14 @@ function NewWorldForm({
         <button
           type="button"
           onClick={onCancel}
-          className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+          className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={busy || !name.trim()}
-          className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+          className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
         >
           {busy ? "Creating..." : "Create"}
         </button>

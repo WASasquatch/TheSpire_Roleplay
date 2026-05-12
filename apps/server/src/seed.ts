@@ -117,10 +117,25 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
         name: def.name,
         type: "public",
         isSystem: true,
+        // The Spire is the canonical landing on a fresh install. Admin
+        // can move the flag elsewhere later; the partial unique index in
+        // the schema enforces "exactly one default" at the DB layer.
+        isDefault: def.name === "The_Spire",
         ownerId: null,
         topic: def.topic,
         description: def.description,
       });
+    }
+
+    // Legacy installs that pre-date the is_default flag: if no room
+    // carries the flag but The_Spire exists, flip it on so the new
+    // findCanonicalLanding logic stays consistent with the old behavior.
+    const hasDefault = (await db.select().from(rooms).where(eq(rooms.isDefault, true)).limit(1))[0];
+    if (!hasDefault) {
+      const spire = (await db.select().from(rooms).where(eq(rooms.name, "The_Spire")).limit(1))[0];
+      if (spire) {
+        await db.update(rooms).set({ isDefault: true }).where(eq(rooms.id, spire.id));
+      }
     }
   }
 
@@ -241,7 +256,18 @@ export function startJanitor(
       const { messageRetentionMs } = await getSettings(db);
       if (messageRetentionMs > 0) {
         const cutoff = new Date(Date.now() - messageRetentionMs);
-        const r = await db.delete(messages).where(lt(messages.createdAt, cutoff));
+        // Nested-mode rooms are forum threads — by design persistent
+        // ("Persistent forum topics for long-lived games"). Exempt them
+        // unconditionally so the global retention sweep can never gut a
+        // forum overnight regardless of how short the site retention is
+        // configured. Flipping a room from flat → nested is the admin's
+        // signal that its history must not be auto-purged.
+        const r = await db.delete(messages).where(
+          and(
+            lt(messages.createdAt, cutoff),
+            sql`${messages.roomId} NOT IN (SELECT id FROM ${rooms} WHERE ${rooms.replyMode} = 'nested')`,
+          ),
+        );
         if (r.changes > 0) log.info(`[janitor] purged ${r.changes} messages older than retention window`);
       }
 
@@ -249,12 +275,14 @@ export function startJanitor(
       // participate; the global sweep above already covers the rest.
       // We process room-by-room because each one has its own cutoff and
       // the alternative (a CTE / correlated subquery) doesn't buy us much
-      // at chat-size scale and complicates the SQL.
+      // at chat-size scale and complicates the SQL. Nested-mode rooms are
+      // still exempt — same invariant as the global sweep.
       const expiringRooms = await db
-        .select({ id: rooms.id, name: rooms.name, mins: rooms.messageExpiryMinutes })
+        .select({ id: rooms.id, name: rooms.name, mins: rooms.messageExpiryMinutes, replyMode: rooms.replyMode })
         .from(rooms)
         .where(sql`${rooms.messageExpiryMinutes} IS NOT NULL`);
       for (const room of expiringRooms) {
+        if (room.replyMode === "nested") continue;
         const mins = room.mins;
         if (!mins || mins <= 0) continue;
         const cutoff = new Date(Date.now() - mins * 60 * 1000);

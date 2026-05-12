@@ -1,0 +1,15 @@
+-- Topic locking for forum-mode (nested) rooms. A locked topic still
+-- displays normally, but the server rejects new replies under it.
+-- Permitted to lock/unlock:
+--   * the topic's author (close-my-own-thread)
+--   * any mod or admin (moderation)
+--
+-- Only meaningful for top-level topics (replyToId IS NULL) in
+-- replyMode=nested rooms. Replies and flat-room messages carry the
+-- column too but never read it.
+--
+-- Stored as a timestamp (ms) for symmetry with the existing
+-- `edited_at` / `deleted_at` columns: null = unlocked; non-null = the
+-- moment it was locked. The client only needs the boolean state, but
+-- preserving the timestamp lets future audit/log surfaces show "when".
+ALTER TABLE `messages` ADD COLUMN `locked_at` integer;

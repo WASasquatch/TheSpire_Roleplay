@@ -62,7 +62,7 @@ export function ThemePicker({ theme, onChange, onReset }: Props) {
           type="button"
           onClick={onReset}
           title="Revert to system default"
-          className="ml-auto rounded border border-keep-border bg-keep-bg px-2 py-1 text-xs text-keep-muted hover:text-keep-text"
+          className="keep-button ml-auto rounded border border-keep-border bg-keep-bg px-2 py-1 text-xs text-keep-muted hover:text-keep-text"
         >
           Default
         </button>

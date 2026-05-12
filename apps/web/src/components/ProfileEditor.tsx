@@ -15,6 +15,7 @@ import {
   type PushState,
 } from "../lib/push.js";
 import { readError } from "../lib/http.js";
+import { StylePicker } from "./AdminPanel.js";
 import { Modal } from "./Modal.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
@@ -40,6 +41,8 @@ interface MasterData {
   chatColor: string | null;
   activeCharacterId: string | null;
   theme?: Theme;
+  /** Per-user theme style override. Null/undefined means "use site default". */
+  styleKey?: string | null;
   notifyPref?: NotifyPref;
   role?: Role;
   isPublic?: boolean;
@@ -107,6 +110,12 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   const [stats, setStats] = useState<CharacterStats>({});
   /** When the form has a theme set; null means "use default / inherit". */
   const [theme, setTheme] = useState<Theme | null>(null);
+  /**
+   * Per-user theme style override (master target only). Null/undefined
+   * means "follow site default". Character targets don't have their own
+   * style override — style is account-wide.
+   */
+  const [userStyleKey, setUserStyleKey] = useState<string | null>(null);
   const [notifyPref, setNotifyPref] = useState<NotifyPref>("mentions");
   // Public + NSFW visibility flags. Default isPublic=true, isNsfw=false to
   // match the schema. NSFW=true forces isPublic=false on save (server
@@ -177,6 +186,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setGender(master.gender ?? "undisclosed");
           setStats({});
           setTheme(master.theme ? normalizeTheme(master.theme) : null);
+          setUserStyleKey(typeof master.styleKey === "string" ? master.styleKey : null);
           setNotifyPref(master.notifyPref ?? "mentions");
           setIsPublic(master.isPublic ?? true);
           setIsNsfw(master.isNsfw ?? false);
@@ -258,6 +268,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             avatarUrl: avatarUrl.trim() || null,
             gender,
             theme,
+            styleKey: userStyleKey,
             notifyPref,
             isPublic,
             isNsfw,
@@ -273,6 +284,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             avatarUrl: avatarUrl.trim() || null,
             gender,
             notifyPref,
+            styleKey: userStyleKey,
             // NSFW=true forces isPublic=false on the server. Mirror that
             // implication client-side so the cached MasterData stays
             // consistent with what the next /me/profile load would return.
@@ -470,7 +482,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
       <form
         onSubmit={save}
         onClick={(e) => e.stopPropagation()}
-        className="flex h-[92vh] w-[min(1200px,98vw)] flex-col rounded border border-keep-rule bg-keep-parchment shadow-xl"
+        className="keep-frame flex h-[92vh] w-[min(1200px,98vw)] flex-col rounded bg-keep-parchment"
       >
         {/* header - fixed */}
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-keep-rule bg-keep-banner px-4 py-2">
@@ -505,7 +517,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                 onClick={switchToCharacter}
                 disabled={switching || loadingTarget}
                 title="Switch to this character - your chat name and theme update immediately."
-                className="shrink-0 rounded border border-keep-action/60 bg-keep-bg px-2 py-0.5 text-sm text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
+                className="keep-button shrink-0 rounded border border-keep-action/60 bg-keep-bg px-2 py-0.5 text-sm text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
               >
                 {switching ? "Switching..." : "Switch"}
               </button>
@@ -516,7 +528,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                 onClick={deleteCharacter}
                 disabled={deleting || loadingTarget}
                 title="Delete this character. Past message history keeps the snapshotted name."
-                className="shrink-0 rounded border border-keep-accent/60 bg-keep-bg px-2 py-0.5 text-sm text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
+                className="keep-button shrink-0 rounded border border-keep-accent/60 bg-keep-bg px-2 py-0.5 text-sm text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
               >
                 {deleting ? "Deleting..." : "Delete"}
               </button>
@@ -700,6 +712,23 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                 ) : null}
               </fieldset>
 
+              {!isCharacter ? (
+                <fieldset className="rounded border border-keep-rule p-3">
+                  <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Theme style</legend>
+                  <p className="mb-2 text-[10px] text-keep-muted">
+                    Visual treatment — ornaments, borders, textures. Orthogonal
+                    to the palette above; the same style works with any colors.
+                    Leave on "use site default" to follow whatever the admin
+                    has chosen site-wide.
+                  </p>
+                  <StylePicker
+                    value={userStyleKey}
+                    onChange={setUserStyleKey}
+                    allowInherit
+                  />
+                </fieldset>
+              ) : null}
+
               {error ? (
                 <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">
                   {error}
@@ -755,14 +784,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             <button
               type="button"
               onClick={onClose}
-              className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
+              className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
             >
               Close
             </button>
             <button
               type="submit"
               disabled={saving || loadingTarget}
-              className="rounded border border-keep-rule bg-keep-banner px-4 py-1 text-sm disabled:opacity-50 hover:bg-keep-banner/80"
+              className="keep-button rounded border border-keep-rule bg-keep-banner px-4 py-1 text-sm disabled:opacity-50 hover:bg-keep-banner/80"
             >
               {saving ? "Saving..." : "Save"}
             </button>
@@ -869,14 +898,14 @@ function CreateCharacterModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
+            className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={!localValid || submitting}
-            className="rounded border border-keep-rule bg-keep-banner px-3 py-1 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
+            className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-1 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
           >
             {submitting ? "Creating..." : "Create"}
           </button>
@@ -1050,7 +1079,7 @@ function PortraitGalleryEditor({
             <button
               type="submit"
               disabled={busy || !url.trim()}
-              className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+              className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
             >
               {busy ? "Adding..." : "Add"}
             </button>
@@ -1262,7 +1291,7 @@ function LinksEditor({
             <button
               type="submit"
               disabled={busy || !title.trim() || !url.trim()}
-              className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+              className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
             >
               {busy ? "Adding..." : "Add"}
             </button>
@@ -1388,7 +1417,7 @@ function NotificationsRow({
           <button
             type="button"
             onClick={enable}
-            className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80"
+            className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80"
           >
             Enable
           </button>
@@ -1545,7 +1574,7 @@ function PushRow() {
             type="button"
             onClick={turnOff}
             disabled={busy}
-            className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs hover:bg-keep-banner disabled:opacity-50"
+            className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs hover:bg-keep-banner disabled:opacity-50"
           >
             {busy ? "..." : "Disable"}
           </button>
@@ -1554,7 +1583,7 @@ function PushRow() {
             type="button"
             onClick={turnOn}
             disabled={busy}
-            className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-xs hover:bg-keep-banner/80 disabled:opacity-50"
+            className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-xs hover:bg-keep-banner/80 disabled:opacity-50"
           >
             {busy ? "..." : "Enable"}
           </button>
@@ -1779,14 +1808,14 @@ function JournalEntryForm({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+            className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={busy || !bodyHtml.trim()}
-            className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+            className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
           >
             {busy ? "Saving..." : mode === "create" ? "Create" : "Save"}
           </button>

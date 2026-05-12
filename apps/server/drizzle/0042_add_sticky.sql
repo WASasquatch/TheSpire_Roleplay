@@ -1,0 +1,11 @@
+-- Admin-pinned "sticky" topics for forum-mode rooms. A sticky topic
+-- floats to the top of its category section regardless of
+-- last_activity_at ordering, so announcements / rules / read-this-first
+-- threads stay visible no matter how many newer topics get created.
+--
+-- Permission to set/unset is admin-only — mods can lock and delete but
+-- not pin, since stickies are effectively persistent room-furniture.
+--
+-- Only meaningful for top-level topics in nested-mode rooms. Replies
+-- and flat-room messages carry the column too but the value is unused.
+ALTER TABLE `messages` ADD COLUMN `is_sticky` integer NOT NULL DEFAULT 0;

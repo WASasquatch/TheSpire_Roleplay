@@ -21,9 +21,15 @@ export function hashWelcome(html: string): string {
  * Parse a stored theme JSON (from `users.themeJson` / `characters.themeJson`)
  * and return a normalized Theme. On null or parse failure, falls back to the
  * sitewide admin-configured default theme. Used by the profile-fetch paths
- * that need to embed a viewable theme into a ProfileView. Worlds use a
- * separate parser (`parseStoredTheme` in routes/worlds.ts) because they
- * surface "no theme set" as null rather than substituting the default.
+ * that need to embed a viewable theme into a ProfileView for OTHER users.
+ *
+ * For "your own profile" reads where the client needs to distinguish
+ * "user explicitly picked X" from "user has no preference, inherits site
+ * default", use `parseOwnThemeJson` below instead — it returns null
+ * rather than substituting the default. Without that distinction the
+ * client would freeze a snapshot of the site default at fetch time and
+ * stop responding to later admin changes (per-user theme save with
+ * "Default" picked would still bake the current site default in).
  */
 export async function parseUserThemeJson(db: Db, json: string | null): Promise<Theme> {
   if (json) {
@@ -31,6 +37,19 @@ export async function parseUserThemeJson(db: Db, json: string | null): Promise<T
     catch { /* fall through */ }
   }
   return (await getSettings(db)).defaultTheme;
+}
+
+/**
+ * Strict parse — returns Theme on success, null when the column was null
+ * or the stored JSON is unparseable. No site-default fallback. Use this
+ * on read paths where the caller must know whether the user has an
+ * explicit theme of their own (e.g. /me/profile, so the client can let
+ * its own resolver pick between user / site / hardcoded layers live).
+ */
+export function parseOwnThemeJson(json: string | null): Theme | null {
+  if (!json) return null;
+  try { return normalizeTheme(JSON.parse(json)); }
+  catch { return null; }
 }
 
 export interface SiteSettings {
@@ -86,6 +105,8 @@ export interface SiteSettings {
   newUserWelcomeHash: string;
   /** Timestamp the welcome text was last edited (ms epoch), or null when never set. Audience gate: `user.createdAt > newUserWelcomeUpdatedAt`. */
   newUserWelcomeUpdatedAt: number | null;
+  /** Site-wide default theme style. Users who haven't picked a per-user override inherit this. */
+  defaultStyleKey: string;
   updatedAt: number;
 }
 
@@ -150,6 +171,8 @@ export interface SettingsPatch {
   featuredWorldsEnabled?: boolean;
   /** Pre-sanitized HTML; route handler sanitizes before invoking. Empty string clears it. */
   newUserWelcomeHtml?: string;
+  /** Site-wide default theme style key. */
+  defaultStyleKey?: string;
 }
 
 export async function updateSettings(
@@ -187,6 +210,7 @@ export async function updateSettings(
   if (patch.customHeadHtml !== undefined) update.customHeadHtml = patch.customHeadHtml;
   if (patch.activityFeedsEnabled !== undefined) update.activityFeedsEnabled = patch.activityFeedsEnabled;
   if (patch.featuredWorldsEnabled !== undefined) update.featuredWorldsEnabled = patch.featuredWorldsEnabled;
+  if (patch.defaultStyleKey !== undefined) update.defaultStyleKey = patch.defaultStyleKey;
   if (patch.newUserWelcomeHtml !== undefined) {
     // Only bump the welcome's edit timestamp when the text actually changed.
     // The audience filter (`user.createdAt > newUserWelcomeUpdatedAt`)
@@ -240,6 +264,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     newUserWelcomeHtml: row.newUserWelcomeHtml,
     newUserWelcomeHash: hashWelcome(row.newUserWelcomeHtml),
     newUserWelcomeUpdatedAt: row.newUserWelcomeUpdatedAt ? +row.newUserWelcomeUpdatedAt : null,
+    defaultStyleKey: row.defaultStyleKey,
     updatedAt: +row.updatedAt,
   };
 }

@@ -402,7 +402,7 @@ function WorldMetaEditor({
         <button
           type="button"
           onClick={onDelete}
-          className="rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
+          className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
         >
           Delete world
         </button>
@@ -413,7 +413,7 @@ function WorldMetaEditor({
           <button
             type="submit"
             disabled={busy || !name.trim()}
-            className="rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+            className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
           >
             {busy ? "Saving..." : "Save"}
           </button>
@@ -557,7 +557,7 @@ function PageEditor({
         <button
           type="button"
           onClick={onDelete}
-          className="rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
+          className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
         >
           Delete page
         </button>
@@ -568,7 +568,7 @@ function PageEditor({
           <button
             type="submit"
             disabled={busy || !title.trim()}
-            className="rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+            className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
           >
             {busy ? "Saving..." : "Save"}
           </button>
@@ -676,14 +676,14 @@ function NewPageForm({
         <button
           type="button"
           onClick={onCancel}
-          className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+          className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={busy || !title.trim()}
-          className="rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+          className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
         >
           {busy ? "Creating..." : "Create page"}
         </button>

@@ -241,7 +241,7 @@ function ProfileBody({
                     type="button"
                     onClick={activeCharacterAction.onClick}
                     title="Change your active identity - chat name and theme update immediately."
-                    className="rounded border border-keep-action/60 bg-keep-bg px-2 py-1 text-keep-action hover:bg-keep-action/10"
+                    className="keep-button rounded border border-keep-action/60 bg-keep-bg px-2 py-1 text-keep-action hover:bg-keep-action/10"
                   >
                     {activeCharacterAction.label}
                   </button>
@@ -447,7 +447,7 @@ function NsfwGate({
         <button
           type="button"
           onClick={onCancel}
-          className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
+          className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
         >
           Back
         </button>

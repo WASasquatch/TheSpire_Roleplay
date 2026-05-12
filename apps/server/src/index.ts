@@ -8,7 +8,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import pino from "pino";
 import { Server as IoServer } from "socket.io";
 import { ZodError } from "zod";
@@ -18,7 +18,7 @@ import type {
 } from "@thekeep/shared";
 
 import { db } from "./db/index.js";
-import { rooms, sessions } from "./db/schema.js";
+import { bans, roomMembers, roomThreadCategories, rooms, sessions, users } from "./db/schema.js";
 import { CommandRegistry } from "./commands/registry.js";
 import { registerBuiltins } from "./commands/builtins/index.js";
 import { dispatchChatInput } from "./realtime/dispatch.js";
@@ -47,6 +47,7 @@ import { extendSession, loadSessionUser } from "./auth/session.js";
 import { registerAuthRoutes, getSessionUser, userIdFromSessionId, SESSION_COOKIE_NAME } from "./routes/auth.js";
 import { registerCharacterRoutes } from "./routes/characters.js";
 import { registerAffiliateRoutes } from "./routes/affiliates.js";
+import { registerBookmarkRoutes } from "./routes/bookmarks.js";
 import { registerJournalRoutes } from "./routes/journal.js";
 import { registerLinkRoutes } from "./routes/links.js";
 import { registerWorldRoutes } from "./routes/worlds.js";
@@ -241,6 +242,10 @@ async function main() {
       // Splash carousel toggle. When true the AuthGate fetches a
       // randomized slice of open worlds via /worlds/featured.
       featuredWorldsEnabled: s.featuredWorldsEnabled,
+      // Default theme STYLE — orthogonal to defaultTheme above. Users
+      // without a per-user style override inherit this. Seeded default
+      // is 'medieval'; the catalog also includes 'modern' and 'scifi'.
+      defaultStyleKey: s.defaultStyleKey,
     };
   });
 
@@ -270,6 +275,7 @@ async function main() {
   await registerLinkRoutes(baseApp, db);
   await registerJournalRoutes(baseApp, db);
   await registerAffiliateRoutes(baseApp, db);
+  await registerBookmarkRoutes(baseApp, db);
   await registerWorldRoutes(baseApp, db, io);
   await registerMessageRoutes(baseApp, db, io);
   await registerReportRoutes(baseApp, db);
@@ -336,6 +342,40 @@ async function main() {
       }
     }
     if (!initialRoomId) {
+      // No sibling tab to follow — try the user's last remembered room
+      // before falling back to the canonical landing. The remembered
+      // room must (a) still exist, (b) be either public or one the user
+      // is already a member of, and (c) not have an active ban against
+      // the user. Anything else and we drop them at the default landing
+      // so the connect path can't dead-end at a wall (forgot password,
+      // banned, etc.).
+      const userRow = (await db.select().from(users).where(eq(users.id, user.id)).limit(1))[0];
+      const lastRoomId = userRow?.lastRoomId ?? null;
+      if (lastRoomId) {
+        const lastRoom = (await db.select().from(rooms).where(eq(rooms.id, lastRoomId)).limit(1))[0];
+        if (lastRoom) {
+          const isBanned = (await db
+            .select()
+            .from(bans)
+            .where(and(eq(bans.roomId, lastRoom.id), eq(bans.userId, user.id)))
+            .limit(1))[0];
+          const banActive = !!isBanned && (!isBanned.until || +isBanned.until > Date.now());
+          if (!banActive) {
+            if (lastRoom.type === "public") {
+              initialRoomId = lastRoom.id;
+            } else {
+              const member = (await db
+                .select()
+                .from(roomMembers)
+                .where(and(eq(roomMembers.roomId, lastRoom.id), eq(roomMembers.userId, user.id)))
+                .limit(1))[0];
+              if (member) initialRoomId = lastRoom.id;
+            }
+          }
+        }
+      }
+    }
+    if (!initialRoomId) {
       const landing = await findCanonicalLanding(db);
       if (landing) initialRoomId = landing.id;
     }
@@ -377,10 +417,37 @@ async function main() {
           return;
         }
         Object.assign(user, fresh);
+        // Validate the thread-category bucket (if any) belongs to the
+        // target room. Race condition: an admin can delete the category
+        // between the user opening the picker and submitting. Rather
+        // than reject the send, drop to null and let the message land
+        // in the "Uncategorized" bucket — discarding the message would
+        // be a worse failure mode.
+        let threadCategoryId: string | null = null;
+        if (payload.threadCategoryId) {
+          const cat = (await db
+            .select()
+            .from(roomThreadCategories)
+            .where(and(
+              eq(roomThreadCategories.id, payload.threadCategoryId),
+              eq(roomThreadCategories.roomId, payload.roomId),
+            ))
+            .limit(1))[0];
+          if (cat) threadCategoryId = cat.id;
+        }
+        // Forum payload — title (new topic) / replyToId (reply under
+        // an existing topic). dispatchChatInput validates the
+        // structural constraints (reject "both", reject "neither" in
+        // forum rooms); we just pass them through.
+        const threadTitle = payload.threadTitle?.trim() || undefined;
+        const replyToId = payload.replyToId || undefined;
         await dispatchChatInput({
           io, socket, db, registry, user,
           roomId: payload.roomId,
           text: payload.text,
+          threadCategoryId,
+          ...(threadTitle ? { threadTitle } : {}),
+          ...(replyToId ? { replyToId } : {}),
         });
         ack?.({ ok: true });
       } catch (err) {
@@ -549,6 +616,19 @@ async function main() {
           const fullyOffline = !(await userIsOnline(io, userId, socketId));
 
           if (fullyOffline) {
+            // Remember the room this socket was last in so the next
+            // connect can drop them back there. Captured from
+            // socket.data.roomId (set by joinRoom on every room move) —
+            // any one of the socket's rooms would do, but `data.roomId`
+            // is the authoritative "current" room. Only persisted on the
+            // fully-offline path so a tab-close that leaves a sibling
+            // socket alive doesn't clobber the lastRoomId the still-
+            // open tab is about to update via its own future disconnect.
+            const lastRoomId = (socket.data as { roomId?: string }).roomId ?? null;
+            if (lastRoomId) {
+              await db.update(users).set({ lastRoomId }).where(eq(users.id, userId));
+            }
+
             // Reconnect-grace path: don't announce or rebroadcast yet. If the
             // user reconnects inside the grace window, joinRoom() consumes
             // the pending entry and this whole block never fires - the chat
@@ -566,7 +646,13 @@ async function main() {
                 if (expired) continue;
                 const stillThere = await userHasSocketInRoom(io, userId, id);
                 if (!stillThere) {
-                  await addSystemMessage(io, db, id, `${displayName} has disconnected.`);
+                  // Forum rooms suppress "X has disconnected." — the
+                  // topic feed isn't a chat log and join/leave noise
+                  // doesn't belong there.
+                  const r = (await db.select().from(rooms).where(eq(rooms.id, id)).limit(1))[0];
+                  if (r?.replyMode !== "nested") {
+                    await addSystemMessage(io, db, id, `${displayName} has disconnected.`);
+                  }
                 }
                 await broadcastPresence(io, db, id);
               }
@@ -583,7 +669,11 @@ async function main() {
               if (expired) continue;
               const stillThere = await userHasSocketInRoom(io, userId, id, socketId);
               if (!stillThere) {
-                await addSystemMessage(io, db, id, `${displayName} left.`);
+                // Same forum-room suppression as the fully-offline path.
+                const r = (await db.select().from(rooms).where(eq(rooms.id, id)).limit(1))[0];
+                if (r?.replyMode !== "nested") {
+                  await addSystemMessage(io, db, id, `${displayName} left.`);
+                }
               }
               await broadcastPresence(io, db, id);
             }

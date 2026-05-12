@@ -53,6 +53,19 @@ export async function addMessage(
     displayNameOverride?: string;
     /** For /npc: the master username of the user who voiced this NPC. Rendered as a "voiced by" tag on the line. */
     npcVoicedBy?: string;
+    /**
+     * Thread-category bucket for top-level messages in nested-mode rooms.
+     * Caller (`dispatchChatInput`) validates the id belongs to the room
+     * and only forwards it for non-reply, plain sends — replies inherit
+     * their parent's category implicitly through the thread relation.
+     */
+    threadCategoryId?: string | null;
+    /**
+     * Forum topic title. Set on new top-level posts in nested-mode
+     * rooms (the master thread the replies live under). Caller is
+     * responsible for trimming and length-capping; we just persist it.
+     */
+    title?: string | null;
   },
 ): Promise<void> {
   const id = nanoid();
@@ -66,6 +79,27 @@ export async function addMessage(
   // Mood snapshots only on actually-spoken kinds, never on /npc lines (the
   // NPC isn't the user — applying their mood would be misleading).
   const moodSnapshot = payload.kind === "npc" ? null : ctx.user.currentMood ?? null;
+  // Avatar snapshot. Prefer the active character's avatar so a forum
+  // post stays visually attached to the character it was authored as
+  // even if the user later switches characters or that character is
+  // deleted. Fall back to the master account's avatar for OOC posts.
+  let avatarSnapshot: string | null = null;
+  if (ctx.user.activeCharacterId) {
+    const c = (await ctx.db
+      .select({ avatarUrl: characters.avatarUrl })
+      .from(characters)
+      .where(eq(characters.id, ctx.user.activeCharacterId))
+      .limit(1))[0];
+    if (c?.avatarUrl) avatarSnapshot = c.avatarUrl;
+  }
+  if (!avatarSnapshot) {
+    const u = (await ctx.db
+      .select({ avatarUrl: users.avatarUrl })
+      .from(users)
+      .where(eq(users.id, ctx.user.id))
+      .limit(1))[0];
+    if (u?.avatarUrl) avatarSnapshot = u.avatarUrl;
+  }
   await ctx.db.insert(messages).values({
     id,
     roomId: ctx.roomId,
@@ -81,7 +115,28 @@ export async function addMessage(
     replyToBodySnippet: payload.replyToBodySnippet ?? null,
     moodSnapshot,
     npcVoicedBy: payload.npcVoicedBy ?? null,
+    threadCategoryId: payload.threadCategoryId ?? null,
+    title: payload.title ?? null,
+    avatarUrl: avatarSnapshot,
+    // last_activity_at on insert:
+    //   - top-level row (topic, or any flat-chat message): its own
+    //     createdAt — for forum topics this seeds the ordering before
+    //     any replies arrive; for flat messages it's unused.
+    //   - reply: null on the reply itself (the column is only read on
+    //     topics), and the parent topic gets a separate UPDATE below.
+    lastActivityAt: payload.replyToId ? null : now,
   });
+  // For replies, bump the parent topic's last_activity_at so the forum
+  // pagination's DESC order surfaces this thread to the top on the
+  // next refresh. We do this best-effort: if the parent has been
+  // deleted or paged out the UPDATE just affects 0 rows. Skip for
+  // non-reply rows (already covered by the insert above).
+  if (payload.replyToId) {
+    await ctx.db
+      .update(messages)
+      .set({ lastActivityAt: now })
+      .where(eq(messages.id, payload.replyToId));
+  }
   const out: ChatMessage = {
     id,
     roomId: ctx.roomId,
@@ -98,6 +153,13 @@ export async function addMessage(
     ...(payload.replyToBodySnippet ? { replyToBodySnippet: payload.replyToBodySnippet } : {}),
     ...(moodSnapshot ? { moodSnapshot } : {}),
     ...(payload.npcVoicedBy ? { npcVoicedBy: payload.npcVoicedBy } : {}),
+    ...(payload.threadCategoryId ? { threadCategoryId: payload.threadCategoryId } : {}),
+    ...(payload.title ? { title: payload.title } : {}),
+    ...(avatarSnapshot ? { avatarUrl: avatarSnapshot } : {}),
+    // Top-level messages carry their seeded lastActivityAt; replies
+    // don't (the column is unused on reply rows, and the parent's
+    // separate UPDATE above is what the client listens for).
+    ...(payload.replyToId ? {} : { lastActivityAt: +now }),
   };
   await emitFiltered(ctx.io, ctx.db, ctx.roomId, ctx.user.id, out);
 
@@ -352,16 +414,24 @@ export async function addSystemMessage(
 }
 
 /**
- * Resolve the canonical landing room — `The_Spire` by name, falling back to
- * the alphabetically-first system room if the canonical name has been
- * renamed away. Used by every "where do we put this user" path: cold-
- * connect with no sibling tab, kick/ban-relocation, and admin room-delete.
+ * Resolve the canonical landing room. Used by every "where do we put this
+ * user" path: cold-connect with no sibling tab and no last-room memory,
+ * kick / ban relocation, and admin room-delete.
  *
- * Without the explicit name lookup the previous code grabbed
- * `(rooms.where(isSystem)).limit(1)[0]` — SQLite's natural row order —
- * which after a write reorder could land users in Tavern or Bazaar.
+ * Resolution order:
+ *   1. The admin-flagged default room (rooms.is_default = 1). Exactly one
+ *      row carries the flag thanks to the partial unique index. This is
+ *      the source of truth on any post-migration install.
+ *   2. Legacy fallback by name (`The_Spire`) for installs that haven't
+ *      yet flipped the flag — the seed migrates them on next boot, but
+ *      this guards the gap.
+ *   3. The alphabetically-first system room as a last resort so a
+ *      malformed install (no default, no Spire) still lands users
+ *      somewhere deterministic instead of SQLite's natural row order.
  */
 export async function findCanonicalLanding(db: Db): Promise<typeof rooms.$inferSelect | null> {
+  const defaulted = (await db.select().from(rooms).where(eq(rooms.isDefault, true)).limit(1))[0];
+  if (defaulted) return defaulted;
   const named = (await db.select().from(rooms).where(eq(rooms.name, "The_Spire")).limit(1))[0];
   if (named) return named;
   const fallback = (await db
@@ -427,8 +497,14 @@ export async function sendRoomBacklogTo(
       ...(m.replyToBodySnippet ? { replyToBodySnippet: m.replyToBodySnippet } : {}),
       ...(m.moodSnapshot ? { moodSnapshot: m.moodSnapshot } : {}),
       ...(m.npcVoicedBy ? { npcVoicedBy: m.npcVoicedBy } : {}),
+      ...(m.threadCategoryId ? { threadCategoryId: m.threadCategoryId } : {}),
+      ...(m.title ? { title: m.title } : {}),
+      ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
       ...(m.editedAt ? { editedAt: +m.editedAt } : {}),
       ...(m.deletedAt ? { deletedAt: +m.deletedAt } : {}),
+      ...(m.lockedAt ? { lockedAt: +m.lockedAt } : {}),
+      ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
+      ...(m.isSticky ? { isSticky: true } : {}),
     }));
   socket.emit("message:bulk", backlog);
 }
@@ -510,13 +586,20 @@ export async function joinRoom(
   // Drop the user from any previous room before joining the new one. For each
   // prev room, emit "X left." iff this was their last socket there. Then
   // expire the prev room if it's now empty (and isn't a system room).
+  //
+  // Forum rooms (replyMode = nested) suppress the "X left." line — the
+  // posting model there is forum-style, not chat, and join/leave noise
+  // would just clutter the topic list.
   for (const prevId of priorRooms) {
     socket.leave(`room:${prevId}`);
     const expired = await expireIfEmpty(io, db, prevId);
     if (expired) continue;
     const stillThere = await userHasSocketInRoom(io, user.id, prevId);
     if (!stillThere) {
-      await addSystemMessage(io, db, prevId, `${user.displayName} left.`);
+      const prevRoom = (await db.select().from(rooms).where(eq(rooms.id, prevId)).limit(1))[0];
+      if (prevRoom?.replyMode !== "nested") {
+        await addSystemMessage(io, db, prevId, `${user.displayName} left.`);
+      }
     }
     await broadcastPresence(io, db, prevId);
   }
@@ -545,7 +628,12 @@ export async function joinRoom(
   // showing it again. (If a reconnect lands them in a different room than
   // they were in, they don't get the description there either - acceptable
   // edge case; description is a lightweight nice-to-have, not load-bearing.)
-  if (room.description && !isReconnect) {
+  //
+  // Also suppressed in forum (nested) rooms — the description is a
+  // chat-flavored welcome and would clutter the topic feed there.
+  // The room banner / metadata surfaces the description via other UI
+  // affordances in those rooms.
+  if (room.description && !isReconnect && room.replyMode !== "nested") {
     socket.emit("message:new", {
       id: `desc-${nanoid()}`,
       roomId,
@@ -573,16 +661,21 @@ export async function joinRoom(
   //     through, but only when they were online before this socket existed.
   const otherSocketHere = await userHasSocketInRoom(io, user.id, roomId, socket.id);
   const suppressed = isReconnect || (!userWasOnlineBefore && isInBootGrace());
-  if (!otherSocketHere && !suppressed) {
+  // Forum rooms suppress arrival lines — the topic feed is not a chat
+  // log. Watcher pings still fire (those are private DMs to the
+  // watcher, not in-room noise).
+  const isForumRoom = room.replyMode === "nested";
+  if (!otherSocketHere && !suppressed && !isForumRoom) {
     const body = userWasOnlineBefore
       ? `${user.displayName} arrived.`
       : `${user.displayName} has connected.`;
     await addSystemMessage(io, db, roomId, body);
-    // Fan-out to watchers iff this is a true online transition (no other
-    // socket of this user existed before this one).
-    if (!userWasOnlineBefore) {
-      await pingWatchers(io, db, user);
-    }
+  }
+  if (!otherSocketHere && !suppressed && !userWasOnlineBefore) {
+    // Watcher pings: still relevant in forum rooms — they're per-user
+    // notifications, not room broadcasts. Fire whenever this is a
+    // true online transition regardless of room type.
+    await pingWatchers(io, db, user);
   }
 }
 

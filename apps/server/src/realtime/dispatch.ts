@@ -9,7 +9,7 @@ import { parseInput } from "../commands/parser.js";
 import type { CommandRegistry } from "../commands/registry.js";
 import type { CommandContext, SessionUser } from "../commands/types.js";
 import type { Db } from "../db/index.js";
-import { mutes } from "../db/schema.js";
+import { messages, mutes, rooms } from "../db/schema.js";
 import { formatDuration } from "../commands/duration.js";
 import { getSettings } from "../settings.js";
 import { addMessage } from "./broadcast.js";
@@ -62,8 +62,29 @@ export async function dispatchChatInput(args: {
   user: SessionUser;
   roomId: string;
   text: string;
+  /**
+   * Optional thread-category bucket for new top-level topics in
+   * nested-mode rooms. Validated by the caller (`socket.on("chat:input")`)
+   * to belong to the target room; an invalid id is silently dropped to
+   * null here rather than rejecting the send, so a racing admin delete
+   * of the chosen category never costs the user their message.
+   */
+  threadCategoryId?: string | null;
+  /**
+   * Non-empty when the user is starting a new forum topic. Carried
+   * straight through to the persisted message row as `title`. Caller
+   * has already trimmed; we just verify it's not blank when present.
+   */
+  threadTitle?: string;
+  /**
+   * When set, this send is a reply under that topic. The dispatcher
+   * also accepts inline `/reply <id>` syntax for the same effect; this
+   * explicit field is what the forum composer uses since it doesn't
+   * require encoding the parent id inside the body text.
+   */
+  replyToId?: string;
 }): Promise<void> {
-  const { io, socket, db, registry, user, roomId, text } = args;
+  const { io, socket, db, registry, user, roomId, text, threadCategoryId, threadTitle, replyToId } = args;
 
   const trimmed = text.trim();
   if (!trimmed) return;
@@ -145,15 +166,113 @@ export async function dispatchChatInput(args: {
     return;
   }
 
-  // Plain chat
+  // Plain chat. Behavior splits based on the room's replyMode:
+  //   - flat rooms: standard chronological chat (the historic behavior).
+  //   - nested rooms: forum-style. Plain sends MUST be either a new
+  //     topic (threadTitle set) or a reply under an existing topic
+  //     (replyToId set). Bare chat-style sends are rejected — the
+  //     composer enforces this client-side, but the server is
+  //     authoritative.
   if (parsed.command === null) {
+    const roomRow = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
+    const isForum = roomRow?.replyMode === "nested";
     const ctx: CommandContext = {
       io, socket, db, user, roomId,
       argsText: parsed.argsText,
       args: [],
       invokedAs: "say",
     };
-    await addMessage(ctx, { kind: "say", body: parsed.argsText.trim() });
+    if (isForum) {
+      // New topic path. Title is required to start one; the client
+      // should never send an empty topic title with no replyToId, but
+      // we reject defensively.
+      if (threadTitle && !replyToId) {
+        const cappedTitle = threadTitle.trim().slice(0, 120);
+        if (!cappedTitle) {
+          socket.emit("error:notice", {
+            code: "EMPTY_TITLE",
+            message: "Topic title can't be empty.",
+          });
+          return;
+        }
+        await addMessage(ctx, {
+          kind: "say",
+          body: parsed.argsText.trim(),
+          title: cappedTitle,
+          ...(threadCategoryId ? { threadCategoryId } : {}),
+        });
+        return;
+      }
+      // Reply path. The parent must exist, be in the same room, and
+      // itself be a top-level topic (not a reply to a reply — forum
+      // structure is two-level: topic + flat reply chain). We
+      // snapshot the parent author's name + a body excerpt for the
+      // inline quote preview, same as the /reply slash command does.
+      if (replyToId && !threadTitle) {
+        const parent = (await db.select().from(messages).where(eq(messages.id, replyToId)).limit(1))[0];
+        if (!parent || parent.roomId !== roomId) {
+          socket.emit("error:notice", {
+            code: "BAD_TOPIC",
+            message: "That topic isn't in this room (or has been removed).",
+          });
+          return;
+        }
+        if (parent.replyToId) {
+          socket.emit("error:notice", {
+            code: "NOT_A_TOPIC",
+            message: "Replies attach to topics, not to other replies.",
+          });
+          return;
+        }
+        // Deleted topics are hidden from end-user views — but a stale
+        // client (or a determined one) could still submit a reply to a
+        // remembered id. Reject with the same code the client uses for
+        // missing-topics so the user sees a graceful message.
+        if (parent.deletedAt) {
+          socket.emit("error:notice", {
+            code: "BAD_TOPIC",
+            message: "That topic isn't in this room (or has been removed).",
+          });
+          return;
+        }
+        // Locked topics reject new replies for users — but moderators
+        // (role mod or admin) bypass the gate so they can post locks/
+        // verdicts/notices in the same thread the lock applies to.
+        // Mirrors the slash-command path in commands/builtins/reply.ts.
+        if (parent.lockedAt && user.role !== "mod" && user.role !== "admin") {
+          socket.emit("error:notice", {
+            code: "TOPIC_LOCKED",
+            message: "This topic is locked and isn't accepting new replies.",
+          });
+          return;
+        }
+        const snippet = parent.body.length > 120 ? `${parent.body.slice(0, 120)}…` : parent.body;
+        await addMessage(ctx, {
+          kind: "say",
+          body: parsed.argsText.trim(),
+          replyToId: parent.id,
+          replyToDisplayName: parent.displayName,
+          replyToBodySnippet: snippet,
+        });
+        return;
+      }
+      // Neither a topic nor a reply — forum rooms don't accept loose
+      // chat. The composer is supposed to disable in this state; this
+      // is the server's belt-and-suspenders.
+      socket.emit("error:notice", {
+        code: "FORUM_NEEDS_TOPIC",
+        message: "This room is a forum. Pick a topic to reply to, or start a new one.",
+      });
+      return;
+    }
+    // Flat-room path (historic). threadCategoryId is still honored for
+    // installs that flipped a categorized room back to flat: the field
+    // is harmless if present, ignored by the flat renderer.
+    await addMessage(ctx, {
+      kind: "say",
+      body: parsed.argsText.trim(),
+      ...(threadCategoryId ? { threadCategoryId } : {}),
+    });
     return;
   }
 

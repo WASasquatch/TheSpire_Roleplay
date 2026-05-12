@@ -40,4 +40,71 @@ export interface ChatMessage {
   editedAt?: number | null;
   /** Set when the author deleted the message inside the grace window. Renderer shows "[message removed]". */
   deletedAt?: number | null;
+  /**
+   * Thread-category anchor for top-level messages in nested-mode rooms.
+   * Null/absent = "Uncategorized" (the renderer's fallback bucket).
+   * Replies inherit their parent's category implicitly — this field is
+   * only meaningful when `replyToId` is absent.
+   */
+  threadCategoryId?: string | null;
+  /**
+   * Forum topic title. Present only on top-level messages in nested-
+   * mode (forum) rooms — those are the "topics" replies live under.
+   * Absent on replies and on every message in flat-mode chat rooms.
+   */
+  title?: string | null;
+  /**
+   * Snapshot of the author's avatar URL at send time. Used by the
+   * forum renderer to show an avatar beside each post; ignored by the
+   * chat renderer. Null = author had no avatar configured when posting.
+   */
+  avatarUrl?: string | null;
+  /**
+   * Timestamp the topic was locked (author or moderator action). Set on
+   * top-level topics in nested-mode rooms to indicate the thread is
+   * closed to new replies — server rejects `chat:input` replies under
+   * a locked topic, the forum UI shows a 🔒 indicator + disables the
+   * reply composer. Null/absent = unlocked. Replies and flat-room
+   * messages always carry this as null.
+   */
+  lockedAt?: number | null;
+  /**
+   * Most-recent-activity timestamp for top-level topics. Updated by
+   * the server when a reply is inserted under the topic — the forum
+   * pagination orders by this DESC so active threads surface first.
+   * For replies and flat-room messages this is null/unused.
+   */
+  lastActivityAt?: number | null;
+  /**
+   * Admin-pinned flag for forum topics. When true, the topic floats
+   * above all non-sticky topics in its category and is returned on
+   * every page of `GET /rooms/:id/topics`. Only admins can toggle
+   * this; the forum view shows a 📌 indicator. Defaults to false.
+   */
+  isSticky?: boolean;
+}
+
+/**
+ * A single result row from `GET /rooms/:id/messages/search`. The server
+ * filters by privacy (whispers visible only to sender/recipient, soft-
+ * deletes excluded) before ranking, so the client can render results
+ * directly without secondary filtering.
+ *
+ * `relevance` is a unitless server-assigned score (higher = better).
+ * The UI sorts by it but doesn't surface the raw number. `snippet` is
+ * the raw matched body — the client renders highlight on top via the
+ * same logic message rendering uses, so we don't ship pre-built HTML
+ * from the server.
+ */
+export interface MessageSearchHit {
+  id: string;
+  roomId: string;
+  userId: string;
+  displayName: string;
+  kind: MessageKind;
+  snippet: string;
+  createdAt: number;
+  relevance: number;
+  /** Top-level thread anchor when the matched message is itself a reply. Used to render "in thread: <parent>" context. */
+  replyToId?: string | null;
 }

@@ -85,7 +85,7 @@ export function RoomPasswordModal({ roomId, roomName, socket, onClose }: Props) 
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
+            className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
           >
             Cancel
           </button>

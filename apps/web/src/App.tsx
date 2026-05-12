@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ChatMessage, PrivateWorldStub, ProfileView, Role, Theme, WorldDetail } from "@thekeep/shared";
+import type { ChatMessage, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, WorldDetail } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
@@ -8,11 +8,13 @@ import { Composer } from "./components/Composer.js";
 import { HelpModal } from "./components/HelpModal.js";
 import { MessageList } from "./components/MessageList.js";
 import { MutualPrompts } from "./components/MutualPrompts.js";
+import { BookmarksModal } from "./components/BookmarksModal.js";
 import { ProfileEditor } from "./components/ProfileEditor.js";
 import { ProfileModal } from "./components/ProfileModal.js";
 import { RoomPasswordModal } from "./components/RoomPasswordModal.js";
 import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
 import { RulesModal } from "./components/RulesModal.js";
+import { ThreadModal } from "./components/ThreadModal.js";
 import { UsersModal } from "./components/UsersModal.js";
 import { WorldCatalogModal } from "./components/WorldCatalogModal.js";
 import { WorldEditorModal } from "./components/WorldEditorModal.js";
@@ -23,6 +25,7 @@ import { getSocket, disconnect as disconnectSocket } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
 import { applyTheme, themeStyle } from "./lib/theme.js";
+import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
 import { fire as fireNotification, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { useChat, type SiteBranding } from "./state/store.js";
 
@@ -469,6 +472,10 @@ function BootSplash() {
 function Chat() {
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
+  // Branding lives in the global store; AdminPanel saves push into it
+  // directly so the derived activeTheme below picks up new site
+  // defaults without waiting for a /me/profile re-fetch.
+  const branding = useChat((s) => s.branding);
   const setKickReason = useChat((s) => s.setKickReason);
   const setRoom = useChat((s) => s.setRoom);
   const setOccupants = useChat((s) => s.setOccupants);
@@ -480,10 +487,21 @@ function Chat() {
   const setOpenProfile = useChat((s) => s.setOpenProfile);
   const openEditor = useChat((s) => s.openEditor);
   const closeEditor = useChat((s) => s.closeEditor);
+  // Forum-pagination store actions.
+  const setForumTopicsPage = useChat((s) => s.setForumTopicsPage);
+  const appendForumTopicsPage = useChat((s) => s.appendForumTopicsPage);
+  const setForumTopicsLoading = useChat((s) => s.setForumTopicsLoading);
+  const prependOwnForumTopic = useChat((s) => s.prependOwnForumTopic);
+  const queuePendingForumTopic = useChat((s) => s.queuePendingForumTopic);
+  const flushPendingForumTopics = useChat((s) => s.flushPendingForumTopics);
+  const updateForumTopic = useChat((s) => s.updateForumTopic);
+  const bumpTopicActivity = useChat((s) => s.bumpTopicActivity);
+  const removeForumTopic = useChat((s) => s.removeForumTopic);
 
   const currentRoomId = useChat((s) => s.currentRoomId);
   const rooms = useChat((s) => s.rooms);
   const messagesByRoom = useChat((s) => s.messagesByRoom);
+  const forumTopicsByRoom = useChat((s) => s.forumTopicsByRoom);
   const occupants = useChat((s) => s.occupants);
   const notice = useChat((s) => s.notice);
   const openProfile = useChat((s) => s.openProfile);
@@ -496,6 +514,7 @@ function Chat() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState<{ filter?: string } | null>(null);
   const [usersOpen, setUsersOpen] = useState<{ query?: string } | null>(null);
+  const [bookmarksOpen, setBookmarksOpen] = useState(false);
   // Password prompt for private rooms — set when the server emits a
   // `prompt-room-password` ui:hint (rail click → server says "needs
   // password"). Cleared on cancel or successful join.
@@ -511,14 +530,54 @@ function Chat() {
   const [worldCatalogOpen, setWorldCatalogOpen] = useState(false);
   const [navLinksVersion, setNavLinksVersion] = useState(0);
   const [composerText, setComposerText] = useState("");
+  // Per-room cached thread categories. Populated lazily for nested rooms
+  // on join; the Composer's category picker reads from this. Stale
+  // entries (after admin edits) refresh on the next room-join cycle.
+  const [threadCategoriesByRoom, setThreadCategoriesByRoom] = useState<Record<string, ThreadCategory[]>>({});
+  // Forum-mode state. Both reset whenever the active room changes —
+  // navigating away from a thread shouldn't leave the composer thinking
+  // it's still replying to the previous room's topic.
+  //   activeTopicId   — id of the topic the user is currently reading
+  //                      (and replying to). null = no topic selected,
+  //                      composer is disabled in forum rooms.
+  //   topicCreateMode — composer is in "start a new topic" mode (title
+  //                      input visible). After successful create, this
+  //                      flips back to false and activeTopicId points
+  //                      at the new topic.
+  const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
+  const [topicCreateMode, setTopicCreateMode] = useState(false);
+  // "Preferred category for the next + New topic" — set when the user
+  // clicks a category section header in the forum view. Tristate where
+  // `undefined` means "no signal yet" (composer falls back to its own
+  // persisted localStorage default), `null` is the Uncategorized
+  // bucket, and a string is a specific category id. Resets on room
+  // change so a click in room A doesn't leak into room B.
+  const [activeForumCategoryId, setActiveForumCategoryId] = useState<string | null | undefined>(undefined);
+  // Pop-out modal target. Independent of activeTopicId: clicking the
+  // ⤢ icon on a topic card opens the focused-view modal AND also sets
+  // activeTopicId (so the underlying list view expands to match), but
+  // closing the modal leaves activeTopicId alone — the user stays
+  // focused on the same topic in the list. Resets on room change.
+  const [poppedTopicId, setPoppedTopicId] = useState<string | null>(null);
   // Rooms drawer on mobile (md breakpoint and below). Always-open on desktop.
   const [railOpen, setRailOpen] = useState(false);
   const [roomsTree, setRoomsTree] = useState<RoomWithOccupants[]>([]);
   const [roomsTreeVersion, setRoomsTreeVersion] = useState(0);
-  const [activeTheme, setActiveTheme] = useState<Theme>(DEFAULT_THEME);
+  // Theme resolution layers. `activeTheme` is derived (not stored) below
+  // as `characterTheme || userTheme || branding.defaultTheme`, so changing
+  // ANY of the three causes the active theme to refresh — including when
+  // admin pushes a new site-wide default to `branding`. Storing them
+  // separately avoids the previous bug where activeTheme was set in a
+  // one-shot effect that only re-ran on `themeVersion` bumps, leaving
+  // the chat stuck on the OLD site default after an admin palette change.
+  const [userTheme, setUserTheme] = useState<Theme | null>(null);
+  const [characterTheme, setCharacterTheme] = useState<Theme | null>(null);
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
   const [activeCharacterName, setActiveCharacterName] = useState<string | null>(null);
   const [notifyPref, setNotifyPref] = useState<NotifyPref>("mentions");
+  // Per-user style override. `null` means "follow the site default";
+  // applyStyle below resolves user > site > hardcoded fallback.
+  const [userStyleKey, setUserStyleKey] = useState<string | null>(null);
   /**
    * Admin-configured one-shot welcome modal. /me/profile returns this only
    * when the user hasn't acknowledged the current welcome's content hash;
@@ -568,26 +627,35 @@ function Chat() {
         if (!me.ok) return;
         const u = (await me.json()) as {
           theme?: unknown;
+          styleKey?: string | null;
           activeCharacterId: string | null;
           activeCharacterName?: string | null;
           notifyPref?: NotifyPref;
           welcome?: { html: string; hash: string } | null;
         };
-        let theme = normalizeTheme(u.theme);
+        // The server returns user.theme which already falls back to the
+        // site default when the user has nothing explicit set
+        // (parseUserThemeJson on the server side does this). We pull
+        // both layers separately into state so the derived activeTheme
+        // below picks the right one in real time.
+        const fetchedUserTheme = u.theme ? normalizeTheme(u.theme) : null;
+        let fetchedCharTheme: Theme | null = null;
         if (u.activeCharacterId) {
           const c = await fetch(`/characters/${u.activeCharacterId}`, { credentials: "include" });
           if (c.ok) {
             const cr = (await c.json()) as { themeJson?: string | null };
             if (cr.themeJson) {
-              try { theme = normalizeTheme(JSON.parse(cr.themeJson)); } catch { /* keep master */ }
+              try { fetchedCharTheme = normalizeTheme(JSON.parse(cr.themeJson)); } catch { /* none */ }
             }
           }
         }
         if (!cancelled) {
-          setActiveTheme(theme);
+          setUserTheme(fetchedUserTheme);
+          setCharacterTheme(fetchedCharTheme);
           setActiveCharacterId(u.activeCharacterId);
           setActiveCharacterName(u.activeCharacterName ?? null);
           if (u.notifyPref) setNotifyPref(u.notifyPref);
+          setUserStyleKey(typeof u.styleKey === "string" ? u.styleKey : null);
           // Server-side gating: only present when there's an unseen
           // welcome to surface. Dismissal flips the user's stored hash
           // server-side, so re-fetches stop returning this field.
@@ -599,9 +667,31 @@ function Chat() {
     return () => { cancelled = true; };
   }, [themeVersion]);
 
+  // Derived active theme. Recomputes whenever ANY of the three layers
+  // changes — including when admin pushes a new site default to the
+  // branding store via /admin/settings save. Previously this was a
+  // one-shot state set inside the load() above, so admin palette
+  // changes only landed for the user after a manual reload.
+  const activeTheme = useMemo<Theme>(() => {
+    return characterTheme ?? userTheme ?? branding.defaultTheme ?? DEFAULT_THEME;
+  }, [characterTheme, userTheme, branding.defaultTheme]);
+
   // Apply whichever theme is active to the document. Sets CSS vars on <html>
   // so they override the :root defaults from styles.css.
-  useEffect(() => { applyTheme(activeTheme); }, [activeTheme]);
+  // Read the site-wide default style off branding (push-updated by
+  // /site + admin saves). Used as the second tier in the user > site >
+  // hardcoded resolution.
+  const siteStyleKey = useChat((s) => s.branding.defaultStyleKey);
+  useEffect(() => {
+    // Apply the palette first so the ornament generator can read the
+    // resulting CSS vars. Style resolution is user > site > hardcoded
+    // fallback — the user's per-user override (Profile.styleKey) wins
+    // when set; otherwise everyone gets the site default; if both are
+    // unknown the ornaments module falls back to 'medieval'.
+    applyTheme(activeTheme);
+    const resolvedStyle = userStyleKey || siteStyleKey || DEFAULT_STYLE_KEY;
+    applyStyle(activeTheme, resolvedStyle);
+  }, [activeTheme, userStyleKey, siteStyleKey]);
 
   /**
    * Activity heartbeat for sliding session-idle expiry.
@@ -701,11 +791,50 @@ function Chat() {
       setRoomsTreeVersion((v) => v + 1);
       setThemeVersion((v) => v + 1);
     });
-    socket.on("message:new", (msg: ChatMessage) => appendMessage(msg));
+    socket.on("message:new", (msg: ChatMessage) => {
+      // Append to the chat backlog regardless of mode — replies and
+      // flat-chat messages live here, and the forum reply view reads
+      // replies from this buffer.
+      appendMessage(msg);
+
+      // Forum-side topic / reply bookkeeping. Driven off the room's
+      // replyMode from the live store snapshot so we don't capture a
+      // stale value in this closure (the listener is registered once
+      // per mount and outlives many room switches).
+      const state = useChat.getState();
+      const roomRow = state.rooms[msg.roomId];
+      if (!roomRow || roomRow.replyMode !== "nested") return;
+
+      if (!msg.replyToId && msg.kind !== "system") {
+        // New top-level topic. The author's own send lands directly
+        // in the bucket so they see it right away; everyone else's
+        // queues behind the "X new topics" pill.
+        const categoryKey = msg.threadCategoryId ?? "_uncat";
+        if (state.me && msg.userId === state.me.id) {
+          prependOwnForumTopic(msg.roomId, categoryKey, msg);
+        } else {
+          queuePendingForumTopic(msg.roomId, categoryKey, msg);
+        }
+      } else if (msg.replyToId) {
+        // Reply to a topic. Bump the parent's activity timestamp so
+        // the forum view re-sorts it to the top of its bucket.
+        bumpTopicActivity(msg.roomId, msg.replyToId, msg.createdAt);
+      }
+    });
     socket.on("message:bulk", (msgs: ChatMessage[]) => {
       if (msgs.length) setMessages(msgs[0]!.roomId, msgs);
     });
-    socket.on("message:update", (msg: ChatMessage) => updateMessage(msg));
+    socket.on("message:update", (msg: ChatMessage) => {
+      updateMessage(msg);
+      // Forum side: if this is a topic, reflect lock/edit state into
+      // the topics store; if it's a freshly-deleted topic, remove it
+      // from every category bucket so the forum view stops rendering
+      // it without waiting for a refetch.
+      if (!msg.replyToId) {
+        if (msg.deletedAt) removeForumTopic(msg.roomId, msg.id);
+        else updateForumTopic(msg);
+      }
+    });
     socket.on("watch:online", ({ username, displayName }) => {
       // Surface a small system line in the current room so the user sees
       // it inline (and it sticks in the timeline). Desktop toast is fired
@@ -796,6 +925,9 @@ function Chat() {
         case "prompt-room-password":
           setPwPrompt({ roomId: h.roomId, roomName: h.roomName });
           break;
+        case "open-bookmarks":
+          setBookmarksOpen(true);
+          break;
       }
     });
 
@@ -830,11 +962,165 @@ function Chat() {
       socket.off("ui:hint");
       socket.off("mutual:settled");
     };
-  }, [socket, setRoom, setOccupants, appendMessage, updateMessage, setMessages, setCurrentRoom, setNotice, setOpenProfile, openEditor, setRefreshIntervalSec, setMe]);
+  }, [socket, setRoom, setOccupants, appendMessage, updateMessage, setMessages, setCurrentRoom, setNotice, setOpenProfile, openEditor, setRefreshIntervalSec, setMe, prependOwnForumTopic, queuePendingForumTopic, bumpTopicActivity, updateForumTopic, removeForumTopic]);
 
-  function send(text: string) {
+  function send(
+    text: string,
+    opts?: { threadCategoryId?: string | null; threadTitle?: string; replyToId?: string },
+  ) {
     if (!currentRoomId) return;
-    socket.emit("chat:input", { roomId: currentRoomId, text });
+    socket.emit("chat:input", {
+      roomId: currentRoomId,
+      text,
+      ...(opts?.threadCategoryId ? { threadCategoryId: opts.threadCategoryId } : {}),
+      ...(opts?.threadTitle ? { threadTitle: opts.threadTitle } : {}),
+      ...(opts?.replyToId ? { replyToId: opts.replyToId } : {}),
+    });
+  }
+
+  // Forum bookkeeping: when a new topic message arrives that was
+  // authored by THIS user (matched by userId + the freshly-set title),
+  // jump straight into it as the active topic so the composer becomes
+  // a reply box for the topic they just created. Listening on the
+  // store's message append rather than the socket directly so we
+  // catch our own optimistic appends too. The check is constrained to
+  // "the user just submitted a topic-create" via topicCreateMode so we
+  // don't auto-activate every topic anyone else creates.
+  useEffect(() => {
+    if (!topicCreateMode || !me) return;
+    const buf = messagesByRoom[currentRoomId ?? ""] ?? [];
+    // Walk from the newest end backwards looking for our own most-
+    // recent topic post. We don't need to look far; the topic create
+    // mode is only active while the request is pending.
+    for (let i = buf.length - 1; i >= Math.max(0, buf.length - 5); i--) {
+      const m = buf[i]!;
+      if (m.userId === me.id && m.title && !m.replyToId) {
+        setActiveTopicId(m.id);
+        setTopicCreateMode(false);
+        return;
+      }
+    }
+  }, [topicCreateMode, me, currentRoomId, messagesByRoom]);
+
+  // Reset forum-mode state on every room switch so the composer doesn't
+  // try to reply into a thread that lived in the room we just left.
+  // `activeForumCategoryId` also clears: a section-click in room A
+  // should not pre-select a (likely nonexistent) category in room B.
+  useEffect(() => {
+    setActiveTopicId(null);
+    setTopicCreateMode(false);
+    setPoppedTopicId(null);
+    setActiveForumCategoryId(undefined);
+  }, [currentRoomId]);
+
+  // Lazy thread-category fetch. Triggered when the current room flips to
+  // a nested-mode room we haven't seen yet, OR when the room object's
+  // replyMode changes to nested (admin toggled /replymode). Flat rooms
+  // and rooms we already have a list for are skipped so this doesn't
+  // spam the server.
+  useEffect(() => {
+    if (!currentRoomId) return;
+    const r = rooms[currentRoomId];
+    if (!r || r.replyMode !== "nested") return;
+    if (threadCategoriesByRoom[currentRoomId]) return;
+    let cancelled = false;
+    fetch(`/rooms/${encodeURIComponent(currentRoomId)}/thread-categories`, { credentials: "include" })
+      .then((res) => (res.ok ? (res.json() as Promise<{ categories: ThreadCategory[] }>) : null))
+      .then((j) => {
+        if (cancelled || !j) return;
+        setThreadCategoriesByRoom((cur) => ({ ...cur, [currentRoomId]: j.categories }));
+      })
+      .catch(() => { /* non-fatal — picker just stays empty */ });
+    return () => { cancelled = true; };
+  }, [currentRoomId, rooms, threadCategoriesByRoom]);
+
+  /**
+   * Initial forum-topics fetch. Once the room flips to nested-mode AND
+   * the categories list has loaded, fetch the first page of topics for
+   * each category (including the synthetic "_uncat" bucket). The
+   * categories must load first because the bucket-keys come from
+   * there; the topics endpoint accepts `category=<id>` or `category=""`
+   * (meaning uncategorized) to scope the page.
+   *
+   * Skipped per-category when that bucket already has a topics array —
+   * lets a user navigate away and back into the same room without
+   * re-fetching everything (they'll just keep what's loaded).
+   */
+  useEffect(() => {
+    if (!currentRoomId) return;
+    const r = rooms[currentRoomId];
+    if (!r || r.replyMode !== "nested") return;
+    const cats = threadCategoriesByRoom[currentRoomId];
+    if (!cats) return; // wait for categories to load first
+
+    // Read forumTopicsByRoom via getState() instead of putting it in
+    // this effect's deps. If it were a dep, the effect's own call to
+    // setForumTopicsLoading below would mutate the store, retrigger
+    // this effect, run the cleanup (flipping `cancelled = true` on the
+    // closure the in-flight fetches are bound to), and those fetches
+    // would silently bail after resolving — leaving every bucket
+    // stuck in `loading: true` with no topics. Reading from getState
+    // here gives us a fresh snapshot per effect fire without re-firing
+    // on every store mutation.
+    const buckets = useChat.getState().forumTopicsByRoom[currentRoomId] ?? {};
+    // Build the list of bucket keys to populate: every category id +
+    // the uncategorized bucket. Skip ones already loaded.
+    const keys: string[] = [];
+    for (const c of cats) {
+      if (!buckets[c.id]) keys.push(c.id);
+    }
+    if (!buckets["_uncat"]) keys.push("_uncat");
+    if (keys.length === 0) return;
+
+    let cancelled = false;
+    for (const key of keys) {
+      setForumTopicsLoading(currentRoomId, key, true);
+      const categoryParam = key === "_uncat" ? "" : key;
+      const url = `/rooms/${encodeURIComponent(currentRoomId)}/topics?category=${encodeURIComponent(categoryParam)}&limit=20`;
+      fetch(url, { credentials: "include" })
+        .then((res) => (res.ok ? (res.json() as Promise<{ topics: ChatMessage[]; hasMore: boolean }>) : null))
+        .then((j) => {
+          if (cancelled || !j) return;
+          setForumTopicsPage(currentRoomId, key, j.topics, j.hasMore);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          // Leave the bucket empty on error; the renderer just shows
+          // "No topics yet" which is benign for a network blip.
+          setForumTopicsLoading(currentRoomId, key, false);
+        });
+    }
+    return () => { cancelled = true; };
+  }, [currentRoomId, rooms, threadCategoriesByRoom, setForumTopicsLoading, setForumTopicsPage]);
+
+  /**
+   * "Load older topics" handler for the forum view. Fetches the next
+   * page for a category, using the oldest-loaded topic's
+   * `lastActivityAt` as the cursor. The store appends the result; the
+   * button shows a busy state while in flight.
+   *
+   * Passed down to MessageList → ForumView so each category section
+   * can wire its own button without each one fetching independently.
+   */
+  async function loadOlderTopics(categoryKey: string): Promise<void> {
+    if (!currentRoomId) return;
+    const bucket = forumTopicsByRoom[currentRoomId]?.[categoryKey];
+    if (!bucket || !bucket.hasMore || bucket.loading) return;
+    const oldest = bucket.topics[bucket.topics.length - 1];
+    if (!oldest) return;
+    const cursor = oldest.lastActivityAt ?? oldest.createdAt;
+    setForumTopicsLoading(currentRoomId, categoryKey, true);
+    try {
+      const categoryParam = categoryKey === "_uncat" ? "" : categoryKey;
+      const url = `/rooms/${encodeURIComponent(currentRoomId)}/topics?category=${encodeURIComponent(categoryParam)}&before=${cursor}&limit=20`;
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const j = (await res.json()) as { topics: ChatMessage[]; hasMore: boolean };
+      appendForumTopicsPage(currentRoomId, categoryKey, j.topics, j.hasMore);
+    } catch (err) {
+      setForumTopicsLoading(currentRoomId, categoryKey, false);
+      setNotice({ code: "LOAD_OLDER_FAILED", message: err instanceof Error ? err.message : "Couldn't load older topics." });
+    }
   }
 
   /**
@@ -909,9 +1195,158 @@ function Chat() {
     });
   }
 
+  // Jump-to-message flow shared by search, bookmarks, and (eventually)
+  // mention navigation. Two distinct paths depending on the room's
+  // reply mode:
+  //
+  //  - Flat rooms: load a chronological window via
+  //    `/messages/around`, replace `messagesByRoom` wholesale, set the
+  //    "viewing older history" banner, then flash the row in
+  //    MessageList via `highlightMessageId`.
+  //
+  //  - Forum rooms: the chronological-window model doesn't compose
+  //    with the per-category topic buckets, so we go a different
+  //    route — fetch the topic the hit belongs to (the hit itself if
+  //    it's a topic, or its parent if it's a reply) plus the full
+  //    reply chain, merge them into the local stores, and open
+  //    `ThreadModal` centered on the topic with `highlightMessageId`
+  //    set so the modal scrolls to and flashes the specific hit.
+  const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
+  const [viewingHistory, setViewingHistory] = useState<boolean>(false);
+  async function jumpToMessage(roomId: string, messageId: string) {
+    setRailOpen(false);
+    // Different room: switch first via the same socket path /go uses, so
+    // joinRoom handles bans, password, etc.
+    if (roomId !== currentRoomId) {
+      await new Promise<void>((resolve) => {
+        socket.emit("room:join", { roomId }, (res) => {
+          if (!res.ok) setNotice({ code: res.code, message: res.message });
+          resolve();
+        });
+      });
+    }
+
+    // Re-read the room's replyMode AFTER the join completes — the
+    // local store updates when `room:state` lands. For same-room
+    // jumps the value is already current.
+    const isForum = useChat.getState().rooms[roomId]?.replyMode === "nested";
+
+    if (isForum) {
+      // Forum path. The `/messages/:messageId/thread` endpoint figures
+      // out the topic for us regardless of whether the id is a topic
+      // or a reply, and returns the topic + every reply under it.
+      try {
+        const r = await fetch(
+          `/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/thread`,
+          { credentials: "include" },
+        );
+        if (!r.ok) {
+          setNotice({ code: "JUMP_FAILED", message: "Couldn't open that thread — it may have been removed." });
+          return;
+        }
+        const j = (await r.json()) as { topic: ChatMessage; replies: ChatMessage[] };
+
+        // Splice the topic into its bucket so closing the modal
+        // leaves the topic visible in the underlying forum list.
+        // Uses the existing own-prepend action (it dedupes if the
+        // topic was already loaded). categoryKey mirrors the
+        // server's bucket convention.
+        const categoryKey = j.topic.threadCategoryId ?? "_uncat";
+        prependOwnForumTopic(roomId, categoryKey, j.topic);
+
+        // Merge the replies into `messagesByRoom` so the modal — which
+        // reads replies from the chat buffer — sees them. We use
+        // appendMessage in a loop (with the store's own de-dup) so
+        // existing buffer entries aren't clobbered.
+        for (const r of j.replies) appendMessage(r);
+
+        setActiveTopicId(j.topic.id);
+        setTopicCreateMode(false);
+        setPoppedTopicId(j.topic.id);
+        setHighlightMessageId(messageId);
+      } catch (err) {
+        setNotice({ code: "JUMP_FAILED", message: err instanceof Error ? err.message : "load failed" });
+      }
+      return;
+    }
+
+    // Flat-room path: chronological window load.
+    const existing = useChat.getState().messagesByRoom[roomId] ?? [];
+    const alreadyLoaded = existing.some((m) => m.id === messageId);
+    if (!alreadyLoaded) {
+      try {
+        const r = await fetch(
+          `/rooms/${encodeURIComponent(roomId)}/messages/around?messageId=${encodeURIComponent(messageId)}&before=20&after=20`,
+          { credentials: "include" },
+        );
+        if (!r.ok) {
+          setNotice({ code: "JUMP_FAILED", message: "Couldn't load that message — it may have been removed." });
+          return;
+        }
+        const j = (await r.json()) as { messages: ChatMessage[] };
+        setMessages(roomId, j.messages);
+        setViewingHistory(true);
+      } catch (err) {
+        setNotice({ code: "JUMP_FAILED", message: err instanceof Error ? err.message : "load failed" });
+        return;
+      }
+    }
+    setHighlightMessageId(messageId);
+  }
+
+  // "Return to live" — refresh the buffer with the recent backlog and
+  // drop the historical-view flag. Re-issues room:join, which on the
+  // server returns the standard last-50 message:bulk we get on connect.
+  function returnToLive() {
+    if (!currentRoomId) return;
+    socket.emit("room:join", { roomId: currentRoomId }, () => {});
+    setViewingHistory(false);
+  }
+
   const room = currentRoomId ? rooms[currentRoomId] : undefined;
   const messages = currentRoomId ? messagesByRoom[currentRoomId] ?? [] : [];
   const occ = currentRoomId ? occupants[currentRoomId] ?? [] : [];
+  // Resolve activeTopicId → the actual topic message so the composer can
+  // render the "Replying to" indicator. We look it up by id in the room's
+  // buffer; null when the id isn't present (paged out, deleted, or no
+  // active topic). Falls back gracefully if the message isn't loaded.
+  const isForumRoom = room?.replyMode === "nested";
+  // Viewer-side moderator gate. Used to expose Lock/Unlock + cross-
+  // author Delete in the forum UI. The server is authoritative on
+  // every action — this only controls UI affordance visibility.
+  const canModerate = me?.role === "mod" || me?.role === "admin";
+  // Viewer-side admin gate. Stricter than canModerate; controls Pin /
+  // Unpin visibility on topic cards. The server enforces admin-only
+  // on PATCH /messages/:id/sticky too.
+  const canPin = me?.role === "admin";
+  const activeTopic = useMemo(() => {
+    if (!activeTopicId) return null;
+    const m = messages.find((x) => x.id === activeTopicId);
+    if (!m) return null;
+    return { id: m.id, title: m.title ?? null, body: m.body, locked: !!m.lockedAt };
+  }, [activeTopicId, messages]);
+  // Pop-out modal data. We look up the topic message itself + the
+  // replies that target it (id-matched). Replies stay in their
+  // original chronological order — same as the inline forum view.
+  // If the topic was deleted server-side after the modal opened, we
+  // return null and the modal effect below auto-closes.
+  const poppedTopic = useMemo(() => {
+    if (!poppedTopicId) return null;
+    return messages.find((m) => m.id === poppedTopicId) ?? null;
+  }, [poppedTopicId, messages]);
+  const poppedReplies = useMemo(() => {
+    if (!poppedTopicId) return [] as ChatMessage[];
+    return messages.filter((m) => m.replyToId === poppedTopicId);
+  }, [poppedTopicId, messages]);
+  // Auto-close if the topic vanishes from view: either paged out of
+  // the buffer entirely (poppedTopic === null) OR soft-deleted while
+  // the modal is open (poppedTopic.deletedAt set). Without the
+  // deletedAt branch the modal would linger showing the topic header
+  // with a "[message removed]" body and an active reply composer.
+  useEffect(() => {
+    if (!poppedTopicId) return;
+    if (!poppedTopic || poppedTopic.deletedAt) setPoppedTopicId(null);
+  }, [poppedTopicId, poppedTopic]);
 
   return (
     // Pin the entire chat shell to the viewport with position: fixed so
@@ -925,6 +1360,12 @@ function Chat() {
     // keyboard. overflow-hidden keeps any internal flex child that grows
     // past its allocated height from leaking back into document overflow.
     <div className="fixed inset-0 flex h-dvh flex-col overflow-hidden">
+      {/* Theme-style ambient overlay. The active StyleGenerator (medieval-
+          parchment in Phase 1) emits an SVG gradient stack as a CSS var
+          on <html>; this div renders it as a fixed full-viewport background
+          behind every other element. When no style is active the CSS var
+          falls back to `none` and this div is invisible. */}
+      <div aria-hidden className="keep-bg-overlay" />
       <Banner
         navLinksVersion={navLinksVersion}
         onOpenRules={() => setRulesOpen(true)}
@@ -952,8 +1393,45 @@ function Chat() {
           Messages auto-expire after {formatExpiry(room.messageExpiryMinutes)}
         </div>
       ) : null}
+      {/* Accent-color rail. A 3px standalone strip in a light tint of
+          the user's `accent` color, separating the entire header zone
+          (banner + topic + expiry) from the chat content below. In the
+          scifi style it gains a multi-layer accent glow halo so the
+          divider reads as a glowing tube; modern/medieval render it
+          as a clean colored strip without the bloom. The strip exists
+          as its own element rather than a border on a container so it
+          can project its glow downward into the chat without being
+          clipped by the parent. */}
+      <div aria-hidden className="keep-accent-rail" />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        <main className="flex min-h-0 flex-1 flex-col">
+        {/* `min-w-0` is non-negotiable: by default a flex child's
+            `min-width` is `auto` (= its intrinsic content width), so a
+            wide descendant — a long topic title, an action button strip,
+            anything with non-wrapping content — forces <main> to grow
+            beyond the viewport. The parent's `overflow-hidden` then
+            clips the right edge visually, which is what produced the
+            "everything pushed off-screen" bug in mobile forum view.
+            `min-w-0` lets the flex child shrink to its allocated slot
+            and forces descendants to honor their own truncation rules. */}
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {/* "Viewing older history" only applies to flat rooms — for
+              forum rooms the topic buckets paginate independently and
+              there's no single "live" chronological view to return to.
+              The forum jump path opens ThreadModal and never sets
+              viewingHistory, but this gate is a belt-and-suspenders
+              against any future caller that flips the flag in a
+              nested room. */}
+          {viewingHistory && !isForumRoom ? (
+            <button
+              type="button"
+              onClick={returnToLive}
+              className="flex w-full items-center justify-center gap-2 border-b border-keep-action/40 bg-keep-action/15 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/25"
+              title="Reload the recent backlog and return to live chat"
+            >
+              <span aria-hidden>↓</span>
+              Viewing older history — click to return to live
+            </button>
+          ) : null}
           <MessageList
             messages={messages}
             occupants={occ}
@@ -966,17 +1444,92 @@ function Chat() {
             onWorldClick={(slug) => setWorldViewerId(slug)}
             onTimeClick={onTimeClick}
             fontStep={fontStep}
+            highlightMessageId={highlightMessageId}
+            onHighlightDone={() => setHighlightMessageId(null)}
+            roomId={currentRoomId}
+            {...(isForumRoom && currentRoomId && threadCategoriesByRoom[currentRoomId]
+              ? { threadCategories: threadCategoriesByRoom[currentRoomId] }
+              : {})}
+            canModerate={canModerate}
+            canPin={canPin}
+            onQuotePost={(quoteText) => {
+              // Inline forum-view quote: pre-fill the MAIN composer.
+              // Append to whatever's already typed so the user can
+              // stack multiple quotes if they want to reply to a few
+              // posts at once.
+              setComposerText((cur) => (cur ? `${cur}\n\n${quoteText}` : quoteText));
+            }}
+            {...(isForumRoom && currentRoomId && forumTopicsByRoom[currentRoomId]
+              ? { forumBuckets: forumTopicsByRoom[currentRoomId] }
+              : {})}
+            onLoadOlderTopics={loadOlderTopics}
+            onFlushPendingTopics={(categoryKey) => {
+              if (!currentRoomId) return;
+              flushPendingForumTopics(currentRoomId, categoryKey);
+            }}
+            activeTopicId={activeTopicId}
+            onSetActiveTopic={(id) => {
+              setActiveTopicId(id);
+              // Picking a topic implicitly cancels topic-create mode —
+              // the user just told us they want to read/reply rather
+              // than start a new thread.
+              if (id) setTopicCreateMode(false);
+            }}
+            onPopoutTopic={(id) => {
+              // Pop-out also flips the underlying list view to that
+              // topic so when the user closes the modal they land on
+              // the same expanded topic in the inline forum. Cancels
+              // topic-create for the same reason onSetActiveTopic does.
+              setActiveTopicId(id);
+              setTopicCreateMode(false);
+              setPoppedTopicId(id);
+            }}
+            onActivateCategory={(id) => setActiveForumCategoryId(id)}
+            // Per-section "+ New Topic" button: collapse-out of any reply
+            // mode, set this section as the target category, and pop the
+            // composer into topic-create. Single click escapes "stuck in
+            // replying to thread X" without making the user hunt for a
+            // Cancel button first.
+            onStartTopicInCategory={(id) => {
+              setActiveTopicId(null);
+              setActiveForumCategoryId(id);
+              setTopicCreateMode(true);
+            }}
           />
           <MutualPrompts
             socket={socket}
             onError={(n) => setNotice(n)}
           />
+          {/* Second accent rail — sits between the message stream and
+              the composer. Same component as the header rail; the per-
+              style CSS gives it identical decoration so the chat is
+              visually bracketed by two glowing accent strips. */}
+          <div aria-hidden className="keep-accent-rail" />
           <Composer
             value={composerText}
             onChange={setComposerText}
             onSend={send}
             occupants={occ}
             onOpenRail={() => setRailOpen(true)}
+            roomId={currentRoomId}
+            {...(isForumRoom && currentRoomId && threadCategoriesByRoom[currentRoomId]
+              ? { threadCategories: threadCategoriesByRoom[currentRoomId] }
+              : {})}
+            isForumRoom={!!isForumRoom}
+            canModerate={canModerate}
+            activeTopic={activeTopic}
+            topicCreateMode={topicCreateMode}
+            {...(activeForumCategoryId !== undefined
+              ? { preferredCategoryId: activeForumCategoryId }
+              : {})}
+            onStartTopicCreate={() => {
+              // Leaving a thread to start a new topic is the natural UX —
+              // the composer can only be in one forum-state at a time.
+              setActiveTopicId(null);
+              setTopicCreateMode(true);
+            }}
+            onCancelTopicCreate={() => setTopicCreateMode(false)}
+            onLeaveThread={() => setActiveTopicId(null)}
           />
         </main>
         {/* Mobile-only backdrop when rail drawer is open */}
@@ -1008,6 +1561,7 @@ function Chat() {
             setWorldViewerId(worldId);
             setRailOpen(false);
           }}
+          onJumpToMessage={jumpToMessage}
           isOpen={railOpen}
           onClose={() => setRailOpen(false)}
         />
@@ -1125,6 +1679,26 @@ function Chat() {
         />
       ) : null}
       {rulesOpen ? <RulesModal onClose={() => setRulesOpen(false)} /> : null}
+      {poppedTopic ? (
+        <ThreadModal
+          topic={poppedTopic}
+          replies={poppedReplies}
+          selfUserId={me?.id ?? null}
+          roomType={room?.type ?? null}
+          canModerate={canModerate}
+          canPin={canPin}
+          occupants={occ}
+          onIconClick={onIconClick}
+          onNameClick={onNameClick}
+          onMentionClick={onMentionClick}
+          onWorldClick={(slug) => setWorldViewerId(slug)}
+          onTimeClick={onTimeClick}
+          onReply={(text) => send(text, { replyToId: poppedTopic.id })}
+          onClose={() => setPoppedTopicId(null)}
+          highlightMessageId={highlightMessageId}
+          onHighlightDone={() => setHighlightMessageId(null)}
+        />
+      ) : null}
       {pwPrompt ? (
         <RoomPasswordModal
           roomId={pwPrompt.roomId}
@@ -1150,6 +1724,12 @@ function Chat() {
               else setNotice({ code: res.code, message: res.message });
             });
           }}
+        />
+      ) : null}
+      {bookmarksOpen ? (
+        <BookmarksModal
+          onClose={() => setBookmarksOpen(false)}
+          onJumpToMessage={jumpToMessage}
         />
       ) : null}
       {worldsListOpen ? (

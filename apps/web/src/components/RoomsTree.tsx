@@ -18,6 +18,8 @@ interface Props {
   onCommand: (text: string) => void;
   /** Open the world viewer modal for a given world id (clicking a primary-world section header). */
   onWorldClick: (worldId: string) => void;
+  /** Jump to a specific message in a room. Wired by the in-rail search bar. */
+  onJumpToMessage: (roomId: string, messageId: string) => void;
   /**
    * Mobile drawer state. On md+ screens the rail is always visible regardless;
    * isOpen only controls the slide-in/out at sub-md widths.
@@ -41,6 +43,7 @@ export function RoomsTree({
   onRoomClick,
   onCommand,
   onWorldClick,
+  onJumpToMessage,
   isOpen,
   onClose,
 }: Props) {
@@ -67,6 +70,7 @@ export function RoomsTree({
       // the rail from the chat. Slightly wider on mobile (72) to give
       // thumbs a comfortable target.
       className={`
+        keep-app-sidebar
         flex h-full w-72 flex-col border-l border-keep-rule bg-keep-bg text-sm shadow-2xl
         fixed inset-y-0 right-0 z-40 transform transition-transform
         ${drawerOpen ? "translate-x-0" : "translate-x-full"}
@@ -85,7 +89,7 @@ export function RoomsTree({
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-base text-keep-text hover:bg-keep-banner md:hidden"
+            className="keep-button flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-base text-keep-text hover:bg-keep-banner md:hidden"
             aria-label="Close rooms"
             title="Close rooms drawer"
           >
@@ -112,7 +116,12 @@ export function RoomsTree({
           </ul>
         )}
       </div>
-      <ToolPanel onCommand={onCommand} activeCharacterId={activeCharacterId ?? null} />
+      <ToolPanel
+        onCommand={onCommand}
+        activeCharacterId={activeCharacterId ?? null}
+        currentRoomId={currentRoomId}
+        onJumpToMessage={onJumpToMessage}
+      />
     </aside>
   );
 }
@@ -140,16 +149,28 @@ function RoomGroup({
   const showHeaders = groups.length > 1; // a single bucket is just a flat list
 
   return (
-    <li className={`border-b border-keep-rule/40 ${isCurrent ? "bg-keep-banner/40" : ""}`}>
+    <li
+      className={`keep-row border-b border-keep-rule/40 ${isCurrent ? "bg-keep-banner/40" : ""}`}
+      data-active={isCurrent ? "true" : undefined}
+    >
       <button
         type="button"
         onClick={() => onRoomClick(room.id)}
         title={room.topic ?? ""}
-        className={`flex w-full items-baseline justify-between px-3 py-2.5 text-left font-bold hover:bg-keep-banner/30 md:py-1 ${
-          isCurrent ? "text-keep-action underline" : "text-keep-action/80"
+        className={`flex w-full items-baseline justify-between px-3 py-2.5 text-left font-bold hover:bg-keep-banner/30 hover:text-keep-accent md:py-1 ${
+          isCurrent ? "text-keep-action" : "text-keep-accent"
         }`}
       >
         <span className="truncate">
+          {/* Room-shape glyph. Flat rooms behave like ephemeral chats;
+              nested rooms persist their conversations as threaded
+              replies (forum-style) so newcomers know which mode the
+              room is in before they enter. */}
+          {room.replyMode === "nested" ? (
+            <span title="threaded conversations — replies persist as forum-style threads" className="mr-1">🧵</span>
+          ) : (
+            <span title="flat chat — chronological, ephemeral feel" className="mr-1">💬</span>
+          )}
           {isPrivate ? <span title="private - password required" className="mr-1">🔒</span> : null}
           {room.name}
         </span>

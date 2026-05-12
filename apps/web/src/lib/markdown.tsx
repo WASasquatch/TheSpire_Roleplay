@@ -1,4 +1,5 @@
 import { Fragment, useState, type ReactNode } from "react";
+import { splitMentions } from "./mentions.js";
 
 /**
  * Inline markdown renderer for chat message bodies.
@@ -395,6 +396,126 @@ function SpoilerSpan({ children }: { children: ReactNode }) {
       {children}
     </button>
   );
+}
+
+/**
+ * Block-level body renderer for forum posts. Splits the body by
+ * newlines and groups consecutive lines that start with `> ` (or just
+ * `>`) into a single `<blockquote>` element so quoted replies render
+ * with the usual left-border / muted-bg styling. Non-quote lines
+ * render inline via parseInline + the mention splitter, same as
+ * before.
+ *
+ * Chat lines (flat-room rendering) deliberately don't use this — they
+ * stay single-visual-line. Forum posts opt in via ForumPostBody.
+ *
+ * Why a manual pre-pass instead of upgrading parseInline:
+ *   - parseInline is inline-only by design (no block-level state). It
+ *     handles emphasis/code/links inside a single line.
+ *   - Blockquote is block-level: groups span newlines. Adding it to
+ *     parseInline would muddle the inline-vs-block contract and risk
+ *     regressions in chat rendering.
+ *
+ * Grouping rule: any line whose first non-whitespace run is `>` is
+ * part of a quote. Adjacent quote lines fuse into one blockquote;
+ * the `> ` prefix (or just `>`) is stripped from each line before
+ * the inline parser runs on the body.
+ */
+export function renderForumBody(
+  body: string,
+  onMentionClick: (name: string) => void,
+  onWorldClick: (slug: string) => void,
+): ReactNode {
+  const lines = body.split("\n");
+  type Group = { kind: "quote" | "normal"; lines: string[] };
+  const groups: Group[] = [];
+  for (const line of lines) {
+    const isQuote = /^\s*>/.test(line);
+    const last = groups[groups.length - 1];
+    if (last && last.kind === (isQuote ? "quote" : "normal")) {
+      last.lines.push(line);
+    } else {
+      groups.push({ kind: isQuote ? "quote" : "normal", lines: [line] });
+    }
+  }
+
+  return groups.map((g, idx) => {
+    if (g.kind === "quote") {
+      // Strip the leading `>` (and one optional following space) from
+      // every line so the inner text reads cleanly. Leaves any
+      // existing markdown inside the quote intact — `> **bold**`
+      // renders the bold inside the blockquote.
+      const stripped = g.lines.map((l) => l.replace(/^\s*>\s?/, "")).join("\n");
+      const parts = splitMentions(stripped);
+      return (
+        <blockquote
+          key={`q${idx}`}
+          // border-l + muted bg gives the conventional quote look.
+          // `my-1` separates it from surrounding paragraphs;
+          // `whitespace-pre-wrap` preserves newlines inside the
+          // quote so multi-line quotes read correctly.
+          className="my-1 whitespace-pre-wrap border-l-2 border-keep-action/50 bg-keep-banner/40 px-3 py-1 text-keep-muted italic"
+        >
+          {renderPartsInline(parts, onMentionClick, onWorldClick)}
+        </blockquote>
+      );
+    }
+    // Normal text group. We join with newlines and rely on the
+    // containing `whitespace-pre-wrap` div to preserve them, exactly
+    // the same way the body rendered before this wrapper existed.
+    const joined = g.lines.join("\n");
+    const parts = splitMentions(joined);
+    return (
+      <Fragment key={`p${idx}`}>
+        {renderPartsInline(parts, onMentionClick, onWorldClick)}
+      </Fragment>
+    );
+  });
+}
+
+/**
+ * Internal: render the array returned by `splitMentions` into nodes.
+ * Mirrors the renderer that lives in MessageList — duplicated here as
+ * a lightweight helper so `renderForumBody` doesn't need a circular
+ * import. The behavior is identical: text segments → parseInline,
+ * mentions → button stubs, world chips → world-link buttons.
+ */
+function renderPartsInline(
+  parts: ReturnType<typeof splitMentions>,
+  onMentionClick: (name: string) => void,
+  onWorldClick: (slug: string) => void,
+): ReactNode[] {
+  const out: ReactNode[] = [];
+  parts.forEach((p, i) => {
+    if (p.kind === "text") {
+      out.push(<Fragment key={i}>{parseInline(p.text)}</Fragment>);
+    } else if (p.kind === "world-mention") {
+      out.push(
+        <button
+          key={i}
+          type="button"
+          onClick={() => onWorldClick(p.slug)}
+          className="rounded border border-keep-action/40 bg-keep-action/10 px-1 text-[0.95em] font-semibold text-keep-action hover:bg-keep-action/20 focus:outline-none focus:ring-1 focus:ring-keep-action"
+          title={`Open the ${p.slug} world`}
+        >
+          @world:{p.slug}
+        </button>,
+      );
+    } else {
+      out.push(
+        <button
+          key={i}
+          type="button"
+          onClick={() => onMentionClick(p.name)}
+          className="rounded px-0.5 font-semibold text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action"
+          title={`View ${p.raw}'s profile`}
+        >
+          @{p.raw}
+        </button>,
+      );
+    }
+  });
+  return out;
 }
 
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:\?[^\s]*)?(?:#[^\s]*)?$/i;

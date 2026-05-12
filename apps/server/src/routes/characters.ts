@@ -7,7 +7,7 @@ import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared
 import { characterPortraits, characters, users } from "../db/schema.js";
 import { sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
-import { parseUserThemeJson } from "../settings.js";
+import { getSettings, parseOwnThemeJson, parseUserThemeJson } from "../settings.js";
 import { broadcastPresence } from "../realtime/broadcast.js";
 import type { Db } from "../db/index.js";
 
@@ -81,6 +81,13 @@ const masterUpdateBody = z.object({
   gender: z.enum(["male", "female", "nonbinary", "other", "undisclosed"]).optional(),
   /** null = revert to system default */
   theme: themeSchema.nullable().optional(),
+  /**
+   * Per-user theme style override. Null clears the override (user falls
+   * back to the site default). Bounded to a reasonable length — actual
+   * validity against the registered style catalog is checked client-
+   * side; the server stores whatever string the user picked.
+   */
+  styleKey: z.string().min(1).max(64).nullable().optional(),
   notifyPref: z.enum(["off", "mentions", "all"]).optional(),
   isPublic: z.boolean().optional(),
   isNsfw: z.boolean().optional(),
@@ -317,7 +324,18 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       awayMessage: u.awayMessage,
       activeCharacterId: u.activeCharacterId,
       activeCharacterName,
-      theme: await parseUserThemeJson(db, u.themeJson),
+      // Strict parse — returns null when the user has no theme of
+      // their own so the client can fall through to the live
+      // `branding.defaultTheme` instead of freezing a snapshot of the
+      // site default at fetch time. (Previously this used the resolving
+      // parser, which made "Default" saves in the profile bake whichever
+      // site theme was active at save time and stop responding to later
+      // admin palette changes.)
+      theme: parseOwnThemeJson(u.themeJson),
+      // Per-user style override. Null means "follow the site default";
+      // the client resolves user > site > hard-coded fallback. Style is
+      // orthogonal to `theme` above — they compose.
+      styleKey: u.styleKey,
       notifyPref: u.notifyPref,
       role: u.role,
       isPublic: u.isPublic,
@@ -538,6 +556,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         ...(body.theme !== undefined
           ? { themeJson: body.theme === null ? null : JSON.stringify(body.theme) }
           : {}),
+        ...(body.styleKey !== undefined ? { styleKey: body.styleKey } : {}),
         ...(body.notifyPref !== undefined ? { notifyPref: body.notifyPref } : {}),
         ...(body.isPublic !== undefined || body.isNsfw !== undefined ? { isPublic, isNsfw } : {}),
       })

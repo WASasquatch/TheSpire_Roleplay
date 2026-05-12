@@ -6,7 +6,32 @@ import type { WatchOnlineEvent } from "./moderation.js";
 /** Events emitted by the client → server. */
 export interface ClientToServerEvents {
   /** Raw user input. The server tokenizes (slash commands or plain text). */
-  "chat:input": (payload: { roomId: string; text: string }, ack?: AckFn<{ ok: true } | AckError>) => void;
+  /**
+   * Forum-mode payload extensions:
+   *   `threadTitle` — non-empty when the user is starting a new topic in
+   *                   a nested-mode room. Becomes the topic header.
+   *                   Rejected when combined with `replyToId`.
+   *   `replyToId`   — when set, the message becomes a reply under that
+   *                   topic. Required in nested rooms when not creating
+   *                   a new topic (forum-style: every post is either a
+   *                   new topic or a reply to one).
+   *   `threadCategoryId` — same as before; only honored for new
+   *                   top-level posts. The server validates the id
+   *                   belongs to the target room; an invalid id silently
+   *                   drops to "Uncategorized" rather than rejecting
+   *                   the send (composer pickers can race with admin
+   *                   category deletes).
+   */
+  "chat:input": (
+    payload: {
+      roomId: string;
+      text: string;
+      threadCategoryId?: string | null;
+      threadTitle?: string;
+      replyToId?: string;
+    },
+    ack?: AckFn<{ ok: true } | AckError>,
+  ) => void;
   "room:join": (payload: { roomId: string; password?: string }, ack?: AckFn<{ ok: true } | AckError>) => void;
   "room:leave": (payload: { roomId: string }) => void;
   /**
@@ -115,7 +140,9 @@ export type UiHint =
    * target room, so a sibling re-emitting room:join doesn't ping the
    * originator back.
    */
-  | { kind: "force-room-join"; roomId: string };
+  | { kind: "force-room-join"; roomId: string }
+  /** Open the user's bookmarks modal (manages saved chat messages). */
+  | { kind: "open-bookmarks" };
 
 /** Wire shape served by GET /commands. The help modal renders this. */
 export interface CommandDoc {

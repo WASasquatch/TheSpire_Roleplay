@@ -188,7 +188,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
               <button
                 type="button"
                 onClick={onEdit}
-                className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner"
+                className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner"
               >
                 Edit
               </button>
@@ -339,7 +339,7 @@ function MembershipControls({
         onClick={onJoin}
         disabled={busy}
         title="Join this world to declare an affiliation. Doesn't change your room access."
-        className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
+        className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
       >
         Join
       </button>
@@ -372,7 +372,7 @@ function MembershipControls({
         type="button"
         onClick={onLeave}
         disabled={busy}
-        className="rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-sm text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
+        className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-sm text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
       >
         Leave
       </button>

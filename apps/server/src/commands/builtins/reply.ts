@@ -59,6 +59,21 @@ export const replyCommand: CommandHandler = {
       notice(ctx, "REPLY_BAD_KIND", "You can only reply to chat messages.");
       return;
     }
+    // Soft-deleted parents (forum topics or chat lines) are not reply
+    // targets — the parent's body is gone from public view and the
+    // reply would look like an orphan quoting nothing. Mirrors the
+    // plain-say reply gate in `dispatch.ts`.
+    if (parent.deletedAt) {
+      notice(ctx, "REPLY_NO_MSG", "That message is no longer available to reply to.");
+      return;
+    }
+    // Locked forum topics reject new replies — except from moderators
+    // (mod or admin), who can still post in the thread to leave a
+    // notice / verdict. Mirrors the plain-say path in dispatch.ts.
+    if (parent.lockedAt && ctx.user.role !== "mod" && ctx.user.role !== "admin") {
+      notice(ctx, "TOPIC_LOCKED", "This topic is locked and isn't accepting new replies.");
+      return;
+    }
 
     await addMessage(ctx, {
       kind: "say",

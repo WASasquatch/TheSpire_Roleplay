@@ -163,6 +163,17 @@ export async function addMessage(
   };
   await emitFiltered(ctx.io, ctx.db, ctx.roomId, ctx.user.id, out);
 
+  // Belt-and-suspenders: emit directly to the sender's socket too. The
+  // room broadcast above only reaches sockets currently subscribed to
+  // `room:${roomId}`, and a race between a fast room-switch and a send
+  // (or a transient socket.io reconnect) can leave the sender's socket
+  // unsubscribed at the moment of broadcast — they'd miss their own
+  // message and not see it again until a page refetch pulled it from
+  // history. The client-side `appendMessage` dedupes by id, so this
+  // duplicate-on-the-wire is invisible in the typical happy path
+  // (socket is in the room → first delivery wins, second is dropped).
+  ctx.socket.emit("message:new", out);
+
   // Fire-and-forget push triggers for offline recipients. Privacy contract:
   // payloads carry only the *kind* of event ("whisper" / "mention") and the
   // author's display name - never the body. The user has to come back to

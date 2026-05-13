@@ -3,6 +3,7 @@ import type { ChatMessage, RoomOccupant } from "@thekeep/shared";
 import type { Gender } from "../lib/gender.js";
 import { Composer } from "./Composer.js";
 import { ForumAvatar, ForumPostBody, topicHeading } from "./MessageList.js";
+import { parseInline } from "../lib/markdown.js";
 
 interface Props {
   /** The topic message being focused. */
@@ -11,6 +12,8 @@ interface Props {
   replies: ChatMessage[];
   /** Current viewer for own-controls (edit/delete shown only on their posts). */
   selfUserId: string | null;
+  /** Viewer identities (master + active char) for self-mention highlighting inside post bodies. */
+  selfNames: ReadonlyArray<string>;
   /** Reporting gate — report button only renders in public rooms. */
   roomType: "public" | "private" | null;
   /** Viewer is a moderator. Passed through to ForumPostBody so cross-author Delete + Lock buttons appear in the modal's toolbars. */
@@ -63,6 +66,7 @@ export function ThreadModal({
   topic,
   replies,
   selfUserId,
+  selfNames,
   roomType,
   canModerate,
   canPin,
@@ -151,7 +155,7 @@ export function ThreadModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/60 p-3 md:p-6"
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/60 p-2 md:p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -159,7 +163,7 @@ export function ThreadModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="keep-frame flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-md bg-keep-bg"
+        className="keep-frame flex h-full w-full flex-col overflow-hidden rounded-md bg-keep-bg md:w-[78vw] md:max-w-[1200px]"
       >
         {/* Header strip: avatar + title + close. Title is the same
             heading helper the inline forum card uses, so the modal
@@ -186,7 +190,7 @@ export function ThreadModal({
                 </span>
               ) : null}
               <div className="truncate text-base font-semibold text-keep-text" title={heading}>
-                {heading}
+                {parseInline(heading)}
               </div>
             </div>
             <div className="flex items-baseline gap-2 text-[11px] text-keep-muted">
@@ -241,6 +245,7 @@ export function ThreadModal({
               onWorldClick={onWorldClick}
               onTimeClick={onTimeClick}
               showAuthorHeader={false}
+              selfNames={selfNames}
             />
           </div>
           {replies.length === 0 ? (
@@ -265,6 +270,7 @@ export function ThreadModal({
                     onWorldClick={onWorldClick}
                     onTimeClick={onTimeClick}
                     showAuthorHeader
+                    selfNames={selfNames}
                   />
                 </div>
               ))}

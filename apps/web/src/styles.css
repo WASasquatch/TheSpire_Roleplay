@@ -47,6 +47,45 @@
     background-color: rgb(var(--keep-bg) / 1);
     color: rgb(var(--keep-text) / 1);
   }
+  /* Per-user font-family override. `--keep-font-family` is set on <html>
+   * by applyFontPrefs() when the user has chosen one; absent the
+   * variable, the `font-chat` Tailwind stack from above remains in
+   * effect. We use `font-family` (not `@apply`) here because Tailwind's
+   * `@apply font-chat` resolves to a static list at build time and
+   * can't compose with a runtime variable. The fallback list mirrors
+   * the `font-chat` stack so an absent or invalid `--keep-font-family`
+   * degrades to exactly the same typography users see when no
+   * preference is set.
+   */
+  body {
+    font-family: var(--keep-font-family, ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif);
+  }
+}
+
+/* ============================================================
+ * WHISPER attention flash
+ * ============================================================
+ *
+ * Fired by MessageList when a whisper addressed to the current user
+ * arrives via the live socket (not from backlog). The animation pulses
+ * the row's tint between the resting 15% and a peak 45% three times so
+ * the eye catches the new line without the page feeling jumpy. The CSS
+ * uses the same `--keep-action` slot the whisper text already lives in,
+ * so it picks up whichever palette the user is on — forest-green flash
+ * on Parchment, purple on Twilight, etc.
+ *
+ * The "resting" tint matches `bg-keep-action/15` applied directly on
+ * the row, so the animation starts and ends on exactly the same value
+ * the row carries permanently. No "settling" jump when the keyframes
+ * complete.
+ */
+.animate-whisper-flash {
+  animation: whisper-flash 1.6s ease-out 1;
+}
+@keyframes whisper-flash {
+  0%, 100% { background-color: rgb(var(--keep-action) / 0.15); }
+  20%, 60% { background-color: rgb(var(--keep-action) / 0.45); }
+  40%, 80% { background-color: rgb(var(--keep-action) / 0.15); }
 }
 
 /* ============================================================

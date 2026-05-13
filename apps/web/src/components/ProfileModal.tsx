@@ -98,7 +98,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
         // become absurd on ultra-wide monitors, capped at 85vh tall, with
         // the original border / rounded / shadow treatment.
         style={themeStyle(ownerTheme)}
-        className="flex h-dvh w-full flex-col overflow-hidden bg-keep-bg text-keep-text md:h-auto md:max-h-[85vh] md:w-[75vw] md:max-w-[1400px] md:rounded md:border md:border-keep-border md:shadow-xl"
+        className="flex h-dvh w-full flex-col overflow-hidden bg-keep-bg text-keep-text md:h-auto md:max-h-[85vh] md:w-[78vw] md:max-w-[1400px] md:rounded md:border md:border-keep-border md:shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {gated ? (

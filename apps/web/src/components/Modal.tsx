@@ -28,7 +28,10 @@ interface ModalProps {
 }
 
 const VARIANT_CLASS = {
-  centered: "flex items-center justify-center p-4",
+  // Tighter padding on mobile (p-2 = 8px each side) so children using
+  // `w-full` or `96vw` don't bleed into the viewport edge. The child
+  // owns its own width cap.
+  centered: "flex items-center justify-center p-2 md:p-4",
   "mobile-fullscreen": "flex items-stretch justify-stretch md:items-center md:justify-center md:p-4",
 } as const;
 

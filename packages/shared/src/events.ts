@@ -130,17 +130,6 @@ export type UiHint =
   | { kind: "open-users"; query?: string }
   /** Clear the local message buffer for the current room (no server effect). */
   | { kind: "clear-room-messages" }
-  /**
-   * Force this client to switch into the given room. Sent to a user's
-   * "sibling" sockets (other tabs/devices for the same account) when one
-   * of them changes rooms, so all sessions stay synchronized to the same
-   * place. The client responds by emitting `room:join` for `roomId`.
-   *
-   * Loop-safe: the server only sends this to siblings NOT already in the
-   * target room, so a sibling re-emitting room:join doesn't ping the
-   * originator back.
-   */
-  | { kind: "force-room-join"; roomId: string }
   /** Open the user's bookmarks modal (manages saved chat messages). */
   | { kind: "open-bookmarks" };
 

@@ -12,7 +12,7 @@ import { profileCommand, whoisCommand } from "./profile.js";
 import { dissolveCommand, requestCommand, titlesCommand } from "./titles.js";
 import { makeHelpCommand } from "./help.js";
 import { colorCommand } from "./color.js";
-import { awayCommand } from "./away.js";
+import { awayCommand, backCommand } from "./away.js";
 import { refreshCommand } from "./refresh.js";
 import { rollCommand } from "./roll.js";
 import { whisperCommand } from "./whisper.js";
@@ -56,6 +56,7 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(titlesCommand);
   reg.registerBuiltin(colorCommand);
   reg.registerBuiltin(awayCommand);
+  reg.registerBuiltin(backCommand);
   reg.registerBuiltin(refreshCommand);
   reg.registerBuiltin(rollCommand);
   reg.registerBuiltin(whisperCommand);

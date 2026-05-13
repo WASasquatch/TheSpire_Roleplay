@@ -850,6 +850,14 @@ export function Composer({
           <FmtButton title="Italic (Ctrl+I)" onClick={() => wrapSelection("*", "*", "italic")}>
             <i>I</i>
           </FmtButton>
+          {/* Underline has no markdown equivalent (CommonMark reserves
+              `__` for bold-alt), so we wrap selection in literal <u>…</u>
+              and the inline parser recognizes the HTML tag as an alias.
+              Same render path as the markdown buttons; the stored body
+              just happens to keep the tag. */}
+          <FmtButton title="Underline" onClick={() => wrapSelection("<u>", "</u>", "underline")}>
+            <u>U</u>
+          </FmtButton>
           <FmtButton title="Strikethrough" onClick={() => wrapSelection("~~", "~~", "strikethrough")}>
             <s>S</s>
           </FmtButton>

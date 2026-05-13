@@ -33,6 +33,8 @@ interface Props {
   onSaved?: () => void;
 }
 
+type UiFontScale = "small" | "medium" | "large" | "xl";
+
 interface MasterData {
   username: string;
   bioHtml: string;
@@ -43,6 +45,10 @@ interface MasterData {
   theme?: Theme;
   /** Per-user theme style override. Null/undefined means "use site default". */
   styleKey?: string | null;
+  /** Free-form CSS font-family stack. Null = use default chat font. */
+  uiFontFamily?: string | null;
+  /** Font-size tier. Null = medium (default 16px). */
+  uiFontScale?: UiFontScale | null;
   notifyPref?: NotifyPref;
   role?: Role;
   isPublic?: boolean;
@@ -116,6 +122,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
    * style override — style is account-wide.
    */
   const [userStyleKey, setUserStyleKey] = useState<string | null>(null);
+  // Per-user UI font + size accessibility prefs (master target only).
+  // Characters don't get their own; font is a per-account setting.
+  const [uiFontFamily, setUiFontFamily] = useState<string | null>(null);
+  const [uiFontScale, setUiFontScale] = useState<UiFontScale | null>(null);
   const [notifyPref, setNotifyPref] = useState<NotifyPref>("mentions");
   // Public + NSFW visibility flags. Default isPublic=true, isNsfw=false to
   // match the schema. NSFW=true forces isPublic=false on save (server
@@ -187,6 +197,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setStats({});
           setTheme(master.theme ? normalizeTheme(master.theme) : null);
           setUserStyleKey(typeof master.styleKey === "string" ? master.styleKey : null);
+          setUiFontFamily(typeof master.uiFontFamily === "string" ? master.uiFontFamily : null);
+          setUiFontScale(
+            master.uiFontScale === "small" || master.uiFontScale === "medium" ||
+            master.uiFontScale === "large" || master.uiFontScale === "xl"
+              ? master.uiFontScale
+              : null,
+          );
           setNotifyPref(master.notifyPref ?? "mentions");
           setIsPublic(master.isPublic ?? true);
           setIsNsfw(master.isNsfw ?? false);
@@ -269,6 +286,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             gender,
             theme,
             styleKey: userStyleKey,
+            uiFontFamily: uiFontFamily && uiFontFamily.trim() !== "" ? uiFontFamily.trim() : null,
+            uiFontScale,
             notifyPref,
             isPublic,
             isNsfw,
@@ -285,6 +304,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             gender,
             notifyPref,
             styleKey: userStyleKey,
+            uiFontFamily: uiFontFamily && uiFontFamily.trim() !== "" ? uiFontFamily.trim() : null,
+            uiFontScale,
             // NSFW=true forces isPublic=false on the server. Mirror that
             // implication client-side so the cached MasterData stays
             // consistent with what the next /me/profile load would return.
@@ -482,7 +503,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
       <form
         onSubmit={save}
         onClick={(e) => e.stopPropagation()}
-        className="keep-frame flex h-[92vh] w-[min(1200px,98vw)] flex-col rounded bg-keep-parchment"
+        className="keep-frame flex h-[92vh] w-full flex-col rounded bg-keep-parchment md:w-[78vw] md:max-w-[1600px]"
       >
         {/* header - fixed */}
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-keep-rule bg-keep-banner px-4 py-2">
@@ -726,6 +747,70 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                     onChange={setUserStyleKey}
                     allowInherit
                   />
+                </fieldset>
+              ) : null}
+
+              {/* Per-user accessibility / readability. Master target only —
+                  font + size are account-wide, not per-character. Both
+                  fields apply live as soon as the editor saves (the same
+                  /me/profile re-fetch path that updates the theme picks
+                  these up too). */}
+              {!isCharacter ? (
+                <fieldset className="rounded border border-keep-rule p-3">
+                  <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
+                    Reading &amp; accessibility
+                  </legend>
+                  <p className="mb-2 text-[10px] text-keep-muted">
+                    Override the interface font and size if the defaults are
+                    hard to read. Empty font = use the site default. Any
+                    fallback font your browser doesn't recognize is silently
+                    skipped, so bad values just degrade — they don't break
+                    the page.
+                  </p>
+
+                  <label className="block text-xs">
+                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">
+                      Font family (CSS)
+                    </span>
+                    <input
+                      type="text"
+                      value={uiFontFamily ?? ""}
+                      onChange={(e) => setUiFontFamily(e.target.value === "" ? null : e.target.value)}
+                      placeholder={`e.g. "Verdana", sans-serif`}
+                      maxLength={200}
+                      className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
+                    />
+                    <span className="mt-1 block text-[10px] text-keep-muted">
+                      Examples: <code>"Georgia", serif</code> ·
+                      {" "}<code>"Verdana", sans-serif</code> ·
+                      {" "}<code>"Comic Sans MS", sans-serif</code> ·
+                      {" "}<code>"Atkinson Hyperlegible", sans-serif</code>
+                    </span>
+                  </label>
+
+                  <label className="mt-3 block text-xs">
+                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">
+                      Font size
+                    </span>
+                    <select
+                      value={uiFontScale ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "small" || v === "medium" || v === "large" || v === "xl") {
+                          setUiFontScale(v);
+                        } else {
+                          setUiFontScale(null);
+                        }
+                      }}
+                      className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+                    >
+                      <option value="">Default (medium)</option>
+                      <option value="small">Small (14px)</option>
+                      <option value="medium">Medium (16px)</option>
+                      <option value="large">Large (18px)</option>
+                      <option value="xl">Extra large (20px)</option>
+                    </select>
+                  </label>
                 </fieldset>
               ) : null}
 

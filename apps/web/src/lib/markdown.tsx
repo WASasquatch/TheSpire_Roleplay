@@ -142,7 +142,76 @@ function trimTrailingPunct(url: string): { url: string; trailing: string } {
   return { url: url.slice(0, -m[0].length), trailing: m[0] };
 }
 
+/**
+ * HTML-tag aliases for chat formatting. A small allow-list of inline
+ * tags that double as synonyms for the existing markdown — lets users
+ * coming from phpMyChat / older HTML-based chats format the way they're
+ * already used to. The mapping is intentionally narrow: only inline
+ * text-style tags that have a markdown equivalent (or a clear
+ * accessibility need, like <u>).
+ *
+ * Implementation contract:
+ *   - Recognized at the same level as markdown tokens (see `tryToken`).
+ *   - Tag matching is case-insensitive (<b>, <B>, <Bold> wouldn't match
+ *     since "bold" isn't in the table — only the listed names).
+ *   - Inner content is recursed through `parseInline` so nested
+ *     formatting works regardless of syntax mix:
+ *       `<b>**italic**</b>` → bold containing italic
+ *       `**<i>both</i>**`   → bold containing italic
+ *   - Unmatched / unknown tags fall through as plain text. They're
+ *     never rendered as raw HTML. Output is still a React tree —
+ *     `dangerouslySetInnerHTML` is not used.
+ *   - Attributes on the opening tag are deliberately not parsed. A
+ *     pasted `<b class="foo">` falls through as text; if the writer
+ *     wants styling, the profile bio sanitizer is the right surface.
+ */
+const HTML_TAG_ALIASES: Record<string, (children: ReactNode[]) => ReactNode> = {
+  b: (c) => <strong>{c}</strong>,
+  strong: (c) => <strong>{c}</strong>,
+  i: (c) => <em>{c}</em>,
+  em: (c) => <em>{c}</em>,
+  u: (c) => <u>{c}</u>,
+  s: (c) => <s>{c}</s>,
+  strike: (c) => <s>{c}</s>,
+  del: (c) => <s>{c}</s>,
+  code: (c) => (
+    <code className="rounded bg-keep-panel/60 px-1 font-mono text-[0.95em]">{c}</code>
+  ),
+};
+
+const HTML_OPEN_RE = /^<([a-zA-Z]+)>/;
+
+function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
+  if (text[i] !== "<") return null;
+  const open = HTML_OPEN_RE.exec(text.slice(i));
+  if (!open) return null;
+  const tag = open[1]!.toLowerCase();
+  const render = HTML_TAG_ALIASES[tag];
+  if (!render) return null;
+  const openLen = open[0].length;
+  // Case-insensitive close-tag search. Without the `i` flag a user who
+  // typed `<B>...</b>` (mixed case) would land on a parse miss and
+  // their formatting would render as raw text.
+  const closeRe = new RegExp(`</${tag}>`, "i");
+  const rest = text.slice(i + openLen);
+  const closeMatch = closeRe.exec(rest);
+  if (!closeMatch) return null;
+  const closeStart = i + openLen + closeMatch.index;
+  const closeEnd = closeStart + closeMatch[0].length;
+  const inner = text.slice(i + openLen, closeStart);
+  return {
+    end: closeEnd,
+    node: render(parseInline(inner, depth + 1)),
+  };
+}
+
 function tryToken(text: string, i: number, depth: number): TokenMatch | null {
+  // Check HTML tag aliases before markdown tokens. Cheap (single-char
+  // discriminator on `<`) and lets `<b>x</b>` win over any markdown
+  // delimiter that happens to be inside it.
+  const htmlMatch = tryHtmlTag(text, i, depth);
+  if (htmlMatch) return htmlMatch;
+
   const ch = text[i];
   const ch2 = text[i + 1] ?? "";
   const ch3 = text[i + 2] ?? "";
@@ -425,6 +494,13 @@ export function renderForumBody(
   body: string,
   onMentionClick: (name: string) => void,
   onWorldClick: (slug: string) => void,
+  /**
+   * Lower-cased names that identify the current viewer (master username
+   * plus any active character). Mentions matching these names render
+   * with a distinct "you got tagged" highlight rather than the regular
+   * keep-action color. Optional — when omitted no self-detection runs.
+   */
+  selfNames: ReadonlyArray<string> = [],
 ): ReactNode {
   const lines = body.split("\n");
   type Group = { kind: "quote" | "normal"; lines: string[] };
@@ -456,7 +532,7 @@ export function renderForumBody(
           // quote so multi-line quotes read correctly.
           className="my-1 whitespace-pre-wrap border-l-2 border-keep-action/50 bg-keep-banner/40 px-3 py-1 text-keep-muted italic"
         >
-          {renderPartsInline(parts, onMentionClick, onWorldClick)}
+          {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames)}
         </blockquote>
       );
     }
@@ -467,7 +543,7 @@ export function renderForumBody(
     const parts = splitMentions(joined);
     return (
       <Fragment key={`p${idx}`}>
-        {renderPartsInline(parts, onMentionClick, onWorldClick)}
+        {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames)}
       </Fragment>
     );
   });
@@ -484,7 +560,11 @@ function renderPartsInline(
   parts: ReturnType<typeof splitMentions>,
   onMentionClick: (name: string) => void,
   onWorldClick: (slug: string) => void,
+  selfNames: ReadonlyArray<string> = [],
 ): ReactNode[] {
+  // Lowercase + Set for O(1) per-mention lookup. Cheap to rebuild
+  // per render; selfNames is typically 0–2 entries.
+  const selfSet = new Set(selfNames.map((n) => n.toLowerCase()));
   const out: ReactNode[] = [];
   parts.forEach((p, i) => {
     if (p.kind === "text") {
@@ -502,23 +582,87 @@ function renderPartsInline(
         </button>,
       );
     } else {
-      out.push(
-        <button
-          key={i}
-          type="button"
-          onClick={() => onMentionClick(p.name)}
-          className="rounded px-0.5 font-semibold text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action"
-          title={`View ${p.raw}'s profile`}
-        >
-          @{p.raw}
-        </button>,
-      );
+      out.push(renderMentionButton(p.raw, p.name, selfSet, onMentionClick, i));
     }
   });
   return out;
 }
 
+/**
+ * Render a single @user mention. When `name` matches one of the viewer's
+ * identities (master username / active character — all lower-cased into
+ * `selfSet`), the chip gets the "you got tagged" treatment: a light
+ * variant of the theme's `system` slot for the background, with the
+ * darker ramp step for the text. Otherwise it falls back to the regular
+ * `keep-action` link styling.
+ *
+ * Implementation note: the highlighted variant uses the auto-generated
+ * 5-step ramp (`keep-system-100` lighter, `keep-system-500` darker) so
+ * the contrast holds across every theme without per-theme tuning.
+ */
+function renderMentionButton(
+  raw: string,
+  name: string,
+  selfSet: ReadonlySet<string>,
+  onMentionClick: (name: string) => void,
+  key: number | string,
+): ReactNode {
+  const isSelf = selfSet.has(name);
+  const className = isSelf
+    ? "rounded bg-keep-system-100 px-1 font-semibold text-keep-system-500 ring-1 ring-keep-system/40 hover:bg-keep-system-200 focus:outline-none focus:ring-2"
+    : "rounded px-0.5 font-semibold text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action";
+  return (
+    <button
+      key={key}
+      type="button"
+      onClick={() => onMentionClick(name)}
+      className={className}
+      title={isSelf ? `You were mentioned (${raw})` : `View ${raw}'s profile`}
+    >
+      @{raw}
+    </button>
+  );
+}
+
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:\?[^\s]*)?(?:#[^\s]*)?$/i;
+
+/**
+ * Truncate a URL to a readable display form for autolinks. The full URL
+ * stays in the `href` (and in the `title` tooltip) — only the visible
+ * text shrinks. Right-click → "Copy link" still copies the full URL.
+ *
+ * Heuristic:
+ *   - Below the threshold: show the URL verbatim. Most pasted links are
+ *     short enough that compression adds noise.
+ *   - Above the threshold: parse via the URL constructor and show
+ *     `host` + an ellipsis-tailed path. The host is what users
+ *     actually identify ("oh, that's a youtube link"); the path tail
+ *     usually carries the slug or id that hints at the content.
+ *   - On parse failure (rare — bare autolinks already pass URL_RE),
+ *     fall back to a simple first-N + … + last-N truncation.
+ *
+ * Threshold picked at 60 — fits comfortably on a 360px mobile viewport
+ * in the chat font without forcing wrap, while leaving most "normal"
+ * pasted URLs unshortened.
+ */
+const URL_DISPLAY_MAX = 60;
+export function compactUrl(url: string): string {
+  if (url.length <= URL_DISPLAY_MAX) return url;
+  try {
+    const u = new URL(url);
+    const host = u.host;
+    const tail = (u.pathname === "/" ? "" : u.pathname) + u.search + u.hash;
+    if (!tail) return host;
+    // Reserve roughly `URL_DISPLAY_MAX - host.length - 2` chars for the
+    // tail (the 2 covers the leading slash + ellipsis). Floor at 12 so
+    // the host name doesn't eat the whole budget on a long subdomain.
+    const budget = Math.max(12, URL_DISPLAY_MAX - host.length - 2);
+    if (tail.length <= budget) return host + tail;
+    return host + "/…" + tail.slice(-budget);
+  } catch {
+    return url.slice(0, 40) + "…" + url.slice(-15);
+  }
+}
 
 interface UrlOrImageProps {
   url: string;
@@ -548,6 +692,12 @@ interface UrlOrImageProps {
 function UrlOrImage({ url, alt, forceImage }: UrlOrImageProps) {
   const [shown, setShown] = useState(false);
   const looksLikeImage = forceImage || IMAGE_EXT_RE.test(url);
+  // Only compact bare autolinks (no alt). Explicit `[label](url)` links go
+  // through tryToken's [link] branch — they never reach UrlOrImage. An
+  // `![alt](image-url)` does reach here with alt set, and we leave the alt
+  // text alone since the author chose it deliberately.
+  const display = alt || compactUrl(url);
+  const isCompacted = !alt && display !== url;
 
   const link = (
     <a
@@ -555,8 +705,9 @@ function UrlOrImage({ url, alt, forceImage }: UrlOrImageProps) {
       target="_blank"
       rel="noopener noreferrer ugc"
       className="break-all text-keep-action underline hover:text-keep-action/80"
+      title={isCompacted ? url : undefined}
     >
-      {alt || url}
+      {display}
     </a>
   );
 

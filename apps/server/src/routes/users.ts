@@ -240,15 +240,18 @@ export async function registerUsersRoutes(
     if (!target || target.username === "system") { reply.code(404); return { error: "not found" }; }
 
     const { z } = await import("zod");
+    const { MASTER_USERNAME_RX, MASTER_USERNAME_RULE_MESSAGE } = await import("./auth.js");
     // Mirror the master-username rule from /auth/register so admins editing a
-    // user's name can't introduce a Unicode-confusable identifier.
+    // user's name can't introduce a Unicode-confusable identifier. Import
+    // the regex + message from auth.ts so both paths stay in sync — a
+    // duplicated regex here would drift the moment one side gets relaxed.
     const masterUsernameSchema = z
       .string()
       .min(2)
       .max(40)
       .transform((s) => s.normalize("NFKC"))
-      .refine((s) => /^[a-zA-Z0-9_-]{2,40}$/.test(s), {
-        message: "username must be 2-40 ASCII letters/numbers/_/-",
+      .refine((s) => MASTER_USERNAME_RX.test(s), {
+        message: MASTER_USERNAME_RULE_MESSAGE,
       });
     const body = z.object({
       username: masterUsernameSchema.optional(),

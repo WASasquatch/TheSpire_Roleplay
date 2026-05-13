@@ -23,7 +23,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
     <Modal onClose={onClose} zIndex={50}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="keep-frame max-h-[92vh] w-[min(900px,95vw)] overflow-hidden rounded bg-keep-parchment"
+        className="keep-frame max-h-[92vh] w-full overflow-hidden rounded bg-keep-parchment md:w-[78vw] md:max-w-[1200px]"
       >
         {/* Header. Three flex children: Admin title (shrink-0), the tab
             strip (flex-1 + min-w-0 + overflow-x-auto so it scrolls

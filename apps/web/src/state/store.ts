@@ -300,6 +300,15 @@ export const useChat = create<ChatState>((set) => ({
   appendMessage: (msg) =>
     set((s) => {
       const list = s.messagesByRoom[msg.roomId] ?? [];
+      // Idempotent on duplicate id. The server may deliver the same
+      // message via two paths (room broadcast + explicit sender emit, or
+      // a reconnect-replay landing on top of a live append) — appending
+      // again would render the line twice. Cheap O(n) tail scan since
+      // duplicates almost always arrive within a handful of entries of
+      // the canonical insertion.
+      for (let i = list.length - 1; i >= 0 && i >= list.length - 16; i--) {
+        if (list[i]!.id === msg.id) return {};
+      }
       return {
         messagesByRoom: { ...s.messagesByRoom, [msg.roomId]: [...list, msg] },
       };

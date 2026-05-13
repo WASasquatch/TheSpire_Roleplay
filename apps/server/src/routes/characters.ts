@@ -88,6 +88,19 @@ const masterUpdateBody = z.object({
    * side; the server stores whatever string the user picked.
    */
   styleKey: z.string().min(1).max(64).nullable().optional(),
+  /**
+   * Free-form CSS font-family stack. Null clears the override. Capped at
+   * 200 chars — long enough for any reasonable stack with multiple
+   * fallbacks, short enough to refuse pathological pasted blobs. Stored
+   * verbatim; CSS rejects unknown families silently, so a bad value just
+   * degrades to the next font in the stack on the client side.
+   */
+  uiFontFamily: z.string().max(200).nullable().optional(),
+  /**
+   * Font-size tier. Null = inherit the default (medium / 16px). Stored as
+   * the enum string so future tiers can be added without schema churn.
+   */
+  uiFontScale: z.enum(["small", "medium", "large", "xl"]).nullable().optional(),
   notifyPref: z.enum(["off", "mentions", "all"]).optional(),
   isPublic: z.boolean().optional(),
   isNsfw: z.boolean().optional(),
@@ -336,6 +349,11 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       // the client resolves user > site > hard-coded fallback. Style is
       // orthogonal to `theme` above — they compose.
       styleKey: u.styleKey,
+      // Per-user UI font + size accessibility preferences. Null on either
+      // means "use the application default" — the client resolves both
+      // independently and applies them via CSS variables on <html>.
+      uiFontFamily: u.uiFontFamily,
+      uiFontScale: u.uiFontScale,
       notifyPref: u.notifyPref,
       role: u.role,
       isPublic: u.isPublic,
@@ -557,6 +575,8 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
           ? { themeJson: body.theme === null ? null : JSON.stringify(body.theme) }
           : {}),
         ...(body.styleKey !== undefined ? { styleKey: body.styleKey } : {}),
+        ...(body.uiFontFamily !== undefined ? { uiFontFamily: body.uiFontFamily } : {}),
+        ...(body.uiFontScale !== undefined ? { uiFontScale: body.uiFontScale } : {}),
         ...(body.notifyPref !== undefined ? { notifyPref: body.notifyPref } : {}),
         ...(body.isPublic !== undefined || body.isNsfw !== undefined ? { isPublic, isNsfw } : {}),
       })

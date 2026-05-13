@@ -121,10 +121,6 @@ export const whisperCommand: CommandHandler = {
       toDisplayName: targetDisplayName,
     };
 
-    // Emit to sender (so they see what they sent) and to every socket of the
-    // recipient (they may have multiple tabs open). NOT to the room at large.
-    ctx.socket.emit("message:new", out);
-
     // Honor /ignore: if the recipient has the sender on their ignore list,
     // silently drop the delivery to them. The sender still sees their own
     // line - we don't tell them they were ignored (that signal is the whole
@@ -134,14 +130,27 @@ export const whisperCommand: CommandHandler = {
       .from(ignores)
       .where(and(eq(ignores.userId, target.id), eq(ignores.ignoredUserId, ctx.user.id)))
       .limit(1))[0];
-    if (blocked) return;
 
+    // One pass over all sockets: emit to every socket belonging to either
+    // the sender OR the recipient. Previously the sender path only hit
+    // `ctx.socket` (the one tab that ran the command), so a user with
+    // the chat open on their phone and a tab on their desktop would
+    // miss the whisper on whichever surface didn't issue the send.
+    // Whispers feel like DMs to the user — they should appear on every
+    // device they're signed in on, both sides. The client dedupes by id
+    // so the duplicate (when sender == recipient, which can't happen
+    // here because /whisper rejects self-whisper above) wouldn't cause
+    // a double-render anyway.
     const sockets = await ctx.io.fetchSockets();
     for (const s of sockets) {
-      if ((s.data as { userId?: string }).userId === target.id) {
+      const uid = (s.data as { userId?: string }).userId;
+      if (uid === ctx.user.id) {
+        s.emit("message:new", out);
+      } else if (!blocked && uid === target.id) {
         s.emit("message:new", out);
       }
     }
+    if (blocked) return;
 
     // Offline-recipient push. pushTriggers internally checks userIsOnline
     // and skips when the recipient is connected, so calling unconditionally

@@ -88,6 +88,63 @@ export function applyTheme(theme: Theme): void {
 }
 
 /* ============================================================
+ * Font / size preferences (per-user accessibility)
+ * ============================================================ */
+
+/**
+ * Discrete font-size tiers. Mapped to a px value applied as the document
+ * font-size, which scales every rem-based Tailwind utility uniformly.
+ * Kept as a closed set so the UI stays readable at every step — a
+ * free-numeric scale would invite both microscopic and unusable
+ * settings.
+ */
+export type UiFontScale = "small" | "medium" | "large" | "xl";
+
+const FONT_SCALE_PX: Record<UiFontScale, number> = {
+  small: 14,
+  medium: 16,
+  large: 18,
+  xl: 20,
+};
+
+/**
+ * Resolve a stored scale value to its px equivalent. Null / unknown
+ * inputs collapse to 16px (medium / browser default), so a missing
+ * preference leaves the document untouched.
+ */
+export function fontScalePx(scale: UiFontScale | null | undefined): number {
+  if (scale && FONT_SCALE_PX[scale] !== undefined) return FONT_SCALE_PX[scale];
+  return FONT_SCALE_PX.medium;
+}
+
+/**
+ * Apply per-user font preferences to <html>:
+ *   - `--keep-font-family`: free-form CSS font-family stack. Null clears
+ *     the override so the document falls back to its base font stack
+ *     declared in styles.css.
+ *   - `font-size` on <html>: the document root size, which is what every
+ *     rem-based Tailwind utility resolves against. Setting it scales the
+ *     entire UI proportionally.
+ *
+ * Called at session load and whenever the user saves a new preference.
+ * Independent of `applyTheme` because font preferences are user-level
+ * (not character-level / room-level), so they don't follow the same
+ * layering rules as the palette.
+ */
+export function applyFontPrefs(prefs: {
+  fontFamily: string | null;
+  fontScale: UiFontScale | null;
+}): void {
+  const root = document.documentElement;
+  if (prefs.fontFamily && prefs.fontFamily.trim() !== "") {
+    root.style.setProperty("--keep-font-family", prefs.fontFamily);
+  } else {
+    root.style.removeProperty("--keep-font-family");
+  }
+  root.style.fontSize = `${fontScalePx(prefs.fontScale)}px`;
+}
+
+/* ============================================================
  * Color ramp utilities
  * ============================================================ */
 

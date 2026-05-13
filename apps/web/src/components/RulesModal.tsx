@@ -40,7 +40,7 @@ export function RulesModal({ onClose }: Props) {
     <Modal onClose={onClose} zIndex={50}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex h-[85vh] w-[min(720px,98vw)] flex-col rounded border border-keep-border bg-keep-bg shadow-xl"
+        className="flex h-[85vh] w-full flex-col rounded border border-keep-border bg-keep-bg shadow-xl md:w-[78vw] md:max-w-[820px]"
       >
         <div className="flex shrink-0 items-center justify-between border-b border-keep-border bg-keep-panel px-4 py-2">
           <h2 className="font-action text-lg">Rules</h2>

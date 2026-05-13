@@ -89,7 +89,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
   return (
     <Modal onClose={onClose} zIndex={50}>
       <div
-        className="flex max-h-[88vh] w-[min(820px,96vw)] flex-col overflow-hidden rounded border border-keep-rule bg-keep-parchment shadow-xl"
+        className="flex max-h-[88vh] w-full flex-col overflow-hidden rounded border border-keep-rule bg-keep-parchment shadow-xl md:w-[78vw] md:max-w-[1000px]"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">

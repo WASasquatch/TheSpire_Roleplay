@@ -14,8 +14,8 @@ import type { CommandHandler } from "../types.js";
 export const awayCommand: CommandHandler = {
   name: "away",
   aliases: ["afk", "brb"],
-  usage: "/away [reason]  (omit reason while away to come back)",
-  description: "Toggle your away state. Userlist shows '[away]' next to your name.",
+  usage: "/away [reason]  (use /back to return)",
+  description: "Mark yourself away with an optional reason. Use /back to return.",
   subcommands: [
     {
       verb: "<reason>",
@@ -53,6 +53,41 @@ export const awayCommand: CommandHandler = {
       ctx.user.awayMessage = note;
       await addMessage(ctx, { kind: "system", body: `${ctx.user.displayName} is away: ${note}` });
     }
+    await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
+  },
+};
+
+/**
+ * /back
+ *   - Explicit return-from-away. Clears the away note if set; no-op
+ *     otherwise (with a friendly notice so users don't think it broke).
+ *
+ * Why a separate command instead of just relying on `/away` to toggle:
+ *   - New users were typing `/away` again to come back, mis-reading it
+ *     as a verb ("go away") rather than a state. `/back` reads as the
+ *     opposite and is what other chat clients use.
+ */
+export const backCommand: CommandHandler = {
+  name: "back",
+  aliases: ["unaway"],
+  usage: "/back",
+  description: "Clear your away state and return to present.",
+  subcommands: [],
+  async run(ctx) {
+    const wasAway = ctx.user.awayMessage != null;
+    if (!wasAway) {
+      ctx.socket.emit("error:notice", {
+        code: "not-away",
+        message: "You're not marked as away.",
+      });
+      return;
+    }
+    await ctx.db
+      .update(users)
+      .set({ awayMessage: null, awaySince: null })
+      .where(eq(users.id, ctx.user.id));
+    ctx.user.awayMessage = null;
+    await addMessage(ctx, { kind: "system", body: `${ctx.user.displayName} is back.` });
     await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
   },
 };

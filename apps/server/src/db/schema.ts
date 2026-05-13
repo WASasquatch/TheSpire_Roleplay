@@ -41,6 +41,24 @@ export const users = sqliteTable(
      */
     styleKey: text("style_key"),
     /**
+     * Free-form CSS font-family stack applied to the entire signed-in UI
+     * via the `--keep-font-family` CSS variable. Null = use the default
+     * chat font stack. Accessibility feature for users who need a
+     * different typeface (e.g. dyslexia-friendly fonts, larger x-height
+     * sans-serifs). Whatever CSS rejects silently falls back to the next
+     * declared font in the stack, so a bad value degrades gracefully.
+     */
+    uiFontFamily: text("ui_font_family"),
+    /**
+     * Discrete font-size tier: 'small' | 'medium' | 'large' | 'xl'.
+     * Null = 'medium' (default 16px base). The client maps the enum to a
+     * px value and sets the document font-size, which scales every
+     * rem-based Tailwind utility uniformly. Kept as a tier rather than a
+     * free numeric to constrain the choice and keep the UI readable at
+     * every step.
+     */
+    uiFontScale: text("ui_font_scale"),
+    /**
      * Desktop notification preference:
      *   "off"      - never show toasts
      *   "mentions" - only whispers + announcements

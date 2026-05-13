@@ -85,7 +85,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
     <Modal onClose={onClose} zIndex={50}>
       <div
         style={modalStyle}
-        className="flex max-h-[92vh] w-[min(1100px,98vw)] flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg text-keep-text shadow-xl"
+        className="flex max-h-[92vh] w-full flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg text-keep-text shadow-xl md:w-[78vw] md:max-w-[1400px]"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">

@@ -11,6 +11,15 @@ interface Props {
   occupants: RoomOccupant[];
   /** Current viewer's user id - so the renderer can decide which messages get edit/delete grace controls. Null when not yet authenticated. */
   selfUserId: string | null;
+  /**
+   * Names that identify the viewer to the mention parser — master
+   * username plus any active character name, in any case (lower-cased
+   * downstream for the lookup). Mentions matching one of these get a
+   * "you got tagged" highlight using the theme's `system` slot. Optional
+   * — when omitted no self-detection runs and every mention renders in
+   * the default keep-action style.
+   */
+  selfNames?: ReadonlyArray<string>;
   /** Current room's type. Reporting is a public-room-only feature. */
   roomType?: "public" | "private" | null;
   /**
@@ -136,7 +145,21 @@ const GRACE_MS = 60_000;
 
 const REPLYABLE_KINDS = new Set(["say", "me", "ooc"]);
 
-const FONT_PX = ["12px", "14px", "16px", "18px"] as const;
+// Stable empty fallback for the optional `selfNames` prop. Using a
+// literal `[]` in the fallback expression would allocate a fresh array
+// each render and churn the downstream `useMemo(renderForumBody, ...)`
+// dependency, defeating the memo. App.tsx always passes a stable
+// memoized array in practice, so this only triggers for older callers.
+const NO_SELF_NAMES: ReadonlyArray<string> = [];
+
+// Font-size cycle for the local Size button. Values are em-units so they
+// compose with the user's profile-level UI font size: a user on "Large"
+// (18px html base) sees `1em` = 18px chat; bumping the local step to 3
+// scales to 18 × 1.3 = ~23px. A user on the default 16px base sees the
+// "natural" 16px chat at step 1, etc. Storing this as px (the previous
+// shape) would override the profile preference and leave accessibility
+// users stuck at whatever the renderer baked in.
+const FONT_EM = ["0.8em", "1em", "1.15em", "1.3em"] as const;
 
 function fmtTime(ms: number): string {
   const d = new Date(ms);
@@ -146,7 +169,7 @@ function fmtTime(ms: number): string {
   return `${hh}:${mm}:${ss}`;
 }
 
-export function MessageList({ messages, occupants, selfUserId, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, onQuotePost, forumBuckets, onLoadOlderTopics, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory }: Props) {
+export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, onQuotePost, forumBuckets, onLoadOlderTopics, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = ref.current;
@@ -189,6 +212,51 @@ export function MessageList({ messages, occupants, selfUserId, roomType, replyMo
     };
   }, [highlightMessageId, onHighlightDone, messages]);
 
+  // Whisper attention flash. Pulses any inbound whisper (`toUserId ===
+  // selfUserId`) the first time it appears in the buffer for this
+  // session. Ref-tracked Set ensures we never flash the same message
+  // twice — a buffer swap (jump-to-message, history reload, room
+  // re-join) re-renders the same id and would otherwise re-flash. We
+  // also seed the Set on first sight with anything older than the
+  // freshness window so backlog whispers loaded on join don't all
+  // flash at once. The CSS animation is one-shot; we remove the class
+  // after it completes so the resting `bg-keep-action/15` (applied
+  // statically on the row) takes back over cleanly.
+  const flashedWhispersRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!selfUserId) return;
+    const container = ref.current;
+    if (!container) return;
+    const now = Date.now();
+    const FRESH_WINDOW_MS = 5_000;
+    const ANIM_MS = 1_600;
+    const pendingCleanups: Array<() => void> = [];
+    for (const m of messages) {
+      if (m.kind !== "whisper") continue;
+      if (m.toUserId !== selfUserId) continue;
+      if (flashedWhispersRef.current.has(m.id)) continue;
+      // Mark every whisper-to-me we encounter (fresh or backlog) so
+      // future renders never reconsider it. Skip the visual flash
+      // when it's outside the freshness window — that's backlog
+      // (loaded via message:bulk after a room join), not a live
+      // arrival worth flagging.
+      flashedWhispersRef.current.add(m.id);
+      if (now - m.createdAt > FRESH_WINDOW_MS) continue;
+      const node = container.querySelector<HTMLElement>(
+        `[data-message-id="${CSS.escape(m.id)}"]`,
+      );
+      if (!node) continue;
+      node.classList.add("animate-whisper-flash");
+      const t = window.setTimeout(() => {
+        node.classList.remove("animate-whisper-flash");
+      }, ANIM_MS);
+      pendingCleanups.push(() => window.clearTimeout(t));
+    }
+    return () => {
+      for (const c of pendingCleanups) c();
+    };
+  }, [messages, selfUserId]);
+
   const genderByUser = new Map<string, Gender>();
   // Account-level role lookup so the renderer can italicize site admins'
   // names. Only populated for users currently in the room - history from
@@ -199,6 +267,10 @@ export function MessageList({ messages, occupants, selfUserId, roomType, replyMo
     genderByUser.set(o.userId, o.gender);
     if (o.accountRole === "admin") adminUserIds.add(o.userId);
   }
+  // Fall back to an empty list when the caller doesn't supply selfNames
+  // (e.g. pre-auth or older callers) — every mention then renders in the
+  // default keep-action style.
+  const effectiveSelfNames: ReadonlyArray<string> = selfNames ?? NO_SELF_NAMES;
 
   // Shared per-line prop bundle so the flat and nested branches can both
   // hand the same callbacks down without repeating themselves.
@@ -210,12 +282,17 @@ export function MessageList({ messages, occupants, selfUserId, roomType, replyMo
         isSenderAdmin={adminUserIds.has(m.userId)}
         isRecipientAdmin={!!m.toUserId && adminUserIds.has(m.toUserId)}
         isOwn={!!selfUserId && m.userId === selfUserId}
+        // True iff the viewer is the addressed recipient on a whisper.
+        // Used to tint the row so the conversation thread visually
+        // groups the viewer's own incoming whispers among the noise.
+        isRecipient={!!selfUserId && m.toUserId === selfUserId}
         canReport={roomType === "public"}
         onIconClick={onIconClick}
         onNameClick={onNameClick}
         onMentionClick={onMentionClick}
         onWorldClick={onWorldClick}
         onTimeClick={onTimeClick}
+        selfNames={effectiveSelfNames}
       />
     );
   }
@@ -269,6 +346,7 @@ export function MessageList({ messages, occupants, selfUserId, roomType, replyMo
         genderByUser={genderByUser}
         adminUserIds={adminUserIds}
         selfUserId={selfUserId}
+        selfNames={effectiveSelfNames}
         roomType={roomType ?? null}
         onIconClick={onIconClick}
         onNameClick={onNameClick}
@@ -284,7 +362,7 @@ export function MessageList({ messages, occupants, selfUserId, roomType, replyMo
     <div
       ref={ref}
       className="flex-1 overflow-y-auto px-4 py-2 leading-relaxed"
-      style={{ fontSize: FONT_PX[fontStep] }}
+      style={{ fontSize: FONT_EM[fontStep] }}
     >
       {messages.map((m) => (
         <Fragment key={m.id}>{lineFor(m)}</Fragment>
@@ -350,6 +428,7 @@ function ForumView({
   genderByUser,
   adminUserIds,
   selfUserId,
+  selfNames,
   roomType,
   onIconClick,
   onNameClick,
@@ -386,6 +465,8 @@ function ForumView({
   genderByUser: Map<string, Gender>;
   adminUserIds: Set<string>;
   selfUserId: string | null;
+  /** Lower-cased viewer identities for self-mention highlighting. */
+  selfNames: ReadonlyArray<string>;
   roomType: "public" | "private" | null;
   onIconClick: (userId: string, displayName: string) => void;
   onNameClick: (userId: string, displayName: string) => void;
@@ -464,7 +545,7 @@ function ForumView({
       // the gutter since desktop has plenty of horizontal room and the
       // visual breathing room reads as intentional, not cramped.
       className="min-h-0 flex-1 overflow-y-auto py-2 leading-relaxed md:px-4"
-      style={{ fontSize: FONT_PX[fontStep] }}
+      style={{ fontSize: FONT_EM[fontStep] }}
     >
       {sections.map((s) => {
         const bucket = buckets[s.key];
@@ -606,6 +687,7 @@ function ForumView({
                       genderByUser={genderByUser}
                       adminUserIds={adminUserIds}
                       selfUserId={selfUserId}
+                      selfNames={selfNames}
                       roomType={roomType}
                       onIconClick={onIconClick}
                       onNameClick={onNameClick}
@@ -664,6 +746,7 @@ function TopicCard({
   genderByUser,
   adminUserIds,
   selfUserId,
+  selfNames,
   roomType,
   onIconClick,
   onNameClick,
@@ -694,6 +777,8 @@ function TopicCard({
   genderByUser: Map<string, Gender>;
   adminUserIds: Set<string>;
   selfUserId: string | null;
+  /** Viewer identities for self-mention highlighting inside topic/reply bodies. */
+  selfNames: ReadonlyArray<string>;
   roomType: "public" | "private" | null;
   onIconClick: (userId: string, displayName: string) => void;
   onNameClick: (userId: string, displayName: string) => void;
@@ -788,7 +873,12 @@ function TopicCard({
                 🔒
               </span>
             ) : null}
-            <span className="min-w-0 flex-1 truncate font-semibold text-keep-text">{headingText}</span>
+            <span
+              className="min-w-0 flex-1 truncate font-semibold text-keep-text"
+              title={headingText}
+            >
+              {parseInline(headingText)}
+            </span>
             <span className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted tabular-nums">
               {fmtTime(topic.createdAt)}
             </span>
@@ -847,6 +937,7 @@ function TopicCard({
             onWorldClick={onWorldClick}
             onTimeClick={onTimeClick}
             showAuthorHeader={false}
+            selfNames={selfNames}
           />
           {replies.length > 0 ? (
             <div className="mt-2 flex flex-col gap-1.5 border-t border-keep-rule/40 pt-2">
@@ -877,6 +968,7 @@ function TopicCard({
                   onWorldClick={onWorldClick}
                   onTimeClick={onTimeClick}
                   showAuthorHeader
+                  selfNames={selfNames}
                 />
               ))}
             </div>
@@ -976,6 +1068,7 @@ export function ForumPostBody({
   onWorldClick,
   onTimeClick,
   showAuthorHeader,
+  selfNames = [],
 }: {
   msg: ChatMessage;
   isOwn: boolean;
@@ -995,14 +1088,16 @@ export function ForumPostBody({
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
   showAuthorHeader: boolean;
+  /** Viewer identities for self-mention highlighting inside this post's body. Optional. */
+  selfNames?: ReadonlyArray<string>;
 }) {
   // Forum posts use the block-level body renderer so blockquotes
   // (`> quoted text` line prefix) render as styled <blockquote>
   // elements — needed by the Quote-reply flow. Flat-chat lines still
   // use the inline parser (see the `Line` component further down).
   const renderedBody = useMemo(
-    () => renderForumBody(msg.body, onMentionClick, onWorldClick),
-    [msg.body, onMentionClick, onWorldClick],
+    () => renderForumBody(msg.body, onMentionClick, onWorldClick, selfNames),
+    [msg.body, onMentionClick, onWorldClick, selfNames],
   );
 
   // Inline editor state — when editing, the body region is replaced
@@ -1623,7 +1718,12 @@ function renderParts(
   parts: ReturnType<typeof splitMentions>,
   onMentionClick: (name: string) => void,
   onWorldClick: (slug: string) => void,
+  selfNames: ReadonlyArray<string> = [],
 ): ReactNode[] {
+  // Lower-cased Set so the inner check is O(1). Empty when no viewer
+  // identity is known yet (pre-auth), which falls through to the
+  // default action-color mention chip.
+  const selfSet = new Set(selfNames.map((n) => n.toLowerCase()));
   const out: ReactNode[] = [];
   parts.forEach((p, i) => {
     if (p.kind === "text") {
@@ -1643,13 +1743,17 @@ function renderParts(
         </button>,
       );
     } else {
+      const isSelf = selfSet.has(p.name);
+      const className = isSelf
+        ? "rounded bg-keep-system-100 px-1 font-semibold text-keep-system-500 ring-1 ring-keep-system/40 hover:bg-keep-system-200 focus:outline-none focus:ring-2"
+        : "rounded px-0.5 font-semibold text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action";
       out.push(
         <button
           key={i}
           type="button"
           onClick={() => onMentionClick(p.name)}
-          className="rounded px-0.5 font-semibold text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action"
-          title={`View ${p.raw}'s profile`}
+          className={className}
+          title={isSelf ? `You were mentioned (${p.raw})` : `View ${p.raw}'s profile`}
         >
           @{p.raw}
         </button>,
@@ -1665,18 +1769,22 @@ function Line({
   isSenderAdmin,
   isRecipientAdmin,
   isOwn,
+  isRecipient,
   canReport,
   onIconClick,
   onNameClick,
   onMentionClick,
   onWorldClick,
   onTimeClick,
+  selfNames,
 }: {
   msg: ChatMessage;
   gender: Gender;
   isSenderAdmin: boolean;
   isRecipientAdmin: boolean;
   isOwn: boolean;
+  /** True iff the viewer is the addressed recipient on a whisper. Combined with `isOwn` to decide whether the viewer is a *party* to this whisper, which drives the resting-tint highlight. */
+  isRecipient: boolean;
   canReport: boolean;
   /** Unbound - Line binds with the relevant userId/displayName for sender vs recipient. */
   onIconClick: (userId: string, displayName: string) => void;
@@ -1684,6 +1792,8 @@ function Line({
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
+  /** Viewer identity names (master + active char). Drives self-mention highlight in body. */
+  selfNames: ReadonlyArray<string>;
 }) {
   const canReply = REPLYABLE_KINDS.has(msg.kind);
   const timeText = fmtTime(msg.createdAt);
@@ -1706,8 +1816,14 @@ function Line({
     </span>
   );
   const isReply = !!(msg.replyToId && msg.replyToDisplayName);
+  // Quote preview reads at the chat body size (`text-sm`), not the
+  // smaller meta size. Previously this rendered at `text-xs` which was
+  // unreadable next to the actual chat lines — users were squinting at
+  // the reference they were responding to. `leading-tight` keeps the
+  // single-line preview compact at the larger size; `truncate` still
+  // caps the run so a long parent body stays one line.
   const quote = isReply ? (
-    <div className="flex items-baseline gap-1 text-xs leading-tight text-keep-muted">
+    <div className="flex items-baseline gap-1 text-sm leading-tight text-keep-muted">
       <span aria-hidden="true">↪</span>
       <span className="font-semibold">{msg.replyToDisplayName}:</span>
       <span className="truncate italic">{msg.replyToBodySnippet ?? ""}</span>
@@ -1745,7 +1861,7 @@ function Line({
   // Memoize the parsed parts on body so the splitMentions regex doesn't
   // re-run on every parent render (only when the body changes).
   const bodyParts = useMemo(() => splitMentions(msg.body), [msg.body]);
-  const renderedBody = renderParts(bodyParts, onMentionClick, onWorldClick);
+  const renderedBody = renderParts(bodyParts, onMentionClick, onWorldClick, selfNames);
 
   // Edit/delete controls only apply to the author's own chat-shaped lines
   // and only inside the grace window. The server re-validates both rules,
@@ -1900,6 +2016,19 @@ function Line({
   // padding) so the strip looks intentional rather than floating mid-row.
   const hoverRow = "-mx-4 px-4 transition-colors hover:bg-keep-muted/25";
 
+  // Persistent tint on whispers the viewer is a party to (sender OR
+  // recipient). Pulls the action-color slot at 15% so it picks up the
+  // current palette automatically. Skipped for whispers the viewer is
+  // only watching (e.g. an admin reading a channel) — those are
+  // technically visible in the timeline but they aren't theirs to
+  // visually claim, and tinting them as such would falsely imply the
+  // viewer is on one end of the conversation. The whisper-flash
+  // keyframe (applied transiently by the effect above) starts and
+  // ends on this same value so the resting state and the flash align
+  // without a "settling" jump.
+  const whisperRest =
+    msg.kind === "whisper" && (isOwn || isRecipient) ? "bg-keep-action/15" : "";
+
   // Replies wrap the quote + the line in a single container with a continuous
   // accent-tinted left border, so the two read as one coupled block instead
   // of as two stray lines next to each other in the timeline. The hover
@@ -1909,7 +2038,7 @@ function Line({
     return (
       <div
         data-message-id={msg.id}
-        className={`group relative my-0.5 border-l-2 border-keep-action/50 pl-2 transition-colors duration-700 ${hoverRow}`}
+        className={`group relative my-0.5 border-l-2 border-keep-action/50 pl-2 transition-colors duration-700 ${hoverRow} ${whisperRest}`}
       >
         {quote}
         {lineEl}
@@ -1922,7 +2051,7 @@ function Line({
   return (
     <div
       data-message-id={msg.id}
-      className={`group relative transition-colors duration-700 ${hoverRow}`}
+      className={`group relative transition-colors duration-700 ${hoverRow} ${whisperRest}`}
     >
       {lineEl}
       {showBookmark ? <BookmarkButton msg={msg} /> : null}

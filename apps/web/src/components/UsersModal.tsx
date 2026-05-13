@@ -71,7 +71,7 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
     <Modal onClose={onClose} zIndex={50}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex h-[90vh] w-[min(720px,98vw)] flex-col rounded border border-keep-border bg-keep-bg shadow-xl"
+        className="flex h-[90vh] w-full flex-col rounded border border-keep-border bg-keep-bg shadow-xl md:w-[78vw] md:max-w-[960px]"
       >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-keep-border bg-keep-panel px-4 py-2">
           <div className="flex items-baseline gap-2">

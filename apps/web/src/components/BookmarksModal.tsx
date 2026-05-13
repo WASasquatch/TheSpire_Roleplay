@@ -115,7 +115,7 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
     <Modal onClose={onClose} variant="mobile-fullscreen">
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex h-dvh w-full flex-col overflow-hidden bg-keep-bg text-keep-text md:h-auto md:max-h-[85vh] md:w-[min(720px,96vw)] md:rounded md:border md:border-keep-border md:shadow-xl"
+        className="flex h-dvh w-full flex-col overflow-hidden bg-keep-bg text-keep-text md:h-auto md:max-h-[85vh] md:w-[78vw] md:max-w-[960px] md:rounded md:border md:border-keep-border md:shadow-xl"
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
           <h2 className="font-action text-lg">Bookmarks</h2>

@@ -492,27 +492,17 @@ async function main() {
         }
         await joinRoom(io, db, socket, user, room.id, { passwordOk });
 
-        // Multi-tab single-presence policy: every other socket for this
-        // same user follows the originator into the new room. Without
-        // this, two browser tabs on the same account drift into different
-        // rooms and presence/userlist state diverges. We send a UI hint
-        // rather than directly mutating sibling sockets so all the room
-        // bookkeeping (member upsert, presence broadcasts, backlog,
-        // description-on-join) flows through the same room:join path
-        // and stays correct.
-        //
-        // Loop guard: skip siblings already in this room. The originator's
-        // joinRoom() already moved itself in, so it's filtered out by the
-        // socket.id check; for genuine siblings, the room.has() check
-        // prevents an infinite ping-pong if both tabs were already in the
-        // target room (e.g. on initial connect both auto-join landing).
-        const siblings = await io.fetchSockets();
-        for (const s of siblings) {
-          if (s.id === socket.id) continue;
-          if ((s.data as { userId?: string }).userId !== user.id) continue;
-          if (s.rooms.has(`room:${room.id}`)) continue;
-          s.emit("ui:hint", { kind: "force-room-join", roomId: room.id });
-        }
+        // Multi-tab independence: each socket is its own occupant. A
+        // user with two tabs can be in two different rooms, three tabs
+        // in three rooms, etc. Previously this handler ran a sibling
+        // sweep that emitted `force-room-join` to every other socket of
+        // the same user, dragging them into the originator's new room
+        // to keep "one user, one room" intact. That broke the natural
+        // expectation that browser tabs are independent contexts. The
+        // userlist already dedupes by userId within a room, so a user
+        // with two tabs in the same room still shows as one occupant;
+        // a user with tabs in different rooms shows in each, which is
+        // exactly what the user opening multiple tabs wants.
 
         ack?.({ ok: true });
       } catch (err) {

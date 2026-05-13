@@ -151,7 +151,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
     <Modal onClose={onClose} variant="mobile-fullscreen" zIndex={50}>
       <div
         style={modalStyle}
-        className="flex h-dvh w-full flex-col overflow-hidden bg-keep-bg text-keep-text md:h-auto md:max-h-[92vh] md:w-[75vw] md:max-w-[1600px] md:rounded md:border md:border-keep-rule md:shadow-xl"
+        className="flex h-dvh w-full flex-col overflow-hidden bg-keep-bg text-keep-text md:h-auto md:max-h-[92vh] md:w-[78vw] md:max-w-[1600px] md:rounded md:border md:border-keep-rule md:shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-keep-rule bg-keep-banner px-4 py-2">

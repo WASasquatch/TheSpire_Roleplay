@@ -12,18 +12,41 @@ const SESSION_COOKIE = "tk_sess";
 
 /**
  * Master usernames are login identifiers - they need to be unambiguous when
- * referenced in chat ("ban @admin") or moderation logs. We restrict them to
- * an ASCII-only character class AFTER applying NFKC normalization, which:
- *   - collapses full-width / half-width variants ("ＡＤＭＩＮ" → "ADMIN")
- *   - blocks full-Unicode-letter homograph attacks (Cyrillic 'а' impersonating
- *     Latin 'a' to register `аdmin`)
+ * referenced in chat ("ban @admin") or moderation logs. We deliberately keep
+ * them ASCII-only AFTER applying NFKC normalization so that:
+ *   - full-width / half-width variants collapse ("ＡＤＭＩＮ" → "ADMIN")
+ *   - full-Unicode-letter homograph attacks stay blocked (Cyrillic 'а'
+ *     impersonating Latin 'a' to register `аdmin` is rejected)
  *
- * Character names are NOT subject to this - they're display-only and RP needs
- * `Æthelred` / `Saorla` / `孫悟空` to be valid. The trade is: master usernames
- * are boring but trustworthy as identifiers; character names are expressive
- * but only locally unique per-account.
+ * The allow-list itself is intentionally generous within ASCII: letters,
+ * digits, a handful of common punctuation marks, and one specific
+ * "invisible" character — U+00A0 (NBSP), the Alt+0160 keyboard trick.
+ *
+ * The punctuation is what people coming from phpMyChat / older chat
+ * systems expect to be able to use in handles (backticks for leet-style
+ * names, periods for "first.last", apostrophes for "O'Reilly").
+ *
+ * NBSP is the classic phpMyChat trick for "I want my name to read as
+ * 'Two Words' but with no real space." Visually it looks like a space;
+ * mechanically it's a non-breaking character that survives @mention
+ * tokenization, URL routing, and JSON serialization without any of the
+ * problems a real space would cause. Users on Windows type Alt+0160
+ * (numpad) to enter it.
+ *
+ * Regular spaces are NOT allowed — they break @mention tokenization
+ * (`@John Smith` would resolve only `@John`) and require URL encoding
+ * (`/p/John%20Smith`) in every shareable link. NBSP gives the visual
+ * illusion of a space without any of that breakage.
+ *
+ * Character names are NOT subject to this regex - they're display-only and
+ * RP needs `Æthelred` / `Saorla` / `孫悟空` to be valid. Master usernames
+ * stay trustworthy as identifiers; character names stay expressive.
  */
-const MASTER_USERNAME_RX = /^[a-zA-Z0-9_-]{2,40}$/;
+/* eslint-disable no-irregular-whitespace -- NBSP (U+00A0) is deliberately in the allow-list */
+export const MASTER_USERNAME_RX = /^[a-zA-Z0-9_\-'.` ]{2,40}$/;
+/* eslint-enable no-irregular-whitespace */
+export const MASTER_USERNAME_RULE_MESSAGE =
+  "username must be 2-40 chars: ASCII letters/numbers and _ - ' . ` plus NBSP (Alt+0160); regular spaces and Unicode confusables blocked";
 export function normalizeMasterUsername(input: string): string {
   return input.normalize("NFKC");
 }
@@ -33,7 +56,7 @@ const masterUsernameSchema = z
   .max(40)
   .transform((s) => normalizeMasterUsername(s))
   .refine((s) => MASTER_USERNAME_RX.test(s), {
-    message: "username must be 2-40 ASCII letters/numbers/_/- (Unicode confusables blocked)",
+    message: MASTER_USERNAME_RULE_MESSAGE,
   });
 
 const credentialsSchema = z.object({

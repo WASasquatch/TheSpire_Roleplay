@@ -25,7 +25,7 @@ import { WelcomeModal } from "./components/WelcomeModal.js";
 import { getSocket, disconnect as disconnectSocket } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
-import { applyTheme, themeStyle } from "./lib/theme.js";
+import { applyFontPrefs, applyTheme, themeStyle, type UiFontScale } from "./lib/theme.js";
 import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
 import { fire as fireNotification, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { useChat, type SiteBranding } from "./state/store.js";
@@ -627,6 +627,12 @@ function Chat() {
   // one-shot effect that only re-ran on `themeVersion` bumps, leaving
   // the chat stuck on the OLD site default after an admin palette change.
   const [userTheme, setUserTheme] = useState<Theme | null>(null);
+  // Per-user UI font + size preferences. User-level accessibility settings,
+  // not theme-layered (a character doesn't override font; that'd be
+  // hostile to a user with low vision). Loaded with the master profile,
+  // applied to <html> via applyFontPrefs.
+  const [uiFontFamily, setUiFontFamily] = useState<string | null>(null);
+  const [uiFontScale, setUiFontScale] = useState<UiFontScale | null>(null);
   const [characterTheme, setCharacterTheme] = useState<Theme | null>(null);
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
   const [activeCharacterName, setActiveCharacterName] = useState<string | null>(null);
@@ -684,6 +690,8 @@ function Chat() {
         const u = (await me.json()) as {
           theme?: unknown;
           styleKey?: string | null;
+          uiFontFamily?: string | null;
+          uiFontScale?: UiFontScale | null;
           activeCharacterId: string | null;
           activeCharacterName?: string | null;
           notifyPref?: NotifyPref;
@@ -712,6 +720,13 @@ function Chat() {
           setActiveCharacterName(u.activeCharacterName ?? null);
           if (u.notifyPref) setNotifyPref(u.notifyPref);
           setUserStyleKey(typeof u.styleKey === "string" ? u.styleKey : null);
+          setUiFontFamily(typeof u.uiFontFamily === "string" ? u.uiFontFamily : null);
+          setUiFontScale(
+            u.uiFontScale === "small" || u.uiFontScale === "medium" ||
+            u.uiFontScale === "large" || u.uiFontScale === "xl"
+              ? u.uiFontScale
+              : null,
+          );
           // Server-side gating: only present when there's an unseen
           // welcome to surface. Dismissal flips the user's stored hash
           // server-side, so re-fetches stop returning this field.
@@ -748,6 +763,15 @@ function Chat() {
     const resolvedStyle = userStyleKey || siteStyleKey || DEFAULT_STYLE_KEY;
     applyStyle(activeTheme, resolvedStyle);
   }, [activeTheme, userStyleKey, siteStyleKey]);
+
+  // Per-user font/size accessibility. Independent of the palette effect
+  // above because font preferences don't layer through character/room
+  // overrides — they're user-level and apply once. Re-runs on every
+  // bump of `themeVersion` (which is also what triggers the /me/profile
+  // re-fetch, so any save in the editor surfaces immediately).
+  useEffect(() => {
+    applyFontPrefs({ fontFamily: uiFontFamily, fontScale: uiFontScale });
+  }, [uiFontFamily, uiFontScale]);
 
   /**
    * Activity heartbeat for sliding session-idle expiry.
@@ -800,11 +824,19 @@ function Chat() {
    * character name so @mentions resolve no matter which identity is
    * currently in play.
    */
-  useEffect(() => {
-    const selfNames = [
+  // Hoisted out of the notifications effect so the MessageList renderer can
+  // share the same identity set. Reference is stable per-identity-change so
+  // child memoization (renderForumBody useMemo) doesn't churn on every
+  // render.
+  const selfNames = useMemo<ReadonlyArray<string>>(
+    () => [
       ...(me?.username ? [me.username] : []),
       ...(activeCharacterName ? [activeCharacterName] : []),
-    ];
+    ],
+    [me?.username, activeCharacterName],
+  );
+
+  useEffect(() => {
     function onMessage(msg: ChatMessage) {
       if (shouldNotify(msg, me?.id ?? null, notifyPref, document.hidden, selfNames)) {
         fireNotification(msg, selfNames);
@@ -812,7 +844,7 @@ function Chat() {
     }
     socket.on("message:new", onMessage);
     return () => { socket.off("message:new", onMessage); };
-  }, [socket, me, notifyPref, activeCharacterName]);
+  }, [socket, me, notifyPref, selfNames]);
 
   // Fetch the rooms tree whenever it might have changed: room switches,
   // explicit refresh, or every 20s as a backstop for cross-room presence.
@@ -962,20 +994,6 @@ function Chat() {
           // its closure would otherwise capture a stale currentRoomId.
           const rid = useChat.getState().currentRoomId;
           if (rid) setMessages(rid, []);
-          break;
-        }
-        case "force-room-join": {
-          // A sibling tab/device on this same account just changed rooms;
-          // server is asking us to follow. Fire room:join — the server's
-          // own loop guard skips siblings already in the target room, so
-          // this won't ping-pong. We don't surface a notice here (the
-          // user already initiated the move on the other tab) and we
-          // don't block on the ack (any failure just leaves us where we
-          // were, which the user can correct manually).
-          const targetId = h.roomId;
-          if (useChat.getState().currentRoomId !== targetId) {
-            socket.emit("room:join", { roomId: targetId }, () => {});
-          }
           break;
         }
         case "prompt-room-password":
@@ -1509,6 +1527,7 @@ function Chat() {
             messages={messages}
             occupants={occ}
             selfUserId={me?.id ?? null}
+            selfNames={selfNames}
             roomType={room?.type ?? null}
             replyMode={room?.replyMode ?? "flat"}
             onIconClick={onIconClick}
@@ -1757,6 +1776,7 @@ function Chat() {
           topic={poppedTopic}
           replies={poppedReplies}
           selfUserId={me?.id ?? null}
+          selfNames={selfNames}
           roomType={room?.type ?? null}
           canModerate={canModerate}
           canPin={canPin}

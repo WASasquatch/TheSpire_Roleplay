@@ -4,10 +4,10 @@ import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { messages, rooms, sessions, users, worldPages, worlds } from "./db/schema.js";
 import { hashPassword } from "./auth/passwords.js";
-import { ensureSiteSettings, getSettings } from "./settings.js";
+import { ensureSiteSettings, getSettings, setWorldsSeedVersion } from "./settings.js";
 import { recordAudit } from "./audit.js";
 import { sanitizeBio } from "./auth/html.js";
-import { DEFAULT_WORLDS } from "./seed_worlds.js";
+import { DEFAULT_WORLDS, WORLDS_SEED_VERSION } from "./seed_worlds.js";
 import type { Db } from "./db/index.js";
 
 /**
@@ -168,31 +168,69 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
  * defaults can flip the flag to stop the duplicate from coming back.
  */
 async function ensureDefaultWorlds(db: Db): Promise<void> {
+  const settings = await getSettings(db);
+  // Decide once up front whether this boot needs to overwrite. The
+  // SEED_VERSION constant in seed_worlds.ts is bumped whenever a content
+  // refresh ships; the stored value tracks the last applied version on
+  // this install. The "missing world" path runs regardless so renamed
+  // defaults still come back, but the overwrite-existing path only fires
+  // when the code is ahead. Admins who customized system worlds and
+  // don't want the refresh: clone the world to your own ownership (the
+  // refresh only ever touches owner = "system") or rename the system
+  // copy out of the way.
+  const shouldOverwrite = settings.worldsSeedVersion < WORLDS_SEED_VERSION;
+
   for (const def of DEFAULT_WORLDS) {
     const existing = (await db
       .select({ id: worlds.id })
       .from(worlds)
       .where(and(eq(worlds.ownerUserId, "system"), eq(worlds.slug, def.slug)))
       .limit(1))[0];
-    if (existing) continue;
 
-    const worldId = nanoid();
-    await db.insert(worlds).values({
-      id: worldId,
-      ownerUserId: "system",
-      slug: def.slug,
-      name: def.name,
-      description: def.description,
-      visibility: "open",
-    });
-    // Starter pages share the world's createdAt order (we increment sortOrder
-    // monotonically so the natural sort matches the DEFAULT_WORLDS authoring
-    // order - Overview first, hooks last).
+    if (!existing) {
+      // Missing → fresh insert + starter pages.
+      const worldId = nanoid();
+      await db.insert(worlds).values({
+        id: worldId,
+        ownerUserId: "system",
+        slug: def.slug,
+        name: def.name,
+        description: def.description,
+        visibility: "open",
+      });
+      let sortOrder = 0;
+      for (const page of def.pages) {
+        await db.insert(worldPages).values({
+          id: nanoid(),
+          worldId,
+          parentPageId: null,
+          slug: page.slug,
+          title: page.title,
+          bodyHtml: sanitizeBio(page.bodyHtml),
+          sortOrder,
+        });
+        sortOrder += 1;
+      }
+      continue;
+    }
+
+    if (!shouldOverwrite) continue;
+
+    // Update path: refresh name + description, wipe existing pages,
+    // re-insert from the seed. The world's id (and therefore its
+    // members, room links, primary-world references) is preserved so
+    // anyone affiliated with a system world keeps that affiliation
+    // across content updates.
+    await db
+      .update(worlds)
+      .set({ name: def.name, description: def.description, updatedAt: new Date() })
+      .where(eq(worlds.id, existing.id));
+    await db.delete(worldPages).where(eq(worldPages.worldId, existing.id));
     let sortOrder = 0;
     for (const page of def.pages) {
       await db.insert(worldPages).values({
         id: nanoid(),
-        worldId,
+        worldId: existing.id,
         parentPageId: null,
         slug: page.slug,
         title: page.title,
@@ -201,6 +239,10 @@ async function ensureDefaultWorlds(db: Db): Promise<void> {
       });
       sortOrder += 1;
     }
+  }
+
+  if (shouldOverwrite) {
+    await setWorldsSeedVersion(db, WORLDS_SEED_VERSION);
   }
 }
 

@@ -87,25 +87,32 @@ async function findOwnWorld(ctx: CommandContext, slug: string) {
 }
 
 /**
- * /world              - opens the linked world viewer for everyone
- * /world link <slug>  - room owner/mod/admin links the caller's own world
- *                       to this room. (Use the World Catalog modal to link
- *                       someone else's open world.)
- * /world unlink       - room owner/mod/admin removes the link
- * /world catalog      - opens the world catalog modal
- * /world join [slug]  - join an open world (or the room's linked world if
- *                       no slug). Doesn't change room access; affiliates
- *                       you with the world for userlist grouping + profile.
- * /world leave [slug] - leave a world membership.
+ * /world                - opens the linked world viewer for everyone
+ * /world <slug>         - open any visible world by slug (shortcut for
+ *                         /world view <slug>; only resolves when the
+ *                         arg doesn't match a known verb).
+ * /world view <slug>    - explicit form of the slug shortcut
+ * /world link <slug>    - room owner/mod/admin links the caller's own
+ *                         world to this room. (Use the World Catalog modal
+ *                         to link someone else's open world.)
+ * /world unlink         - room owner/mod/admin removes the link
+ * /world catalog        - opens the world catalog modal
+ * /world join [slug]    - join an open world (or the room's linked world
+ *                         if no slug). Doesn't change room access;
+ *                         affiliates you with the world for userlist
+ *                         grouping + profile.
+ * /world leave [slug]   - leave a world membership.
  * /world primary [slug] - set this world as your primary affiliation
- *                       (clears primary if no slug).
+ *                         (clears primary if no slug).
  */
 export const worldCommand: CommandHandler = {
   name: "world",
-  usage: "/world | /world link <slug> | /world unlink | /world catalog | /world join [slug] | /world leave [slug] | /world primary [slug]",
-  description: "Show, link, or join the world (wiki) attached to this room.",
+  usage: "/world | /world <slug> | /world view <slug> | /world link <slug> | /world unlink | /world catalog | /world join [slug] | /world leave [slug] | /world primary [slug]",
+  description: "Show, link, or join a world (wiki). Pass a slug to open any visible world directly.",
   subcommands: [
     { verb: "(no args)", usage: "/world", description: "Open the linked world's wiki, if any." },
+    { verb: "(slug)", usage: "/world <slug>", description: "Open any visible world by slug." },
+    { verb: "view", usage: "/world view <slug>", description: "Explicit form of the slug shortcut." },
     { verb: "link", usage: "/world link <slug>", description: "Link one of YOUR worlds to this room. (Owner/mod/admin only.)" },
     { verb: "unlink", usage: "/world unlink", description: "Remove the linked world. (Owner/mod/admin only.)" },
     { verb: "catalog", usage: "/world catalog", description: "Browse the world catalog (open worlds usable in any room)." },
@@ -127,6 +134,18 @@ export const worldCommand: CommandHandler = {
         return notice(ctx, "NO_WORLD", "No world is linked to this room. Use /world link <slug> to attach one.");
       }
       ctx.socket.emit("ui:hint", { kind: "open-world", worldId: link.worldId });
+      return;
+    }
+
+    if (subLower === "view") {
+      // Explicit form: /world view <slug>. The unambiguous variant for
+      // users who don't want to risk the implicit `/world <slug>` shortcut
+      // shadowing a slug that collides with a future verb.
+      const slug = rest.join(" ").trim();
+      if (!slug) return notice(ctx, "VIEW_USAGE", "Usage: /world view <slug>");
+      const w = await findVisibleWorldBySlug(ctx, slug);
+      if (!w) return notice(ctx, "NO_WORLD", `No visible world with slug "${slug}".`);
+      ctx.socket.emit("ui:hint", { kind: "open-world", worldId: w.id });
       return;
     }
 
@@ -248,7 +267,28 @@ export const worldCommand: CommandHandler = {
       return notice(ctx, "PRIMARY_SET", `"${w.name}" is now your primary world.`);
     }
 
-    return notice(ctx, "BAD_SUBCMD", "Try /world, /world link <slug>, /world unlink, /world catalog, /world join, /world leave, or /world primary.");
+    // Slug shortcut: any unknown first arg is tried as a world slug. Lets
+    // users type `/world darkrealm` instead of `/world view darkrealm`
+    // once they've memorized the slug — same energy as IRC's `/join #foo`
+    // skipping a separate "join" verb. Only fires when nothing else
+    // matched, so future verbs added above can't be silently shadowed.
+    if (subLower) {
+      const w = await findVisibleWorldBySlug(ctx, sub!);
+      if (w) {
+        ctx.socket.emit("ui:hint", { kind: "open-world", worldId: w.id });
+        return;
+      }
+      // Fall through to BAD_SUBCMD with a hint that the unknown token also
+      // wasn't a slug — so users who fat-fingered a verb get one notice,
+      // not two attempts.
+      return notice(
+        ctx,
+        "BAD_SUBCMD",
+        `"${sub}" isn't a /world subcommand or a visible world slug. Try /world, /world view <slug>, /world catalog, etc.`,
+      );
+    }
+
+    return notice(ctx, "BAD_SUBCMD", "Try /world, /world <slug>, /world view <slug>, /world link <slug>, /world unlink, /world catalog, /world join, /world leave, or /world primary.");
   },
 };
 

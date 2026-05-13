@@ -107,6 +107,8 @@ export interface SiteSettings {
   newUserWelcomeUpdatedAt: number | null;
   /** Site-wide default theme style. Users who haven't picked a per-user override inherit this. */
   defaultStyleKey: string;
+  /** Iteration of the DEFAULT_WORLDS seed last applied to system worlds. The boot seeder compares against SEED_VERSION in seed_worlds.ts and overwrites when this is behind. */
+  worldsSeedVersion: number;
   updatedAt: number;
 }
 
@@ -265,8 +267,21 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     newUserWelcomeHash: hashWelcome(row.newUserWelcomeHtml),
     newUserWelcomeUpdatedAt: row.newUserWelcomeUpdatedAt ? +row.newUserWelcomeUpdatedAt : null,
     defaultStyleKey: row.defaultStyleKey,
+    worldsSeedVersion: row.worldsSeedVersion,
     updatedAt: +row.updatedAt,
   };
+}
+
+/**
+ * Atomically bump the stored worlds-seed-version. Called by the seeder
+ * after it has successfully written the v{n} content so the next boot
+ * compares against the new value and skips redundant work. Direct write
+ * (not via `updateSettings`) because there's no actor user — the seed
+ * is system-initiated, and we don't want it touching `updatedById`.
+ */
+export async function setWorldsSeedVersion(db: Db, version: number): Promise<void> {
+  await db.update(siteSettings).set({ worldsSeedVersion: version }).where(eq(siteSettings.id, "singleton"));
+  cached = null;
 }
 
 /**

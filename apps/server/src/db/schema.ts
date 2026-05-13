@@ -659,6 +659,16 @@ export const siteSettings = sqliteTable("site_settings", {
    * seed 'medieval' as the launch flagship.
    */
   defaultStyleKey: text("default_style_key").notNull().default("medieval"),
+  /**
+   * Tracks the iteration of DEFAULT_WORLDS content the system worlds were
+   * last seeded from. `seed_worlds.ts` exports a SEED_VERSION constant; on
+   * boot the seeder compares the two and overwrites all system-owned
+   * worlds (name, description, pages) when the constant is higher. Lets
+   * us ship richer content to the bundled worlds without forcing a
+   * manual admin step on each deploy. 0 = never seeded under the
+   * versioning scheme — implicitly v1.
+   */
+  worldsSeedVersion: integer("worlds_seed_version").notNull().default(0),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
 });

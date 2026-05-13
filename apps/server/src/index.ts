@@ -44,7 +44,7 @@ import {
 } from "./seo.js";
 import { readFile } from "node:fs/promises";
 import { extendSession, loadSessionUser, resolveDisplayName } from "./auth/session.js";
-import { registerAuthRoutes, getSessionUser, userIdFromSessionId, SESSION_COOKIE_NAME } from "./routes/auth.js";
+import { registerAuthRoutes, getSessionUser, userIdFromSessionId, SESSION_COOKIE_NAME, slugToUsername } from "./routes/auth.js";
 import { registerCharacterRoutes } from "./routes/characters.js";
 import { registerAffiliateRoutes } from "./routes/affiliates.js";
 import { registerBookmarkRoutes } from "./routes/bookmarks.js";
@@ -190,7 +190,10 @@ async function main() {
 
   app.get("/profiles/:name", publicLimit, async (req, reply) => {
     const { name } = req.params as { name: string };
-    const profile = await lookupProfile(db, name);
+    // URLs present NBSP as a regular space for readability; restore the
+    // canonical DB form (NBSP) before lookup. No-op for names that don't
+    // contain a space at all.
+    const profile = await lookupProfile(db, slugToUsername(name));
     if (!profile) {
       reply.code(404);
       return { error: "no profile" };
@@ -571,7 +574,11 @@ async function main() {
         return;
       }
       profileFetchTimes.push(now);
-      const profile = await lookupProfile(db, payload.username);
+      // Same slug → username normalization as the HTTP /profiles/:name
+      // route. Some clients (in-chat name clicks) hand us the canonical
+      // NBSP form already; others (URL-derived calls) carry the slug
+      // with a regular space. slugToUsername resolves both.
+      const profile = await lookupProfile(db, slugToUsername(payload.username));
       if (!profile) ack({ ok: false, code: "NO_USER", message: "Not found." });
       else ack({ ok: true, profile });
     });

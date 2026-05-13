@@ -57,6 +57,29 @@ export function normalizeMasterUsername(input: string): string {
   // [a-zA-Z], so NFKC's compatibility passes never gated that anyway.
   return input.normalize("NFC");
 }
+
+/**
+ * Convert a username-shaped URL slug back to its canonical DB form.
+ *
+ * Master usernames allow NBSP (U+00A0) as an invisible "fake space"
+ * separator. We deliberately present those as regular spaces (U+0020)
+ * in shareable URLs so the address bar reads `/p/The Watcher` instead
+ * of `/p/The%C2%A0Watcher`. Any handler that takes a name out of a URL
+ * (or any HTTP param meant to identify a master account) runs the
+ * incoming string through this helper before the DB lookup so the
+ * round-trip works regardless of which form the caller used.
+ *
+ * Regular spaces are NOT a legal username character (see
+ * MASTER_USERNAME_RX above), so the substitution is unambiguous —
+ * there's no DB row that contains a literal U+0020.
+ */
+export function slugToUsername(slug: string): string {
+  // Map regular space (U+0020) -> NBSP (U+00A0). Regular space is not a
+  // legal username character, so the substitution is unambiguous and the
+  // round-trip with the client-side `usernameToSlug` is exact.
+  return slug.replace(/ /g, String.fromCharCode(0xA0));
+}
+
 const masterUsernameSchema = z
   .string()
   .min(2)

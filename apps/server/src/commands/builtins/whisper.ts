@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import type { ChatMessage } from "@thekeep/shared";
 import { ignores, messages, users } from "../../db/schema.js";
 import { pushTriggers } from "../../realtime/broadcast.js";
+import { stripFirstToken } from "../parser.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -38,8 +39,10 @@ export const whisperCommand: CommandHandler = {
       return;
     }
     const targetName = args[0]!;
-    // body is the original argsText with the first token (and following whitespace) stripped
-    const body = ctx.argsText.replace(/^\S+\s*/, "").trim();
+    // body is the original argsText with the first token (and following
+    // whitespace) stripped. `stripFirstToken` is NBSP-aware so a username
+    // with an Alt+0160 keeps its full name as a single token.
+    const body = stripFirstToken(ctx.argsText).trim();
     if (!body) {
       notice(ctx, "WHISPER_EMPTY", "Whisper body is empty.");
       return;

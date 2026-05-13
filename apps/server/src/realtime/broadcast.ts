@@ -858,7 +858,26 @@ export async function sendRoomStateTo(
 
 export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<RoomOccupant[]> {
   const sockets = await io.in(`room:${roomId}`).fetchSockets();
-  const userIds = [...new Set(sockets.map((s) => (s.data as { userId?: string }).userId).filter(Boolean) as string[])];
+  // Per-tab character routing: each socket carries its own `tabCharId`
+  // override (seeded from `users.activeCharacterId` at connect, then
+  // mutated only by /char or me:switch-character from THAT socket).
+  // The userlist must reflect what each socket is actually voicing in
+  // THIS room — falling back to the DB column would leak a /char run
+  // on a sibling tab into this room's occupant display.
+  //
+  // Multi-tab edge case (same user, two sockets in the same room, two
+  // different characters): we still dedupe by userId here and pick the
+  // first socket's char. Both tabs still send messages with their own
+  // identity (chat lines come through correctly); the userlist just
+  // can't show one user as two people. Acceptable for the "different
+  // characters in different rooms" use case the feature targets.
+  const tabCharByUser = new Map<string, string | null | undefined>();
+  for (const s of sockets) {
+    const uid = (s.data as { userId?: string }).userId;
+    if (!uid || tabCharByUser.has(uid)) continue;
+    tabCharByUser.set(uid, (s.data as { tabCharId?: string | null }).tabCharId);
+  }
+  const userIds = [...tabCharByUser.keys()];
   if (!userIds.length) return [];
 
   const userRows = await db
@@ -866,9 +885,15 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     .from(users)
     .where(sql`${users.id} IN (${sql.join(userIds.map((u) => sql`${u}`), sql`, `)})`);
 
-  const charIds = userRows
-    .map((u) => u.activeCharacterId)
-    .filter((v): v is string => !!v);
+  // Resolve the *effective* charId per user: socket-local override wins,
+  // else fall back to the DB column (covers pre-handshake sockets and
+  // any user without an override).
+  const effectiveCharIdByUser = new Map<string, string | null>();
+  for (const u of userRows) {
+    const tab = tabCharByUser.get(u.id);
+    effectiveCharIdByUser.set(u.id, tab === undefined ? u.activeCharacterId : tab);
+  }
+  const charIds = [...new Set([...effectiveCharIdByUser.values()].filter((v): v is string => !!v))];
   const charRows = charIds.length
     ? await db
         .select()
@@ -941,9 +966,14 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     // count reflects what's visible, not raw socket presence — fine,
     // since invisible users are by definition not "in" the room from
     // a viewer's perspective.
-    .filter((u) => u.isPublic || !!u.activeCharacterId)
+    // Privacy filter uses the EFFECTIVE charId (per-tab override or DB
+    // fallback). A user with isPublic=false who's voicing a character
+    // in this room — via either path — surfaces; OOC-only socket
+    // presence stays hidden.
+    .filter((u) => u.isPublic || !!effectiveCharIdByUser.get(u.id))
     .map<RoomOccupant>((u) => {
-      const c = u.activeCharacterId ? charById.get(u.activeCharacterId) : undefined;
+      const charId = effectiveCharIdByUser.get(u.id) ?? null;
+      const c = charId ? charById.get(charId) : undefined;
       return {
         userId: u.id,
         displayName: c ? c.name : u.username,

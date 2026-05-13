@@ -7,14 +7,42 @@ export interface ParsedInput {
   args: string[];
 }
 
-const COMMAND_RX = /^\/(\S+)\s*(.*)$/s;
+/**
+ * Word/whitespace primitives that DELIBERATELY exclude NBSP (U+00A0).
+ *
+ * Master usernames are allowed to contain NBSP (the "Alt+0160" invisible
+ * separator users use to fake spaces in names). JavaScript's default `\s`
+ * and `\S` shortcuts include NBSP in the whitespace class — using them
+ * would split `The[NBSP]Watcher` into two tokens, breaking /whisper,
+ * /char, and every other command that takes a name as its first arg.
+ *
+ * `WS` is the ASCII whitespace set (space, tab, vertical-tab, formfeed,
+ * carriage-return, newline). `NON_WS` is the negation; both are used
+ * across the command parser and individual builtins.
+ */
+const WS = " \\t\\n\\r\\f\\v";
+export const NBSP_AWARE_WS_RX = new RegExp(`[${WS}]+`);
+const COMMAND_RX = new RegExp(`^\\/([^${WS}]+)[${WS}]*(.*)$`, "s");
+const TOKEN_RX = new RegExp(`"([^"]*)"|'([^']*)'|([^${WS}]+)`, "g");
+
+/**
+ * Strip the first whitespace-delimited token (and its trailing
+ * whitespace) from a string. Used by /whisper, /reply, /go, etc. to
+ * recover the body text after the first positional argument. NBSP is
+ * treated as a normal word character — same rationale as the
+ * tokenizer above.
+ */
+export function stripFirstToken(argsText: string): string {
+  return argsText.replace(new RegExp(`^[^${WS}]+[${WS}]*`), "");
+}
 
 /** Split a string on whitespace while keeping "quoted strings" together. */
 function tokenize(s: string): string[] {
   const out: string[] = [];
-  const rx = /"([^"]*)"|'([^']*)'|(\S+)/g;
   let m: RegExpExecArray | null;
-  while ((m = rx.exec(s)) !== null) {
+  // Reset lastIndex so a previous caller's match state doesn't bleed in.
+  TOKEN_RX.lastIndex = 0;
+  while ((m = TOKEN_RX.exec(s)) !== null) {
     out.push(m[1] ?? m[2] ?? m[3] ?? "");
   }
   return out;

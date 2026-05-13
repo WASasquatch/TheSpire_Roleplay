@@ -16,7 +16,40 @@
  * links and bookmarks all converge on a single form.
  */
 
-const PROFILE_URL_RX = /^\/[pu]\/([\p{L}\p{N}_\-]{1,32})\/?$/u;
+/**
+ * Master usernames allow NBSP (Alt+0160) as a "fake space" inside the
+ * name. To keep the shareable URL readable — and to avoid the ugly
+ * `%C2%A0` byte sequence in the address bar — we present NBSP as a
+ * regular space in the slug, then convert it back to NBSP on lookup
+ * (see `slugToUsername`). The route regex therefore has to allow
+ * regular spaces (which decode in from `%20`), plus the other
+ * username-legal punctuation. Length cap mirrors the master-username
+ * 40-char ceiling.
+ */
+const PROFILE_URL_RX = /^\/[pu]\/([\p{L}\p{N}_\-'.`  ]{1,40})\/?$/u;
+
+/**
+ * Convert a master username to its URL-slug form. NBSP collapses to a
+ * regular space so the encoded URL reads as `%20` rather than `%C2%A0`.
+ * Mirrored on the server in `slugToUsername`.
+ */
+export function usernameToSlug(name: string): string {
+  // Map NBSP (U+00A0) -> regular space (U+0020) so the encoded URL
+  // reads as `%20` rather than the much uglier `%C2%A0`.
+  return name.replace(new RegExp(String.fromCharCode(0xA0), "g"), " ");
+}
+
+/**
+ * Reverse of `usernameToSlug` — restore NBSP from a URL slug before any
+ * client-side comparison. The server normalizes the same way before its
+ * DB lookup; we mirror it client-side so things like "is this profile
+ * me?" checks line up against the master username stored in `me`.
+ */
+export function slugToUsername(slug: string): string {
+  // Reverse of `usernameToSlug` -- map regular space (U+0020) back to
+  // NBSP (U+00A0) so the result matches the DB canonical form.
+  return slug.replace(/ /g, String.fromCharCode(0xA0));
+}
 
 /** What the API returns for a restricted profile (HTTP 200, signaled by the `private` flag). */
 export interface PrivateProfileStub {
@@ -41,7 +74,8 @@ export function parseProfileFromUrl(): string | null {
  */
 export function syncProfileUrl(name: string | null, opts: { replace?: boolean } = {}): void {
   if (typeof window === "undefined") return;
-  const target = name ? `/p/${encodeURIComponent(name)}` : "/";
+  // Slug form: NBSP → space so the address bar shows %20, not %C2%A0.
+  const target = name ? `/p/${encodeURIComponent(usernameToSlug(name))}` : "/";
   if (window.location.pathname === target) return;
   // Closing modal: if we aren't currently on a profile path at all, don't
   // stomp the URL (preserves /w/foo etc.).
@@ -49,8 +83,9 @@ export function syncProfileUrl(name: string | null, opts: { replace?: boolean } 
   if (!name && currentName === null) return;
   // If we're already viewing this same profile via an alias (e.g. /u/<name>
   // canonicalizing to /p/<name>), replace rather than push so the alias
-  // doesn't leave a stray "back" entry.
-  const replace = opts.replace || (name !== null && currentName === name);
+  // doesn't leave a stray "back" entry. Compare via the slug form so an
+  // NBSP-containing name matches whatever the address bar already has.
+  const replace = opts.replace || (name !== null && currentName === usernameToSlug(name));
   if (replace) {
     window.history.replaceState({}, "", target);
   } else {
@@ -60,6 +95,7 @@ export function syncProfileUrl(name: string | null, opts: { replace?: boolean } 
 
 /** Build the absolute URL for a profile (used by Copy Link). */
 export function profileShareUrl(name: string): string {
-  if (typeof window === "undefined") return `/p/${encodeURIComponent(name)}`;
-  return `${window.location.origin}/p/${encodeURIComponent(name)}`;
+  const path = `/p/${encodeURIComponent(usernameToSlug(name))}`;
+  if (typeof window === "undefined") return path;
+  return `${window.location.origin}${path}`;
 }

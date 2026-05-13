@@ -115,11 +115,34 @@ function topicLabel(t: { title: string | null; body: string }): string {
 }
 
 interface Trigger {
-  kind: "/" | "@";
-  /** Character offset where the trigger token starts (the `/` or `@` itself). */
+  kind: "/" | "@" | "whisper-target";
+  /** Character offset where the trigger token starts (the `/` or `@` itself,
+   *  or for whisper-target, the first char of the username being typed). */
   tokenStart: number;
   /** Lower-cased query (everything after the trigger char up to the caret). */
   query: string;
+}
+
+/**
+ * Slash commands whose first positional argument is a username — when the
+ * user is typing the name, we open the same occupant picker we use for
+ * `@`-mentions. Matches the server-side `whisper` command's `aliases`
+ * list (see apps/server/src/commands/builtins/whisper.ts) so any alias
+ * the dispatcher accepts also lights up the picker.
+ */
+const WHISPER_CMDS = new Set([
+  "whisper", "w", "wh", "to", "msg", "message", "pm",
+]);
+
+/**
+ * NBSP-aware "word char" check used to walk back to a token boundary.
+ * `/\s/` matches NBSP (U+00A0) — but NBSP is a legal username character,
+ * so we treat it as part of the same token to keep names like
+ * `The[NBSP]Watcher` whole.
+ */
+function isWordChar(ch: string): boolean {
+  if (ch === " ") return true;
+  return !/\s/.test(ch);
 }
 
 /**
@@ -127,14 +150,50 @@ interface Trigger {
  *   - `/word` — only when the slash is at the start of the message (matches
  *     the dispatcher, which treats slash commands as the *first* token only).
  *   - `@word` — anywhere; mentions can appear mid-message.
+ *   - whisper-target: when the caret is in the first positional argument
+ *     of a /whisper-alias command, show the same occupant picker (the
+ *     name is what the recipient resolves against on the server, so the
+ *     picker streamlines what was previously typed-by-hand).
  *
  * Returns null when no trigger is active (e.g. caret in plain text, or after
  * a space).
  */
 function detectTrigger(text: string, caret: number): Trigger | null {
+  // Whisper-target check first — we want it to win over the @-mention
+  // path when the user types `/w foo` (the `foo` part is a bare name,
+  // not an @mention). The check looks at the WHOLE line because the
+  // trigger boundary isn't a single delimiter char.
+  if (text.startsWith("/")) {
+    // Find the space that separates the command word from its args. We
+    // skip the NBSP-as-whitespace trap here by looking for an ASCII
+    // space specifically (NBSP can never appear inside a command name,
+    // so the first U+0020 cleanly divides cmd from rest).
+    const firstSpace = text.indexOf(" ");
+    if (firstSpace > 0 && caret > firstSpace) {
+      const cmd = text.slice(1, firstSpace).toLowerCase();
+      if (WHISPER_CMDS.has(cmd)) {
+        const argStart = firstSpace + 1;
+        const argSoFar = text.slice(argStart, caret);
+        // Bail out once the caret moves past the first arg — at that
+        // point the user is typing the message body, not picking a
+        // recipient. NBSP is intentionally NOT counted as whitespace
+        // here so `/w The[NBSP]Watcher` keeps the picker open while
+        // the name is being typed.
+        const pastNameBoundary = /[ \t]/.test(argSoFar);
+        if (!pastNameBoundary) {
+          return {
+            kind: "whisper-target",
+            tokenStart: argStart,
+            query: argSoFar.toLowerCase(),
+          };
+        }
+      }
+    }
+  }
+
   // Walk back from the caret to the previous whitespace or start-of-string.
   let s = caret;
-  while (s > 0 && !/\s/.test(text[s - 1]!)) s--;
+  while (s > 0 && isWordChar(text[s - 1]!)) s--;
   const token = text.slice(s, caret);
   if (token.length === 0) return null;
   if (token.startsWith("/")) {
@@ -309,14 +368,18 @@ export function Composer({
       out.sort((a, b) => a.label.localeCompare(b.label));
       return out.slice(0, MAX_COMPLETIONS);
     }
-    // @-mention: filter occupants by displayName prefix.
+    // @-mention OR whisper-target: filter occupants by displayName prefix.
+    // The two share the same item source — the only difference is whether
+    // the inserted text carries an `@` prefix (mid-message mention) or
+    // not (a bare username after `/whisper`).
     if (!occupants) return [];
     const out: CompletionItem[] = [];
+    const wantAt = trigger.kind === "@";
     for (const o of occupants) {
       if (o.displayName.toLowerCase().startsWith(trigger.query)) {
         out.push({
-          value: `@${o.displayName}`,
-          label: `@${o.displayName}`,
+          value: wantAt ? `@${o.displayName}` : o.displayName,
+          label: wantAt ? `@${o.displayName}` : o.displayName,
           ...(o.away ? { sublabel: "away" } : {}),
         });
       }

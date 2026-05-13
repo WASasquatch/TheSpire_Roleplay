@@ -681,6 +681,15 @@ function Chat() {
    * theme if set, else the master theme. Re-fetched whenever the editor
    * closes or `/char switch` fires (both bump themeVersion).
    */
+  /**
+   * First-load seed only. `/me/profile.activeCharacterId` is the user's
+   * DB-level default and is the right answer ONCE per session — at the
+   * moment this tab connects. Subsequent updates flow through
+   * `me:character-update` events (per-tab) so a sibling tab's /char
+   * doesn't override this tab's identity through a backend poll.
+   */
+  const profileSeededRef = useRef(false);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -703,21 +712,19 @@ function Chat() {
         // both layers separately into state so the derived activeTheme
         // below picks the right one in real time.
         const fetchedUserTheme = u.theme ? normalizeTheme(u.theme) : null;
-        let fetchedCharTheme: Theme | null = null;
-        if (u.activeCharacterId) {
-          const c = await fetch(`/characters/${u.activeCharacterId}`, { credentials: "include" });
-          if (c.ok) {
-            const cr = (await c.json()) as { themeJson?: string | null };
-            if (cr.themeJson) {
-              try { fetchedCharTheme = normalizeTheme(JSON.parse(cr.themeJson)); } catch { /* none */ }
-            }
-          }
-        }
         if (!cancelled) {
           setUserTheme(fetchedUserTheme);
-          setCharacterTheme(fetchedCharTheme);
-          setActiveCharacterId(u.activeCharacterId);
-          setActiveCharacterName(u.activeCharacterName ?? null);
+          // Seed activeCharacterId/Name from the DB default ONLY on the
+          // very first profile load of this tab. After that, the
+          // identity is owned by me:character-update events so a /char
+          // run on another tab can't override this tab's voice when
+          // something else (presence:update, theme save) bumps
+          // themeVersion and re-runs this effect.
+          if (!profileSeededRef.current) {
+            setActiveCharacterId(u.activeCharacterId);
+            setActiveCharacterName(u.activeCharacterName ?? null);
+            profileSeededRef.current = true;
+          }
           if (u.notifyPref) setNotifyPref(u.notifyPref);
           setUserStyleKey(typeof u.styleKey === "string" ? u.styleKey : null);
           setUiFontFamily(typeof u.uiFontFamily === "string" ? u.uiFontFamily : null);
@@ -737,6 +744,35 @@ function Chat() {
     load();
     return () => { cancelled = true; };
   }, [themeVersion]);
+
+  /**
+   * Character theme load — keyed on the LOCAL `activeCharacterId` so a
+   * per-tab switch (via me:character-update) re-fetches this tab's
+   * theme without dragging in the DB default from `/me/profile`. Runs
+   * on the initial seed too because the seed effect above sets
+   * activeCharacterId, which then triggers this.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!activeCharacterId) {
+        setCharacterTheme(null);
+        return;
+      }
+      try {
+        const c = await fetch(`/characters/${activeCharacterId}`, { credentials: "include" });
+        if (!c.ok) return;
+        const cr = (await c.json()) as { themeJson?: string | null };
+        let fetched: Theme | null = null;
+        if (cr.themeJson) {
+          try { fetched = normalizeTheme(JSON.parse(cr.themeJson)); } catch { /* none */ }
+        }
+        if (!cancelled) setCharacterTheme(fetched);
+      } catch { /* ignore */ }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [activeCharacterId, themeVersion]);
 
   // Derived active theme. Recomputes whenever ANY of the three layers
   // changes — including when admin pushes a new site default to the

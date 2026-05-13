@@ -18,7 +18,7 @@ import type {
 } from "@thekeep/shared";
 
 import { db } from "./db/index.js";
-import { bans, roomMembers, roomThreadCategories, rooms, sessions, users } from "./db/schema.js";
+import { bans, characters, roomMembers, roomThreadCategories, rooms, sessions, users } from "./db/schema.js";
 import { CommandRegistry } from "./commands/registry.js";
 import { registerBuiltins } from "./commands/builtins/index.js";
 import { dispatchChatInput } from "./realtime/dispatch.js";
@@ -43,7 +43,7 @@ import {
   resolveIndexHtmlPath,
 } from "./seo.js";
 import { readFile } from "node:fs/promises";
-import { extendSession, loadSessionUser } from "./auth/session.js";
+import { extendSession, loadSessionUser, resolveDisplayName } from "./auth/session.js";
 import { registerAuthRoutes, getSessionUser, userIdFromSessionId, SESSION_COOKIE_NAME } from "./routes/auth.js";
 import { registerCharacterRoutes } from "./routes/characters.js";
 import { registerAffiliateRoutes } from "./routes/affiliates.js";
@@ -133,6 +133,25 @@ async function main() {
       return payload;
     });
   }
+
+  // Default `Cache-Control: private, no-store` on every Fastify response that
+  // hasn't already set one. The SPA shell, hashed asset paths, and 404 page
+  // all set their own (see below); this hook catches the JSON API routes
+  // (`/me`, `/rooms/*/messages/around`, `/rooms/*/topics`, etc.) so an
+  // intermediary or aggressive browser heuristic can't cache them. We
+  // deliberately don't set it on responses that already carry a cache-
+  // control header so the existing immutable/static rules still win.
+  //
+  // `private` keeps shared caches (corporate proxies, ISPs) from holding
+  // user-scoped JSON; `no-store` forbids any cache from retaining it at
+  // all. Cheap to set — one header per request — and we're not relying on
+  // cacheable APIs anywhere.
+  app.addHook("onSend", async (_req, reply, payload) => {
+    if (!reply.getHeader("cache-control")) {
+      reply.header("cache-control", "private, no-store");
+    }
+    return payload;
+  });
 
   // ZodError → 400 with a readable list of issues. Without this, our routes'
   // `schema.parse(req.body)` calls bubble up as 500s.
@@ -309,6 +328,12 @@ async function main() {
       (socket.data as { userId: string }).userId = userId;
       (socket.data as { user: typeof user }).user = user;
       (socket.data as { sid: string }).sid = sid;
+      // Per-tab active character. Seeded from the DB-level default
+      // (user.activeCharacterId) on connect, then mutated only by
+      // commands originating from THIS socket so other tabs the user has
+      // open keep their own identity. `undefined` here means "follow the
+      // DB"; an explicit value (string or null) is a sticky override.
+      (socket.data as { tabCharId?: string | null }).tabCharId = user.activeCharacterId;
       next();
     } catch (err) {
       next(err as Error);
@@ -417,6 +442,17 @@ async function main() {
           return;
         }
         Object.assign(user, fresh);
+        // Per-tab character override. After the DB reload above, restore
+        // this socket's sticky `tabCharId` so a /char invoked on another
+        // tab doesn't silently retag THIS tab's outgoing messages.
+        // `tabCharId === undefined` means "no override set yet" (the
+        // handshake always seeds it, so in practice this branch falls
+        // through and the DB value is used).
+        const tabCharId = (socket.data as { tabCharId?: string | null }).tabCharId;
+        if (tabCharId !== undefined) {
+          user.activeCharacterId = tabCharId;
+          user.displayName = await resolveDisplayName(db, user.id, tabCharId);
+        }
         // Validate the thread-category bucket (if any) belongs to the
         // target room. Race condition: an admin can delete the category
         // between the user opening the picker and submitting. Rather
@@ -567,6 +603,66 @@ async function main() {
      * dissolve). The service layer authorizes by row state and the
      * authenticated socket's userId; we just route the result.
      */
+    /**
+     * Per-tab character switch. Mirrors what `/char switch` does in chat,
+     * but is the entry point for UI buttons (ProfileEditor "Switch to
+     * this character", profile-modal action chip) that previously hit
+     * the HTTP `PUT /me/active-character` endpoint and synced every tab.
+     *
+     * Side effects on success:
+     *   1. socket.data.tabCharId is set — this socket's outgoing messages
+     *      now carry the new identity.
+     *   2. user.activeCharacterId + user.displayName mutate in-place so
+     *      any in-flight handler on this socket sees the fresh value.
+     *   3. users.activeCharacterId in the DB is updated so a *fresh* tab
+     *      opened later defaults to this character. Already-connected
+     *      tabs are NOT touched — that's the entire point of the per-
+     *      socket scope.
+     *   4. Presence in the current room is rebroadcast so the userlist
+     *      reflects the new name on everyone's screen.
+     *   5. me:character-update is emitted to this socket so the React
+     *      state in this tab can refresh activeCharacterId/Name + theme
+     *      without polling /me/profile.
+     */
+    socket.on("me:switch-character", async (payload, ack) => {
+      try {
+        if (!(await checkAndExtendSession())) {
+          ack?.({ ok: false, code: "AUTH", message: "Session expired." });
+          return;
+        }
+        const requested = payload.characterId;
+        if (requested !== null) {
+          const c = (await db
+            .select()
+            .from(characters)
+            .where(eq(characters.id, requested))
+            .limit(1))[0];
+          if (!c || c.deletedAt || c.userId !== user.id) {
+            ack?.({ ok: false, code: "NO_CHAR", message: "Character not found." });
+            return;
+          }
+        }
+        await db.update(users).set({ activeCharacterId: requested }).where(eq(users.id, user.id));
+        (socket.data as { tabCharId?: string | null }).tabCharId = requested;
+        user.activeCharacterId = requested;
+        user.displayName = await resolveDisplayName(db, user.id, requested);
+        const roomId = (socket.data as { roomId?: string }).roomId;
+        if (roomId) {
+          const { broadcastPresence } = await import("./realtime/broadcast.js");
+          await broadcastPresence(io, db, roomId);
+        }
+        const name = requested === null ? null : user.displayName;
+        socket.emit("me:character-update", {
+          activeCharacterId: requested,
+          activeCharacterName: name,
+        });
+        ack?.({ ok: true, activeCharacterId: requested, activeCharacterName: name });
+      } catch (err) {
+        log.error({ err }, "me:switch-character error");
+        ack?.({ ok: false, code: "ERR", message: err instanceof Error ? err.message : "error" });
+      }
+    });
+
     socket.on("mutual:respond", async (payload, ack) => {
       if (!(await checkAndExtendSession())) {
         ack?.({ ok: false, code: "AUTH", message: "Session expired." });

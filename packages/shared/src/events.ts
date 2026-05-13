@@ -53,6 +53,30 @@ export interface ClientToServerEvents {
     payload: { id: string; accept: boolean },
     ack?: AckFn<{ ok: true } | AckError>,
   ) => void;
+  /**
+   * Switch THIS tab's active character without affecting other tabs the
+   * same user has open. `characterId` is a character the caller owns, or
+   * null to drop the active character (become master / OOC).
+   *
+   * Why this exists alongside the HTTP `PUT /me/active-character`:
+   *   - HTTP can't identify which tab made the call, so it can only
+   *     toggle the user-level default. That implementation moved every
+   *     tab in lockstep — surprising behavior for multi-character
+   *     play where one tab is the in-character voice and another is OOC.
+   *   - This socket event scopes the switch to the calling socket
+   *     (`socket.data.tabCharId`). The server also updates the user-
+   *     level default so a NEW tab opened later picks up the most-
+   *     recent character — but already-connected tabs are untouched.
+   *
+   * The server replies via `me:character-update` to the calling socket
+   * with the resolved identity (new id + name) so the client can
+   * refresh its theme + activeCharacterName state without polling
+   * `/me/profile`.
+   */
+  "me:switch-character": (
+    payload: { characterId: string | null },
+    ack?: AckFn<{ ok: true; activeCharacterId: string | null; activeCharacterName: string | null } | AckError>,
+  ) => void;
 }
 
 /** Events emitted by the server → client. */
@@ -105,6 +129,19 @@ export interface ServerToClientEvents {
    * private-room/whisper info - just identity + display name.
    */
   "watch:online": (payload: WatchOnlineEvent) => void;
+  /**
+   * Sent ONLY to the calling socket after a successful character switch
+   * (in-chat `/char switch|clear`, `me:switch-character` socket event,
+   * or character deletion that cleared the active char). Carries the
+   * resolved identity post-switch so the client can refresh local
+   * activeCharacterId/Name + reload the active theme without polling
+   * `/me/profile`. Other open tabs of the same user are deliberately
+   * NOT notified — each tab keeps its own character state.
+   */
+  "me:character-update": (payload: {
+    activeCharacterId: string | null;
+    activeCharacterName: string | null;
+  }) => void;
 }
 
 export type UiHint =

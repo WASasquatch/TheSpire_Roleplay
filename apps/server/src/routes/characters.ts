@@ -276,22 +276,32 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     // someone else's character - in that case the owner still needs the
     // active-character cleared if they had switched to it.
     const owner = (await db.select().from(users).where(eq(users.id, c.userId)).limit(1))[0];
+    // Clear from DB if it was the owner's default char.
     if (owner?.activeCharacterId === c.id) {
       await db.update(users).set({ activeCharacterId: null }).where(eq(users.id, owner.id));
-      // Re-broadcast presence in every room the owner is currently joined to
-      // so other occupants see the displayName fall back to their username.
-      // Different rooms can dedupe themselves; a Set across socket.rooms is enough.
-      const sockets = await io.fetchSockets();
-      const rooms = new Set<string>();
-      for (const s of sockets) {
-        if ((s.data as { userId?: string }).userId !== owner.id) continue;
-        for (const r of s.rooms) {
-          if (r.startsWith("room:")) rooms.add(r.slice(5));
-        }
+    }
+    // Per-tab character routing: even if the owner's DB default wasn't
+    // this char, some live socket of theirs may have voiced this
+    // character (set via socket /char or me:switch-character). Sweep
+    // every owner socket, clear the tab override on any that match, and
+    // notify each so its React state drops to OOC without a poll. Same
+    // sweep also feeds the presence rebroadcast — a tombstoned name
+    // shouldn't linger in any occupant list the owner was visible in.
+    const sockets = await io.fetchSockets();
+    const affectedRooms = new Set<string>();
+    for (const s of sockets) {
+      if ((s.data as { userId?: string }).userId !== c.userId) continue;
+      const tabCharId = (s.data as { tabCharId?: string | null }).tabCharId;
+      if (tabCharId === c.id) {
+        (s.data as { tabCharId?: string | null }).tabCharId = null;
+        s.emit("me:character-update", { activeCharacterId: null, activeCharacterName: null });
       }
-      for (const roomId of rooms) {
-        await broadcastPresence(io, db, roomId);
+      for (const r of s.rooms) {
+        if (r.startsWith("room:")) affectedRooms.add(r.slice(5));
       }
+    }
+    for (const roomId of affectedRooms) {
+      await broadcastPresence(io, db, roomId);
     }
 
     return { ok: true };

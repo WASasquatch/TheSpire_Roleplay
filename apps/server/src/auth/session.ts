@@ -4,15 +4,28 @@ import type { Db } from "../db/index.js";
 import type { SessionUser } from "../commands/types.js";
 import { getSettings } from "../settings.js";
 
-/** Resolve the current display name for a user (active char name or master username). */
-export async function resolveDisplayName(db: Db, userId: string): Promise<string> {
+/**
+ * Resolve the current display name for a user. By default reads
+ * `users.activeCharacterId` from the DB; pass `overrideCharId` to resolve
+ * against a different character (or null for master/OOC) without touching
+ * the DB row. Used by per-tab character routing so each socket can have
+ * its own active identity independent of the user-level default.
+ */
+export async function resolveDisplayName(
+  db: Db,
+  userId: string,
+  overrideCharId?: string | null,
+): Promise<string> {
   const u = (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0];
   if (!u) throw new Error(`user not found: ${userId}`);
-  if (!u.activeCharacterId) return u.username;
+  // `undefined` means "no override — use DB". An explicit `null` means
+  // "master, even if DB has an active char".
+  const charId = overrideCharId === undefined ? u.activeCharacterId : overrideCharId;
+  if (!charId) return u.username;
   const c = (await db
     .select()
     .from(characters)
-    .where(eq(characters.id, u.activeCharacterId))
+    .where(eq(characters.id, charId))
     .limit(1))[0];
   return c && !c.deletedAt ? c.name : u.username;
 }

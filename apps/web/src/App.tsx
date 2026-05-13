@@ -1024,6 +1024,21 @@ function Chat() {
       });
     });
 
+    /**
+     * Per-tab character switch confirmation. Fired only to the socket
+     * that originated the switch (in-chat /char, ProfileEditor's switch
+     * button, profile-modal action). We update local activeCharacterId
+     * + name in place and bump themeVersion so the theme re-resolves
+     * against the new character. We deliberately do NOT poll
+     * /me/profile here — that endpoint serves the user-level DB default
+     * which may not match THIS tab's identity in a multi-tab session.
+     */
+    socket.on("me:character-update", ({ activeCharacterId: aci, activeCharacterName: acn }) => {
+      setActiveCharacterId(aci);
+      setActiveCharacterName(acn);
+      setThemeVersion((v) => v + 1);
+    });
+
     return () => {
       socket.off("room:state");
       socket.off("presence:update");
@@ -1035,6 +1050,7 @@ function Chat() {
       socket.off("auth:expired");
       socket.off("ui:hint");
       socket.off("mutual:settled");
+      socket.off("me:character-update");
     };
   }, [socket, setRoom, setOccupants, appendMessage, updateMessage, setMessages, setCurrentRoom, setNotice, setOpenProfile, openEditor, setRefreshIntervalSec, setMe, prependOwnForumTopic, queuePendingForumTopic, bumpTopicActivity, updateForumTopic, removeForumTopic]);
 
@@ -1719,21 +1735,18 @@ function Chat() {
               activeCharacterAction: {
                 label,
                 onClick: () => {
-                  fetch("/me/active-character", {
-                    method: "PUT",
-                    credentials: "include",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ characterId: targetId }),
-                  })
-                    .then(async (r) => {
-                      if (!r.ok) {
-                        const j = (await r.json().catch(() => ({} as { error?: string })));
-                        throw new Error(j.error ?? `HTTP ${r.status}`);
-                      }
+                  // Per-tab switch via socket. The server scopes the new
+                  // identity to THIS socket so a parallel tab voicing a
+                  // different character isn't dragged along; me:character-
+                  // update lands in the global listener and refreshes
+                  // activeCharacterId/Name + themeVersion.
+                  socket.emit("me:switch-character", { characterId: targetId }, (res) => {
+                    if (res.ok) {
                       setOpenProfile(null);
-                      setThemeVersion((v) => v + 1);
-                    })
-                    .catch((err) => setNotice({ code: "SWITCH_FAILED", message: err instanceof Error ? err.message : "switch failed" }));
+                    } else {
+                      setNotice({ code: res.code ?? "SWITCH_FAILED", message: res.message ?? "switch failed" });
+                    }
+                  });
                 },
               },
             };

@@ -54,6 +54,36 @@ async function createSubcommand(ctx: CommandContext, name: string) {
   ctx.socket.emit("ui:hint", { kind: "open-character-editor", characterId: id });
 }
 
+/**
+ * Set this socket's tab-local active character. Updates the DB (so the
+ * next fresh tab the user opens picks up the same default) AND the
+ * `socket.data.tabCharId` override so the per-tab routing in
+ * `chat:input` (see index.ts) doesn't get clobbered by a /char run on a
+ * sibling tab. Also emits `me:character-update` to the caller so its
+ * React state can refresh activeCharacterId/Name + theme without
+ * polling `/me/profile`.
+ */
+async function applyTabCharacter(
+  ctx: CommandContext,
+  newCharId: string | null,
+): Promise<void> {
+  await ctx.db
+    .update(users)
+    .set({ activeCharacterId: newCharId })
+    .where(eq(users.id, ctx.user.id));
+  (ctx.socket.data as { tabCharId?: string | null }).tabCharId = newCharId;
+  ctx.user.activeCharacterId = newCharId;
+  ctx.user.displayName = newCharId === null
+    ? ctx.user.username
+    : await resolveDisplayName(ctx.db, ctx.user.id, newCharId);
+  const { broadcastPresence } = await import("../../realtime/broadcast.js");
+  await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
+  ctx.socket.emit("me:character-update", {
+    activeCharacterId: newCharId,
+    activeCharacterName: newCharId === null ? null : ctx.user.displayName,
+  });
+}
+
 async function switchSubcommand(ctx: CommandContext, name: string) {
   // "OOC" / "master" / "off" / "none" all mean "drop the active character and
   // become the master account" - this is the natural inverse of /char switch
@@ -63,30 +93,11 @@ async function switchSubcommand(ctx: CommandContext, name: string) {
   const c = await findCharacter(ctx, name);
   if (!c) return notice(ctx, "NO_CHAR", `No character named "${name}".`);
 
-  await ctx.db
-    .update(users)
-    .set({ activeCharacterId: c.id })
-    .where(eq(users.id, ctx.user.id));
-
-  // mutate in-place so subsequent commands in this socket session see it
-  ctx.user.activeCharacterId = c.id;
-  ctx.user.displayName = await resolveDisplayName(ctx.db, ctx.user.id);
-
-  // refresh occupant list so other clients see the rename
-  const { broadcastPresence } = await import("../../realtime/broadcast.js");
-  await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
+  await applyTabCharacter(ctx, c.id);
 }
 
 async function clearSubcommand(ctx: CommandContext) {
-  await ctx.db
-    .update(users)
-    .set({ activeCharacterId: null })
-    .where(eq(users.id, ctx.user.id));
-  ctx.user.activeCharacterId = null;
-  ctx.user.displayName = ctx.user.username;
-
-  const { broadcastPresence } = await import("../../realtime/broadcast.js");
-  await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
+  await applyTabCharacter(ctx, null);
 }
 
 async function editSubcommand(ctx: CommandContext, name: string) {
@@ -104,13 +115,37 @@ async function deleteSubcommand(ctx: CommandContext, name: string) {
     .set({ deletedAt: new Date() })
     .where(eq(characters.id, c.id));
 
-  // if this was the active character, clear it
+  // Char deletion is a global action — every tab that was voicing this
+  // character has to drop to OOC, not just the calling tab. Find every
+  // live socket for this user whose `tabCharId` matches the deletion
+  // and clear it. Each affected socket gets its own me:character-update
+  // so its React state refreshes without a /me/profile poll. We also
+  // null out users.activeCharacterId in the DB so fresh tabs default to
+  // OOC instead of trying to resolve a tombstoned character.
+  await ctx.db.update(users).set({ activeCharacterId: null }).where(eq(users.id, ctx.user.id));
+  const affectedRooms = new Set<string>();
+  const sockets = await ctx.io.fetchSockets();
+  for (const s of sockets) {
+    if ((s.data as { userId?: string }).userId !== ctx.user.id) continue;
+    const sCharId = (s.data as { tabCharId?: string | null }).tabCharId;
+    if (sCharId !== c.id) continue;
+    (s.data as { tabCharId?: string | null }).tabCharId = null;
+    s.emit("me:character-update", { activeCharacterId: null, activeCharacterName: null });
+    const r = (s.data as { roomId?: string }).roomId;
+    if (r) affectedRooms.add(r);
+  }
+  // Update the calling socket's in-memory user too — it may not be in
+  // the io.fetchSockets() iteration if we're mid-event-handler.
   if (ctx.user.activeCharacterId === c.id) {
-    await ctx.db.update(users).set({ activeCharacterId: null }).where(eq(users.id, ctx.user.id));
     ctx.user.activeCharacterId = null;
     ctx.user.displayName = ctx.user.username;
+    affectedRooms.add(ctx.roomId);
+  }
+  if (affectedRooms.size > 0) {
     const { broadcastPresence } = await import("../../realtime/broadcast.js");
-    await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
+    for (const roomId of affectedRooms) {
+      await broadcastPresence(ctx.io, ctx.db, roomId);
+    }
   }
 }
 

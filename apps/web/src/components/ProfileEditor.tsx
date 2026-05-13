@@ -8,6 +8,7 @@ import {
   requestPermission as notifyRequestPermission,
   type NotifyPref,
 } from "../lib/notifications.js";
+import { getSocket } from "../lib/socket.js";
 import {
   disablePush,
   enablePush,
@@ -366,32 +367,30 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   }
 
   /**
-   * Switch the user's active character to the one currently being edited.
-   * Equivalent to typing `/char switch <name>` from chat. After success
-   * onSaved fires so the chat re-fetches /me/profile and re-applies the
-   * character's theme.
+   * Switch THIS tab's active character to the one currently being edited.
+   * Equivalent to typing `/char switch <name>` from chat — and like that
+   * path, it routes through the socket so the change is scoped to this
+   * tab. Other tabs the user has open keep voicing whatever they were.
+   * The server emits `me:character-update` which App.tsx picks up to
+   * refresh local activeCharacterId/Name + theme without polling.
    */
   async function switchToCharacter() {
     if (target.kind !== "character") return;
     setError(null);
     setSwitching(true);
-    try {
-      const res = await fetch("/me/active-character", {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ characterId: target.id }),
-      });
-      if (!res.ok) throw new Error(await readError(res));
-      // Track the change locally so the Switch button hides without waiting
-      // for a re-fetch of /me/profile.
-      setMaster((prev) => (prev ? { ...prev, activeCharacterId: target.id } : prev));
-      onSaved?.();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "switch failed");
-    } finally {
+    const charId = target.id;
+    getSocket().emit("me:switch-character", { characterId: charId }, (res) => {
       setSwitching(false);
-    }
+      if (res.ok) {
+        // Track the change locally so the Switch button hides without
+        // waiting for the App.tsx-level me:character-update handler
+        // to round-trip its state update back to props.
+        setMaster((prev) => (prev ? { ...prev, activeCharacterId: charId } : prev));
+        onSaved?.();
+      } else {
+        setError(res.message ?? "switch failed");
+      }
+    });
   }
 
   /**

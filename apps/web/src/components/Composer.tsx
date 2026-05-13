@@ -837,7 +837,13 @@ export function Composer({
           (forum-locked-for-viewer or no-active-topic states) since
           formatting a blocked compose makes no sense. */}
       {!inputDisabled ? (
-        <div className="flex flex-wrap items-center gap-0.5 text-xs">
+        // Left-padded to match the input row's effective left edge on
+        // mobile: the input row prefixes a 40px (`h-10 w-10`) hamburger
+        // toggle + 8px (`gap-2`) before the textarea, so the toolbar
+        // floats 48px off the composer's left padding to land flush
+        // under the textarea instead of under the hamburger. md+ has no
+        // hamburger (rail is always visible), so the offset is dropped.
+        <div className="flex flex-wrap items-center gap-0.5 pl-12 text-xs md:pl-0">
           <FmtButton title="Bold (Ctrl+B)" onClick={() => wrapSelection("**", "**", "bold")}>
             <b>B</b>
           </FmtButton>

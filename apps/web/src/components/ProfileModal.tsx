@@ -662,16 +662,36 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * a glance which world this user identifies with most.
  */
 function WorldsSection({ userId, onOpenWorld }: { userId: string; onOpenWorld: ((slug: string) => void) | undefined }) {
-  const [memberships, setMemberships] = useState<WorldMembership[] | null>(null);
+  // Tristate: `null` while loading, `"private"` when the server gated
+  // the response (anonymous viewer — see /users/:id/world-memberships),
+  // or the membership list when the viewer is authed and the user has
+  // any visible memberships. Empty memberships still render nothing so
+  // the section doesn't show an awkward "Worlds:" with no chips.
+  const [memberships, setMemberships] = useState<WorldMembership[] | "private" | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetch(`/users/${encodeURIComponent(userId)}/world-memberships`, { credentials: "include" })
-      .then((r) => (r.ok ? (r.json() as Promise<{ memberships: WorldMembership[] }>) : null))
-      .then((j) => { if (!cancelled && j) setMemberships(j.memberships); })
+      .then((r) => (r.ok ? (r.json() as Promise<{ memberships?: WorldMembership[]; private?: true }>) : null))
+      .then((j) => {
+        if (cancelled || !j) return;
+        if (j.private) setMemberships("private");
+        else if (j.memberships) setMemberships(j.memberships);
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [userId]);
-  if (!memberships || memberships.length === 0) return null;
+  if (memberships === null) return null;
+  if (memberships === "private") {
+    return (
+      <Section title="Worlds">
+        <p className="text-xs italic text-keep-muted">
+          Worlds are private. <a href="/login" className="text-keep-action hover:underline">Log in</a> or{" "}
+          <a href="/register" className="text-keep-action hover:underline">register</a> to view.
+        </p>
+      </Section>
+    );
+  }
+  if (memberships.length === 0) return null;
   return (
     <Section title="Worlds">
       <ul className="flex flex-wrap gap-1.5 text-sm">

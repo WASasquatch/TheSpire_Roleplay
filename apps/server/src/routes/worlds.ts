@@ -839,6 +839,17 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
    */
   app.get<{ Params: { userId: string } }>("/users/:userId/world-memberships", async (req, reply) => {
     const me = await getSessionUser(req, db);
+    // Privacy: world memberships expose the owner's username via every
+    // joined world, which is how a determined anon viewer could otherwise
+    // walk from a character profile back to its master account. Gate the
+    // entire response on auth — anonymous viewers get a `{ private: true }`
+    // stub so the client can render a "log in to view" placeholder
+    // instead of an error. Logged-in viewers see the membership list
+    // (filtered to private-world visibility as before). HTTP 200 with a
+    // discriminating shape so fetch() doesn't treat it as an error.
+    if (!me) {
+      return { private: true as const };
+    }
     const rows = await db
       .select({
         worldId: worldMembers.worldId,

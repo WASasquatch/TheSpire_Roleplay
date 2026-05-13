@@ -918,22 +918,35 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     ]),
   );
 
-  return userRows.map<RoomOccupant>((u) => {
-    const c = u.activeCharacterId ? charById.get(u.activeCharacterId) : undefined;
-    return {
-      userId: u.id,
-      displayName: c ? c.name : u.username,
-      characterId: c?.id ?? null,
-      away: u.awayMessage != null,
-      awayMessage: u.awayMessage,
-      chatColor: u.chatColor,
-      gender: resolveGender(u.gender, c?.statsJson),
-      role: roleByUser.get(u.id) ?? "member",
-      accountRole: u.role,
-      mood: u.currentMood,
-      primaryWorld: primaryWorldByUser.get(u.id) ?? null,
-    };
-  });
+  return userRows
+    // Privacy: a user whose master profile is marked private
+    // (`users.isPublic = false`) only surfaces in the userlist while
+    // *actively using* a character. In OOC mode (no active character)
+    // they're filtered out entirely — the (ooc) badge would otherwise
+    // expose the master username they specifically opted out of
+    // publishing. Active-character rows still appear (and only the
+    // character name is shown; the master link is independently gated
+    // on the profile endpoint). Side-effect: the room's occupant
+    // count reflects what's visible, not raw socket presence — fine,
+    // since invisible users are by definition not "in" the room from
+    // a viewer's perspective.
+    .filter((u) => u.isPublic || !!u.activeCharacterId)
+    .map<RoomOccupant>((u) => {
+      const c = u.activeCharacterId ? charById.get(u.activeCharacterId) : undefined;
+      return {
+        userId: u.id,
+        displayName: c ? c.name : u.username,
+        characterId: c?.id ?? null,
+        away: u.awayMessage != null,
+        awayMessage: u.awayMessage,
+        chatColor: u.chatColor,
+        gender: resolveGender(u.gender, c?.statsJson),
+        role: roleByUser.get(u.id) ?? "member",
+        accountRole: u.role,
+        mood: u.currentMood,
+        primaryWorld: primaryWorldByUser.get(u.id) ?? null,
+      };
+    });
 }
 
 /** When a character is active, prefer its stats.gender; else the user's OOC gender. */

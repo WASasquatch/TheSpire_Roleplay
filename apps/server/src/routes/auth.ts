@@ -48,7 +48,14 @@ export const MASTER_USERNAME_RX = /^[a-zA-Z0-9_\-'.` ]{2,40}$/;
 export const MASTER_USERNAME_RULE_MESSAGE =
   "username must be 2-40 chars: ASCII letters/numbers and _ - ' . ` plus NBSP (Alt+0160); regular spaces and Unicode confusables blocked";
 export function normalizeMasterUsername(input: string): string {
-  return input.normalize("NFKC");
+  // NFC, not NFKC. NFKC's compatibility decomposition collapses NBSP
+  // (U+00A0) into a regular space (U+0020), which then fails the regex
+  // that only allows NBSP. NFC preserves NBSP while still composing
+  // canonical sequences (e.g. `e` + combining-acute → `é` as a single
+  // codepoint). The Unicode-confusables defense lives in the regex's
+  // `[a-zA-Z0-9_\-'.` ]` allow-list — Cyrillic 'а' isn't in
+  // [a-zA-Z], so NFKC's compatibility passes never gated that anyway.
+  return input.normalize("NFC");
 }
 const masterUsernameSchema = z
   .string()

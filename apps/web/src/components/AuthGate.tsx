@@ -510,7 +510,16 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           // (wrong answer, dup username, expired token, etc.) leaves the
           // current id consumed. Drop it so the next render re-fetches.
           refreshCaptcha();
-          throw new Error((await res.json()).error ?? "register failed");
+          // Zod validation failures arrive as `{ error: "validation",
+          // issues: [{ path, message }] }`. Surfacing just `error` left
+          // the user staring at the word "validation" with no idea
+          // which field failed — prefer the first issue's message.
+          const body = await res.json().catch(() => ({} as { error?: string; issues?: Array<{ path?: string; message: string }> }));
+          const firstIssue = body.issues?.[0];
+          const detail = firstIssue
+            ? `${firstIssue.path ? `${firstIssue.path}: ` : ""}${firstIssue.message}`
+            : null;
+          throw new Error(detail ?? body.error ?? "register failed");
         }
         const j = await res.json();
         // The server returns role:"admin" for the very first registrant
@@ -524,7 +533,14 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ identifier: email || username, password }),
         });
-        if (!res.ok) throw new Error((await res.json()).error ?? "login failed");
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({} as { error?: string; issues?: Array<{ path?: string; message: string }> }));
+          const firstIssue = body.issues?.[0];
+          const detail = firstIssue
+            ? `${firstIssue.path ? `${firstIssue.path}: ` : ""}${firstIssue.message}`
+            : null;
+          throw new Error(detail ?? body.error ?? "login failed");
+        }
         const j = await res.json();
         setMe({ id: j.id, username: j.username, role: j.role });
       }

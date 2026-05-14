@@ -45,6 +45,14 @@ export interface SiteBranding {
    */
   sessionTtlMs: number;
   /**
+   * Author-edit / author-delete grace window in ms for chat + DM
+   * messages. Drives the per-message edit/delete control visibility
+   * + the "Edit (within Xs)" tooltip copy. The server is the
+   * authoritative gate; this value is just the soft client-side
+   * mirror so the controls disappear at the right time.
+   */
+  editGraceMs: number;
+  /**
    * Sitewide default theme - used by the splash so the login screen renders
    * in the admin-configured palette instead of inheriting whatever theme the
    * last logged-in user happened to leave on documentElement.
@@ -84,6 +92,9 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // TTL 30 days. Real values are pushed in by /site on first paint.
   messageRetentionMs: 0,
   sessionTtlMs: 30 * 24 * 60 * 60 * 1000,
+  // 5 minutes — mirrors the server migration default. Real value
+  // arrives via /site on first paint.
+  editGraceMs: 5 * 60 * 1000,
   defaultTheme: DEFAULT_THEME,
   // Off by default. Admin flips it on once there are real users to surface.
   activityFeedsEnabled: false,
@@ -137,6 +148,9 @@ export function loadCachedBranding(): SiteBranding {
       sessionTtlMs: typeof parsed.sessionTtlMs === "number" && parsed.sessionTtlMs > 0
         ? parsed.sessionTtlMs
         : DEFAULT_BRANDING.sessionTtlMs,
+      editGraceMs: typeof parsed.editGraceMs === "number" && parsed.editGraceMs >= 0
+        ? parsed.editGraceMs
+        : DEFAULT_BRANDING.editGraceMs,
       // Theme is structured; fall through to DEFAULT_THEME if the cached
       // payload is malformed instead of letting a partial value slip in.
       defaultTheme: parsed.defaultTheme && typeof parsed.defaultTheme === "object"

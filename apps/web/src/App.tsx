@@ -1158,15 +1158,14 @@ function Chat() {
       }
     });
     socket.on("watch:online", ({ username, displayName }) => {
-      // (No friends-rail refresh needed — the modal pulls fresh on
-      // every open. The system message below + the toast are still
-      // the right inline + OS-level signals.)
-      // Surface a small system line in the current room so the user sees
-      // it inline (and it sticks in the timeline). Desktop toast is fired
-      // separately - watchers usually want both surfaces.
-      const body = displayName === username
-        ? `${username} is online.`
-        : `${displayName} (${username}) is online.`;
+      // Show ONLY the public-facing display name. When the watched
+      // user is in-character, `displayName` is the character name —
+      // appending " (master_username)" outed the OOC account to
+      // every watcher's room, breaking the same per-identity privacy
+      // contract that protects DMs / friends / userlists. The
+      // notification tag still keys on the master username so
+      // duplicate browser toasts collapse correctly.
+      const body = `${displayName} is online.`;
       const id = `watch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const roomId = useChat.getState().currentRoomId;
       if (roomId) {

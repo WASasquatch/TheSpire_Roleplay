@@ -28,7 +28,16 @@ interface Props {
 interface FriendListEntry {
   userId: string;
   username: string;
+  /**
+   * The friend's character id on this friendship row, or null when
+   * the row is OOC-pinned. Drives the @handle display + the
+   * `targetCharacterId` we seed onto a brand-new DM thread so the
+   * conversation is created against the right identity.
+   */
+  characterId: string | null;
   displayName: string;
+  /** Character name when characterId is set; master username otherwise. */
+  handle: string;
   avatarUrl: string | null;
   online: boolean;
 }
@@ -364,7 +373,13 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
     kind: "friend" as const,
     userId: f.userId,
     username: f.username,
+    // The friend's pinned character id on this friendship — drives
+    // both the @handle display (character name when set) and the
+    // `targetCharacterId` we seed onto a brand-new DM thread so the
+    // first message lands in the right per-identity inbox.
+    characterId: f.characterId,
     displayName: f.displayName,
+    handle: f.handle,
     avatarUrl: f.avatarUrl,
     online: f.online,
     conv: convByOther.get(f.userId) ?? null,
@@ -376,7 +391,12 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
       kind: "conv" as const,
       userId: c.otherUserId,
       username: c.otherUsername,
+      // Same per-identity pinning as friend rows. `otherCharacterId`
+      // comes off the conversation row and may be null when the
+      // thread is OOC-pinned.
+      characterId: c.otherCharacterId,
       displayName: c.otherDisplayName,
+      handle: c.otherCharacterId ? c.otherDisplayName : c.otherUsername,
       avatarUrl: c.otherAvatarUrl,
       online: c.otherOnline,
       conv: c,
@@ -706,7 +726,9 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
                         onRemove={() => removeFriend({
                           userId: row.userId,
                           username: row.username,
+                          characterId: row.characterId,
                           displayName: row.displayName,
+                          handle: row.handle,
                           avatarUrl: row.avatarUrl,
                           online: row.online,
                         })}
@@ -829,22 +851,33 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
               (mobileView === "thread" ? "flex-1" : "hidden md:flex md:flex-1")
             }
           >
-            {selectedUserId ? (
-              <ThreadPane
-                otherUserId={selectedUserId}
-                fallback={
-                  friendRows.find((r) => r.userId === selectedUserId)
-                    ?? nonFriendConvRows.find((r) => r.userId === selectedUserId)
-                    ?? null
-                }
-                onBack={() => setMobileView("list")}
-                appendDmMessage={appendDmMessage}
-                setDmMessages={setDmMessages}
-                meId={me?.id ?? null}
-                onCommand={onCommand}
-                myCharacterId={inboxFilterCharId}
-              />
-            ) : (
+            {selectedUserId ? (() => {
+              // Resolve the friend/conv row for the selected user so we
+              // can hand the pinned otherCharacterId down even when no
+              // DirectConversation exists yet. Without this seed, the
+              // first DM with a character-friend would create the
+              // conversation against the master (OOC) side — which is
+              // exactly the per-identity-partition leak the user
+              // reported: clicking a character friend opened a chat
+              // with their OOC account.
+              const selectedRow =
+                friendRows.find((r) => r.userId === selectedUserId)
+                  ?? nonFriendConvRows.find((r) => r.userId === selectedUserId)
+                  ?? null;
+              return (
+                <ThreadPane
+                  otherUserId={selectedUserId}
+                  fallback={selectedRow}
+                  initialOtherCharacterId={selectedRow?.characterId ?? null}
+                  onBack={() => setMobileView("list")}
+                  appendDmMessage={appendDmMessage}
+                  setDmMessages={setDmMessages}
+                  meId={me?.id ?? null}
+                  onCommand={onCommand}
+                  myCharacterId={inboxFilterCharId}
+                />
+              );
+            })() : (
               <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-sm italic text-keep-muted">
                 Pick a friend or recent conversation to start chatting.
               </div>
@@ -869,7 +902,11 @@ function UserRow({
   row: {
     userId: string;
     username: string;
+    /** Pinned character id for this row, or null when OOC-pinned. */
+    characterId: string | null;
     displayName: string;
+    /** Character name when characterId is set; master username otherwise. */
+    handle: string;
     avatarUrl: string | null;
     online: boolean;
     conv: DirectConversationSummary | null;
@@ -899,7 +936,7 @@ function UserRow({
             ) : null}
           </span>
           <span className="block truncate text-[10px] text-keep-muted">
-            {row.conv?.lastMessagePreview ?? `@${row.username}`}
+            {row.conv?.lastMessagePreview ?? `@${row.handle}`}
           </span>
         </span>
       </button>
@@ -1111,6 +1148,7 @@ function CharacterSwitcher({
 function ThreadPane({
   otherUserId,
   fallback,
+  initialOtherCharacterId,
   onBack,
   appendDmMessage,
   setDmMessages,
@@ -1120,6 +1158,16 @@ function ThreadPane({
 }: {
   otherUserId: string;
   fallback: { displayName: string; avatarUrl: string | null; online: boolean } | null;
+  /**
+   * The friend/conv row's pinned character id for the OTHER party,
+   * threaded in from the parent so the first send on a brand-new
+   * thread targets the right character. Without this, opening a DM
+   * with a character-friend whose conversation doesn't yet exist
+   * would default `targetCharacterId` to null and create the
+   * conversation against their OOC side — the per-identity partition
+   * would silently leak to OOC on first contact.
+   */
+  initialOtherCharacterId: string | null;
   onBack: () => void;
   appendDmMessage: (msg: DirectMessage) => void;
   setDmMessages: (conversationId: string, msgs: DirectMessage[]) => void;
@@ -1146,11 +1194,13 @@ function ThreadPane({
   // read-marker POST so the server scopes the thread to my pinned
   // side. Null = master OOC.
   const activeCharacterId = myCharacterId;
-  // Target identity pinned to THIS thread (server-side per-conversation
-  // attribution). On a fresh thread (no row yet) we default to null so
-  // the first send addresses the target's master OOC handle — matches
-  // the pre-identity behavior for first contact from "compose by name".
-  const targetCharacterId = conversation?.otherCharacterId ?? null;
+  // Target identity pinned to THIS thread. Existing conversations
+  // carry an authoritative `otherCharacterId` from the server (the
+  // pinned side of the row); fresh threads with no conversation yet
+  // fall back to the friend/conv row's pinned character so the first
+  // send creates the conversation against the right identity — not
+  // the OOC side, which was the partition-leak the user reported.
+  const targetCharacterId = conversation?.otherCharacterId ?? initialOtherCharacterId;
   const messages = useChat((s) =>
     conversation ? (s.dmMessagesByConv[conversation.id] ?? NO_DM_MESSAGES) : NO_DM_MESSAGES,
   );

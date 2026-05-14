@@ -640,6 +640,12 @@ export async function registerAdminRoutes(
     maxRoomsPerOwner: z.number().int().min(0).max(1000).optional(),
     /** 100..50000 chars per chat message. */
     maxMessageLength: z.number().int().min(100).max(50_000).optional(),
+    /**
+     * Author-edit / author-delete grace window in ms for chat + DM
+     * messages. 0..7 days. Mods and admins bypass the gate. Forum
+     * rooms ignore it (indefinite edits with an (edited) badge).
+     */
+    editGraceMs: z.number().int().min(0).max(7 * 24 * 60 * 60 * 1000).optional(),
     /** 1000..200000 chars per bio HTML. */
     maxBioLength: z.number().int().min(1000).max(200_000).optional(),
     /** Master switch for /auth/register. */
@@ -689,6 +695,7 @@ export async function registerAdminRoutes(
       maxAccountsPerEmail: s.maxAccountsPerEmail,
       maxRoomsPerOwner: s.maxRoomsPerOwner,
       maxMessageLength: s.maxMessageLength,
+      editGraceMs: s.editGraceMs,
       maxBioLength: s.maxBioLength,
       registrationOpen: s.registrationOpen,
       welcomeHtml: s.welcomeHtml,
@@ -724,6 +731,7 @@ export async function registerAdminRoutes(
     if (body.maxAccountsPerEmail !== undefined) patch.maxAccountsPerEmail = body.maxAccountsPerEmail;
     if (body.maxRoomsPerOwner !== undefined) patch.maxRoomsPerOwner = body.maxRoomsPerOwner;
     if (body.maxMessageLength !== undefined) patch.maxMessageLength = body.maxMessageLength;
+    if (body.editGraceMs !== undefined) patch.editGraceMs = body.editGraceMs;
     if (body.maxBioLength !== undefined) patch.maxBioLength = body.maxBioLength;
     if (body.registrationOpen !== undefined) patch.registrationOpen = body.registrationOpen;
     if (body.welcomeHtml !== undefined) {

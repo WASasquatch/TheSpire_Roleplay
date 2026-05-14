@@ -49,7 +49,16 @@ function tokenize(s: string): string[] {
 }
 
 export function parseInput(raw: string): ParsedInput {
-  const text = raw.trimStart();
+  // No `trimStart` here on purpose. A leading space is the user's
+  // explicit escape hatch for "don't parse this as a command": typing
+  // " :O" gets sent as a literal smiley instead of dispatching the
+  // `:` action shortcut, and " /foo" gets sent as literal text
+  // instead of routing to /foo. The existing `//` and `::` escapes
+  // still work for users who don't want a leading space in the body,
+  // and the dispatch layer preserves the leading space in the sent
+  // body via `trimEnd()` (vs. `trim()`) so the space survives all
+  // the way to the recipient's screen.
+  const text = raw;
 
   /**
    * `:` action shortcut. ":walks in casually" is parsed as if the user
@@ -59,7 +68,9 @@ export function parseInput(raw: string): ParsedInput {
    * pose-heavy users don't need a 3-character prefix per line.
    *
    * "::text" escapes to a literal say starting with a single colon —
-   * same posture as "//foo" escaping a literal slash.
+   * same posture as "//foo" escaping a literal slash. " :text" (with
+   * a leading space) is ALSO a literal say, since the parser only
+   * triggers shortcuts when the very first character is `:` or `/`.
    */
   if (text.startsWith(":")) {
     if (text.startsWith("::")) {

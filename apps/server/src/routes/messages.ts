@@ -15,17 +15,13 @@ import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
-/**
- * Edit / delete grace window for chat (flat) rooms. After this many ms have
- * passed since the message was created, edits and deletes are rejected.
- * Picked to be long enough for typo fixes and "wait, that wasn't the right
- * window" second thoughts, short enough that long-tail edits can't quietly
- * rewrite established history. Forum rooms (replyMode="nested") bypass this
- * cap entirely — posts there are long-lived and the author is expected to
- * be able to refine them indefinitely, with the (edited) badge providing
- * transparency.
- */
-const GRACE_MS = 60_000;
+// Edit / delete grace window for chat (flat) rooms is now admin-
+// configurable via `siteSettings.editGraceMs`. Each handler below
+// reads the current value via `getSettings(db)` so a runtime tweak
+// takes effect on the next attempt without restart. Forum rooms
+// (replyMode="nested") bypass the cap entirely — posts there are
+// long-lived and authors are expected to refine them indefinitely,
+// with the (edited) badge providing transparency.
 
 /**
  * Look up whether the message's room is a forum (nested-mode). Forum posts
@@ -104,14 +100,16 @@ export async function registerMessageRoutes(
 
     const now = Date.now();
     const forum = await isForumMessage(db, m.roomId);
-    if (!forum && now - +m.createdAt > GRACE_MS) {
+    // Single settings read covers both gates (edit window + size cap)
+    // so we don't pay two getSettings round-trips per edit.
+    const { maxMessageLength, editGraceMs } = await getSettings(db);
+    if (!forum && now - +m.createdAt > editGraceMs) {
       reply.code(403);
-      return { error: `Edit window has closed (${Math.round(GRACE_MS / 1000)}s after sending).` };
+      return { error: `Edit window has closed (${Math.round(editGraceMs / 1000)}s after sending).` };
     }
 
     // Apply the same length cap as fresh messages so editing isn't a back
     // door around maxMessageLength.
-    const { maxMessageLength } = await getSettings(db);
     const trimmed = body.body.trim();
     if (!trimmed) { reply.code(400); return { error: "empty" }; }
     if (trimmed.length > maxMessageLength) {
@@ -164,11 +162,13 @@ export async function registerMessageRoutes(
 
     const now = Date.now();
     const forum = await isForumMessage(db, m.roomId);
-    // Mods/admins bypass the grace window entirely; authors only get the
-    // bypass in forum rooms (and in flat-chat rooms within 60s).
-    if (!isMod && !forum && now - +m.createdAt > GRACE_MS) {
+    // Mods/admins bypass the grace window entirely; authors only get
+    // the bypass in forum rooms (and in flat-chat rooms within the
+    // admin-configured grace window).
+    const { editGraceMs } = await getSettings(db);
+    if (!isMod && !forum && now - +m.createdAt > editGraceMs) {
       reply.code(403);
-      return { error: `Delete window has closed (${Math.round(GRACE_MS / 1000)}s after sending).` };
+      return { error: `Delete window has closed (${Math.round(editGraceMs / 1000)}s after sending).` };
     }
 
     const deletedAt = new Date(now);

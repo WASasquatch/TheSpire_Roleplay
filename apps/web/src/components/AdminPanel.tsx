@@ -167,6 +167,8 @@ interface SettingsRow {
   maxAccountsPerEmail: number;
   maxRoomsPerOwner: number;
   maxMessageLength: number;
+  /** Author edit/delete grace window in ms for chat + DM messages. */
+  editGraceMs: number;
   maxBioLength: number;
   registrationOpen: boolean;
   welcomeHtml: string;
@@ -462,6 +464,11 @@ function SettingsTab() {
   const [maxEmail, setMaxEmail] = useState("");
   const [maxRooms, setMaxRooms] = useState("");
   const [maxMsgLen, setMaxMsgLen] = useState("");
+  // Edit-grace window stored as a duration string (e.g. "5m", "30s",
+  // "1h") so admins can pick the right unit for the room's pace.
+  // Persisted as ms via parseDurationMs. "0" disables editing entirely
+  // (still leaves mods/admins able to delete via moderation tools).
+  const [editGrace, setEditGrace] = useState("");
   const [maxBioLen, setMaxBioLen] = useState("");
   const [regOpen, setRegOpen] = useState(true);
   const [activityFeedsEnabled, setActivityFeedsEnabled] = useState(false);
@@ -485,6 +492,7 @@ function SettingsTab() {
       setMaxEmail(String(j.maxAccountsPerEmail));
       setMaxRooms(String(j.maxRoomsPerOwner));
       setMaxMsgLen(String(j.maxMessageLength));
+      setEditGrace(formatMs(j.editGraceMs));
       setMaxBioLen(String(j.maxBioLength));
       setRegOpen(j.registrationOpen);
       setActivityFeedsEnabled(j.activityFeedsEnabled);
@@ -503,8 +511,13 @@ function SettingsTab() {
     try {
       const retentionMs = parseDurationMs(retention);
       const ttlMs = parseDurationMs(sessionTtl);
+      const editGraceMs = parseDurationMs(editGrace);
       if (retentionMs === null) throw new Error("retention must be a duration like 30d (or 0 for never)");
       if (ttlMs === null || ttlMs < 5 * 60 * 1000) throw new Error("session TTL must be at least 5m");
+      if (editGraceMs === null) throw new Error("edit window must be a duration like 5m (or 0 to disable edits)");
+      // Server caps at 7d; same here so the input error is friendlier
+      // than an opaque 400 from the route.
+      if (editGraceMs > 7 * 24 * 60 * 60 * 1000) throw new Error("edit window must be 7 days or less");
       const intOrThrow = (label: string, raw: string, min: number, max: number): number => {
         const n = parseInt(raw, 10);
         if (!Number.isFinite(n) || n < min || n > max) {
@@ -519,6 +532,7 @@ function SettingsTab() {
         maxAccountsPerEmail: intOrThrow("Max accounts/email", maxEmail, 1, 50),
         maxRoomsPerOwner: intOrThrow("Max rooms/owner", maxRooms, 0, 1000),
         maxMessageLength: intOrThrow("Max message length", maxMsgLen, 100, 50_000),
+        editGraceMs,
         maxBioLength: intOrThrow("Max bio length", maxBioLen, 1000, 200_000),
         registrationOpen: regOpen,
         activityFeedsEnabled,
@@ -552,6 +566,7 @@ function SettingsTab() {
         registerDisclaimerHtml: j.registerDisclaimerHtml,
         messageRetentionMs: j.messageRetentionMs,
         sessionTtlMs: j.sessionTtlMs,
+        editGraceMs: j.editGraceMs,
         defaultTheme: j.defaultTheme,
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
@@ -643,6 +658,21 @@ function SettingsTab() {
             min={100}
             max={50_000}
           />
+          <label className="text-xs">
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">
+              Edit / delete window
+            </span>
+            <input
+              type="text"
+              value={editGrace}
+              onChange={(e) => setEditGrace(e.target.value)}
+              placeholder="5m"
+              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+            />
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              How long after sending an author can edit / delete their own chat or DM message. Duration like 30s / 5m / 1h. 0 disables author edits entirely. Mods + admins always bypass this; forum posts are exempt and stay editable indefinitely.
+            </span>
+          </label>
           <LimitField
             label="Max bio length"
             hint="Hard cap on profile bio HTML (chars)."
@@ -844,6 +874,7 @@ function BrandingTab() {
         registerDisclaimerHtml: j.registerDisclaimerHtml,
         messageRetentionMs: j.messageRetentionMs,
         sessionTtlMs: j.sessionTtlMs,
+        editGraceMs: j.editGraceMs,
         defaultTheme: j.defaultTheme,
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
@@ -1132,6 +1163,7 @@ function RulesTab() {
         registerDisclaimerHtml: j.registerDisclaimerHtml,
         messageRetentionMs: j.messageRetentionMs,
         sessionTtlMs: j.sessionTtlMs,
+        editGraceMs: j.editGraceMs,
         defaultTheme: j.defaultTheme,
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,

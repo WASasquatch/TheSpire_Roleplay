@@ -197,7 +197,7 @@ export async function dispatchChatInput(args: {
         }
         await addMessage(ctx, {
           kind: "say",
-          body: parsed.argsText.trim(),
+          body: parsed.argsText.trimEnd(),
           title: cappedTitle,
           ...(threadCategoryId ? { threadCategoryId } : {}),
         });
@@ -249,7 +249,7 @@ export async function dispatchChatInput(args: {
         const snippet = parent.body.length > 120 ? `${parent.body.slice(0, 120)}…` : parent.body;
         await addMessage(ctx, {
           kind: "say",
-          body: parsed.argsText.trim(),
+          body: parsed.argsText.trimEnd(),
           replyToId: parent.id,
           replyToDisplayName: parent.displayName,
           replyToBodySnippet: snippet,

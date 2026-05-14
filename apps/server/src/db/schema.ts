@@ -644,6 +644,14 @@ export const siteSettings = sqliteTable("site_settings", {
   maxRoomsPerOwner: integer("max_rooms_per_owner").notNull().default(25),
   /** Hard cap on chat message body length (matches dispatch.ts MAX_BODY default). */
   maxMessageLength: integer("max_message_length").notNull().default(4000),
+  /**
+   * Author-edit / author-delete grace window in ms. After this many
+   * ms since createdAt, edits and deletes are rejected for the author.
+   * Mods and admins bypass the gate entirely. Forum (nested) rooms
+   * ignore this and allow indefinite edits — the (edited) badge is
+   * the transparency signal there. Default 300_000 (5 min).
+   */
+  editGraceMs: integer("edit_grace_ms").notNull().default(300_000),
   /** Hard cap on profile bio HTML length (master + character bios). */
   maxBioLength: integer("max_bio_length").notNull().default(50_000),
   /** Master switch - when false, /auth/register returns 503. */

@@ -13,8 +13,27 @@ type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 export interface FriendListEntry {
   userId: string;
   username: string;
-  /** Active character name if the friend is currently in-character, else master username. */
+  /**
+   * The friend's character id pinned to THIS friendship row, or null
+   * when they're friended via their master/OOC handle. Per-identity
+   * partition contract: if you friended @Aphelios (a character), this
+   * row carries Aphelios's character id and the DM thread it opens
+   * stays bound to that character forever — no OOC crossover. The
+   * client uses this as `targetCharacterId` when seeding a fresh DM
+   * conversation so the first message lands in the right pinned
+   * thread.
+   */
+  characterId: string | null;
+  /** Character name when characterId is set, else the master username. */
   displayName: string;
+  /**
+   * Handle the UI shows under the displayName — character name when
+   * the friendship is pinned to a character, master username
+   * otherwise. Distinct from `username` so the per-character privacy
+   * contract holds: a character-pinned friend NEVER leaks the
+   * master account's username through the @handle.
+   */
+  handle: string;
   avatarUrl: string | null;
   online: boolean;
 }
@@ -134,12 +153,22 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     const entries: FriendListEntry[] = otherIdentities.map((o) => {
       const u = userById.get(o.userId);
       const c = o.characterId ? charById.get(o.characterId) : null;
-      const displayName = c?.name ?? u?.username ?? "(unknown)";
-      const avatarUrl = c?.avatarUrl ?? u?.avatarUrl ?? null;
+      const usingChar = !!(c && !c.deletedAt);
+      const displayName = usingChar ? c!.name : (u?.username ?? "(unknown)");
+      const avatarUrl = usingChar ? (c!.avatarUrl ?? u?.avatarUrl ?? null) : (u?.avatarUrl ?? null);
       return {
         userId: o.userId,
         username: u?.username ?? "(unknown)",
+        // Pinned character id for this friendship row. Null when
+        // they're friended OOC. The client uses this to seed
+        // `targetCharacterId` on a brand-new DM so the conversation
+        // is created against the right identity, not the master.
+        characterId: usingChar ? o.characterId : null,
         displayName,
+        // Handle = character name when pinned to a character, else
+        // master username. Keeps the master handle out of the UI
+        // entirely for character-friendship rows.
+        handle: usingChar ? c!.name : (u?.username ?? "(unknown)"),
         avatarUrl,
         online: online.has(o.userId),
       };

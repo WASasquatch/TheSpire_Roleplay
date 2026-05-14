@@ -888,35 +888,56 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   // THIS room — falling back to the DB column would leak a /char run
   // on a sibling tab into this room's occupant display.
   //
-  // Multi-tab edge case (same user, two sockets in the same room, two
-  // different characters): we still dedupe by userId here and pick the
-  // first socket's char. Both tabs still send messages with their own
-  // identity (chat lines come through correctly); the userlist just
-  // can't show one user as two people. Acceptable for the "different
-  // characters in different rooms" use case the feature targets.
-  const tabCharByUser = new Map<string, string | null | undefined>();
+  // Dedupe is on the IDENTITY tuple (userId, tabCharId), not on
+  // userId alone. That makes a user with two tabs voicing two
+  // different characters in the same room render as TWO occupants
+  // (one per character), which is the per-identity contract the rest
+  // of the app (DMs, friends, @mentions) already uses. Two tabs as
+  // the same character (or both OOC) collapse to one row, since
+  // they're the same identity. The previous userId-only dedup made
+  // the second tab invisible in the userlist while their messages
+  // still flowed through — the bug this comment block now exists to
+  // prevent regressing.
+  type Identity = { userId: string; tabCharId: string | null };
+  const identities: Identity[] = [];
+  const seen = new Set<string>();
   for (const s of sockets) {
     const uid = (s.data as { userId?: string }).userId;
-    if (!uid || tabCharByUser.has(uid)) continue;
-    tabCharByUser.set(uid, (s.data as { tabCharId?: string | null }).tabCharId);
+    if (!uid) continue;
+    const tabRaw = (s.data as { tabCharId?: string | null }).tabCharId;
+    // `tabCharId === undefined` means "no override yet" — fall back
+    // to the DB default below by leaving it undefined here; the
+    // identity key still needs a stable string, so collapse it to
+    // the empty sentinel after we know the DB default.
+    const tab = tabRaw === undefined ? undefined : tabRaw;
+    // Defer the DB-default resolution until we know the user row, so
+    // the dedup key matches the value we'll render with. For now,
+    // index by `userId::tabCharId` when set, or `userId::?` when
+    // not (the `?` is resolved below).
+    const provisionalKey = `${uid}::${tab === undefined ? "?" : (tab ?? "")}`;
+    if (seen.has(provisionalKey)) continue;
+    seen.add(provisionalKey);
+    identities.push({ userId: uid, tabCharId: tab === undefined ? null : tab });
   }
-  const userIds = [...tabCharByUser.keys()];
-  if (!userIds.length) return [];
+  if (!identities.length) return [];
 
+  const userIds = [...new Set(identities.map((i) => i.userId))];
   const userRows = await db
     .select()
     .from(users)
     .where(sql`${users.id} IN (${sql.join(userIds.map((u) => sql`${u}`), sql`, `)})`);
+  const userById = new Map(userRows.map((u) => [u.id, u]));
 
-  // Resolve the *effective* charId per user: socket-local override wins,
-  // else fall back to the DB column (covers pre-handshake sockets and
-  // any user without an override).
-  const effectiveCharIdByUser = new Map<string, string | null>();
-  for (const u of userRows) {
-    const tab = tabCharByUser.get(u.id);
-    effectiveCharIdByUser.set(u.id, tab === undefined ? u.activeCharacterId : tab);
-  }
-  const charIds = [...new Set([...effectiveCharIdByUser.values()].filter((v): v is string => !!v))];
+  // For any socket without a tabCharId override (rare — the
+  // handshake seeds one), fall back to the DB column. We do this
+  // after the dedup pass since the fallback only matters for
+  // rendering, not for identity dedup (those sockets had `?` in the
+  // dedup key above and end up as one row per user).
+  const resolvedIdentities = identities.map((i) => {
+    const u = userById.get(i.userId);
+    return { userId: i.userId, characterId: i.tabCharId ?? u?.activeCharacterId ?? null };
+  });
+  const charIds = [...new Set(resolvedIdentities.map((i) => i.characterId).filter((v): v is string => !!v))];
   const charRows = charIds.length
     ? await db
         .select()
@@ -977,7 +998,18 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     ]),
   );
 
-  return userRows
+  // Render one occupant per resolved identity. Two characters of the
+  // same player in the same room (two tabs voicing different chars)
+  // come out as two rows; the same character on multiple tabs (or
+  // both OOC) collapses to one because the dedup pass above keys on
+  // the identity tuple. Downstream consumers (React keys, @mention
+  // autocomplete, gender lookup) cope fine with multiple rows
+  // sharing a userId because each carries its own characterId.
+  const out: RoomOccupant[] = [];
+  for (const id of resolvedIdentities) {
+    const u = userById.get(id.userId);
+    if (!u) continue;
+    const c = id.characterId ? charById.get(id.characterId) : undefined;
     // Privacy: a user whose master profile is marked private
     // (`users.isPublic = false`) only surfaces in the userlist while
     // *actively using* a character. In OOC mode (no active character)
@@ -989,34 +1021,28 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     // count reflects what's visible, not raw socket presence — fine,
     // since invisible users are by definition not "in" the room from
     // a viewer's perspective.
-    // Privacy filter uses the EFFECTIVE charId (per-tab override or DB
-    // fallback). A user with isPublic=false who's voicing a character
-    // in this room — via either path — surfaces; OOC-only socket
-    // presence stays hidden.
-    .filter((u) => u.isPublic || !!effectiveCharIdByUser.get(u.id))
-    .map<RoomOccupant>((u) => {
-      const charId = effectiveCharIdByUser.get(u.id) ?? null;
-      const c = charId ? charById.get(charId) : undefined;
-      // Same character-first / master-fallback logic the message-author
-      // color path uses (see addMessage). Userlist + chat lines have to
-      // agree, otherwise a user posting as Character A would show up
-      // with their OOC color in the rail and a different color on the
-      // line, which looks broken.
-      const effectiveColor = c?.chatColor ?? u.chatColor;
-      return {
-        userId: u.id,
-        displayName: c ? c.name : u.username,
-        characterId: c?.id ?? null,
-        away: u.awayMessage != null,
-        awayMessage: u.awayMessage,
-        chatColor: effectiveColor,
-        gender: resolveGender(u.gender, c?.statsJson),
-        role: roleByUser.get(u.id) ?? "member",
-        accountRole: u.role,
-        mood: u.currentMood,
-        primaryWorld: primaryWorldByUser.get(u.id) ?? null,
-      };
+    if (!u.isPublic && !c) continue;
+    // Same character-first / master-fallback logic the message-author
+    // color path uses (see addMessage). Userlist + chat lines have to
+    // agree, otherwise a user posting as Character A would show up
+    // with their OOC color in the rail and a different color on the
+    // line, which looks broken.
+    const effectiveColor = c?.chatColor ?? u.chatColor;
+    out.push({
+      userId: u.id,
+      displayName: c ? c.name : u.username,
+      characterId: c?.id ?? null,
+      away: u.awayMessage != null,
+      awayMessage: u.awayMessage,
+      chatColor: effectiveColor,
+      gender: resolveGender(u.gender, c?.statsJson),
+      role: roleByUser.get(u.id) ?? "member",
+      accountRole: u.role,
+      mood: u.currentMood,
+      primaryWorld: primaryWorldByUser.get(u.id) ?? null,
     });
+  }
+  return out;
 }
 
 /** When a character is active, prefer its stats.gender; else the user's OOC gender. */

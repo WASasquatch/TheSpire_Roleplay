@@ -142,8 +142,13 @@ const NESTED_VISIBLE_REPLIES = 5;
 /** Kinds eligible for /reports - mirrors the server's privacy gate. */
 const REPORTABLE_KINDS = new Set(["say", "me", "ooc", "announce", "npc"]);
 
-/** Author can edit or delete their own message inside this window after sending. Mirrors the server-side cap in routes/messages.ts. */
-const GRACE_MS = 60_000;
+// Author edit/delete grace window is admin-configurable via
+// `siteSettings.editGraceMs`, surfaced through the public /site
+// endpoint into the branding store. The Line component reads it via
+// `useChat` at render time so a runtime tweak in the admin panel
+// takes effect without a reload. This client-side gate is just the
+// soft "hide controls past the window" check; the server route
+// re-validates and is authoritative.
 
 const REPLYABLE_KINDS = new Set(["say", "me", "ooc"]);
 
@@ -2034,11 +2039,14 @@ function Line({
   const bodyParts = useMemo(() => splitMentions(msg.body), [msg.body]);
   const renderedBody = renderParts(bodyParts, onMentionClick, onWorldClick, selfNames);
 
-  // Edit/delete controls only apply to the author's own chat-shaped lines
-  // and only inside the grace window. The server re-validates both rules,
-  // so the UI is just an affordance hint.
+  // Edit/delete controls only apply to the author's own chat-shaped
+  // lines and only inside the admin-configured grace window. The
+  // server re-validates both rules — this is just the affordance
+  // hint, and reading the window from the store means an admin tweak
+  // takes effect on the next render without a reload.
+  const editGraceMs = useChat((s) => s.branding.editGraceMs);
   const ageMs = Date.now() - msg.createdAt;
-  const showOwnControls = isOwn && ageMs < GRACE_MS && REPLYABLE_KINDS.has(msg.kind);
+  const showOwnControls = isOwn && ageMs < editGraceMs && REPLYABLE_KINDS.has(msg.kind);
   const editedBadge = msg.editedAt ? (
     <span
       className="ml-1 text-[10px] italic text-keep-muted"
@@ -2357,6 +2365,11 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(msg.body);
   const [error, setError] = useState<string | null>(null);
+  // Same admin-configurable grace window the visibility gate above
+  // checks against. Threaded down so the button tooltip reads the
+  // current cap instead of a hardcoded "60s" that drifted from the
+  // server once admins bumped the value.
+  const graceMs = useChat((s) => s.branding.editGraceMs);
 
   async function submitEdit(e: React.FormEvent) {
     e.preventDefault();
@@ -2453,10 +2466,11 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
   return (
     // Always visible (no hover gate). The caller only renders <OwnControls>
     // when `showOwnControls` is true, which already means "your own message,
-    // still within the 60s grace window, chat-style kind." Hiding the edit
-    // button behind a hover trigger turned that into a discoverability
-    // black hole — people kept reporting the option was missing because
-    // they didn't think to mouse over their own messages to find it.
+    // still within the admin-configured grace window, chat-style kind."
+    // Hiding the edit button behind a hover trigger turned that into a
+    // discoverability black hole — people kept reporting the option was
+    // missing because they didn't think to mouse over their own messages
+    // to find it.
     //
     // Visual contract: edit + delete share the same base shape as the
     // BookmarkButton (h-5, rounded, thin border, 10px text) so the
@@ -2467,7 +2481,7 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
       <button
         type="button"
         onClick={() => { setDraft(msg.body); setEditing(true); }}
-        title="Edit (within 60s of sending)"
+        title={`Edit (within ${formatGraceWindow(graceMs)} of sending)`}
         className="flex h-5 items-center rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action"
       >
         edit
@@ -2475,7 +2489,7 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
       <button
         type="button"
         onClick={doDelete}
-        title="Delete (within 60s of sending)"
+        title={`Delete (within ${formatGraceWindow(graceMs)} of sending)`}
         disabled={busy}
         className="flex h-5 items-center rounded border border-keep-accent/60 bg-keep-accent/10 px-1.5 text-[10px] font-semibold leading-none text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
       >
@@ -2484,6 +2498,17 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
       {error ? <span className="text-[10px] text-keep-accent">{error}</span> : null}
     </span>
   );
+}
+
+/**
+ * Human-friendly format for the edit grace window. Picks the most
+ * natural unit so a 300_000ms setting reads "5m" rather than "300s".
+ */
+function formatGraceWindow(ms: number): string {
+  if (ms <= 0) return "no edits";
+  if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
+  if (ms % 60_000 === 0) return `${ms / 60_000}m`;
+  return `${Math.round(ms / 1000)}s`;
 }
 
 /**

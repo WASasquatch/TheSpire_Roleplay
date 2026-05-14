@@ -212,7 +212,11 @@ function RoomGroup({
               ) : null}
               <ul>
                 {g.users.map((o) => (
-                  <li key={o.userId} className="truncate px-3 py-1.5 pl-5 md:py-0.5">
+                  // Composite key — a single account voicing two
+                  // different characters in two tabs renders as two
+                  // occupant rows (one per identity). Keying on userId
+                  // alone would dup-React-key in that case.
+                  <li key={`${o.userId}:${o.characterId ?? ""}`} className="truncate px-3 py-1.5 pl-5 md:py-0.5">
                     <UserNameTag
                       displayName={o.displayName}
                       gender={o.gender}

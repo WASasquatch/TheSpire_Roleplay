@@ -315,6 +315,11 @@ async function main() {
       // messageRetentionMs === 0 means "kept indefinitely".
       messageRetentionMs: s.messageRetentionMs,
       sessionTtlMs: s.sessionTtlMs,
+      // Author-edit / author-delete grace window in ms. Surfaced so
+      // the chat client can paint the right "Edit (within Xs)"
+      // tooltip and gate the hover-controls without a separate
+      // authenticated lookup.
+      editGraceMs: s.editGraceMs,
       // Master toggle for surfacing live community activity. The splash
       // hides its user/room counters when this is false (default during
       // cold-start so an empty community doesn't telegraph "dead site").

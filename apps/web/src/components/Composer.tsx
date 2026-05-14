@@ -444,8 +444,14 @@ export function Composer({
 
   function submit(e?: FormEvent) {
     e?.preventDefault();
-    const t = value.trim();
-    if (!t) return;
+    // Empty-check uses the fully-trimmed copy so all-whitespace input
+    // doesn't fire a send. Outgoing body keeps leading whitespace:
+    // typing " :O" intentionally avoids the `:` action shortcut and
+    // sends a literal smiley, so the leading space MUST survive the
+    // client → server hop. Only the trailing whitespace is collapsed
+    // (accidental trailing newline / spaces on copy-paste).
+    if (!value.trim()) return;
+    const t = value.trimEnd();
     const buf = historyRef.current;
     if (buf[buf.length - 1] !== t) {
       buf.push(t);

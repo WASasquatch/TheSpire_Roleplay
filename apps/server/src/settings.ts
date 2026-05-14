@@ -75,6 +75,12 @@ export interface SiteSettings {
   maxRoomsPerOwner: number;
   /** Cap on chat message body length. */
   maxMessageLength: number;
+  /**
+   * Author-edit / author-delete grace window in ms for flat chat
+   * rooms. Mods and admins bypass the gate entirely; forum (nested)
+   * rooms allow indefinite edits regardless. Default 5 minutes.
+   */
+  editGraceMs: number;
   /** Cap on profile bio HTML length. */
   maxBioLength: number;
   /** When false, /auth/register returns 503. */
@@ -153,6 +159,8 @@ export interface SettingsPatch {
   maxAccountsPerEmail?: number;
   maxRoomsPerOwner?: number;
   maxMessageLength?: number;
+  /** Author-edit/delete grace window in ms (chat rooms). */
+  editGraceMs?: number;
   maxBioLength?: number;
   registrationOpen?: boolean;
   /** Pre-sanitized HTML; settings layer doesn't re-sanitize so the route handler must. */
@@ -202,6 +210,7 @@ export async function updateSettings(
   if (patch.maxAccountsPerEmail !== undefined) update.maxAccountsPerEmail = patch.maxAccountsPerEmail;
   if (patch.maxRoomsPerOwner !== undefined) update.maxRoomsPerOwner = patch.maxRoomsPerOwner;
   if (patch.maxMessageLength !== undefined) update.maxMessageLength = patch.maxMessageLength;
+  if (patch.editGraceMs !== undefined) update.editGraceMs = patch.editGraceMs;
   if (patch.maxBioLength !== undefined) update.maxBioLength = patch.maxBioLength;
   if (patch.registrationOpen !== undefined) update.registrationOpen = patch.registrationOpen;
   if (patch.welcomeHtml !== undefined) update.welcomeHtml = patch.welcomeHtml;
@@ -251,6 +260,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     maxAccountsPerEmail: row.maxAccountsPerEmail,
     maxRoomsPerOwner: row.maxRoomsPerOwner,
     maxMessageLength: row.maxMessageLength,
+    editGraceMs: row.editGraceMs,
     maxBioLength: row.maxBioLength,
     registrationOpen: row.registrationOpen,
     welcomeHtml: row.welcomeHtml,

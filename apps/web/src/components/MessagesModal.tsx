@@ -412,10 +412,15 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
   }
 
   return (
-    <Modal onClose={onClose} zIndex={50}>
+    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex h-[85vh] w-full flex-col overflow-hidden rounded border border-keep-border bg-keep-bg shadow-xl md:w-[78vw] md:max-w-[1100px]"
+        // Mobile: edge-to-edge fullscreen (no border-radius, full dvh).
+        // Desktop: centered card with the existing 78vw/1100px cap and
+        // 85vh height. `100dvh` follows the browser's *dynamic* viewport
+        // so the on-screen keyboard doesn't paint the modal off-screen
+        // on iOS Safari / Chrome Android — `100vh` would.
+        className="flex h-[100dvh] w-full flex-col overflow-hidden border border-keep-border bg-keep-bg shadow-xl md:h-[85vh] md:w-[78vw] md:max-w-[1100px] md:rounded"
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
           <h2 className="font-action text-lg">Messages</h2>
@@ -424,15 +429,60 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
           </button>
         </header>
 
+        {/* Mobile-only tab strip. Lets users flip between the inbox
+            (Friends + Recents + add forms) and the active conversation
+            without relying on the per-row back-arrow inside the thread
+            header. Hidden on md+ where both panes are visible at once.
+            The Chat tab is disabled until a conversation is selected —
+            tapping it with no selection would surface the empty-state
+            pane, which is more confusing than a dimmed-out tab. */}
+        <div className="flex shrink-0 border-b border-keep-rule bg-keep-banner/40 md:hidden" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileView === "list"}
+            onClick={() => setMobileView("list")}
+            className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-widest ${
+              mobileView === "list"
+                ? "border-b-2 border-keep-action text-keep-text"
+                : "text-keep-muted hover:text-keep-text"
+            }`}
+          >
+            Inbox
+            {pendingFriendRequests.length > 0 ? (
+              <span className="ml-1 inline-block rounded-full bg-keep-action px-1.5 text-[10px] font-semibold text-keep-bg">
+                {pendingFriendRequests.length}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileView === "thread"}
+            disabled={!selectedUserId}
+            onClick={() => setMobileView("thread")}
+            className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-widest disabled:opacity-40 ${
+              mobileView === "thread"
+                ? "border-b-2 border-keep-action text-keep-text"
+                : "text-keep-muted hover:text-keep-text"
+            }`}
+          >
+            Chat
+          </button>
+        </div>
+
         <div className="flex min-h-0 flex-1 overflow-hidden">
           {/* LEFT pane — list. Hidden on mobile when thread is visible.
-              `md:flex-none` cancels the mobile-only `flex-1` at md+ so
-              the explicit `width` (state-driven, drag-resizable) wins
-              and the column stops trying to claim half the modal. */}
+              The state-driven `listWidth` (set by the drag-resize
+              handle) only applies on md+; on mobile the aside fills
+              the full modal width. We pass the width as a CSS custom
+              property so the responsive `md:w-[var(...)]` class can
+              consume it — using `style={{ width }}` directly would win
+              over `w-full` on mobile via specificity. */}
           <aside
-            style={{ width: `${listWidth}px` }}
+            style={{ "--list-width": `${listWidth}px` } as React.CSSProperties}
             className={
-              "flex min-h-0 flex-col border-keep-rule md:shrink-0 md:flex-none " +
+              "flex min-h-0 w-full flex-col border-keep-rule md:w-[var(--list-width)] md:shrink-0 md:flex-none " +
               (mobileView === "list" ? "flex-1" : "hidden md:flex")
             }
           >

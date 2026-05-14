@@ -1,6 +1,19 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { Theme, WorldDetail, WorldPage, WorldVisibility } from "@thekeep/shared";
-import { DEFAULT_THEME, WORLD_PAGE_DEPTH_CAP } from "@thekeep/shared";
+import type {
+  Theme,
+  WorldDetail,
+  WorldGenre,
+  WorldPacing,
+  WorldPage,
+  WorldStatus,
+  WorldVisibility,
+} from "@thekeep/shared";
+import {
+  CANONICAL_TAGS,
+  CONTENT_WARNINGS,
+  DEFAULT_THEME,
+  WORLD_PAGE_DEPTH_CAP,
+} from "@thekeep/shared";
 import { buildWorldTree, deriveSlug, type WorldTreeNode } from "../lib/worlds.js";
 import { readError } from "../lib/http.js";
 import { themeStyle } from "../lib/theme.js";
@@ -274,9 +287,42 @@ function WorldMetaEditor({
   // null = "no theme set" (fall back to viewer's chat theme); a Theme object
   // = author has explicit colors. Both states need to round-trip via PATCH.
   const [theme, setTheme] = useState<Theme | null>(w.theme);
+  // Phase-1 catalog metadata. Local state stays as primitive types
+  // (genre + tags + CWs + pacing + cover URL + status); the submit
+  // path diffs each against the server-side copy so we only PATCH
+  // when something actually changed.
+  const [genre, setGenre] = useState<WorldGenre>(w.genre);
+  const [tags, setTags] = useState<string[]>(w.tags);
+  const [tagDraft, setTagDraft] = useState("");
+  const [cws, setCws] = useState<string[]>(w.contentWarnings);
+  const [coverImageUrl, setCoverImageUrl] = useState(w.coverImageUrl ?? "");
+  const [pacing, setPacing] = useState<WorldPacing | "">(w.pacing ?? "");
+  // Status: owners pick `active` or `archived`; the `featured` slot is
+  // admin-only (the server silently downgrades any attempt to
+  // self-promote). We surface `featured` here read-only so an admin
+  // viewer sees the actual state.
+  const [status, setStatus] = useState<WorldStatus>(w.status);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  function addTag(t: string) {
+    const norm = t.trim().toLowerCase();
+    if (!norm || tags.includes(norm)) return;
+    setTags([...tags, norm]);
+    setTagDraft("");
+  }
+  function removeTag(t: string) {
+    setTags(tags.filter((x) => x !== t));
+  }
+  function toggleCw(c: string) {
+    setCws(cws.includes(c) ? cws.filter((x) => x !== c) : [...cws, c]);
+  }
+
+  // Order canonical tags as: those already selected (so they stay
+  // visible after click), then the rest. Custom tags the owner has
+  // added (not in CANONICAL_TAGS) render as chips alongside.
+  const canonicalNotSelected = CANONICAL_TAGS.filter((t) => !tags.includes(t));
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -291,6 +337,18 @@ function WorldMetaEditor({
       // Theme diff: stringify-compare so we only send when something actually
       // changed. Null vs null is a no-op; null vs Theme (or vice versa) writes.
       if (JSON.stringify(theme) !== JSON.stringify(w.theme)) body.theme = theme;
+      if (genre !== w.genre) body.genre = genre;
+      // Tag/CW arrays compare via canonical join — the server normalizes
+      // the same way (trim + lowercase + dedupe via parseTagList), so
+      // a join() round-trip is the right yardstick for "changed."
+      if (tags.join(",") !== w.tags.join(",")) body.tags = tags;
+      if (cws.join(",") !== w.contentWarnings.join(",")) body.contentWarnings = cws;
+      if (status !== w.status) body.status = status;
+      const coverTrimmed = coverImageUrl.trim();
+      const coverNext = coverTrimmed === "" ? null : coverTrimmed;
+      if (coverNext !== (w.coverImageUrl ?? null)) body.coverImageUrl = coverNext;
+      const pacingNext = (pacing === "" ? null : pacing) as WorldPacing | null;
+      if (pacingNext !== (w.pacing ?? null)) body.pacing = pacingNext;
       if (Object.keys(body).length === 0) { setBusy(false); return; }
       const r = await fetch(`/worlds/${worldId}`, {
         method: "PATCH",
@@ -362,6 +420,168 @@ function WorldMetaEditor({
         </select>
       </label>
 
+      <fieldset className="rounded border border-keep-rule p-3 space-y-3">
+        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">
+          Catalog metadata
+        </legend>
+        <p className="text-[11px] text-keep-muted">
+          Surfaces in the World Catalog filter UI. Genre and tags help readers find your
+          world; content warnings let them filter what they'd rather not encounter.
+        </p>
+
+        <label className="block">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Genre</span>
+          <select
+            value={genre}
+            onChange={(e) => setGenre(e.target.value as WorldGenre)}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+          >
+            <option value="fantasy">Fantasy</option>
+            <option value="modern">Modern</option>
+            <option value="scifi">Sci-Fi</option>
+            <option value="horror">Horror</option>
+            <option value="western">Western</option>
+            <option value="steampunk">Steampunk</option>
+            <option value="mythological">Mythological</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+
+        <div>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Tags</span>
+          {tags.length > 0 ? (
+            <div className="mb-1 flex flex-wrap gap-1">
+              {tags.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => removeTag(t)}
+                  title={`Remove "${t}"`}
+                  className="rounded border border-keep-action/40 bg-keep-action/10 px-1.5 py-0 text-[11px] text-keep-action hover:bg-keep-accent/15 hover:text-keep-accent"
+                >
+                  {t} <span aria-hidden>×</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="mb-1 text-[10px] italic text-keep-muted">No tags yet.</div>
+          )}
+          <div className="mb-1 flex gap-1">
+            <input
+              type="text"
+              value={tagDraft}
+              onChange={(e) => setTagDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addTag(tagDraft);
+                }
+              }}
+              placeholder="add a custom tag..."
+              maxLength={32}
+              className="flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+            />
+            <button
+              type="button"
+              onClick={() => addTag(tagDraft)}
+              disabled={!tagDraft.trim()}
+              className="rounded border border-keep-rule bg-keep-banner px-2 py-1 text-[11px] hover:bg-keep-banner/80 disabled:opacity-50"
+            >
+              add
+            </button>
+          </div>
+          {canonicalNotSelected.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              <span className="text-[10px] uppercase tracking-widest text-keep-muted">Common:</span>
+              {canonicalNotSelected.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => addTag(t)}
+                  className="rounded border border-keep-rule bg-keep-bg/50 px-1.5 py-0 text-[11px] text-keep-muted hover:border-keep-action hover:bg-keep-action/10 hover:text-keep-action"
+                >
+                  + {t}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Content warnings</span>
+          <div className="flex flex-wrap gap-2 text-[11px]">
+            {CONTENT_WARNINGS.map((c) => (
+              <label key={c} className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={cws.includes(c)}
+                  onChange={() => toggleCw(c)}
+                />
+                {c}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <label className="block">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Cover image URL</span>
+          <input
+            type="url"
+            value={coverImageUrl}
+            onChange={(e) => setCoverImageUrl(e.target.value)}
+            placeholder="https://example.com/cover.jpg"
+            maxLength={2000}
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+          />
+          {coverImageUrl ? (
+            <div className="mt-1">
+              {/* Live preview at the same aspect the catalog card will use
+                  (3:2). `referrerPolicy="no-referrer"` matches the inline
+                  image preview in chat — keeps the chat URL from leaking
+                  via Referer to whoever hosts the image. */}
+              <img
+                src={coverImageUrl}
+                alt="cover preview"
+                referrerPolicy="no-referrer"
+                className="block max-h-32 max-w-full rounded border border-keep-rule object-cover"
+              />
+            </div>
+          ) : null}
+        </label>
+
+        <label className="block">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Pacing</span>
+          <select
+            value={pacing}
+            onChange={(e) => setPacing(e.target.value as WorldPacing | "")}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+          >
+            <option value="">(unspecified)</option>
+            <option value="casual">Casual (pick-up scenes, low commitment)</option>
+            <option value="structured">Structured (planned scenes / arcs)</option>
+            <option value="long-form">Long-form (extended arcs, deep commitment)</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Status</span>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as WorldStatus)}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+          >
+            <option value="active">Active</option>
+            <option value="archived">Archived (hidden from catalog)</option>
+            {status === "featured" ? (
+              <option value="featured">Featured (admin-curated)</option>
+            ) : null}
+          </select>
+          <span className="mt-0.5 block text-[10px] text-keep-muted">
+            Featured status is admin-curated only; owners can move between Active and Archived.
+          </span>
+        </label>
+      </fieldset>
+
       <fieldset className="rounded border border-keep-rule p-3">
         <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">
           Theme
@@ -413,7 +633,7 @@ function WorldMetaEditor({
           <button
             type="submit"
             disabled={busy || !name.trim()}
-            className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+            className="keep-button rounded border border-keep-action bg-keep-action/15 px-3 py-0.5 font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
           >
             {busy ? "Saving..." : "Save"}
           </button>
@@ -568,7 +788,7 @@ function PageEditor({
           <button
             type="submit"
             disabled={busy || !title.trim()}
-            className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+            className="keep-button rounded border border-keep-action bg-keep-action/15 px-3 py-0.5 font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
           >
             {busy ? "Saving..." : "Save"}
           </button>
@@ -676,14 +896,14 @@ function NewPageForm({
         <button
           type="button"
           onClick={onCancel}
-          className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+          className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-keep-muted hover:bg-keep-banner hover:text-keep-text"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={busy || !title.trim()}
-          className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
+          className="keep-button rounded border border-keep-action bg-keep-action/15 px-3 py-0.5 font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
           {busy ? "Creating..." : "Create page"}
         </button>

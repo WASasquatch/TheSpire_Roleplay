@@ -197,6 +197,15 @@ async function ensureDefaultWorlds(db: Db): Promise<void> {
         name: def.name,
         description: def.description,
         visibility: "open",
+        // Catalog metadata. Falls back to the DB column defaults
+        // ("other", empty strings, "active", null) when the seed entry
+        // hasn't been classified yet. Tags + content warnings are
+        // joined into the canonical comma-separated form here so the
+        // read-side `parseTagList` round-trips them cleanly.
+        genre: def.genre ?? "other",
+        tags: def.tags ? def.tags.join(",") : "",
+        contentWarnings: def.contentWarnings ? def.contentWarnings.join(",") : "",
+        pacing: def.pacing ?? null,
       });
       let sortOrder = 0;
       for (const page of def.pages) {
@@ -216,14 +225,26 @@ async function ensureDefaultWorlds(db: Db): Promise<void> {
 
     if (!shouldOverwrite) continue;
 
-    // Update path: refresh name + description, wipe existing pages,
-    // re-insert from the seed. The world's id (and therefore its
-    // members, room links, primary-world references) is preserved so
-    // anyone affiliated with a system world keeps that affiliation
-    // across content updates.
+    // Update path: refresh name + description + catalog metadata, wipe
+    // existing pages, re-insert from the seed. The world's id (and
+    // therefore its members, room links, primary-world references) is
+    // preserved so anyone affiliated with a system world keeps that
+    // affiliation across content updates.
+    //
+    // Status is intentionally NOT overwritten — an admin who's
+    // promoted a system world to `featured` shouldn't lose that on a
+    // version bump.
     await db
       .update(worlds)
-      .set({ name: def.name, description: def.description, updatedAt: new Date() })
+      .set({
+        name: def.name,
+        description: def.description,
+        genre: def.genre ?? "other",
+        tags: def.tags ? def.tags.join(",") : "",
+        contentWarnings: def.contentWarnings ? def.contentWarnings.join(",") : "",
+        pacing: def.pacing ?? null,
+        updatedAt: new Date(),
+      })
       .where(eq(worlds.id, existing.id));
     await db.delete(worldPages).where(eq(worldPages.worldId, existing.id));
     let sortOrder = 0;

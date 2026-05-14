@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import DOMPurify from "dompurify";
 import { VERSION } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
+import { setSessionToken } from "../lib/http.js";
 import { themeStyle } from "../lib/theme.js";
 import { AffiliatesCarousel } from "./AffiliatesCarousel.js";
 import { FeaturedWorldsCarousel } from "./FeaturedWorldsCarousel.js";
@@ -522,6 +523,11 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           throw new Error(detail ?? body.error ?? "register failed");
         }
         const j = await res.json();
+        // Persist the per-tab bearer token before flipping `me` — the
+        // moment AuthGate unmounts, the chat shell fires its mount-time
+        // /me/profile + /me/dms fetches and they need the header
+        // already in place.
+        if (typeof j.sessionToken === "string") setSessionToken(j.sessionToken);
         // The server returns role:"admin" for the very first registrant
         // (bootstrap path). Trust the server response so the Admin button
         // appears immediately without requiring a page reload.
@@ -542,6 +548,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           throw new Error(detail ?? body.error ?? "login failed");
         }
         const j = await res.json();
+        if (typeof j.sessionToken === "string") setSessionToken(j.sessionToken);
         setMe({ id: j.id, username: j.username, role: j.role });
       }
     } catch (err) {

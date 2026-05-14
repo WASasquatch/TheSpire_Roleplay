@@ -12,6 +12,15 @@ interface Props {
   onClose: () => void;
   /** Pre-fill composer with `/whisper <name> ` and close. */
   onWhisper?: (name: string) => void;
+  /**
+   * Open the DM floating panel keyed to the profile's owner. Phase 4
+   * surface for the Direct Messages feature. The parent hides this
+   * action when the viewer is anonymous OR equals the profile owner
+   * OR the target has `dmsEnabled === false` — same gate posture as
+   * Whisper. The handler receives the target's userId since the DM
+   * routing is user-based, not name-based.
+   */
+  onMessage?: (userId: string, displayName: string, avatarUrl: string | null) => void;
   /** Issue `/ignore <name>`. */
   onIgnore?: (name: string) => void;
   /** Open another profile by name (used to follow a mutual-title link). */
@@ -56,7 +65,7 @@ interface Props {
  * Every section degrades gracefully: characters with nothing filled out
  * still get a clean modal that says "X hasn't filled out their profile yet."
  */
-export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProfile, onOpenWorld, activeCharacterAction, bypassNsfwGate }: Props) {
+export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore, onOpenProfile, onOpenWorld, activeCharacterAction, bypassNsfwGate }: Props) {
   const isChar = profile.kind === "character";
   const name = isChar ? profile.profile.name : profile.profile.username;
   const bio = profile.profile.bioHtml.trim();
@@ -124,6 +133,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onIgnore, onOpenProf
             isCompletelyBlank={isCompletelyBlank}
             onClose={onClose}
             onWhisper={onWhisper}
+            onMessage={onMessage}
             onIgnore={onIgnore}
             onOpenProfile={onOpenProfile}
             onOpenWorld={onOpenWorld}
@@ -156,6 +166,7 @@ function ProfileBody({
   isCompletelyBlank,
   onClose,
   onWhisper,
+  onMessage,
   onIgnore,
   onOpenProfile,
   onOpenWorld,
@@ -178,6 +189,7 @@ function ProfileBody({
   // `| undefined` (rather than `?:`) so callers can spread the value
   // straight through without exactOptionalPropertyTypes complaining.
   onWhisper: ((name: string) => void) | undefined;
+  onMessage: ((userId: string, displayName: string, avatarUrl: string | null) => void) | undefined;
   onIgnore: ((name: string) => void) | undefined;
   onOpenProfile: ((name: string) => void) | undefined;
   onOpenWorld: ((slug: string) => void) | undefined;
@@ -234,7 +246,7 @@ function ProfileBody({
             {/* Action row - renders when there's at least one action to
                 offer. Self-views (App suppresses whisper/ignore) still get
                 this row when there's a Switch / Disable action to take. */}
-            {onWhisper || onIgnore || activeCharacterAction ? (
+            {onWhisper || onMessage || onIgnore || activeCharacterAction ? (
               <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
                 {activeCharacterAction ? (
                   <button
@@ -244,6 +256,16 @@ function ProfileBody({
                     className="keep-button rounded border border-keep-action/60 bg-keep-bg px-2 py-1 text-keep-action hover:bg-keep-action/10"
                   >
                     {activeCharacterAction.label}
+                  </button>
+                ) : null}
+                {onMessage ? (
+                  <button
+                    type="button"
+                    onClick={() => onMessage(profile.profile.userId, name, avatar)}
+                    title="Open a direct message thread with this user."
+                    className="rounded border border-keep-action/40 bg-keep-bg px-2 py-1 text-keep-action hover:bg-keep-action/10"
+                  >
+                    💬 Message
                   </button>
                 ) : null}
                 {onWhisper ? (

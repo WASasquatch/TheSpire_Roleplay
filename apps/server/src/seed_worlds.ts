@@ -25,7 +25,7 @@
  * next boot. Skip a bump if changes are seed-mechanic only (e.g.
  * refactoring this file's helpers).
  */
-export const WORLDS_SEED_VERSION = 2;
+export const WORLDS_SEED_VERSION = 3;
 
 export interface SeedPage {
   /** Page slug (must match SLUG_RX in routes/worlds.ts). */
@@ -39,6 +39,20 @@ export interface SeedWorld {
   name: string;
   description: string;
   pages: SeedPage[];
+  /**
+   * Catalog metadata (Phase 1 of the worlds/DMs plan). All optional —
+   * the seed loader fills in defaults (`genre: "other"`, empty
+   * tags/CWs, `pacing: null`) for any world that hasn't been
+   * classified yet. Existing values get overwritten on every seed
+   * version bump, so editing this file is the source of truth for
+   * default-world classification.
+   */
+  genre?:
+    | "fantasy" | "modern" | "scifi" | "horror"
+    | "western" | "steampunk" | "mythological" | "other";
+  tags?: ReadonlyArray<string>;
+  contentWarnings?: ReadonlyArray<string>;
+  pacing?: "casual" | "structured" | "long-form" | null;
 }
 
 const p = (slug: string, title: string, bodyHtml: string): SeedPage => ({ slug, title, bodyHtml });
@@ -98,6 +112,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: knightly RP, court intrigue, frontier patrols, family sagas, Warden-novice training arcs.</li>
 </ul>`),
     ],
+    genre: "fantasy",
+    tags: ["low-magic", "courtly", "political"],
+    contentWarnings: ["violence"],
+    pacing: "structured",
   },
 
   {
@@ -135,6 +153,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: investigators, scholars, priests, merchants with secrets, expatriates who came here to disappear.</li>
 </ul>`),
     ],
+    genre: "horror",
+    tags: ["mystery", "investigation", "urban"],
+    contentWarnings: ["dark-themes", "death"],
+    pacing: "structured",
   },
 
   {
@@ -170,6 +192,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: ambassadors, spies, duelists, mage apprentices, courtiers, merchants with too many loyalties.</li>
 </ul>`),
     ],
+    genre: "fantasy",
+    tags: ["intrigue", "political", "courtly", "war"],
+    contentWarnings: ["violence"],
+    pacing: "structured",
   },
 
   {
@@ -206,6 +232,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: druid apprentices, hold-reeves, bards, wandering folk, settlers with a complicated relationship to the wild.</li>
 </ul>`),
     ],
+    genre: "fantasy",
+    tags: ["wilderness", "exploration", "frontier", "low-magic"],
+    contentWarnings: ["violence"],
+    pacing: "casual",
   },
 
   {
@@ -242,6 +272,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: pilgrims, acolytes, heretic scholars, Temple Guard, the merchants who feed them all.</li>
 </ul>`),
     ],
+    genre: "fantasy",
+    tags: ["mystery", "urban", "high-magic"],
+    contentWarnings: ["dark-themes"],
+    pacing: "structured",
   },
 
   /* ============================================================
@@ -281,6 +315,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: ronin, retainers, shrine-keepers, traveling monks, foreigners who arrived through a misunderstanding.</li>
 </ul>`),
     ],
+    genre: "mythological",
+    tags: ["mystery", "exploration", "wilderness"],
+    contentWarnings: ["violence", "dark-themes"],
+    pacing: "structured",
   },
 
   {
@@ -317,6 +355,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: courtiers, scholars, ministers, ambassadors, exam candidates, poets, the occasional border-soldier home on leave.</li>
 </ul>`),
     ],
+    genre: "fantasy",
+    tags: ["courtly", "intrigue", "political"],
+    contentWarnings: ["violence"],
+    pacing: "structured",
   },
 
   {
@@ -353,6 +395,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: village folk, ronin, lighthouse-keepers, pirate-raiders, sword-saints in retreat, tax-agents pretending not to notice.</li>
 </ul>`),
     ],
+    genre: "fantasy",
+    tags: ["frontier", "war", "combat-heavy"],
+    contentWarnings: ["violence"],
+    pacing: "casual",
   },
 
   /* ============================================================
@@ -392,6 +438,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: runners, fixers, ex-corporate, ex-military, journalists, medics, the occasional honest cop.</li>
 </ul>`),
     ],
+    genre: "scifi",
+    tags: ["urban", "intrigue", "combat-heavy"],
+    contentWarnings: ["violence", "substance"],
+    pacing: "structured",
   },
 
   {
@@ -428,6 +478,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: prospectors, station crew, arbiters, traders, Coalition functionaries, inner-system imports who are learning fast.</li>
 </ul>`),
     ],
+    genre: "scifi",
+    tags: ["exploration", "frontier", "political"],
+    contentWarnings: ["violence"],
+    pacing: "structured",
   },
 
   {
@@ -464,6 +518,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: salvage-crew, scouts, surgeon-engineers, House diplomats, planet-side liaisons, the occasional defector from House Below.</li>
 </ul>`),
     ],
+    genre: "scifi",
+    tags: ["frontier", "exploration", "war"],
+    contentWarnings: ["violence", "dark-themes"],
+    pacing: "structured",
   },
 
   {
@@ -500,6 +558,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: crew, engineers, medics, archivists, deck-workers, the occasional dissident asking questions everyone has agreed not to ask.</li>
 </ul>`),
     ],
+    genre: "scifi",
+    tags: ["mystery", "investigation"],
+    contentWarnings: ["dark-themes", "body-horror", "death"],
+    pacing: "structured",
   },
 
   {
@@ -536,6 +598,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: Council functionaries, Joint Rangers, translators, scientists, mixed-species families, second-ship dissenters.</li>
 </ul>`),
     ],
+    genre: "scifi",
+    tags: ["political", "slice-of-life"],
+    contentWarnings: ["discrimination"],
+    pacing: "casual",
   },
 
   /* ============================================================
@@ -575,6 +641,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: slice-of-life with edges, supernatural mystery, returning natives, newcomers with reasons, the kind of journalist who poked the wrong thing in a previous city.</li>
 </ul>`),
     ],
+    genre: "modern",
+    tags: ["mystery", "slice-of-life", "investigation"],
+    contentWarnings: ["dark-themes"],
+    pacing: "casual",
   },
 
   {
@@ -611,6 +681,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: witches, alchemists, lower-rank Court members, fae enclave-folk, Order lawyers, mortal investigators who got too close.</li>
 </ul>`),
     ],
+    genre: "modern",
+    tags: ["urban", "intrigue", "mystery", "romance-friendly"],
+    contentWarnings: ["violence", "nsfw", "dark-themes"],
+    pacing: "structured",
   },
 
   {
@@ -647,6 +721,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: students (any year), prefects, faculty, the occasional alumnus returning, parents who paid for the brochure and want to know what they got.</li>
 </ul>`),
     ],
+    genre: "modern",
+    tags: ["slice-of-life", "mystery", "romance-friendly", "intrigue"],
+    contentWarnings: ["dark-themes"],
+    pacing: "casual",
   },
 
   {
@@ -683,6 +761,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: returning natives, newcomers with reasons, Calhoun cousins, the sheriff's deputies, the kind of journalist who hasn't been warned off yet.</li>
 </ul>`),
     ],
+    genre: "modern",
+    tags: ["mystery", "investigation"],
+    contentWarnings: ["dark-themes", "death"],
+    pacing: "structured",
   },
 
   /* ============================================================
@@ -722,6 +804,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: investigators, journalists, parish staff, descendants of relocatees, Reservoir Authority employees with the wrong questions.</li>
 </ul>`),
     ],
+    genre: "horror",
+    tags: ["mystery", "investigation", "wilderness"],
+    contentWarnings: ["dark-themes", "death", "body-horror"],
+    pacing: "structured",
   },
 
   {
@@ -758,6 +844,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: new staff, visiting cousins, doctors, investigators with reasons, the rare romantic interest with very specific qualifications.</li>
 </ul>`),
     ],
+    genre: "horror",
+    tags: ["courtly", "mystery", "romance-friendly"],
+    contentWarnings: ["dark-themes", "death"],
+    pacing: "structured",
   },
 
   /* ============================================================
@@ -797,6 +887,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: marshals, gunfighters, ranchers, sheepherders, native scouts, railroad workers, card-sharps, the schoolteacher who came west for unspecified reasons.</li>
 </ul>`),
     ],
+    genre: "western",
+    tags: ["frontier", "combat-heavy", "war"],
+    contentWarnings: ["violence"],
+    pacing: "casual",
   },
 
   {
@@ -833,6 +927,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: hexbreakers, snake-oil peddlers, preachers, native medicine-folk, gamblers with charms, undertakers who keep records.</li>
 </ul>`),
     ],
+    genre: "western",
+    tags: ["frontier", "mystery"],
+    contentWarnings: ["violence", "dark-themes"],
+    pacing: "casual",
   },
 
   /* ============================================================
@@ -872,6 +970,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: licensed practitioners, Office officials, salon-goers, engineers, journalists, organizers, foreign agents, unlicensed everything.</li>
 </ul>`),
     ],
+    genre: "steampunk",
+    tags: ["urban", "political", "intrigue"],
+    contentWarnings: ["violence"],
+    pacing: "structured",
   },
 
   {
@@ -908,6 +1010,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: Senators, Mechanicals (Free or owned), factory workers, engineers, journalists, Naturalist organizers, Republic Guard.</li>
 </ul>`),
     ],
+    genre: "steampunk",
+    tags: ["political", "intrigue", "urban"],
+    contentWarnings: ["dark-themes", "discrimination"],
+    pacing: "structured",
   },
 
   /* ============================================================
@@ -947,6 +1053,10 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: rural priests, witches, traveling folk, off-duty police, the occasional academic folklorist who got out of their depth.</li>
 </ul>`),
     ],
+    genre: "mythological",
+    tags: ["wilderness", "exploration", "mystery"],
+    contentWarnings: ["dark-themes"],
+    pacing: "casual",
   },
 
   {
@@ -983,5 +1093,9 @@ export const DEFAULT_WORLDS: SeedWorld[] = [
 <li>Good fits: navigator-priests, adepts, temple-singers, sailors, foreign traders, anyone tangled up in the question of why gods go silent.</li>
 </ul>`),
     ],
+    genre: "mythological",
+    tags: ["exploration", "wilderness"],
+    contentWarnings: ["violence"],
+    pacing: "casual",
   },
 ];

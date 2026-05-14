@@ -102,6 +102,14 @@ const masterUpdateBody = z.object({
    */
   uiFontScale: z.enum(["small", "medium", "large", "xl"]).nullable().optional(),
   notifyPref: z.enum(["off", "mentions", "all"]).optional(),
+  /**
+   * Per-event sound toggles (account-level, not per-character). Each
+   * maps to a bundled mp3 in apps/web/public/audio. Omitted = keep
+   * current value; the route does partial updates.
+   */
+  soundDmEnabled: z.boolean().optional(),
+  soundChatEnabled: z.boolean().optional(),
+  soundAlertEnabled: z.boolean().optional(),
   isPublic: z.boolean().optional(),
   isNsfw: z.boolean().optional(),
 });
@@ -365,6 +373,9 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       uiFontFamily: u.uiFontFamily,
       uiFontScale: u.uiFontScale,
       notifyPref: u.notifyPref,
+      soundDmEnabled: u.soundDmEnabled,
+      soundChatEnabled: u.soundChatEnabled,
+      soundAlertEnabled: u.soundAlertEnabled,
       role: u.role,
       isPublic: u.isPublic,
       isNsfw: u.isNsfw,
@@ -588,6 +599,9 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         ...(body.uiFontFamily !== undefined ? { uiFontFamily: body.uiFontFamily } : {}),
         ...(body.uiFontScale !== undefined ? { uiFontScale: body.uiFontScale } : {}),
         ...(body.notifyPref !== undefined ? { notifyPref: body.notifyPref } : {}),
+        ...(body.soundDmEnabled !== undefined ? { soundDmEnabled: body.soundDmEnabled } : {}),
+        ...(body.soundChatEnabled !== undefined ? { soundChatEnabled: body.soundChatEnabled } : {}),
+        ...(body.soundAlertEnabled !== undefined ? { soundAlertEnabled: body.soundAlertEnabled } : {}),
         ...(body.isPublic !== undefined || body.isNsfw !== undefined ? { isPublic, isNsfw } : {}),
       })
       .where(eq(users.id, me.id));

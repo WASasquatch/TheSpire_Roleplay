@@ -1,7 +1,39 @@
 import { resolve } from "node:path";
+import { randomBytes } from "node:crypto";
 import type { FastifyRequest } from "fastify";
 import type { Db } from "./db/index.js";
 import { getSettings } from "./settings.js";
+
+/**
+ * Generate a fresh nonce for a single HTTP response. Base64 of 16 random
+ * bytes — 128 bits is well above the CSP3 floor (the spec asks for ≥
+ * 128 bits because the policy directly trusts anything that quotes the
+ * nonce). Url-safe so it survives being dropped into an HTML attribute
+ * without escaping.
+ */
+export function generateCspNonce(): string {
+  return randomBytes(16).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * Tag every inline `<script>` and `<style>` in the HTML with the given
+ * CSP nonce so they pass the policy. We touch only tags that don't
+ * already carry a `nonce` attribute (idempotent if the source HTML was
+ * pre-noncedand catches three different injection sites in one pass:
+ *
+ *   1. The JSON-LD block in apps/web/index.html.
+ *   2. Vite's prod-built `<script type="module" src="/assets/...">` tag.
+ *   3. The admin-configured analytics scripts spliced into HEAD_EXTRA.
+ *
+ * The regex is intentionally simple — we only care about the tag-open
+ * sequence and don't try to parse attributes. Anything looking like
+ * `<script foo` becomes `<script nonce="…" foo` (and same for `<style`).
+ */
+function applyNonceToInlineTags(html: string, nonce: string): string {
+  return html
+    .replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`)
+    .replace(/<style(?![^>]*\bnonce=)/g, `<style nonce="${nonce}"`);
+}
 
 /**
  * Server-side SEO rendering for the splash page.
@@ -89,6 +121,14 @@ export async function renderSplashHtml(
   origin: string,
   pathname: string,
   sourceHtml: string,
+  /**
+   * Optional CSP nonce. When provided, every inline `<script>` /
+   * `<style>` in the rendered HTML (the JSON-LD block, Vite's main
+   * bundle tag, and any analytics scripts the admin spliced via
+   * customHeadHtml) gets `nonce="…"` so a strict `script-src 'nonce-…'`
+   * CSP can permit them while still rejecting injected scripts.
+   */
+  nonce?: string,
 ): Promise<string> {
   let html = sourceHtml;
 
@@ -200,6 +240,12 @@ export async function renderSplashHtml(
     );
   }
 
+  // Final pass: stamp every script/style with the nonce so the strict
+  // CSP we ship in the response header doesn't reject them. Must run
+  // AFTER the HEAD_EXTRA splice above so admin-injected scripts are
+  // covered too.
+  if (nonce) html = applyNonceToInlineTags(html, nonce);
+
   return html;
 }
 
@@ -264,10 +310,15 @@ export function resolveIndexHtmlPath(serverDir: string): string {
  * the 404 path simple (no SPA boot) matters for crawlers and for the
  * pathological case where the bundle itself fails to load.
  */
-export async function render404Html(db: Db, origin: string): Promise<string> {
+export async function render404Html(db: Db, origin: string, nonce?: string): Promise<string> {
   const s = await getSettings(db);
   const title = escapeHtmlAttr(s.siteName?.trim() || "The Spire");
   const home = escapeHtmlAttr(`${origin}/`);
+  // Nonce attribute on the inline <style> below so the strict CSP
+  // ships allow it. Empty string when no nonce was passed (e.g. unit
+  // tests, dev-mode call paths) — browsers ignore `nonce=""`, which
+  // matches the pre-CSP behavior.
+  const styleNonce = nonce ? ` nonce="${nonce}"` : "";
   // Inline minimal CSS so the page looks themed even if the main bundle is
   // stale or unreachable. Colors mirror the parchment default theme.
   return `<!doctype html>
@@ -279,7 +330,7 @@ export async function render404Html(db: Db, origin: string): Promise<string> {
 <link rel="icon" href="/favicon.ico" />
 <link rel="canonical" href="${home}" />
 <title>404 — ${title}</title>
-<style>
+<style${styleNonce}>
   :root { color-scheme: light; }
   body {
     margin: 0;

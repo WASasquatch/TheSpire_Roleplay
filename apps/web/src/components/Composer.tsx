@@ -730,7 +730,14 @@ export function Composer({
   return (
     <form
       onSubmit={submit}
-      className="keep-composer flex flex-col gap-1 border-t border-keep-rule bg-keep-banner/50 p-2"
+      // `min-h-[5.25rem]` + `justify-end` keep the composer wrapper the
+      // same height as the right-rail's bottom strip (identity-button +
+      // Tools-trigger stacked), so the two bottom rails align visually
+      // at the chat's lower edge instead of the composer hovering an
+      // inch above. Extra rows the composer renders in forum / reply
+      // modes still grow it past the minimum; the floor only matters
+      // in the simple "send a chat message" state.
+      className="keep-composer flex min-h-[5.25rem] flex-col justify-end gap-1 border-t border-keep-rule bg-keep-banner/50 p-2"
     >
       {/* Forum-mode disabled state — composer is locked until the user
           picks a topic or starts a new one. The "New Topic" button is

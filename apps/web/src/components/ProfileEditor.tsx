@@ -16,6 +16,7 @@ import {
   type PushState,
 } from "../lib/push.js";
 import { readError } from "../lib/http.js";
+import { useChat } from "../state/store.js";
 import { StylePicker } from "./AdminPanel.js";
 import { Modal } from "./Modal.js";
 import { ProfileModal } from "./ProfileModal.js";
@@ -51,6 +52,10 @@ interface MasterData {
   /** Font-size tier. Null = medium (default 16px). */
   uiFontScale?: UiFontScale | null;
   notifyPref?: NotifyPref;
+  /** Per-event in-app sound toggles. Account-level (not per-character). */
+  soundDmEnabled?: boolean;
+  soundChatEnabled?: boolean;
+  soundAlertEnabled?: boolean;
   role?: Role;
   isPublic?: boolean;
   isNsfw?: boolean;
@@ -128,6 +133,12 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   const [uiFontFamily, setUiFontFamily] = useState<string | null>(null);
   const [uiFontScale, setUiFontScale] = useState<UiFontScale | null>(null);
   const [notifyPref, setNotifyPref] = useState<NotifyPref>("mentions");
+  // Per-event in-app sound toggles. Account-level (master target only); a
+  // character switch doesn't carry its own audio prefs. All three default
+  // to enabled to match the server schema.
+  const [soundDmEnabled, setSoundDmEnabled] = useState<boolean>(true);
+  const [soundChatEnabled, setSoundChatEnabled] = useState<boolean>(true);
+  const [soundAlertEnabled, setSoundAlertEnabled] = useState<boolean>(true);
   // Public + NSFW visibility flags. Default isPublic=true, isNsfw=false to
   // match the schema. NSFW=true forces isPublic=false on save (server
   // enforces this too); the UI mirrors that by disabling the Public box.
@@ -140,10 +151,40 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   // Permission state is volatile - re-read on each render via a key bump.
   const [permVersion, setPermVersion] = useState(0);
 
-  // Mobile tab. The mobile viewport (<md) can't fit both columns side-by-side
-  // and shrinking either makes the form unusable - especially the bio textarea.
-  // On md+ both panels render together as before; this state is ignored.
-  const [mobileTab, setMobileTab] = useState<"settings" | "description">("settings");
+  /**
+   * Active editor tab. The settings used to stack vertically in one column
+   * next to the bio editor, which made the color picker etc. cramped at
+   * 420px and forced scrolling through unrelated sections. The tabbed
+   * layout gives each section the full modal width.
+   *
+   * Tabs:
+   *   - description: bio HTML editor (was the right column)
+   *   - profile:     name, avatar, gender (master), stats (character)
+   *   - appearance:  theme colors, theme style, fonts (master only)
+   *   - privacy:     visibility, NSFW, push, notifications
+   *   - links:       profile-link chips
+   *   - gallery:     portrait gallery (character only)
+   *   - journal:     character journal (character only)
+   */
+  type EditorTab =
+    | "description"
+    | "profile"
+    | "appearance"
+    | "privacy"
+    | "links"
+    | "gallery"
+    | "journal";
+  const [activeTab, setActiveTab] = useState<EditorTab>("description");
+
+  // Switching from a character → master target removes the Gallery and
+  // Journal tabs from the strip. If the user happened to be on one of
+  // those tabs at the moment of the switch, fall back to "profile" so
+  // the content pane doesn't go blank.
+  useEffect(() => {
+    if (target.kind === "master" && (activeTab === "gallery" || activeTab === "journal")) {
+      setActiveTab("profile");
+    }
+  }, [target.kind, activeTab]);
 
   // "+ New character" modal toggle. When the user creates a character we POST
   // /characters, splice the row into the local list, and switch the editor's
@@ -206,6 +247,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
               : null,
           );
           setNotifyPref(master.notifyPref ?? "mentions");
+          setSoundDmEnabled(master.soundDmEnabled ?? true);
+          setSoundChatEnabled(master.soundChatEnabled ?? true);
+          setSoundAlertEnabled(master.soundAlertEnabled ?? true);
           setIsPublic(master.isPublic ?? true);
           setIsNsfw(master.isNsfw ?? false);
           setPortraits([]); // master has no gallery; only characters do
@@ -290,6 +334,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             uiFontFamily: uiFontFamily && uiFontFamily.trim() !== "" ? uiFontFamily.trim() : null,
             uiFontScale,
             notifyPref,
+            soundDmEnabled,
+            soundChatEnabled,
+            soundAlertEnabled,
             isPublic,
             isNsfw,
           }),
@@ -304,6 +351,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             avatarUrl: avatarUrl.trim() || null,
             gender,
             notifyPref,
+            soundDmEnabled,
+            soundChatEnabled,
+            soundAlertEnabled,
             styleKey: userStyleKey,
             uiFontFamily: uiFontFamily && uiFontFamily.trim() !== "" ? uiFontFamily.trim() : null,
             uiFontScale,
@@ -316,6 +366,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           if (theme) next.theme = theme;
           else delete next.theme;
           return next;
+        });
+        // Push the new sound prefs into the global store so lib/sound
+        // picks them up before the next ping/tap/alert event fires —
+        // no need to wait for the next /me/profile reload.
+        useChat.getState().setSoundPrefs({
+          dm: soundDmEnabled,
+          chat: soundChatEnabled,
+          alert: soundAlertEnabled,
         });
       } else {
         const r = await fetch(`/characters/${target.id}`, {
@@ -559,294 +617,329 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           </button>
         </div>
 
-        {/* Mobile-only tab strip. The two panels would otherwise stack and
-            crush each other on narrow viewports. md+ keeps the side-by-side
-            layout and ignores this strip. */}
-        <div className="flex shrink-0 border-b border-keep-rule bg-keep-banner/40 md:hidden" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mobileTab === "settings"}
-            onClick={() => setMobileTab("settings")}
-            className={`flex-1 px-3 py-2 text-xs uppercase tracking-widest ${
-              mobileTab === "settings"
-                ? "border-b-2 border-keep-action text-keep-text"
-                : "text-keep-muted hover:text-keep-text"
-            }`}
-          >
-            Settings
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mobileTab === "description"}
-            onClick={() => setMobileTab("description")}
-            className={`flex-1 px-3 py-2 text-xs uppercase tracking-widest ${
-              mobileTab === "description"
-                ? "border-b-2 border-keep-action text-keep-text"
-                : "text-keep-muted hover:text-keep-text"
-            }`}
-          >
-            Description
-          </button>
-        </div>
+        {/* Tab strip. Replaces the old mobile-only Settings/Description
+            split + the two-column desktop grid. Each tab gets the full
+            modal width so the color picker, links editor, etc. have
+            room to breathe instead of fighting a 420px sidebar. The
+            strip scrolls horizontally on narrow viewports — mobile
+            users swipe; desktop users see them all at once.
+            `flex-nowrap` + `overflow-x-auto` is the canonical pattern
+            for this. */}
+        {(() => {
+          const tabs: Array<{ id: EditorTab; label: string; show: boolean }> = [
+            { id: "description", label: "Description", show: true },
+            { id: "profile",     label: "Profile",     show: true },
+            { id: "appearance",  label: "Appearance",  show: true },
+            { id: "privacy",     label: "Privacy",     show: true },
+            { id: "links",       label: "Links",       show: true },
+            { id: "gallery",     label: "Gallery",     show: isCharacter },
+            { id: "journal",     label: "Journal",     show: isCharacter },
+          ];
+          return (
+            <div
+              className="flex shrink-0 flex-nowrap overflow-x-auto border-b border-keep-rule bg-keep-banner/40"
+              role="tablist"
+            >
+              {tabs.filter((t) => t.show).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === t.id}
+                  onClick={() => setActiveTab(t.id)}
+                  className={`shrink-0 whitespace-nowrap px-3 py-2 text-xs uppercase tracking-widest ${
+                    activeTab === t.id
+                      ? "border-b-2 border-keep-action text-keep-text"
+                      : "text-keep-muted hover:text-keep-text"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          );
+        })()}
 
-        {/* body - fills remaining height. Two columns on md+. Each column scrolls independently. */}
+        {/* Tab content — fills remaining height; scrolls when long. */}
         {loadingTarget ? (
           <div className="flex flex-1 items-center justify-center text-keep-muted">loading...</div>
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:grid md:grid-cols-[420px_1fr]">
-            {/* Left: form fields, scrolls independently. On mobile this only
-                renders when the Settings tab is active and takes the full
-                remaining height; on md+ it's always-visible in its grid cell.
-                `md:block` overrides the mobile `hidden` at the breakpoint. */}
-            <div className={`${mobileTab === "settings" ? "flex-1" : "hidden"} space-y-3 overflow-y-auto border-keep-rule p-4 md:block md:flex-initial md:border-r`}>
-              <Field
-                label={isCharacter ? "Character name" : "Master username"}
-                value={name}
-                readOnly
-                hint={isCharacter ? "Renaming is blocked - message history snapshots the name at send time." : "Set at registration."}
-              />
-              <Field
-                label="Main Profile Image URL"
-                value={avatarUrl}
-                onChange={setAvatarUrl}
-                placeholder="https://example.com/portrait.png"
-                hint="Drives the userlist icon, the modal hero, and the full-size footer image."
-              />
-
-              {!isCharacter ? (
-                <label className="block text-xs">
-                  <span className="mb-1 block uppercase tracking-widest text-keep-muted">Gender (OOC)</span>
-                  <select
-                    value={gender}
-                    onChange={(e) => setGender(e.target.value as Gender)}
-                    className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
-                  >
-                    {GENDER_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>{o.label}</option>
-                    ))}
-                  </select>
-                  <span className="mt-1 block text-[10px] text-keep-muted">
-                    Renders as an icon next to your username when no character is active.
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {/* DESCRIPTION — the bio HTML editor. Was the right column on
+                desktop; now its own tab so it gets the full width too. */}
+            {activeTab === "description" ? (
+              <div className="flex min-h-0 flex-1 flex-col p-4">
+                <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="uppercase tracking-widest text-keep-muted">
+                    {isCharacter ? "Character bio" : "OOC bio"}
                   </span>
-                </label>
-              ) : null}
-
-              {!isCharacter ? <ColorRow current={chatColor} /> : null}
-
-              {!isCharacter ? (
-                <NotificationsRow
-                  pref={notifyPref}
-                  onChangePref={setNotifyPref}
-                  permVersion={permVersion}
-                  onPermissionChange={() => setPermVersion((v) => v + 1)}
+                  <span className="text-keep-muted">
+                    HTML allowed: b, i, u, em, strong, a, img, br, p, ul/ol/li, blockquote, hr, h3-h6, span style=color
+                  </span>
+                </div>
+                <textarea
+                  value={bioHtml}
+                  onChange={(e) => setBioHtml(e.target.value)}
+                  className="min-h-0 w-full flex-1 resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs outline-none focus:border-keep-action"
+                  placeholder={
+                    isCharacter
+                      ? "<p>A weather-beaten mercenary from the Reach...</p>"
+                      : "<p>Time-zone, contact preferences, RP boundaries, anything OOC.</p>"
+                  }
                 />
-              ) : null}
+                <div className="mt-1 text-right text-[10px] text-keep-muted tabular-nums">
+                  {bioHtml.length.toLocaleString()} / {(master?.limits?.maxBioLength ?? 50_000).toLocaleString()}
+                </div>
+              </div>
+            ) : null}
 
-              <VisibilityRow
-                isPublic={isPublic}
-                isNsfw={isNsfw}
-                onChangePublic={setIsPublic}
-                onChangeNsfw={setIsNsfw}
-                kind={isCharacter ? "character" : "master"}
-              />
+            {/* PROFILE — name, avatar, gender (master) / stats (character).
+                The bread-and-butter "who am I" tab. */}
+            {activeTab === "profile" ? (
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+                <Field
+                  label={isCharacter ? "Character name" : "Master username"}
+                  value={name}
+                  readOnly
+                  hint={isCharacter ? "Renaming is blocked - message history snapshots the name at send time." : "Set at registration."}
+                />
+                <Field
+                  label="Main Profile Image URL"
+                  value={avatarUrl}
+                  onChange={setAvatarUrl}
+                  placeholder="https://example.com/portrait.png"
+                  hint="Drives the userlist icon, the modal hero, and the full-size footer image."
+                />
+                {!isCharacter ? (
+                  <label className="block text-xs">
+                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">Gender (OOC)</span>
+                    <select
+                      value={gender}
+                      onChange={(e) => setGender(e.target.value as Gender)}
+                      className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+                    >
+                      {GENDER_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    <span className="mt-1 block text-[10px] text-keep-muted">
+                      Renders as an icon next to your username when no character is active.
+                    </span>
+                  </label>
+                ) : null}
+                {isCharacter ? (
+                  <fieldset className="rounded border border-keep-rule p-3">
+                    <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Stats</legend>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {STAT_FIELDS.map(({ key, label }) => (
+                        <label key={key} className="block text-xs">
+                          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{label}</span>
+                          {key === "gender" ? (
+                            <select
+                              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+                              value={(stats.gender as string) ?? ""}
+                              onChange={(e) =>
+                                setStats((s) => {
+                                  const next = { ...s };
+                                  if (e.target.value) next.gender = e.target.value;
+                                  else delete next.gender;
+                                  return next;
+                                })
+                              }
+                            >
+                              <option value="">-</option>
+                              {GENDER_OPTIONS.filter((o) => o.value !== "undisclosed").map((o) => (
+                                <option key={o.value} value={o.value}>{o.label}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type="text"
+                              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+                              value={(stats[key] as string) ?? ""}
+                              onChange={(e) =>
+                                setStats((s) => ({ ...s, [key]: e.target.value || undefined }))
+                              }
+                            />
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : null}
+              </div>
+            ) : null}
 
-              {isCharacter ? (
+            {/* APPEARANCE — chat color (master), theme palette, theme style
+                (master), font/size (master). All the visual customization
+                in one place so the color picker has the full modal width
+                instead of getting squeezed to 420px. */}
+            {activeTab === "appearance" ? (
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+                {!isCharacter ? <ColorRow current={chatColor} /> : null}
                 <fieldset className="rounded border border-keep-rule p-3">
-                  <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Stats</legend>
-                  <div className="grid grid-cols-2 gap-2">
-                    {STAT_FIELDS.map(({ key, label }) => (
-                      <label key={key} className="block text-xs">
-                        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{label}</span>
-                        {key === "gender" ? (
-                          <select
-                            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
-                            value={(stats.gender as string) ?? ""}
-                            onChange={(e) =>
-                              setStats((s) => {
-                                const next = { ...s };
-                                if (e.target.value) next.gender = e.target.value;
-                                else delete next.gender;
-                                return next;
-                              })
-                            }
-                          >
-                            <option value="">-</option>
-                            {GENDER_OPTIONS.filter((o) => o.value !== "undisclosed").map((o) => (
-                              <option key={o.value} value={o.value}>{o.label}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            type="text"
-                            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
-                            value={(stats[key] as string) ?? ""}
-                            onChange={(e) =>
-                              setStats((s) => ({ ...s, [key]: e.target.value || undefined }))
-                            }
-                          />
-                        )}
-                      </label>
-                    ))}
-                  </div>
+                  <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
+                    {isCharacter ? "Character theme" : "OOC theme"}
+                  </legend>
+                  <p className="mb-2 text-[10px] text-keep-muted">
+                    {isCharacter
+                      ? "Switching to this character applies this theme to your chat. Others viewing this character's profile see it themed this way."
+                      : "Applied to your chat when no character is active, and to your master profile modal."}
+                  </p>
+                  <ThemePicker
+                    theme={theme ?? DEFAULT_THEME}
+                    onChange={setTheme}
+                    onReset={() => setTheme(null)}
+                  />
+                  {!theme ? (
+                    <div className="mt-1 text-[10px] italic text-keep-muted">
+                      Currently using the system default - change a color or pick a preset to start customizing.
+                    </div>
+                  ) : null}
                 </fieldset>
-              ) : null}
+                {!isCharacter ? (
+                  <fieldset className="rounded border border-keep-rule p-3">
+                    <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Theme style</legend>
+                    <p className="mb-2 text-[10px] text-keep-muted">
+                      Visual treatment — ornaments, borders, textures. Orthogonal
+                      to the palette above; the same style works with any colors.
+                      Leave on "use site default" to follow whatever the admin
+                      has chosen site-wide.
+                    </p>
+                    <StylePicker
+                      value={userStyleKey}
+                      onChange={setUserStyleKey}
+                      allowInherit
+                    />
+                  </fieldset>
+                ) : null}
+                {!isCharacter ? (
+                  <fieldset className="rounded border border-keep-rule p-3">
+                    <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
+                      Reading &amp; accessibility
+                    </legend>
+                    <p className="mb-2 text-[10px] text-keep-muted">
+                      Override the interface font and size if the defaults are
+                      hard to read. Empty font = use the site default. Any
+                      fallback font your browser doesn't recognize is silently
+                      skipped, so bad values just degrade — they don't break
+                      the page.
+                    </p>
+                    <label className="block text-xs">
+                      <span className="mb-1 block uppercase tracking-widest text-keep-muted">
+                        Font family (CSS)
+                      </span>
+                      <input
+                        type="text"
+                        value={uiFontFamily ?? ""}
+                        onChange={(e) => setUiFontFamily(e.target.value === "" ? null : e.target.value)}
+                        placeholder={`e.g. "Verdana", sans-serif`}
+                        maxLength={200}
+                        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
+                      />
+                      <span className="mt-1 block text-[10px] text-keep-muted">
+                        Examples: <code>"Georgia", serif</code> ·
+                        {" "}<code>"Verdana", sans-serif</code> ·
+                        {" "}<code>"Comic Sans MS", sans-serif</code> ·
+                        {" "}<code>"Atkinson Hyperlegible", sans-serif</code>
+                      </span>
+                    </label>
+                    <label className="mt-3 block text-xs">
+                      <span className="mb-1 block uppercase tracking-widest text-keep-muted">
+                        Font size
+                      </span>
+                      <select
+                        value={uiFontScale ?? ""}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "small" || v === "medium" || v === "large" || v === "xl") {
+                            setUiFontScale(v);
+                          } else {
+                            setUiFontScale(null);
+                          }
+                        }}
+                        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+                      >
+                        <option value="">Default (medium)</option>
+                        <option value="small">Small (14px)</option>
+                        <option value="medium">Medium (16px)</option>
+                        <option value="large">Large (18px)</option>
+                        <option value="xl">Extra large (20px)</option>
+                      </select>
+                    </label>
+                  </fieldset>
+                ) : null}
+              </div>
+            ) : null}
 
-              {isCharacter && target.kind === "character" ? (
+            {/* PRIVACY — visibility (public / NSFW), push notifications,
+                desktop notification preference. All the "who can see /
+                hear from me" toggles. */}
+            {activeTab === "privacy" ? (
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+                <VisibilityRow
+                  isPublic={isPublic}
+                  isNsfw={isNsfw}
+                  onChangePublic={setIsPublic}
+                  onChangeNsfw={setIsNsfw}
+                  kind={isCharacter ? "character" : "master"}
+                />
+                {!isCharacter ? (
+                  <NotificationsRow
+                    pref={notifyPref}
+                    onChangePref={setNotifyPref}
+                    permVersion={permVersion}
+                    onPermissionChange={() => setPermVersion((v) => v + 1)}
+                  />
+                ) : null}
+                {!isCharacter ? (
+                  <SoundRow
+                    dm={soundDmEnabled}
+                    chat={soundChatEnabled}
+                    alert={soundAlertEnabled}
+                    onChangeDm={setSoundDmEnabled}
+                    onChangeChat={setSoundChatEnabled}
+                    onChangeAlert={setSoundAlertEnabled}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+
+            {/* LINKS — profile-link chips, edited via the existing
+                LinksEditor component. */}
+            {activeTab === "links" ? (
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                <LinksEditor
+                  scope={target.kind === "character" ? { kind: "character", id: target.id } : { kind: "master" }}
+                  links={links}
+                  onChange={setLinks}
+                />
+              </div>
+            ) : null}
+
+            {/* GALLERY — portrait gallery (character only). */}
+            {activeTab === "gallery" && isCharacter && target.kind === "character" ? (
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
                 <PortraitGalleryEditor
                   characterId={target.id}
                   portraits={portraits}
                   onChange={setPortraits}
                 />
-              ) : null}
+              </div>
+            ) : null}
 
-              {isCharacter && target.kind === "character" ? (
+            {/* JOURNAL — character journal entries (character only). */}
+            {activeTab === "journal" && isCharacter && target.kind === "character" ? (
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
                 <JournalEditor characterId={target.id} />
-              ) : null}
-
-              <LinksEditor
-                scope={target.kind === "character" ? { kind: "character", id: target.id } : { kind: "master" }}
-                links={links}
-                onChange={setLinks}
-              />
-
-              <fieldset className="rounded border border-keep-rule p-3">
-                <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
-                  {isCharacter ? "Character theme" : "OOC theme"}
-                </legend>
-                <p className="mb-2 text-[10px] text-keep-muted">
-                  {isCharacter
-                    ? "Switching to this character applies this theme to your chat. Others viewing this character's profile see it themed this way."
-                    : "Applied to your chat when no character is active, and to your master profile modal."}
-                </p>
-                <ThemePicker
-                  theme={theme ?? DEFAULT_THEME}
-                  onChange={setTheme}
-                  onReset={() => setTheme(null)}
-                />
-                {!theme ? (
-                  <div className="mt-1 text-[10px] italic text-keep-muted">
-                    Currently using the system default - change a color or pick a preset to start customizing.
-                  </div>
-                ) : null}
-              </fieldset>
-
-              {!isCharacter ? (
-                <fieldset className="rounded border border-keep-rule p-3">
-                  <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Theme style</legend>
-                  <p className="mb-2 text-[10px] text-keep-muted">
-                    Visual treatment — ornaments, borders, textures. Orthogonal
-                    to the palette above; the same style works with any colors.
-                    Leave on "use site default" to follow whatever the admin
-                    has chosen site-wide.
-                  </p>
-                  <StylePicker
-                    value={userStyleKey}
-                    onChange={setUserStyleKey}
-                    allowInherit
-                  />
-                </fieldset>
-              ) : null}
-
-              {/* Per-user accessibility / readability. Master target only —
-                  font + size are account-wide, not per-character. Both
-                  fields apply live as soon as the editor saves (the same
-                  /me/profile re-fetch path that updates the theme picks
-                  these up too). */}
-              {!isCharacter ? (
-                <fieldset className="rounded border border-keep-rule p-3">
-                  <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
-                    Reading &amp; accessibility
-                  </legend>
-                  <p className="mb-2 text-[10px] text-keep-muted">
-                    Override the interface font and size if the defaults are
-                    hard to read. Empty font = use the site default. Any
-                    fallback font your browser doesn't recognize is silently
-                    skipped, so bad values just degrade — they don't break
-                    the page.
-                  </p>
-
-                  <label className="block text-xs">
-                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">
-                      Font family (CSS)
-                    </span>
-                    <input
-                      type="text"
-                      value={uiFontFamily ?? ""}
-                      onChange={(e) => setUiFontFamily(e.target.value === "" ? null : e.target.value)}
-                      placeholder={`e.g. "Verdana", sans-serif`}
-                      maxLength={200}
-                      className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
-                    />
-                    <span className="mt-1 block text-[10px] text-keep-muted">
-                      Examples: <code>"Georgia", serif</code> ·
-                      {" "}<code>"Verdana", sans-serif</code> ·
-                      {" "}<code>"Comic Sans MS", sans-serif</code> ·
-                      {" "}<code>"Atkinson Hyperlegible", sans-serif</code>
-                    </span>
-                  </label>
-
-                  <label className="mt-3 block text-xs">
-                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">
-                      Font size
-                    </span>
-                    <select
-                      value={uiFontScale ?? ""}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (v === "small" || v === "medium" || v === "large" || v === "xl") {
-                          setUiFontScale(v);
-                        } else {
-                          setUiFontScale(null);
-                        }
-                      }}
-                      className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
-                    >
-                      <option value="">Default (medium)</option>
-                      <option value="small">Small (14px)</option>
-                      <option value="medium">Medium (16px)</option>
-                      <option value="large">Large (18px)</option>
-                      <option value="xl">Extra large (20px)</option>
-                    </select>
-                  </label>
-                </fieldset>
-              ) : null}
-
-              {error ? (
-                <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">
-                  {error}
-                </div>
-              ) : null}
-            </div>
-
-            {/* Right: bio editor - textarea fills column. On mobile only
-                renders when the Description tab is active. `md:flex` overrides
-                the mobile `hidden` so on md+ it always shows alongside the
-                settings column. */}
-            <div className={`${mobileTab === "description" ? "flex flex-1" : "hidden"} min-h-0 flex-col p-4 md:flex md:flex-initial`}>
-              <div className="mb-1 flex items-center justify-between text-xs">
-                <span className="uppercase tracking-widest text-keep-muted">
-                  {isCharacter ? "Character bio" : "OOC bio"}
-                </span>
-                <span className="hidden text-keep-muted md:inline">
-                  HTML allowed: b, i, u, em, strong, a, img, br, p, ul/ol/li, blockquote, hr, h3-h6, span style=color
-                </span>
               </div>
-              <textarea
-                value={bioHtml}
-                onChange={(e) => setBioHtml(e.target.value)}
-                className="min-h-0 w-full flex-1 resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs outline-none focus:border-keep-action"
-                placeholder={
-                  isCharacter
-                    ? "<p>A weather-beaten mercenary from the Reach...</p>"
-                    : "<p>Time-zone, contact preferences, RP boundaries, anything OOC.</p>"
-                }
-              />
-              <div className="mt-1 text-right text-[10px] text-keep-muted tabular-nums">
-                {bioHtml.length.toLocaleString()} / {(master?.limits?.maxBioLength ?? 50_000).toLocaleString()}
+            ) : null}
+
+            {error ? (
+              <div className="mx-4 mb-2 shrink-0 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">
+                {error}
               </div>
-            </div>
+            ) : null}
           </div>
         )}
 
@@ -868,14 +961,18 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             <button
               type="button"
               onClick={onClose}
-              className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
+              // Cancel = neutral, muted. Save = primary, action-color
+              // tint. The two are visually distinct so a fast click
+              // doesn't accidentally discard unsaved edits — the
+              // accent on Save reads as the "go" button at a glance.
+              className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm text-keep-muted hover:bg-keep-banner hover:text-keep-text"
             >
-              Close
+              Cancel
             </button>
             <button
               type="submit"
               disabled={saving || loadingTarget}
-              className="keep-button rounded border border-keep-rule bg-keep-banner px-4 py-1 text-sm disabled:opacity-50 hover:bg-keep-banner/80"
+              className="keep-button rounded border border-keep-action bg-keep-action/15 px-4 py-1 text-sm font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save"}
             </button>
@@ -897,9 +994,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
               setCharacters((prev) => [...prev, c]);
               setTarget({ kind: "character", id: c.id });
               // Drop the user onto the description tab so they can start
-              // writing immediately on mobile - the settings tab is mostly
-              // empty for a brand-new character.
-              setMobileTab("description");
+              // writing immediately — most of the other tabs are empty
+              // for a fresh character.
+              setActiveTab("description");
               setCreateOpen(false);
             }}
           />
@@ -1512,6 +1609,85 @@ function NotificationsRow({
         ) : null}
       </div>
       <PushRow />
+    </fieldset>
+  );
+}
+
+/**
+ * In-app sound effect toggles. Three discrete events, three checkboxes.
+ * Stored as boolean columns on `users` (sound_*_enabled) and persisted
+ * via the same /me/profile PUT that handles the rest of the master
+ * settings — saved when the user clicks Save in the editor footer, not
+ * on toggle.
+ *
+ * All three default on; users opt out of the noises they find
+ * intrusive. The toggles take effect immediately on save thanks to the
+ * Zustand store push in the parent's onSubmit — no need to reload the
+ * page or the Audio elements.
+ */
+function SoundRow({
+  dm,
+  chat,
+  alert,
+  onChangeDm,
+  onChangeChat,
+  onChangeAlert,
+}: {
+  dm: boolean;
+  chat: boolean;
+  alert: boolean;
+  onChangeDm: (v: boolean) => void;
+  onChangeChat: (v: boolean) => void;
+  onChangeAlert: (v: boolean) => void;
+}) {
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Sound effects</legend>
+      <p className="mb-2 text-[10px] text-keep-muted">
+        Per-event audio cues. Saved with the rest of your profile.
+      </p>
+      <label className="mb-1 flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={dm}
+          onChange={(e) => onChangeDm(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="block text-keep-text">Direct messages (ping)</span>
+          <span className="block text-[10px] text-keep-muted">
+            Plays when someone DMs you, anywhere in the app.
+          </span>
+        </span>
+      </label>
+      <label className="mb-1 flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={chat}
+          onChange={(e) => onChangeChat(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="block text-keep-text">Chat messages (tap)</span>
+          <span className="block text-[10px] text-keep-muted">
+            Plays on incoming room messages and /me actions.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={alert}
+          onChange={(e) => onChangeAlert(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="block text-keep-text">Announcements (alert)</span>
+          <span className="block text-[10px] text-keep-muted">
+            Plays on admin announcements and other system events.
+          </span>
+        </span>
+      </label>
     </fieldset>
   );
 }

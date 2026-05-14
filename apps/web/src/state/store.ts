@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import type {
   ChatMessage,
+  DirectConversationSummary,
+  DirectMessage,
   ProfileView,
   Role,
   RoomOccupant,
@@ -265,6 +267,55 @@ interface ChatState {
   /** Public site branding - see SiteBranding. */
   branding: SiteBranding;
   setBranding: (b: SiteBranding) => void;
+
+  /* =========================================================
+   *  Direct messages (Phase 4)
+   * ========================================================= */
+  /**
+   * Per-conversation message buffer. Keyed by conversationId. Each
+   * list stays sorted oldest → newest; the store action handles
+   * dedupe by id (server can fan a message to multiple sockets of
+   * the same user). Trimmed lazily — the DmThread caps display at
+   * its own rendering layer.
+   */
+  dmMessagesByConv: Record<string, DirectMessage[]>;
+  /** Conversation summaries for the rail. Keyed by conversationId. */
+  dmConversations: Record<string, DirectConversationSummary>;
+  /**
+   * The OTHER user id of the currently-open DM panel, or null when no
+   * panel is open. We key on the user id rather than the conversation
+   * id because the conversation row may not exist server-side until
+   * the first message is sent — letting the panel mount with just an
+   * otherUserId removes the "first-DM bootstrapping" footgun.
+   */
+  openDmOtherUserId: string | null;
+  /** Local mirror of `users.dms_enabled`. Updated from /me/profile + the prefs PUT. */
+  dmsEnabled: boolean;
+  /**
+   * Per-event in-app sound toggles. Mirrors the three boolean columns
+   * on `users` (sound_dm_enabled, sound_chat_enabled, sound_alert_enabled).
+   * Read by `lib/sound.ts` before every play() so a toggle in the
+   * profile editor takes effect immediately, without an Audio reload.
+   */
+  soundPrefs: { dm: boolean; chat: boolean; alert: boolean };
+  setSoundPrefs: (p: { dm: boolean; chat: boolean; alert: boolean }) => void;
+  /**
+   * Counter bumped each time the socket (re)connects. Any open
+   * ThreadPane watches this and re-runs its history seed when it
+   * changes — that's the catch-up path for `dm:new` events the
+   * client missed while disconnected (Socket.io drops `emit`s when
+   * the recipient socket isn't connected; there's no replay).
+   */
+  dmReseedTick: number;
+
+  setDmConversations: (list: DirectConversationSummary[]) => void;
+  upsertDmConversation: (c: DirectConversationSummary) => void;
+  setDmMessages: (conversationId: string, msgs: DirectMessage[]) => void;
+  appendDmMessage: (msg: DirectMessage) => void;
+  updateDmMessage: (msg: DirectMessage) => void;
+  setOpenDmOtherUser: (otherUserId: string | null) => void;
+  setDmsEnabled: (enabled: boolean) => void;
+  bumpDmReseed: () => void;
 }
 
 /**
@@ -560,4 +611,53 @@ export const useChat = create<ChatState>((set) => ({
     saveCachedBranding(b);
     set({ branding: b });
   },
+
+  /* ----- direct messages ----- */
+  dmMessagesByConv: {},
+  dmConversations: {},
+  openDmOtherUserId: null,
+  dmsEnabled: true,
+  soundPrefs: { dm: true, chat: true, alert: true },
+  setSoundPrefs: (p) => set({ soundPrefs: p }),
+  dmReseedTick: 0,
+
+  setDmConversations: (list) => set(() => {
+    const next: Record<string, DirectConversationSummary> = {};
+    for (const c of list) next[c.id] = c;
+    return { dmConversations: next };
+  }),
+  upsertDmConversation: (c) => set((s) => ({
+    dmConversations: { ...s.dmConversations, [c.id]: c },
+  })),
+  setDmMessages: (conversationId, msgs) => set((s) => ({
+    dmMessagesByConv: { ...s.dmMessagesByConv, [conversationId]: [...msgs] },
+  })),
+  appendDmMessage: (msg) => set((s) => {
+    const list = s.dmMessagesByConv[msg.conversationId] ?? [];
+    // Same dedupe-by-id discipline as `appendMessage`: the server
+    // can fan a single DM to multiple sockets of the same user, so
+    // the client treats inbound messages as idempotent. Look back
+    // at the last 16 entries; a duplicate almost always arrives
+    // within a couple of items of the original.
+    for (let i = list.length - 1; i >= 0 && i >= list.length - 16; i--) {
+      if (list[i]!.id === msg.id) return {};
+    }
+    return {
+      dmMessagesByConv: { ...s.dmMessagesByConv, [msg.conversationId]: [...list, msg] },
+    };
+  }),
+  updateDmMessage: (msg) => set((s) => {
+    const list = s.dmMessagesByConv[msg.conversationId];
+    if (!list) return {};
+    const idx = list.findIndex((m) => m.id === msg.id);
+    if (idx < 0) return {};
+    const next = list.slice();
+    next[idx] = msg;
+    return {
+      dmMessagesByConv: { ...s.dmMessagesByConv, [msg.conversationId]: next },
+    };
+  }),
+  setOpenDmOtherUser: (otherUserId) => set({ openDmOtherUserId: otherUserId }),
+  setDmsEnabled: (enabled) => set({ dmsEnabled: enabled }),
+  bumpDmReseed: () => set((s) => ({ dmReseedTick: s.dmReseedTick + 1 })),
 }));

@@ -181,13 +181,65 @@ const FORMATTING_ROWS: Array<{ syntax: string; example: string; note?: string }>
   { syntax: "@world:slug", example: "anyone for a game in @world:ironreach?", note: "click to open the world viewer; slug is the world's URL slug (lowercase + hyphens)" },
 ];
 
+/**
+ * Categorized listing of every HTML construct the bio/world-page sanitizer
+ * accepts. Mirrors the allow-list in apps/server/src/auth/html.ts —
+ * keep them in sync when one changes. Anything outside this list is
+ * dropped silently on save.
+ */
+const HTML_TAG_GROUPS: Array<{ label: string; tags: string[]; note?: string }> = [
+  {
+    label: "Inline text",
+    tags: ["b", "i", "u", "em", "strong", "s", "mark", "small", "sub", "sup", "code", "kbd", "var", "samp", "abbr", "cite", "q"],
+  },
+  {
+    label: "Block structure",
+    tags: ["p", "div", "br", "blockquote", "pre", "hr", "h3", "h4", "h5", "h6", "figure", "figcaption"],
+    note: "h1 and h2 are reserved for the site chrome (banner, modal titles); writer content tops out at h3.",
+  },
+  {
+    label: "Lists",
+    tags: ["ul", "ol", "li", "dl", "dt", "dd"],
+  },
+  {
+    label: "Tables",
+    tags: ["table", "caption", "thead", "tbody", "tfoot", "tr", "th", "td"],
+    note: "th/td accept colspan, rowspan, scope, headers.",
+  },
+  {
+    label: "Disclosure (spoilers / NSFW gates)",
+    tags: ["details", "summary"],
+    note: "<details open> ships a section pre-expanded.",
+  },
+  {
+    label: "Links & media",
+    tags: ["a", "img", "span"],
+    note: "a href: http/https/mailto only. img src: http/https only. javascript: and data: schemes are blocked.",
+  },
+];
+
+const HTML_STYLE_PROPS: Array<{ prop: string; values: string }> = [
+  { prop: "color, background-color", values: "#abc, #aabbcc, rgb(…), rgba(…)" },
+  { prop: "font-weight", values: "normal, bold, lighter, bolder, 100–900 (step 100)" },
+  { prop: "font-style", values: "italic, normal, oblique" },
+  { prop: "font-family", values: "any name list up to 200 chars" },
+  { prop: "font-size", values: "1–72px, 0.5–4em, 50–400%, or named (small/large/etc.)" },
+  { prop: "line-height", values: "0.0–3.9, or 10–69px" },
+  { prop: "text-decoration", values: "underline, line-through, overline, none" },
+  { prop: "text-align", values: "left, right, center, justify" },
+  { prop: "list-style-type", values: "disc, circle, square, decimal, lower/upper-roman, lower/upper-alpha, none" },
+  { prop: "vertical-align", values: "baseline, top, middle, bottom, sub, super" },
+];
+
 function FormattingHelp() {
   return (
     <div className="space-y-3 text-xs">
       <p className="text-keep-muted">
         Chat messages support a small subset of GitHub-flavored markdown.
         Block-level features (headings, lists, tables, blockquotes) are
-        deliberately omitted - chat is single-line content.
+        deliberately omitted - chat is single-line content. Profile bios,
+        world pages, and admin HTML use a separate, richer allow-list —
+        see the Profile / World HTML section below.
       </p>
 
       <div className="overflow-hidden rounded border border-keep-border">
@@ -218,6 +270,109 @@ function FormattingHelp() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="mt-5 border-t border-keep-rule/40 pt-3">
+        <h3 className="mb-1 font-action text-sm uppercase tracking-widest text-keep-text">
+          Profile / world HTML
+        </h3>
+        <p className="text-keep-muted">
+          Bio fields on profiles + world pages accept HTML, not Markdown.
+          Saved content runs through <code className="font-mono text-keep-action">sanitize-html</code>;
+          anything outside the allow-list below is silently stripped.
+          Event handlers (<code className="font-mono text-keep-action">onclick=</code>, etc.) and the
+          <code className="font-mono text-keep-action">javascript:</code> /{" "}
+          <code className="font-mono text-keep-action">data:</code> URL schemes are blocked.
+        </p>
+
+        <div className="mt-2 overflow-hidden rounded border border-keep-border">
+          <table className="w-full text-[12px]">
+            <thead className="bg-keep-panel/50 text-[10px] uppercase tracking-widest text-keep-muted">
+              <tr>
+                <th className="w-1/4 px-2 py-1 text-left">Category</th>
+                <th className="px-2 py-1 text-left">Allowed tags</th>
+              </tr>
+            </thead>
+            <tbody>
+              {HTML_TAG_GROUPS.map((g) => (
+                <tr key={g.label} className="border-t border-keep-border align-top">
+                  <td className="px-2 py-1.5 font-semibold text-keep-text">{g.label}</td>
+                  <td className="px-2 py-1.5">
+                    <div className="flex flex-wrap gap-1">
+                      {g.tags.map((t) => (
+                        <code key={t} className="rounded bg-keep-panel/60 px-1 font-mono text-[11px] text-keep-action">
+                          &lt;{t}&gt;
+                        </code>
+                      ))}
+                    </div>
+                    {g.note ? (
+                      <div className="mt-1 text-[10px] text-keep-muted">{g.note}</div>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="mt-3 text-keep-muted">
+          Every allowed tag accepts <code className="font-mono text-keep-action">class</code>,
+          <code className="font-mono text-keep-action">style</code>,
+          and <code className="font-mono text-keep-action">title</code> attributes. A few elements
+          accept more:
+          <code className="font-mono text-keep-action">a</code> takes
+          <code className="font-mono text-keep-action">href</code>;
+          <code className="font-mono text-keep-action">img</code> takes
+          <code className="font-mono text-keep-action">src/alt/width/height</code>;
+          table cells take <code className="font-mono text-keep-action">colspan/rowspan</code>;
+          <code className="font-mono text-keep-action">{"<details>"}</code> takes
+          <code className="font-mono text-keep-action">open</code>. All
+          outbound <code className="font-mono text-keep-action">{"<a>"}</code> links open in a new
+          tab with <code className="font-mono text-keep-action">rel="noopener noreferrer ugc"</code>.
+        </p>
+
+        <h4 className="mt-3 font-action text-xs uppercase tracking-widest text-keep-muted">
+          Inline CSS via style="…"
+        </h4>
+        <div className="mt-1 overflow-hidden rounded border border-keep-border">
+          <table className="w-full text-[12px]">
+            <thead className="bg-keep-panel/50 text-[10px] uppercase tracking-widest text-keep-muted">
+              <tr>
+                <th className="w-1/3 px-2 py-1 text-left">Property</th>
+                <th className="px-2 py-1 text-left">Allowed values</th>
+              </tr>
+            </thead>
+            <tbody>
+              {HTML_STYLE_PROPS.map((s) => (
+                <tr key={s.prop} className="border-t border-keep-border align-top">
+                  <td className="px-2 py-1 font-mono text-keep-action">{s.prop}</td>
+                  <td className="px-2 py-1 text-keep-text">{s.values}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <h4 className="mt-3 font-action text-xs uppercase tracking-widest text-keep-muted">
+          Example bio snippet
+        </h4>
+        <pre className="overflow-x-auto rounded border border-keep-rule/60 bg-keep-panel/30 p-2 font-mono text-[10px] leading-relaxed">{`<h3 style="color:#a83232">Character Name</h3>
+<p style="font-style:italic">"A short opening line."</p>
+
+<h4>At a glance</h4>
+<table>
+  <tr><th>Age</th><td>32</td></tr>
+  <tr><th>Build</th><td>Tall, scarred</td></tr>
+</table>
+
+<details>
+  <summary>Content warnings</summary>
+  <p>Grief, violence (no on-screen without buy-in).</p>
+</details>`}</pre>
+        <p className="mt-1 text-[10px] text-keep-muted">
+          The <b>Profile creation</b> guide on the Guides tab has more
+          worked examples and walks through every editor tab.
+        </p>
       </div>
 
       <details className="rounded border border-keep-border bg-keep-panel/30 p-2">

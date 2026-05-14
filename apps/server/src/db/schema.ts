@@ -67,6 +67,34 @@ export const users = sqliteTable(
     notifyPref: text("notify_pref", { enum: ["off", "mentions", "all"] })
       .notNull()
       .default("mentions"),
+    /**
+     * Per-user DM opt-out. `true` (default) lets other users start a
+     * direct message thread; `false` makes /me/dms/with/:target return
+     * 403 with `error: "dms_disabled"` so the client can render a
+     * "this user has DMs turned off" affordance instead of a generic
+     * failure. Stored as INTEGER 0/1 in SQLite via Drizzle's boolean
+     * mode (matches isPublic / isNsfw posture nearby).
+     */
+    dmsEnabled: integer("dms_enabled", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    /**
+     * Per-event in-app sound toggles. All three default to on — opt out,
+     * not opt in — so a fresh sign-in hears notifications. Each maps to
+     * one bundled mp3 in apps/web/public/audio:
+     *   soundDmEnabled    → ping.mp3  (inbound DMs)
+     *   soundChatEnabled  → tap.mp3   (inbound chat messages + actions)
+     *   soundAlertEnabled → alert.mp3 (announcements / system events)
+     */
+    soundDmEnabled: integer("sound_dm_enabled", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    soundChatEnabled: integer("sound_chat_enabled", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    soundAlertEnabled: integer("sound_alert_enabled", { mode: "boolean" })
+      .notNull()
+      .default(true),
     /** Free-text "away" reason; null means the user is present. */
     awayMessage: text("away_message"),
     awaySince: integer("away_since", { mode: "timestamp_ms" }),
@@ -889,12 +917,39 @@ export const worlds = sqliteTable(
      * viewer's chat theme as a fallback.
      */
     theme: text("theme"),
+    /**
+     * Catalog metadata. Validated as closed enums at the Zod layer (mirrors
+     * `rooms.replyMode`); the DB column itself is plain TEXT so a missed
+     * Zod entry doesn't crash existing rows. Defaults pick the "most
+     * conservative" choice so legacy rows render sanely in the catalog
+     * until their owners get around to setting real values.
+     */
+    genre: text("genre", {
+      enum: [
+        "fantasy", "modern", "scifi", "horror",
+        "western", "steampunk", "mythological", "other",
+      ],
+    }).notNull().default("other"),
+    /** Comma-separated lowercased tag list. Parsed via shared `parseTagList`. */
+    tags: text("tags").notNull().default(""),
+    /** Comma-separated lowercased content-warning list from the closed CONTENT_WARNINGS set. */
+    contentWarnings: text("content_warnings").notNull().default(""),
+    /** Admin-curated only for `"featured"`; owners can flip between `active` and `archived`. */
+    status: text("status", { enum: ["active", "featured", "archived"] })
+      .notNull()
+      .default("active"),
+    /** Public URL to the catalog cover image (uploaded via /worlds/:id/cover). Null = render text-only fallback. */
+    coverImageUrl: text("cover_image_url"),
+    /** Soft cadence signal for would-be members. Null = unspecified. */
+    pacing: text("pacing", { enum: ["casual", "structured", "long-form"] }),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
   },
   (t) => ({
     ownerSlugUq: uniqueIndex("worlds_owner_slug_uq").on(t.ownerUserId, sql`lower(${t.slug})`),
     visibilityIdx: index("worlds_visibility_idx").on(t.visibility, t.updatedAt),
+    genreIdx: index("worlds_genre_idx").on(t.genre),
+    statusIdx: index("worlds_status_idx").on(t.status),
   }),
 );
 
@@ -1022,12 +1077,14 @@ export const reports = sqliteTable(
     reporterUserId: text("reporter_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    messageId: text("message_id")
-      .notNull()
-      .references(() => messages.id, { onDelete: "cascade" }),
-    roomId: text("room_id")
-      .notNull()
-      .references(() => rooms.id, { onDelete: "cascade" }),
+    /**
+     * Room-message id when this is a room-content report; null for
+     * DM reports (which use `directMessageId` below). Exactly one of
+     * (messageId, directMessageId) is set on a given row — enforced
+     * at the route layer because SQLite has no native XOR check.
+     */
+    messageId: text("message_id").references(() => messages.id, { onDelete: "cascade" }),
+    roomId: text("room_id").references(() => rooms.id, { onDelete: "cascade" }),
     /** Free-text reason from the reporter. Optional; many UIs leave it blank. */
     reason: text("reason"),
     status: text("status", { enum: ["open", "reviewed", "dismissed"] })
@@ -1038,6 +1095,18 @@ export const reports = sqliteTable(
     /** Admin's note added on resolve/dismiss; surfaced in the audit entry. */
     resolutionNote: text("resolution_note"),
     createdAt: ts("created_at"),
+    /**
+     * DM report fields (Phase 5). `directMessageId` references the
+     * reported DM; `bodySnapshot` captures the body at report-time
+     * so the admin queue can show it WITHOUT the admin route ever
+     * querying `direct_messages` directly (preserves the "admin
+     * queries cannot reach DM tables" invariant). `senderUserId` is
+     * denormalized from `direct_messages.senderUserId` for the same
+     * reason — the admin row stands on its own.
+     */
+    directMessageId: text("direct_message_id").references(() => directMessages.id, { onDelete: "set null" }),
+    bodySnapshot: text("body_snapshot"),
+    senderUserId: text("sender_user_id").references(() => users.id, { onDelete: "set null" }),
   },
   (t) => ({
     statusIdx: index("reports_status_idx").on(t.status, t.createdAt),
@@ -1045,26 +1114,129 @@ export const reports = sqliteTable(
   }),
 );
 
-/* ---------- watches (Phase 3) ---------- */
+/* ---------- friends (formerly `watches`) ---------- */
 /**
- * Asymmetric "watch" list - "tell me when this user comes online". The
- * watched user can't enumerate their watchers. Mutual confirmation (proper
- * friends) is a possible v2.
+ * Asymmetric "friend" list - "tell me when this user comes online". The
+ * friended user can't enumerate who's friended them. Mutuality (two-way
+ * accept/reject) stays a possible v2 question; the current semantics
+ * are unchanged from the prior `watches` table.
+ *
+ * The /watch family of slash commands remains as aliases for /friend
+ * so existing tutorials and muscle memory still work.
  */
-export const watches = sqliteTable(
-  "watches",
+export const friends = sqliteTable(
+  "friends",
   {
-    watcherUserId: text("watcher_user_id")
+    frienderUserId: text("friender_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    watchedUserId: text("watched_user_id")
+    friendedUserId: text("friended_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * Friendship state. `pending` means the friender sent a request and
+     * the friended user hasn't responded yet — they appear in the
+     * inbox but NOT in either party's friends list. `accepted` means
+     * the friendship is mutual: both sides see the other in their
+     * list. Decline removes the row entirely (no `'declined'` state —
+     * we don't want a permanent "you've been declined" record sitting
+     * in the DB).
+     */
+    status: text("status", { enum: ["pending", "accepted"] })
+      .notNull()
+      .default("accepted"),
     createdAt: ts("created_at"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.watcherUserId, t.watchedUserId] }),
-    watchedIdx: index("watches_watched_idx").on(t.watchedUserId),
+    pk: primaryKey({ columns: [t.frienderUserId, t.friendedUserId] }),
+    friendedIdx: index("friends_friended_idx").on(t.friendedUserId),
+    statusIdx: index("friends_status_idx").on(t.friendedUserId, t.status),
+  }),
+);
+
+/* ---------- direct messages (Phase 3) ---------- */
+/**
+ * Two-party persistent conversations, distinct from in-room whispers.
+ * The canonical-pair invariant — `user_a_id < user_b_id` — combined
+ * with the unique index guarantees one conversation row per pair
+ * regardless of who started it. The route layer enforces the
+ * ordering on insert; once recorded the row never moves.
+ *
+ * Why a separate table family rather than reusing `rooms` + `messages`:
+ *   - DMs are always 2-party. The room model carries replyMode, world
+ *     links, thread categories, passwords, membership, expiry — every
+ *     one of which would be a meaningless column on a DM "room."
+ *   - Privacy: admins must never read DMs. Keeping the storage out of
+ *     `messages` makes "admin queries can't touch DM bodies" enforceable
+ *     at the table level (no `/admin/*` route queries
+ *     `direct_messages`) rather than as a runtime filter.
+ */
+export const directConversations = sqliteTable(
+  "direct_conversations",
+  {
+    id: id(),
+    /** Lexicographically smaller user id. Enforced at the route layer. */
+    userAId: text("user_a_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    /** Lexicographically larger user id. */
+    userBId: text("user_b_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    createdAt: ts("created_at"),
+    /**
+     * Touched on every successful send so the conversation list can sort
+     * by recency without scanning `direct_messages`. Defaults to
+     * `created_at` so a never-used row still surfaces in a friend's
+     * "recent" tab.
+     */
+    lastMessageAt: ts("last_message_at"),
+  },
+  (t) => ({
+    pairUq: uniqueIndex("direct_conversations_pair_uq").on(t.userAId, t.userBId),
+    aRecentIdx: index("direct_conversations_a_idx").on(t.userAId, t.lastMessageAt),
+    bRecentIdx: index("direct_conversations_b_idx").on(t.userBId, t.lastMessageAt),
+  }),
+);
+
+export const directMessages = sqliteTable(
+  "direct_messages",
+  {
+    id: id(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => directConversations.id, { onDelete: "cascade" }),
+    senderUserId: text("sender_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Display name snapshot at send time. Same posture as messages.displayName. */
+    displayName: text("display_name").notNull(),
+    avatarUrl: text("avatar_url"),
+    body: text("body").notNull(),
+    /** Set when the sender edits within the grace window. */
+    editedAt: integer("edited_at", { mode: "timestamp_ms" }),
+    /** Set when the sender soft-deletes. Body blanks to '' at render time. */
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    convTimeIdx: index("direct_messages_conv_time_idx").on(t.conversationId, t.createdAt),
+  }),
+);
+
+/**
+ * Per-user read marker. Keyed on (conversation, user) so the friends
+ * rail can compute unread counts as
+ * `count(messages where created_at > my last_read_at)` without a
+ * full table scan per render.
+ */
+export const directConversationReads = sqliteTable(
+  "direct_conversation_reads",
+  {
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => directConversations.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    lastReadAt: integer("last_read_at", { mode: "timestamp_ms" }).notNull().default(new Date(0)),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.conversationId, t.userId] }),
   }),
 );
 
@@ -1136,7 +1308,9 @@ export type DbRoomWorldLink = typeof roomWorldLinks.$inferSelect;
 export type DbWorldMember = typeof worldMembers.$inferSelect;
 export type DbAuditEntry = typeof auditLog.$inferSelect;
 export type DbReport = typeof reports.$inferSelect;
-export type DbWatch = typeof watches.$inferSelect;
+export type DbFriend = typeof friends.$inferSelect;
+/** @deprecated Use DbFriend. Kept for one release for downstream callers. */
+export type DbWatch = DbFriend;
 export type DbPushSubscription = typeof pushSubscriptions.$inferSelect;
 export type DbBookmark = typeof bookmarks.$inferSelect;
 export type DbRoomThreadCategory = typeof roomThreadCategories.$inferSelect;

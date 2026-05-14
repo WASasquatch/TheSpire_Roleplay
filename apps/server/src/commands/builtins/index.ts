@@ -20,7 +20,13 @@ import { replyCommand } from "./reply.js";
 import { moodCommand } from "./mood.js";
 import { sceneCommand } from "./scene.js";
 import { npcCommand, npcModeCommand } from "./npc.js";
-import { unwatchCommand, watchCommand, watchingCommand } from "./watch.js";
+import {
+  acceptFriendCommand,
+  declineFriendCommand,
+  friendCommand,
+  friendsCommand,
+  unfriendCommand,
+} from "./friends.js";
 import { worldCommand, worldsCommand } from "./world.js";
 import { expiryCommand, replyModeCommand } from "./room_modes.js";
 import { ignoreCommand, unignoreCommand } from "./ignore.js";
@@ -65,9 +71,11 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(sceneCommand);
   reg.registerBuiltin(npcCommand);
   reg.registerBuiltin(npcModeCommand);
-  reg.registerBuiltin(watchCommand);
-  reg.registerBuiltin(unwatchCommand);
-  reg.registerBuiltin(watchingCommand);
+  reg.registerBuiltin(friendCommand);
+  reg.registerBuiltin(acceptFriendCommand);
+  reg.registerBuiltin(declineFriendCommand);
+  reg.registerBuiltin(unfriendCommand);
+  reg.registerBuiltin(friendsCommand);
   reg.registerBuiltin(worldCommand);
   reg.registerBuiltin(worldsCommand);
   reg.registerBuiltin(expiryCommand);

@@ -1,6 +1,6 @@
 # The Spire
 
-A roleplay-focused chat sanctuary. Build characters, share scenes, and tell collaborative stories with other writers. A modern Node/React reimagining of the RPGHost / NexxusChat / phpMyChat lineage, with first-class character profiles, slash-command parity, mutual relationship titles, and privacy guarantees enforced in code rather than by promise.
+A roleplay-focused chat sanctuary. Build characters, share scenes, and tell collaborative stories with other writers. A modern Node/React reimagining of the RPGHost / NexxusChat / phpMyChat lineage, with first-class character profiles, slash-command parity, mutual relationship titles, an in-app wiki for your world(s), per-user direct messages, and privacy guarantees enforced in code rather than by promise.
 
 ### Live demo
 
@@ -14,7 +14,7 @@ The Spire is a real-time text chat built specifically for roleplayers. It treats
 
 ### Characters & profiles
 
-You sign in with a **master account** — that's your OOC handle and login identity. Underneath it, you keep as many **characters** as you want, each with their own bio (limited HTML — links, formatting, lists), structured stats (age, race, gender, height, weight, alignment, occupation, plus custom key/value rows you define), avatar, and theme.
+You sign in with a **master account** — that's your OOC handle and login identity. Underneath it, you keep as many **characters** as you want, each with their own bio (rich HTML — headings, lists, tables, collapsible spoiler blocks, inline CSS), structured stats (age, race, gender, height, weight, alignment, occupation, plus custom key/value rows you define), avatar, theme, a portrait gallery, and an in-character journal.
 
 | Action | Command |
 | --- | --- |
@@ -26,11 +26,109 @@ You sign in with a **master account** — that's your OOC handle and login ident
 | View someone's profile by name | `/whois <name>` |
 | Open a random profile | `/whois` (no args) |
 
-Click a name in chat to pre-fill a whisper; click the gender icon next to it to view that user's profile. Each profile applies the **owner's** theme to the modal — every character feels distinctly theirs to whoever's looking.
+Click a name in chat to pre-fill a whisper; click their `@mention` to open the profile. Each profile applies the **owner's** theme to the modal — every character feels distinctly theirs to whoever's looking.
 
 Master usernames are globally unique; character names are unique per owner. If a master and a character happen to share a name, `/whois` resolves to the master.
 
-### Mutual titles
+The profile editor is tabbed: **Description** (bio HTML), **Profile** (name/avatar/stats), **Appearance** (theme + fonts, master only), **Privacy** (visibility, NSFW, notifications, DM opt-out, sound effects), **Links** (external chip links), **Gallery** (extra portraits, per-image NSFW flag, character only), and **Journal** (in-character log entries, character only).
+
+### Direct messages & friends
+
+Two players can DM each other privately — conversations live outside the rooms, follow you across rooms, and persist even when the recipient is offline.
+
+- **Friends** are mutual and explicit. `/friend <name>` sends a pending request; `/accept <name>` or `/decline <name>` resolves it; `/unfriend <name>` ends it; `/friends` lists yours. Friends get a small "X is online" line when they connect.
+- **DM anyone.** You don't need to be friends to message someone. Profile → 💬 Message, or the compose-to-non-friend form in the Messages modal.
+- **Unread badges** appear on the Tools button, on the Messages menu item, and on each conversation in the list.
+- **Soft-delete** + 60-second edit grace, same as room messages.
+- **Reports** — right-click any incoming DM to file a moderation report. The full thread snapshot lands in the admin queue; the body is preserved server-side even if the sender later deletes the message.
+- **Opt-out** — Profile → Privacy → DMs enabled. Toggle off to refuse all DMs; senders get a friendly "this user has DMs turned off" response.
+
+The Messages modal has a resizable two-pane layout (drag the divider, double-click to reset) with the inbox on the left and the active thread on the right. Mobile collapses to one pane with a back chevron.
+
+### Chat & roleplay
+
+- **`/me <action>`** — renders `YourName <action>` with no brackets or colons. Aliases let you phrase pronoun-naturally: `/he`, `/she`, `/they`, `/it`, `/em`, `/action`, `/pose`, `/emote`. The display name is always the sender's; pronouns inside the action text are the author's responsibility.
+- **Limited Markdown** — `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, `[link text](https://...)`, `@mentions`, `@world:slug` chips, opt-in inline images. Block-level features (headings, tables, blockquotes) are intentionally omitted from chat — chat is single-line content. The full reference is in the Help modal's Formatting tab.
+- **`/whisper <name> <text>`** (alias `/w`) — private 1:1 message. The recipient can be a master username (always works) or an active character name. `/reply <text>` answers the last whisper without re-typing the name.
+- **`/reply <messageId> <text>`** (or click a timestamp) — threaded reply that quotes the parent message and stacks under it in nested-reply rooms.
+- **`/mood <text>`** — small mood chip next to your name ("brooding", "smug"). `/mood clear` removes it.
+- **`/scene <title>`** (owner/mod) — set a scene banner above the chat. `/scene end` clears it.
+- **`/npcmode on|off`** (owner/mod) — toggle whether `/npc <name> <dialogue>` is allowed in this room. Voiced-by tag prevents impersonation.
+- **`/roll 1d20`, `/roll 3d6`, `/roll d20`** — dice with crypto-secure RNG. Results post as a distinct message kind that's authoritative server-side (clients can't re-roll or fake).
+- **`/color #990000`** — set the hex color used on your messages and actions. `/color clear` reverts. Each character can override the master color independently.
+- **`/away [reason]`** — toggle your away state. `/back` clears it.
+- **`/ignore <name>`** — silence a user. One-way and silent — they have no signal you've done it. Their messages are dropped server-side before they reach your socket. `/unignore <name>` reverses.
+- **`/bookmarks`** — save a message for later. The Bookmarks modal lists every save with a jump-to-message link and a freeform note field.
+- **`/refresh [N]`** — re-fetch the userlist + topic. Pass `N` (5–3600) to set an auto-refresh interval; `/refresh off` disables it.
+- **Custom commands** — admins author their own slash commands at runtime (`/blush`, `/grin`, `/tea`, etc.) with a small template language. They appear in `/help` alongside built-ins, and can default to a custom color.
+
+Type `/help` for the full searchable reference with subcommand options. `/help <command>` jumps to a specific command's card. The Help modal also has a Guides tab with plain-language walkthroughs of every major feature, and a Formatting tab that doubles as the HTML allow-list reference for profile + world bios.
+
+### Sound effects
+
+Three small audio cues, each individually toggleable in Profile → Privacy → Sound effects:
+
+| Sound | Fires on | Default |
+| --- | --- | --- |
+| `ping` | Inbound DM from anyone | on |
+| `tap` | Inbound chat message or `/me` action in any room you're in | on |
+| `alert` | Admin `/announce` or system message | on |
+
+Sounds respect the browser's autoplay rules — they kick in after your first click anywhere in the app. Toggling a sound in the editor takes effect immediately on save (no reload).
+
+### Rooms
+
+- **Public rooms** — anyone joins via `/go RoomName`. Creates the room if it doesn't exist. Multi-word names work: `/go Common Room`.
+- **Private (password-protected) rooms** — `/go SecretRoom hunter2` creates one with that password if it doesn't exist, or joins an existing private room without you having to click through the password prompt. Equivalent to `/private SecretRoom hunter2`. The first whitespace-separated token is the name; everything after is the password.
+- **Invites** — `/invite <name>` whitelists a user so they can join a private room without the password. Useful for sustaining a scene as new players are added without leaking the password every time.
+- **Topics and descriptions** — `/topic <text>` is the short headline above the chat (always visible). `/describe <long text>` is the long-form world-setting description shown once when someone enters the room.
+- **Scene marker** — `/scene <title>` puts a banner above the chat ("Scene: dragon's lair"); `/scene end` clears it. Owner/mod only.
+- **Per-room moderation** — `/kick`, `/mute <user> <duration>`, `/ban <user> [duration] [reason]`, `/promote` users to room mods, `/demote` them back. Room owners and mods govern their own rooms; site admins can intervene anywhere.
+- **Announcements** — `/announce <text>` (owner/mod/admin) renders a high-visibility banner in the current room. `/announce all <text>` (admin only) blasts it sitewide.
+- **Per-room rendering modes** — `/replymode nested` groups replies under their parent in a thread container; `/replymode flat` reverts. `/expiry <minutes>` auto-deletes messages older than N; `/expiry off` clears it. Pairs well with `nested` for bulletin/forum-style rooms.
+- **Persistent rooms** — system rooms (`The_Spire`, `Tavern`, `Library`, `Garden`, `Bazaar` by default) survive admin sweeps and auto-expiry. User-created rooms auto-expire when nobody's inside.
+
+The first room you land in on connect is The Spire — a beacon-tower where entities arrive disoriented and find their footing. From there you wander.
+
+### Forums (threaded rooms)
+
+Any room can be switched into forum mode with `/replymode nested`. In forum mode:
+
+- New top-level messages become **topics** with a title input alongside the composer.
+- Replies stack under their parent in a collapsible thread. Latest 5 are visible; "View More" expands the rest.
+- Topics can be **sticky** (admin-pinned), **locked** (no more replies), and grouped into **thread categories** (per-room labels you create from the Tools menu).
+- Each topic has its own URL fragment so you can deep-link a thread.
+- A "Pop-out" icon opens a topic in a focused modal with the full reply tree.
+
+Pair forum mode with `/expiry` for "looking for RP" bulletin boards that clean themselves up.
+
+### Worlds (your own wiki)
+
+A **world** is a private wiki for your setting — lore, factions, places, NPCs. Each world has a tree of pages nested up to 10 levels deep. You own and edit every world you create; nobody else can edit your pages.
+
+Three visibility tiers:
+
+- **Private** — only you can see it. Draft-mode.
+- **Public** — anyone with the URL can read it; not listed in the catalog.
+- **Open** — public + listed in the World Catalog; others can join your world and link it to their own rooms.
+
+Major actions:
+
+| Action | Command / UI |
+| --- | --- |
+| Create / list your worlds | Tools → My Worlds |
+| Browse open worlds others made | Tools → World Catalog |
+| Open a specific world | `/world <slug>` |
+| Join an open world (declare affiliation) | `/world join <slug>` |
+| Set a primary world (drives chat userlist grouping) | `/world primary <slug>` |
+| Leave a world | `/world leave <slug>` |
+| Attach a world to the current room (owner/mod) | `/world link <slug>` |
+| Detach the room's world | `/world unlink` |
+| Inline link to a world in chat | `@world:<slug>` |
+
+Each world has its own theme, NSFW flag, cover image, tagline, and metadata fields. Pages accept the same HTML allow-list as profile bios. Joining a world is purely affiliation; it doesn't grant access to anything.
+
+### Mutual titles (bonds)
 
 Two players can ask each other to share a relationship title that appears on both of their profiles — `Married to`, `'s Partner`, `Best Friend of`, `Mate of`, `Sibling of`, plus whatever else admins add to the catalog.
 
@@ -42,34 +140,9 @@ Two players can ask each other to share a relationship title that appears on bot
 /request list               # what title kinds are available
 ```
 
-When you `/request`, Bob sees an inline Accept | Decline card above the chat composer. On accept, both profiles surface the title; on decline, the request is gone with no record. The same flow applies to dissolution — the other party has to agree before the title is removed, so a marriage can't be silently severed.
+When you `/request`, Bob sees an inline Accept | Decline card above the chat composer. On accept, both profiles surface the title; on decline, the request is gone with no record. The same flow applies to dissolution — the other party has to agree before the title is removed.
 
 Titles attach to **identities**, not accounts. Master-Alice married to Master-Bob is a separate relationship from Char-Alice married to Char-Bob, so the system follows whichever face you were wearing when you sent the request. The catalog is admin-managed (Admin → Titles), supporting both symmetric kinds (marriage, partner) and asymmetric ones (mentor / apprentice).
-
-### Chat & roleplay
-
-- **`/me <action>`** — renders `YourName <action>` with no brackets or colons. Aliases let you phrase pronoun-naturally: `/he`, `/she`, `/they`, `/it`, `/em`, `/action`, `/pose`, `/emote`. The display name is always the sender's; pronouns inside the action text are the author's responsibility.
-- **Limited Markdown** — `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, `[link text](https://...)`, `@mentions`, opt-in inline images. Block-level features (headings, tables, blockquotes) are intentionally omitted — chat is single-line content. The full reference is in the Help modal's Formatting tab.
-- **`/whisper <name> <text>`** — private 1:1 message. The recipient can be a master username (always works) or an active character name.
-- **`/roll 1d20`, `/roll 3d6`, `/roll d20`** — dice with crypto-secure RNG. Results post as a distinct message kind that's authoritative server-side (clients can't re-roll or fake).
-- **`/color #990000`** — set the hex color used on your messages and actions. `/color clear` reverts.
-- **`/away [reason]`** — toggle your away state. With a reason, others see it on hover. With no reason while already away, you come back.
-- **`/ignore <name>`** — silence a user. One-way and silent — they have no signal you've done it. `/unignore <name>` reverses.
-- **`/refresh [N]`** — re-fetch the userlist + topic. Pass `N` (5–3600) to set an auto-refresh interval; `/refresh off` disables it.
-- **Custom commands** — admins author their own slash commands at runtime (`/blush`, `/grin`, `/tea`, etc.) with a small template language. They appear in `/help` alongside built-ins, and can default to a custom color.
-
-Type `/help` for the full searchable reference with subcommand options. `/help <command>` jumps to a specific command's card.
-
-### Rooms
-
-- **Public rooms** — anyone joins via `/go RoomName`. Creates the room if it doesn't exist. Multi-word names work: `/go Common Room`.
-- **Private (password-protected) rooms** — `/go SecretRoom hunter2` creates one with that password if it doesn't exist, or joins an existing private room without you having to click through the password prompt. Equivalent to `/private SecretRoom hunter2`. The first whitespace-separated token is the name; everything after is the password.
-- **Invites** — `/invite <name>` whitelists a user so they can join a private room without the password. Useful for sustaining a scene as new players are added without leaking the password every time.
-- **Topics and descriptions** — `/topic <text>` is the short headline above the chat (always visible). `/describe <long text>` is the long-form world-setting description shown once when someone enters the room.
-- **Per-room moderation** — `/kick`, `/mute <user> <duration>`, `/ban <user> [duration] [reason]`, `/promote` users to room mods, `/demote` them back. Room owners and mods govern their own rooms; site admins can intervene anywhere.
-- **Persistent rooms** — system rooms (`The_Spire`, `Tavern`, `Library`, `Garden`, `Bazaar` by default) survive admin sweeps and auto-expiry. User-created rooms auto-expire when nobody's inside.
-
-The first room you land in on connect is The Spire — a beacon-tower where entities arrive disoriented and find their footing. From there you wander.
 
 ---
 
@@ -80,6 +153,7 @@ The Spire's privacy guarantees are enforced **in code**, not by policy. The inva
 ### What admins can NOT see
 
 - **Whispers are never readable by admins.** Sender and recipient can scroll back through their own; no admin endpoint will return them. The `/admin/rooms/:id/messages` route filters whispers out of every room regardless of room type.
+- **Direct messages are never readable by admins via room queries.** A DM only enters the moderation queue when the *recipient* explicitly files a 🚩 report on it — and then it's the reported snippet, not the full inbox.
 - **Private-room messages are never readable by admins.** Admins can list private rooms, see who's in them, and view their metadata (name, topic, owner, member count) — but the message contents are walled off at the data layer. Whatever you say in a private room stays between the people who were there.
 - **Soft-deleted characters keep their message history under the snapshotted name.** Admins see the name as-it-was-then in moderation views, not whatever the owner renames to later.
 
@@ -91,17 +165,18 @@ To be honest about what moderation does have access to:
 - The existence, name, owner, topic, and current occupants of every room — including private ones.
 - The user list, login/registration metadata, IP/user-agent recorded per session.
 - Site-wide configuration: themes, branding, rules, room caps, retention windows, etc.
+- DM contents that someone explicitly reported via the 🚩 button (preserved server-side even if the sender deletes the message later).
 
-If you have abuse to report, screenshot and contact an admin — the privacy contract means we can act on evidence we can see, but never on contents we can't.
+If you have abuse to report, screenshot or 🚩 and contact an admin — the privacy contract means we can act on evidence we can see, but never on contents we can't.
 
 ### Other guarantees
 
-- **NSFW flagging is multi-layered and independent.** A profile can be marked NSFW (gates anonymous viewers behind a "private" stub and surfaces a content warning before the modal opens). Individual character portraits in the gallery carry their own `nsfw` flag — these blur with click-to-reveal regardless of the parent profile's flag. The two are intentionally decoupled so a SFW character can carry an NSFW reference image, or an NSFW character's safe portraits don't all blur. The profile-level flag does NOT cascade into per-portrait flags and vice versa.
-- **`/ignore` is one-way and silent.** The ignored user has no signal you've done it. Your scrollback is filtered locally; their incoming messages are dropped server-side before they reach your socket.
-- **Sessions are server-side.** They live in a database row referenced by an `httpOnly` cookie — admins (and the periodic janitor) can revoke them. No JWTs. Idle expiry is sliding; typing or scrolling keeps your session alive while you're at the keyboard.
+- **NSFW flagging is multi-layered and independent.** A profile can be marked NSFW (gates anonymous viewers behind a "private" stub and surfaces a content warning before the modal opens). Individual character portraits in the gallery carry their own `nsfw` flag — these blur with click-to-reveal regardless of the parent profile's flag. The two are intentionally decoupled.
+- **`/ignore` is one-way and silent.** The ignored user has no signal you've done it. Your scrollback is filtered locally; their incoming messages are dropped server-side before they reach your socket. Admins are not exempt — ignore an admin and you stop seeing their messages.
+- **Sessions are server-side and per-tab.** They live in a SQLite row referenced by a bearer token stored in `sessionStorage` — admins (and the periodic janitor) can revoke them by deleting the row. No JWTs, no shared cookies. Each browser tab gets its own session, so you can sign in as two different accounts (or the same account with different active characters) side-by-side without one tab stomping the other.
 - **The keymaster is untouchable.** The longest-tenured admin (the first registered user, by default) cannot be demoted, kicked, muted, or banned by anyone. The keys to the keep stay with the original holder. Worth choosing carefully on a fresh install.
-- **Admins are NOT exempt from `/ignore`.** If you ignore an admin, you stop seeing their messages just like anyone else's.
 - **No third-party content loads at first paint.** The page sets `referrer-policy: no-referrer` so admin-configured banner backgrounds and avatars don't leak the visitor's URL to third parties. Inline images in chat are opt-in (you click "Show image" before they load).
+- **Strict Content Security Policy in production.** Every HTML response carries a fresh per-request CSP nonce; `script-src` and `style-src` reject anything that doesn't quote it. Inline scripts (the JSON-LD block, Vite's prod bundle tag, admin analytics splices) are auto-nonced server-side. `object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'self'`. Companion headers: HSTS, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy strict-origin-when-cross-origin, Cross-Origin-Opener-Policy same-origin, and a Permissions-Policy that opts the site out of camera/mic/geolocation/payment/USB/sensors/MIDI/FLoC.
 
 ### Etiquette & community standards
 
@@ -114,18 +189,21 @@ The default house rules (admin-editable per install) cover what most RP communit
 5. **Keep IC and OOC separate.** A character's hostility is not the player's.
 6. **Mind the rating.** Public rooms are general-audience by default; explicit content belongs in private rooms with consenting participants.
 7. **No real-world hate.** Bigotry, harassment, and targeting of real people are out of bounds in any room.
-8. **Report problems.** If something crosses a line, screenshot and report to an admin rather than escalating in chat.
+8. **Report problems.** If something crosses a line, screenshot or 🚩 the message and contact an admin rather than escalating in chat.
 
-Registration requires explicit acknowledgement of a disclaimer that the operators don't endorse the fiction users write here, that mature themes may appear, and that respectful OOC behavior is expected. Both the rules and the disclaimer are admin-editable per install.
+Registration requires explicit acknowledgement of a disclaimer (admin-editable per install) that the operators don't endorse the fiction users write here, that mature themes may appear, that you are 18+, and that respectful OOC behavior is expected.
 
 ---
 
 ## Concepts cheat sheet
 
 - **Master account** — your login identity / OOC handle. The first registered user is auto-promoted to admin (the keymaster).
-- **Character** — display name + bio + stats + avatar + theme. `/char switch <name>` activates one; `/char clear` returns you to OOC.
-- **Identity** — a master account OR a specific character. Mutual titles, profile lookups, and most "who is this?" questions resolve to an identity.
-- **System rooms** — permanent rooms that survive admin sweeps and auto-expiry. Default install ships The_Spire, Tavern, Library, Garden, and Bazaar; admins can edit them but not delete.
+- **Character** — display name + bio + stats + avatar + theme + gallery + journal. `/char switch <name>` activates one; `/char clear` returns you to OOC.
+- **Identity** — a master account OR a specific character. Mutual titles, profile lookups, DMs, friends, and most "who is this?" questions resolve to an identity.
+- **System rooms** — permanent rooms that survive admin sweeps and auto-expiry. Default install ships The_Spire, Tavern, Library, Garden, and Bazaar.
+- **World** — your own private wiki. Owned and edited by you; can be private, public-by-URL, or open (listed + joinable).
+- **Friend** — mutual relationship; both sides accept. A friendship surfaces the online indicator and groups conversations under a Friends section in Messages.
+- **Bond** — mutual relationship *title* (married, mate, mentor, etc.) that appears on both profiles.
 - **Custom commands** — admin-authored at runtime via a small template language (variables, math, choose, if/else). Two flavors: `action` (renders like `/me`) and `say` (renders as a normal message).
 
 ---
@@ -177,7 +255,9 @@ pnpm --filter @thekeep/web run build           # build the SPA bundle once
 pnpm --filter @thekeep/server run start        # serves bundle + API on PORT
 ```
 
-In production mode the server registers `@fastify/static` against `apps/web/dist/` and adds an SPA fallback so client-side routes serve `index.html`. The splash response is rewritten server-side with the admin-configured site name, SEO meta description, and any analytics scripts so non-JS crawlers see live values. CORS is disabled (same origin), and `WEB_ORIGIN=""` makes that explicit.
+In production mode the server registers `@fastify/static` against `apps/web/dist/` and adds an SPA fallback so client-side routes serve `index.html`. The splash response is rewritten server-side with the admin-configured site name, SEO meta description, JSON-LD, and any analytics scripts spliced in — so non-JS crawlers see live values. CORS is disabled (same origin), and `WEB_ORIGIN=""` makes that explicit.
+
+The production response carries a strict per-request CSP with a fresh nonce; every inline `<script>` and `<style>` the server emits is stamped with that nonce on the way out. See `Privacy & safety → Other guarantees` above for the full policy.
 
 ## Deploying to Fly.io
 
@@ -215,6 +295,12 @@ pnpm deploy                              # alias for `ship --deploy-only` (no co
 
 By default the script stages `apps/`, `packages/`, and `README.md` only — root-level files require `--all`. `.gitignore` is honored either way. Run `bash scripts/ship.sh --help` for the full flag reference.
 
+A second helper, [`remote-deploy.sh`](remote-deploy.sh), is a one-liner that runs `bash scripts/ship.sh --deploy-only --no-seed --remote-only` — what you'll typically use after pushing changes manually (or for re-deploying current `origin/main` without a new commit).
+
+### Heads-up: bearer-token migration
+
+The current codebase ships sessions as bearer tokens stored in `sessionStorage`, not as HttpOnly cookies. The first deploy after upgrading from a cookie-session install will invalidate every active session — users sign back in once and pick up the new flow. Their session rows in SQLite stay around (unreachable until janitor sweep), which is harmless.
+
 ### Preserving admin customizations across deploys
 
 Server boot calls `ensureSystemSeeds`, which idempotently re-creates the default rooms by exact-name match. If an admin **renames** a default room, the seed sees the original name as missing and re-creates it — leaving a duplicate next to the renamed copy.
@@ -227,8 +313,6 @@ pnpm ship "msg" --reseed                 # clears it so default rooms get re-see
 ```
 
 The flag is sticky — once set, every subsequent deploy honors it until cleared with `--reseed`. The system sentinel user and the site-settings singleton are still ensured (both insert-if-missing only; they never overwrite admin customization), so this is safe to leave on permanently for production installs.
-
-A second helper, [`remote-deploy.sh`](remote-deploy.sh), is a one-liner that runs `bash scripts/ship.sh --deploy-only --no-seed --remote-only` — what you'll typically use after pushing changes manually (or for re-deploying current `origin/main` without a new commit).
 
 ### What `fly.toml` does
 
@@ -245,13 +329,15 @@ The splash page is server-rendered with admin-configured `<title>`, `<meta name=
 Admins control three SEO-related fields from **Admin → Branding**:
 
 - **SEO description** — plain text used in `<meta description>`, `og:description`, and `twitter:description`.
-- **Custom head HTML** — verbatim raw HTML spliced into `<head>` on every splash response. The intended use is analytics tags (Plausible, GA4, Cloudflare Web Analytics, Umami, etc.) — paste from your provider's dashboard. **Not** sanitized; admin-trusted only.
+- **Custom head HTML** — verbatim raw HTML spliced into `<head>` on every splash response. The intended use is analytics tags (Plausible, GA4, Cloudflare Web Analytics, Umami, etc.) — paste from your provider's dashboard. **Not** sanitized; admin-trusted only. The server auto-stamps the per-request CSP nonce onto any `<script>` or `<style>` tags it splices in, so analytics keeps working under the strict CSP.
 
-A `robots.txt` and `sitemap.xml` are served from the app at the root. The default `robots.txt` allows everything (the auth wall handles privacy); the sitemap lists only `/` since everything past login is private.
+A `robots.txt` and `sitemap.xml` are served from the app at the root. The default `robots.txt` allows everything (the auth wall handles privacy); the sitemap lists `/`, `/login`, and `/register` since everything past login is private.
 
 ## Known limitations
 
 A short list of small surprises that are intentional in the current build — documented here so future contributors don't re-discover them as bugs:
 
-- **Reply snippets are frozen at the moment of reply.** When the author of a parent message uses the 60-second edit grace to fix typos, any child message's `replyToBodySnippet` keeps the original snippet. This matches the rest of the snapshot-at-send-time pattern (`displayName`, `toDisplayName`, etc.) and keeps the audit trail honest, but it means a reply quote can drift from the live parent body. Revisit only if users complain.
-- **Public-room reports only.** The 🚩 button doesn't show on whispers or private-room messages, and the server rejects reports for either kind. Whispers carry the strongest privacy contract (admins explicitly cannot read them), and private-room participants can already use `/ignore` and the room owner's `/kick`. Surfacing private-room bodies into the admin queue would breach the privacy posture and is not in scope for v1.
+- **Reply snippets are frozen at the moment of reply.** When the author of a parent message uses the 60-second edit grace to fix typos, any child message's `replyToBodySnippet` keeps the original snippet. This matches the rest of the snapshot-at-send-time pattern and keeps the audit trail honest, but it means a reply quote can drift from the live parent body.
+- **Public-room reports only for room messages.** The 🚩 button doesn't show on whispers or private-room messages, and the server rejects reports for either kind. Whispers carry the strongest privacy contract; private-room participants can already use `/ignore` and the room owner's `/kick`. DMs have their own report path (recipient only) since the DM is already a two-party affair.
+- **`sessionStorage` is per-tab, not per-window.** Two tabs you open via "+ new tab" are independent (the intended behavior). But a tab spawned by a `target="_blank"` link from a logged-in tab *does* inherit `sessionStorage` per the HTML spec, so it'll be logged in too. That's typically what users want, but worth knowing.
+- **Bearer token is JS-reachable.** Migrating off HttpOnly cookies bought per-tab session isolation at the cost of making an XSS more dangerous (the token can be exfiltrated by injected script). The strict CSP closes the most common vector, but the bio HTML sanitizer is still the load-bearing defense for stored-XSS attempts.

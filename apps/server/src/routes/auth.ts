@@ -8,7 +8,16 @@ import { hashPassword, verifyPassword } from "../auth/passwords.js";
 import { getSettings } from "../settings.js";
 import type { Db } from "../db/index.js";
 
-const SESSION_COOKIE = "tk_sess";
+/**
+ * Sessions are now bearer-token based — no cookie. The client stores
+ * the token returned by /auth/login or /auth/register in sessionStorage
+ * (per-tab, not per-browser) and sends it on every request as
+ * `Authorization: Bearer <sid>`. The session row in SQLite is
+ * unchanged; only the transport switched. This makes each tab an
+ * independent login: two tabs can sign in as different accounts (or
+ * the same account with different active characters) without
+ * stomping each other.
+ */
 
 /**
  * Master usernames are login identifiers - they need to be unambiguous when
@@ -266,10 +275,11 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       throw err;
     }
 
-    await issueSession(reply, db, id, req);
+    const sessionToken = await issueSession(db, id, req);
     return {
       id,
       username: body.username,
+      sessionToken,
       ...(isFirstUser ? { role: "admin", bootstrap: true } : {}),
     };
   });
@@ -302,14 +312,17 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       return { error: "invalid credentials" };
     }
     await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, u.id));
-    await issueSession(reply, db, u.id, req);
-    return { id: u.id, username: u.username, role: u.role };
+    const sessionToken = await issueSession(db, u.id, req);
+    return { id: u.id, username: u.username, role: u.role, sessionToken };
   });
 
-  app.post("/auth/logout", async (req, reply) => {
-    const sid = readSessionCookie(req);
+  app.post("/auth/logout", async (req) => {
+    // Token is read off the Authorization header. We delete the row so
+    // any other place this token might be cached (e.g. an inadvertently
+    // shared sessionStorage via target=_blank link inheritance) stops
+    // working immediately.
+    const sid = readBearerToken(req);
     if (sid) await db.delete(sessions).where(eq(sessions.id, sid));
-    reply.clearCookie(SESSION_COOKIE, { path: "/" });
     return { ok: true };
   });
 
@@ -329,18 +342,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
   });
 }
 
-/**
- * Hard upper bound on the cookie's lifetime in the browser. Decoupled from
- * the admin-configured idle timeout: the cookie just stores a session id, so
- * if the underlying row has been swept the cookie is already worthless even
- * if the browser still has it. A long cookie life means an admin shortening
- * the idle timeout doesn't drop active users mid-session due to the browser
- * discarding the cookie before the server-side row would have expired.
- */
-const COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
-
 async function issueSession(
-  reply: import("fastify").FastifyReply,
   db: Db,
   userId: string,
   req: FastifyRequest,
@@ -359,31 +361,30 @@ async function issueSession(
     userAgent: req.headers["user-agent"] ?? null,
     ip: req.ip,
   });
-  reply.setCookie(SESSION_COOKIE, id, {
-    httpOnly: true,
-    sameSite: "lax",
-    // Default: secure only in production (where same-origin = HTTPS by
-    // construction). Override with FORCE_SECURE_COOKIES=true when proxying
-    // dev through ngrok / Cloudflare Tunnel / any HTTPS frontend - without
-    // this, the session cookie travels in plaintext over HTTP between the
-    // tunnel terminator and Fastify on localhost.
-    secure: process.env.FORCE_SECURE_COOKIES === "true" || process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: COOKIE_MAX_AGE_SECONDS,
-  });
   return id;
 }
 
-function readSessionCookie(req: FastifyRequest): string | null {
-  const raw = req.cookies?.[SESSION_COOKIE];
-  return raw ?? null;
+/**
+ * Pull the session id out of an `Authorization: Bearer <sid>` header.
+ * Case-insensitive on the scheme so a sloppy client still works; the
+ * token itself is opaque (the `sessions.id` nanoid) and case-sensitive.
+ * Returns null when the header is missing or malformed — never throws —
+ * so callers can use it inline.
+ */
+export function readBearerToken(req: FastifyRequest): string | null {
+  const h = req.headers.authorization;
+  if (!h) return null;
+  const m = /^bearer\s+(.+)$/i.exec(h);
+  if (!m) return null;
+  const tok = m[1]!.trim();
+  return tok.length > 0 ? tok : null;
 }
 
 export async function getSessionUser(
   req: FastifyRequest,
   db: Db,
 ): Promise<{ id: string; username: string; role: Role } | null> {
-  const sid = readSessionCookie(req);
+  const sid = readBearerToken(req);
   if (!sid) return null;
   const row = (await db.select().from(sessions).where(eq(sessions.id, sid)).limit(1))[0];
   if (!row || +row.expiresAt < Date.now()) {
@@ -402,4 +403,3 @@ export async function userIdFromSessionId(db: Db, sid: string): Promise<string |
   return row.userId;
 }
 
-export const SESSION_COOKIE_NAME = SESSION_COOKIE;

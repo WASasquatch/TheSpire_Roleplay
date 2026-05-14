@@ -35,6 +35,7 @@ import {
 import { lookupProfile } from "./commands/builtins/profile.js";
 import { emitMutualSettled, respondToPrompt } from "./titles/service.js";
 import {
+  generateCspNonce,
   originFromRequest,
   render404Html,
   renderRobotsTxt,
@@ -44,10 +45,12 @@ import {
 } from "./seo.js";
 import { readFile } from "node:fs/promises";
 import { extendSession, loadSessionUser, resolveDisplayName } from "./auth/session.js";
-import { registerAuthRoutes, getSessionUser, userIdFromSessionId, SESSION_COOKIE_NAME, slugToUsername } from "./routes/auth.js";
+import { registerAuthRoutes, getSessionUser, userIdFromSessionId, slugToUsername } from "./routes/auth.js";
 import { registerCharacterRoutes } from "./routes/characters.js";
 import { registerAffiliateRoutes } from "./routes/affiliates.js";
 import { registerBookmarkRoutes } from "./routes/bookmarks.js";
+import { registerDirectMessageRoutes } from "./routes/directMessages.js";
+import { registerFriendsRoutes } from "./routes/friends.js";
 import { registerJournalRoutes } from "./routes/journal.js";
 import { registerLinkRoutes } from "./routes/links.js";
 import { registerWorldRoutes } from "./routes/worlds.js";
@@ -133,6 +136,60 @@ async function main() {
       return payload;
     });
   }
+
+  /**
+   * Baseline security headers applied to every response. The strict CSP
+   * (with a per-request nonce) lives on the HTML routes below — these
+   * lighter directives belong on JSON + static-asset responses too so
+   * an attacker can't bypass them by targeting a non-HTML endpoint:
+   *
+   *   X-Content-Type-Options: nosniff — block MIME confusion attacks
+   *     where the browser is tricked into rendering JSON as HTML.
+   *   X-Frame-Options: DENY — clickjacking defense; older-browser
+   *     analogue of the CSP `frame-ancestors 'none'` we set on HTML.
+   *   Referrer-Policy: strict-origin-when-cross-origin — leak only
+   *     the origin (not the full URL) when navigating to a different
+   *     site. Sane modern default.
+   *   Cross-Origin-Opener-Policy: same-origin — isolates this origin
+   *     from cross-origin window references; pairs with the strict
+   *     CSP to defeat Spectre-class side-channels.
+   *   Permissions-Policy — opt out of every powerful browser API we
+   *     don't use, so an admin-injected analytics script or a future
+   *     bug can't quietly start using the camera/mic/geolocation/etc.
+   *     `interest-cohort=()` opts out of Chrome's FLoC tracking.
+   */
+  app.addHook("onSend", async (_req, reply, payload) => {
+    if (!reply.getHeader("x-content-type-options")) {
+      reply.header("x-content-type-options", "nosniff");
+    }
+    if (!reply.getHeader("x-frame-options")) {
+      reply.header("x-frame-options", "DENY");
+    }
+    if (!reply.getHeader("referrer-policy")) {
+      reply.header("referrer-policy", "strict-origin-when-cross-origin");
+    }
+    if (!reply.getHeader("cross-origin-opener-policy")) {
+      reply.header("cross-origin-opener-policy", "same-origin");
+    }
+    if (!reply.getHeader("permissions-policy")) {
+      reply.header(
+        "permissions-policy",
+        [
+          "camera=()",
+          "microphone=()",
+          "geolocation=()",
+          "payment=()",
+          "usb=()",
+          "accelerometer=()",
+          "gyroscope=()",
+          "magnetometer=()",
+          "midi=()",
+          "interest-cohort=()",
+        ].join(", "),
+      );
+    }
+    return payload;
+  });
 
   // Default `Cache-Control: private, no-store` on every Fastify response that
   // hasn't already set one. The SPA shell, hashed asset paths, and 404 page
@@ -299,6 +356,8 @@ async function main() {
   await registerAffiliateRoutes(baseApp, db);
   await registerBookmarkRoutes(baseApp, db);
   await registerWorldRoutes(baseApp, db, io);
+  await registerFriendsRoutes(baseApp, db, io);
+  await registerDirectMessageRoutes(baseApp, db, io);
   await registerMessageRoutes(baseApp, db, io);
   await registerReportRoutes(baseApp, db);
   await registerPushRoutes(baseApp, db);
@@ -315,11 +374,22 @@ async function main() {
     getSessionUser: (req) => getSessionUser(req, db),
   });
 
-  /* Socket auth handshake - pull session id from cookie. */
+  /**
+   * Socket auth handshake — pulls the session id from the client's
+   * `auth: { token: ... }` handshake field. That field is set by the
+   * web client from sessionStorage, so a fresh tab without a token
+   * gets rejected at connect time and the user lands back on the
+   * splash + login flow.
+   *
+   * We accept the token at two well-known shapes: `auth.token` (our
+   * canonical) or the legacy `auth.sid` (Socket.io's "set whatever
+   * key you like" surface — kept tolerant for future clients).
+   */
   io.use(async (socket, next) => {
     try {
-      const cookieHeader = socket.handshake.headers.cookie ?? "";
-      const sid = parseCookie(cookieHeader, SESSION_COOKIE_NAME);
+      const a = socket.handshake.auth as { token?: unknown; sid?: unknown } | undefined;
+      const raw = typeof a?.token === "string" ? a.token : typeof a?.sid === "string" ? a.sid : "";
+      const sid = raw.trim();
       if (!sid) return next(new Error("unauthenticated"));
       const userId = await userIdFromSessionId(db, sid);
       if (!userId) return next(new Error("unauthenticated"));
@@ -826,17 +896,59 @@ async function main() {
         return cachedIndexHtml;
       };
 
+      /**
+       * Build the per-response Content-Security-Policy. Strict by design:
+       * scripts and styles must carry the fresh nonce (or be loaded by
+       * something that did, courtesy of `'strict-dynamic'` on scripts).
+       * Inline `style="..."` attributes are governed by the separate
+       * `style-src-attr` directive — React's `style={{...}}` props
+       * produce those and we can't reasonably hash them per render, so
+       * we accept `'unsafe-inline'` *for attributes only*. Inline
+       * `<style>` blocks still need the nonce.
+       *
+       * Tweak guides for future edits:
+       *   - `img-src 'self' data: https:` is permissive on purpose:
+       *     avatars and admin-uploaded banner covers can point anywhere
+       *     on HTTPS.
+       *   - `connect-src 'self'` covers the websocket too (same-origin
+       *     ws:// is treated as same-origin per the CSP3 spec).
+       *   - `frame-ancestors 'none'` is the modern replacement for
+       *     X-Frame-Options: DENY; we ship both for older browsers.
+       */
+      function buildCsp(nonce: string): string {
+        return [
+          "default-src 'self'",
+          `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+          `style-src 'self' 'nonce-${nonce}'`,
+          "style-src-attr 'unsafe-inline'",
+          "img-src 'self' data: https:",
+          "font-src 'self' data:",
+          "connect-src 'self'",
+          "media-src 'self'",
+          "worker-src 'self'",
+          "manifest-src 'self'",
+          "object-src 'none'",
+          "base-uri 'self'",
+          "frame-ancestors 'none'",
+          "form-action 'self'",
+          "upgrade-insecure-requests",
+        ].join("; ");
+      }
+
       // GET / and any non-API GET that should serve the SPA shell go
       // through the SEO renderer so admin-configured siteName / meta
       // description / analytics scripts land in the HTML before crawlers
       // (or anyone) parses it.
       const serveSplash = async (req: FastifyRequest, reply: FastifyReply) => {
+        const nonce = generateCspNonce();
         const html = await renderSplashHtml(
           db,
           originFromRequest(req),
           req.url.split("?")[0] ?? "/",
           await getIndexHtml(),
+          nonce,
         );
+        reply.header("content-security-policy", buildCsp(nonce));
         reply.type("text/html; charset=utf-8");
         // The SPA shell references content-hashed asset filenames that
         // change on every build. If we let browsers (or any intermediary
@@ -913,8 +1025,10 @@ async function main() {
           reply.code(404);
           return reply.send({ error: "not found" });
         }
-        const html = await render404Html(db, originFromRequest(req));
+        const nonce = generateCspNonce();
+        const html = await render404Html(db, originFromRequest(req), nonce);
         reply.code(404);
+        reply.header("content-security-policy", buildCsp(nonce));
         reply.type("text/html; charset=utf-8");
         // Tell crawlers and shared caches not to retain the 404 body. With
         // an SPA there's no risk of a real route silently 404'ing for long
@@ -928,14 +1042,6 @@ async function main() {
 
   await app.listen({ port: PORT, host: "0.0.0.0" });
   log.info({ port: PORT, mode: IS_PROD ? "production" : "development" }, "The Spire server up");
-}
-
-function parseCookie(header: string, name: string): string | null {
-  for (const part of header.split(";")) {
-    const [k, v] = part.trim().split("=");
-    if (k === name) return decodeURIComponent(v ?? "");
-  }
-  return null;
 }
 
 /**

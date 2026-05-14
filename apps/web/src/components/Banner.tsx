@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { useChat } from "../state/store.js";
 import { disconnect } from "../lib/socket.js";
+import { clearSessionToken } from "../lib/http.js";
 
 interface NavLinkRow {
   id: string;
@@ -64,8 +65,19 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
 
   async function logout() {
     try {
-      await fetch("/auth/logout", { method: "POST", credentials: "include" });
+      // The fetch monkey-patch (lib/http) attaches the current bearer
+      // token, so the server can identify and delete this tab's session
+      // row. Best-effort: a network failure shouldn't leave us
+      // half-logged-out, so we proceed with the local cleanup either way.
+      await fetch("/auth/logout", { method: "POST" });
     } catch { /* best-effort */ }
+    // Clear in this order: token → socket → me. Socket disconnect
+    // races against the React re-render that hides the chat shell;
+    // clearing the token first guarantees that any in-flight fetch
+    // started before this handler ran can't accidentally re-authenticate
+    // the now-deleted server-side session row by piggybacking the old
+    // token.
+    clearSessionToken();
     disconnect();
     setMe(null);
   }

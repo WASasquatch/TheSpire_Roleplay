@@ -283,6 +283,165 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode }> = [
   },
 
   {
+    id: "profile-create",
+    title: "Profile creation: bios, HTML, and examples",
+    body: (
+      <>
+        <P>
+          Every account (master + every character) gets a profile page that
+          other users can open by clicking your name in chat. Your bio is the
+          centerpiece. It accepts a generous subset of HTML so you can lay
+          out a profile like a tiny webpage — colors, headings, tables for
+          stats, collapsible spoilers, the works.
+        </P>
+
+        <Heading>Open the editor</Heading>
+        <Steps>
+          <li>Open <K>/profile</K> or pick <b>Edit Profile</b> from the Tools drawer.</li>
+          <li>
+            The editor opens to your master account. To edit a character, pick
+            it from the dropdown at the top — there's also a <b>New character</b>{" "}
+            button if you don't have one yet.
+          </li>
+          <li>
+            Tabs along the top split the editor into focused panes:{" "}
+            <b>Description</b> (bio HTML), <b>Profile</b> (name/avatar/gender/stats),{" "}
+            <b>Appearance</b> (theme + fonts, master only), <b>Privacy</b>{" "}
+            (visibility, NSFW gate, notifications, sound prefs), <b>Links</b>{" "}
+            (chips that appear on your profile), <b>Gallery</b> (portraits,
+            character only), and <b>Journal</b> (in-character entries, character only).
+          </li>
+        </Steps>
+
+        <Heading>Bio HTML — what's allowed</Heading>
+        <P>
+          The bio field is HTML, not Markdown. The server runs your text
+          through <K>sanitize-html</K> on save and re-sanitizes on read, so
+          anything outside the allow-list is silently stripped. Event
+          handlers (<K>onclick=</K>, <K>onload=</K>, etc.) and the{" "}
+          <K>javascript:</K> + <K>data:</K> URL schemes are blocked.
+        </P>
+        <P>
+          See the <b>Formatting</b> tab for the full categorized table of
+          allowed tags, attributes, and CSS style properties. Quick summary:
+        </P>
+        <Bullets>
+          <li>
+            <b>Text:</b> <K>b</K>, <K>i</K>, <K>u</K>, <K>em</K>, <K>strong</K>,{" "}
+            <K>s</K>, <K>mark</K>, <K>small</K>, <K>sub</K>, <K>sup</K>,{" "}
+            <K>code</K>, <K>kbd</K>, <K>abbr</K>, <K>cite</K>, <K>q</K>.
+          </li>
+          <li>
+            <b>Structure:</b> <K>p</K>, <K>div</K>, <K>span</K>, <K>br</K>,{" "}
+            <K>blockquote</K>, <K>pre</K>, <K>hr</K>, <K>h3</K>–<K>h6</K>{" "}
+            (h1/h2 are reserved for the site chrome).
+          </li>
+          <li>
+            <b>Lists:</b> <K>ul</K>, <K>ol</K>, <K>li</K>, <K>dl</K>,{" "}
+            <K>dt</K>, <K>dd</K>.
+          </li>
+          <li>
+            <b>Tables:</b> <K>table</K>, <K>thead</K>, <K>tbody</K>, <K>tr</K>,{" "}
+            <K>th</K>, <K>td</K>, <K>caption</K> — useful for stat blocks.
+          </li>
+          <li>
+            <b>Spoilers / NSFW gates:</b> <K>{`<details>`}</K> +{" "}
+            <K>{`<summary>`}</K> for collapsible sections.
+          </li>
+          <li>
+            <b>Links + images:</b> <K>a href</K> (http/https/mailto only),{" "}
+            <K>img src</K> (http/https only).
+          </li>
+          <li>
+            <b>Inline CSS</b> on any element via <K>style="…"</K>: colors
+            (hex/rgb), <K>font-weight</K>, <K>font-style</K>,{" "}
+            <K>font-family</K>, <K>font-size</K> (1–72px, 0.5–4em, 50–400%),{" "}
+            <K>line-height</K>, <K>text-decoration</K>, <K>text-align</K>,{" "}
+            <K>list-style-type</K>, <K>vertical-align</K>. Anything else is
+            dropped silently.
+          </li>
+        </Bullets>
+
+        <Heading>Example: a clean RP bio</Heading>
+        <pre className="overflow-x-auto rounded border border-keep-rule/60 bg-keep-panel/30 p-2 font-mono text-[10px] leading-relaxed">{`<h3 style="color:#a83232">Sigrid the Quiet</h3>
+<p>A retired blade-singer who runs a quiet inn at the foot of
+the mountains. Speaks little. Watches everything.</p>
+
+<h4>At a glance</h4>
+<table>
+  <tr><th>Age</th><td>Late forties (Hollow elf)</td></tr>
+  <tr><th>Build</th><td>Lean, scarred forearms</td></tr>
+  <tr><th>Voice</th><td>Low, weighed; rarely raised</td></tr>
+</table>
+
+<h4>Looking for</h4>
+<ul>
+  <li>Slow-burn dialogue with travelers in the common room.</li>
+  <li>Old comrades dropping in (DM first; lore is touchy).</li>
+</ul>
+
+<details>
+  <summary>Content warnings (click to expand)</summary>
+  <p>Touches on grief, old violence, occasional combat injury.
+  Nothing on-screen without buy-in.</p>
+</details>`}</pre>
+
+        <Heading>Example: a styled flourish</Heading>
+        <pre className="overflow-x-auto rounded border border-keep-rule/60 bg-keep-panel/30 p-2 font-mono text-[10px] leading-relaxed">{`<p style="text-align:center; font-family:Georgia, serif;
+font-size:1.4em; color:#5a3a1a">
+  <em>"The road remembers what we leave on it."</em>
+</p>
+<hr />
+<blockquote style="border-left:3px solid #8a6a3a; padding-left:0.6em">
+  Origin: <a href="https://example.com/lore">Ironreach campaign notes</a>.
+</blockquote>`}</pre>
+
+        <Tip>
+          Save often — the bio editor doesn't autosave, and switching
+          characters mid-edit will drop unsaved changes. The character/world
+          limit shown under the textarea reflects the server-side cap
+          (default 50,000 chars; admin-tunable).
+        </Tip>
+
+        <Heading>Non-bio fields</Heading>
+        <Bullets>
+          <li>
+            <b>Avatar URL</b> — any HTTP/HTTPS URL pointing at an image. The
+            server doesn't proxy it, so the host can see clicks; pick one
+            you trust to stay up.
+          </li>
+          <li>
+            <b>Gender</b> (master + character independently) — drives the
+            small icon next to your name in the userlist.
+          </li>
+          <li>
+            <b>Theme + style</b> (master only) — palette + style axis
+            (medieval / modern / scifi). A character can override the
+            palette in their own theme tab.
+          </li>
+          <li>
+            <b>Stats</b> (character only) — short labelled fields (age,
+            race, etc.) that show up as a small card above the bio.
+          </li>
+          <li>
+            <b>Visibility</b> — public, or "logged-in only." Marking
+            <b>NSFW</b> forces logged-in-only and gates the profile behind
+            a content warning splash that the owner + admins skip.
+          </li>
+          <li>
+            <b>Links</b> — chips at the top of the profile (Discord, Twitter,
+            blog, etc.). Show or hide each independently.
+          </li>
+          <li>
+            <b>Gallery + Journal</b> (character only) — extra portraits and
+            in-character log entries. Both have their own tab in the editor.
+          </li>
+        </Bullets>
+      </>
+    ),
+  },
+
+  {
     id: "bonds",
     title: "Bonds (mutual titles): marriage, mates, family, friends",
     body: (
@@ -324,6 +483,106 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode }> = [
           accounts behind them. To bond OOC, drop your character first (<K>/char clear</K>) and
           then propose.
         </P>
+      </>
+    ),
+  },
+
+  {
+    id: "messages",
+    title: "Direct messages & friends",
+    body: (
+      <>
+        <P>
+          Direct messages are 1:1 conversations that live <i>outside</i> the
+          rooms. They follow you across rooms, persist when you're offline,
+          and let two people talk privately without needing to share a room.
+        </P>
+
+        <Heading>Open the Messages modal</Heading>
+        <Steps>
+          <li>
+            From the <b>Tools</b> drawer, pick <b>Messages</b> (or click the
+            ▲ Tools button — an unread-count badge on that button hints at
+            new DMs without opening the drawer).
+          </li>
+          <li>
+            From any profile, click <b>💬 Message</b> in the header. The
+            modal opens straight to that conversation.
+          </li>
+        </Steps>
+        <P>
+          The modal has two panes. Left: your friends, pending requests, and
+          recent non-friend conversations. Right: the active thread. Drag the
+          divider between the panes to resize (double-click to reset).
+          On mobile it slides between the two — a back chevron returns to
+          the list.
+        </P>
+
+        <Heading>Friends</Heading>
+        <P>
+          Friendship is mutual and explicit. To add a friend, type the
+          username in <b>add friend by username…</b> in the modal, or run{" "}
+          <K>/friend {`<name>`}</K>. The other side sees a pending request
+          they can accept or decline. While pending, you can already DM
+          them — friendship is the persistent-list affordance, not the
+          permission gate.
+        </P>
+        <Bullets>
+          <li><K>/friends</K> — list your accepted friends.</li>
+          <li><K>/accept {`<name>`}</K> — accept a pending request.</li>
+          <li><K>/decline {`<name>`}</K> — decline (silent on their side).</li>
+          <li><K>/unfriend {`<name>`}</K> — end a friendship.</li>
+        </Bullets>
+        <P>
+          When a friend comes online, you get a small "X is online" line in
+          your current room. Per-tab quiet: only the active tab shows it.
+        </P>
+
+        <Heading>Messaging non-friends</Heading>
+        <P>
+          You don't need to be friends to DM. Type a username in{" "}
+          <b>message non-friend…</b> in the modal, or click <b>💬 Message</b>{" "}
+          on their profile. The conversation appears under <b>Recent</b>{" "}
+          until someone friends the other side.
+        </P>
+
+        <Heading>Opting out</Heading>
+        <P>
+          Profile editor → <b>Privacy</b> → <b>DMs enabled</b>. Toggle off to
+          refuse all DMs; attempts to message you return a friendly "this
+          user has DMs turned off" error instead of going through.
+        </P>
+
+        <Heading>Sound + notifications</Heading>
+        <P>
+          Incoming DMs play the <b>ping</b> sound when this tab is open
+          (toggle in <b>Privacy → Sound effects</b>). If you've opted into
+          web push, you'll also get an OS-level notification when this tab
+          is closed or backgrounded — the body just says "You have a new
+          direct message" without quoting any content, so a glance at the
+          lock screen never leaks a thread.
+        </P>
+
+        <Heading>Editing, deleting, reporting</Heading>
+        <Bullets>
+          <li>
+            Your own messages get tiny edit/delete buttons for one minute
+            after sending — same grace window as room chat.
+          </li>
+          <li>
+            Right-click (or long-press) someone else's DM to <b>Report</b>{" "}
+            it. The full conversation snapshot lands in the admin queue;
+            the body is preserved server-side even if the sender later
+            deletes the message.
+          </li>
+        </Bullets>
+
+        <Tip>
+          DM history is yours alone. The other side can independently delete
+          their copy of a message (within the grace window), but you keep
+          your view of what they sent. Admin moderation can read both sides
+          via the report path.
+        </Tip>
       </>
     ),
   },
@@ -597,9 +856,9 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode }> = [
           <li><b>Worldbuilding</b> - My Worlds, World Catalog.</li>
           <li><b>Roleplay</b> - Set Mood, Set Scene, NPC mode toggle.</li>
           <li><b>Rooms</b> - Find Rooms, List Rooms, New Private Room.</li>
-          <li><b>People</b> - Watching, All Users, Ignore List.</li>
-          <li><b>Display</b> - Color picker, Font size, Refresh interval.</li>
-          <li><b>Account</b> - Edit Profile, Toggle Away, Help.</li>
+          <li><b>People</b> - Messages, Friends, All Users, Ignore List. A small unread-count badge appears on the trigger and on the Messages row when someone DMs you.</li>
+          <li><b>Display</b> - Chat color, Font size, Refresh interval.</li>
+          <li><b>Account</b> - Edit Profile, Bookmarks, Toggle Away, Help.</li>
         </Bullets>
         <P>
           Anything you can do from the drawer, you can also do via slash command - the drawer just

@@ -10,8 +10,10 @@ export interface RoomWithOccupants extends RoomSummary {
 interface Props {
   rooms: RoomWithOccupants[];
   currentRoomId: string | null;
-  /** When set, the Tools panel surfaces a "Leave Character" button. */
+  /** When set, the Tools panel's identity dropdown adopts an in-character label + "Leave Character" row. */
   activeCharacterId?: string | null;
+  /** Display name of the active character — used by the identity button label. */
+  activeCharacterName?: string | null;
   onIconClick: (userId: string, displayName: string) => void;
   onNameClick: (userId: string, displayName: string) => void;
   onRoomClick: (roomId: string) => void;
@@ -20,6 +22,10 @@ interface Props {
   onWorldClick: (worldId: string) => void;
   /** Jump to a specific message in a room. Wired by the in-rail search bar. */
   onJumpToMessage: (roomId: string, messageId: string) => void;
+  /** Open the Friends modal (full friend list with avatars + DM shortcut). */
+  onOpenFriends: () => void;
+  /** Open the Messages modal (DM conversation list). */
+  onOpenMessages: () => void;
   /**
    * Mobile drawer state. On md+ screens the rail is always visible regardless;
    * isOpen only controls the slide-in/out at sub-md widths.
@@ -38,12 +44,15 @@ export function RoomsTree({
   rooms,
   currentRoomId,
   activeCharacterId,
+  activeCharacterName,
   onIconClick,
   onNameClick,
   onRoomClick,
   onCommand,
   onWorldClick,
   onJumpToMessage,
+  onOpenFriends,
+  onOpenMessages,
   isOpen,
   onClose,
 }: Props) {
@@ -119,8 +128,11 @@ export function RoomsTree({
       <ToolPanel
         onCommand={onCommand}
         activeCharacterId={activeCharacterId ?? null}
+        activeCharacterName={activeCharacterName ?? null}
         currentRoomId={currentRoomId}
         onJumpToMessage={onJumpToMessage}
+        onOpenFriends={onOpenFriends}
+        onOpenMessages={onOpenMessages}
       />
     </aside>
   );

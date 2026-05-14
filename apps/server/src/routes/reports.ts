@@ -3,12 +3,37 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { ReportEntry, ReportStatus } from "@thekeep/shared";
-import { messages, reports, rooms, users } from "../db/schema.js";
+import { directConversations, directMessages, messages, reports, rooms, users } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
 import type { Db } from "../db/index.js";
 
-const createReportBody = z.object({
+/**
+ * Two report shapes share one endpoint. The discriminant is `kind`:
+ *   - kind: "message"  — room-content report; `messageId` required.
+ *   - kind: "dm"       — direct-message report; `directMessageId`
+ *                        required. The reporter must be one of the
+ *                        two participants. The route snapshots the
+ *                        body at report-time so the admin queue can
+ *                        show it without ever querying
+ *                        `direct_messages` from the /admin/* surface.
+ *
+ * The "message" branch is the legacy default (omit `kind` and pass
+ * `messageId`) so existing clients keep working without an update.
+ */
+const createReportBody = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("message"),
+    messageId: z.string().min(1),
+    reason: z.string().max(500).optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("dm"),
+    directMessageId: z.string().min(1),
+    reason: z.string().max(500).optional(),
+  }).strict(),
+]);
+const legacyMessageReportBody = z.object({
   messageId: z.string().min(1),
   reason: z.string().max(500).optional(),
 }).strict();
@@ -40,32 +65,82 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
 
-    let body;
-    try { body = createReportBody.parse(req.body); }
-    catch { reply.code(400); return { error: "invalid body" }; }
+    // Accept the new discriminated shape OR the legacy `{ messageId }`
+    // form. Legacy clients (or admin-tool scripts) don't have to be
+    // updated to keep filing message reports.
+    let parsed: z.infer<typeof createReportBody>;
+    const tryUnion = createReportBody.safeParse(req.body);
+    if (tryUnion.success) {
+      parsed = tryUnion.data;
+    } else {
+      const tryLegacy = legacyMessageReportBody.safeParse(req.body);
+      if (!tryLegacy.success) { reply.code(400); return { error: "invalid body" }; }
+      parsed = { kind: "message", messageId: tryLegacy.data.messageId, reason: tryLegacy.data.reason };
+    }
 
-    const m = (await db.select().from(messages).where(eq(messages.id, body.messageId)).limit(1))[0];
-    if (!m) { reply.code(404); return { error: "message not found" }; }
-    // Privacy gate: never accept reports for whispers (private 1:1) or for
-    // messages from non-public rooms. The client doesn't expose the button
-    // for those, but the server must independently enforce.
-    if (m.kind === "whisper") { reply.code(403); return { error: "whispers cannot be reported" }; }
-    const room = (await db.select().from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
-    if (!room) { reply.code(404); return { error: "room not found" }; }
-    if (room.type !== "public") { reply.code(403); return { error: "only public-room messages can be reported" }; }
-    if (m.userId === me.id) { reply.code(400); return { error: "you can't report your own message" }; }
+    if (parsed.kind === "message") {
+      const m = (await db.select().from(messages).where(eq(messages.id, parsed.messageId)).limit(1))[0];
+      if (!m) { reply.code(404); return { error: "message not found" }; }
+      // Privacy gate: never accept reports for whispers (private 1:1) or
+      // for messages from non-public rooms. The client doesn't expose the
+      // button for those, but the server must independently enforce.
+      if (m.kind === "whisper") { reply.code(403); return { error: "whispers cannot be reported" }; }
+      const room = (await db.select().from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
+      if (!room) { reply.code(404); return { error: "room not found" }; }
+      if (room.type !== "public") { reply.code(403); return { error: "only public-room messages can be reported" }; }
+      if (m.userId === me.id) { reply.code(400); return { error: "you can't report your own message" }; }
 
+      try {
+        await db.insert(reports).values({
+          id: nanoid(),
+          reporterUserId: me.id,
+          messageId: m.id,
+          roomId: m.roomId,
+          reason: parsed.reason?.trim() || null,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        if (/UNIQUE/i.test(msg)) {
+          reply.code(409);
+          return { error: "you already reported this message" };
+        }
+        throw err;
+      }
+      return { ok: true };
+    }
+
+    // DM branch.
+    const dm = (await db.select().from(directMessages).where(eq(directMessages.id, parsed.directMessageId)).limit(1))[0];
+    if (!dm) { reply.code(404); return { error: "message not found" }; }
+    if (dm.senderUserId === me.id) { reply.code(400); return { error: "you can't report your own message" }; }
+    // Participant check — reporter must be one of the two parties on
+    // the conversation. Non-participants don't see DMs at all (the
+    // history endpoint also 404s for them), so a request here from
+    // someone else is treated the same: 404, no info leak.
+    const conv = (await db
+      .select()
+      .from(directConversations)
+      .where(eq(directConversations.id, dm.conversationId))
+      .limit(1))[0];
+    if (!conv) { reply.code(404); return { error: "message not found" }; }
+    if (conv.userAId !== me.id && conv.userBId !== me.id) {
+      reply.code(404);
+      return { error: "message not found" };
+    }
     try {
       await db.insert(reports).values({
         id: nanoid(),
         reporterUserId: me.id,
-        messageId: m.id,
-        roomId: m.roomId,
-        reason: body.reason?.trim() || null,
+        directMessageId: dm.id,
+        // Snapshot the body + sender at report time so the admin
+        // queue stands on its own. Even if the sender soft-deletes
+        // afterwards (or the DM cascade fires), the report row
+        // retains what was reported.
+        bodySnapshot: dm.body,
+        senderUserId: dm.senderUserId,
+        reason: parsed.reason?.trim() || null,
       });
     } catch (err) {
-      // SQLite throws on the unique (reporter, message) index - surface as
-      // 409 so the UI can say "you already reported this".
       const msg = err instanceof Error ? err.message : "";
       if (/UNIQUE/i.test(msg)) {
         reply.code(409);
@@ -99,14 +174,23 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
 
     // Hydrate the rows with the surrounding context the admin needs to
     // triage: reporter name, message body + author name, room name, resolver.
+    //
+    // Reports come in two shapes now (Phase 5 extension): the old
+    // room-message report carries `messageId` + `roomId` and we hydrate
+    // them by joining `messages` and `rooms`. DM reports carry
+    // `directMessageId` + `bodySnapshot` + `senderUserId`, with
+    // `messageId` and `roomId` null; the snapshot is used verbatim so
+    // the admin queue never queries `direct_messages` from the
+    // /admin/* surface (preserves the admin-blind invariant).
     const userIds = new Set<string>();
     const roomIds = new Set<string>();
     const messageIds = new Set<string>();
     for (const r of rows) {
       userIds.add(r.reporterUserId);
       if (r.resolvedById) userIds.add(r.resolvedById);
-      roomIds.add(r.roomId);
-      messageIds.add(r.messageId);
+      if (r.senderUserId) userIds.add(r.senderUserId);
+      if (r.roomId) roomIds.add(r.roomId);
+      if (r.messageId) messageIds.add(r.messageId);
     }
     const userRows = userIds.size > 0
       ? await db.select().from(users).where(inArray(users.id, [...userIds]))
@@ -124,23 +208,33 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
     const out: ReportEntry[] = rows.map((r) => {
       const reporter = userById.get(r.reporterUserId);
       const resolver = r.resolvedById ? userById.get(r.resolvedById) : null;
-      const room = roomById.get(r.roomId);
-      const msg = msgById.get(r.messageId);
+      const room = r.roomId ? roomById.get(r.roomId) : undefined;
+      const msg = r.messageId ? msgById.get(r.messageId) : undefined;
+      // DM branch: use the at-report-time snapshot rather than
+      // looking up the live row. The /admin/* surface deliberately
+      // never queries `direct_messages` directly.
+      const isDmReport = !!r.directMessageId;
+      const dmSender = r.senderUserId ? userById.get(r.senderUserId) : undefined;
       return {
         id: r.id,
         reporterUserId: r.reporterUserId,
         reporterDisplayName: reporter?.username ?? "(deleted user)",
-        messageId: r.messageId,
+        messageId: r.messageId ?? r.directMessageId ?? "",
         // Soft-deleted messages return their placeholder rather than the
         // wiped body; admins still see what was reported, but if the
-        // author already removed it the queue makes that visible.
-        messageBody: msg
-          ? (msg.deletedAt ? "[message removed]" : msg.body)
-          : "[message gone]",
-        messageDisplayName: msg?.displayName ?? "(unknown)",
-        messageCreatedAt: msg ? +msg.createdAt : 0,
-        roomId: r.roomId,
-        roomName: room?.name ?? "(deleted room)",
+        // author already removed it the queue makes that visible. DM
+        // reports return their snapshot.
+        messageBody: isDmReport
+          ? (r.bodySnapshot ?? "[snapshot gone]")
+          : (msg
+              ? (msg.deletedAt ? "[message removed]" : msg.body)
+              : "[message gone]"),
+        messageDisplayName: isDmReport
+          ? (dmSender?.username ?? "(unknown)")
+          : (msg?.displayName ?? "(unknown)"),
+        messageCreatedAt: msg ? +msg.createdAt : (isDmReport ? +r.createdAt : 0),
+        roomId: r.roomId ?? "",
+        roomName: isDmReport ? "(direct message)" : (room?.name ?? "(deleted room)"),
         reason: r.reason,
         status: r.status as ReportStatus,
         resolvedById: r.resolvedById,

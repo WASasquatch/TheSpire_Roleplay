@@ -14,6 +14,7 @@ import { ProfileEditor } from "./components/ProfileEditor.js";
 import { ProfileModal } from "./components/ProfileModal.js";
 import { RoomPasswordModal } from "./components/RoomPasswordModal.js";
 import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
+import { MessagesModal } from "./components/MessagesModal.js";
 import { RulesModal } from "./components/RulesModal.js";
 import { ThreadModal } from "./components/ThreadModal.js";
 import { UsersModal } from "./components/UsersModal.js";
@@ -28,6 +29,8 @@ import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./
 import { applyFontPrefs, applyTheme, themeStyle, type UiFontScale } from "./lib/theme.js";
 import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
 import { fire as fireNotification, shouldNotify, type NotifyPref } from "./lib/notifications.js";
+import { clearSessionToken } from "./lib/http.js";
+import { playAlert, playPing, playTap } from "./lib/sound.js";
 import { useChat, type SiteBranding } from "./state/store.js";
 
 export function App() {
@@ -64,11 +67,18 @@ export function App() {
   // Restore session on mount. Until this resolves we deliberately render
   // *neither* AuthGate nor Chat - otherwise a logged-in user reloading the
   // page (or following a banner link) sees AuthGate flash for ~100ms before
-  // the cookie probe completes.
+  // the token probe completes. The bearer token is attached automatically
+  // by the lib/http fetch interceptor when sessionStorage holds one.
   useEffect(() => {
     let cancelled = false;
-    fetch("/auth/me", { credentials: "include" })
-      .then(async (r) => (r.ok ? (r.json() as Promise<{ id: string; username: string; role: Role }>) : null))
+    fetch("/auth/me")
+      .then(async (r) => {
+        // Clear a stale token immediately on 401 — otherwise the next
+        // tab open inherits a dead token and the user wonders why every
+        // request bounces them back to the splash.
+        if (r.status === 401) clearSessionToken();
+        return r.ok ? (r.json() as Promise<{ id: string; username: string; role: Role }>) : null;
+      })
       .then((j) => {
         if (cancelled) return;
         if (j) setMe({ id: j.id, username: j.username, role: j.role });
@@ -92,8 +102,12 @@ export function App() {
     if (!me) return;
     const id = window.setInterval(async () => {
       try {
-        const r = await fetch("/auth/me", { credentials: "include" });
+        const r = await fetch("/auth/me");
         if (!r.ok) {
+          // Same logic as logout: clear the token before disconnecting
+          // so an in-flight reconnect attempt doesn't carry the dead
+          // sid back to the server.
+          clearSessionToken();
           setKickReason("Your session expired due to inactivity. Please log in again.");
           disconnectSocket();
           setMe(null);
@@ -538,6 +552,15 @@ function Chat() {
   const appendMessage = useChat((s) => s.appendMessage);
   const updateMessage = useChat((s) => s.updateMessage);
   const setMessages = useChat((s) => s.setMessages);
+  // DM store actions (Phase 4). Pulled flat so the socket-handler
+  // effect can reference them by their stable function identity.
+  const appendDmMessage = useChat((s) => s.appendDmMessage);
+  const updateDmMessage = useChat((s) => s.updateDmMessage);
+  const setDmConversations = useChat((s) => s.setDmConversations);
+  const upsertDmConversation = useChat((s) => s.upsertDmConversation);
+  const openDmOtherUserId = useChat((s) => s.openDmOtherUserId);
+  const setOpenDmOtherUser = useChat((s) => s.setOpenDmOtherUser);
+  const bumpDmReseed = useChat((s) => s.bumpDmReseed);
   const setCurrentRoom = useChat((s) => s.setCurrentRoom);
   const setNotice = useChat((s) => s.setNotice);
   const setOpenProfile = useChat((s) => s.setOpenProfile);
@@ -570,6 +593,14 @@ function Chat() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState<{ filter?: string } | null>(null);
   const [usersOpen, setUsersOpen] = useState<{ query?: string } | null>(null);
+  /**
+   * Unified Messages modal toggle. Replaces the older split-up trio
+   * (FriendsModal + DmListModal + DmFloatingPanel). The Tools
+   * drawer's "Messages" and "Friends" entries both flip this on —
+   * the modal handles friends + requests + conversations in one
+   * place. Fetches fresh on each open.
+   */
+  const [messagesOpen, setMessagesOpen] = useState(false);
   const [bookmarksOpen, setBookmarksOpen] = useState(false);
   // Password prompt for private rooms — set when the server emits a
   // `prompt-room-password` ui:hint (rail click → server says "needs
@@ -704,6 +735,9 @@ function Chat() {
           activeCharacterId: string | null;
           activeCharacterName?: string | null;
           notifyPref?: NotifyPref;
+          soundDmEnabled?: boolean;
+          soundChatEnabled?: boolean;
+          soundAlertEnabled?: boolean;
           welcome?: { html: string; hash: string } | null;
         };
         // The server returns user.theme which already falls back to the
@@ -726,6 +760,15 @@ function Chat() {
             profileSeededRef.current = true;
           }
           if (u.notifyPref) setNotifyPref(u.notifyPref);
+          // Seed sound prefs into the store. The lib/sound module
+          // reads from this on every play(), so a fresh /me/profile
+          // load applies the user's toggles before the first sound
+          // event has a chance to fire.
+          useChat.getState().setSoundPrefs({
+            dm: u.soundDmEnabled ?? true,
+            chat: u.soundChatEnabled ?? true,
+            alert: u.soundAlertEnabled ?? true,
+          });
           setUserStyleKey(typeof u.styleKey === "string" ? u.styleKey : null);
           setUiFontFamily(typeof u.uiFontFamily === "string" ? u.uiFontFamily : null);
           setUiFontScale(
@@ -914,12 +957,29 @@ function Chat() {
       // /char switch broadcasts presence - refetch the active theme too.
       setRoomsTreeVersion((v) => v + 1);
       setThemeVersion((v) => v + 1);
+      // The friends modal pulls fresh data on every open, so we no
+      // longer need to bump a live refresh key here. Online dots in
+      // an open FriendsModal will lag slightly until the user re-
+      // opens it; acceptable for a non-live affordance.
     });
     socket.on("message:new", (msg: ChatMessage) => {
       // Append to the chat backlog regardless of mode — replies and
       // flat-chat messages live here, and the forum reply view reads
       // replies from this buffer.
       appendMessage(msg);
+
+      // Sound effects. Three discrete events:
+      //   announce → alert.mp3 (admin megaphone)
+      //   anything else (except system + our own) → tap.mp3
+      // System notices (joins/kicks/topic changes) stay silent — they
+      // would dogpile on a busy room. Our own outbound messages stay
+      // silent — the user already knows they sent something.
+      const meId = useChat.getState().me?.id ?? null;
+      if (msg.kind === "announce") {
+        playAlert();
+      } else if (msg.kind !== "system" && msg.userId !== meId) {
+        playTap();
+      }
 
       // Forum-side topic / reply bookkeeping. Driven off the room's
       // replyMode from the live store snapshot so we don't capture a
@@ -960,6 +1020,9 @@ function Chat() {
       }
     });
     socket.on("watch:online", ({ username, displayName }) => {
+      // (No friends-rail refresh needed — the modal pulls fresh on
+      // every open. The system message below + the toast are still
+      // the right inline + OS-level signals.)
       // Surface a small system line in the current room so the user sees
       // it inline (and it sticks in the timeline). Desktop toast is fired
       // separately - watchers usually want both surfaces.
@@ -1075,6 +1138,100 @@ function Chat() {
       setThemeVersion((v) => v + 1);
     });
 
+    /**
+     * DM live updates. `dm:new` covers both inbound and outbound
+     * (the server fans every send to both participants' sockets),
+     * so the local store-update path is uniform regardless of
+     * sender. `dm:update` carries edit / soft-delete echoes;
+     * `dm:read` advances the OTHER party's seen marker.
+     *
+     * Conversations the client hasn't seen before are pulled in via
+     * a single `/me/dms` refetch — cheaper than threading a partial
+     * "new conversation" payload through the socket event, and the
+     * conversation list response already carries the metadata
+     * (otherDisplayName, avatar, unread, online) the rail needs.
+     */
+    /**
+     * On every (re)connect: pull /me/dms so the conversation list
+     * reflects anything that happened while we were disconnected
+     * (most importantly, DMs from other users — those arrive as
+     * `dm:new` to live sockets, so an offline window means missed
+     * events. The DB has them, but the local store doesn't until we
+     * refetch). We also bump dmReseedTick so any open ThreadPane
+     * re-runs its history seed and picks up the missed messages it
+     * never saw via socket.
+     */
+    function onConnect() {
+      fetch("/me/dms", { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (j && Array.isArray(j.conversations)) setDmConversations(j.conversations);
+        })
+        .catch(() => {});
+      bumpDmReseed();
+    }
+    // socket.io-client fires `connect` on the initial handshake and
+    // after every successful auto-reconnect, so this single handler
+    // covers cold-load AND wake-from-suspend / network-blip cases.
+    socket.on("connect", onConnect);
+    // If the socket is already connected at the moment this effect
+    // mounts (e.g. StrictMode double-mount, hot reload), `connect`
+    // won't fire again — run the sync once eagerly.
+    if (socket.connected) onConnect();
+
+    socket.on("dm:new", ({ message }) => {
+      appendDmMessage(message);
+      // Ping on inbound DMs from someone else; silent on our own echo
+      // (the server fans every send to the sender's sockets too so
+      // multi-tab works). Same posture as the room-message tap sound.
+      const meIdForDm = useChat.getState().me?.id ?? null;
+      if (message.senderId !== meIdForDm) playPing();
+      // Pull the conversation list if we don't already know this
+      // conversation — otherwise the rail won't surface it. Cheap;
+      // /me/dms is bounded by the user's own DM count.
+      const known = useChat.getState().dmConversations[message.conversationId];
+      if (!known) {
+        fetch("/me/dms", { credentials: "include" })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((j) => {
+            if (j && Array.isArray(j.conversations)) setDmConversations(j.conversations);
+          })
+          .catch(() => {});
+      } else {
+        // Bump lastMessageAt + advance preview locally so the rail
+        // reflects the new arrival without a roundtrip.
+        upsertDmConversation({
+          ...known,
+          lastMessageAt: message.createdAt,
+          lastMessagePreview: message.deletedAt
+            ? "[message removed]"
+            : message.body.slice(0, 120),
+          unreadCount:
+            message.senderId === (useChat.getState().me?.id ?? "")
+              ? known.unreadCount
+              : known.unreadCount + 1,
+        });
+      }
+    });
+    socket.on("dm:update", ({ message }) => {
+      updateDmMessage(message);
+    });
+    socket.on("dm:read", () => {
+      // Phase 4 doesn't render a "seen" indicator yet (Phase 4+
+      // aesthetic question per plan.md); listener is wired so the
+      // event is consumed instead of warning in the console.
+    });
+    // Friend-state changed somewhere (new request landed, an existing
+    // request was accepted/declined, or a friendship ended). Surface
+    // a small notice so the user knows even when the Messages modal
+    // isn't open; the modal itself refetches on next open.
+    socket.on("friend:request", (payload) => {
+      setNotice({
+        code: "FRIEND_UPDATE",
+        message: `Friend update from ${payload.frienderDisplayName}.`,
+      });
+    });
+
     return () => {
       socket.off("room:state");
       socket.off("presence:update");
@@ -1087,6 +1244,11 @@ function Chat() {
       socket.off("ui:hint");
       socket.off("mutual:settled");
       socket.off("me:character-update");
+      socket.off("dm:new");
+      socket.off("dm:update");
+      socket.off("dm:read");
+      socket.off("friend:request");
+      socket.off("connect", onConnect);
     };
   }, [socket, setRoom, setOccupants, appendMessage, updateMessage, setMessages, setCurrentRoom, setNotice, setOpenProfile, openEditor, setRefreshIntervalSec, setMe, prependOwnForumTopic, queuePendingForumTopic, bumpTopicActivity, updateForumTopic, removeForumTopic]);
 
@@ -1319,6 +1481,25 @@ function Chat() {
   }
 
   /**
+   * Open the unified Messages modal with a specific user pre-selected.
+   * Routed from ProfileModal's "💬 Message" button and any other
+   * "send a DM to this person" entry points. The modal handles
+   * conversation lookup internally — we just open it and set the
+   * target via the store so it picks the right row.
+   */
+  function openDmWithUser(otherUserId: string) {
+    setOpenDmOtherUser(otherUserId);
+    setMessagesOpen(true);
+    // Best-effort cache warm so the modal's first paint is correct.
+    fetch("/me/dms", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (j && Array.isArray(j.conversations)) setDmConversations(j.conversations);
+      })
+      .catch(() => {});
+  }
+
+  /**
    * Click on an @mention inside a message body. Per the spec this should
    * open the user's profile (not whisper) - and resolve to their *active*
    * character profile when they have one, falling back to master. The
@@ -1547,6 +1728,12 @@ function Chat() {
           clipped by the parent. */}
       <div aria-hidden className="keep-accent-rail" />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        {/* The friends list used to live here as an always-visible
+            48px-wide rail, but a column that narrow couldn't fit
+            avatars or a readable label and ended up squeezing the
+            rest of the chat shell. It's now a modal opened from
+            Tools → People → Friends (see FriendsModal + the
+            `onOpenFriends` wire below). */}
         {/* `min-w-0` is non-negotiable: by default a flex child's
             `min-width` is `auto` (= its intrinsic content width), so a
             wide descendant — a long topic title, an action button strip,
@@ -1688,6 +1875,7 @@ function Chat() {
           rooms={roomsTree}
           currentRoomId={currentRoomId}
           activeCharacterId={activeCharacterId}
+          activeCharacterName={activeCharacterName}
           onIconClick={onIconClick}
           onNameClick={(uid, dn) => {
             onNameClick(uid, dn);
@@ -1706,6 +1894,8 @@ function Chat() {
             setRailOpen(false);
           }}
           onJumpToMessage={jumpToMessage}
+          onOpenFriends={() => { setMessagesOpen(true); setRailOpen(false); }}
+          onOpenMessages={() => { setMessagesOpen(true); setRailOpen(false); }}
           isOpen={railOpen}
           onClose={() => setRailOpen(false)}
         />
@@ -1729,6 +1919,15 @@ function Chat() {
                 onWhisper: (name: string) => {
                   setOpenProfile(null);
                   setComposerText(`/whisper ${name} `);
+                },
+                // Open the DM floating panel. The conversation is
+                // looked up by `otherUserId` server-side; if no
+                // conversation exists yet the panel renders in
+                // "Send a message to start" mode and the first
+                // POST creates the conversation.
+                onMessage: (userId: string) => {
+                  setOpenProfile(null);
+                  openDmWithUser(userId);
                 },
                 onIgnore: (name: string) => {
                   setOpenProfile(null);
@@ -1866,6 +2065,13 @@ function Chat() {
               else setNotice({ code: res.code, message: res.message });
             });
           }}
+        />
+      ) : null}
+      {messagesOpen && me ? (
+        <MessagesModal
+          onClose={() => { setMessagesOpen(false); setOpenDmOtherUser(null); }}
+          onCommand={(text) => send(text)}
+          initialOtherUserId={openDmOtherUserId}
         />
       ) : null}
       {bookmarksOpen ? (

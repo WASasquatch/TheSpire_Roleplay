@@ -2,6 +2,7 @@ import type { ChatMessage } from "./message.js";
 import type { RoomOccupant, RoomSummary } from "./room.js";
 import type { IdentityRef, ProfileView } from "./profile.js";
 import type { WatchOnlineEvent } from "./moderation.js";
+import type { DirectMessage } from "./directMessage.js";
 
 /** Events emitted by the client → server. */
 export interface ClientToServerEvents {
@@ -141,6 +142,43 @@ export interface ServerToClientEvents {
   "me:character-update": (payload: {
     activeCharacterId: string | null;
     activeCharacterName: string | null;
+  }) => void;
+  /**
+   * A new DM landed in a conversation the recipient socket is part
+   * of. Server emits to every live socket of BOTH participants on
+   * every send so the friends rail and any open DM panels light up
+   * simultaneously. Honors `/ignore` symmetric to whispers: a DM
+   * from a sender the recipient has ignored is silently dropped to
+   * the recipient's sockets (the sender still sees it in their own
+   * scrollback).
+   */
+  "dm:new": (payload: { message: DirectMessage; conversationId: string }) => void;
+  /**
+   * Edit / soft-delete echo. The same shape as `dm:new` so the
+   * client can reuse the same handler with a "replace by id"
+   * branch. Sent to every live socket of both participants.
+   */
+  "dm:update": (payload: { message: DirectMessage; conversationId: string }) => void;
+  /**
+   * The OTHER party read up to this timestamp. Lets the sender's
+   * client advance its "seen" indicator without polling. Sent to
+   * the sender's sockets only — the reader already knows what
+   * they read.
+   */
+  "dm:read": (payload: { conversationId: string; readerUserId: string; lastReadAt: number }) => void;
+  /**
+   * Friend-state changed for the receiving socket: a new request
+   * landed, a previously-pending request was accepted/declined, or
+   * a friendship ended. The payload identifies the OTHER party so
+   * the client can refresh its inbox / friends list without a
+   * full re-fetch dance — but the actual canonical state lives at
+   * `/me/friends` + `/me/friend-requests`, so the client just bumps
+   * a refresh key and re-polls those.
+   */
+  "friend:request": (payload: {
+    frienderUserId: string;
+    frienderUsername: string;
+    frienderDisplayName: string;
   }) => void;
 }
 

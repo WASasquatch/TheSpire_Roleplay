@@ -2034,29 +2034,78 @@ function Line({
   // of as two stray lines next to each other in the timeline. The hover
   // tint goes on the OUTER container so hovering anywhere over the reply
   // (including its quote preview) lights the whole block.
+  // Controls bundle. Behavior diverges by viewport:
+  //
+  //   Mobile (default): the wrapper is `hidden` by default and flips to
+  //     a right-aligned flex row when the row gains focus-within. To
+  //     receive focus from a touch tap we give the outer row
+  //     `tabIndex=-1` (focusable via pointer but not keyboard tab order
+  //     — keyboard users get the desktop hover/focus path instead). Tap
+  //     once to surface the controls, tap a different row (or the
+  //     composer) to dismiss.
+  //
+  //   Desktop (md+): the wrapper collapses via `md:contents` so each
+  //     button's own `md:absolute md:right-* md:top-0
+  //     md:invisible md:group-hover:visible` classes restore the
+  //     original hover-revealed behavior. We additionally honor
+  //     `group-focus-within` on desktop so a tab-navigating user can
+  //     reveal the controls without a mouse.
+  const hasControls = showBookmark || showOwnControls || (showReport && !showOwnControls);
+  const controls = hasControls ? (
+    <div className="hidden group-focus-within:flex justify-end gap-1 mt-0.5 md:contents">
+      {showBookmark ? <BookmarkButton msg={msg} /> : null}
+      {showOwnControls ? <OwnControls msg={msg} /> : null}
+      {showReport && !showOwnControls ? <ReportButton msg={msg} /> : null}
+    </div>
+  ) : null;
+
+  // `tabIndex=-1` makes the row focusable from a tap without putting it
+  // in the keyboard tab order. `outline-none` strips the default focus
+  // ring — the hover background tint already signals "this row is
+  // active". Skipped when there are no controls to reveal (saves users
+  // a phantom focus state with no visible effect).
+  //
+  // iOS Safari quirk: a tap on a div with only `tabIndex=-1` doesn't
+  // reliably move focus. Explicit `currentTarget.focus()` in onClick
+  // makes the focus transition deterministic across browsers. The
+  // call is harmless on desktop (the element either already has
+  // focus or is about to receive it from the click event anyway).
+  // We also bail out when the tap originated inside a focusable
+  // descendant (button, link, input) — letting that native control's
+  // own focus win prevents the row from snatching it back and
+  // closing things like an open bookmark popover.
+  function activateRow(e: React.MouseEvent<HTMLDivElement>) {
+    const t = e.target as HTMLElement;
+    if (t.closest("button, a, input, textarea, select, label")) return;
+    e.currentTarget.focus();
+  }
+  const rowFocusProps = hasControls
+    ? { tabIndex: -1 as const, className: "outline-none", onClick: activateRow }
+    : { className: "" };
+
   if (isReply) {
     return (
       <div
         data-message-id={msg.id}
-        className={`group relative my-0.5 border-l-2 border-keep-action/50 pl-2 transition-colors duration-700 ${hoverRow} ${whisperRest}`}
+        tabIndex={rowFocusProps.tabIndex}
+        onClick={rowFocusProps.onClick}
+        className={`group relative my-0.5 border-l-2 border-keep-action/50 pl-2 transition-colors duration-700 ${rowFocusProps.className} ${hoverRow} ${whisperRest}`}
       >
         {quote}
         {lineEl}
-        {showBookmark ? <BookmarkButton msg={msg} /> : null}
-        {showOwnControls ? <OwnControls msg={msg} /> : null}
-        {showReport && !showOwnControls ? <ReportButton msg={msg} /> : null}
+        {controls}
       </div>
     );
   }
   return (
     <div
       data-message-id={msg.id}
-      className={`group relative transition-colors duration-700 ${hoverRow} ${whisperRest}`}
+      tabIndex={rowFocusProps.tabIndex}
+      onClick={rowFocusProps.onClick}
+      className={`group relative transition-colors duration-700 ${rowFocusProps.className} ${hoverRow} ${whisperRest}`}
     >
       {lineEl}
-      {showBookmark ? <BookmarkButton msg={msg} /> : null}
-      {showOwnControls ? <OwnControls msg={msg} /> : null}
-      {showReport && !showOwnControls ? <ReportButton msg={msg} /> : null}
+      {controls}
     </div>
   );
 }
@@ -2102,7 +2151,7 @@ function ReportButton({ msg }: { msg: ChatMessage }) {
   }
 
   return (
-    <span className="absolute right-0 top-0 invisible group-hover:visible">
+    <span className="inline-flex md:absolute md:right-0 md:top-0 md:invisible md:group-hover:visible">
       <button
         type="button"
         onClick={file}
@@ -2213,7 +2262,7 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
   }
 
   return (
-    <span className="absolute right-0 top-0 invisible flex gap-1 group-hover:visible">
+    <span className="inline-flex gap-1 md:absolute md:right-0 md:top-0 md:invisible md:group-hover:visible">
       <button
         type="button"
         onClick={() => { setDraft(msg.body); setEditing(true); }}
@@ -2311,7 +2360,7 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
   }
 
   return (
-    <span className="absolute right-20 top-0 invisible group-hover:visible">
+    <span className="relative inline-flex md:absolute md:right-20 md:top-0 md:invisible md:group-hover:visible">
       <button
         type="button"
         onClick={openPopover}

@@ -39,13 +39,13 @@ const ALLOWED_TAGS = [
 
 /**
  * Pre-pass: convert newlines to `<br>` for inputs that look like plain
- * text. The detection looks for any block-level tag — if the input
- * already has one, we trust the author's structure and leave newlines
- * alone (HTML collapses them as whitespace anyway, so the rendered
- * output reads as the author intended). If no block tag is present, we
- * treat the input as a paste of prose with real line breaks and
- * convert them so the rendered profile preserves the writer's
- * pagination.
+ * text. We only skip the conversion when the input already carries
+ * *paragraph-level* wrappers (`<p>`, `<div>`, `<blockquote>`, `<pre>`) —
+ * those define their own vertical rhythm and dropping `<br>` between
+ * them would add ugly double-gaps. Inline tags (`<br>`, `<b>`, `<i>`),
+ * lists, and headings do NOT count as paragraph structure: a writer
+ * who typed `<h3>Title</h3>` followed by two newlines of prose still
+ * expects those newlines to render as line breaks.
  *
  * Without this pass, pasting a bio like:
  *   First paragraph.
@@ -54,11 +54,14 @@ const ALLOWED_TAGS = [
  * collapses to a single visually unbroken run because the browser
  * treats the source newlines as whitespace. With this pass, the same
  * paste becomes `First paragraph.<br><br>Second paragraph.` and reads
- * the way the author wrote it.
+ * the way the author wrote it. The previous version of the regex
+ * included `<br>`, so a single inline line-break elsewhere in the bio
+ * was enough to disable the whole pass — surprisingly easy to trip,
+ * and a common "my paragraph spacing disappeared on save" report.
  */
 function nlToBrForPlainText(input: string): string {
-  const hasBlock = /<(?:p|div|h[1-6]|blockquote|pre|ul|ol|li|hr|br)\b/i.test(input);
-  if (hasBlock) return input;
+  const hasParagraphStructure = /<(?:p|div|blockquote|pre)\b/i.test(input);
+  if (hasParagraphStructure) return input;
   return input.replace(/\r\n?/g, "\n").replace(/\n/g, "<br>\n");
 }
 

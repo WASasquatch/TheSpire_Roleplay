@@ -95,6 +95,23 @@ export function FeaturedWorldsCarousel() {
       <div className="mb-1 text-center text-[10px] uppercase tracking-[0.3em] text-keep-muted">
         Worlds you can play in
       </div>
+      {/* Cover image hero. When the world has one we render a short
+          banner above the text. The banner stays out of the way when
+          there's no image — the strip still reads as a quick text-card
+          like before. `referrerPolicy="no-referrer"` matches the
+          inline image policy elsewhere (don't leak the chat URL to
+          whoever hosts the image). */}
+      {active.coverImageUrl ? (
+        <div className="mb-2 overflow-hidden rounded border border-keep-rule/40 bg-keep-banner/30">
+          <img
+            src={active.coverImageUrl}
+            alt={`${active.name} cover`}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            className="block max-h-32 w-full object-cover"
+          />
+        </div>
+      ) : null}
       <div className="min-h-[88px] text-center">
         <div className="font-action text-lg leading-tight text-keep-action">{active.name}</div>
         <div className="text-[10px] text-keep-muted">

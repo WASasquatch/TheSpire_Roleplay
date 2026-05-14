@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer, Socket } from "socket.io";
 import type {
@@ -13,6 +13,7 @@ import { extractMentions } from "@thekeep/shared";
 import {
   bans,
   characters,
+  friends,
   ignores,
   messages,
   roomInvites,
@@ -20,7 +21,6 @@ import {
   roomWorldLinks,
   rooms,
   users,
-  watches,
   worldMembers,
   worlds,
 } from "../db/schema.js";
@@ -795,17 +795,25 @@ async function loadLinkedWorld(db: Db, roomId: string): Promise<LinkedWorldRef |
 
 /**
  * Fan out a `watch:online` push to every live socket of every user who
- * watches the user that just came online. Quiet failures are logged via the
- * caller (we don't want one stale watcher's socket failure to block the
- * connect path).
+ * has the just-connected user as an accepted mutual friend. The event
+ * name on the wire is still `watch:online` (changing it would break
+ * older cached client bundles); the underlying table moved from
+ * `watches` to `friends`, and as of migration 0051 friendship is
+ * symmetric — so we pull the OTHER side of every accepted edge that
+ * touches `user`, in either direction.
  */
 async function pingWatchers(io: Io, db: Db, user: SessionUser): Promise<void> {
-  const watchers = await db
-    .select({ watcherUserId: watches.watcherUserId })
-    .from(watches)
-    .where(eq(watches.watchedUserId, user.id));
-  if (watchers.length === 0) return;
-  const watcherSet = new Set(watchers.map((w) => w.watcherUserId));
+  const rows = await db
+    .select({
+      otherUserId: sql<string>`CASE WHEN ${friends.frienderUserId} = ${user.id} THEN ${friends.friendedUserId} ELSE ${friends.frienderUserId} END`,
+    })
+    .from(friends)
+    .where(and(
+      or(eq(friends.frienderUserId, user.id), eq(friends.friendedUserId, user.id)),
+      eq(friends.status, "accepted"),
+    ));
+  if (rows.length === 0) return;
+  const friendSet = new Set(rows.map((r) => r.otherUserId));
   const sockets = await io.fetchSockets();
   const payload = {
     userId: user.id,
@@ -814,7 +822,7 @@ async function pingWatchers(io: Io, db: Db, user: SessionUser): Promise<void> {
   };
   for (const s of sockets) {
     const uid = (s.data as { userId?: string }).userId;
-    if (uid && watcherSet.has(uid)) {
+    if (uid && friendSet.has(uid)) {
       s.emit("watch:online", payload);
     }
   }

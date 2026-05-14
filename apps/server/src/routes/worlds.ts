@@ -6,14 +6,25 @@ import type {
   Role,
   Theme,
   WorldCatalogEntry,
+  WorldCatalogPage,
   WorldDetail,
+  WorldGenre,
   WorldMemberRef,
   WorldMembership,
+  WorldPacing,
   WorldPage,
+  WorldStatus,
   WorldSummary,
   WorldVisibility,
 } from "@thekeep/shared";
-import { WORLD_PAGE_DEPTH_CAP, deriveSlug, normalizeTheme } from "@thekeep/shared";
+import {
+  CONTENT_WARNINGS,
+  WORLD_PAGE_DEPTH_CAP,
+  deriveSlug,
+  normalizeTheme,
+  parseTagList,
+  serializeTagList,
+} from "@thekeep/shared";
 import {
   roomMembers,
   roomWorldLinks,
@@ -40,12 +51,59 @@ type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 const SLUG_RX = /^[a-z0-9](?:[a-z0-9-]{0,58}[a-z0-9])?$/;
 
 const visibilityEnum = z.enum(["private", "public", "open"]);
+const genreEnum = z.enum([
+  "fantasy", "modern", "scifi", "horror",
+  "western", "steampunk", "mythological", "other",
+]);
+const statusEnum = z.enum(["active", "featured", "archived"]);
+const pacingEnum = z.enum(["casual", "structured", "long-form"]);
+const contentWarningEnum = z.enum(CONTENT_WARNINGS as unknown as [string, ...string[]]);
+
+// Tags: each entry must look like a slug-ish kebab token. The canonical
+// list is curated and short, but owners can add custom tags — this regex
+// gates the *shape* (lowercase letters / digits / hyphens, 1-32 chars),
+// not the membership. Empty input arrays are allowed (no tags).
+const TAG_RX = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
+const tagSchema = z
+  .string()
+  .min(1)
+  .max(32)
+  .transform((s) => s.trim().toLowerCase())
+  .refine((s) => TAG_RX.test(s), { message: "tags must be lowercase letters / digits / hyphens" });
+const tagsArraySchema = z
+  .array(tagSchema)
+  .max(20)
+  .transform((arr) => parseTagList(arr.join(",")));
+const cwArraySchema = z
+  .array(contentWarningEnum)
+  .max(CONTENT_WARNINGS.length)
+  .transform((arr) => parseTagList(arr.join(",")));
+
+// Restrict cover image URLs to http(s) — same posture as character
+// avatars (the URL constructor rejects malformed input; we additionally
+// gate the protocol).
+const httpUrl = z.string().min(1).max(2000).refine(
+  (s) => { try { return /^https?:$/.test(new URL(s).protocol); } catch { return false; } },
+  { message: "coverImageUrl must use http or https" },
+);
 
 const createWorldBody = z.object({
   name: z.string().min(1).max(120),
   slug: z.string().max(60).optional(),
   description: z.string().max(2000).nullable().optional(),
   visibility: visibilityEnum.optional(),
+  // Catalog metadata — all optional on create so the world can be filled
+  // out incrementally; defaults match the DB column defaults so missing
+  // fields land in the catalog's "Other" bucket without an extra step.
+  genre: genreEnum.optional(),
+  tags: tagsArraySchema.optional(),
+  contentWarnings: cwArraySchema.optional(),
+  // Owners can mark their own world `archived` (hide from catalog) or
+  // leave it `active`; only admins can set `featured`. Enforced at the
+  // route layer, not the Zod schema.
+  status: statusEnum.optional(),
+  coverImageUrl: httpUrl.nullable().optional(),
+  pacing: pacingEnum.nullable().optional(),
 }).strict();
 
 // Theme is a free-form object passed to normalizeTheme on the way in. We
@@ -57,6 +115,31 @@ const updateWorldBody = z.object({
   description: z.string().max(2000).nullable().optional(),
   visibility: visibilityEnum.optional(),
   theme: z.union([z.record(z.unknown()), z.null()]).optional(),
+  genre: genreEnum.optional(),
+  tags: tagsArraySchema.optional(),
+  contentWarnings: cwArraySchema.optional(),
+  status: statusEnum.optional(),
+  coverImageUrl: httpUrl.nullable().optional(),
+  pacing: pacingEnum.nullable().optional(),
+}).strict();
+
+const catalogQuery = z.object({
+  q: z.string().max(120).optional(),
+  // Repeated `tag=foo&tag=bar` semantics. Zod's preprocess can normalize
+  // either a single string (`?tag=foo`) or an array (`?tag=foo&tag=bar`)
+  // because Fastify's querystring parser yields one or the other.
+  tag: z.preprocess(
+    (v) => (typeof v === "string" ? [v] : v),
+    z.array(z.string().max(32)).optional(),
+  ),
+  exclude: z.preprocess(
+    (v) => (typeof v === "string" ? [v] : v),
+    z.array(z.string().max(32)).optional(),
+  ),
+  genre: genreEnum.optional(),
+  status: statusEnum.optional(),
+  page: z.coerce.number().int().min(0).max(1000).optional(),
+  pageSize: z.coerce.number().int().min(1).max(50).optional(),
 }).strict();
 
 const setPrimaryWorldBody = z.object({
@@ -108,6 +191,14 @@ async function memberCountFor(db: Db, worldId: string): Promise<number> {
   return r?.n ?? 0;
 }
 
+async function linkedRoomCountFor(db: Db, worldId: string): Promise<number> {
+  const r = (await db
+    .select({ n: sql<number>`count(*)` })
+    .from(roomWorldLinks)
+    .where(eq(roomWorldLinks.worldId, worldId)))[0];
+  return r?.n ?? 0;
+}
+
 /**
  * Materialize the member list for a world (used in WorldDetail). Resolves
  * usernames in one extra query per row; fine at chat-room scale, switch to
@@ -152,8 +243,40 @@ async function toSummary(db: Db, w: typeof worlds.$inferSelect): Promise<WorldSu
     visibility: w.visibility as WorldVisibility,
     pageCount: await pageCount(db, w.id),
     memberCount: await memberCountFor(db, w.id),
+    linkedRoomCount: await linkedRoomCountFor(db, w.id),
     theme: parseStoredTheme(w.theme),
+    genre: (w.genre ?? "other") as WorldGenre,
+    tags: parseTagList(w.tags),
+    contentWarnings: parseTagList(w.contentWarnings),
+    status: (w.status ?? "active") as WorldStatus,
+    coverImageUrl: w.coverImageUrl ?? null,
+    pacing: (w.pacing ?? null) as WorldPacing | null,
     createdAt: +w.createdAt,
+    updatedAt: +w.updatedAt,
+  };
+}
+
+/**
+ * Shared catalog-entry builder. The cards in WorldsListModal and
+ * FeaturedWorldsCarousel share this shape; centralizing keeps the two
+ * surfaces in lockstep when metadata fields are added.
+ */
+async function toCatalogEntry(db: Db, w: typeof worlds.$inferSelect): Promise<WorldCatalogEntry> {
+  return {
+    id: w.id,
+    slug: w.slug,
+    ownerUsername: await loadOwnerUsername(db, w.ownerUserId),
+    name: w.name,
+    description: w.description,
+    pageCount: await pageCount(db, w.id),
+    memberCount: await memberCountFor(db, w.id),
+    linkedRoomCount: await linkedRoomCountFor(db, w.id),
+    genre: (w.genre ?? "other") as WorldGenre,
+    tags: parseTagList(w.tags),
+    contentWarnings: parseTagList(w.contentWarnings),
+    status: (w.status ?? "active") as WorldStatus,
+    coverImageUrl: w.coverImageUrl ?? null,
+    pacing: (w.pacing ?? null) as WorldPacing | null,
     updatedAt: +w.updatedAt,
   };
 }
@@ -298,49 +421,100 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
    */
   app.get<{ Querystring: { limit?: string } }>("/worlds/featured", async (req) => {
     const limit = Math.min(10, Math.max(1, parseInt(req.query.limit ?? "10", 10) || 10));
-    const rows = await db
+    // Featured rotation: prefer admin-curated `status="featured"`, fall
+    // back to the random sample of open worlds when there aren't enough
+    // featured rows to fill the strip. Curated worlds always lead so
+    // an admin's deliberate spotlight isn't drowned by the random tail.
+    const featured = await db
       .select()
       .from(worlds)
-      .where(eq(worlds.visibility, "open"))
+      .where(and(eq(worlds.visibility, "open"), eq(worlds.status, "featured")))
       .orderBy(sql`random()`)
       .limit(limit);
-    const entries: WorldCatalogEntry[] = await Promise.all(
-      rows.map(async (w) => ({
-        id: w.id,
-        slug: w.slug,
-        ownerUsername: await loadOwnerUsername(db, w.ownerUserId),
-        name: w.name,
-        description: w.description,
-        pageCount: await pageCount(db, w.id),
-        memberCount: await memberCountFor(db, w.id),
-        updatedAt: +w.updatedAt,
-      })),
-    );
+    const need = limit - featured.length;
+    const filler = need > 0
+      ? await db
+          .select()
+          .from(worlds)
+          .where(and(eq(worlds.visibility, "open"), ne(worlds.status, "featured"), ne(worlds.status, "archived")))
+          .orderBy(sql`random()`)
+          .limit(need)
+      : [];
+    const entries = await Promise.all([...featured, ...filler].map((w) => toCatalogEntry(db, w)));
     return { entries };
   });
 
-  /* ---------- World catalog (open visibility) ---------- */
-  app.get<{ Querystring: { limit?: string } }>("/worlds/catalog", async (req) => {
-    const limit = Math.min(200, parseInt(req.query.limit ?? "100", 10) || 100);
+  /* ---------- World catalog (open visibility, filterable) ---------- */
+  app.get<{ Querystring: Record<string, string | string[]> }>("/worlds/catalog", async (req) => {
+    const parsed = catalogQuery.safeParse(req.query);
+    const q = parsed.success ? parsed.data : ({} as z.infer<typeof catalogQuery>);
+    const pageSize = q.pageSize ?? 24;
+    const page = q.page ?? 0;
+    // Build the WHERE incrementally. The base set is "open + not
+    // archived" (archived worlds stay reachable via direct link but
+    // don't appear in catalog browse).
+    const conds: ReturnType<typeof eq>[] = [
+      eq(worlds.visibility, "open"),
+      ne(worlds.status, "archived"),
+    ];
+    if (q.genre) conds.push(eq(worlds.genre, q.genre));
+    if (q.status) conds.push(eq(worlds.status, q.status));
+    // Text search across name + description + tags. SQLite LIKE is
+    // case-insensitive for ASCII; the patterns are escaped to keep `%`
+    // and `_` literal so a search for "20% off" doesn't go wild.
+    if (q.q && q.q.trim()) {
+      const like = `%${q.q.trim().replace(/[%_]/g, (c) => `\\${c}`).toLowerCase()}%`;
+      conds.push(or(
+        sql`lower(${worlds.name}) LIKE ${like} ESCAPE '\\'`,
+        sql`lower(${worlds.description}) LIKE ${like} ESCAPE '\\'`,
+        sql`lower(${worlds.tags}) LIKE ${like} ESCAPE '\\'`,
+      )!);
+    }
+    // Tags: AND together (a world must carry every requested tag). We
+    // use substring matches since tags are stored as comma-separated;
+    // wrap the column in commas so a search for `,courtly,` doesn't
+    // accidentally match `low-courtly` or similar substring overlaps.
+    if (q.tag && q.tag.length > 0) {
+      for (const tag of q.tag) {
+        const needle = `%,${tag.toLowerCase()},%`;
+        conds.push(sql`(',' || lower(${worlds.tags}) || ',') LIKE ${needle}`);
+      }
+    }
+    // Exclude any world that lists ANY of these content warnings. Same
+    // bracketed-substring approach as tags.
+    if (q.exclude && q.exclude.length > 0) {
+      for (const cw of q.exclude) {
+        const needle = `%,${cw.toLowerCase()},%`;
+        conds.push(sql`(',' || lower(${worlds.contentWarnings}) || ',') NOT LIKE ${needle}`);
+      }
+    }
+    const whereExpr = and(...conds);
+    const totalRow = (await db
+      .select({ n: sql<number>`count(*)` })
+      .from(worlds)
+      .where(whereExpr))[0];
+    const total = totalRow?.n ?? 0;
     const rows = await db
       .select()
       .from(worlds)
-      .where(eq(worlds.visibility, "open"))
-      .orderBy(desc(worlds.updatedAt))
-      .limit(limit);
-    const entries: WorldCatalogEntry[] = await Promise.all(
-      rows.map(async (w) => ({
-        id: w.id,
-        slug: w.slug,
-        ownerUsername: await loadOwnerUsername(db, w.ownerUserId),
-        name: w.name,
-        description: w.description,
-        pageCount: await pageCount(db, w.id),
-        memberCount: await memberCountFor(db, w.id),
-        updatedAt: +w.updatedAt,
-      })),
-    );
-    return { entries };
+      .where(whereExpr)
+      // Featured first so admin curation reads top-of-page; then by
+      // recency so freshly-updated worlds bubble up.
+      .orderBy(
+        sql`CASE ${worlds.status} WHEN 'featured' THEN 0 ELSE 1 END`,
+        desc(worlds.updatedAt),
+      )
+      .limit(pageSize)
+      .offset(page * pageSize);
+    const entries = await Promise.all(rows.map((w) => toCatalogEntry(db, w)));
+    const payload: WorldCatalogPage = {
+      entries,
+      page,
+      pageSize,
+      total,
+      hasMore: (page + 1) * pageSize < total,
+    };
+    return payload;
   });
 
   /* ---------- Create world ---------- */
@@ -366,6 +540,14 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       .limit(1))[0];
     if (dup) { reply.code(409); return { error: "you already have a world with that slug" }; }
 
+    // `featured` is admin-curated only; silently downgrade to `active`
+    // when an owner attempts to self-promote on create. We don't error
+    // here because the rest of the body is valid — the surprise of a
+    // 400 over a single forbidden enum value would be hostile when the
+    // owner's intent is clearly "publish this world."
+    let initialStatus: WorldStatus = body.status ?? "active";
+    if (initialStatus === "featured" && me.role !== "admin") initialStatus = "active";
+
     const id = nanoid();
     await db.insert(worlds).values({
       id,
@@ -374,6 +556,12 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       name: body.name.trim(),
       description: body.description?.trim() || null,
       visibility: body.visibility ?? "private",
+      genre: body.genre ?? "other",
+      tags: body.tags ? serializeTagList(body.tags) : "",
+      contentWarnings: body.contentWarnings ? serializeTagList(body.contentWarnings) : "",
+      status: initialStatus,
+      coverImageUrl: body.coverImageUrl ?? null,
+      pacing: body.pacing ?? null,
     });
     const created = (await db.select().from(worlds).where(eq(worlds.id, id)).limit(1))[0]!;
     reply.code(201);
@@ -451,6 +639,26 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
         ? null
         : JSON.stringify(normalizeTheme(body.theme));
     }
+    if (body.genre !== undefined) update.genre = body.genre;
+    if (body.tags !== undefined) update.tags = serializeTagList(body.tags);
+    if (body.contentWarnings !== undefined) {
+      update.contentWarnings = serializeTagList(body.contentWarnings);
+    }
+    if (body.status !== undefined) {
+      // Non-admin owners can move between `active` ↔ `archived`. Only
+      // admins can set `featured`; an owner attempting to self-promote
+      // is silently downgraded to `active` for the same UX reason as
+      // the create path (no hostile 400 over one field).
+      if (body.status === "featured" && me.role !== "admin") {
+        update.status = "active";
+      } else {
+        update.status = body.status;
+      }
+    }
+    if (body.coverImageUrl !== undefined) {
+      update.coverImageUrl = body.coverImageUrl ?? null;
+    }
+    if (body.pacing !== undefined) update.pacing = body.pacing ?? null;
     if (body.slug !== undefined) {
       const slug = body.slug.toLowerCase();
       if (!SLUG_RX.test(slug)) { reply.code(400); return { error: "slug must be 1-60 lowercase letters, numbers, hyphens" }; }

@@ -2,14 +2,28 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useChat } from "../state/store.js";
 import { SearchBar } from "./SearchBar.js";
 
+/** Shape of `/characters` rows — narrow projection of the server payload. */
+interface CharacterRow {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+}
+
 interface Props {
   onCommand: (text: string) => void;
-  /** When set, the rail shows a "Leave Character" button to drop back to OOC. */
+  /** Id of the active character on this tab, or null when posting as the master. */
   activeCharacterId?: string | null;
+  /** Display name of the active character (passed through from App so the
+   *  identity button can show "Sigrid" instead of just the id). */
+  activeCharacterName?: string | null;
   /** Current room; the search bar scopes to it. Null disables the bar. */
   currentRoomId: string | null;
   /** Jump to a specific message id in the given room. Search bar wires this. */
   onJumpToMessage: (roomId: string, messageId: string) => void;
+  /** Open the Friends modal (full friend list with avatars + DM shortcut). */
+  onOpenFriends: () => void;
+  /** Open the Messages (DM conversation list) modal. */
+  onOpenMessages: () => void;
 }
 
 /**
@@ -24,7 +38,7 @@ interface Props {
  * is a fixed-position slide-out), so the drawer here just expands upward
  * within that container - works the same as desktop.
  */
-export function ToolPanel({ onCommand, activeCharacterId, currentRoomId, onJumpToMessage }: Props) {
+export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, currentRoomId, onJumpToMessage, onOpenFriends, onOpenMessages }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
   const [refreshOpen, setRefreshOpen] = useState(false);
@@ -32,9 +46,27 @@ export function ToolPanel({ onCommand, activeCharacterId, currentRoomId, onJumpT
   const [sceneOpen, setSceneOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [privateOpen, setPrivateOpen] = useState(false);
+  // Identity switcher (above the Tools trigger). Lazily loads the user's
+  // character list the first time it's opened — most sessions never
+  // touch it, so paying the /characters fetch on every mount would be
+  // wasteful. After the first open the result is cached for this tab.
+  const [identityOpen, setIdentityOpen] = useState(false);
+  const [characters, setCharacters] = useState<CharacterRow[] | null>(null);
+  const [charactersLoading, setCharactersLoading] = useState(false);
+  const me = useChat((s) => s.me);
   const fontStep = useChat((s) => s.fontStep);
   const setFontStep = useChat((s) => s.setFontStep);
   const refreshIntervalSec = useChat((s) => s.refreshIntervalSec);
+  // Total unread DM count across every conversation. Drives the badge
+  // on the "Messages" menu item AND a small dot on the closed Tools
+  // trigger so the user gets a glance-level cue even before they
+  // open the drawer. Same source the per-conversation badges in
+  // MessagesModal pull from, so the two numbers stay consistent.
+  const dmUnreadTotal = useChat((s) => {
+    let n = 0;
+    for (const c of Object.values(s.dmConversations)) n += c.unreadCount;
+    return n;
+  });
 
   function cycleFont() {
     setFontStep(((fontStep + 1) % 4) as 0 | 1 | 2 | 3);
@@ -52,6 +84,58 @@ export function ToolPanel({ onCommand, activeCharacterId, currentRoomId, onJumpT
     setSceneOpen(false);
     setFindOpen(false);
     setPrivateOpen(false);
+  }
+
+  /**
+   * Lazy load the character list when the identity dropdown opens for
+   * the first time. Re-uses the cached list on subsequent opens this
+   * session; an /char create or rename happens through the editor and
+   * its own onSaved hooks would need to invalidate this — but the
+   * cache is per-mount of ToolPanel, which is cheap to remount (e.g.
+   * after a room switch we don't, but after a full reload we do).
+   */
+  useEffect(() => {
+    if (!identityOpen || characters !== null) return;
+    let cancelled = false;
+    setCharactersLoading(true);
+    fetch("/characters")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled) return;
+        if (j && Array.isArray(j.characters)) {
+          setCharacters(
+            j.characters.map((c: { id: string; name: string; avatarUrl: string | null }) => ({
+              id: c.id,
+              name: c.name,
+              avatarUrl: c.avatarUrl,
+            })),
+          );
+        } else {
+          setCharacters([]);
+        }
+      })
+      .catch(() => { if (!cancelled) setCharacters([]); })
+      .finally(() => { if (!cancelled) setCharactersLoading(false); });
+    return () => { cancelled = true; };
+  }, [identityOpen, characters]);
+
+  // Esc closes the identity dropdown too — same UX as the Tools drawer.
+  useEffect(() => {
+    if (!identityOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setIdentityOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [identityOpen]);
+
+  function switchCharacter(name: string) {
+    onCommand(`/char switch ${name}`);
+    setIdentityOpen(false);
+  }
+  function leaveCharacter() {
+    onCommand("/char clear");
+    setIdentityOpen(false);
   }
 
   // Esc closes the drawer when it's open. Registering only while open keeps
@@ -101,105 +185,118 @@ export function ToolPanel({ onCommand, activeCharacterId, currentRoomId, onJumpT
               </button>
             </header>
 
-            <Section title="Worldbuilding">
-              <DrawerBtn label="My Worlds" hint="Manage your worlds + pages (/worlds)" onClick={() => fire("/worlds")} />
-              <DrawerBtn label="World Catalog" hint="Browse open worlds (/world catalog)" onClick={() => fire("/world catalog")} />
-            </Section>
+            <SectionHeader title="Worldbuilding" />
+            <MenuItem label="My Worlds" hint="Manage your worlds + pages" onClick={() => fire("/worlds")} />
+            <MenuItem label="World Catalog" hint="Browse open worlds" onClick={() => fire("/world catalog")} />
 
-            <Section title="Roleplay">
-              <DrawerBtn
-                label="Set Mood"
-                hint="Show a mood next to your name (/mood)"
-                onClick={() => setMoodOpen((v) => !v)}
-                active={moodOpen}
-              />
-              {moodOpen ? (
+            <SectionHeader title="Roleplay" />
+            <MenuItem
+              label="Set Mood"
+              hint="Show a mood next to your name"
+              active={moodOpen}
+              onClick={() => setMoodOpen((v) => !v)}
+            />
+            {moodOpen ? (
+              <InlinePanel>
                 <InlineForm
                   placeholder="e.g. brooding, exhausted, smug"
                   submitLabel="Set"
                   extraButtons={[{ label: "Clear", onClick: () => fire("/mood clear") }]}
                   onSubmit={(text) => { if (text.trim()) fire(`/mood ${text.trim()}`); }}
                 />
-              ) : null}
-
-              <DrawerBtn
-                label="Set Scene"
-                hint="Set the room's scene title (/scene)"
-                onClick={() => setSceneOpen((v) => !v)}
-                active={sceneOpen}
-              />
-              {sceneOpen ? (
+              </InlinePanel>
+            ) : null}
+            <MenuItem
+              label="Set Scene"
+              hint="Set the room's scene title"
+              active={sceneOpen}
+              onClick={() => setSceneOpen((v) => !v)}
+            />
+            {sceneOpen ? (
+              <InlinePanel>
                 <InlineForm
                   placeholder="e.g. The dragon's lair"
                   submitLabel="Set"
                   extraButtons={[{ label: "End scene", onClick: () => fire("/scene end") }]}
                   onSubmit={(text) => { if (text.trim()) fire(`/scene ${text.trim()}`); }}
                 />
-              ) : null}
+              </InlinePanel>
+            ) : null}
+            <MenuItem label="NPCs: On" hint="Enable NPC voice in this room" onClick={() => fire("/npcmode on")} />
+            <MenuItem label="NPCs: Off" hint="Disable NPC voice in this room" onClick={() => fire("/npcmode off")} />
 
-              <Row>
-                <DrawerBtn label="NPCs On" hint="Enable NPC voice (/npcmode on)" onClick={() => fire("/npcmode on")} />
-                <DrawerBtn label="NPCs Off" hint="Disable NPC voice (/npcmode off)" onClick={() => fire("/npcmode off")} />
-              </Row>
-            </Section>
-
-            <Section title="Rooms">
-              <DrawerBtn
-                label="Find Rooms"
-                hint="Search for a room by name (/find)"
-                onClick={() => setFindOpen((v) => !v)}
-                active={findOpen}
-              />
-              {findOpen ? (
+            <SectionHeader title="Rooms" />
+            <MenuItem
+              label="Find Rooms"
+              hint="Search for a room by name"
+              active={findOpen}
+              onClick={() => setFindOpen((v) => !v)}
+            />
+            {findOpen ? (
+              <InlinePanel>
                 <InlineForm
                   placeholder="search text (or empty for all)"
                   submitLabel="Find"
                   onSubmit={(text) => fire(text.trim() ? `/find ${text.trim()}` : "/find")}
                 />
-              ) : null}
-
-              <DrawerBtn label="List Rooms" hint="Show all public rooms (/list)" onClick={() => fire("/list")} />
-
-              <DrawerBtn
-                label="New Private Room"
-                hint="Create a password-locked room (/private)"
-                onClick={() => setPrivateOpen((v) => !v)}
-                active={privateOpen}
-              />
-              {privateOpen ? (
+              </InlinePanel>
+            ) : null}
+            <MenuItem label="List Rooms" hint="Show all public rooms" onClick={() => fire("/list")} />
+            <MenuItem
+              label="New Private Room"
+              hint="Create a password-locked room"
+              active={privateOpen}
+              onClick={() => setPrivateOpen((v) => !v)}
+            />
+            {privateOpen ? (
+              <InlinePanel>
                 <PrivateForm onSubmit={(name, pw) => fire(`/private ${name} ${pw}`)} />
-              ) : null}
-            </Section>
+              </InlinePanel>
+            ) : null}
 
-            <Section title="People">
-              <DrawerBtn label="Watching" hint="Who you've /watch'd (/watching)" onClick={() => fire("/watching")} />
-              <DrawerBtn label="All Users" hint="Browse the user directory (/users)" onClick={() => fire("/users")} />
-              <DrawerBtn label="Ignore List" hint="Show or clear your ignore list (/ignore)" onClick={() => fire("/ignore")} />
-            </Section>
+            <SectionHeader title="People" />
+            <MenuItem
+              label="Messages"
+              hint="Your direct-message conversations"
+              badge={dmUnreadTotal}
+              onClick={() => { onOpenMessages(); setDrawerOpen(false); }}
+            />
+            <MenuItem
+              label="Friends"
+              hint="Friends list with online status + DM shortcuts"
+              onClick={() => { onOpenFriends(); setDrawerOpen(false); }}
+            />
+            <MenuItem label="All Users" hint="Browse the user directory" onClick={() => fire("/users")} />
+            <MenuItem label="Ignore List" hint="Show or clear your ignore list" onClick={() => fire("/ignore")} />
 
-            <Section title="Display">
-              <DrawerBtn
-                label="Color"
-                hint="Set your chat color (/color)"
-                onClick={() => setColorOpen((v) => !v)}
-                active={colorOpen}
-              />
-              {colorOpen ? (
+            <SectionHeader title="Display" />
+            <MenuItem
+              label="Chat Color"
+              hint="Set your chat color"
+              active={colorOpen}
+              onClick={() => setColorOpen((v) => !v)}
+            />
+            {colorOpen ? (
+              <InlinePanel>
                 <ColorPicker
                   onPick={(hex) => fire(`/color ${hex}`)}
                   onClear={() => fire("/color clear")}
                 />
-              ) : null}
-
-              <DrawerBtn label={`Font size: ${fontStep}`} hint="Cycle local chat font size" onClick={cycleFont} />
-
-              <DrawerBtn
-                label={refreshIntervalSec > 0 ? `Refresh: ${refreshIntervalSec}s` : "Refresh"}
-                hint={refreshIntervalSec > 0 ? `Auto-refresh every ${refreshIntervalSec}s` : "Refresh once or schedule (/refresh)"}
-                onClick={() => setRefreshOpen((v) => !v)}
-                active={refreshOpen || refreshIntervalSec > 0}
-              />
-              {refreshOpen ? (
+              </InlinePanel>
+            ) : null}
+            <MenuItem
+              label={`Font Size: ${fontStep}`}
+              hint="Cycle local chat font size"
+              onClick={cycleFont}
+            />
+            <MenuItem
+              label={refreshIntervalSec > 0 ? `Refresh: every ${refreshIntervalSec}s` : "Refresh"}
+              hint={refreshIntervalSec > 0 ? "Auto-refresh on a schedule" : "Refresh once or schedule"}
+              active={refreshOpen || refreshIntervalSec > 0}
+              onClick={() => setRefreshOpen((v) => !v)}
+            />
+            {refreshOpen ? (
+              <InlinePanel>
                 <RefreshPicker
                   current={refreshIntervalSec}
                   onPick={(n) => {
@@ -208,21 +305,21 @@ export function ToolPanel({ onCommand, activeCharacterId, currentRoomId, onJumpT
                     else fire(`/refresh ${n}`);
                   }}
                 />
-              ) : null}
-            </Section>
+              </InlinePanel>
+            ) : null}
 
-            <Section title="Account">
-              <DrawerBtn label="Edit Profile" hint="Open your profile editor (/profile)" onClick={() => fire("/profile")} />
-              <DrawerBtn label="Bookmarks" hint="Your saved chat messages (/bookmarks)" onClick={() => fire("/bookmarks")} />
-              <DrawerBtn label="Toggle Away" hint="Mark yourself away (/away)" onClick={() => fire("/away")} />
-              <DrawerBtn label="Help / Commands" hint="Browse all commands (/help)" onClick={() => fire("/help")} />
-            </Section>
+            <SectionHeader title="Account" />
+            <MenuItem label="Edit Profile" hint="Open your profile editor" onClick={() => fire("/profile")} />
+            <MenuItem label="Bookmarks" hint="Your saved chat messages" onClick={() => fire("/bookmarks")} />
+            <MenuItem label="Toggle Away" hint="Mark yourself away" onClick={() => fire("/away")} />
+            <MenuItem label="Help / Commands" hint="Browse all commands" onClick={() => fire("/help")} />
 
             {/* Search lives at the bottom of the drawer so the input is
                 close to the user's resting touch position on mobile.
                 Results render upward (most-relevant nearest the bar) — see
                 SearchBar for the spatial-proximity-to-action rationale. */}
-            <Section title="Search this room">
+            <SectionHeader title="Search this room" />
+            <div className="px-3 py-2">
               <SearchBar
                 roomId={currentRoomId}
                 onJump={(messageId) => {
@@ -230,79 +327,319 @@ export function ToolPanel({ onCommand, activeCharacterId, currentRoomId, onJumpT
                 }}
                 onClose={() => setDrawerOpen(false)}
               />
-            </Section>
+            </div>
           </div>
         </>
       ) : null}
 
-      {/* Trigger bar - always visible at the bottom of the rail. */}
+      {/* Identity switcher — always visible above the Tools trigger.
+          When a character is active the button shows their name and the
+          dropdown ends with a red "Leave Character" row. When OOC the
+          label reads "<username> OOC" and the dropdown lists just the
+          characters to step into. */}
+      <IdentityButton
+        masterName={me?.username ?? null}
+        activeCharacterName={activeCharacterName ?? null}
+        characters={characters}
+        loading={charactersLoading}
+        open={identityOpen}
+        onToggle={() => setIdentityOpen((v) => !v)}
+        onClose={() => setIdentityOpen(false)}
+        onSwitch={switchCharacter}
+        onLeave={leaveCharacter}
+        inCharacter={!!activeCharacterId}
+      />
+
+      {/* Trigger bar - always visible at the bottom of the rail. The
+          unread-count pill (when non-zero) tips the user that there's
+          something inside the drawer that needs attention; matches the
+          same number shown on the Messages menu item. */}
       <button
         type="button"
         onClick={() => setDrawerOpen((v) => !v)}
-        title="Open the tools drawer"
+        title={dmUnreadTotal > 0 ? `${dmUnreadTotal} unread message${dmUnreadTotal === 1 ? "" : "s"}` : "Open the tools drawer"}
         // py-2.5 on mobile (thumb target); py-1 on md+ for compact desktop.
-        className={`flex w-full items-center justify-center gap-2 rounded border border-keep-rule py-2.5 text-xs font-semibold uppercase tracking-widest md:py-1 ${
+        className={`mt-1 flex w-full items-center justify-center gap-2 rounded border border-keep-rule py-2.5 text-xs font-semibold uppercase tracking-widest md:py-1 ${
           drawerOpen ? "bg-keep-banner" : "bg-keep-bg hover:bg-keep-banner"
         }`}
       >
         <span aria-hidden>{drawerOpen ? "▼" : "▲"}</span>
         Tools
+        {dmUnreadTotal > 0 ? (
+          <span className="rounded-full bg-keep-action px-1.5 py-0 text-[10px] font-semibold text-keep-bg">
+            {dmUnreadTotal > 99 ? "99+" : dmUnreadTotal}
+          </span>
+        ) : null}
       </button>
-
-      {activeCharacterId ? (
-        <button
-          type="button"
-          onClick={() => fire("/char clear")}
-          title="Drop the active character and return to your master (OOC) account."
-          className="mt-1 w-full rounded border border-keep-border bg-keep-accent/10 py-2 text-xs font-semibold text-keep-accent hover:bg-keep-accent/20 md:py-1"
-        >
-          ← Leave Character (OOC)
-        </button>
-      ) : null}
     </div>
   );
 }
 
 /* ------------------------------------------------------------ *
- *  Drawer building blocks
+ *  IdentityButton — character switcher dropdown
+ *
+ *  Sits above the Tools trigger and is always visible. The button's
+ *  label reflects who's currently posting:
+ *    - In character: the character's display name.
+ *    - OOC:          "<username> OOC".
+ *
+ *  Clicking it pops a dropdown that lists every other character on
+ *  the account as a one-tap switch. When the user is currently in
+ *  character, the dropdown closes with a red "Leave Character" row
+ *  that fires `/char clear`. (When already OOC there's nothing to
+ *  leave, so the row is omitted.)
+ *
+ *  Lives in the same parent positioning context as the Tools drawer
+ *  so its `absolute inset-x-0 bottom-full` panel rises out of the
+ *  bottom strip just like the Tools drawer does.
  * ------------------------------------------------------------ */
+function IdentityButton({
+  masterName,
+  activeCharacterName,
+  characters,
+  loading,
+  open,
+  onToggle,
+  onClose,
+  onSwitch,
+  onLeave,
+  inCharacter,
+}: {
+  masterName: string | null;
+  activeCharacterName: string | null;
+  characters: CharacterRow[] | null;
+  loading: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onSwitch: (name: string) => void;
+  onLeave: () => void;
+  inCharacter: boolean;
+}) {
+  const buttonLabel = inCharacter
+    ? activeCharacterName ?? "Active character"
+    : `${masterName ?? "OOC"} (OOC)`;
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+  // Filter the dropdown so the *currently active* character doesn't
+  // appear as a switch target — switching to yourself is a no-op that
+  // confuses more than it helps. Still shown when OOC (no active char).
+  const switchTargets = (characters ?? []).filter(
+    (c) => !inCharacter || c.name !== activeCharacterName,
+  );
+
   return (
-    <div className="border-b border-keep-rule/60 p-2">
-      <div className="mb-1 px-1 text-[10px] uppercase tracking-widest text-keep-muted">{title}</div>
-      <div className="space-y-1">{children}</div>
+    <div className="relative">
+      {open ? (
+        <>
+          {/* Same backdrop discipline as the Tools drawer — fixed
+              viewport so a click anywhere outside closes the panel. */}
+          <button
+            type="button"
+            aria-label="Close identity menu"
+            onClick={onClose}
+            className="fixed inset-0 z-30 bg-black/20 md:bg-black/10"
+          />
+          {/* Anchored to the trigger's top edge; grows upward like
+              the Tools drawer. Capped so it never overflows the rail
+              even when the user has 30+ characters. */}
+          <div className="absolute inset-x-0 bottom-full z-40 mb-1 max-h-[calc(100dvh-14rem)] overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl">
+            <header className="sticky top-0 border-b border-keep-rule bg-keep-banner px-3 py-1 text-[10px] font-action uppercase tracking-[0.2em] text-keep-muted">
+              Switch identity
+            </header>
+            {loading && switchTargets.length === 0 ? (
+              <div className="px-3 py-2 text-xs italic text-keep-muted">Loading…</div>
+            ) : switchTargets.length === 0 ? (
+              <div className="px-3 py-2 text-xs italic text-keep-muted">
+                {inCharacter
+                  ? "No other characters on this account."
+                  : "No characters yet. Open the profile editor to create one."}
+              </div>
+            ) : (
+              <ul>
+                {switchTargets.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      onClick={() => onSwitch(c.name)}
+                      className="flex w-full items-center gap-2 border-b border-keep-rule/40 px-3 py-1.5 text-left text-sm hover:bg-keep-banner/40 md:py-1"
+                    >
+                      <Avatar url={c.avatarUrl} name={c.name} />
+                      <span className="min-w-0 flex-1 truncate text-keep-text">{c.name}</span>
+                      <span aria-hidden className="shrink-0 text-keep-muted">›</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {/* "Leave Character" lives at the very bottom of the
+                dropdown so the destructive option is one extra
+                deliberate scroll away from the casual switch targets.
+                Red tint reads as the OOC-bail action; omitted entirely
+                when already OOC. */}
+            {inCharacter ? (
+              <button
+                type="button"
+                onClick={onLeave}
+                title="Drop the active character and return to your master (OOC) account."
+                className="flex w-full items-center justify-center gap-1 border-t border-keep-rule bg-keep-accent/10 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-keep-accent hover:bg-keep-accent/20 md:py-1"
+              >
+                ← Leave Character (OOC)
+              </button>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={onToggle}
+        title={
+          inCharacter
+            ? "Switch character or return to OOC"
+            : "Switch into a character"
+        }
+        className={`flex w-full items-center justify-center gap-2 rounded border border-keep-rule py-2.5 text-xs font-semibold uppercase tracking-widest md:py-1 ${
+          open
+            ? "bg-keep-banner"
+            : inCharacter
+              ? "bg-keep-action/10 text-keep-action hover:bg-keep-action/20"
+              : "bg-keep-bg hover:bg-keep-banner"
+        }`}
+      >
+        <span aria-hidden>{open ? "▼" : "▲"}</span>
+        <span className="min-w-0 truncate">{buttonLabel}</span>
+      </button>
     </div>
   );
 }
 
-function Row({ children }: { children: ReactNode }) {
-  return <div className="flex gap-1">{children}</div>;
+/** Tiny circular avatar / initials fallback for the switcher rows. */
+function Avatar({ url, name }: { url: string | null; name: string }) {
+  const [errored, setErrored] = useState(false);
+  const initials = name
+    .split(/[  \-_]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]!.toUpperCase())
+    .join("") || "?";
+  return (
+    <span
+      className="relative inline-block h-6 w-6 shrink-0 overflow-hidden rounded border border-keep-rule bg-keep-banner"
+    >
+      {url && !errored ? (
+        <img
+          src={url}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setErrored(true)}
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      ) : (
+        <span className="absolute inset-0 flex items-center justify-center text-[9px] font-semibold text-keep-muted">
+          {initials}
+        </span>
+      )}
+    </span>
+  );
 }
 
-function DrawerBtn({
+/* ------------------------------------------------------------ *
+ *  Drawer building blocks
+ *
+ *  The drawer renders as a vertical dropdown — section headers in a
+ *  banner-tinted strip, then each option as a full-width row with a
+ *  primary label and a smaller hint underneath. Matches the mobile-
+ *  navigation pattern the rest of the app uses (single column,
+ *  generous tap targets, theme-agnostic separators). The previous
+ *  grid-of-buttons layout collapsed awkwardly on narrow widths and
+ *  did not play well with the medieval/modern/scifi ornament styles
+ *  (each style draws its own border treatment around `keep-frame`
+ *  surfaces; a row-based list reads consistently across all three
+ *  because the visual unit is the divider, not a bordered tile).
+ * ------------------------------------------------------------ */
+
+/**
+ * Section divider strip. Visually distinct from a menu row — uses the
+ * panel tint + uppercase tracking-widest so users scan the
+ * categories quickly. Sticky-free so all sections scroll with the
+ * drawer.
+ */
+function SectionHeader({ title }: { title: string }) {
+  return (
+    <div className="border-y border-keep-rule/60 bg-keep-banner/40 px-3 py-0.5 text-[10px] font-action uppercase tracking-[0.2em] text-keep-muted">
+      {title}
+    </div>
+  );
+}
+
+/**
+ * Wrapper for the inline forms / pickers that drop down beneath
+ * their trigger row (mood, scene, find, private-room, color,
+ * refresh). Adds a subtle indent + padded surface so the form
+ * visually nests under the row above instead of butting against
+ * the next divider. Pure visual containment — the form components
+ * own their own internal layout.
+ */
+function InlinePanel({ children }: { children: ReactNode }) {
+  return (
+    <div className="border-b border-keep-rule/40 bg-keep-banner/20 px-3 py-2">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A single dropdown row. Full-width, left-aligned label. The `hint`
+ * surfaces as a native browser tooltip on hover/focus rather than
+ * sitting under the label — keeps the menu compact enough to fit on
+ * one screen without scrolling, while still being self-documenting
+ * for users who pause over a row. Hover paints the row with the
+ * panel-banner tint so the theme's accent color is reserved for
+ * the active / pressed state.
+ */
+function MenuItem({
   label,
   hint,
   onClick,
   active,
+  badge,
 }: {
   label: string;
   hint?: string;
   onClick: () => void;
   active?: boolean;
+  /**
+   * Optional unread-count badge. Falsy / zero / negative hides the pill;
+   * counts above 99 collapse to "99+" to avoid blowing out the row.
+   */
+  badge?: number;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title={hint}
-      // py-2 baseline keeps mobile thumb targets generous; flex-1 lets Row
-      // pack two side-by-side equally.
-      className={`flex-1 rounded border border-keep-rule px-2 py-2 text-left text-xs md:py-1 ${
-        active ? "bg-keep-banner" : "bg-keep-bg hover:bg-keep-banner"
+      // py-1.5 on mobile keeps a usable thumb target while staying
+      // compact; md+ tightens to py-1. Border on the bottom only so
+      // adjacent rows visually fuse into a single list. Active rows
+      // get a left accent stripe + banner tint instead of a full
+      // background swap — preserves row text contrast across themes.
+      className={`flex w-full items-center gap-3 border-b border-keep-rule/40 px-3 py-1.5 text-left text-sm md:py-1 ${
+        active
+          ? "border-l-2 border-l-keep-action bg-keep-banner/60 pl-[10px]"
+          : "hover:bg-keep-banner/40"
       }`}
     >
-      {label}
+      <span className="min-w-0 flex-1 truncate text-keep-text">{label}</span>
+      {badge && badge > 0 ? (
+        <span className="shrink-0 rounded-full bg-keep-action px-1.5 py-0 text-[10px] font-semibold text-keep-bg">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      ) : null}
+      <span aria-hidden className="shrink-0 text-keep-muted">
+        {active ? "▾" : "›"}
+      </span>
     </button>
   );
 }

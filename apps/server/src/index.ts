@@ -93,6 +93,19 @@ if (SESSION_SECRET.length < 32) {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const webDistPath = resolve(__dirname, "..", "..", "web", "dist");
 
+/**
+ * Persistent uploads directory — sibling of the SQLite database file.
+ * On Fly.io both live on the mounted /data volume so admin-uploaded
+ * logos survive a container restart. The directory is created on
+ * demand by the upload route; we just resolve the path here so the
+ * fastify-static registration below has something to point at.
+ *
+ * Mirrors the same env-precedence as db/index.ts so a local .env that
+ * still uses DATABASE_URL keeps working without a rename.
+ */
+const dbPath = resolve(process.env.SQLITE_PATH ?? process.env.DATABASE_URL ?? "./data/thekeep.sqlite");
+const uploadsRoot = resolve(dirname(dbPath), "uploads");
+
 const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
   ...(process.env.NODE_ENV === "production"
@@ -107,7 +120,12 @@ async function main() {
   registerBuiltins(registry);
   await registry.reloadCustom(db);
 
-  const app = Fastify({ loggerInstance: log });
+  // bodyLimit bumped from the 1MB Fastify default so the admin
+  // logo-upload route (base64-encoded image in JSON body, up to 8MB
+  // raw → ~10.7MB encoded) doesn't bounce off 413. Every other route
+  // is well under 1MB; the global cap is fine to keep loose since
+  // each route still imposes its own zod max where it matters.
+  const app = Fastify({ loggerInstance: log, bodyLimit: 12 * 1024 * 1024 });
   await app.register(cookie, { secret: SESSION_SECRET });
   // CORS is only useful when the web bundle is served from a different origin
   // (the dev setup, where Vite is on :5173 and the API is on :3001). In prod
@@ -296,6 +314,11 @@ async function main() {
       bannerCoverCss: s.bannerCoverCss,
       logoColor: s.logoColor,
       logoFont: s.logoFont,
+      // Banner/splash logo URL. Empty string = no logo (text title
+      // is used). Default = the SPA-bundled /thespire-logo.png; can
+      // be replaced by an /uploads/... path written by the upload
+      // endpoint, or by any remote https URL.
+      logoUrl: s.logoUrl,
       defaultTheme: s.defaultTheme,
       // Surface so the unauthenticated AuthGate can hide the Register tab.
       registrationOpen: s.registrationOpen,
@@ -378,7 +401,32 @@ async function main() {
     db,
     io,
     registry,
+    uploadsRoot,
     getSessionUser: (req) => getSessionUser(req, db),
+  });
+
+  // Serve admin-uploaded files (logos today, possibly more later).
+  // Lives on the persistent data volume so deploys don't lose them.
+  // Filenames are content-hashed by the upload route, so the
+  // 1-year immutable cache is safe — a replaced logo gets a new
+  // filename + URL, busting any stale cache automatically. Registered
+  // BEFORE the SPA static below so /uploads/* never falls into the
+  // SPA fallback in prod.
+  //
+  // Decorate-skipped so we can register a second fastify-static for
+  // the SPA later: only one instance can claim the default
+  // decorators per Fastify scope.
+  if (!existsSync(uploadsRoot)) {
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(uploadsRoot, { recursive: true });
+  }
+  await baseApp.register(fastifyStatic, {
+    root: uploadsRoot,
+    prefix: "/uploads/",
+    decorateReply: false,
+    setHeaders(res) {
+      res.setHeader("cache-control", "public, max-age=31536000, immutable");
+    },
   });
 
   /**
@@ -458,7 +506,11 @@ async function main() {
       const lastRoomId = userRow?.lastRoomId ?? null;
       if (lastRoomId) {
         const lastRoom = (await db.select().from(rooms).where(eq(rooms.id, lastRoomId)).limit(1))[0];
-        if (lastRoom) {
+        // Skip archived rooms — the user's previous room got
+        // parked while they were offline, so it's no longer a valid
+        // landing target. Fall through to the canonical landing
+        // below instead of dead-ending here.
+        if (lastRoom && !lastRoom.archivedAt) {
           const isBanned = (await db
             .select()
             .from(bans)

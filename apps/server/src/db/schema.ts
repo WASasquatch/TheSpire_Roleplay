@@ -244,6 +244,16 @@ export const rooms = sqliteTable(
     replyMode: text("reply_mode", { enum: ["flat", "nested"] })
       .notNull()
       .default("flat"),
+    /**
+     * Set when the last live socket leaves a user-created room. The
+     * row is kept (settings + name reservation) so a future create
+     * with the same lowercased name can resurrect the room with the
+     * new caller as owner. Excluded from rooms-tree / search / join
+     * queries — archived rows are effectively invisible until
+     * resurrected. Null for active rooms; null for system rooms
+     * permanently (they're never archived).
+     */
+    archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
     createdAt: ts("created_at"),
   },
   (t) => ({
@@ -631,6 +641,14 @@ export const siteSettings = sqliteTable("site_settings", {
    * `"Cinzel", "Georgia", serif`. Null = use the theme's `font-action` stack.
    */
   logoFont: text("logo_font"),
+  /**
+   * URL for the logo image rendered in place of the `siteName` text in the
+   * banner + splash. Defaults to the SPA-bundled `/thespire-logo.png`; can
+   * be overridden via /admin/settings (any URL) or replaced via
+   * /admin/upload/logo (writes under /uploads and updates this column).
+   * Empty string = no logo, fall back to the text title.
+   */
+  logoUrl: text("logo_url").notNull().default("/thespire-logo.png"),
   /** Hard cap on characters per user account. */
   maxCharactersPerUser: integer("max_characters_per_user").notNull().default(100),
   /**

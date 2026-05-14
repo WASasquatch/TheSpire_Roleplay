@@ -163,6 +163,8 @@ interface SettingsRow {
   bannerCoverCss: string | null;
   logoColor: string | null;
   logoFont: string | null;
+  /** Banner/splash logo URL. Empty string = no logo. */
+  logoUrl: string;
   maxCharactersPerUser: number;
   maxAccountsPerEmail: number;
   maxRoomsPerOwner: number;
@@ -561,6 +563,7 @@ function SettingsTab() {
         bannerCoverCss: j.bannerCoverCss,
         logoColor: j.logoColor,
         logoFont: j.logoFont,
+        logoUrl: j.logoUrl,
         registrationOpen: j.registrationOpen,
         welcomeHtml: j.welcomeHtml,
         registerDisclaimerHtml: j.registerDisclaimerHtml,
@@ -795,6 +798,8 @@ interface BrandingDraft {
   bannerCoverCss: string;
   logoColor: string;
   logoFont: string;
+  /** Logo URL. Empty string = no logo image, banner falls back to the text title. */
+  logoUrl: string;
   welcomeHtml: string;
   metaDescription: string;
   customHeadHtml: string;
@@ -820,6 +825,7 @@ function BrandingTab() {
         bannerCoverCss: j.bannerCoverCss ?? "",
         logoColor: j.logoColor ?? "",
         logoFont: j.logoFont ?? "",
+        logoUrl: j.logoUrl ?? "",
         welcomeHtml: j.welcomeHtml ?? "",
         metaDescription: j.metaDescription ?? "",
         customHeadHtml: j.customHeadHtml ?? "",
@@ -842,6 +848,10 @@ function BrandingTab() {
         bannerCoverCss: draft.bannerCoverCss.trim() === "" ? null : draft.bannerCoverCss.trim(),
         logoColor: draft.logoColor.trim() === "" ? null : draft.logoColor.trim(),
         logoFont: draft.logoFont.trim() === "" ? null : draft.logoFont.trim(),
+        // Logo URL is stored verbatim. Empty string is the explicit
+        // "no logo, show text" clear; non-empty stays as the path /
+        // URL the banner uses for <img src>.
+        logoUrl: draft.logoUrl.trim(),
         // welcomeHtml is sanitized server-side; empty stays empty (no rendering).
         welcomeHtml: draft.welcomeHtml,
         // metaDescription is plain text; server collapses internal whitespace.
@@ -869,6 +879,7 @@ function BrandingTab() {
         bannerCoverCss: j.bannerCoverCss,
         logoColor: j.logoColor,
         logoFont: j.logoFont,
+        logoUrl: j.logoUrl,
         registrationOpen: j.registrationOpen,
         welcomeHtml: j.welcomeHtml,
         registerDisclaimerHtml: j.registerDisclaimerHtml,
@@ -931,6 +942,41 @@ function BrandingTab() {
           text. Accepts <code>url()</code>, <code>linear-gradient(...)</code>,
           a solid color, etc. Leave empty to use the theme's panel color.
         </p>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Logo image</legend>
+        <p className="mb-2 text-keep-muted">
+          Shown in the banner and on the splash in place of the site name. Leave empty to use the text title instead. The default install ships <code>/thespire-logo.png</code>; uploading replaces it with your own image stored on the server (no external host required).
+        </p>
+        <LogoImageRow
+          value={draft.logoUrl}
+          onChange={(next) => setDraft({ ...draft, logoUrl: next })}
+          onUploaded={(j) => {
+            // The upload endpoint returns the full freshly-saved
+            // settings row. Mirror it straight into the store so the
+            // banner refreshes without waiting for the form save.
+            setData(j.settings);
+            setDraft((d) => (d ? { ...d, logoUrl: j.url } : d));
+            setBranding({
+              siteName: j.settings.siteName,
+              bannerCoverCss: j.settings.bannerCoverCss,
+              logoColor: j.settings.logoColor,
+              logoFont: j.settings.logoFont,
+              logoUrl: j.settings.logoUrl,
+              registrationOpen: j.settings.registrationOpen,
+              welcomeHtml: j.settings.welcomeHtml,
+              registerDisclaimerHtml: j.settings.registerDisclaimerHtml,
+              messageRetentionMs: j.settings.messageRetentionMs,
+              sessionTtlMs: j.settings.sessionTtlMs,
+              editGraceMs: j.settings.editGraceMs,
+              defaultTheme: j.settings.defaultTheme,
+              activityFeedsEnabled: j.settings.activityFeedsEnabled,
+              featuredWorldsEnabled: j.settings.featuredWorldsEnabled,
+              defaultStyleKey: j.settings.defaultStyleKey,
+            });
+          }}
+        />
       </fieldset>
 
       <fieldset className="rounded border border-keep-rule p-3 text-xs">
@@ -1085,6 +1131,125 @@ function BrandingTab() {
   );
 }
 
+/**
+ * Logo image picker — URL input + Upload button + live preview.
+ *
+ * Two paths admins can take:
+ *   1. Type/paste a URL (built-in `/thespire-logo.png`, an
+ *      `/uploads/...` path that was uploaded earlier, or a remote
+ *      https URL). Save commits via the standard /admin/settings PUT
+ *      flow alongside the rest of the branding form.
+ *   2. Click Upload, pick a local file. We read it via FileReader as
+ *      a base64 data URL, POST to /admin/upload/logo, and the server
+ *      writes it under /uploads + immediately persists the URL onto
+ *      site_settings.logo_url. That bypass the parent form save —
+ *      the upload is its own atomic operation since admins typically
+ *      want the new logo live as soon as they pick it. The parent
+ *      callback then syncs the local draft + branding store.
+ */
+function LogoImageRow({
+  value,
+  onChange,
+  onUploaded,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onUploaded: (j: { url: string; settings: SettingsRow }) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
+    if (!f) return;
+    if (!/^image\/(png|jpeg|webp|gif)$/.test(f.type)) {
+      setError("Only PNG, JPEG, WebP, and GIF are accepted.");
+      return;
+    }
+    if (f.size > 8 * 1024 * 1024) {
+      setError("Image is over 8MB. Resize or recompress before uploading.");
+      return;
+    }
+    setError(null);
+    setUploading(true);
+    try {
+      const dataUrl: string = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result ?? ""));
+        r.onerror = () => reject(new Error("file read failed"));
+        r.readAsDataURL(f);
+      });
+      const res = await fetch("/admin/upload/logo", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl }),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      const j = (await res.json()) as { ok: true; url: string; settings: SettingsRow };
+      onUploaded(j);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="(empty = no logo, show text title)"
+          className="min-w-[14rem] flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+        />
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          onChange={onPick}
+          className="hidden"
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          className="rounded border border-keep-rule bg-keep-banner px-3 py-1 hover:bg-keep-banner/80 disabled:opacity-50"
+        >
+          {uploading ? "Uploading…" : "Upload…"}
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-keep-muted hover:text-keep-text"
+          title="Clear — banner falls back to the text site name."
+        >
+          Clear
+        </button>
+      </div>
+      {error ? (
+        <div className="text-[11px] text-keep-accent">{error}</div>
+      ) : null}
+      {value ? (
+        <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg p-2">
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">Preview:</span>
+          <img
+            src={value}
+            alt="logo preview"
+            className="max-h-10 w-auto"
+            // Surface a broken URL without breaking the form layout.
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = "0.3"; }}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /* =============================================================
  * RULES TAB
  * =============================================================
@@ -1158,6 +1323,7 @@ function RulesTab() {
         bannerCoverCss: j.bannerCoverCss,
         logoColor: j.logoColor,
         logoFont: j.logoFont,
+        logoUrl: j.logoUrl,
         registrationOpen: j.registrationOpen,
         welcomeHtml: j.welcomeHtml,
         registerDisclaimerHtml: j.registerDisclaimerHtml,

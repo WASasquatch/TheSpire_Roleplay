@@ -112,7 +112,21 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
       }`}
     >
       <h1 style={logoStyle} className="font-action text-xl tracking-wide">
-        {branding.siteName}
+        {branding.logoUrl ? (
+          // Image logo (default install ships /thespire-logo.png; admins can
+          // swap it via /admin/settings or upload via the admin panel). The
+          // <h1> stays for screen-readers + SEO. `max-h` keeps the banner
+          // height stable regardless of source PNG dimensions; the
+          // 1580×446 default lands well within that on retina.
+          <img
+            src={branding.logoUrl}
+            alt={branding.siteName}
+            className="max-h-8 w-auto select-none"
+            draggable={false}
+          />
+        ) : (
+          branding.siteName
+        )}
       </h1>
 
       {/* Desktop nav. Hidden below md+; the hamburger button + dropdown

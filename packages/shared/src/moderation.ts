@@ -27,6 +27,7 @@ export type AuditAction =
   | "custom_command_create"
   | "custom_command_update"
   | "custom_command_delete"
+  | "logo_upload"
   // Account management
   | "user_disable"
   | "user_enable"

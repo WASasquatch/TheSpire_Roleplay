@@ -69,6 +69,13 @@ export interface SiteSettings {
   logoFont: string | null;
   /** Cap on characters per user. */
   maxCharactersPerUser: number;
+  /**
+   * URL for the banner/splash logo image. Empty string = no logo, fall
+   * back to the `siteName` text. Default = `/thespire-logo.png` (SPA-
+   * bundled). Custom URLs or uploads (via /admin/upload/logo, which
+   * writes to /uploads/...) overwrite it.
+   */
+  logoUrl: string;
   /** Cap on user accounts that may share an email (1 = traditional). */
   maxAccountsPerEmail: number;
   /** Cap on user-owned rooms (system rooms exempt). */
@@ -155,6 +162,13 @@ export interface SettingsPatch {
   logoColor?: string | null;
   /** Pass null to clear; pass a CSS font-family stack to set. */
   logoFont?: string | null;
+  /**
+   * Banner/splash logo URL. Empty string clears the override (banner
+   * falls back to text title). Any non-empty string is stored verbatim
+   * — typically `/thespire-logo.png` (default), an `/uploads/...` path
+   * from the upload endpoint, or a remote https URL.
+   */
+  logoUrl?: string;
   maxCharactersPerUser?: number;
   maxAccountsPerEmail?: number;
   maxRoomsPerOwner?: number;
@@ -206,6 +220,7 @@ export async function updateSettings(
   if (patch.bannerCoverCss !== undefined) update.bannerCoverCss = patch.bannerCoverCss;
   if (patch.logoColor !== undefined) update.logoColor = patch.logoColor;
   if (patch.logoFont !== undefined) update.logoFont = patch.logoFont;
+  if (patch.logoUrl !== undefined) update.logoUrl = patch.logoUrl;
   if (patch.maxCharactersPerUser !== undefined) update.maxCharactersPerUser = patch.maxCharactersPerUser;
   if (patch.maxAccountsPerEmail !== undefined) update.maxAccountsPerEmail = patch.maxAccountsPerEmail;
   if (patch.maxRoomsPerOwner !== undefined) update.maxRoomsPerOwner = patch.maxRoomsPerOwner;
@@ -256,6 +271,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     bannerCoverCss: row.bannerCoverCss,
     logoColor: row.logoColor,
     logoFont: row.logoFont,
+    logoUrl: row.logoUrl,
     maxCharactersPerUser: row.maxCharactersPerUser,
     maxAccountsPerEmail: row.maxAccountsPerEmail,
     maxRoomsPerOwner: row.maxRoomsPerOwner,

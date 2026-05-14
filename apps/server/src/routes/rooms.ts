@@ -40,11 +40,16 @@ export async function registerRoomsRoutes(
   app.get("/rooms", async (req: FastifyRequest) => {
     const me = await getSessionUser(req, db);
 
-    // 1. Pull every public room.
+    // 1. Pull every public room. Archived rows (auto-parked after the
+    //    last occupant left) are excluded so the name appears
+    //    available for resurrection on the next create. They still
+    //    show up via `findRoomByName` on the create path so a same-
+    //    name create reactivates the row instead of erroring on the
+    //    unique-name index.
     const publicRows = await db
       .select()
       .from(rooms)
-      .where(eq(rooms.type, "public"))
+      .where(and(eq(rooms.type, "public"), isNull(rooms.archivedAt)))
       .orderBy(asc(rooms.name));
 
     // 2. If the caller is logged in, find any private room they're currently

@@ -1,7 +1,7 @@
 import argon2 from "argon2";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { roomMembers, rooms } from "../../db/schema.js";
+import { bans, roomInvites, roomMembers, rooms } from "../../db/schema.js";
 import { joinRoom } from "../../realtime/broadcast.js";
 import { getSettings } from "../../settings.js";
 import type { CommandContext, CommandHandler } from "../types.js";
@@ -21,10 +21,19 @@ async function checkRoomCap(ctx: CommandContext): Promise<boolean> {
     });
     return false;
   }
+  // Archived rooms don't count against the per-user cap — they hold a
+  // name reservation but have no users and add no load. Without this
+  // exclusion, a user who created N rooms that all auto-archived would
+  // permanently lose the ability to create more even though all of
+  // their visible rooms are gone.
   const countRow = (await ctx.db
     .select({ n: sql<number>`count(*)` })
     .from(rooms)
-    .where(and(eq(rooms.ownerId, ctx.user.id), eq(rooms.isSystem, false))))[0];
+    .where(and(
+      eq(rooms.ownerId, ctx.user.id),
+      eq(rooms.isSystem, false),
+      isNull(rooms.archivedAt),
+    )))[0];
   const count = countRow?.n ?? 0;
   if (count >= maxRoomsPerOwner) {
     ctx.socket.emit("error:notice", {
@@ -39,12 +48,63 @@ async function checkRoomCap(ctx: CommandContext): Promise<boolean> {
 const NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
 
 async function findRoomByName(ctx: CommandContext, name: string) {
+  // Returns ARCHIVED rooms too — callers branch on `row.archivedAt` to
+  // decide between "join existing", "resurrect", and "name conflict".
+  // Filtering archived rows here would break the resurrect path
+  // because the room_name unique index still holds, so the matching
+  // create would 409 on the live row anyway.
   const rows = await ctx.db
     .select()
     .from(rooms)
     .where(sql`lower(${rooms.name}) = ${name.toLowerCase()}`)
     .limit(1);
   return rows[0];
+}
+
+/**
+ * Bring an archived row back to life with a new caller as owner.
+ * Mirrors the design choice from the spec: settings (topic,
+ * description, replyMode, theme link, messageExpiryMinutes,
+ * npcDisabled, plus type + passwordHash by default) all carry over
+ * so the new owner inherits the prior incarnation's setup; the
+ * membership / invites / bans tables reset to a clean slate so the
+ * new owner doesn't inherit someone else's moderation history.
+ *
+ * `overrides` is the escape hatch for resurrection paths where the
+ * caller explicitly redeclared the room's mode — `/private` / `/go
+ * <name> <password>` clearly want a private room with a known
+ * password regardless of how the previous incarnation was set up. A
+ * plain `/go <name>` leaves both fields alone and the preserved
+ * type/password carry through; the owner bypasses the password
+ * gate in `joinExistingWithPassword` so re-entry works.
+ */
+async function resurrectArchivedRoom(
+  ctx: CommandContext,
+  roomId: string,
+  overrides?: { type?: "public" | "private"; passwordHash?: string | null },
+): Promise<void> {
+  await ctx.db
+    .update(rooms)
+    .set({
+      archivedAt: null,
+      ownerId: ctx.user.id,
+      ...(overrides?.type !== undefined ? { type: overrides.type } : {}),
+      ...(overrides?.passwordHash !== undefined ? { passwordHash: overrides.passwordHash } : {}),
+    })
+    .where(eq(rooms.id, roomId));
+  // Wipe any stale per-user state from the previous incarnation. FK
+  // cascades did this on hard-delete; we replicate it explicitly now
+  // that the row sticks around.
+  await ctx.db.delete(roomMembers).where(eq(roomMembers.roomId, roomId));
+  await ctx.db.delete(bans).where(eq(bans.roomId, roomId));
+  await ctx.db.delete(roomInvites).where(eq(roomInvites.roomId, roomId));
+  // Re-seat the new caller as the owner-role member so /topic + other
+  // owner-gated commands recognize them immediately.
+  await ctx.db.insert(roomMembers).values({
+    roomId,
+    userId: ctx.user.id,
+    role: "owner",
+  });
 }
 
 async function joinOrCreatePublic(ctx: CommandContext, name: string) {
@@ -56,7 +116,14 @@ async function joinOrCreatePublic(ctx: CommandContext, name: string) {
     return;
   }
   let room = await findRoomByName(ctx, name);
-  if (!room) {
+  if (room?.archivedAt) {
+    // Resurrection path: the row's been parked since its last
+    // occupant left. Bring it back with the current caller as owner;
+    // settings carry over, member/ban/invite tables reset.
+    if (!(await checkRoomCap(ctx))) return;
+    await resurrectArchivedRoom(ctx, room.id);
+    room = (await findRoomByName(ctx, name))!;
+  } else if (!room) {
     if (!(await checkRoomCap(ctx))) return;
     const id = nanoid();
     await ctx.db.insert(rooms).values({
@@ -82,7 +149,10 @@ async function joinOrCreatePublic(ctx: CommandContext, name: string) {
 /**
  * Create a brand-new private room owned by the caller and immediately join it.
  * Shared by /private and the /go-with-password sugar form below. Caller has
- * already verified there's no existing room with this name.
+ * already verified there's no LIVE room with this name; an archived row with
+ * this name still gets resurrected here with the caller's password as the
+ * new override (the previous incarnation's password is replaced because the
+ * caller clearly intended a fresh private setup with their own credential).
  */
 async function createPrivateRoom(ctx: CommandContext, name: string, password: string) {
   if (!NAME_RX.test(name)) {
@@ -90,12 +160,22 @@ async function createPrivateRoom(ctx: CommandContext, name: string, password: st
     return;
   }
   if (!(await checkRoomCap(ctx))) return;
+  const passwordHash = await argon2.hash(password);
+  // Same-name resurrection: an archived row keeps the unique index
+  // alive, so a fresh INSERT would 23505. Detect + resurrect with the
+  // caller's chosen password as the override.
+  const archived = await findRoomByName(ctx, name);
+  if (archived?.archivedAt) {
+    await resurrectArchivedRoom(ctx, archived.id, { type: "private", passwordHash });
+    await joinRoom(ctx.io, ctx.db, ctx.socket, ctx.user, archived.id);
+    return;
+  }
   const id = nanoid();
   await ctx.db.insert(rooms).values({
     id,
     name,
     type: "private",
-    passwordHash: await argon2.hash(password),
+    passwordHash,
     ownerId: ctx.user.id,
   });
   await ctx.db.insert(roomMembers).values({
@@ -187,17 +267,23 @@ export const goCommand: CommandHandler = {
     // pre-existing /go behavior for multi-word room names like "Common Room".
     // joinRoom itself surfaces the password prompt UI for private rooms when
     // the user didn't supply one inline.
+    //
+    // Archived rooms surface here too — `joinOrCreatePublic` handles the
+    // resurrection branch when there's no password component. A
+    // matched-but-archived row with a password supplied later in the flow
+    // (the multi-token branch below) routes through `createPrivateRoom`
+    // which also handles resurrection.
     const fullMatch = await findRoomByName(ctx, argsText);
-    if (fullMatch) {
+    if (fullMatch && !fullMatch.archivedAt) {
       await joinRoom(ctx.io, ctx.db, ctx.socket, ctx.user, fullMatch.id);
       return;
     }
 
-    // No full-text room match. If the user provided multiple tokens, treat
-    // the first as the name and the rest as a password (the /private form).
+    // No full-text room match (or matched row is archived). If the user
+    // provided multiple tokens, treat the first as the name and the rest
+    // as a password (the /private form). Single token → public.
     const tokens = argsText.split(/\s+/);
     if (tokens.length === 1) {
-      // Single token, no room of that name - create as public.
       await joinOrCreatePublic(ctx, tokens[0]!);
       return;
     }
@@ -205,15 +291,16 @@ export const goCommand: CommandHandler = {
     const name = tokens[0]!;
     const password = tokens.slice(1).join(" ");
     const existingByFirst = await findRoomByName(ctx, name);
-    if (existingByFirst) {
-      // The first-token name matches an existing room. Treat the trailing
+    if (existingByFirst && !existingByFirst.archivedAt) {
+      // The first-token name matches a LIVE room. Treat the trailing
       // text as a password and let joinExistingWithPassword sort out
       // public-vs-private (public will emit a "password ignored" notice).
       await joinExistingWithPassword(ctx, existingByFirst, password);
       return;
     }
-    // No existing room by first token either - create a NEW private room
-    // with this name + password (same as /private).
+    // No live room by first token. createPrivateRoom resurrects an
+    // archived row with the new password if there is one, otherwise
+    // inserts a fresh row.
     await createPrivateRoom(ctx, name, password);
   },
 };
@@ -235,7 +322,9 @@ export const privateRoomCommand: CommandHandler = {
       return;
     }
     const existing = await findRoomByName(ctx, name);
-    if (existing) {
+    if (existing && !existing.archivedAt) {
+      // LIVE room — name's still in active use, reject. Archived
+      // rooms fall through to createPrivateRoom which resurrects.
       ctx.socket.emit("error:notice", {
         code: "DUP_ROOM",
         message: `A room named "${name}" already exists.`,

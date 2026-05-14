@@ -182,7 +182,21 @@ export function SplashShell({
                   style={logoStyle}
                   className="font-action text-3xl tracking-wide text-keep-text sm:text-4xl max-lg:landscape:text-2xl"
                 >
-                  {branding.siteName}
+                  {branding.logoUrl ? (
+                    // The splash gets a larger logo than the banner —
+                    // welcome card has the vertical real estate. `mx-auto`
+                    // keeps it centered inside the text-aligned <h1>;
+                    // alt = siteName so screen-readers + SEO still see
+                    // the brand string.
+                    <img
+                      src={branding.logoUrl}
+                      alt={branding.siteName}
+                      className="mx-auto max-h-20 w-auto select-none sm:max-h-24 max-lg:landscape:max-h-16"
+                      draggable={false}
+                    />
+                  ) : (
+                    branding.siteName
+                  )}
                 </h1>
                 <div className="mt-1 text-[10px] uppercase tracking-[0.3em] text-keep-muted">
                   a chat sanctuary

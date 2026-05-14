@@ -52,11 +52,17 @@ export async function registerAdminRoutes(
     db: Db;
     io: Io;
     registry: CommandRegistry;
+    /**
+     * Absolute path to the persistent uploads directory. The admin-
+     * upload routes write into this; the matching `/uploads/*` static
+     * registration in index.ts serves them back to clients.
+     */
+    uploadsRoot: string;
     /** Returns the current authenticated session user (or null if unauthenticated). */
     getSessionUser: (req: FastifyRequest) => Promise<SessionUserCtx | null>;
   },
 ): Promise<void> {
-  const { db, io, registry, getSessionUser } = deps;
+  const { db, io, registry, uploadsRoot, getSessionUser } = deps;
 
   app.addHook("preHandler", async (req, reply) => {
     if (!req.url.startsWith("/admin")) return;
@@ -631,6 +637,15 @@ export async function registerAdminRoutes(
     logoColor: z.string().regex(HEX_RX).nullable().optional(),
     /** Pass null to clear; pass a CSS font-family stack. */
     logoFont: z.string().max(200).nullable().optional(),
+    /**
+     * Banner/splash logo URL. Empty string clears the image (text
+     * title takes over). Otherwise: an `/uploads/...` path (written
+     * by the upload endpoint), a built-in path like `/thespire-logo
+     * .png`, or a remote `https://...` URL. The 1KB cap is a sanity
+     * check; uploaded paths are short, hosted URLs rarely exceed
+     * a few hundred chars.
+     */
+    logoUrl: z.string().max(1000).optional(),
     /* ----- Limits / capacity controls ----- */
     /** 1..1000. */
     maxCharactersPerUser: z.number().int().min(1).max(1000).optional(),
@@ -691,6 +706,7 @@ export async function registerAdminRoutes(
       bannerCoverCss: s.bannerCoverCss,
       logoColor: s.logoColor,
       logoFont: s.logoFont,
+      logoUrl: s.logoUrl,
       maxCharactersPerUser: s.maxCharactersPerUser,
       maxAccountsPerEmail: s.maxAccountsPerEmail,
       maxRoomsPerOwner: s.maxRoomsPerOwner,
@@ -727,6 +743,7 @@ export async function registerAdminRoutes(
     if (body.bannerCoverCss !== undefined) patch.bannerCoverCss = body.bannerCoverCss;
     if (body.logoColor !== undefined) patch.logoColor = body.logoColor;
     if (body.logoFont !== undefined) patch.logoFont = body.logoFont;
+    if (body.logoUrl !== undefined) patch.logoUrl = body.logoUrl;
     if (body.maxCharactersPerUser !== undefined) patch.maxCharactersPerUser = body.maxCharactersPerUser;
     if (body.maxAccountsPerEmail !== undefined) patch.maxAccountsPerEmail = body.maxAccountsPerEmail;
     if (body.maxRoomsPerOwner !== undefined) patch.maxRoomsPerOwner = body.maxRoomsPerOwner;
@@ -785,6 +802,83 @@ export async function registerAdminRoutes(
       metadata: { keys: Object.keys(patch) },
     });
     return result;
+  });
+
+  /* ---------- logo upload ----------
+   * Admins paste an image's base64 data URL ("data:image/png;base64,…")
+   * via the Branding tab's Upload button; the server validates the
+   * magic bytes against a small image allow-list, writes the file
+   * under /uploads/logos/<sha>.<ext>, and persists the served path
+   * onto `site_settings.logo_url`. Content-hash filenames make the
+   * 1-year immutable cache (set on the /uploads static route) safe
+   * even when admins replace the logo — the URL changes.
+   *
+   * Plain JSON body (no multipart plugin) keeps the dep surface small;
+   * 8MB cap is plenty for any reasonable logo and well under the
+   * `bodyLimit` we'd hit at the Fastify level. */
+  const uploadLogoBody = z.object({
+    /** Data URL, e.g. `data:image/png;base64,iVBORw0K...`. */
+    dataUrl: z.string().min(32).max(8 * 1024 * 1024),
+  });
+
+  // Image signatures we accept. Keep this short on purpose — any new
+  // entry has to round-trip through DOMPurify-safe rendering and the
+  // CSP image-src allow-list. Each entry maps to the file extension
+  // we write so the browser content-type sniff matches the blob.
+  const ACCEPTED_IMAGE_PREFIXES: Array<{ mime: string; ext: string; magic: Uint8Array }> = [
+    { mime: "image/png", ext: "png", magic: Uint8Array.of(0x89, 0x50, 0x4e, 0x47) },
+    { mime: "image/jpeg", ext: "jpg", magic: Uint8Array.of(0xff, 0xd8, 0xff) },
+    { mime: "image/webp", ext: "webp", magic: Uint8Array.of(0x52, 0x49, 0x46, 0x46) },
+    { mime: "image/gif", ext: "gif", magic: Uint8Array.of(0x47, 0x49, 0x46, 0x38) },
+  ];
+
+  function detectImage(bytes: Uint8Array): { ext: string; mime: string } | null {
+    for (const sig of ACCEPTED_IMAGE_PREFIXES) {
+      if (bytes.length < sig.magic.length) continue;
+      let match = true;
+      for (let i = 0; i < sig.magic.length; i++) {
+        if (bytes[i] !== sig.magic[i]) { match = false; break; }
+      }
+      if (match) return { ext: sig.ext, mime: sig.mime };
+    }
+    return null;
+  }
+
+  app.post<{ Body: unknown }>("/admin/upload/logo", async (req, reply) => {
+    let body: z.infer<typeof uploadLogoBody>;
+    try { body = uploadLogoBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const m = /^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(body.dataUrl.trim());
+    if (!m) { reply.code(400); return { error: "expected a base64 data URL" }; }
+    let bytes: Buffer;
+    try { bytes = Buffer.from(m[2]!, "base64"); }
+    catch { reply.code(400); return { error: "invalid base64 payload" }; }
+    const detected = detectImage(bytes);
+    if (!detected) {
+      reply.code(415);
+      return { error: "unsupported image type (png, jpg, webp, gif only)" };
+    }
+    // Content-hash filename so a re-upload of the same bytes deduplicates
+    // and a different image necessarily produces a different URL. The
+    // hex hash is collision-resistant for our scale; we slice to 16
+    // chars to keep the URL short without sacrificing uniqueness.
+    const { createHash } = await import("node:crypto");
+    const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+    const filename = `${hash}.${detected.ext}`;
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const dir = join(uploadsRoot, "logos");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, filename), bytes);
+    const url = `/uploads/logos/${filename}`;
+    const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+    const result = await updateSettings(db, { logoUrl: url }, sessionUser.id);
+    await recordAudit(db, {
+      actorUserId: sessionUser.id,
+      action: "logo_upload",
+      metadata: { url, bytes: bytes.length, mime: detected.mime },
+    });
+    return { ok: true, url, settings: result };
   });
 
   /* ---------- custom commands ---------- */

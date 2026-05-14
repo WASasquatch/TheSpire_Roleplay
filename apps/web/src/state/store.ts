@@ -27,6 +27,12 @@ export interface SiteBranding {
   bannerCoverCss: string | null;
   logoColor: string | null;
   logoFont: string | null;
+  /**
+   * URL for the banner/splash logo image. When set, the banner + splash
+   * render this as an `<img>` in place of the `siteName` text. Empty
+   * string = no logo, fall back to text title.
+   */
+  logoUrl: string;
   /** Master switch for /auth/register; surfaced so AuthGate can hide the tab. */
   registrationOpen: boolean;
   /** Sanitized welcome HTML rendered above the splash login form. */
@@ -85,6 +91,9 @@ export const DEFAULT_BRANDING: SiteBranding = {
   bannerCoverCss: null,
   logoColor: null,
   logoFont: null,
+  // Bundled default. Real value (possibly an `/uploads/...` path) arrives
+  // via /site on first paint. Empty string would mean the admin cleared it.
+  logoUrl: "/thespire-logo.png",
   registrationOpen: true,
   welcomeHtml: "",
   registerDisclaimerHtml: "",
@@ -133,6 +142,9 @@ export function loadCachedBranding(): SiteBranding {
       logoFont: typeof parsed.logoFont === "string" || parsed.logoFont === null
         ? parsed.logoFont
         : null,
+      logoUrl: typeof parsed.logoUrl === "string"
+        ? parsed.logoUrl
+        : DEFAULT_BRANDING.logoUrl,
       registrationOpen: typeof parsed.registrationOpen === "boolean"
         ? parsed.registrationOpen
         : DEFAULT_BRANDING.registrationOpen,
@@ -175,6 +187,34 @@ export function saveCachedBranding(b: SiteBranding): void {
   try {
     if (typeof localStorage === "undefined") return;
     localStorage.setItem(BRANDING_CACHE_KEY, JSON.stringify(b));
+  } catch { /* quota or privacy mode - silently skip */ }
+}
+
+/**
+ * Local-only UI prefs that aren't worth a round-trip to the server.
+ * Persisted to localStorage so a tab reload (or a post-deploy bundle
+ * pickup) doesn't wipe the user's customizations. Each key is small
+ * and read-only outside the matching setter, so no schema or
+ * migration concerns.
+ */
+const FONT_STEP_KEY = "tk:fontStep:v1";
+
+function loadFontStep(): 0 | 1 | 2 | 3 {
+  try {
+    if (typeof localStorage === "undefined") return 1;
+    const raw = localStorage.getItem(FONT_STEP_KEY);
+    if (raw === null) return 1;
+    const n = parseInt(raw, 10);
+    return n === 0 || n === 1 || n === 2 || n === 3 ? n : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function saveFontStep(n: 0 | 1 | 2 | 3): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(FONT_STEP_KEY, String(n));
   } catch { /* quota or privacy mode - silently skip */ }
 }
 
@@ -715,8 +755,18 @@ export const useChat = create<ChatState>((set) => ({
   openEditor: (target) => set({ editor: target }),
   closeEditor: () => set({ editor: null }),
 
-  fontStep: 1,
-  setFontStep: (n) => set({ fontStep: n }),
+  // fontStep is local-only (no server mirror) and the user cycles it
+  // via the Tools panel. Persist to localStorage so a tab reload —
+  // which happens every time the user picks up a fresh post-deploy
+  // bundle, but also any plain refresh — restores their choice
+  // instead of snapping back to the default. The previous "in-memory
+  // only" behavior made deploys look like they were wiping custom
+  // sizes when really any reload did it.
+  fontStep: loadFontStep(),
+  setFontStep: (n) => {
+    saveFontStep(n);
+    set({ fontStep: n });
+  },
 
   refreshIntervalSec: 0,
   setRefreshIntervalSec: (n) => set({ refreshIntervalSec: n }),

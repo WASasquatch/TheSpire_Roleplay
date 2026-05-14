@@ -1,4 +1,4 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { roomMembers, rooms } from "../../db/schema.js";
 import type { CommandHandler } from "../types.js";
 
@@ -25,7 +25,10 @@ export const listCommand: CommandHandler = {
         type: rooms.type,
       })
       .from(rooms)
-      .where(eq(rooms.type, "public"))
+      // Archived rows hold a name reservation but no users; hide them
+      // from the user-facing list. They'll come back if anyone
+      // recreates a room with the same name.
+      .where(and(eq(rooms.type, "public"), isNull(rooms.archivedAt)))
       .orderBy(asc(rooms.name));
 
     if (allRooms.length === 0) {

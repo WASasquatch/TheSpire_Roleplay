@@ -548,6 +548,14 @@ export async function joinRoom(
     socket.emit("error:notice", { code: "NO_ROOM", message: "Room not found." });
     return;
   }
+  if (room.archivedAt) {
+    // Stale id from before the room auto-archived. The room is
+    // effectively gone to end users; the row only exists to preserve
+    // settings for a future same-name resurrect via the create path.
+    // Treat as 404 for this socket.
+    socket.emit("error:notice", { code: "NO_ROOM", message: "Room not found." });
+    return;
+  }
 
   const banned = (await db
     .select()
@@ -844,18 +852,34 @@ async function pingWatchers(io: Io, db: Db, user: SessionUser): Promise<void> {
 }
 
 /**
- * If a user-created room has no live sockets in it, delete it. System rooms
- * (those with isSystem=true, e.g. The_Spire) are exempt so users always
- * have a default landing place. Cascade FKs clean up room_members,
- * messages, bans, invites. Returns true if the room was actually removed.
+ * If a user-created room has no live sockets in it, ARCHIVE it.
+ * Previously this was a hard DELETE that cascaded onto room_members /
+ * messages / bans / invites; the user-visible behavior is the same
+ * (room disappears from the tree and search) but the row + its
+ * configuration (topic, description, theme via linked world,
+ * replyMode, messageExpiryMinutes, npcDisabled, type/passwordHash)
+ * stick around. The matching create flow detects the archived row
+ * on a same-name create and resurrects it with the new caller as
+ * owner — see `resurrectArchivedRoom` in routes/commands/builtins/
+ * room.ts. System rooms (isSystem=true) are still exempt: they need
+ * to stay live so users always have a landing place.
+ *
+ * Already-archived rows short-circuit so a noisy reconnect loop
+ * can't churn the archived_at timestamp every pass.
+ *
+ * Returns true when the row transitioned active → archived (caller
+ * uses it to skip the "X left." announcement the room is no longer
+ * around to need). False when the room was system, populated, or
+ * already archived.
  */
 export async function expireIfEmpty(io: Io, db: Db, roomId: string): Promise<boolean> {
   const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
   if (!room) return false;
   if (room.isSystem) return false;
+  if (room.archivedAt) return false;
   const sockets = await io.in(`room:${roomId}`).fetchSockets();
   if (sockets.length > 0) return false;
-  await db.delete(rooms).where(eq(rooms.id, roomId));
+  await db.update(rooms).set({ archivedAt: new Date() }).where(eq(rooms.id, roomId));
   return true;
 }
 

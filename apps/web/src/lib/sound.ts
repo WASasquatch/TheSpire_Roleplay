@@ -59,7 +59,38 @@ function getAudio(event: SoundEvent): HTMLAudioElement {
   return el;
 }
 
+/**
+ * True when the current user has marked themselves /away in any room
+ * they're currently parked in. We read the occupant rows for the
+ * current room rather than tracking a separate "am I away" flag in
+ * the store — there's no UI to toggle it outside of /away, and the
+ * occupant row already carries the canonical `away` boolean (set by
+ * `broadcastPresence` after the slash command writes to `users
+ * .awayMessage`). When the user moves rooms the new room's
+ * broadcastPresence emits an occupant list that still carries their
+ * away flag, so this stays correct.
+ */
+function isUserAway(): boolean {
+  const s = useChat.getState();
+  const myId = s.me?.id;
+  if (!myId) return false;
+  const roomId = s.currentRoomId;
+  if (!roomId) return false;
+  const occ = s.occupants[roomId];
+  if (!occ) return false;
+  // Multiple occupant rows may share a userId now (one per identity —
+  // see broadcast.ts currentOccupants). Any row matching = the user
+  // is /away on at least one identity, which is all we need.
+  return occ.some((o) => o.userId === myId && o.away);
+}
+
 function isEnabled(event: SoundEvent): boolean {
+  // Hard mute when the user has set themselves /away. The whole
+  // point of /away is "don't disturb me right now", and a pinged
+  // sound effect undermines that promise even when the per-event
+  // preference is on. /back (or `/away` to toggle off) re-enables
+  // the sounds via this same gate.
+  if (isUserAway()) return false;
   const prefs = useChat.getState().soundPrefs;
   if (event === "ping") return prefs.dm;
   if (event === "tap") return prefs.chat;

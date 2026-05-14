@@ -86,6 +86,36 @@ async function lookupProfile(
   db: import("../../db/index.js").Db,
   name: string,
 ): Promise<ProfileView | null> {
+  /**
+   * Build the set of name variants to try.
+   *
+   * Master usernames allow NBSP (U+00A0) as an invisible "fake space"
+   * separator. Shareable URLs present those NBSPs as regular spaces
+   * for readability, so callers coming from a URL hand us a regular-
+   * space form, while callers coming from chat (clicking a sender
+   * name) hand us the canonical NBSP form. AND character names can
+   * legally contain regular spaces ("Some Char") that should NOT be
+   * NBSP-substituted — those rows store the regular space in the DB.
+   *
+   * Earlier the URL/chat callers pre-substituted via slugToUsername
+   * before calling lookupProfile, which broke character lookups: a
+   * click on "Some Char" became "Some[NBSP]Char" before the query
+   * and missed the real character row.
+   *
+   * The robust fix: try every plausible form against both tables.
+   * Three variants cover every caller:
+   *   - the input as given
+   *   - regular-space → NBSP (for masters arriving via slug)
+   *   - NBSP → regular-space (for characters arriving with the
+   *     master-style normalization already applied)
+   * Deduped via Set so identical forms collapse.
+   */
+  const variants = Array.from(new Set([
+    name,
+    name.replace(/ /g, " "),
+    name.replace(/ /g, " "),
+  ])).map((v) => v.toLowerCase());
+
   // Master username takes precedence - it's globally unique, while character
   // names are only unique per-owner, so collisions between a master "Kaal"
   // and someone else's character "Kaal" resolve to the master.
@@ -97,7 +127,7 @@ async function lookupProfile(
   const u = (await db
     .select()
     .from(users)
-    .where(sql`lower(${users.username}) = ${name.toLowerCase()}`)
+    .where(sql`lower(${users.username}) IN (${sql.join(variants.map((v) => sql`${v}`), sql`, `)})`)
     .limit(1))[0];
   if (u && !u.disabledAt) {
     return {
@@ -122,11 +152,14 @@ async function lookupProfile(
   // Character lookup - by name, regardless of whether the owner is currently
   // switched to it. Soft-deleted characters and characters whose owner is
   // disabled are filtered out (the data still exists for message history but
-  // shouldn't surface in profile lookups).
+  // shouldn't surface in profile lookups). Uses the same name variants the
+  // master lookup did so a name that arrived NBSP-substituted (because the
+  // caller pre-ran slugToUsername for the master case) still resolves the
+  // character row that stores the regular-space form.
   const c = (await db
     .select()
     .from(characters)
-    .where(sql`lower(${characters.name}) = ${name.toLowerCase()}`)
+    .where(sql`lower(${characters.name}) IN (${sql.join(variants.map((v) => sql`${v}`), sql`, `)})`)
     .limit(1))[0];
   if (!c || c.deletedAt) return null;
 

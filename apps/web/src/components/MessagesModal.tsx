@@ -3,10 +3,11 @@ import type {
   DirectConversationSummary,
   DirectMessage,
   DirectMessageHistoryPage,
+  InboxIdentityCount,
 } from "@thekeep/shared";
 import { Modal } from "./Modal.js";
 import { useChat } from "../state/store.js";
-import { readError } from "../lib/http.js";
+import { readError, withIdentityQuery } from "../lib/http.js";
 import { parseInline } from "../lib/markdown.js";
 import { FormattingToolbar } from "./FormattingToolbar.js";
 import { SynonymPopup } from "./SynonymPopup.js";
@@ -184,15 +185,56 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
     return () => window.clearTimeout(t);
   }, [composeStatus]);
 
+  // Pull the active character id from the store so identity-scoped
+  // fetches default to the right inbox. Used as the SEED for the
+  // modal-local filter below — a chip click in the switcher can take
+  // the filter elsewhere without touching the user's global voice.
+  const activeCharacterId = useChat((s) => s.activeCharacterId);
+
+  /**
+   * Inbox filter id, modal-local. Drives which identity's friends /
+   * DMs / friend-requests show in the left pane and which identity the
+   * thread send routes through. Defaults to the user's global active
+   * character so the modal opens to the "current voice" inbox, but the
+   * chip switcher at the top of the list can override it without
+   * firing `me:switch-character` — that's the design choice from the
+   * spec: switching chips ONLY refilters the inbox.
+   *
+   * When the user changes their global active character externally
+   * (the /char dropdown, a slash command, another tab), we mirror that
+   * change into the filter — the assumption is that any global switch
+   * is also what they want to see in their messages.
+   */
+  const [inboxFilterCharId, setInboxFilterCharId] = useState<string | null>(activeCharacterId);
+  useEffect(() => {
+    setInboxFilterCharId(activeCharacterId);
+  }, [activeCharacterId]);
+
+  /**
+   * The character roster used to render the switcher chips. Fetched
+   * once per modal open from `/characters` (the same endpoint the
+   * Identity tool panel uses). Includes only the caller's non-deleted
+   * characters; master / OOC is rendered as the first chip from a
+   * fixed sentinel, not from this list.
+   */
+  interface CharChipRow { id: string; name: string; avatarUrl: string | null }
+  const [myCharacters, setMyCharacters] = useState<CharChipRow[]>([]);
+  /**
+   * Per-identity unread counts (DMs + pending friend requests) keyed
+   * on characterId (null = master). Refreshed alongside the inbox
+   * lists so the chip badges stay in sync with what the list shows.
+   */
+  const [inboxCounts, setInboxCounts] = useState<Map<string | null, InboxIdentityCount>>(() => new Map());
+
   /** Refetch the left-pane lists (friends + requests + conversations). */
   const refreshLists = useCallback(async () => {
     setLoadingList(true);
     setError(null);
     try {
       const [fr, fq, dm] = await Promise.all([
-        fetch("/me/friends", { credentials: "include" }),
-        fetch("/me/friend-requests", { credentials: "include" }),
-        fetch("/me/dms", { credentials: "include" }),
+        fetch(withIdentityQuery("/me/friends", inboxFilterCharId), { credentials: "include" }),
+        fetch(withIdentityQuery("/me/friend-requests", inboxFilterCharId), { credentials: "include" }),
+        fetch(withIdentityQuery("/me/dms", inboxFilterCharId), { credentials: "include" }),
       ]);
       if (!fr.ok && fr.status !== 401) throw new Error(await readError(fr));
       if (!fq.ok && fq.status !== 401) throw new Error(await readError(fq));
@@ -211,11 +253,65 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
     } finally {
       setLoadingList(false);
     }
-  }, [setDmConversations, setPendingFriendRequests]);
+  }, [setDmConversations, setPendingFriendRequests, inboxFilterCharId]);
 
   useEffect(() => {
     refreshLists();
   }, [refreshLists, refreshKey]);
+
+  /**
+   * Inbox counts feed the per-identity chip badges. Kept on a separate
+   * fetch from refreshLists so we can refresh just the counts whenever
+   * the global DM/friend state changes (dm:new or friend:request from
+   * the socket) — refreshLists would loop because it owns the same
+   * store fields it'd be reacting to. The counts endpoint returns
+   * every identity I own, regardless of the inbox filter, so the chips
+   * keep showing badges for unread on the OTHER characters too.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/me/inbox-counts", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j || !Array.isArray(j.counts)) return;
+        const m = new Map<string | null, InboxIdentityCount>();
+        for (const row of j.counts as InboxIdentityCount[]) m.set(row.characterId, row);
+        setInboxCounts(m);
+      })
+      .catch(() => { /* badges are non-critical */ });
+    return () => { cancelled = true; };
+  }, [dmConversations, pendingFriendRequests, refreshKey]);
+
+  // Re-fire refreshLists whenever the inbox filter changes — Char A
+  // and Char B keep separate friends + DM inboxes, so flipping
+  // chips (or following a global /char switch) should swap the
+  // visible lists.
+  useEffect(() => {
+    setRefreshKey((v) => v + 1);
+    // Drop any selected conversation; the new identity might not be
+    // a participant on it. (Re-selecting after refresh shows the new
+    // inbox's most recent conversation via auto-open.)
+    setSelectedUserId(null);
+    autoOpenAttempted.current = false;
+  }, [inboxFilterCharId]);
+
+  // One-shot character roster fetch for the switcher chips. The roster
+  // changes rarely (only when the user creates/renames/deletes a
+  // character) so refetching on every refreshKey would be wasteful;
+  // the rare add/rename case is caught when the modal reopens.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/characters", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j || !Array.isArray(j.characters)) return;
+        setMyCharacters(j.characters.map((c: { id: string; name: string; avatarUrl: string | null }) => ({
+          id: c.id, name: c.name, avatarUrl: c.avatarUrl,
+        })));
+      })
+      .catch(() => { /* roster is non-fatal */ });
+    return () => { cancelled = true; };
+  }, []);
 
   /**
    * Auto-open the most recently active conversation when the modal
@@ -357,7 +453,12 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
       const r = await fetch("/me/friend-requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: name }),
+        body: JSON.stringify({
+          username: name,
+          // Friend FROM my active identity. When I'm in character, this
+          // is the character; when OOC, omitted = master.
+          characterId: inboxFilterCharId ?? undefined,
+        }),
       });
       const j = await r.json().catch(() => ({} as { error?: string; status?: string; username?: string }));
       if (!r.ok) {
@@ -492,6 +593,17 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
                 {error}
               </div>
             ) : null}
+            {/* Character switcher chips — pinned above the list so the
+                row stays visible while the list scrolls. Click a chip
+                to refilter the inbox by that identity (does NOT change
+                your global active character / voice). Badge totals
+                unread DMs + pending friend requests for that identity. */}
+            <CharacterSwitcher
+              characters={myCharacters}
+              counts={inboxCounts}
+              selectedId={inboxFilterCharId}
+              onSelect={setInboxFilterCharId}
+            />
             <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-xs">
               {/* Pending requests — sourced from the shared store so
                   accept/decline elsewhere clears this list automatically. */}
@@ -698,6 +810,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
                 setDmMessages={setDmMessages}
                 meId={me?.id ?? null}
                 onCommand={onCommand}
+                myCharacterId={inboxFilterCharId}
               />
             ) : (
               <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-sm italic text-keep-muted">
@@ -824,6 +937,142 @@ function initialsFor(name: string): string {
 }
 
 /* ============================================================
+ *  Character switcher (top of inbox list)
+ * ============================================================ */
+
+/**
+ * Identity picker pinned above the inbox list. Renders as a single
+ * chip showing the currently-filtered identity; clicking it opens a
+ * scrollable dropdown listing OOC + every character with their unread
+ * badge. A horizontal chip row was the first iteration, but the
+ * default per-user character cap is 100, which would overflow the
+ * left pane horizontally even with scroll affordances; a dropdown
+ * scales to that count without disturbing the inbox layout.
+ *
+ * Click semantics: per design choice, picking an identity ONLY
+ * refilters the inbox in this modal — it does not call
+ * `me:switch-character` or change the user's global voice. A user
+ * can read Char A's messages without breaking their current in-room
+ * Char B identity.
+ */
+function CharacterSwitcher({
+  characters,
+  counts,
+  selectedId,
+  onSelect,
+}: {
+  characters: { id: string; name: string; avatarUrl: string | null }[];
+  counts: Map<string | null, InboxIdentityCount>;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  // Hide the switcher entirely when the user has no characters — the
+  // only option would be OOC, which is the default. Showing a
+  // single-option dropdown is just noise.
+  // (Hooks above must run unconditionally; this early return sits
+  // *after* them so React's hook order stays stable across renders.)
+
+  // Close on outside click / Escape so the dropdown behaves like a
+  // native control. Bound only while open to avoid wasting handler
+  // dispatch on every click in the modal.
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (characters.length === 0) return null;
+
+  function badgeFor(id: string | null): number {
+    const c = counts.get(id);
+    return (c?.unreadDms ?? 0) + (c?.pendingFriendRequests ?? 0);
+  }
+
+  // Total of every OTHER identity's badge — surfaced on the current
+  // chip when the dropdown is closed so the user sees "there's traffic
+  // somewhere else" at a glance without opening the menu.
+  const selectedChar = selectedId ? characters.find((c) => c.id === selectedId) : null;
+  const selectedLabel = selectedChar ? selectedChar.name : "OOC";
+  const selectedAvatar = selectedChar ? selectedChar.avatarUrl : null;
+  let otherUnread = 0;
+  for (const c of characters) if (c.id !== selectedId) otherUnread += badgeFor(c.id);
+  if (selectedId !== null) otherUnread += badgeFor(null);
+
+  function row(id: string | null, label: string, avatarUrl: string | null) {
+    const b = badgeFor(id);
+    const active = selectedId === id;
+    return (
+      <button
+        key={id ?? "master"}
+        type="button"
+        onClick={() => { onSelect(id); setOpen(false); }}
+        className={
+          "flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] transition-colors " +
+          (active
+            ? "bg-keep-action/10 text-keep-action"
+            : "text-keep-text hover:bg-keep-banner")
+        }
+      >
+        <Avatar url={avatarUrl} name={label} size={20} />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {b > 0 ? (
+          <span className="rounded-full bg-keep-accent px-1.5 py-px text-[10px] font-semibold leading-none text-keep-bg">
+            {b > 99 ? "99+" : b}
+          </span>
+        ) : null}
+      </button>
+    );
+  }
+
+  return (
+    <div ref={wrapRef} className="relative shrink-0 border-b border-keep-rule px-3 py-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-[11px] text-keep-text hover:border-keep-action/60 hover:bg-keep-banner"
+      >
+        <Avatar url={selectedAvatar} name={selectedLabel} size={20} />
+        <span className="min-w-0 flex-1 truncate text-left">{selectedLabel}</span>
+        {otherUnread > 0 ? (
+          <span
+            title={`${otherUnread} unread on other ${otherUnread === 1 ? "identity" : "identities"}`}
+            className="rounded-full bg-keep-accent px-1.5 py-px text-[10px] font-semibold leading-none text-keep-bg"
+          >
+            {otherUnread > 99 ? "99+" : otherUnread}
+          </span>
+        ) : null}
+        <span aria-hidden className="text-keep-muted">{open ? "▴" : "▾"}</span>
+      </button>
+      {open ? (
+        <div
+          role="listbox"
+          className="absolute left-3 right-3 top-full z-10 mt-1 max-h-72 overflow-y-auto rounded border border-keep-rule bg-keep-parchment shadow-lg"
+        >
+          {row(null, "OOC", null)}
+          {characters.map((c) => row(c.id, c.name, c.avatarUrl))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* ============================================================
  *  Thread pane (right side)
  * ============================================================ */
 
@@ -835,6 +1084,7 @@ function ThreadPane({
   setDmMessages,
   meId,
   onCommand,
+  myCharacterId,
 }: {
   otherUserId: string;
   fallback: { displayName: string; avatarUrl: string | null; online: boolean } | null;
@@ -844,6 +1094,14 @@ function ThreadPane({
   meId: string | null;
   /** Dispatch slash commands (used for /accept and /decline on the pinned banner). */
   onCommand: (text: string) => void;
+  /**
+   * My identity for this thread — the inbox filter from the parent
+   * modal, not the global activeCharacterId. The chip switcher at the
+   * top of the inbox can take this somewhere different than the user's
+   * global voice; the thread fetches / sends MUST follow the filter so
+   * the thread you're viewing stays consistent with its pinned side.
+   */
+  myCharacterId: string | null;
 }) {
   // Resolve conversation reactively — server creates the row on first
   // send, so it may be absent until then. NO_DM_MESSAGES is a stable
@@ -851,6 +1109,16 @@ function ThreadPane({
   const conversation = useChat(
     (s) => Object.values(s.dmConversations).find((c) => c.otherUserId === otherUserId) ?? null,
   );
+  // My identity for this thread — forwarded from the parent modal's
+  // inbox filter. Drives `?characterId=` on history fetches and the
+  // read-marker POST so the server scopes the thread to my pinned
+  // side. Null = master OOC.
+  const activeCharacterId = myCharacterId;
+  // Target identity pinned to THIS thread (server-side per-conversation
+  // attribution). On a fresh thread (no row yet) we default to null so
+  // the first send addresses the target's master OOC handle — matches
+  // the pre-identity behavior for first contact from "compose by name".
+  const targetCharacterId = conversation?.otherCharacterId ?? null;
   const messages = useChat((s) =>
     conversation ? (s.dmMessagesByConv[conversation.id] ?? NO_DM_MESSAGES) : NO_DM_MESSAGES,
   );
@@ -922,7 +1190,7 @@ function ThreadPane({
     const convId = conversation.id;
     const ac = new AbortController();
     setError(null);
-    fetch(`/me/dms/${convId}/messages?limit=${PAGE_SIZE}`, {
+    fetch(withIdentityQuery(`/me/dms/${convId}/messages?limit=${PAGE_SIZE}`, activeCharacterId), {
       credentials: "include",
       signal: ac.signal,
     })
@@ -956,11 +1224,11 @@ function ThreadPane({
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ upTo: Date.now() }),
+      body: JSON.stringify({ upTo: Date.now(), characterId: activeCharacterId ?? undefined }),
       signal: ac.signal,
     }).catch(() => {});
     return () => { ac.abort(); };
-  }, [conversation?.id, setDmMessages, dmReseedTick]);
+  }, [conversation?.id, setDmMessages, dmReseedTick, activeCharacterId]);
 
   // Auto-scroll on new message arrivals.
   useEffect(() => {
@@ -983,7 +1251,11 @@ function ThreadPane({
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ body: text }),
+          body: JSON.stringify({
+            body: text,
+            characterId: activeCharacterId ?? undefined,
+            targetCharacterId: targetCharacterId ?? undefined,
+          }),
         },
       );
       if (!r.ok) throw new Error(await readError(r));
@@ -999,7 +1271,7 @@ function ThreadPane({
     } finally {
       setBusy(false);
     }
-  }, [draft, busy, otherUserId, appendDmMessage]);
+  }, [draft, busy, otherUserId, appendDmMessage, activeCharacterId, targetCharacterId]);
 
   return (
     <>

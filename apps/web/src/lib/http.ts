@@ -47,6 +47,23 @@ export function setSessionToken(token: string): void {
   catch { /* private-mode: nothing to do, the tab just won't persist */ }
 }
 
+/**
+ * Append `?characterId=<id>` (or `&characterId=<id>` if the URL already
+ * has a query string) when the active tab is in-character. Used by
+ * friend + DM fetches so the server scopes responses to the right
+ * identity — Char A and Char B of the same player keep separate
+ * friends lists and inboxes.
+ *
+ * Reads from the Zustand store at call time, so callers don't need
+ * to thread the character id through props. When the user is OOC,
+ * returns the URL unchanged.
+ */
+export function withIdentityQuery(url: string, characterId: string | null | undefined): string {
+  if (!characterId) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}characterId=${encodeURIComponent(characterId)}`;
+}
+
 /** Wipe the token (logout, or 401 from /auth/me). */
 export function clearSessionToken(): void {
   if (typeof window === "undefined") return;

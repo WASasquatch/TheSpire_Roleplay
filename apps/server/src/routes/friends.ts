@@ -1,10 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import type { Server as IoServer } from "socket.io";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { characters, friends, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
+import { characterIdFromQuery, eqIdentity, ownsCharacter, type Identity } from "../auth/identity.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -49,33 +50,63 @@ export interface FriendRequestEntry {
  *     list scan + Set lookup, so the per-row cost is constant.
  */
 export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
-  app.get("/me/friends", async (req, reply) => {
+  app.get<{ Querystring: { characterId?: string } }>("/me/friends", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
 
-    // Symmetric pull: every accepted edge where I'm on either side.
-    // The SQL `CASE` collapses the two directions into a single
-    // `otherUserId` column so the inner join only needs to walk once.
+    // Friends are keyed per-identity. The client passes `?characterId=`
+    // when the active tab is in-character; missing/empty means OOC.
+    // We verify ownership server-side so a user can't read another
+    // player's character inbox by guessing the id.
+    const charId = characterIdFromQuery(req.query.characterId);
+    if (charId && !(await ownsCharacter(db, me.id, charId))) {
+      reply.code(403); return { error: "not your character" };
+    }
+    const meIdentity: Identity = { userId: me.id, characterId: charId };
+
+    // Symmetric pull: every accepted edge where I (this identity) am
+    // on either side, plus the OTHER side's identity (so we can
+    // resolve their display name as the character that initiated the
+    // friendship, not whatever they're currently playing).
     const rows = await db
       .select({
-        otherUserId: sql<string>`CASE WHEN ${friends.frienderUserId} = ${me.id} THEN ${friends.friendedUserId} ELSE ${friends.frienderUserId} END`,
-        username: users.username,
-        avatarUrl: users.avatarUrl,
-        activeCharacterId: users.activeCharacterId,
-        charName: characters.name,
-        charAvatarUrl: characters.avatarUrl,
-        charDeletedAt: characters.deletedAt,
+        frienderUserId: friends.frienderUserId,
+        frienderCharacterId: friends.frienderCharacterId,
+        friendedUserId: friends.friendedUserId,
+        friendedCharacterId: friends.friendedCharacterId,
       })
       .from(friends)
-      .innerJoin(
-        users,
-        sql`${users.id} = CASE WHEN ${friends.frienderUserId} = ${me.id} THEN ${friends.friendedUserId} ELSE ${friends.frienderUserId} END`,
-      )
-      .leftJoin(characters, eq(characters.id, users.activeCharacterId))
       .where(and(
-        or(eq(friends.frienderUserId, me.id), eq(friends.friendedUserId, me.id)),
+        or(
+          eqIdentity(friends.frienderUserId, friends.frienderCharacterId, meIdentity),
+          eqIdentity(friends.friendedUserId, friends.friendedCharacterId, meIdentity),
+        ),
         eq(friends.status, "accepted"),
       ));
+
+    // Resolve each other-side identity to a display name + avatar.
+    // We need both the user row (for username + master avatar) and
+    // optionally the specific character row (for character name +
+    // avatar when the friendship was tagged to a character).
+    const otherIdentities = rows.map((r) => {
+      const iAmFriender = r.frienderUserId === me.id
+        && (r.frienderCharacterId ?? null) === charId;
+      return iAmFriender
+        ? { userId: r.friendedUserId, characterId: r.friendedCharacterId ?? null }
+        : { userId: r.frienderUserId, characterId: r.frienderCharacterId ?? null };
+    });
+
+    const otherUserIds = [...new Set(otherIdentities.map((o) => o.userId))];
+    const userRows = otherUserIds.length
+      ? await db.select().from(users).where(sql`${users.id} IN (${sql.join(otherUserIds.map((u) => sql`${u}`), sql`, `)})`)
+      : [];
+    const userById = new Map(userRows.map((u) => [u.id, u]));
+
+    const otherCharIds = otherIdentities.map((o) => o.characterId).filter((c): c is string => !!c);
+    const charRows = otherCharIds.length
+      ? await db.select().from(characters).where(sql`${characters.id} IN (${sql.join(otherCharIds.map((c) => sql`${c}`), sql`, `)})`)
+      : [];
+    const charById = new Map(charRows.map((c) => [c.id, c]));
 
     const allSockets = await io.fetchSockets();
     const online = new Set<string>();
@@ -84,18 +115,20 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
       if (uid) online.add(uid);
     }
 
-    const entries: FriendListEntry[] = rows.map((r) => {
-      const usingChar = r.activeCharacterId && r.charName && !r.charDeletedAt;
+    const entries: FriendListEntry[] = otherIdentities.map((o) => {
+      const u = userById.get(o.userId);
+      const c = o.characterId ? charById.get(o.characterId) : null;
+      const displayName = c?.name ?? u?.username ?? "(unknown)";
+      const avatarUrl = c?.avatarUrl ?? u?.avatarUrl ?? null;
       return {
-        userId: r.otherUserId,
-        username: r.username,
-        displayName: usingChar ? r.charName! : r.username,
-        avatarUrl: usingChar ? (r.charAvatarUrl ?? r.avatarUrl ?? null) : (r.avatarUrl ?? null),
-        online: online.has(r.otherUserId),
+        userId: o.userId,
+        username: u?.username ?? "(unknown)",
+        displayName,
+        avatarUrl,
+        online: online.has(o.userId),
       };
     });
 
-    // Stable display ordering: online first, then alphabetical.
     entries.sort((a, b) => {
       if (a.online !== b.online) return a.online ? -1 : 1;
       return a.displayName.localeCompare(b.displayName);
@@ -118,48 +151,71 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
    *   400 { error: "self" }               — friending yourself is silly
    *   400 { error: "username required" }  — body empty
    */
-  app.post<{ Body: { username?: string } }>("/me/friend-requests", async (req, reply) => {
+  app.post<{ Body: { username?: string; characterId?: string } }>("/me/friend-requests", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
     const username = (req.body?.username ?? "").trim();
     if (!username) { reply.code(400); return { error: "username required" }; }
+    // Friender identity: my active character (or master if absent).
+    const myCharId = characterIdFromQuery(req.body?.characterId);
+    if (myCharId && !(await ownsCharacter(db, me.id, myCharId))) {
+      reply.code(403); return { error: "not your character" };
+    }
+    const meIdentity: Identity = { userId: me.id, characterId: myCharId };
 
-    const target = (await db
+    // Target identity: try master username first, then character name.
+    // Either resolution gives us a (userId, characterId|null) pair to
+    // pin the friendship to.
+    let targetIdentity: Identity | null = null;
+    let targetDisplay: string = username;
+    const masterRow = (await db
       .select()
       .from(users)
       .where(sql`lower(${users.username}) = ${username.toLowerCase()}`)
       .limit(1))[0];
-    if (!target || target.disabledAt) { reply.code(404); return { error: "no_user" }; }
-    if (target.id === me.id) { reply.code(400); return { error: "self" }; }
+    if (masterRow && !masterRow.disabledAt) {
+      targetIdentity = { userId: masterRow.id, characterId: null };
+      targetDisplay = masterRow.username;
+    } else {
+      const charRow = (await db
+        .select()
+        .from(characters)
+        .where(sql`lower(${characters.name}) = ${username.toLowerCase()}`)
+        .limit(1))[0];
+      if (charRow && !charRow.deletedAt) {
+        targetIdentity = { userId: charRow.userId, characterId: charRow.id };
+        targetDisplay = charRow.name;
+      }
+    }
+    if (!targetIdentity) { reply.code(404); return { error: "no_user" }; }
+    if (targetIdentity.userId === me.id && targetIdentity.characterId === myCharId) {
+      reply.code(400); return { error: "self" };
+    }
 
-    // Same idempotency tree as the slash command: existing accepted edge
-    // is a no-op, existing pending-from-me is also a no-op, existing
-    // pending-from-them auto-accepts (mutual intent).
+    // Idempotency over the identity pair, in either direction.
     const existing = (await db
       .select()
       .from(friends)
       .where(or(
-        and(eq(friends.frienderUserId, me.id), eq(friends.friendedUserId, target.id)),
-        and(eq(friends.frienderUserId, target.id), eq(friends.friendedUserId, me.id)),
+        and(
+          eqIdentity(friends.frienderUserId, friends.frienderCharacterId, meIdentity),
+          eqIdentity(friends.friendedUserId, friends.friendedCharacterId, targetIdentity),
+        ),
+        and(
+          eqIdentity(friends.frienderUserId, friends.frienderCharacterId, targetIdentity),
+          eqIdentity(friends.friendedUserId, friends.friendedCharacterId, meIdentity),
+        ),
       ))
       .limit(1))[0];
 
-    // Capture the narrowed locals into closure-stable consts. TS doesn't
-    // carry the outer null/undefined narrowing into the inner function,
-    // so referencing `me.id` / `target.id` inside a nested function would
-    // re-widen them. These aliases keep the closure type-clean.
+    const targetUserId = targetIdentity.userId;
     const meId = me.id;
     const meUsername = me.username;
-    const targetId = target.id;
     async function notifyTarget() {
-      // Fan a friend:request event to every live socket of the target so
-      // their inbox/badge refreshes without polling. The payload is
-      // intentionally minimal — the client pulls /me/friend-requests for
-      // canonical state.
       const sockets = await io.fetchSockets();
       for (const s of sockets) {
         const uid = (s.data as { userId?: string }).userId;
-        if (uid !== targetId) continue;
+        if (uid !== targetUserId) continue;
         s.emit("friend:request", {
           frienderUserId: meId,
           frienderUsername: meUsername,
@@ -171,60 +227,87 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     if (existing) {
       if (existing.status === "accepted") {
         reply.code(200);
-        return { ok: true, status: "already_friends" as const, username: target.username };
+        return { ok: true, status: "already_friends" as const, username: targetDisplay };
       }
-      if (existing.frienderUserId === me.id) {
+      const meIsFriender = existing.frienderUserId === me.id
+        && (existing.frienderCharacterId ?? null) === myCharId;
+      if (meIsFriender) {
         reply.code(200);
-        return { ok: true, status: "already_pending" as const, username: target.username };
+        return { ok: true, status: "already_pending" as const, username: targetDisplay };
       }
-      // Their pending request flips to accepted.
+      // Their pending request to ME flips to accepted (mutual intent).
       await db
         .update(friends)
         .set({ status: "accepted" })
-        .where(and(eq(friends.frienderUserId, target.id), eq(friends.friendedUserId, me.id)));
+        .where(and(
+          eqIdentity(friends.frienderUserId, friends.frienderCharacterId, targetIdentity),
+          eqIdentity(friends.friendedUserId, friends.friendedCharacterId, meIdentity),
+        ));
       await notifyTarget();
       reply.code(200);
-      return { ok: true, status: "accepted" as const, username: target.username };
+      return { ok: true, status: "accepted" as const, username: targetDisplay };
     }
 
     await db
       .insert(friends)
-      .values({ frienderUserId: me.id, friendedUserId: target.id, status: "pending" });
+      .values({
+        frienderUserId: meIdentity.userId,
+        frienderCharacterId: meIdentity.characterId,
+        friendedUserId: targetIdentity.userId,
+        friendedCharacterId: targetIdentity.characterId,
+        status: "pending",
+      });
     await notifyTarget();
     reply.code(201);
-    return { ok: true, status: "sent" as const, username: target.username };
+    return { ok: true, status: "sent" as const, username: targetDisplay };
   });
 
-  app.get("/me/friend-requests", async (req, reply) => {
+  app.get<{ Querystring: { characterId?: string } }>("/me/friend-requests", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
 
+    // Friend requests are per-identity too. The active tab's character
+    // id determines which inbox we're reading; missing = OOC.
+    const charId = characterIdFromQuery(req.query.characterId);
+    if (charId && !(await ownsCharacter(db, me.id, charId))) {
+      reply.code(403); return { error: "not your character" };
+    }
+    const meIdentity: Identity = { userId: me.id, characterId: charId };
+
+    // Pending rows where I (this identity) am the friended side.
+    // Surface the FRIENDER's identity — the user only ever sees the
+    // character that sent the request, not the master handle behind it.
     const rows = await db
       .select({
         frienderUserId: friends.frienderUserId,
+        frienderCharacterId: friends.frienderCharacterId,
         createdAt: friends.createdAt,
-        username: users.username,
-        avatarUrl: users.avatarUrl,
-        activeCharacterId: users.activeCharacterId,
-        charName: characters.name,
-        charAvatarUrl: characters.avatarUrl,
-        charDeletedAt: characters.deletedAt,
       })
       .from(friends)
-      .innerJoin(users, eq(users.id, friends.frienderUserId))
-      .leftJoin(characters, eq(characters.id, users.activeCharacterId))
       .where(and(
-        eq(friends.friendedUserId, me.id),
+        eqIdentity(friends.friendedUserId, friends.friendedCharacterId, meIdentity),
         eq(friends.status, "pending"),
       ));
 
+    const otherUserIds = [...new Set(rows.map((r) => r.frienderUserId))];
+    const userRows = otherUserIds.length
+      ? await db.select().from(users).where(sql`${users.id} IN (${sql.join(otherUserIds.map((u) => sql`${u}`), sql`, `)})`)
+      : [];
+    const userById = new Map(userRows.map((u) => [u.id, u]));
+    const otherCharIds = rows.map((r) => r.frienderCharacterId).filter((c): c is string => !!c);
+    const charRows = otherCharIds.length
+      ? await db.select().from(characters).where(sql`${characters.id} IN (${sql.join(otherCharIds.map((c) => sql`${c}`), sql`, `)})`)
+      : [];
+    const charById = new Map(charRows.map((c) => [c.id, c]));
+
     const entries: FriendRequestEntry[] = rows.map((r) => {
-      const usingChar = r.activeCharacterId && r.charName && !r.charDeletedAt;
+      const u = userById.get(r.frienderUserId);
+      const c = r.frienderCharacterId ? charById.get(r.frienderCharacterId) : null;
       return {
         userId: r.frienderUserId,
-        username: r.username,
-        displayName: usingChar ? r.charName! : r.username,
-        avatarUrl: usingChar ? (r.charAvatarUrl ?? r.avatarUrl ?? null) : (r.avatarUrl ?? null),
+        username: u?.username ?? "(unknown)",
+        displayName: c?.name ?? u?.username ?? "(unknown)",
+        avatarUrl: c?.avatarUrl ?? u?.avatarUrl ?? null,
         createdAt: +r.createdAt,
       };
     });

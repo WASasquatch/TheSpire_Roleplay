@@ -5,6 +5,6 @@ export default {
   out: "./drizzle",
   dialect: "sqlite",
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? "./data/thekeep.sqlite",
+    url: process.env.SQLITE_PATH ?? process.env.DATABASE_URL ?? "./data/thekeep.sqlite",
   },
 } satisfies Config;

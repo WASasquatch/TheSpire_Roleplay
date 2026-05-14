@@ -4,7 +4,7 @@ import "dotenv/config";
 import Database from "better-sqlite3";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dbPath = resolve(__dirname, "..", process.env.DATABASE_URL ?? "./data/thekeep.sqlite");
+const dbPath = resolve(__dirname, "..", process.env.SQLITE_PATH ?? process.env.DATABASE_URL ?? "./data/thekeep.sqlite");
 const db = new Database(dbPath);
 
 const u = db.prepare("SELECT id, username, theme_json, active_character_id FROM users WHERE username='WAS'").get();

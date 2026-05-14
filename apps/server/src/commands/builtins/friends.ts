@@ -1,8 +1,51 @@
 import { and, eq, or, sql } from "drizzle-orm";
 import { addSystemMessage } from "../../realtime/broadcast.js";
 import { resolveDisplayName } from "../../auth/session.js";
-import { friends, users } from "../../db/schema.js";
+import { characters, friends, users } from "../../db/schema.js";
+import { eqIdentity, type Identity } from "../../auth/identity.js";
 import type { CommandContext, CommandHandler } from "../types.js";
+
+/**
+ * Resolve a typed-in name to an identity. Master usernames take
+ * precedence (globally unique); characters fall through for names
+ * that don't match a master. Returns null when nothing matches or
+ * the target is disabled/soft-deleted.
+ *
+ * Handles the NBSP-vs-regular-space dance for master usernames the
+ * same way lookupProfile does — tries both forms so a click from
+ * chat (canonical NBSP form) and a URL-style spelling (regular
+ * space) both resolve.
+ */
+async function resolveIdentityByName(
+  db: import("../../db/index.js").Db,
+  name: string,
+): Promise<Identity | null> {
+  const NBSP = String.fromCharCode(0xA0);
+  const variants = Array.from(new Set([
+    name,
+    name.replace(/ /g, NBSP),
+    name.replace(new RegExp(NBSP, "g"), " "),
+  ])).map((v) => v.toLowerCase());
+
+  const u = (await db
+    .select({ id: users.id, disabledAt: users.disabledAt })
+    .from(users)
+    .where(sql`lower(${users.username}) IN (${sql.join(variants.map((v) => sql`${v}`), sql`, `)})`)
+    .limit(1))[0];
+  if (u && !u.disabledAt) return { userId: u.id, characterId: null };
+
+  const c = (await db
+    .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+    .from(characters)
+    .where(sql`lower(${characters.name}) IN (${sql.join(variants.map((v) => sql`${v}`), sql`, `)})`)
+    .limit(1))[0];
+  if (c && !c.deletedAt) return { userId: c.userId, characterId: c.id };
+  return null;
+}
+
+function meIdentity(ctx: CommandContext): Identity {
+  return { userId: ctx.user.id, characterId: ctx.user.activeCharacterId };
+}
 
 function notice(ctx: CommandContext, code: string, message: string) {
   ctx.socket.emit("error:notice", { code, message });
@@ -70,155 +113,156 @@ async function emitFriendRequestTo(
 export const friendCommand: CommandHandler = {
   name: "friend",
   aliases: ["watch", "follow"],
-  usage: "/friend <username>",
+  usage: "/friend <name>",
   description:
-    "Send a friend request. They'll see it in their inbox and can /accept or /decline. Once accepted you'll both appear on each other's friends lists.",
+    "Send a friend request. The friendship is tied to whoever's active right now — if you're in-character, the request comes from that character; the other party never sees your OOC handle through this request.",
   async run(ctx) {
     const targetName = ctx.argsText.trim();
-    if (!targetName) return notice(ctx, "FRIEND_USAGE", "Usage: /friend <username>");
+    if (!targetName) return notice(ctx, "FRIEND_USAGE", "Usage: /friend <name>");
 
-    const target = (await ctx.db
-      .select()
-      .from(users)
-      .where(sql`lower(${users.username}) = ${targetName.toLowerCase()}`)
-      .limit(1))[0];
-    if (!target || target.disabledAt) return notice(ctx, "NO_USER", `No user named "${targetName}".`);
-    if (target.id === ctx.user.id) return notice(ctx, "SELF", "Friending yourself isn't useful.");
+    const target = await resolveIdentityByName(ctx.db, targetName);
+    if (!target) return notice(ctx, "NO_USER", `No user or character named "${targetName}".`);
 
-    // Idempotency: if there's already an accepted friendship in either
-    // direction, just confirm. If there's a pending request from THIS
-    // user to the target, also a no-op. If the target previously sent
-    // US a request that we never accepted, calling /friend on them
-    // counts as accepting (mutual intent — same shape as Facebook).
+    const me = meIdentity(ctx);
+    if (target.userId === me.userId && target.characterId === me.characterId) {
+      return notice(ctx, "SELF", "Friending yourself isn't useful.");
+    }
+
+    // Idempotency over the IDENTITY PAIR. Two characters of mine can
+    // each have their own friendship with the same target — only the
+    // exact same identity pair (either direction) collides.
     const existing = (await ctx.db
       .select()
       .from(friends)
       .where(or(
-        and(eq(friends.frienderUserId, ctx.user.id), eq(friends.friendedUserId, target.id)),
-        and(eq(friends.frienderUserId, target.id), eq(friends.friendedUserId, ctx.user.id)),
+        and(eqIdentity(friends.frienderUserId, friends.frienderCharacterId, me),
+            eqIdentity(friends.friendedUserId, friends.friendedCharacterId, target)),
+        and(eqIdentity(friends.frienderUserId, friends.frienderCharacterId, target),
+            eqIdentity(friends.friendedUserId, friends.friendedCharacterId, me)),
       ))
       .limit(1))[0];
     if (existing) {
       if (existing.status === "accepted") {
-        return whisperToSelf(ctx, `You and ${target.username} are already friends.`);
+        return whisperToSelf(ctx, `You and ${targetName} are already friends.`);
       }
-      if (existing.frienderUserId === ctx.user.id) {
-        return whisperToSelf(ctx, `Friend request to ${target.username} is still pending — wait for them to /accept.`);
+      if (existing.frienderUserId === me.userId
+          && (existing.frienderCharacterId ?? null) === me.characterId) {
+        return whisperToSelf(ctx, `Friend request to ${targetName} is still pending — wait for them to /accept.`);
       }
       // Existing pending request from THEM to us; calling /friend on
       // them is the natural way to accept.
       await ctx.db
         .update(friends)
         .set({ status: "accepted" })
-        .where(and(eq(friends.frienderUserId, target.id), eq(friends.friendedUserId, ctx.user.id)));
-      await whisperToSelf(ctx, `Accepted ${target.username}'s friend request.`);
-      await emitFriendRequestTo(ctx, target.id);
+        .where(and(
+          eqIdentity(friends.frienderUserId, friends.frienderCharacterId, target),
+          eqIdentity(friends.friendedUserId, friends.friendedCharacterId, me),
+        ));
+      await whisperToSelf(ctx, `Accepted ${targetName}'s friend request.`);
+      await emitFriendRequestTo(ctx, target.userId);
       return;
     }
 
     await ctx.db
       .insert(friends)
-      .values({ frienderUserId: ctx.user.id, friendedUserId: target.id, status: "pending" });
-    await whisperToSelf(ctx, `Friend request sent to ${target.username}.`);
-    await emitFriendRequestTo(ctx, target.id);
+      .values({
+        frienderUserId: me.userId,
+        frienderCharacterId: me.characterId,
+        friendedUserId: target.userId,
+        friendedCharacterId: target.characterId,
+        status: "pending",
+      });
+    await whisperToSelf(ctx, `Friend request sent to ${targetName}.`);
+    await emitFriendRequestTo(ctx, target.userId);
   },
 };
 
 export const acceptFriendCommand: CommandHandler = {
   name: "accept",
   aliases: ["acceptfriend"],
-  usage: "/accept <username>",
-  description: "Accept a pending friend request from this user.",
+  usage: "/accept <name>",
+  description: "Accept a pending friend request from this user or character.",
   async run(ctx) {
     const targetName = ctx.argsText.trim();
-    if (!targetName) return notice(ctx, "ACCEPT_USAGE", "Usage: /accept <username>");
+    if (!targetName) return notice(ctx, "ACCEPT_USAGE", "Usage: /accept <name>");
 
-    const target = (await ctx.db
-      .select()
-      .from(users)
-      .where(sql`lower(${users.username}) = ${targetName.toLowerCase()}`)
-      .limit(1))[0];
-    if (!target) return notice(ctx, "NO_USER", `No user named "${targetName}".`);
+    const target = await resolveIdentityByName(ctx.db, targetName);
+    if (!target) return notice(ctx, "NO_USER", `No user or character named "${targetName}".`);
 
+    const me = meIdentity(ctx);
     const r = await ctx.db
       .update(friends)
       .set({ status: "accepted" })
       .where(and(
-        eq(friends.frienderUserId, target.id),
-        eq(friends.friendedUserId, ctx.user.id),
+        eqIdentity(friends.frienderUserId, friends.frienderCharacterId, target),
+        eqIdentity(friends.friendedUserId, friends.friendedCharacterId, me),
         eq(friends.status, "pending"),
       ));
     if (r.changes === 0) {
-      return notice(ctx, "NO_REQUEST", `No pending friend request from ${target.username}.`);
+      return notice(ctx, "NO_REQUEST", `No pending friend request from ${targetName}.`);
     }
-    await whisperToSelf(ctx, `You and ${target.username} are now friends.`);
+    await whisperToSelf(ctx, `You and ${targetName} are now friends.`);
     // Tell the original sender so their inbox + friends-rail refresh.
-    await emitFriendRequestTo(ctx, target.id);
+    await emitFriendRequestTo(ctx, target.userId);
   },
 };
 
 export const declineFriendCommand: CommandHandler = {
   name: "decline",
   aliases: ["declinefriend", "rejectfriend"],
-  usage: "/decline <username>",
+  usage: "/decline <name>",
   description: "Decline a pending friend request. The sender isn't notified.",
   async run(ctx) {
     const targetName = ctx.argsText.trim();
-    if (!targetName) return notice(ctx, "DECLINE_USAGE", "Usage: /decline <username>");
+    if (!targetName) return notice(ctx, "DECLINE_USAGE", "Usage: /decline <name>");
 
-    const target = (await ctx.db
-      .select()
-      .from(users)
-      .where(sql`lower(${users.username}) = ${targetName.toLowerCase()}`)
-      .limit(1))[0];
-    if (!target) return notice(ctx, "NO_USER", `No user named "${targetName}".`);
+    const target = await resolveIdentityByName(ctx.db, targetName);
+    if (!target) return notice(ctx, "NO_USER", `No user or character named "${targetName}".`);
 
+    const me = meIdentity(ctx);
     const r = await ctx.db
       .delete(friends)
       .where(and(
-        eq(friends.frienderUserId, target.id),
-        eq(friends.friendedUserId, ctx.user.id),
+        eqIdentity(friends.frienderUserId, friends.frienderCharacterId, target),
+        eqIdentity(friends.friendedUserId, friends.friendedCharacterId, me),
         eq(friends.status, "pending"),
       ));
     if (r.changes === 0) {
-      return notice(ctx, "NO_REQUEST", `No pending friend request from ${target.username}.`);
+      return notice(ctx, "NO_REQUEST", `No pending friend request from ${targetName}.`);
     }
-    await whisperToSelf(ctx, `Declined ${target.username}'s friend request.`);
+    await whisperToSelf(ctx, `Declined ${targetName}'s friend request.`);
   },
 };
 
 export const unfriendCommand: CommandHandler = {
   name: "unfriend",
   aliases: ["unwatch", "unfollow"],
-  usage: "/unfriend <username>",
-  description: "End a friendship OR cancel a pending request, in either direction.",
+  usage: "/unfriend <name>",
+  description: "End a friendship OR cancel a pending request, in either direction. Operates on your active identity only.",
   async run(ctx) {
     const targetName = ctx.argsText.trim();
-    if (!targetName) return notice(ctx, "UNFRIEND_USAGE", "Usage: /unfriend <username>");
+    if (!targetName) return notice(ctx, "UNFRIEND_USAGE", "Usage: /unfriend <name>");
 
-    const target = (await ctx.db
-      .select()
-      .from(users)
-      .where(sql`lower(${users.username}) = ${targetName.toLowerCase()}`)
-      .limit(1))[0];
-    if (!target) return notice(ctx, "NO_USER", `No user named "${targetName}".`);
+    const target = await resolveIdentityByName(ctx.db, targetName);
+    if (!target) return notice(ctx, "NO_USER", `No user or character named "${targetName}".`);
 
-    // Delete any row in either direction. Covers all three states:
-    //   - accepted friendship: row(me→them) or row(them→me)
-    //   - pending request I sent: row(me→them, pending)
-    //   - pending request they sent: row(them→me, pending) — same as decline
+    const me = meIdentity(ctx);
+    // Delete the row for THIS identity pair in either direction. Other
+    // characters of the same user keep their own friendships with the
+    // same target — only this active identity unfriends.
     const r = await ctx.db
       .delete(friends)
       .where(or(
-        and(eq(friends.frienderUserId, ctx.user.id), eq(friends.friendedUserId, target.id)),
-        and(eq(friends.frienderUserId, target.id), eq(friends.friendedUserId, ctx.user.id)),
+        and(eqIdentity(friends.frienderUserId, friends.frienderCharacterId, me),
+            eqIdentity(friends.friendedUserId, friends.friendedCharacterId, target)),
+        and(eqIdentity(friends.frienderUserId, friends.frienderCharacterId, target),
+            eqIdentity(friends.friendedUserId, friends.friendedCharacterId, me)),
       ));
     if (r.changes === 0) {
-      return notice(ctx, "NOT_FRIENDED", `${target.username} isn't on your friends list or in your inbox.`);
+      return notice(ctx, "NOT_FRIENDED", `${targetName} isn't on your friends list or in your inbox.`);
     }
-    await whisperToSelf(ctx, `Removed ${target.username} from your friends list.`);
-    // Refresh the other party's inbox / list — same event, different cause.
-    await emitFriendRequestTo(ctx, target.id);
+    await whisperToSelf(ctx, `Removed ${targetName} from your friends list.`);
+    await emitFriendRequestTo(ctx, target.userId);
   },
 };
 
@@ -226,30 +270,38 @@ export const friendsCommand: CommandHandler = {
   name: "friends",
   aliases: ["watching", "watchlist", "watches"],
   usage: "/friends",
-  description: "List your accepted friendships (mutual).",
+  description: "List your accepted friendships for the active identity. Switch character to see that character's list.",
   async run(ctx) {
-    // Symmetric: list anyone with an accepted edge to me, regardless
-    // of which side originated the request.
+    const me = meIdentity(ctx);
+    // Symmetric: list anyone with an accepted edge to MY active
+    // identity (master or specific character), regardless of which
+    // side originated the request.
     const rows = await ctx.db
       .select({
-        otherUserId: sql<string>`CASE WHEN ${friends.frienderUserId} = ${ctx.user.id} THEN ${friends.friendedUserId} ELSE ${friends.frienderUserId} END`,
-        username: users.username,
+        otherUserId: sql<string>`CASE WHEN ${friends.frienderUserId} = ${ctx.user.id} AND ${friends.frienderCharacterId} IS ${me.characterId === null ? sql`NULL` : sql`${me.characterId}`} THEN ${friends.friendedUserId} ELSE ${friends.frienderUserId} END`,
+        otherCharacterId: sql<string | null>`CASE WHEN ${friends.frienderUserId} = ${ctx.user.id} AND ${friends.frienderCharacterId} IS ${me.characterId === null ? sql`NULL` : sql`${me.characterId}`} THEN ${friends.friendedCharacterId} ELSE ${friends.frienderCharacterId} END`,
       })
       .from(friends)
-      .innerJoin(
-        users,
-        sql`${users.id} = CASE WHEN ${friends.frienderUserId} = ${ctx.user.id} THEN ${friends.friendedUserId} ELSE ${friends.frienderUserId} END`,
-      )
       .where(and(
-        or(eq(friends.frienderUserId, ctx.user.id), eq(friends.friendedUserId, ctx.user.id)),
+        or(
+          eqIdentity(friends.frienderUserId, friends.frienderCharacterId, me),
+          eqIdentity(friends.friendedUserId, friends.friendedCharacterId, me),
+        ),
         eq(friends.status, "accepted"),
       ));
     if (rows.length === 0) {
-      return whisperToSelf(ctx, "Friends list is empty. Use /friend <username> to send a request.");
+      return whisperToSelf(ctx, "Friends list is empty for this identity. Use /friend <name> to send a request.");
     }
+    // Resolve each other-side identity to a human-readable name —
+    // character name if the friendship was tagged to a character,
+    // master username otherwise.
     const names = await Promise.all(rows.map(async (r) => {
-      const display = await resolveDisplayName(ctx.db, r.otherUserId);
-      return display === r.username ? r.username : `${r.username} (${display})`;
+      if (r.otherCharacterId) {
+        const c = (await ctx.db.select({ name: characters.name }).from(characters).where(eq(characters.id, r.otherCharacterId)).limit(1))[0];
+        if (c) return c.name;
+      }
+      const u = (await ctx.db.select({ username: users.username }).from(users).where(eq(users.id, r.otherUserId)).limit(1))[0];
+      return u?.username ?? "(unknown)";
     }));
     return whisperToSelf(ctx, `Friends: ${names.join(", ")}`);
   },

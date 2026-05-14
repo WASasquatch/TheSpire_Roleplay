@@ -5,7 +5,7 @@ import "dotenv/config";
 import Database from "better-sqlite3";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dbUrl = process.env.DATABASE_URL ?? "./data/thekeep.sqlite";
+const dbUrl = process.env.SQLITE_PATH ?? process.env.DATABASE_URL ?? "./data/thekeep.sqlite";
 const dbPath = resolve(__dirname, "..", dbUrl);
 
 const username = process.argv[2];

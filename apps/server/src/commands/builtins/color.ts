@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { users } from "../../db/schema.js";
+import { characters, users } from "../../db/schema.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const HEX_RX = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -26,7 +26,7 @@ export const colorCommand: CommandHandler = {
   name: "color",
   aliases: ["co", "colour"],
   usage: "/color <hex>   or   /color clear",
-  description: "Set the hex color used for your chat messages and actions.",
+  description: "Set the hex color used for your chat messages and actions. Sets the active character's color when you're in-character, your master/OOC color otherwise — so Character A and Character B can keep different chat colors.",
   subcommands: [
     {
       verb: "(no args)",
@@ -47,20 +47,53 @@ export const colorCommand: CommandHandler = {
   ],
   async run(ctx) {
     const arg = ctx.argsText.trim();
+    // Pick the target identity. When in-character, /color sets the
+    // character's own chatColor so Character A and Character B can
+    // keep distinct chat colors under the same master account. When
+    // OOC, /color sets the master's chatColor as before.
+    const charId = ctx.user.activeCharacterId;
+    const scope = charId ? "character" : "master";
+    // Resolve the CURRENT color for the active identity. The session-
+    // loaded ctx.user.chatColor is always the master's value; for an
+    // in-character session we need a fresh DB read of the character's
+    // override before reporting it back to the user.
+    let currentColor: string | null = ctx.user.chatColor;
+    if (charId) {
+      const c = (await ctx.db
+        .select({ chatColor: characters.chatColor })
+        .from(characters)
+        .where(eq(characters.id, charId))
+        .limit(1))[0];
+      currentColor = c?.chatColor ?? null;
+    }
+
     if (!arg) {
+      const where = scope === "character" ? " for this character" : " for your OOC account";
       notice(
         ctx,
         "COLOR_HELP",
-        ctx.user.chatColor
-          ? `Current color: ${ctx.user.chatColor}. Usage: /color <hex>  |  /color clear`
-          : "No color set. Usage: /color <hex>  (e.g. /color 990000)",
+        currentColor
+          ? `Current color${where}: ${currentColor}. Usage: /color <hex>  |  /color clear`
+          : `No color set${where}. Usage: /color <hex>  (e.g. /color 990000)`,
       );
       return;
     }
     if (/^(clear|none|off|default)$/i.test(arg)) {
-      await ctx.db.update(users).set({ chatColor: null }).where(eq(users.id, ctx.user.id));
-      ctx.user.chatColor = null;
-      notice(ctx, "COLOR_CLEARED", "Chat color cleared.");
+      if (charId) {
+        await ctx.db.update(characters).set({ chatColor: null }).where(eq(characters.id, charId));
+      } else {
+        await ctx.db.update(users).set({ chatColor: null }).where(eq(users.id, ctx.user.id));
+        ctx.user.chatColor = null;
+      }
+      notice(
+        ctx,
+        "COLOR_CLEARED",
+        scope === "character"
+          ? "Character chat color cleared. Falls back to your OOC color."
+          : "OOC chat color cleared.",
+      );
+      const { broadcastPresence } = await import("../../realtime/broadcast.js");
+      await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
       return;
     }
     if (!HEX_RX.test(arg)) {
@@ -72,9 +105,19 @@ export const colorCommand: CommandHandler = {
       return;
     }
     const normalized = normalize(arg);
-    await ctx.db.update(users).set({ chatColor: normalized }).where(eq(users.id, ctx.user.id));
-    ctx.user.chatColor = normalized;
-    notice(ctx, "COLOR_SET", `Chat color set to ${normalized}.`);
+    if (charId) {
+      await ctx.db.update(characters).set({ chatColor: normalized }).where(eq(characters.id, charId));
+    } else {
+      await ctx.db.update(users).set({ chatColor: normalized }).where(eq(users.id, ctx.user.id));
+      ctx.user.chatColor = normalized;
+    }
+    notice(
+      ctx,
+      "COLOR_SET",
+      scope === "character"
+        ? `Character chat color set to ${normalized}.`
+        : `OOC chat color set to ${normalized}.`,
+    );
 
     // Refresh occupant list so other clients see the new color metadata.
     const { broadcastPresence } = await import("../../realtime/broadcast.js");

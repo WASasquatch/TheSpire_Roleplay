@@ -33,6 +33,15 @@ export interface DirectMessage {
 export interface DirectConversationSummary {
   id: string;
   otherUserId: string;
+  /**
+   * The other party's character id pinned to THIS conversation, or
+   * null when the other side is talking as their master OOC handle.
+   * Pinned per-thread: a conversation that began with Char A stays
+   * addressed to Char A even after that user switches to Char B.
+   * The client threads this back as `targetCharacterId` on send so
+   * a reply lands in the same thread rather than spawning a new one.
+   */
+  otherCharacterId: string | null;
   otherUsername: string;
   otherDisplayName: string;
   otherAvatarUrl: string | null;
@@ -51,4 +60,17 @@ export interface DirectConversationSummary {
 export interface DirectMessageHistoryPage {
   messages: DirectMessage[];
   hasMore: boolean;
+}
+
+/**
+ * Per-identity inbox totals returned from `/me/inbox-counts`. One row
+ * per identity the caller owns (master with `characterId === null`,
+ * plus each non-deleted character), so the client can render every
+ * chip in the Messages-modal character switcher with a stable layout
+ * even when an identity has zero unread.
+ */
+export interface InboxIdentityCount {
+  characterId: string | null;
+  unreadDms: number;
+  pendingFriendRequests: number;
 }

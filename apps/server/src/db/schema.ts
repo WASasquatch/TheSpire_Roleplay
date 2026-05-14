@@ -171,6 +171,8 @@ export const characters = sqliteTable(
     /** structured stats serialized as JSON; see CharacterStats in @thekeep/shared */
     statsJson: text("stats_json").notNull().default("{}"),
     avatarUrl: text("avatar_url"),
+    /** Per-character chat color (hex, e.g. "#990000"). Null = inherit the master's color. */
+    chatColor: text("chat_color"),
     /** Per-character UI theme - JSON-serialized Theme. Null = inherit master/default. */
     themeJson: text("theme_json"),
     /** Same semantics as users.is_public - public = anonymous can view this character's profile. */
@@ -1134,6 +1136,17 @@ export const friends = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     /**
+     * Per-identity partitioning (migration 0054). NULL means "this side
+     * is the master OOC handle"; a character id pins the friendship to
+     * that character. Two characters of the same player can keep
+     * entirely separate friends lists, and the friended party only
+     * ever sees the character that initiated the request.
+     */
+    frienderCharacterId: text("friender_character_id")
+      .references(() => characters.id, { onDelete: "cascade" }),
+    friendedCharacterId: text("friended_character_id")
+      .references(() => characters.id, { onDelete: "cascade" }),
+    /**
      * Friendship state. `pending` means the friender sent a request and
      * the friended user hasn't responded yet — they appear in the
      * inbox but NOT in either party's friends list. `accepted` means
@@ -1148,7 +1161,9 @@ export const friends = sqliteTable(
     createdAt: ts("created_at"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.frienderUserId, t.friendedUserId] }),
+    // Unique pair across BOTH sides' identities. Migration 0054 builds
+    // the index with COALESCE-to-empty so SQLite's NULLs-are-distinct
+    // behavior doesn't allow duplicate rows for master pairs.
     friendedIdx: index("friends_friended_idx").on(t.friendedUserId),
     statusIdx: index("friends_status_idx").on(t.friendedUserId, t.status),
   }),
@@ -1179,6 +1194,19 @@ export const directConversations = sqliteTable(
     userAId: text("user_a_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     /** Lexicographically larger user id. */
     userBId: text("user_b_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * Per-identity partitioning (migration 0054). NULL means "this side
+     * is the master OOC handle"; a character id pins the conversation
+     * to that character. Two characters of the same player can hold
+     * entirely separate threads with the same other party. ON DELETE
+     * SET NULL keeps the conversation alive (and visible to the OTHER
+     * party) when a character is later deleted; the row falls back to
+     * master attribution rather than vanishing the history.
+     */
+    userACharacterId: text("user_a_character_id")
+      .references(() => characters.id, { onDelete: "set null" }),
+    userBCharacterId: text("user_b_character_id")
+      .references(() => characters.id, { onDelete: "set null" }),
     createdAt: ts("created_at"),
     /**
      * Touched on every successful send so the conversation list can sort
@@ -1189,7 +1217,9 @@ export const directConversations = sqliteTable(
     lastMessageAt: ts("last_message_at"),
   },
   (t) => ({
-    pairUq: uniqueIndex("direct_conversations_pair_uq").on(t.userAId, t.userBId),
+    // Pair uniqueness includes the character ids (migration 0054). The
+    // SQL index uses COALESCE-to-empty so SQLite's NULLs-are-distinct
+    // behavior doesn't permit duplicate master-master rows.
     aRecentIdx: index("direct_conversations_a_idx").on(t.userAId, t.lastMessageAt),
     bRecentIdx: index("direct_conversations_b_idx").on(t.userBId, t.lastMessageAt),
   }),
@@ -1205,6 +1235,15 @@ export const directMessages = sqliteTable(
     senderUserId: text("sender_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * Send-time snapshot of which character the sender was voicing.
+     * NULL means "sent OOC under the master handle." Pairs with the
+     * displayName / avatarUrl snapshots so a later /char clear or
+     * character delete doesn't rewrite past lines. ON DELETE SET NULL
+     * preserves message history past a character deletion.
+     */
+    senderCharacterId: text("sender_character_id")
+      .references(() => characters.id, { onDelete: "set null" }),
     /** Display name snapshot at send time. Same posture as messages.displayName. */
     displayName: text("display_name").notNull(),
     avatarUrl: text("avatar_url"),

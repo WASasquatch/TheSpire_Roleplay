@@ -72,8 +72,23 @@ export async function addMessage(
   const now = new Date();
   // System messages (server-authored via addSystemMessage) bypass this path,
   // so user-authored kinds inherit the author's snapshotted color unless
-  // an explicit override is supplied.
-  const baseColor = payload.color !== undefined ? payload.color : ctx.user.chatColor;
+  // an explicit override is supplied. When in-character, prefer the
+  // character's own chat_color over the master's — that's how Character A
+  // and Character B keep visually distinct chat lines under one account.
+  // Falls through to the master's color when the character hasn't set one.
+  let baseColor: string | null;
+  if (payload.color !== undefined) {
+    baseColor = payload.color;
+  } else if (ctx.user.activeCharacterId) {
+    const cc = (await ctx.db
+      .select({ chatColor: characters.chatColor })
+      .from(characters)
+      .where(eq(characters.id, ctx.user.activeCharacterId))
+      .limit(1))[0];
+    baseColor = cc?.chatColor ?? ctx.user.chatColor;
+  } else {
+    baseColor = ctx.user.chatColor;
+  }
   const colorSnapshot = colorForKind(payload.kind, baseColor);
   const displayName = payload.displayNameOverride ?? ctx.user.displayName;
   // Mood snapshots only on actually-spoken kinds, never on /npc lines (the
@@ -982,13 +997,19 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     .map<RoomOccupant>((u) => {
       const charId = effectiveCharIdByUser.get(u.id) ?? null;
       const c = charId ? charById.get(charId) : undefined;
+      // Same character-first / master-fallback logic the message-author
+      // color path uses (see addMessage). Userlist + chat lines have to
+      // agree, otherwise a user posting as Character A would show up
+      // with their OOC color in the rail and a different color on the
+      // line, which looks broken.
+      const effectiveColor = c?.chatColor ?? u.chatColor;
       return {
         userId: u.id,
         displayName: c ? c.name : u.username,
         characterId: c?.id ?? null,
         away: u.awayMessage != null,
         awayMessage: u.awayMessage,
-        chatColor: u.chatColor,
+        chatColor: effectiveColor,
         gender: resolveGender(u.gender, c?.statsJson),
         role: roleByUser.get(u.id) ?? "member",
         accountRole: u.role,

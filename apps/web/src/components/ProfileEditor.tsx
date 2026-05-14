@@ -1120,8 +1120,10 @@ function PortraitGalleryEditor({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function add(e: FormEvent) {
-    e.preventDefault();
+  // Plain handler (not onSubmit) — see LinksEditor.add for why nesting a
+  // <form> inside the outer ProfileEditor <form> silently routes the
+  // submit to the wrong handler.
+  async function add() {
     const u = url.trim();
     if (!u) return;
     setErr(null);
@@ -1224,12 +1226,13 @@ function PortraitGalleryEditor({
         <p className="mb-2 italic text-keep-muted">No extra portraits yet.</p>
       )}
       {adding ? (
-        <form onSubmit={add} className="space-y-1">
+        <div className="space-y-1">
           <input
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://example.com/portrait.png"
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
           />
           <input
@@ -1237,6 +1240,7 @@ function PortraitGalleryEditor({
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="Label (optional - e.g. 'transformed')"
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
           />
           <label className="flex items-center gap-1 text-[11px] text-keep-muted">
@@ -1258,14 +1262,15 @@ function PortraitGalleryEditor({
               Cancel
             </button>
             <button
-              type="submit"
+              type="button"
+              onClick={() => { void add(); }}
               disabled={busy || !url.trim()}
               className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
             >
               {busy ? "Adding..." : "Add"}
             </button>
           </div>
-        </form>
+        </div>
       ) : (
         <button
           type="button"
@@ -1324,8 +1329,14 @@ function LinksEditor({
     setErr(null);
   }
 
-  async function add(e: FormEvent) {
-    e.preventDefault();
+  // Triggered by the inline "Add" button. NOT a form submit handler —
+  // the surrounding ProfileEditor is itself a <form onSubmit={save}>, and
+  // an inner <form> nested inside it is invalid HTML. Browsers route
+  // submit events from an inner form's button up to whichever ancestor
+  // form the DOM commits to, which used to fire the outer profile save
+  // instead of this handler — links never POSTed, the outer save ran,
+  // and the user saw the profile-save side effects instead of a saved link.
+  async function add() {
     if (!title.trim() || !url.trim()) return;
     setErr(null);
     setBusy(true);
@@ -1408,13 +1419,14 @@ function LinksEditor({
         <p className="mb-2 italic text-keep-muted">No links yet.</p>
       )}
       {adding ? (
-        <form onSubmit={add} className="space-y-1">
+        <div className="space-y-1">
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Title (e.g. 'F-List profile')"
             maxLength={60}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
           />
           <input
@@ -1422,6 +1434,7 @@ function LinksEditor({
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://example.com/your-profile"
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
           />
           <label className="flex items-center gap-1 text-[11px] text-keep-muted">
@@ -1470,14 +1483,15 @@ function LinksEditor({
               Cancel
             </button>
             <button
-              type="submit"
+              type="button"
+              onClick={() => { void add(); }}
               disabled={busy || !title.trim() || !url.trim()}
               className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
             >
               {busy ? "Adding..." : "Add"}
             </button>
           </div>
-        </form>
+        </div>
       ) : (
         <button
           type="button"
@@ -2017,8 +2031,10 @@ function JournalEntryForm({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
+  // Plain handler (not onSubmit) — see LinksEditor.add for why nesting a
+  // <form> inside the outer ProfileEditor <form> silently routes the
+  // submit to the wrong handler.
+  async function submit() {
     if (!bodyHtml.trim()) return;
     setBusy(true);
     setErr(null);
@@ -2036,13 +2052,14 @@ function JournalEntryForm({
   }
 
   return (
-    <form onSubmit={submit} className="space-y-1">
+    <div className="space-y-1">
       <input
         type="text"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         maxLength={120}
         placeholder="Title (optional)"
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submit(); } }}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
       />
       <textarea
@@ -2073,7 +2090,8 @@ function JournalEntryForm({
             Cancel
           </button>
           <button
-            type="submit"
+            type="button"
+            onClick={() => { void submit(); }}
             disabled={busy || !bodyHtml.trim()}
             className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
           >
@@ -2082,6 +2100,6 @@ function JournalEntryForm({
         </div>
       </div>
       {err ? <div className="text-[10px] text-keep-accent">{err}</div> : null}
-    </form>
+    </div>
   );
 }

@@ -179,6 +179,15 @@ interface ChatState {
   kickReason: string | null;
   setKickReason: (r: string | null) => void;
   /**
+   * Per-tab active character id. Mirrored here (separately from the
+   * App.tsx local state) so any component or fetch can grab the
+   * current identity without prop-drilling. Friend + DM endpoints
+   * pass this as `?characterId=...` so the server scopes responses
+   * to the right identity. Null means "OOC / master."
+   */
+  activeCharacterId: string | null;
+  setActiveCharacterIdStore: (id: string | null) => void;
+  /**
    * Server-reported version observed by the periodic /auth/me poll when
    * it differs from the build version this tab loaded. When set, the
    * chat shell shows a sticky "you're running an old copy" banner
@@ -366,6 +375,8 @@ export const useChat = create<ChatState>((set) => ({
   setKickReason: (r) => set({ kickReason: r }),
   staleVersion: null,
   setStaleVersion: (v) => set({ staleVersion: v }),
+  activeCharacterId: null,
+  setActiveCharacterIdStore: (id) => set({ activeCharacterId: id }),
 
   currentRoomId: null,
   setCurrentRoom: (id) => set({ currentRoomId: id }),

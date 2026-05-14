@@ -30,7 +30,7 @@ import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./
 import { applyFontPrefs, applyTheme, themeStyle, type UiFontScale } from "./lib/theme.js";
 import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
 import { fire as fireNotification, shouldNotify, type NotifyPref } from "./lib/notifications.js";
-import { clearSessionToken } from "./lib/http.js";
+import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
 import { playAlert, playPing, playTap } from "./lib/sound.js";
 import { useChat, type SiteBranding } from "./state/store.js";
 
@@ -688,8 +688,19 @@ function Chat() {
   const [uiFontFamily, setUiFontFamily] = useState<string | null>(null);
   const [uiFontScale, setUiFontScale] = useState<UiFontScale | null>(null);
   const [characterTheme, setCharacterTheme] = useState<Theme | null>(null);
-  const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
+  const [activeCharacterId, setActiveCharacterIdLocal] = useState<string | null>(null);
   const [activeCharacterName, setActiveCharacterName] = useState<string | null>(null);
+  // Wrapper that mirrors local state into the Zustand store so any
+  // component / fetch can read the active identity via useChat. The
+  // friend + DM endpoints scope responses by this id (server filters
+  // on `?characterId=`); without this mirror they'd always default to
+  // OOC. Wrapped instead of dropping local state so we don't need to
+  // refactor every existing consumer of `activeCharacterId`.
+  const setActiveCharacterIdStore = useChat((s) => s.setActiveCharacterIdStore);
+  const setActiveCharacterId = (id: string | null) => {
+    setActiveCharacterIdLocal(id);
+    setActiveCharacterIdStore(id);
+  };
   const [notifyPref, setNotifyPref] = useState<NotifyPref>("mentions");
   // Per-user style override. `null` means "follow the site default";
   // applyStyle below resolves user > site > hardcoded fallback.
@@ -1237,17 +1248,18 @@ function Chat() {
      * never saw via socket.
      */
     function onConnect() {
-      fetch("/me/dms", { credentials: "include" })
+      // Both endpoints are identity-scoped on the server, so we pass
+      // the current active character (or nothing, for OOC). When the
+      // user switches characters, the activeCharacterId effect below
+      // re-fires onConnect's payload too.
+      const charId = useChat.getState().activeCharacterId;
+      fetch(withIdentityQuery("/me/dms", charId), { credentials: "include" })
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => {
           if (j && Array.isArray(j.conversations)) setDmConversations(j.conversations);
         })
         .catch(() => {});
-      // Pull pending friend requests too so the in-chat prompt + the
-      // DM pinned banner have something to render right away on a
-      // fresh load (a request that landed while the tab was offline
-      // would otherwise stay invisible until the next live event).
-      fetch("/me/friend-requests", { credentials: "include" })
+      fetch(withIdentityQuery("/me/friend-requests", charId), { credentials: "include" })
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => {
           if (j && Array.isArray(j.requests)) useChat.getState().setPendingFriendRequests(j.requests);
@@ -1276,7 +1288,8 @@ function Chat() {
       // /me/dms is bounded by the user's own DM count.
       const known = useChat.getState().dmConversations[message.conversationId];
       if (!known) {
-        fetch("/me/dms", { credentials: "include" })
+        const charId = useChat.getState().activeCharacterId;
+        fetch(withIdentityQuery("/me/dms", charId), { credentials: "include" })
           .then((r) => (r.ok ? r.json() : null))
           .then((j) => {
             if (j && Array.isArray(j.conversations)) setDmConversations(j.conversations);
@@ -1301,12 +1314,14 @@ function Chat() {
         const viewing = state.openDmOtherUserId === otherUserId;
         if (viewing && !isSelf) {
           // Mark read on the server so the next /me/dms refetch
-          // returns unreadCount=0 too.
+          // returns unreadCount=0 too. Carries the active character
+          // so the server-side identity auth on the read endpoint
+          // matches this conversation's pinned identity.
           fetch(`/me/dms/${known.id}/read`, {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ upTo: Date.now() }),
+            body: JSON.stringify({ upTo: Date.now(), characterId: state.activeCharacterId ?? undefined }),
           }).catch(() => {});
         }
         upsertDmConversation({
@@ -1340,7 +1355,7 @@ function Chat() {
       // of guessing from the payload. The in-chat prompt card and the
       // DM pinned banner both read from the store, so this single
       // fetch updates both surfaces atomically.
-      fetch("/me/friend-requests", { credentials: "include" })
+      fetch(withIdentityQuery("/me/friend-requests", useChat.getState().activeCharacterId), { credentials: "include" })
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => {
           if (j && Array.isArray(j.requests)) useChat.getState().setPendingFriendRequests(j.requests);
@@ -1615,7 +1630,7 @@ function Chat() {
     setOpenDmOtherUser(otherUserId);
     setMessagesOpen(true);
     // Best-effort cache warm so the modal's first paint is correct.
-    fetch("/me/dms", { credentials: "include" })
+    fetch(withIdentityQuery("/me/dms", useChat.getState().activeCharacterId), { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (j && Array.isArray(j.conversations)) setDmConversations(j.conversations);

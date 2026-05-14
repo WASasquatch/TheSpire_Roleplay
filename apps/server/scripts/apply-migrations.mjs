@@ -18,7 +18,7 @@ import Database from "better-sqlite3";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
-const dbUrl = process.env.DATABASE_URL ?? "./data/thekeep.sqlite";
+const dbUrl = process.env.SQLITE_PATH ?? process.env.DATABASE_URL ?? "./data/thekeep.sqlite";
 const dbPath = resolve(root, dbUrl);
 const dbDir = dirname(dbPath);
 if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });

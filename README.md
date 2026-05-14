@@ -64,6 +64,14 @@ The Messages modal has a resizable two-pane layout (drag the divider, double-cli
 
 Type `/help` for the full searchable reference with subcommand options. `/help <command>` jumps to a specific command's card. The Help modal also has a Guides tab with plain-language walkthroughs of every major feature, and a Formatting tab that doubles as the HTML allow-list reference for profile + world bios.
 
+### Thesaurus lookup
+
+Highlight any word in a chat composer, a DM input, or a forum thread / reply and a synonyms popup floats above the input — same UX shape as the `@`-mention completer. Arrow keys navigate, Enter or Tab accepts the highlighted synonym (replacing the selection in place), Esc dismisses, and clicking a result also accepts.
+
+The data is the public-domain **Moby Thesaurus + Open Office Thesaurus** corpus (~30k root words, hundreds of thousands of synonyms including short phrases), bundled in-process via the [`moby`](https://github.com/words/moby) npm package — no external API, no key, no rate-limit dependency. The server exposes a single `GET /thesaurus?word=<word>` endpoint (auth-gated, 60/min/IP, results capped at 50 per call). Lookups are synchronous hash hits, debounced 200ms client-side so a fast drag through a selection doesn't fire a request per pixel.
+
+Out-of-scope by design: definitions, antonyms, part-of-speech filtering. The point is "swap a word for a better word mid-roleplay," not full lexicography.
+
 ### Sound effects
 
 Three small audio cues, each individually toggleable in Profile → Privacy → Sound effects:

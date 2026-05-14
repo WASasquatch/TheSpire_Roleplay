@@ -220,11 +220,11 @@ const HTML_TAG_GROUPS: Array<{ label: string; tags: string[]; note?: string }> =
 
 const HTML_STYLE_PROPS: Array<{ prop: string; values: string }> = [
   { prop: "color, background-color", values: "#abc, #aabbcc, rgb(…), rgba(…)" },
-  { prop: "font-weight", values: "normal, bold, lighter, bolder, 100–900 (step 100)" },
+  { prop: "font-weight", values: "normal, bold, lighter, bolder, 100 to 900 (step 100)" },
   { prop: "font-style", values: "italic, normal, oblique" },
   { prop: "font-family", values: "any name list up to 200 chars" },
-  { prop: "font-size", values: "1–72px, 0.5–4em, 50–400%, or named (small/large/etc.)" },
-  { prop: "line-height", values: "0.0–3.9, or 10–69px" },
+  { prop: "font-size", values: "1 to 72px, 0.5 to 4em, 50 to 400%, or named (small/large/etc.)" },
+  { prop: "line-height", values: "0.0 to 3.9, or 10 to 69px" },
   { prop: "text-decoration", values: "underline, line-through, overline, none" },
   { prop: "text-align", values: "left, right, center, justify" },
   { prop: "list-style-type", values: "disc, circle, square, decimal, lower/upper-roman, lower/upper-alpha, none" },
@@ -235,11 +235,14 @@ function FormattingHelp() {
   return (
     <div className="space-y-3 text-xs">
       <p className="text-keep-muted">
-        Chat messages support a small subset of GitHub-flavored markdown.
-        Block-level features (headings, lists, tables, blockquotes) are
-        deliberately omitted - chat is single-line content. Profile bios,
-        world pages, and admin HTML use a separate, richer allow-list —
-        see the Profile / World HTML section below.
+        Chat messages support a small set of formatting shortcuts.
+        Headings, lists, tables, and other big-block stuff stays off
+        in chat. Profile and world pages can use more (see the
+        Profile / world HTML section below).
+      </p>
+      <p className="text-[11px] text-keep-muted">
+        Tip: highlight a word in any text box to see synonyms.
+        Up/Down to choose, Enter to swap, Esc to close.
       </p>
 
       <div className="overflow-hidden rounded border border-keep-border">
@@ -277,12 +280,11 @@ function FormattingHelp() {
           Profile / world HTML
         </h3>
         <p className="text-keep-muted">
-          Bio fields on profiles + world pages accept HTML, not Markdown.
-          Saved content runs through <code className="font-mono text-keep-action">sanitize-html</code>;
-          anything outside the allow-list below is silently stripped.
-          Event handlers (<code className="font-mono text-keep-action">onclick=</code>, etc.) and the
-          <code className="font-mono text-keep-action">javascript:</code> /{" "}
-          <code className="font-mono text-keep-action">data:</code> URL schemes are blocked.
+          On profiles and world pages, you can use a small set of HTML
+          tags to lay out your text. Plain typing works too. Anything
+          on the list below is fine to use; anything else is dropped
+          when you save. The list keeps things safe so nothing weird
+          can run on other people's screens.
         </p>
 
         <div className="mt-2 overflow-hidden rounded border border-keep-border">
@@ -316,23 +318,14 @@ function FormattingHelp() {
         </div>
 
         <p className="mt-3 text-keep-muted">
-          Every allowed tag accepts <code className="font-mono text-keep-action">class</code>,
-          <code className="font-mono text-keep-action">style</code>,
-          and <code className="font-mono text-keep-action">title</code> attributes. A few elements
-          accept more:
-          <code className="font-mono text-keep-action">a</code> takes
-          <code className="font-mono text-keep-action">href</code>;
-          <code className="font-mono text-keep-action">img</code> takes
-          <code className="font-mono text-keep-action">src/alt/width/height</code>;
-          table cells take <code className="font-mono text-keep-action">colspan/rowspan</code>;
-          <code className="font-mono text-keep-action">{"<details>"}</code> takes
-          <code className="font-mono text-keep-action">open</code>. All
-          outbound <code className="font-mono text-keep-action">{"<a>"}</code> links open in a new
-          tab with <code className="font-mono text-keep-action">rel="noopener noreferrer ugc"</code>.
+          You can also add a small bit of styling using a{" "}
+          <code className="font-mono text-keep-action">style</code> on
+          any tag. The properties you can change are listed below.
+          Links open in a new tab automatically.
         </p>
 
         <h4 className="mt-3 font-action text-xs uppercase tracking-widest text-keep-muted">
-          Inline CSS via style="…"
+          Styling you can use
         </h4>
         <div className="mt-1 overflow-hidden rounded border border-keep-border">
           <table className="w-full text-[12px]">
@@ -370,8 +363,8 @@ function FormattingHelp() {
   <p>Grief, violence (no on-screen without buy-in).</p>
 </details>`}</pre>
         <p className="mt-1 text-[10px] text-keep-muted">
-          The <b>Profile creation</b> guide on the Guides tab has more
-          worked examples and walks through every editor tab.
+          The <b>Building a profile</b> guide on the Guides tab walks
+          through the editor step by step with more examples.
         </p>
       </div>
 

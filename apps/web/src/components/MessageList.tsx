@@ -2051,8 +2051,18 @@ function Line({
   //     `group-focus-within` on desktop so a tab-navigating user can
   //     reveal the controls without a mouse.
   const hasControls = showBookmark || showOwnControls || (showReport && !showOwnControls);
+  // On mobile we normally keep the controls hidden until the row gains
+  // focus-within (a tap) so the timeline stays uncluttered. The author's
+  // own edit/delete row is the exception: hiding it behind a tap was
+  // making people think the controls didn't exist. When `showOwnControls`
+  // is true, the wrapper is always-flex on mobile so edit/delete are
+  // visible on the row without an extra interaction. Other people's
+  // messages keep the tap-to-reveal behavior.
+  const controlsClass = showOwnControls
+    ? "flex justify-end gap-1 mt-0.5 md:contents"
+    : "hidden group-focus-within:flex justify-end gap-1 mt-0.5 md:contents";
   const controls = hasControls ? (
-    <div className="hidden group-focus-within:flex justify-end gap-1 mt-0.5 md:contents">
+    <div className={controlsClass}>
       {showBookmark ? <BookmarkButton msg={msg} /> : null}
       {showOwnControls ? <OwnControls msg={msg} /> : null}
       {showReport && !showOwnControls ? <ReportButton msg={msg} /> : null}
@@ -2270,7 +2280,13 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
   }
 
   return (
-    <span className="inline-flex gap-1 md:absolute md:right-0 md:top-0 md:invisible md:group-hover:visible">
+    // Always visible (no hover gate). The caller only renders <OwnControls>
+    // when `showOwnControls` is true, which already means "your own message,
+    // still within the 60s grace window, chat-style kind." Hiding the edit
+    // button behind a hover trigger turned that into a discoverability
+    // black hole — people kept reporting the option was missing because
+    // they didn't think to mouse over their own messages to find it.
+    <span className="inline-flex gap-1 md:absolute md:right-0 md:top-0">
       <button
         type="button"
         onClick={() => { setDraft(msg.body); setEditing(true); }}

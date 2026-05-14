@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import type { Role } from "@thekeep/shared";
+import { type Role, VERSION } from "@thekeep/shared";
 import { sessions, users } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../auth/passwords.js";
 import { getSettings } from "../settings.js";
@@ -338,7 +338,13 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       reply.code(401);
       return { error: "not authenticated" };
     }
-    return { id: user.id, username: user.username, role: user.role };
+    // `version` rides on every /auth/me poll so the client can detect a
+    // post-deploy version drift. The web bundle stamps the build's
+    // VERSION at compile time; after a deploy the running server reports
+    // the new version while the user's still-loaded tab reports the old
+    // one. The 60s poll cadence is fast enough that a fresh deploy
+    // surfaces a "please refresh" hint within a minute.
+    return { id: user.id, username: user.username, role: user.role, version: VERSION };
   });
 }
 

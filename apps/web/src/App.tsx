@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, WorldDetail } from "@thekeep/shared";
-import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
+import { DEFAULT_THEME, normalizeTheme, VERSION } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
 import { SplashLanding } from "./components/SplashLanding.js";
@@ -78,11 +78,23 @@ export function App() {
         // tab open inherits a dead token and the user wonders why every
         // request bounces them back to the splash.
         if (r.status === 401) clearSessionToken();
-        return r.ok ? (r.json() as Promise<{ id: string; username: string; role: Role }>) : null;
+        return r.ok
+          ? (r.json() as Promise<{ id: string; username: string; role: Role; version?: string }>)
+          : null;
       })
       .then((j) => {
         if (cancelled) return;
-        if (j) setMe({ id: j.id, username: j.username, role: j.role });
+        if (j) {
+          setMe({ id: j.id, username: j.username, role: j.role });
+          // Detect a post-deploy version drift on the very first probe.
+          // If the user opened this tab before a deploy, the bundle they
+          // loaded reports an older VERSION than the live server, and
+          // we surface that immediately rather than waiting up to 60s
+          // for the backstop poll.
+          if (j.version && j.version !== VERSION) {
+            useChat.getState().setStaleVersion(j.version);
+          }
+        }
         setAuthChecked(true);
       })
       .catch(() => {
@@ -112,6 +124,16 @@ export function App() {
           setKickReason("Your session expired due to inactivity. Please log in again.");
           disconnectSocket();
           setMe(null);
+          return;
+        }
+        // Post-deploy version drift detection. The bundle the user
+        // loaded stamps a build-time VERSION; the live server reports
+        // the current one in /auth/me. When they diverge, the user is
+        // on an outdated copy and should refresh — the stale-version
+        // banner in the chat shell offers a one-click Refresh.
+        const j = (await r.json()) as { version?: string };
+        if (j.version && j.version !== VERSION) {
+          useChat.getState().setStaleVersion(j.version);
         }
       } catch { /* network blip - ignore */ }
     }, 60_000);
@@ -1797,6 +1819,7 @@ function Chat() {
         onOpenRules={() => setRulesOpen(true)}
         {...(me?.role === "admin" ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
+      <StaleVersionBanner />
       {room?.linkedWorld ? (
         <button
           type="button"
@@ -2278,6 +2301,37 @@ function Toast({ notice, onDismiss }: { notice: { code: string; message: string 
     <div className="pointer-events-none fixed bottom-16 left-1/2 z-30 -translate-x-1/2 max-w-[80vw] rounded border border-keep-rule bg-keep-parchment px-3 py-2 text-sm shadow">
       <span className="text-keep-muted">[{notice.code}]</span>{" "}
       <span className="whitespace-pre-wrap">{notice.message}</span>
+    </div>
+  );
+}
+
+/**
+ * Sticky "you're on an old version, please refresh" banner. Mounted in
+ * the chat shell just under the main Banner so it's the first thing
+ * users see across the top of the page when a drift is detected. The
+ * Refresh button does a hard reload so the browser pulls the new
+ * index.html and (transitively) the new asset bundle. The banner
+ * stays put until refresh — no dismiss button on purpose, because
+ * dismissing it would just hide the very thing the user needs to act
+ * on. The 60s /auth/me poll keeps the comparison fresh, so a deploy
+ * surfaces this within a minute of landing.
+ */
+function StaleVersionBanner() {
+  const staleVersion = useChat((s) => s.staleVersion);
+  const siteName = useChat((s) => s.branding.siteName);
+  if (!staleVersion) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-2 border-b border-keep-action/40 bg-keep-action/15 px-3 py-1.5 text-xs text-keep-text">
+      <span>
+        You're running <b>{siteName} {VERSION}</b>. The current version is <b>{staleVersion}</b>. Please refresh to update.
+      </span>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="rounded border border-keep-action bg-keep-action/20 px-2 py-0.5 text-xs font-semibold text-keep-action hover:bg-keep-action/30"
+      >
+        Refresh
+      </button>
     </div>
   );
 }

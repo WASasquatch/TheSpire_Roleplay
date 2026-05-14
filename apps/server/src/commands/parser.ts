@@ -50,6 +50,25 @@ function tokenize(s: string): string[] {
 
 export function parseInput(raw: string): ParsedInput {
   const text = raw.trimStart();
+
+  /**
+   * `:` action shortcut. ":walks in casually" is parsed as if the user
+   * had typed "/me walks in casually" — no space required after the
+   * colon, the action body is everything after it. Mirrors the muscle-
+   * memory shortcut from older RP clients (IRC's `/me`, MUD `:`) so
+   * pose-heavy users don't need a 3-character prefix per line.
+   *
+   * "::text" escapes to a literal say starting with a single colon —
+   * same posture as "//foo" escaping a literal slash.
+   */
+  if (text.startsWith(":")) {
+    if (text.startsWith("::")) {
+      return { command: null, argsText: text.slice(1), args: [] };
+    }
+    const body = text.slice(1);
+    return { command: "me", argsText: body, args: tokenize(body) };
+  }
+
   if (!text.startsWith("/")) {
     return { command: null, argsText: raw, args: [] };
   }

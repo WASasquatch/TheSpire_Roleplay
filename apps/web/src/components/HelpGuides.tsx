@@ -212,6 +212,12 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode }> = [
             Anything not starting with <K>/</K> is a normal "say" message. Wrap a sentence in
             <K>/me {`<action>`}</K> to post a third-person action ("Sigrid draws her sword.").
           </li>
+          <li>
+            Quick action shortcut: start a line with <K>:</K> and the rest
+            becomes an action. <K>:walks in casually</K> is the same as
+            <K>/me walks in casually</K>. If you actually want to start a
+            message with a colon, type two: <K>::like this</K>.
+          </li>
         </Bullets>
 
         <Heading>Editing &amp; deleting your own messages</Heading>

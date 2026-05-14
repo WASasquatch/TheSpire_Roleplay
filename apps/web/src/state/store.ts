@@ -178,6 +178,15 @@ interface ChatState {
    */
   kickReason: string | null;
   setKickReason: (r: string | null) => void;
+  /**
+   * Server-reported version observed by the periodic /auth/me poll when
+   * it differs from the build version this tab loaded. When set, the
+   * chat shell shows a sticky "you're running an old copy" banner
+   * with a Refresh button. Cleared on reload (the tab fetches the
+   * fresh bundle and the comparison stops mismatching).
+   */
+  staleVersion: string | null;
+  setStaleVersion: (v: string | null) => void;
 
   currentRoomId: string | null;
   setCurrentRoom: (id: string | null) => void;
@@ -355,6 +364,8 @@ export const useChat = create<ChatState>((set) => ({
   setAuthChecked: (b) => set({ authChecked: b }),
   kickReason: null,
   setKickReason: (r) => set({ kickReason: r }),
+  staleVersion: null,
+  setStaleVersion: (v) => set({ staleVersion: v }),
 
   currentRoomId: null,
   setCurrentRoom: (id) => set({ currentRoomId: id }),

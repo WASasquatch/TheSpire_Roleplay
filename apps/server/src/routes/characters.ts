@@ -63,12 +63,24 @@ const httpUrl = z.string().url().max(500).refine(
 // tune it without redeploys.
 const BIO_HARD_CAP = 200_000;
 
+/** `#rrggbb` or `#rgb` literal. Used by chat-color fields on both master and character. */
+const hexColor = z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "color must be a hex like #990000 or #abc");
+
 const updateBody = z.object({
   bioHtml: z.string().max(BIO_HARD_CAP).optional(),
   stats: statsSchema.optional(),
   avatarUrl: httpUrl.nullable().optional(),
   /** null = inherit master/default theme */
   theme: themeSchema.nullable().optional(),
+  /**
+   * Per-character chat color override. Null = inherit the master
+   * account's chat color (existing behavior). When set, messages
+   * authored AS this character render in this color regardless of the
+   * tab's `/color` state — so Character A and Character B can keep
+   * distinct chat colors under one account without having to
+   * re-issue `/color` after every `/char switch`.
+   */
+  chatColor: hexColor.nullable().optional(),
   /** Public visibility - anonymous viewers can fetch this character. */
   isPublic: z.boolean().optional(),
   /** NSFW gate: forces non-public to anonymous + adds a viewer warning splash. */
@@ -110,6 +122,12 @@ const masterUpdateBody = z.object({
   soundDmEnabled: z.boolean().optional(),
   soundChatEnabled: z.boolean().optional(),
   soundAlertEnabled: z.boolean().optional(),
+  /**
+   * Master / OOC chat color. Drives the chat color for OOC messages
+   * AND acts as the fallback for any character whose own chat color
+   * is null. Null = system default.
+   */
+  chatColor: hexColor.nullable().optional(),
   isPublic: z.boolean().optional(),
   isNsfw: z.boolean().optional(),
 });
@@ -173,10 +191,31 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
           ...(body.theme !== undefined
             ? { themeJson: body.theme === null ? null : JSON.stringify(body.theme) }
             : {}),
+          // Chat color is partial-update friendly: a present `null` clears
+          // the override (character falls back to master); a present hex
+          // sets it; an absent key leaves the existing value alone. The
+          // same shape the rest of this body uses.
+          ...(body.chatColor !== undefined ? { chatColor: body.chatColor } : {}),
           ...(body.isPublic !== undefined || body.isNsfw !== undefined ? { isPublic, isNsfw } : {}),
           updatedAt: new Date(),
         })
         .where(eq(characters.id, c.id));
+      // If the character's chat color changed, every room this user is
+      // currently parked in needs its userlist re-broadcast so other
+      // viewers see the new color metadata on the occupant row. Mirrors
+      // the broadcast the /color slash command already does — without
+      // this, a color set via the editor only shows up to others on
+      // their next message-driven render.
+      if (body.chatColor !== undefined) {
+        const sockets = await io.fetchSockets();
+        const rooms = new Set<string>();
+        for (const s of sockets) {
+          if ((s.data as { userId?: string }).userId !== c.userId) continue;
+          for (const r of s.rooms) if (r.startsWith("room:")) rooms.add(r.slice(5));
+        }
+        const { broadcastPresence } = await import("../realtime/broadcast.js");
+        for (const roomId of rooms) await broadcastPresence(io, db, roomId);
+      }
       return { ok: true };
     },
   );
@@ -602,9 +641,27 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         ...(body.soundDmEnabled !== undefined ? { soundDmEnabled: body.soundDmEnabled } : {}),
         ...(body.soundChatEnabled !== undefined ? { soundChatEnabled: body.soundChatEnabled } : {}),
         ...(body.soundAlertEnabled !== undefined ? { soundAlertEnabled: body.soundAlertEnabled } : {}),
+        // Master chat color. Mirrors the `/color` slash command's
+        // master-scope write — this is the value that drives OOC
+        // messages and acts as the fallback for any character whose
+        // own override is null. Partial update (null clears, hex sets,
+        // absent leaves alone).
+        ...(body.chatColor !== undefined ? { chatColor: body.chatColor } : {}),
         ...(body.isPublic !== undefined || body.isNsfw !== undefined ? { isPublic, isNsfw } : {}),
       })
       .where(eq(users.id, me.id));
+    if (body.chatColor !== undefined) {
+      // Same userlist re-broadcast as the character PUT does — keeps
+      // every viewer's occupant row in sync with the new color metadata.
+      const sockets = await io.fetchSockets();
+      const rooms = new Set<string>();
+      for (const s of sockets) {
+        if ((s.data as { userId?: string }).userId !== me.id) continue;
+        for (const r of s.rooms) if (r.startsWith("room:")) rooms.add(r.slice(5));
+      }
+      const { broadcastPresence } = await import("../realtime/broadcast.js");
+      for (const roomId of rooms) await broadcastPresence(io, db, roomId);
+    }
     return { ok: true };
   });
 }

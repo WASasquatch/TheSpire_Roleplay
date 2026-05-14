@@ -38,6 +38,10 @@ interface FriendRequestEntry {
   username: string;
   displayName: string;
   avatarUrl: string | null;
+  /** Sender's character id on this request; null = they sent it as their master/OOC handle. */
+  frienderCharacterId: string | null;
+  /** My (receiver) character id when the request was fetched; null = OOC inbox. */
+  friendedCharacterId: string | null;
   createdAt: number;
 }
 
@@ -409,20 +413,48 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
     return () => { setOpenDmOtherUser(null); };
   }, [selectedUserId, setOpenDmOtherUser, upsertDmConversation]);
 
-  function acceptRequest(r: FriendRequestEntry) {
-    onCommand(`/accept ${r.username}`);
-    // Optimistic removal from the store: the chat-level prompt card
-    // and the DM thread's bottom banner both read from the same
-    // pendingFriendRequests list, so dropping the row here clears
-    // every surface in one render. The refreshKey bump below also
-    // re-pulls /me/friend-requests as a backstop.
+  // Accept/decline route through identity-keyed endpoints, NOT the
+  // `/accept <name>` / `/decline <name>` slash commands. Reason:
+  // `resolveIdentityByName` on the server resolves master-first, so a
+  // request whose sender was on a character with the same name as a
+  // master account never matched the row — the row stayed pending and
+  // the UI looped on a banner that wouldn't clear. The new endpoints
+  // operate on the exact (frienderUserId, frienderCharacterId,
+  // friendedCharacterId) tuple carried in the inbox payload, so no
+  // name disambiguation is needed.
+  async function acceptRequest(r: FriendRequestEntry) {
+    // Optimistic removal: every surface (this inbox, the chat-level
+    // prompt card, the DM thread's bottom banner) reads from the
+    // shared pendingFriendRequests store, so dropping the row here
+    // clears them all in one render.
     removePendingFriendRequest(r.userId);
-    window.setTimeout(() => setRefreshKey((v) => v + 1), 500);
+    try {
+      await fetch(`/me/friend-requests/${encodeURIComponent(r.userId)}/accept`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          frienderCharacterId: r.frienderCharacterId ?? undefined,
+          characterId: r.friendedCharacterId ?? undefined,
+        }),
+      });
+    } catch { /* refresh below will resync */ }
+    window.setTimeout(() => setRefreshKey((v) => v + 1), 200);
   }
-  function declineRequest(r: FriendRequestEntry) {
-    onCommand(`/decline ${r.username}`);
+  async function declineRequest(r: FriendRequestEntry) {
     removePendingFriendRequest(r.userId);
-    window.setTimeout(() => setRefreshKey((v) => v + 1), 500);
+    try {
+      await fetch(`/me/friend-requests/${encodeURIComponent(r.userId)}/decline`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          frienderCharacterId: r.frienderCharacterId ?? undefined,
+          characterId: r.friendedCharacterId ?? undefined,
+        }),
+      });
+    } catch { /* refresh below will resync */ }
+    window.setTimeout(() => setRefreshKey((v) => v + 1), 200);
   }
   function removeFriend(f: FriendListEntry) {
     if (!window.confirm(`Remove ${f.displayName} from your friends list?`)) return;
@@ -1324,8 +1356,21 @@ function ThreadPane({
             <button
               type="button"
               onClick={() => {
-                onCommand(`/accept ${pendingFromThisUser.username}`);
-                removePendingFriendRequest(pendingFromThisUser.userId);
+                // Identity-keyed accept (see MessagesModal.acceptRequest
+                // for the rationale — name-based lookup loops forever
+                // when the sender was on a character whose name collides
+                // with a master account).
+                const r = pendingFromThisUser;
+                removePendingFriendRequest(r.userId);
+                void fetch(`/me/friend-requests/${encodeURIComponent(r.userId)}/accept`, {
+                  method: "POST",
+                  credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    frienderCharacterId: r.frienderCharacterId ?? undefined,
+                    characterId: r.friendedCharacterId ?? undefined,
+                  }),
+                }).catch(() => {});
               }}
               className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg hover:bg-keep-action/90"
             >
@@ -1334,8 +1379,17 @@ function ThreadPane({
             <button
               type="button"
               onClick={() => {
-                onCommand(`/decline ${pendingFromThisUser.username}`);
-                removePendingFriendRequest(pendingFromThisUser.userId);
+                const r = pendingFromThisUser;
+                removePendingFriendRequest(r.userId);
+                void fetch(`/me/friend-requests/${encodeURIComponent(r.userId)}/decline`, {
+                  method: "POST",
+                  credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    frienderCharacterId: r.frienderCharacterId ?? undefined,
+                    characterId: r.friendedCharacterId ?? undefined,
+                  }),
+                }).catch(() => {});
               }}
               className="rounded border border-keep-border bg-keep-bg px-3 py-1 text-xs uppercase tracking-widest text-keep-muted hover:bg-keep-panel hover:text-keep-text"
             >

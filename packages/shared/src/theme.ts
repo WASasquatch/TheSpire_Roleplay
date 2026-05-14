@@ -128,6 +128,54 @@ export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
   },
 ];
 
+/**
+ * Theme color "slots" that a custom-command author can target instead
+ * of a literal hex. Stored on a message as `theme:<slot>` and
+ * resolved at render time to whatever the VIEWER's theme defines as
+ * that slot. This way a "Looks like a system message" command keeps
+ * the right visual identity for every reader, regardless of their
+ * personal theme.
+ *
+ * Only the text-tone slots are exposed — `bg`, `panel`, `border` are
+ * structural and would render as invisible-on-itself text.
+ */
+export const THEMEABLE_TEXT_SLOTS = ["system", "action", "accent", "muted", "text"] as const;
+export type ThemeableTextSlot = (typeof THEMEABLE_TEXT_SLOTS)[number];
+
+/** Matches a stored color token like `theme:system`. */
+const THEME_COLOR_TOKEN_RE = /^theme:([a-z]+)$/;
+
+/**
+ * Pattern admin endpoints use to validate a custom-command color
+ * coming in over the wire. Accepts a `#rrggbb` literal OR a
+ * `theme:<slot>` token referencing one of {@link THEMEABLE_TEXT_SLOTS}.
+ */
+export const COLOR_TOKEN_OR_HEX_RE = new RegExp(
+  `^(?:#[0-9a-fA-F]{6}|theme:(?:${THEMEABLE_TEXT_SLOTS.join("|")}))$`,
+);
+
+/**
+ * Resolve a stored message color to a CSS color value the client can
+ * drop into `style={{ color: ... }}`. Returns:
+ *   - `undefined` for null/empty (the renderer falls back to default)
+ *   - `rgb(var(--keep-<slot>))` for `theme:<slot>` tokens, so the
+ *     viewer's theme palette drives the value
+ *   - the literal string for everything else (e.g. `#990000`)
+ *
+ * The CSS-variable form depends on the web app exposing each theme
+ * slot as `--keep-<slot>` in the format `R G B` (space-separated rgb
+ * channels). The Vite app already does this — see `lib/theme.ts`'s
+ * `applyTheme` which sets each slot via `setProperty`.
+ */
+export function resolveMessageColor(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  const m = THEME_COLOR_TOKEN_RE.exec(raw);
+  if (m && (THEMEABLE_TEXT_SLOTS as readonly string[]).includes(m[1]!)) {
+    return `rgb(var(--keep-${m[1]}))`;
+  }
+  return raw;
+}
+
 /** Tolerant of partial/legacy data - anything missing falls back to default. */
 export function normalizeTheme(input: unknown): Theme {
   if (!input || typeof input !== "object") return DEFAULT_THEME;

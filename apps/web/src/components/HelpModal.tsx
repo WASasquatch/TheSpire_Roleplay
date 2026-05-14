@@ -3,6 +3,7 @@ import type { CommandDoc } from "@thekeep/shared";
 import { parseInline } from "../lib/markdown.js";
 import { HelpGuides } from "./HelpGuides.js";
 import { Modal } from "./Modal.js";
+import { useChat } from "../state/store.js";
 
 interface Props {
   /** Initial filter - pre-fills the search box (e.g. /help char). */
@@ -30,6 +31,12 @@ export function HelpModal({ initialFilter, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  // Keyed on `commandsVersion` so the App-level listener for the
+  // server's `commands:updated` broadcast forces a refetch when an
+  // admin edits a custom command while this modal is already open
+  // (or about to open). Without the key, a freshly-added command
+  // wouldn't show up in the help list until a full tab reload.
+  const commandsVersion = useChat((s) => s.commandsVersion);
   useEffect(() => {
     let cancelled = false;
     fetch("/commands", { credentials: "include" })
@@ -40,7 +47,7 @@ export function HelpModal({ initialFilter, onClose }: Props) {
       .then((j) => { if (!cancelled) setCommands(j.commands); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "load failed"); });
     return () => { cancelled = true; };
-  }, []);
+  }, [commandsVersion]);
 
   // Focus the search input on open so / typing into the modal just works.
   // Only fires on the Commands tab - the Formatting tab has no search box.
@@ -179,6 +186,7 @@ const FORMATTING_ROWS: Array<{ syntax: string; example: string; note?: string }>
   { syntax: "https://.../photo.png", example: "screenshot: https://example.com/screenshot.png", note: "image URLs ending in png/jpg/jpeg/gif/webp/svg/bmp/avif also get the Show image toggle" },
   { syntax: "@username", example: "thanks @sigrid!", note: "click to open their profile; matches a master account or active character" },
   { syntax: "@world:slug", example: "anyone for a game in @world:ironreach?", note: "click to open the world viewer; slug is the world's URL slug (lowercase + hyphens)" },
+  { syntax: "\\* escape", example: "\\*boinks Kaal on the head\\*", note: "put a backslash before a markdown character (* _ ~ | ` etc.) to keep it literal — useful for old-school IRC-style actions where you want the asterisks to show" },
 ];
 
 /**

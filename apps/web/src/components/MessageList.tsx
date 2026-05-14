@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { ChatMessage, RoomOccupant, ThreadCategory } from "@thekeep/shared";
+import { resolveMessageColor, type ChatMessage, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
 import { UserNameTag } from "./UserNameTag.js";
 import type { Gender } from "../lib/gender.js";
 import { parseInline, renderForumBody } from "../lib/markdown.js";
@@ -1350,7 +1350,7 @@ export function ForumPostBody({
                 "rounded font-semibold text-keep-text hover:text-keep-action " +
                 (isSenderAdmin ? "italic" : "")
               }
-              style={msg.color ? { color: msg.color } : undefined}
+              style={resolveMessageColor(msg.color) ? { color: resolveMessageColor(msg.color)! } : undefined}
             >
               {msg.displayName}
             </button>
@@ -2052,7 +2052,7 @@ function Line({
   switch (msg.kind) {
     case "me":
       lineEl = (
-        <div className="font-action" style={msg.color ? { color: msg.color } : { color: "rgb(var(--keep-action))" }}>
+        <div className="font-action" style={{ color: resolveMessageColor(msg.color) ?? "rgb(var(--keep-action))" }}>
           {time}{tag} <span className="whitespace-pre-wrap">{renderedBody}</span>{editedBadge}
         </div>
       );
@@ -2160,7 +2160,7 @@ function Line({
     default:
       lineEl = (
         <div>
-          {time}[{tag}] <span className="whitespace-pre-wrap" style={msg.color ? { color: msg.color } : undefined}>{renderedBody}</span>{editedBadge}
+          {time}[{tag}] <span className="whitespace-pre-wrap" style={resolveMessageColor(msg.color) ? { color: resolveMessageColor(msg.color)! } : undefined}>{renderedBody}</span>{editedBadge}
         </div>
       );
       break;

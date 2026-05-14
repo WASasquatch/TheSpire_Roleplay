@@ -1,3 +1,4 @@
+import { resolveMessageColor } from "@thekeep/shared";
 import type { Gender } from "../lib/gender.js";
 import { genderGlyph } from "../lib/gender.js";
 
@@ -56,6 +57,10 @@ export function UserNameTag({
   ooc,
 }: Props) {
   const g = genderGlyph(gender);
+  // Resolve theme-slot tokens (e.g. `theme:system`) to a CSS color
+  // that follows the viewer's palette; literal hex strings pass
+  // through unchanged.
+  const resolvedColor = resolveMessageColor(color);
   return (
     <span className="inline-flex items-baseline gap-1">
       {rolePrefix ? <span className="text-keep-muted">{rolePrefix}</span> : null}
@@ -80,7 +85,7 @@ export function UserNameTag({
           (away && awayMessage ? ` (away: ${awayMessage})` : "")
         }
         className={`rounded px-1 py-0.5 font-semibold hover:bg-keep-panel hover:underline${italic ? " italic" : ""}`}
-        style={color ? { color } : undefined}
+        style={resolvedColor ? { color: resolvedColor } : undefined}
       >
         {displayName}
       </button>

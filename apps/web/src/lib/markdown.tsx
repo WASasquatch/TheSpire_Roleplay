@@ -205,7 +205,31 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
   };
 }
 
+/**
+ * Markdown-significant characters that a leading backslash can escape.
+ * Covers every delimiter `tryToken` would otherwise consume — asterisk,
+ * underscore, tilde, pipe, backtick, the link/image brackets, the HTML
+ * tag opener, and the backslash itself (so users can type a literal `\`
+ * without it being read as the start of an escape). This is what lets
+ * old-school IRC-style actions like `\*boinks Kaal\*` survive into the
+ * rendered line with their asterisks intact.
+ */
+const MD_ESCAPABLE = new Set("*_~|`[]()!<>\\");
+
 function tryToken(text: string, i: number, depth: number): TokenMatch | null {
+  // Backslash escape: `\X` where X is a markdown-special char renders
+  // as the literal X with the backslash itself stripped. Highest-
+  // priority check so an escape always wins over the matching
+  // delimiter's normal interpretation, regardless of context (italic,
+  // bold, code, etc.). A lone trailing backslash falls through and
+  // renders as itself via the plain-text path.
+  if (text[i] === "\\") {
+    const next = text[i + 1];
+    if (next && MD_ESCAPABLE.has(next)) {
+      return { end: i + 2, node: next };
+    }
+  }
+
   // Check HTML tag aliases before markdown tokens. Cheap (single-char
   // discriminator on `<`) and lets `<b>x</b>` win over any markdown
   // delimiter that happens to be inside it.

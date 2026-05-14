@@ -95,6 +95,24 @@ export const whisperCommand: CommandHandler = {
       if (c && !c.deletedAt) targetDisplayName = c.name;
     }
 
+    // Effective sender color. When in-character, prefer the active
+    // character's own chat_color so a whisper from Char A renders in
+    // Char A's red even though `ctx.user.chatColor` (the master's
+    // snapshot) is null or some other OOC color. Mirrors the
+    // character-first/master-fallback logic addMessage uses for room
+    // messages, so whisper and say lines from the same character agree
+    // on color.
+    let senderColor: string | null = ctx.user.chatColor;
+    if (ctx.user.activeCharacterId) {
+      const { characters } = await import("../../db/schema.js");
+      const cc = (await ctx.db
+        .select({ chatColor: characters.chatColor })
+        .from(characters)
+        .where(eq(characters.id, ctx.user.activeCharacterId))
+        .limit(1))[0];
+      senderColor = cc?.chatColor ?? ctx.user.chatColor;
+    }
+
     const id = nanoid();
     const now = new Date();
     await ctx.db.insert(messages).values({
@@ -107,7 +125,7 @@ export const whisperCommand: CommandHandler = {
       body,
       toUserId: target.id,
       toDisplayName: targetDisplayName,
-      color: ctx.user.chatColor,
+      color: senderColor,
     });
 
     const out: ChatMessage = {
@@ -118,7 +136,7 @@ export const whisperCommand: CommandHandler = {
       displayName: ctx.user.displayName,
       kind: "whisper",
       body,
-      color: ctx.user.chatColor,
+      color: senderColor,
       createdAt: +now,
       toUserId: target.id,
       toDisplayName: targetDisplayName,

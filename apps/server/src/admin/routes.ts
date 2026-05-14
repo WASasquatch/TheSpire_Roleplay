@@ -19,7 +19,7 @@ import {
   users,
   worlds,
 } from "../db/schema.js";
-import type { AuditEntry, Role } from "@thekeep/shared";
+import { COLOR_TOKEN_OR_HEX_RE, type AuditEntry, type Role } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import type { CommandRegistry } from "../commands/registry.js";
 import {
@@ -787,8 +787,18 @@ export async function registerAdminRoutes(
     description: z.string().max(200).optional(),
     aliases: z.array(z.string().min(1).max(32).regex(/^[a-z][a-z0-9_-]*$/i)).max(20).optional(),
     enabled: z.boolean().optional(),
-    /** Pass null to clear; pass a hex like "#990000" to override. */
-    color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "color must be a 6-digit hex like #990000").nullable().optional(),
+    /**
+     * Pass null to clear; pass a hex like `#990000` to fix a literal
+     * color; or pass `theme:<slot>` (slot ∈ system / action / accent /
+     * muted / text) to follow the viewer's theme palette. Theme tokens
+     * mean an "alert" command keeps the right visual identity for
+     * every reader regardless of which palette they've chosen.
+     */
+    color: z
+      .string()
+      .regex(COLOR_TOKEN_OR_HEX_RE, "color must be a 6-digit hex like #990000 or a theme:<slot> token")
+      .nullable()
+      .optional(),
   });
 
   app.get("/admin/custom-commands", async () => {
@@ -836,6 +846,10 @@ export async function registerAdminRoutes(
       );
     }
     await registry.reloadCustom(db);
+    // Hot-reload every connected client's autocomplete + help cache —
+    // otherwise a brand-new command stays invisible until each user
+    // refreshes their tab.
+    io.emit("commands:updated");
     await recordAudit(db, {
       actorUserId: sessionUser.id,
       action: "custom_command_create",
@@ -879,6 +893,7 @@ export async function registerAdminRoutes(
         }
       }
       await registry.reloadCustom(db);
+      io.emit("commands:updated");
       const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
       await recordAudit(db, {
         actorUserId: sessionUser.id,
@@ -893,6 +908,7 @@ export async function registerAdminRoutes(
     const existing = (await db.select().from(customCommands).where(eq(customCommands.id, req.params.id)).limit(1))[0];
     await db.delete(customCommands).where(eq(customCommands.id, req.params.id));
     await registry.reloadCustom(db);
+    io.emit("commands:updated");
     const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
     await recordAudit(db, {
       actorUserId: sessionUser.id,

@@ -11,6 +11,7 @@ import {
 import type { CommandDoc, RoomOccupant, ThreadCategory } from "@thekeep/shared";
 import { CompleterPopup, type CompletionItem } from "./CompleterPopup.js";
 import { SynonymPopup } from "./SynonymPopup.js";
+import { useChat } from "../state/store.js";
 
 interface Props {
   value: string;
@@ -328,9 +329,14 @@ export function Composer({
       ? selectedCategoryId
       : null;
 
-  // Cache the command list. Fetched once per session; HelpModal hits the
-  // same endpoint when opened, but the duplicated cost is negligible.
+  // Cache the command list. Fetched per mount + whenever
+  // `commandsVersion` bumps (the App-level socket listener bumps it
+  // on `commands:updated` from the server, fired by every admin
+  // custom-command edit). Without the version key, a brand-new
+  // command would stay invisible in the autocomplete until the user
+  // reloaded their tab.
   const [commands, setCommands] = useState<CommandDoc[] | null>(null);
+  const commandsVersion = useChat((s) => s.commandsVersion);
   useEffect(() => {
     let cancelled = false;
     fetch("/commands", { credentials: "include" })
@@ -338,7 +344,7 @@ export function Composer({
       .then((j) => { if (!cancelled && j) setCommands(j.commands); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, []);
+  }, [commandsVersion]);
 
   // Caret-driven trigger detection. We track caret separately because React's
   // value+onChange flow doesn't carry the caret position; we update it in a

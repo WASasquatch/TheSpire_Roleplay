@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import DOMPurify from "dompurify";
-import type { AuditEntry, ReportEntry, Role, Theme, ThreadCategory } from "@thekeep/shared";
-import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
+import type { AuditEntry, ReportEntry, Role, Theme, ThemeableTextSlot, ThreadCategory } from "@thekeep/shared";
+import { DEFAULT_THEME, normalizeTheme, resolveMessageColor, THEMEABLE_TEXT_SLOTS } from "@thekeep/shared";
 import { readError } from "../lib/http.js";
+import { parseInline } from "../lib/markdown.js";
 import { listStyles } from "../lib/ornaments/index.js";
 import { Modal } from "./Modal.js";
 import { ThemePicker } from "./ThemePicker.js";
@@ -1869,34 +1870,73 @@ function CommandForm({
         </label>
         <label className="col-span-2">
           <span className="mb-1 block uppercase tracking-widest text-keep-muted">Color</span>
+          {/* Theme-slot chips — pick one of these to follow whatever
+              palette the reader is running with. Useful for "system"
+              flavor commands that should look like server notices to
+              everyone regardless of their theme choice. */}
+          <div className="mb-1.5 flex flex-wrap items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setColor(null)}
+              className={
+                "rounded border px-2 py-0.5 text-[11px] " +
+                (color === null
+                  ? "border-keep-action bg-keep-action/15 text-keep-action"
+                  : "border-keep-rule bg-keep-bg hover:bg-keep-banner")
+              }
+              title="Sender's /color flows through"
+            >
+              Sender color
+            </button>
+            {THEMEABLE_TEXT_SLOTS.map((slot: ThemeableTextSlot) => {
+              const token = `theme:${slot}`;
+              const active = color === token;
+              return (
+                <button
+                  key={slot}
+                  type="button"
+                  onClick={() => setColor(token)}
+                  className={
+                    "rounded border px-2 py-0.5 text-[11px] capitalize " +
+                    (active
+                      ? "border-keep-action bg-keep-action/15"
+                      : "border-keep-rule bg-keep-bg hover:bg-keep-banner")
+                  }
+                  style={{ color: `rgb(var(--keep-${slot}))` }}
+                  title={`Use the viewer's theme "${slot}" color`}
+                >
+                  {slot}
+                </button>
+              );
+            })}
+          </div>
+          {/* Literal hex fallback. Useful when an admin wants an
+              exact brand color that doesn't track the theme. Picking
+              a hex automatically deselects the theme chip above. */}
           <div className="flex items-center gap-2">
             <input
               type="color"
-              value={color ?? "#990000"}
+              value={color && color.startsWith("#") ? color : "#990000"}
               onChange={(e) => setColor(e.target.value)}
               className="h-7 w-10 cursor-pointer rounded border border-keep-rule"
-              aria-label="Command color"
+              aria-label="Command color (custom hex)"
             />
             <input
               type="text"
-              value={color ?? ""}
+              value={color && color.startsWith("#") ? color : ""}
               onChange={(e) => setColor(e.target.value || null)}
-              placeholder="(none - sender's chat color flows through)"
+              placeholder={
+                color && color.startsWith("theme:")
+                  ? `(using ${color})`
+                  : "(none - sender's chat color flows through)"
+              }
               maxLength={7}
               pattern="^#[0-9a-fA-F]{6}$"
               className="flex-1 rounded border border-keep-rule px-2 py-1 font-mono"
             />
-            <button
-              type="button"
-              onClick={() => setColor(null)}
-              className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-keep-muted hover:text-keep-text"
-              title="Clear - let the sender's /color flow through"
-            >
-              Clear
-            </button>
           </div>
           <span className="mt-0.5 block text-[10px] text-keep-muted">
-            Optional. Locks every message from this command to this color, regardless of who runs it.
+            Optional. A theme color tracks the reader's palette; a hex locks every message to that literal color.
           </span>
         </label>
       </div>
@@ -1904,6 +1944,17 @@ function CommandForm({
       <details className="mt-3 text-[11px]">
         <summary className="cursor-pointer text-keep-muted">Template syntax</summary>
         <div className="mt-1 space-y-2">
+          <div>
+            <div className="mb-0.5 uppercase tracking-widest text-keep-muted">Formatting (markdown)</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono">
+              <div><b>{"**bold**"}</b> - <b>bold</b></div>
+              <div><b>{"*italic*"}</b> - <em>italic</em></div>
+              <div><b>{"~~strike~~"}</b> - <s>strike</s></div>
+              <div><b>{"`code`"}</b> - <code>code</code></div>
+              <div><b>{"||spoiler||"}</b> - hidden until clicked</div>
+              <div><b>{"[text](url)"}</b> - inline link</div>
+            </div>
+          </div>
           <div>
             <div className="mb-0.5 uppercase tracking-widest text-keep-muted">Variables</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono">
@@ -1943,14 +1994,18 @@ function CommandForm({
         </div>
       </details>
 
+      {/* Live preview. Renders inline markdown the same way chat
+          messages will at delivery time (see `lib/markdown.tsx`), so
+          `**bold**`, `*italic*`, links, etc. show up exactly as
+          they'll appear to readers — not as their raw `**` source. */}
       <div className="mt-2 rounded border border-keep-rule bg-keep-banner/30 p-2">
         <div className="mb-0.5 text-[10px] uppercase tracking-widest text-keep-muted">
           Preview (Sigrid runs /{name || "..."} Bran tightly)
         </div>
-        <div className="font-mono" style={color ? { color } : undefined}>
+        <div style={resolveMessageColor(color) ? { color: resolveMessageColor(color)! } : undefined}>
           {kind === "action"
-            ? <span><b>Sigrid</b> {preview}</span>
-            : <span>[<b>Sigrid</b>] {preview}</span>}
+            ? <span><b>Sigrid</b> {parseInline(" " + preview)}</span>
+            : <span>[<b>Sigrid</b>] {parseInline(preview)}</span>}
         </div>
       </div>
 

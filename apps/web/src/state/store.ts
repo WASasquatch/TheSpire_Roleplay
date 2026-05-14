@@ -337,6 +337,23 @@ interface ChatState {
     username: string;
     displayName: string;
     avatarUrl: string | null;
+    /**
+     * The friender's character id pinned to THIS request, or null
+     * when the sender was on their master OOC handle. Required for
+     * the accept/decline buttons to identify the exact row — resolving
+     * by username alone is ambiguous because `resolveIdentityByName`
+     * matches the master account first, so a request sent from a
+     * character would never match and would loop forever in the
+     * pending list.
+     */
+    frienderCharacterId: string | null;
+    /**
+     * My (receiver) character id at the time the request was fetched.
+     * Echoed back by `/me/friend-requests` per entry so the
+     * accept/decline buttons don't have to thread the per-fetch
+     * identity through the UI separately.
+     */
+    friendedCharacterId: string | null;
     createdAt: number;
   }>;
   setPendingFriendRequests: (list: ChatState["pendingFriendRequests"]) => void;
@@ -368,6 +385,16 @@ interface ChatState {
   setOpenDmOtherUser: (otherUserId: string | null) => void;
   setDmsEnabled: (enabled: boolean) => void;
   bumpDmReseed: () => void;
+
+  /**
+   * Bumped when the server broadcasts `commands:updated` after an
+   * admin edits a custom command. Both the Composer's autocomplete
+   * cache and the HelpModal key their `/commands` fetch on this so a
+   * new/renamed/removed command surfaces without forcing users to
+   * reload their tab.
+   */
+  commandsVersion: number;
+  bumpCommandsVersion: () => void;
 }
 
 /**
@@ -740,4 +767,7 @@ export const useChat = create<ChatState>((set) => ({
   setOpenDmOtherUser: (otherUserId) => set({ openDmOtherUserId: otherUserId }),
   setDmsEnabled: (enabled) => set({ dmsEnabled: enabled }),
   bumpDmReseed: () => set((s) => ({ dmReseedTick: s.dmReseedTick + 1 })),
+
+  commandsVersion: 0,
+  bumpCommandsVersion: () => set((s) => ({ commandsVersion: s.commandsVersion + 1 })),
 }));

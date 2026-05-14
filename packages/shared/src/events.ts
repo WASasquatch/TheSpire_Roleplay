@@ -180,6 +180,15 @@ export interface ServerToClientEvents {
     frienderUsername: string;
     frienderDisplayName: string;
   }) => void;
+  /**
+   * Broadcast to every connected socket when an admin creates / edits
+   * / deletes / toggles a custom command. Carries no payload — the
+   * Composer + HelpModal both refetch `/commands` on receipt so the
+   * new command surfaces in autocomplete and help without forcing
+   * users to reload their tab. Cheap to send (rare event, one HTTP
+   * fetch per receiver).
+   */
+  "commands:updated": () => void;
 }
 
 export type UiHint =

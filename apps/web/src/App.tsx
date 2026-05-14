@@ -1422,6 +1422,14 @@ function Chat() {
         message: `Friend update from ${payload.frienderDisplayName}.`,
       });
     });
+    // Admin edited a custom command. Bump the shared version so the
+    // Composer's autocomplete cache and the HelpModal both refetch
+    // `/commands` on their next render — they key their fetch effect
+    // on this value. Cheap to fan out (rare event, single fetch per
+    // receiver).
+    socket.on("commands:updated", () => {
+      useChat.getState().bumpCommandsVersion();
+    });
 
     return () => {
       socket.off("room:state");
@@ -1439,6 +1447,7 @@ function Chat() {
       socket.off("dm:update");
       socket.off("dm:read");
       socket.off("friend:request");
+      socket.off("commands:updated");
       socket.off("connect", onConnect);
     };
   }, [socket, setRoom, setOccupants, appendMessage, updateMessage, setMessages, setCurrentRoom, setNotice, setOpenProfile, openEditor, setRefreshIntervalSec, setMe, prependOwnForumTopic, queuePendingForumTopic, bumpTopicActivity, updateForumTopic, removeForumTopic]);
@@ -2030,7 +2039,7 @@ function Chat() {
               /accept or /decline via the existing send() pipe — the
               server emits a fresh friend:request echo when the row
               flips, which clears the card via the store re-sync. */}
-          <FriendRequestPrompts onCommand={send} />
+          <FriendRequestPrompts />
           {/* Second accent rail — sits between the message stream and
               the composer. Same component as the header rail; the per-
               style CSS gives it identical decoration so the chat is

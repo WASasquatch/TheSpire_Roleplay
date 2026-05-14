@@ -5,33 +5,46 @@ import { useChat } from "../state/store.js";
  *
  * Mounted right above the composer (next to MutualPrompts) so a new
  * request can't be missed mid-roleplay. Each card lists who asked,
- * with two buttons that dispatch the matching `/accept` or `/decline`
- * slash command through the parent's `onCommand` callback.
+ * with two buttons that POST directly to the identity-keyed
+ * accept/decline endpoints.
  *
  * Source of truth is `pendingFriendRequests` in the Zustand store;
  * the App-level socket handler re-polls `/me/friend-requests` on
  * every `friend:request` event so both this card stack and the DM
  * pinned banner stay aligned without each refetching independently.
  *
- * Optimistic removal on click — once the user picks accept/decline,
- * we yank the row from the store immediately so the card doesn't
- * stick around waiting for the server echo. The next live event
- * resyncs the canonical state, and if the slash command failed for
- * some reason (rate limit, server-side race), it'll reappear.
+ * Why endpoints instead of slash commands: `/accept <name>` /
+ * `/decline <name>` resolve the sender by name, and the server's
+ * `resolveIdentityByName` checks master usernames first — so when a
+ * request was sent FROM a character whose name happens to collide
+ * with a master account, the slash-command path never matched the
+ * row, left it pending, and the banner re-popped every refresh.
+ * The identity endpoints operate on the exact
+ * (frienderUserId, frienderCharacterId, friendedCharacterId) tuple
+ * carried in the inbox payload, so there's nothing to disambiguate.
+ *
+ * Optimistic removal on click — we yank the row from the store
+ * immediately so the card doesn't stick around waiting for the
+ * server echo. The next live event resyncs canonical state.
  */
-export function FriendRequestPrompts({
-  onCommand,
-}: {
-  onCommand: (text: string) => void;
-}) {
+export function FriendRequestPrompts() {
   const pending = useChat((s) => s.pendingFriendRequests);
   const removePendingFriendRequest = useChat((s) => s.removePendingFriendRequest);
 
   if (pending.length === 0) return null;
 
-  function decide(username: string, userId: string, accept: boolean) {
-    onCommand(`/${accept ? "accept" : "decline"} ${username}`);
-    removePendingFriendRequest(userId);
+  function decide(r: typeof pending[number], accept: boolean) {
+    removePendingFriendRequest(r.userId);
+    const verb = accept ? "accept" : "decline";
+    void fetch(`/me/friend-requests/${encodeURIComponent(r.userId)}/${verb}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        frienderCharacterId: r.frienderCharacterId ?? undefined,
+        characterId: r.friendedCharacterId ?? undefined,
+      }),
+    }).catch(() => { /* friend:request echo will resync */ });
   }
 
   return (
@@ -49,14 +62,14 @@ export function FriendRequestPrompts({
           <span className="flex shrink-0 gap-1.5">
             <button
               type="button"
-              onClick={() => decide(r.username, r.userId, true)}
+              onClick={() => decide(r, true)}
               className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg shadow-sm hover:bg-keep-action/90"
             >
               Accept
             </button>
             <button
               type="button"
-              onClick={() => decide(r.username, r.userId, false)}
+              onClick={() => decide(r, false)}
               className="rounded border border-keep-border bg-keep-bg px-3 py-1 text-xs uppercase tracking-widest text-keep-muted hover:bg-keep-panel hover:text-keep-text"
             >
               Decline

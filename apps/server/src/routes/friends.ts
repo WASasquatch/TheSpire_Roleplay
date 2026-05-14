@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Server as IoServer } from "socket.io";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { z } from "zod";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { characters, friends, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
@@ -24,6 +25,21 @@ export interface FriendRequestEntry {
   username: string;
   displayName: string;
   avatarUrl: string | null;
+  /**
+   * The sender's character id pinned to THIS request, or null when
+   * they sent it as their master/OOC handle. The client passes this
+   * back when accepting/declining so the server can identify the
+   * exact row by identity instead of by name (name-based lookup is
+   * ambiguous when a character shares a username with a master).
+   */
+  frienderCharacterId: string | null;
+  /**
+   * The RECEIVER's (caller's) character id this request was sent to —
+   * mirrors the `?characterId` the inbox was queried with. Echoed
+   * back per entry so a later accept/decline click doesn't have to
+   * thread the per-fetch identity through the UI state.
+   */
+  friendedCharacterId: string | null;
   createdAt: number;
 }
 
@@ -308,6 +324,18 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
         username: u?.username ?? "(unknown)",
         displayName: c?.name ?? u?.username ?? "(unknown)",
         avatarUrl: c?.avatarUrl ?? u?.avatarUrl ?? null,
+        // Surface the exact friender identity so accept/decline can
+        // identify the row unambiguously — a master and a character
+        // can share a name, and `resolveIdentityByName` resolves
+        // master-first, so name-only matching strands rows whose
+        // friender_character_id is set.
+        frienderCharacterId: r.frienderCharacterId ?? null,
+        // Friended (receiver) side identity that this request was
+        // sent TO. Always equal to the inbox's characterId since
+        // the query filters on it — but echoed back per-row so the
+        // client doesn't have to remember which inbox the entry
+        // came from when it later fires accept/decline.
+        friendedCharacterId: charId,
         createdAt: +r.createdAt,
       };
     });
@@ -315,4 +343,114 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     entries.sort((a, b) => b.createdAt - a.createdAt);
     return { requests: entries };
   });
+
+  /**
+   * Accept (`/accept`) and decline (`/decline`) — but routed by EXACT
+   * identity instead of by name. The Messages-modal Accept/Decline
+   * buttons and the FriendRequestPrompts banner both call these so
+   * they can clear the canonical pending row even when:
+   *
+   *   - the sender's name collides with a master account (a
+   *     character named "Aphelios" sent the request, but
+   *     `resolveIdentityByName("Aphelios")` resolves master-first and
+   *     never matches the row whose friender_character_id is set);
+   *   - the receiver's tab has since switched identities (the slash-
+   *     command path uses ctx.user.activeCharacterId for `me`, which
+   *     drifts as the user moves between characters);
+   *   - the row was written with a friender_character_id we can only
+   *     read off the inbox payload, not derive from a name.
+   *
+   * Both endpoints require the FULL friender identity in the URL +
+   * body, and the friended-side identity (this caller's `?characterId`).
+   * Mirroring /me/friend-requests' query-string contract keeps the
+   * "this inbox is this identity" rule consistent across the API.
+   */
+  const acceptDeclineBody = z.object({
+    /** The friender's character id on the row, or null for their master OOC. */
+    frienderCharacterId: z.string().nullable().optional(),
+    /** My own character id for this request, or null for my master OOC inbox. */
+    characterId: z.string().nullable().optional(),
+  }).strict();
+
+  app.post<{ Params: { frienderUserId: string }; Body: unknown }>(
+    "/me/friend-requests/:frienderUserId/accept",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      let body: z.infer<typeof acceptDeclineBody>;
+      try { body = acceptDeclineBody.parse(req.body); }
+      catch { reply.code(400); return { error: "invalid body" }; }
+      const myCharId = body.characterId ?? null;
+      if (myCharId && !(await ownsCharacter(db, me.id, myCharId))) {
+        reply.code(403); return { error: "not your character" };
+      }
+      const frienderIdentity: Identity = {
+        userId: req.params.frienderUserId,
+        characterId: body.frienderCharacterId ?? null,
+      };
+      const meIdentity: Identity = { userId: me.id, characterId: myCharId };
+
+      // Flip status pending → accepted on the exact pair. r.changes ===
+      // 0 means the row's already been resolved (other tab accepted,
+      // sender canceled, etc.) — we treat that as success so the client
+      // can still clear its local optimistic state instead of looping
+      // on a stuck banner. The /me/friend-requests refetch the client
+      // does next will reflect the actual current state.
+      await db
+        .update(friends)
+        .set({ status: "accepted" })
+        .where(and(
+          eqIdentity(friends.frienderUserId, friends.frienderCharacterId, frienderIdentity),
+          eqIdentity(friends.friendedUserId, friends.friendedCharacterId, meIdentity),
+          eq(friends.status, "pending"),
+        ));
+      // Notify the sender's sockets so their friends rail refreshes.
+      const sockets = await io.fetchSockets();
+      for (const s of sockets) {
+        const uid = (s.data as { userId?: string }).userId;
+        if (uid !== frienderIdentity.userId) continue;
+        s.emit("friend:request", {
+          frienderUserId: me.id,
+          frienderUsername: me.username,
+          frienderDisplayName: me.username,
+        });
+      }
+      return { ok: true };
+    },
+  );
+
+  app.post<{ Params: { frienderUserId: string }; Body: unknown }>(
+    "/me/friend-requests/:frienderUserId/decline",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      let body: z.infer<typeof acceptDeclineBody>;
+      try { body = acceptDeclineBody.parse(req.body); }
+      catch { reply.code(400); return { error: "invalid body" }; }
+      const myCharId = body.characterId ?? null;
+      if (myCharId && !(await ownsCharacter(db, me.id, myCharId))) {
+        reply.code(403); return { error: "not your character" };
+      }
+      const frienderIdentity: Identity = {
+        userId: req.params.frienderUserId,
+        characterId: body.frienderCharacterId ?? null,
+      };
+      const meIdentity: Identity = { userId: me.id, characterId: myCharId };
+
+      // Delete the pending row outright. Same "already-resolved is
+      // success" posture as accept above so the UI never gets stuck
+      // looping.
+      await db
+        .delete(friends)
+        .where(and(
+          eqIdentity(friends.frienderUserId, friends.frienderCharacterId, frienderIdentity),
+          eqIdentity(friends.friendedUserId, friends.friendedCharacterId, meIdentity),
+          eq(friends.status, "pending"),
+        ));
+      // Sender stays unnotified per the existing decline contract —
+      // mirrors the slash-command behavior and avoids a passive-
+      // aggressive "they declined you" signal.
+      return { ok: true };
+    },
+  );
 }

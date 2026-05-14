@@ -70,6 +70,14 @@ interface CharacterRow {
   statsJson: string;
   avatarUrl: string | null;
   themeJson: string | null;
+  /**
+   * Per-character chat color override. Null = inherit the master
+   * account's color. When set, every message authored AS this
+   * character uses this color regardless of the tab's current `/color`
+   * state — so Character A and Character B stay visually distinct
+   * even when both belong to the same master account.
+   */
+  chatColor?: string | null;
   isPublic?: boolean;
   isNsfw?: boolean;
 }
@@ -272,7 +280,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setName(c.name);
           setBioHtml(c.bioHtml ?? "");
           setAvatarUrl(c.avatarUrl ?? "");
-          setChatColor(null); // chatColor lives on the user, not per-character (yet)
+          // Per-character chat color. Null means "fall back to the
+          // master account's color" — preserved as a distinct state
+          // from "" so the picker can tell apart "no override set"
+          // (inherit) from a deliberate clear-to-default.
+          setChatColor(c.chatColor ?? null);
           try {
             setStats(c.statsJson ? JSON.parse(c.statsJson) : {});
           } catch {
@@ -337,6 +349,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             soundDmEnabled,
             soundChatEnabled,
             soundAlertEnabled,
+            chatColor,
             isPublic,
             isNsfw,
           }),
@@ -357,6 +370,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             styleKey: userStyleKey,
             uiFontFamily: uiFontFamily && uiFontFamily.trim() !== "" ? uiFontFamily.trim() : null,
             uiFontScale,
+            chatColor,
             // NSFW=true forces isPublic=false on the server. Mirror that
             // implication client-side so the cached MasterData stays
             // consistent with what the next /me/profile load would return.
@@ -385,6 +399,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             stats,
             avatarUrl: avatarUrl.trim() || null,
             theme,
+            chatColor,
             isPublic,
             isNsfw,
           }),
@@ -400,6 +415,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                   statsJson: JSON.stringify(stats),
                   avatarUrl: avatarUrl.trim() || null,
                   themeJson: theme ? JSON.stringify(theme) : null,
+                  chatColor,
                   isPublic: isNsfw ? false : isPublic,
                   isNsfw,
                 }
@@ -770,13 +786,17 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
               </div>
             ) : null}
 
-            {/* APPEARANCE — chat color (master), theme palette, theme style
+            {/* APPEARANCE — chat color, theme palette, theme style
                 (master), font/size (master). All the visual customization
                 in one place so the color picker has the full modal width
                 instead of getting squeezed to 420px. */}
             {activeTab === "appearance" ? (
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-                {!isCharacter ? <ColorRow current={chatColor} /> : null}
+                <ChatColorRow
+                  scope={isCharacter ? "character" : "master"}
+                  value={chatColor}
+                  onChange={setChatColor}
+                />
                 <fieldset className="rounded border border-keep-rule p-3">
                   <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
                     {isCharacter ? "Character theme" : "OOC theme"}
@@ -1540,21 +1560,90 @@ function Field({
   );
 }
 
-function ColorRow({ current }: { current: string | null }) {
+/**
+ * Editable chat-color picker. Writes onto the profile form state; the
+ * containing save() handler bundles it into the PUT body for master or
+ * character. Two scopes:
+ *   - `master`  — null = system default. This is the OOC color and the
+ *                 fallback every character without its own override
+ *                 inherits.
+ *   - `character` — null = inherit the master color. Setting a hex
+ *                 makes this character's messages render in that color
+ *                 regardless of the tab's `/color` state, which is the
+ *                 whole reason the per-character column exists (so
+ *                 Character A and Character B stay visually distinct
+ *                 even after a `/char switch`).
+ *
+ * The "Use OOC color" / "Use system default" button writes null rather
+ * than a hex so the inheritance chain stays intact — clearing to a
+ * literal "#000000" would freeze the inheritance even when the upstream
+ * color changes later.
+ */
+function ChatColorRow({
+  scope,
+  value,
+  onChange,
+}: {
+  scope: "master" | "character";
+  value: string | null;
+  onChange: (next: string | null) => void;
+}) {
+  // Local mirror so an in-progress typed hex doesn't bubble up on every
+  // keystroke and trigger downstream side effects (formDirty etc.).
+  // Pushed up on blur or via the explicit "Set" button — the swatch
+  // picker still commits on each pick, since that's a discrete choice.
+  const [draft, setDraft] = useState(value ?? "");
+  useEffect(() => { setDraft(value ?? ""); }, [value]);
+  const isHex = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(draft);
+
   return (
-    <div className="rounded border border-keep-rule bg-keep-banner/30 p-2 text-xs">
-      <div className="mb-1 uppercase tracking-widest text-keep-muted">Chat color</div>
-      <div className="flex items-center gap-2">
-        {current ? (
-          <span
-            className="inline-block h-4 w-8 rounded border border-keep-rule"
-            style={{ backgroundColor: current }}
-          />
-        ) : null}
-        <span className="font-mono">{current ?? "(default)"}</span>
-        <span className="text-keep-muted">- change via <code>/color &lt;hex&gt;</code> or the Tools panel.</span>
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Chat color</legend>
+      <p className="mb-2 text-[10px] text-keep-muted">
+        {scope === "master"
+          ? "Drives your OOC messages and acts as the fallback for any character without its own color."
+          : "Locks this character's messages to this color, regardless of the tab's /color state. Leave on \"inherit\" to use your OOC color."}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="color"
+          value={value && /^#[0-9a-fA-F]{6}$/.test(value) ? value : "#990000"}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-7 w-10 cursor-pointer rounded border border-keep-rule"
+          aria-label="Chat color"
+        />
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            if (draft === "") onChange(null);
+            else if (isHex) onChange(draft);
+          }}
+          placeholder={scope === "master" ? "(default)" : "(inherit OOC)"}
+          maxLength={7}
+          pattern="^#[0-9a-fA-F]{6}$"
+          className="flex-1 min-w-[8rem] rounded border border-keep-rule px-2 py-1 font-mono"
+        />
+        <button
+          type="button"
+          onClick={() => onChange(null)}
+          className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-keep-muted hover:text-keep-text"
+          title={scope === "master" ? "Revert to the system default color" : "Inherit the master / OOC color"}
+        >
+          {scope === "master" ? "Use default" : "Inherit OOC"}
+        </button>
       </div>
-    </div>
+      <div className="mt-2 flex items-center gap-2 text-[11px]">
+        <span className="text-keep-muted">Preview:</span>
+        <span
+          className="rounded bg-keep-banner/30 px-1.5 py-0.5"
+          style={value ? { color: value } : undefined}
+        >
+          The quick brown fox jumps.
+        </span>
+      </div>
+    </fieldset>
   );
 }
 

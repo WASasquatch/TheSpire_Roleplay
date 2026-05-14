@@ -9,6 +9,7 @@ import { useChat } from "../state/store.js";
 import { readError } from "../lib/http.js";
 import { parseInline } from "../lib/markdown.js";
 import { FormattingToolbar } from "./FormattingToolbar.js";
+import { SynonymPopup } from "./SynonymPopup.js";
 import { UsernameAutocomplete } from "./UsernameAutocomplete.js";
 
 interface Props {
@@ -1085,16 +1086,23 @@ function ThreadPane({
           disabled={busy}
         />
         <div className="flex items-center gap-1">
-          <input
-            ref={dmInputRef}
-            type="text"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={`Message ${header.displayName}...`}
-            maxLength={4000}
-            disabled={busy}
-            className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action disabled:opacity-50"
-          />
+          {/* Relative wrapper anchors the SynonymPopup to the input's
+              top edge — the popup uses `absolute bottom-full` so it
+              floats above the input when the user highlights a word
+              and synonyms land. */}
+          <div className="relative min-w-0 flex-1">
+            <SynonymPopup inputRef={dmInputRef} value={draft} onChange={setDraft} />
+            <input
+              ref={dmInputRef}
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={`Message ${header.displayName}...`}
+              maxLength={4000}
+              disabled={busy}
+              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action disabled:opacity-50"
+            />
+          </div>
           <button
             type="submit"
             disabled={busy || !draft.trim()}

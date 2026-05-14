@@ -12,7 +12,10 @@
     "db:push": "pnpm --filter @thekeep/server run db:push",
     "db:studio": "pnpm --filter @thekeep/server run db:studio",
     "ship": "bash scripts/ship.sh",
-    "deploy": "bash scripts/ship.sh --deploy-only"
+    "deploy": "bash scripts/ship.sh --deploy-only",
+    "bump:patch": "bash scripts/bump.sh patch",
+    "bump:minor": "bash scripts/bump.sh minor",
+    "bump:major": "bash scripts/bump.sh major"
   },
   "engines": {
     "node": ">=20",

@@ -62,6 +62,7 @@ import { registerCommandsRoutes } from "./routes/commands.js";
 import { registerNavLinkRoutes } from "./routes/nav-links.js";
 import { registerRoomsRoutes } from "./routes/rooms.js";
 import { registerStatsRoutes } from "./routes/stats.js";
+import { registerThesaurusRoutes } from "./routes/thesaurus.js";
 import { registerUsersRoutes } from "./routes/users.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import { ensureSystemSeeds, startJanitor } from "./seed.js";
@@ -365,6 +366,7 @@ async function main() {
   // Idempotent on subsequent starts; survives deploys via the persisted keys.
   await initPush(db);
   await registerStatsRoutes(baseApp, db, io);
+  await registerThesaurusRoutes(baseApp, db);
   await registerUsersRoutes(baseApp, db, io);
   await registerRoomsRoutes(baseApp, db, io);
   await registerAdminRoutes(baseApp, {
@@ -1020,7 +1022,7 @@ async function main() {
           reply.code(404);
           return reply.send({ error: "not found" });
         }
-        const apiPrefixes = ["/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/messages", "/reports", "/push", "/affiliates", "/worlds", "/me", "/health", "/users", "/site", "/rules", "/socket.io"];
+        const apiPrefixes = ["/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/messages", "/reports", "/push", "/affiliates", "/worlds", "/me", "/health", "/users", "/site", "/rules", "/socket.io", "/thesaurus"];
         if (apiPrefixes.some((p) => req.url === p || req.url.startsWith(p + "/") || req.url.startsWith(p + "?"))) {
           reply.code(404);
           return reply.send({ error: "not found" });

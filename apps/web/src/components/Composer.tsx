@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { CommandDoc, RoomOccupant, ThreadCategory } from "@thekeep/shared";
 import { CompleterPopup, type CompletionItem } from "./CompleterPopup.js";
+import { SynonymPopup } from "./SynonymPopup.js";
 
 interface Props {
   value: string;
@@ -992,6 +993,12 @@ export function Composer({
           onSelect={setSelectedIndex}
           onAccept={acceptItem}
         />
+        {/* Thesaurus popup. Same anchor strategy as CompleterPopup
+            (absolute, bottom-full) so highlighting a word in chat /
+            forum messages pops a list of synonyms above the
+            textarea — Enter or click swaps the highlighted word for
+            the chosen synonym. */}
+        <SynonymPopup inputRef={inputRef} value={value} onChange={onChange} />
         <textarea
           ref={inputRef}
           value={value}

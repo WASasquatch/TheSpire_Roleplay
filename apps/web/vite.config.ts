@@ -24,6 +24,7 @@ export default defineConfig({
       "/users": "http://localhost:3001",
       "/site": "http://localhost:3001",
       "/rules": "http://localhost:3001",
+      "/thesaurus": "http://localhost:3001",
       "/socket.io": {
         target: "http://localhost:3001",
         ws: true,

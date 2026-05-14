@@ -2167,7 +2167,7 @@ function ReportButton({ msg }: { msg: ChatMessage }) {
         onClick={file}
         disabled={busy || done}
         title={done ? "Reported - admins will review." : "Report this message to admins"}
-        className="keep-button rounded border border-keep-rule bg-keep-bg/80 px-1.5 py-0 text-[10px] text-keep-muted hover:bg-keep-accent/10 hover:text-keep-accent disabled:opacity-50"
+        className="flex h-5 items-center rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-accent/60 hover:bg-keep-accent/10 hover:text-keep-accent disabled:opacity-50"
       >
         {done ? "reported" : "🚩 report"}
       </button>
@@ -2286,12 +2286,18 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
     // button behind a hover trigger turned that into a discoverability
     // black hole — people kept reporting the option was missing because
     // they didn't think to mouse over their own messages to find it.
+    //
+    // Visual contract: edit + delete share the same base shape as the
+    // BookmarkButton (h-5, rounded, thin border, 10px text) so the
+    // three-button row reads as one set. Edit is neutral; delete is
+    // accent-tinted as the danger-coded option so a fast click can't
+    // confuse the two.
     <span className="inline-flex gap-1 md:absolute md:right-0 md:top-0">
       <button
         type="button"
         onClick={() => { setDraft(msg.body); setEditing(true); }}
         title="Edit (within 60s of sending)"
-        className="rounded border border-keep-rule bg-keep-bg/80 px-1.5 py-0 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+        className="flex h-5 items-center rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action"
       >
         edit
       </button>
@@ -2300,7 +2306,7 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
         onClick={doDelete}
         title="Delete (within 60s of sending)"
         disabled={busy}
-        className="keep-button rounded border border-keep-accent/50 bg-keep-bg/80 px-1.5 py-0 text-[10px] text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
+        className="flex h-5 items-center rounded border border-keep-accent/60 bg-keep-accent/10 px-1.5 text-[10px] font-semibold leading-none text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
       >
         delete
       </button>
@@ -2389,7 +2395,9 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
         type="button"
         onClick={openPopover}
         title="Bookmark this message"
-        className="keep-button rounded border border-keep-rule bg-keep-bg/80 px-1.5 py-0 text-[10px] text-keep-muted hover:bg-keep-action/10 hover:text-keep-action"
+        // Matches the h-5 / rounded / 10px shape of the edit + delete
+        // buttons in OwnControls so the row reads as one consistent set.
+        className="flex h-5 items-center rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action"
       >
         {done ? "✓ saved" : "🔖"}
       </button>

@@ -756,6 +756,29 @@ export function Composer({
       // in the simple "send a chat message" state.
       className="keep-composer flex min-h-[5.25rem] flex-col justify-end gap-1 border-t border-keep-rule bg-keep-banner/50 p-2"
     >
+      {/* Mobile-only rooms-drawer trigger for the disabled-input states
+          (forum-disabled / forum-locked-for-viewer). When input is
+          enabled, the rooms button rides on the FormattingToolbar
+          row below; that toolbar is hidden in disabled states, which
+          historically stranded mobile users inside a forum with no
+          composer-level way back to the rooms drawer. Rendering this
+          one-button row here keeps the escape hatch reachable in
+          every state without disturbing the desktop layout (md+ has
+          the rooms tree always visible). */}
+      {inputDisabled && onOpenRail ? (
+        <div className="flex md:hidden">
+          <button
+            type="button"
+            onClick={onOpenRail}
+            aria-label="Open rooms"
+            title="Rooms"
+            className="keep-button flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none hover:bg-keep-banner"
+          >
+            💬
+          </button>
+        </div>
+      ) : null}
+
       {/* Forum-mode disabled state — composer is locked until the user
           picks a topic or starts a new one. The "New Topic" button is
           the primary call-to-action in this state. */}

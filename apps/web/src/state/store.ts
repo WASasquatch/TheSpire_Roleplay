@@ -208,6 +208,25 @@ interface ChatState {
   /** Replace an existing message in-place (used for edit/delete grace updates). */
   updateMessage: (msg: ChatMessage) => void;
   setMessages: (roomId: string, msgs: ChatMessage[]) => void;
+  /**
+   * Prepend an older window of messages onto the front of a room's
+   * buffer. Used by the scroll-to-top infinite history loader; the
+   * server returns a chronologically-ordered page strictly older than
+   * the oldest message currently in the buffer, and we splice it on
+   * with id-dedupe so an overlap (server reordered, race with a live
+   * append) doesn't double-render any line.
+   */
+  prependMessages: (roomId: string, msgs: ChatMessage[]) => void;
+  /**
+   * Per-room "there are still older messages on the server" hint.
+   * Seeded true when the room is joined (since the initial backlog
+   * is capped at 50 and the user may have much more history), set
+   * false when an older-history fetch returns `hasMore: false`, and
+   * also false on rooms that don't make sense to paginate (cleared
+   * by an admin /clear, freshly created, etc.).
+   */
+  roomHistoryHasMore: Record<string, boolean>;
+  setRoomHistoryHasMore: (roomId: string, hasMore: boolean) => void;
 
   /**
    * Paginated forum topics, keyed by roomId then by category key.
@@ -415,6 +434,26 @@ export const useChat = create<ChatState>((set) => ({
 
   setMessages: (roomId, msgs) =>
     set((s) => ({ messagesByRoom: { ...s.messagesByRoom, [roomId]: msgs } })),
+
+  prependMessages: (roomId, older) =>
+    set((s) => {
+      if (older.length === 0) return {};
+      const current = s.messagesByRoom[roomId] ?? [];
+      // Dedupe by id — a live `message:new` may have landed within the
+      // window we just fetched (race between socket and HTTP), and the
+      // server-returned page is the authoritative ordering up to the
+      // boundary so the live row stays put.
+      const seen = new Set(current.map((m) => m.id));
+      const extras = older.filter((m) => !seen.has(m.id));
+      if (extras.length === 0) return {};
+      return {
+        messagesByRoom: { ...s.messagesByRoom, [roomId]: [...extras, ...current] },
+      };
+    }),
+
+  roomHistoryHasMore: {},
+  setRoomHistoryHasMore: (roomId, hasMore) =>
+    set((s) => ({ roomHistoryHasMore: { ...s.roomHistoryHasMore, [roomId]: hasMore } })),
 
   forumTopicsByRoom: {},
 

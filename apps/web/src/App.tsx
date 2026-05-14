@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, WorldDetail } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme, VERSION } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
@@ -111,6 +111,24 @@ export function App() {
   // /auth/me is intentionally NOT counted as user activity on the server
   // (see auth/session.ts) - otherwise this poll would keep idle tabs logged
   // in forever, defeating the idle-timeout feature.
+  //
+  // The same fetch also carries the post-deploy version-drift check (see
+  // `probeVersion` below). Up to 60s is fine for the session-TTL purpose,
+  // but it's a long lag for "the site just updated, please refresh" —
+  // so we ALSO probe on tab focus and on socket reconnect (see effects
+  // below). A deploy reliably triggers the socket reconnect path, so in
+  // practice the banner now surfaces within a couple of seconds of the
+  // user's tab regaining the server.
+  const probeVersion = useCallback(async () => {
+    try {
+      const r = await fetch("/auth/me");
+      if (!r.ok) return;
+      const j = (await r.json()) as { version?: string };
+      if (j.version && j.version !== VERSION) {
+        useChat.getState().setStaleVersion(j.version);
+      }
+    } catch { /* network blip - ignore */ }
+  }, []);
   useEffect(() => {
     if (!me) return;
     const id = window.setInterval(async () => {
@@ -126,11 +144,6 @@ export function App() {
           setMe(null);
           return;
         }
-        // Post-deploy version drift detection. The bundle the user
-        // loaded stamps a build-time VERSION; the live server reports
-        // the current one in /auth/me. When they diverge, the user is
-        // on an outdated copy and should refresh — the stale-version
-        // banner in the chat shell offers a one-click Refresh.
         const j = (await r.json()) as { version?: string };
         if (j.version && j.version !== VERSION) {
           useChat.getState().setStaleVersion(j.version);
@@ -139,6 +152,37 @@ export function App() {
     }, 60_000);
     return () => window.clearInterval(id);
   }, [me, setMe, setKickReason]);
+
+  // Tab-focus re-probe. A user with a backgrounded tab won't see the
+  // 60s poll fire reliably (browsers throttle timers in hidden tabs),
+  // so the version mismatch can sit undetected for many minutes. Firing
+  // `probeVersion` on visibility / focus catches the "I tabbed back
+  // after the site was redeployed" case immediately.
+  useEffect(() => {
+    if (!me) return;
+    function onVisible() {
+      if (document.visibilityState === "visible") void probeVersion();
+    }
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [me, probeVersion]);
+
+  // Socket-reconnect re-probe. The most common cause of a reconnect is
+  // a server restart, which is also the most common cause of a fresh
+  // VERSION on the server. Probing on reconnect means the banner pops
+  // within seconds of a deploy instead of waiting for the next 60s
+  // poll tick.
+  useEffect(() => {
+    if (!me) return;
+    const socket = getSocket();
+    function onConnect() { void probeVersion(); }
+    socket.io.on("reconnect", onConnect);
+    return () => { socket.io.off("reconnect", onConnect); };
+  }, [me, probeVersion]);
 
   // /p/<username> deep-link state. Lives at App level (not Chat) so it's
   // available to AuthGate too: anonymous visitors landing on /p/<X> see a
@@ -1092,7 +1136,15 @@ function Chat() {
       }
     });
     socket.on("message:bulk", (msgs: ChatMessage[]) => {
-      if (msgs.length) setMessages(msgs[0]!.roomId, msgs);
+      if (msgs.length) {
+        const roomId = msgs[0]!.roomId;
+        setMessages(roomId, msgs);
+        // Seed the scroll-up paginator. The server caps the backlog at
+        // 50 lines; a full page suggests there's older history to fetch
+        // when the user scrolls up. A short page means we already
+        // received the whole room's history.
+        useChat.getState().setRoomHistoryHasMore(roomId, msgs.length >= 50);
+      }
     });
     socket.on("message:update", (msg: ChatMessage) => {
       updateMessage(msg);

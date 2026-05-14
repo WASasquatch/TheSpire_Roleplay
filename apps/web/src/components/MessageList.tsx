@@ -1,9 +1,11 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ChatMessage, RoomOccupant, ThreadCategory } from "@thekeep/shared";
 import { UserNameTag } from "./UserNameTag.js";
 import type { Gender } from "../lib/gender.js";
 import { parseInline, renderForumBody } from "../lib/markdown.js";
 import { splitMentions } from "../lib/mentions.js";
+import { useChat } from "../state/store.js";
+import { readError } from "../lib/http.js";
 
 interface Props {
   messages: ChatMessage[];
@@ -171,14 +173,77 @@ function fmtTime(ms: number): string {
 
 export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, onQuotePost, forumBuckets, onLoadOlderTopics, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
+  /**
+   * Scroll-bookkeeping for flat-mode auto-scroll-vs-preserve. We
+   * capture the scroll geometry from BEFORE the upcoming commit and
+   * compare it to the new buffer in the layout effect below. This
+   * lets us tell apart three transitions:
+   *   1. Appended (last id changed, first id unchanged) → scroll to
+   *      bottom if the user was already near the bottom; otherwise
+   *      leave the position alone so reading older history isn't
+   *      interrupted by every live arrival.
+   *   2. Prepended (first id changed, last id unchanged) → keep the
+   *      same content visible: scrollTop += (newScrollHeight -
+   *      prevScrollHeight). Without this the scroll-to-load loader
+   *      would jump the user back up to the boundary of every page.
+   *   3. Buffer wholesale replacement (room switch, jump-to-message
+   *      window swap) → fall through to the default end-pin so the
+   *      user lands at the newest content.
+   */
+  const scrollState = useRef<{ height: number; top: number; firstId: string | null; lastId: string | null } | null>(null);
+  // Capture pre-commit geometry every render. Runs BEFORE the layout
+  // effect that decides how to react to the new buffer.
   useEffect(() => {
     const el = ref.current;
+    if (!el) {
+      scrollState.current = null;
+      return;
+    }
+    scrollState.current = {
+      height: el.scrollHeight,
+      top: el.scrollTop,
+      firstId: messages[0]?.id ?? null,
+      lastId: messages[messages.length - 1]?.id ?? null,
+    };
+  });
+
+  // Apply scroll adjustment for the new buffer. useLayoutEffect (not
+  // useEffect) so the position fix happens BEFORE the browser paints —
+  // an effect-based fix would let the user see the layout jump for one
+  // frame on every prepend.
+  useLayoutEffect(() => {
+    const el = ref.current;
     if (!el) return;
-    // Skip the auto-scroll-to-bottom when we're driving a jump-to-message
-    // flash; the flash effect owns scroll positioning in that case and
-    // pinning to the end would fight it.
-    if (highlightMessageId) return;
-    el.scrollTop = el.scrollHeight;
+    if (highlightMessageId) return; // jump-to-message owns scroll
+    const prev = scrollState.current;
+    const newFirstId = messages[0]?.id ?? null;
+    const newLastId = messages[messages.length - 1]?.id ?? null;
+    if (!prev || !prev.firstId || !prev.lastId) {
+      // Initial mount or empty → end-pin.
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    const firstChanged = newFirstId !== prev.firstId;
+    const lastChanged = newLastId !== prev.lastId;
+    if (firstChanged && !lastChanged) {
+      // Prepend: anchor the existing content under the user's eyes.
+      const delta = el.scrollHeight - prev.height;
+      el.scrollTop = prev.top + delta;
+      return;
+    }
+    if (lastChanged) {
+      // Append (or full replacement). End-pin only when the user was
+      // already near the bottom — otherwise they're reading older
+      // history and we shouldn't yank them away.
+      const NEAR_BOTTOM_PX = 120;
+      const wasNearBottom = prev.height - prev.top - el.clientHeight < NEAR_BOTTOM_PX;
+      // Detect full-replacement: BOTH endpoints changed (room switch,
+      // jump-window swap). End-pin so the user lands at the newest.
+      const replaced = firstChanged && lastChanged;
+      if (replaced || wasNearBottom) el.scrollTop = el.scrollHeight;
+    }
+    // first AND last unchanged → no buffer changes that affect layout
+    // (an in-place message edit, for example). Leave scroll alone.
   }, [messages, highlightMessageId]);
 
   // Jump-to-message flash. When `highlightMessageId` flips to a value
@@ -357,13 +422,119 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     );
   }
 
-  // Flat mode: existing chronological rendering.
+  // Flat mode: existing chronological rendering with scroll-to-top
+  // history pagination. The /rooms/:id/messages?before= endpoint serves
+  // older pages; we trigger a fetch when the user scrolls within
+  // SCROLL_TRIGGER_PX of the top edge, prepend the page via
+  // store.prependMessages, and the layout effect above preserves their
+  // scroll position so the new content slides in above without yanking
+  // their eyes.
+  return (
+    <FlatMessageView
+      scrollRef={ref}
+      messages={messages}
+      roomId={roomId ?? null}
+      fontStep={fontStep}
+      lineFor={lineFor}
+    />
+  );
+}
+
+/** Trigger an older-history fetch when scrolled within this many px of the top. */
+const FLAT_LOAD_OLDER_THRESHOLD_PX = 200;
+
+/**
+ * Flat-mode renderer extracted so it can own the scroll-to-load-older
+ * state (loading flag, error string) without polluting MessageList's
+ * shared body. The shared scroll-position math lives on MessageList
+ * (it applies to BOTH flat and nested-reply modes), so we forward the
+ * scroll ref instead of holding our own.
+ */
+function FlatMessageView({
+  scrollRef,
+  messages,
+  roomId,
+  fontStep,
+  lineFor,
+}: {
+  scrollRef: React.MutableRefObject<HTMLDivElement | null>;
+  messages: ChatMessage[];
+  roomId: string | null;
+  fontStep: 0 | 1 | 2 | 3;
+  lineFor: (m: ChatMessage) => ReactNode;
+}) {
+  const hasMore = useChat((s) => (roomId ? (s.roomHistoryHasMore[roomId] ?? false) : false));
+  const prependMessages = useChat((s) => s.prependMessages);
+  const setRoomHistoryHasMore = useChat((s) => s.setRoomHistoryHasMore);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState<string | null>(null);
+  // Latch in a ref so the onScroll handler can early-out without
+  // re-rendering. setState alone would race: scroll events fire faster
+  // than React can commit a flag.
+  const inflightRef = useRef(false);
+
+  const loadOlder = useCallback(async () => {
+    if (!roomId) return;
+    if (inflightRef.current) return;
+    if (!hasMore) return;
+    const buf = useChat.getState().messagesByRoom[roomId] ?? [];
+    const oldest = buf[0];
+    if (!oldest) return;
+    inflightRef.current = true;
+    setLoadingOlder(true);
+    setOlderError(null);
+    try {
+      const r = await fetch(`/rooms/${roomId}/messages?before=${oldest.createdAt}&limit=50`, {
+        credentials: "include",
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      const j = (await r.json()) as { messages: ChatMessage[]; hasMore: boolean };
+      prependMessages(roomId, j.messages);
+      setRoomHistoryHasMore(roomId, j.hasMore);
+    } catch (e) {
+      setOlderError(e instanceof Error ? e.message : "load failed");
+    } finally {
+      inflightRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [roomId, hasMore, prependMessages, setRoomHistoryHasMore]);
+
+  function onScroll(e: React.UIEvent<HTMLDivElement>) {
+    if (!hasMore || inflightRef.current) return;
+    if (e.currentTarget.scrollTop <= FLAT_LOAD_OLDER_THRESHOLD_PX) {
+      void loadOlder();
+    }
+  }
+
   return (
     <div
-      ref={ref}
+      ref={scrollRef}
+      onScroll={onScroll}
       className="flex-1 overflow-y-auto px-4 py-2 leading-relaxed"
       style={{ fontSize: FONT_EM[fontStep] }}
     >
+      {hasMore || loadingOlder ? (
+        <div className="mb-1 flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-keep-muted">
+          {loadingOlder ? (
+            <span>Loading earlier messages…</span>
+          ) : olderError ? (
+            <button
+              type="button"
+              onClick={() => { void loadOlder(); }}
+              className="rounded border border-keep-accent/40 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
+              title={olderError}
+            >
+              Retry loading earlier messages
+            </button>
+          ) : (
+            <span>Scroll up for earlier messages</span>
+          )}
+        </div>
+      ) : messages.length > 0 ? (
+        <div className="mb-1 flex items-center justify-center text-[10px] uppercase tracking-widest text-keep-muted/60">
+          — start of history —
+        </div>
+      ) : null}
       {messages.map((m) => (
         <Fragment key={m.id}>{lineFor(m)}</Fragment>
       ))}
@@ -2161,7 +2332,7 @@ function ReportButton({ msg }: { msg: ChatMessage }) {
   }
 
   return (
-    <span className="inline-flex md:absolute md:right-0 md:top-0 md:invisible md:group-hover:visible">
+    <span className="inline-flex md:absolute md:right-3 md:top-0 md:invisible md:group-hover:visible">
       <button
         type="button"
         onClick={file}
@@ -2292,7 +2463,7 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
     // three-button row reads as one set. Edit is neutral; delete is
     // accent-tinted as the danger-coded option so a fast click can't
     // confuse the two.
-    <span className="inline-flex gap-1 md:absolute md:right-0 md:top-0">
+    <span className="inline-flex gap-1 md:absolute md:right-3 md:top-0">
       <button
         type="button"
         onClick={() => { setDraft(msg.body); setEditing(true); }}
@@ -2318,9 +2489,11 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
 /**
  * Hover-revealed bookmark control on each message. Sits at the top-right
  * of the line, offset to the LEFT of the existing OwnControls / Report
- * buttons so they don't overlap (both clusters use `absolute right-0
- * top-0`; we offset this one with `right-20` ≈ 80px, which leaves room
- * for either control variant without crowding).
+ * buttons so they don't overlap. Both clusters use a small right-3
+ * inset (12px) to clear the scroll container's scrollbar; the
+ * bookmark sits another 80px to the left of that (`right-[5.75rem]`
+ * ≈ 92px total) which leaves room for either control variant
+ * without crowding.
  *
  * Open the popover to choose a category and optional note, then POST to
  * `/me/bookmarks`. The server upserts on the unique (user, message)
@@ -2390,7 +2563,7 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
   }
 
   return (
-    <span className="relative inline-flex md:absolute md:right-20 md:top-0 md:invisible md:group-hover:visible">
+    <span className="relative inline-flex md:absolute md:right-[5.75rem] md:top-0 md:invisible md:group-hover:visible">
       <button
         type="button"
         onClick={openPopover}

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -12,7 +12,7 @@ import type {
   ServerToClientEvents,
   ThreadCategory,
 } from "@thekeep/shared";
-import { messages, roomMembers, roomThreadCategories, rooms } from "../db/schema.js";
+import { ignores, messages, roomMembers, roomThreadCategories, rooms } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
@@ -301,6 +301,105 @@ export async function registerRoomsRoutes(
       ...(m.isSticky ? { isSticky: true } : {}),
     }));
     return { messages: wire };
+  });
+
+  /**
+   * GET /rooms/:id/messages?before=<createdAt-ms>&limit=<N>
+   *
+   * Scroll-up pagination for the flat chat history. The initial backlog
+   * delivered via `room:join` / `message:bulk` is capped at the most
+   * recent 50 lines; this endpoint serves the older window that
+   * scrolling past the top edge of the buffer needs. Same privacy /
+   * ignore / whisper-party filters as the live backlog so the
+   * server-side posture is consistent between "first 50" and "older
+   * pages."
+   *
+   * Returns `{ messages, hasMore }` chronologically oldest → newest
+   * within the page so the client can prepend in order. `hasMore` is
+   * computed by overfetching one row past the limit so the client
+   * doesn't need a separate count round-trip.
+   */
+  app.get<{
+    Params: { id: string };
+    Querystring: { before?: string; limit?: string };
+  }>("/rooms/:id/messages", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
+    if (!room) { reply.code(404); return { error: "no room" }; }
+    if (room.type === "private") {
+      const member = (await db
+        .select()
+        .from(roomMembers)
+        .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, me.id)))
+        .limit(1))[0];
+      if (!member) { reply.code(403); return { error: "not a member" }; }
+    }
+    const before = req.query.before ? parseInt(req.query.before, 10) : NaN;
+    if (!Number.isFinite(before) || before <= 0) {
+      reply.code(400);
+      return { error: "before (ms) required" };
+    }
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit ?? "50", 10) || 50));
+
+    // Apply the same ignore filter the live backlog uses so a user
+    // they've muted doesn't re-appear when they scroll older.
+    const ignoredIds = new Set(
+      (await db
+        .select({ ignoredUserId: ignores.ignoredUserId })
+        .from(ignores)
+        .where(eq(ignores.userId, me.id))).map((r) => r.ignoredUserId),
+    );
+    const whisperFilter = or(
+      sql`${messages.kind} != 'whisper'`,
+      eq(messages.userId, me.id),
+      eq(messages.toUserId, me.id),
+    );
+
+    // Overfetch by one to detect hasMore without a separate count.
+    const rows = await db
+      .select()
+      .from(messages)
+      .where(and(
+        eq(messages.roomId, room.id),
+        lt(messages.createdAt, new Date(before)),
+        whisperFilter,
+      ))
+      .orderBy(desc(messages.createdAt))
+      .limit(limit + 1);
+    const hasMore = rows.length > limit;
+    const window = (hasMore ? rows.slice(0, limit) : rows)
+      .filter((m) => !ignoredIds.has(m.userId));
+    // The DB pull was DESC for the limit boundary; flip to ASC so the
+    // client can prepend in place without re-sorting.
+    window.reverse();
+    const wire: ChatMessage[] = window.map((m) => ({
+      id: m.id,
+      roomId: m.roomId,
+      userId: m.userId,
+      characterId: m.characterId,
+      displayName: m.displayName,
+      kind: m.kind,
+      body: m.deletedAt ? "" : m.body,
+      color: m.color,
+      createdAt: +m.createdAt,
+      ...(m.toUserId ? { toUserId: m.toUserId } : {}),
+      ...(m.toDisplayName ? { toDisplayName: m.toDisplayName } : {}),
+      ...(m.replyToId ? { replyToId: m.replyToId } : {}),
+      ...(m.replyToDisplayName ? { replyToDisplayName: m.replyToDisplayName } : {}),
+      ...(m.replyToBodySnippet ? { replyToBodySnippet: m.replyToBodySnippet } : {}),
+      ...(m.moodSnapshot ? { moodSnapshot: m.moodSnapshot } : {}),
+      ...(m.npcVoicedBy ? { npcVoicedBy: m.npcVoicedBy } : {}),
+      ...(m.threadCategoryId ? { threadCategoryId: m.threadCategoryId } : {}),
+      ...(m.title ? { title: m.title } : {}),
+      ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
+      ...(m.editedAt ? { editedAt: +m.editedAt } : {}),
+      ...(m.deletedAt ? { deletedAt: +m.deletedAt } : {}),
+      ...(m.lockedAt ? { lockedAt: +m.lockedAt } : {}),
+      ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
+      ...(m.isSticky ? { isSticky: true } : {}),
+    }));
+    return { messages: wire, hasMore };
   });
 
   /**

@@ -20,9 +20,7 @@ interface Props {
   currentRoomId: string | null;
   /** Jump to a specific message id in the given room. Search bar wires this. */
   onJumpToMessage: (roomId: string, messageId: string) => void;
-  /** Open the Friends modal (full friend list with avatars + DM shortcut). */
-  onOpenFriends: () => void;
-  /** Open the Messages (DM conversation list) modal. */
+  /** Open the unified Messages modal (DMs + friends + friend requests). */
   onOpenMessages: () => void;
 }
 
@@ -38,7 +36,7 @@ interface Props {
  * is a fixed-position slide-out), so the drawer here just expands upward
  * within that container - works the same as desktop.
  */
-export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, currentRoomId, onJumpToMessage, onOpenFriends, onOpenMessages }: Props) {
+export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, currentRoomId, onJumpToMessage, onOpenMessages }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
   const [refreshOpen, setRefreshOpen] = useState(false);
@@ -57,13 +55,13 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   const fontStep = useChat((s) => s.fontStep);
   const setFontStep = useChat((s) => s.setFontStep);
   const refreshIntervalSec = useChat((s) => s.refreshIntervalSec);
-  // Total unread DM count across every conversation. Drives the badge
-  // on the "Messages" menu item AND a small dot on the closed Tools
-  // trigger so the user gets a glance-level cue even before they
-  // open the drawer. Same source the per-conversation badges in
-  // MessagesModal pull from, so the two numbers stay consistent.
-  const dmUnreadTotal = useChat((s) => {
-    let n = 0;
+  // Total "things in Messages that need attention." Sums unread DMs
+  // across every conversation AND the count of pending friend
+  // requests so both the messenger ✉ icon and the Tools menu
+  // Messages row show one combined cue. Renamed from `dmUnreadTotal`
+  // to make the broader scope explicit.
+  const messagesBadgeTotal = useChat((s) => {
+    let n = s.pendingFriendRequests.length;
     for (const c of Object.values(s.dmConversations)) n += c.unreadCount;
     return n;
   });
@@ -257,14 +255,9 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
             <SectionHeader title="People" />
             <MenuItem
               label="Messages"
-              hint="Your direct-message conversations"
-              badge={dmUnreadTotal}
+              hint="DMs, friends, and friend requests — all in one place"
+              badge={messagesBadgeTotal}
               onClick={() => { onOpenMessages(); setDrawerOpen(false); }}
-            />
-            <MenuItem
-              label="Friends"
-              hint="Friends list with online status + DM shortcuts"
-              onClick={() => { onOpenFriends(); setDrawerOpen(false); }}
             />
             <MenuItem label="All Users" hint="Browse the user directory" onClick={() => fire("/users")} />
             <MenuItem label="Ignore List" hint="Show or clear your ignore list" onClick={() => fire("/ignore")} />
@@ -332,44 +325,65 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
         </>
       ) : null}
 
-      {/* Identity switcher — always visible above the Tools trigger.
-          When a character is active the button shows their name and the
-          dropdown ends with a red "Leave Character" row. When OOC the
-          label reads "<username> OOC" and the dropdown lists just the
-          characters to step into. */}
-      <IdentityButton
-        masterName={me?.username ?? null}
-        activeCharacterName={activeCharacterName ?? null}
-        characters={characters}
-        loading={charactersLoading}
-        open={identityOpen}
-        onToggle={() => setIdentityOpen((v) => !v)}
-        onClose={() => setIdentityOpen(false)}
-        onSwitch={switchCharacter}
-        onLeave={leaveCharacter}
-        inCharacter={!!activeCharacterId}
-      />
+      {/* Identity switcher (flex-1) + Messenger shortcut (icon-square).
+          The two share a row so the DM unread badge sits where the eye
+          naturally lands when scanning the bottom strip, instead of
+          competing with the Tools button. Identity dropdown owns the
+          left, messenger icon owns the right — fixed-width so it
+          doesn't push the identity label around. All three buttons
+          (identity, envelope, Tools) share the same explicit height
+          (h-9 mobile / md:h-7 desktop) so they line up regardless of
+          their font-size differences. Without the fixed heights the
+          envelope's `text-base` glyph would render taller than the
+          identity's `text-xs` label and the row's bottom edges would
+          drift apart. */}
+      <div className="flex gap-1">
+        <div className="min-w-0 flex-1">
+          <IdentityButton
+            masterName={me?.username ?? null}
+            activeCharacterName={activeCharacterName ?? null}
+            characters={characters}
+            loading={charactersLoading}
+            open={identityOpen}
+            onToggle={() => setIdentityOpen((v) => !v)}
+            onClose={() => setIdentityOpen(false)}
+            onSwitch={switchCharacter}
+            onLeave={leaveCharacter}
+            inCharacter={!!activeCharacterId}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={onOpenMessages}
+          title={messagesBadgeTotal > 0
+            ? `${messagesBadgeTotal} unread message${messagesBadgeTotal === 1 ? "" : "s"} or friend request${messagesBadgeTotal === 1 ? "" : "s"} — open Messages`
+            : "Open Messages"}
+          aria-label="Open Messages"
+          className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-sm leading-none hover:bg-keep-banner md:h-7 md:w-7"
+        >
+          <span aria-hidden>✉</span>
+          {messagesBadgeTotal > 0 ? (
+            <span className="absolute -right-1 -top-1 min-w-[1.1rem] rounded-full bg-keep-action px-1 py-0 text-center text-[10px] font-semibold leading-tight text-keep-bg">
+              {messagesBadgeTotal > 99 ? "99+" : messagesBadgeTotal}
+            </span>
+          ) : null}
+        </button>
+      </div>
 
       {/* Trigger bar - always visible at the bottom of the rail. The
-          unread-count pill (when non-zero) tips the user that there's
-          something inside the drawer that needs attention; matches the
-          same number shown on the Messages menu item. */}
+          DM unread badge moved to the dedicated messenger icon above;
+          the Tools trigger stays uncluttered. Height locked to match
+          the identity/envelope row. */}
       <button
         type="button"
         onClick={() => setDrawerOpen((v) => !v)}
-        title={dmUnreadTotal > 0 ? `${dmUnreadTotal} unread message${dmUnreadTotal === 1 ? "" : "s"}` : "Open the tools drawer"}
-        // py-2.5 on mobile (thumb target); py-1 on md+ for compact desktop.
-        className={`mt-1 flex w-full items-center justify-center gap-2 rounded border border-keep-rule py-2.5 text-xs font-semibold uppercase tracking-widest md:py-1 ${
+        title="Open the tools drawer"
+        className={`mt-1 flex h-9 w-full items-center justify-center gap-2 rounded border border-keep-rule text-xs font-semibold uppercase tracking-widest md:h-7 ${
           drawerOpen ? "bg-keep-banner" : "bg-keep-bg hover:bg-keep-banner"
         }`}
       >
         <span aria-hidden>{drawerOpen ? "▼" : "▲"}</span>
         Tools
-        {dmUnreadTotal > 0 ? (
-          <span className="rounded-full bg-keep-action px-1.5 py-0 text-[10px] font-semibold text-keep-bg">
-            {dmUnreadTotal > 99 ? "99+" : dmUnreadTotal}
-          </span>
-        ) : null}
       </button>
     </div>
   );
@@ -498,7 +512,12 @@ function IdentityButton({
             ? "Switch character or return to OOC"
             : "Switch into a character"
         }
-        className={`flex w-full items-center justify-center gap-2 rounded border border-keep-rule py-2.5 text-xs font-semibold uppercase tracking-widest md:py-1 ${
+        // Height locked to h-9 mobile / md:h-7 desktop to match the
+        // adjacent envelope shortcut and the Tools trigger below.
+        // Without the explicit height the row's bottom edges drift
+        // apart whenever one button's content has a different font-
+        // size than its siblings.
+        className={`flex h-9 w-full items-center justify-center gap-2 rounded border border-keep-rule text-xs font-semibold uppercase tracking-widest md:h-7 ${
           open
             ? "bg-keep-banner"
             : inCharacter

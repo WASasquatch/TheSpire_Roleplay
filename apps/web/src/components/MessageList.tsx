@@ -2227,9 +2227,17 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
 
   if (editing) {
     return (
+      // `block w-full` is load-bearing. The OwnControls wrapper above this
+      // uses `md:contents` on desktop, so the form ends up as a direct
+      // child of the message row. Without an explicit width the form was
+      // collapsing to a narrow slot on the right of the line — looked like
+      // a tiny ~200px input next to the message body. Forcing block + 100%
+      // makes the editor span the full row width on every viewport.
+      // `basis-full` is the flex-context fallback in case the form lands
+      // inside a horizontal flex container in some future caller.
       <form
         onSubmit={submitEdit}
-        className="mt-1 flex items-center gap-1"
+        className="mt-1 flex w-full basis-full items-center gap-1"
         onKeyDown={(e) => {
           if (e.key === "Escape") { setEditing(false); setDraft(msg.body); }
         }}
@@ -2240,19 +2248,19 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
           type="text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          className="flex-1 rounded border border-keep-action bg-keep-bg px-2 py-0.5 text-sm outline-none"
+          className="min-w-0 flex-1 rounded border border-keep-action bg-keep-bg px-2 py-0.5 text-sm outline-none"
         />
         <button
           type="submit"
           disabled={busy}
-          className="rounded border border-keep-action bg-keep-action/10 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
+          className="shrink-0 rounded border border-keep-action bg-keep-action/10 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
         >
           {busy ? "..." : "Save"}
         </button>
         <button
           type="button"
           onClick={() => { setEditing(false); setDraft(msg.body); setError(null); }}
-          className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs hover:bg-keep-banner"
+          className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner hover:text-keep-text"
         >
           Cancel
         </button>

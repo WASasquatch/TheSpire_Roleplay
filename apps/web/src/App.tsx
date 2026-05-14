@@ -9,6 +9,7 @@ import { Composer } from "./components/Composer.js";
 import { HelpModal } from "./components/HelpModal.js";
 import { MessageList } from "./components/MessageList.js";
 import { MutualPrompts } from "./components/MutualPrompts.js";
+import { FriendRequestPrompts } from "./components/FriendRequestPrompts.js";
 import { BookmarksModal } from "./components/BookmarksModal.js";
 import { ProfileEditor } from "./components/ProfileEditor.js";
 import { ProfileModal } from "./components/ProfileModal.js";
@@ -915,6 +916,58 @@ function Chat() {
     [me?.username, activeCharacterName],
   );
 
+  /**
+   * System-announcement-style chat line whenever a NEW friend request
+   * lands. The pendingFriendRequests array is the canonical source —
+   * we diff its membership against the previous render and emit one
+   * system message per newly-appeared sender id.
+   *
+   * Why diff instead of listening to `friend:request` directly?
+   *
+   *   - The socket event fires for FOUR distinct causes (new request,
+   *     accept echo, decline echo, unfriend echo). Only the first is
+   *     "new incoming request from someone you haven't heard from
+   *     yet." Diffing the resolved list filters out the other three
+   *     for free.
+   *   - The initial fetch on connect should NOT spam a system line
+   *     for every already-pending request the user had before
+   *     reconnecting. `seededRef` covers that: the first observation
+   *     of the array just records the baseline.
+   *
+   * The message is room-scoped (uses currentRoomId), so users in any
+   * room see the cue inline. Skipped silently when no room is active.
+   */
+  const pendingFriendRequests = useChat((s) => s.pendingFriendRequests);
+  const prevPendingIdsRef = useRef<Set<string>>(new Set());
+  const pendingSeededRef = useRef(false);
+  useEffect(() => {
+    const currIds = new Set(pendingFriendRequests.map((r) => r.userId));
+    if (!pendingSeededRef.current) {
+      prevPendingIdsRef.current = currIds;
+      pendingSeededRef.current = true;
+      return;
+    }
+    const roomId = useChat.getState().currentRoomId;
+    for (const r of pendingFriendRequests) {
+      if (prevPendingIdsRef.current.has(r.userId)) continue;
+      // New request → emit system line. No-op when not in any room
+      // (the line would have no home to render in).
+      if (!roomId) continue;
+      appendMessage({
+        id: `friend-req-${r.userId}-${Date.now()}`,
+        roomId,
+        userId: "system",
+        characterId: null,
+        displayName: "system",
+        kind: "system",
+        body: `${r.displayName} sent you a friend request. Open Messages to accept or decline.`,
+        color: null,
+        createdAt: Date.now(),
+      });
+    }
+    prevPendingIdsRef.current = currIds;
+  }, [pendingFriendRequests, appendMessage]);
+
   useEffect(() => {
     function onMessage(msg: ChatMessage) {
       if (shouldNotify(msg, me?.id ?? null, notifyPref, document.hidden, selfNames)) {
@@ -1168,6 +1221,16 @@ function Chat() {
           if (j && Array.isArray(j.conversations)) setDmConversations(j.conversations);
         })
         .catch(() => {});
+      // Pull pending friend requests too so the in-chat prompt + the
+      // DM pinned banner have something to render right away on a
+      // fresh load (a request that landed while the tab was offline
+      // would otherwise stay invisible until the next live event).
+      fetch("/me/friend-requests", { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (j && Array.isArray(j.requests)) useChat.getState().setPendingFriendRequests(j.requests);
+        })
+        .catch(() => {});
       bumpDmReseed();
     }
     // socket.io-client fires `connect` on the initial handshake and
@@ -1198,18 +1261,39 @@ function Chat() {
           })
           .catch(() => {});
       } else {
-        // Bump lastMessageAt + advance preview locally so the rail
-        // reflects the new arrival without a roundtrip.
+        // Decide whether this DM counts as a new unread.
+        //
+        // Three cases that should NOT bump the badge:
+        //   1. We sent it — the server fans our own send back to our
+        //      sockets too, but the user obviously read what they
+        //      typed.
+        //   2. The user is currently viewing this conversation in the
+        //      open Messages modal (selectedUserId === otherUser).
+        //      They've effectively read it on arrival; fire a /read
+        //      POST so the server's last-read-at advances too.
+        //   3. Anyone else's message into this conversation: bump.
+        const state = useChat.getState();
+        const meIdInner = state.me?.id ?? "";
+        const otherUserId = known.otherUserId;
+        const isSelf = message.senderId === meIdInner;
+        const viewing = state.openDmOtherUserId === otherUserId;
+        if (viewing && !isSelf) {
+          // Mark read on the server so the next /me/dms refetch
+          // returns unreadCount=0 too.
+          fetch(`/me/dms/${known.id}/read`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ upTo: Date.now() }),
+          }).catch(() => {});
+        }
         upsertDmConversation({
           ...known,
           lastMessageAt: message.createdAt,
           lastMessagePreview: message.deletedAt
             ? "[message removed]"
             : message.body.slice(0, 120),
-          unreadCount:
-            message.senderId === (useChat.getState().me?.id ?? "")
-              ? known.unreadCount
-              : known.unreadCount + 1,
+          unreadCount: isSelf || viewing ? known.unreadCount : known.unreadCount + 1,
         });
       }
     });
@@ -1226,6 +1310,24 @@ function Chat() {
     // a small notice so the user knows even when the Messages modal
     // isn't open; the modal itself refetches on next open.
     socket.on("friend:request", (payload) => {
+      // Refresh the pending-requests list every time the server tells
+      // us anything about friend state changed. The event fires on
+      // four distinct causes (new request, accept echo, decline echo,
+      // unfriend echo); the canonical answer for "what's in my inbox
+      // right now" lives at /me/friend-requests, so we re-poll instead
+      // of guessing from the payload. The in-chat prompt card and the
+      // DM pinned banner both read from the store, so this single
+      // fetch updates both surfaces atomically.
+      fetch("/me/friend-requests", { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (j && Array.isArray(j.requests)) useChat.getState().setPendingFriendRequests(j.requests);
+        })
+        .catch(() => {});
+      // Soft notice in the banner so the user gets a glance signal
+      // even when the chat prompt is offscreen (e.g. they're deep in
+      // the forum view). Phrasing keeps it neutral — the actual
+      // accept/decline UI lives in the prompt cards.
       setNotice({
         code: "FRIEND_UPDATE",
         message: `Friend update from ${payload.frienderDisplayName}.`,
@@ -1731,9 +1833,10 @@ function Chat() {
         {/* The friends list used to live here as an always-visible
             48px-wide rail, but a column that narrow couldn't fit
             avatars or a readable label and ended up squeezing the
-            rest of the chat shell. It's now a modal opened from
-            Tools → People → Friends (see FriendsModal + the
-            `onOpenFriends` wire below). */}
+            rest of the chat shell. Friends now live inside the
+            unified Messages modal (Tools → People → Messages); the
+            old standalone Friends button was redundant once the two
+            features merged into one surface. */}
         {/* `min-w-0` is non-negotiable: by default a flex child's
             `min-width` is `auto` (= its intrinsic content width), so a
             wide descendant — a long topic title, an action button strip,
@@ -1831,6 +1934,13 @@ function Chat() {
             socket={socket}
             onError={(n) => setNotice(n)}
           />
+          {/* Inline friend-request prompts. Sit alongside the mutual-
+              title prompts so any inbound social ask lands in one
+              consistent slot above the composer. Cards dispatch
+              /accept or /decline via the existing send() pipe — the
+              server emits a fresh friend:request echo when the row
+              flips, which clears the card via the store re-sync. */}
+          <FriendRequestPrompts onCommand={send} />
           {/* Second accent rail — sits between the message stream and
               the composer. Same component as the header rail; the per-
               style CSS gives it identical decoration so the chat is
@@ -1894,7 +2004,6 @@ function Chat() {
             setRailOpen(false);
           }}
           onJumpToMessage={jumpToMessage}
-          onOpenFriends={() => { setMessagesOpen(true); setRailOpen(false); }}
           onOpenMessages={() => { setMessagesOpen(true); setRailOpen(false); }}
           isOpen={railOpen}
           onClose={() => setRailOpen(false)}

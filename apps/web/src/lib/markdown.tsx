@@ -726,12 +726,21 @@ function UrlOrImage({ url, alt, forceImage }: UrlOrImageProps) {
       </button>
       {shown ? (
         <span className="mt-1 block">
+          {/*
+            Viewport-relative cap: 95% of the screen width on mobile so
+            a portrait image isn't pushed off the gutter, narrowing to
+            30% of the viewport on md+ so a single image can't dominate
+            the chat column. `max-h-` is in vh units for the same
+            "always fits on screen without scrolling the whole image"
+            posture. object-contain keeps the natural aspect ratio
+            inside whichever cap binds first.
+          */}
           <img
             src={url}
             alt={alt ?? ""}
             loading="lazy"
             referrerPolicy="no-referrer"
-            className="block max-h-[360px] max-w-[480px] rounded border border-keep-rule object-contain"
+            className="block max-h-[60vh] max-w-[95vw] rounded border border-keep-rule object-contain md:max-w-[30vw]"
           />
         </span>
       ) : null}

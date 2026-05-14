@@ -22,9 +22,7 @@ interface Props {
   onWorldClick: (worldId: string) => void;
   /** Jump to a specific message in a room. Wired by the in-rail search bar. */
   onJumpToMessage: (roomId: string, messageId: string) => void;
-  /** Open the Friends modal (full friend list with avatars + DM shortcut). */
-  onOpenFriends: () => void;
-  /** Open the Messages modal (DM conversation list). */
+  /** Open the unified Messages modal (DMs + friends + friend requests). */
   onOpenMessages: () => void;
   /**
    * Mobile drawer state. On md+ screens the rail is always visible regardless;
@@ -51,7 +49,6 @@ export function RoomsTree({
   onCommand,
   onWorldClick,
   onJumpToMessage,
-  onOpenFriends,
   onOpenMessages,
   isOpen,
   onClose,
@@ -131,7 +128,6 @@ export function RoomsTree({
         activeCharacterName={activeCharacterName ?? null}
         currentRoomId={currentRoomId}
         onJumpToMessage={onJumpToMessage}
-        onOpenFriends={onOpenFriends}
         onOpenMessages={onOpenMessages}
       />
     </aside>

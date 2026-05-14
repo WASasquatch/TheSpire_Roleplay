@@ -8,6 +8,8 @@ import { Modal } from "./Modal.js";
 import { useChat } from "../state/store.js";
 import { readError } from "../lib/http.js";
 import { parseInline } from "../lib/markdown.js";
+import { FormattingToolbar } from "./FormattingToolbar.js";
+import { UsernameAutocomplete } from "./UsernameAutocomplete.js";
 
 interface Props {
   onClose: () => void;
@@ -81,9 +83,18 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
   const setDmConversations = useChat((s) => s.setDmConversations);
   const setDmMessages = useChat((s) => s.setDmMessages);
   const appendDmMessage = useChat((s) => s.appendDmMessage);
+  const upsertDmConversation = useChat((s) => s.upsertDmConversation);
+  const setOpenDmOtherUser = useChat((s) => s.setOpenDmOtherUser);
+  // Pending requests come from the store so accept/decline in *any*
+  // surface (this inbox, the chat-level prompts, or the DM thread's
+  // bottom banner) clears every other surface in one shot. Previously
+  // the modal kept its own copy and would diverge — accepting from
+  // the inbox left the chat prompt and the DM banner stuck.
+  const pendingFriendRequests = useChat((s) => s.pendingFriendRequests);
+  const setPendingFriendRequests = useChat((s) => s.setPendingFriendRequests);
+  const removePendingFriendRequest = useChat((s) => s.removePendingFriendRequest);
 
   const [friends, setFriends] = useState<FriendListEntry[]>([]);
-  const [requests, setRequests] = useState<FriendRequestEntry[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(initialOtherUserId ?? null);
@@ -154,6 +165,23 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
   // Add-friend / compose form drafts.
   const [addDraft, setAddDraft] = useState("");
   const [composeDraft, setComposeDraft] = useState("");
+  // Inline status strips shown right under each form. Cleared
+  // automatically after a few seconds so the strip doesn't shout
+  // forever after a successful submit; errors stick until the next
+  // edit or submit so the user can read them at leisure.
+  type FormStatus = { kind: "ok" | "info" | "error"; text: string } | null;
+  const [addStatus, setAddStatus] = useState<FormStatus>(null);
+  const [composeStatus, setComposeStatus] = useState<FormStatus>(null);
+  useEffect(() => {
+    if (!addStatus || addStatus.kind === "error") return;
+    const t = window.setTimeout(() => setAddStatus(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [addStatus]);
+  useEffect(() => {
+    if (!composeStatus || composeStatus.kind === "error") return;
+    const t = window.setTimeout(() => setComposeStatus(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [composeStatus]);
 
   /** Refetch the left-pane lists (friends + requests + conversations). */
   const refreshLists = useCallback(async () => {
@@ -172,14 +200,17 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
       const reqJson = fq.ok ? ((await fq.json()) as { requests: FriendRequestEntry[] }) : { requests: [] };
       const dmJson = dm.ok ? ((await dm.json()) as { conversations: DirectConversationSummary[] }) : { conversations: [] };
       setFriends(friendsJson.friends);
-      setRequests(reqJson.requests);
+      // Pending requests go straight into the store so every surface
+      // (this inbox, the chat prompts, the DM banner) sees the same
+      // list. Local component state is no longer involved.
+      setPendingFriendRequests(reqJson.requests);
       setDmConversations(dmJson.conversations);
     } catch (e) {
       setError(e instanceof Error ? e.message : "load failed");
     } finally {
       setLoadingList(false);
     }
-  }, [setDmConversations]);
+  }, [setDmConversations, setPendingFriendRequests]);
 
   useEffect(() => {
     refreshLists();
@@ -256,12 +287,44 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
     setMobileView("thread");
   }
 
+  /**
+   * Whenever the selection (manual or auto-open) changes, mirror it
+   * into the store's `openDmOtherUserId` so the App-level `dm:new`
+   * handler can tell "user is staring at this conversation right now"
+   * and skip the unread bump. Also locally reset that conversation's
+   * unreadCount to 0 — the server-side /read POST in ThreadPane fires
+   * separately, but resetting the badge optimistically here keeps the
+   * UI from showing a stale count for the half-second between mount
+   * and the POST round-trip.
+   *
+   * Cleanup on unmount clears the store flag so a stale tab doesn't
+   * keep claiming to view a conversation it's no longer showing.
+   */
+  useEffect(() => {
+    setOpenDmOtherUser(selectedUserId);
+    if (selectedUserId !== null) {
+      const conv = Object.values(useChat.getState().dmConversations)
+        .find((c) => c.otherUserId === selectedUserId);
+      if (conv && conv.unreadCount > 0) {
+        upsertDmConversation({ ...conv, unreadCount: 0 });
+      }
+    }
+    return () => { setOpenDmOtherUser(null); };
+  }, [selectedUserId, setOpenDmOtherUser, upsertDmConversation]);
+
   function acceptRequest(r: FriendRequestEntry) {
     onCommand(`/accept ${r.username}`);
+    // Optimistic removal from the store: the chat-level prompt card
+    // and the DM thread's bottom banner both read from the same
+    // pendingFriendRequests list, so dropping the row here clears
+    // every surface in one render. The refreshKey bump below also
+    // re-pulls /me/friend-requests as a backstop.
+    removePendingFriendRequest(r.userId);
     window.setTimeout(() => setRefreshKey((v) => v + 1), 500);
   }
   function declineRequest(r: FriendRequestEntry) {
     onCommand(`/decline ${r.username}`);
+    removePendingFriendRequest(r.userId);
     window.setTimeout(() => setRefreshKey((v) => v + 1), 500);
   }
   function removeFriend(f: FriendListEntry) {
@@ -269,13 +332,55 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
     onCommand(`/unfriend ${f.username}`);
     window.setTimeout(() => setRefreshKey((v) => v + 1), 500);
   }
-  function sendFriendRequest(e: FormEvent) {
+  /**
+   * Submit the add-friend form. Hits POST /me/friend-requests instead
+   * of dispatching the slash command so we get a structured success/
+   * error response — the slash-command path emits its result as a
+   * room system message, which the modal can't easily surface inline.
+   *
+   * The status messages map onto the four distinct server responses:
+   *   - sent             → "Friend request sent to <name>."
+   *   - accepted         → "You and <name> are now friends." (they had asked us first)
+   *   - already_pending  → "Request to <name> is still pending."
+   *   - already_friends  → "You and <name> are already friends."
+   * Errors:
+   *   - 404 no_user      → "No user named <name>."
+   *   - 400 self         → "Can't friend yourself."
+   */
+  async function sendFriendRequest(e: FormEvent) {
     e.preventDefault();
     const name = addDraft.trim();
     if (!name) return;
-    onCommand(`/friend ${name}`);
-    setAddDraft("");
-    window.setTimeout(() => setRefreshKey((v) => v + 1), 600);
+    setAddStatus({ kind: "info", text: "Sending…" });
+    try {
+      const r = await fetch("/me/friend-requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: name }),
+      });
+      const j = await r.json().catch(() => ({} as { error?: string; status?: string; username?: string }));
+      if (!r.ok) {
+        const msg =
+          j.error === "no_user" ? `No user named "${name}".`
+          : j.error === "self" ? "You can't friend yourself."
+          : j.error ?? "Friend request failed.";
+        setAddStatus({ kind: "error", text: msg });
+        return;
+      }
+      const target = j.username ?? name;
+      const ok =
+        j.status === "accepted" ? `You and ${target} are now friends.`
+        : j.status === "already_pending" ? `Friend request to ${target} is still pending.`
+        : j.status === "already_friends" ? `You and ${target} are already friends.`
+        : `Friend request sent to ${target}.`;
+      setAddStatus({ kind: "ok", text: ok });
+      setAddDraft("");
+      // Refresh inbox so the new pending row shows up (or disappears
+      // if we just auto-accepted into mutual friendship).
+      setRefreshKey((v) => v + 1);
+    } catch {
+      setAddStatus({ kind: "error", text: "Network error — try again." });
+    }
   }
 
   /**
@@ -288,23 +393,22 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
     e.preventDefault();
     const name = composeDraft.trim();
     if (!name) return;
-    // No server lookup here — the right pane's first send will 404 if
-    // the username is wrong, and surface the error inline. Keeps the
-    // path simple; users rarely type usernames they don't already
-    // have in mind.
-    setComposeDraft("");
-    // We don't have a userId yet — the right pane needs one. Best we
-    // can do: fetch the profile via the REST endpoint and grab its id.
+    setComposeStatus({ kind: "info", text: "Looking up…" });
     fetch(`/profiles/${encodeURIComponent(name)}`, { credentials: "include" })
       .then(async (r) => {
-        if (!r.ok) throw new Error("No user named " + name);
+        if (!r.ok) throw new Error(`No user named "${name}".`);
         const j = await r.json();
-        if ("private" in j) throw new Error("Profile is private");
+        if ("private" in j) throw new Error("That profile is private.");
         const userId = j.profile?.userId;
-        if (!userId) throw new Error("Couldn't resolve user");
+        if (!userId) throw new Error("Couldn't resolve user.");
+        setComposeDraft("");
+        setComposeStatus(null);
         selectUser(userId);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "lookup failed"));
+      .catch((err) => setComposeStatus({
+        kind: "error",
+        text: err instanceof Error ? err.message : "Lookup failed.",
+      }));
   }
 
   return (
@@ -338,20 +442,33 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
               </div>
             ) : null}
             <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-xs">
-              {/* Pending requests */}
-              {requests.length > 0 ? (
+              {/* Pending requests — sourced from the shared store so
+                  accept/decline elsewhere clears this list automatically. */}
+              {pendingFriendRequests.length > 0 ? (
                 <div className="mb-2">
                   <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">
-                    Friend requests ({requests.length})
+                    Friend requests ({pendingFriendRequests.length})
                   </div>
                   <ul className="space-y-1">
-                    {requests.map((r) => (
+                    {pendingFriendRequests.map((r) => (
                       <li key={r.userId} className="flex items-center gap-2 rounded border border-keep-action/30 bg-keep-action/5 p-2">
-                        <Avatar url={r.avatarUrl} name={r.displayName} size={32} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-semibold text-keep-text">{r.displayName}</span>
-                          <span className="block truncate text-[10px] text-keep-muted">wants to be friends</span>
-                        </span>
+                        {/* Avatar + name is now a click target: clicking
+                            opens the thread pane with this user, which
+                            shows the same accept/decline as a sticky
+                            banner at the bottom. The ✓/× buttons stay
+                            here as quick-answer shortcuts for the inbox
+                            view. */}
+                        <button
+                          type="button"
+                          onClick={() => selectUser(r.userId)}
+                          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                        >
+                          <Avatar url={r.avatarUrl} name={r.displayName} size={32} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold text-keep-text">{r.displayName}</span>
+                            <span className="block truncate text-[10px] text-keep-muted">wants to be friends</span>
+                          </span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => acceptRequest(r)}
@@ -424,15 +541,19 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
               ) : null}
             </div>
 
-            {/* Bottom forms: add friend + compose */}
+            {/* Bottom forms: add friend + compose. Each input gets a
+                debounced username autocomplete so users don't have to
+                remember the exact spelling, and an inline status strip
+                that shows the server's response (request sent, already
+                friends, no such user, etc.) so submitting actually
+                feels like it did something. */}
             <div className="shrink-0 space-y-2 border-t border-keep-rule/60 bg-keep-bg/50 p-3 text-xs">
               <form onSubmit={sendFriendRequest} className="flex gap-1">
-                <input
-                  type="text"
+                <UsernameAutocomplete
                   value={addDraft}
-                  onChange={(e) => setAddDraft(e.target.value)}
+                  onChange={setAddDraft}
+                  onPick={() => { /* keep the form open so the user can hit Enter to send */ }}
                   placeholder="add friend by username..."
-                  className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
                 />
                 <button
                   type="submit"
@@ -442,13 +563,26 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
                   + Friend
                 </button>
               </form>
+              {addStatus ? (
+                <div
+                  className={
+                    "rounded border px-2 py-1 text-[11px] " +
+                    (addStatus.kind === "error"
+                      ? "border-keep-accent/50 bg-keep-accent/10 text-keep-accent"
+                      : addStatus.kind === "ok"
+                        ? "border-keep-action/50 bg-keep-action/10 text-keep-action"
+                        : "border-keep-rule bg-keep-banner/40 text-keep-muted")
+                  }
+                >
+                  {addStatus.text}
+                </div>
+              ) : null}
               <form onSubmit={composeToUser} className="flex gap-1">
-                <input
-                  type="text"
+                <UsernameAutocomplete
                   value={composeDraft}
-                  onChange={(e) => setComposeDraft(e.target.value)}
+                  onChange={setComposeDraft}
+                  onPick={() => { /* same — Enter from input submits the form */ }}
                   placeholder="message non-friend..."
-                  className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
                 />
                 <button
                   type="submit"
@@ -458,6 +592,20 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
                   💬
                 </button>
               </form>
+              {composeStatus ? (
+                <div
+                  className={
+                    "rounded border px-2 py-1 text-[11px] " +
+                    (composeStatus.kind === "error"
+                      ? "border-keep-accent/50 bg-keep-accent/10 text-keep-accent"
+                      : composeStatus.kind === "ok"
+                        ? "border-keep-action/50 bg-keep-action/10 text-keep-action"
+                        : "border-keep-rule bg-keep-banner/40 text-keep-muted")
+                  }
+                >
+                  {composeStatus.text}
+                </div>
+              ) : null}
             </div>
           </aside>
 
@@ -498,6 +646,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
                 appendDmMessage={appendDmMessage}
                 setDmMessages={setDmMessages}
                 meId={me?.id ?? null}
+                onCommand={onCommand}
               />
             ) : (
               <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-sm italic text-keep-muted">
@@ -634,6 +783,7 @@ function ThreadPane({
   appendDmMessage,
   setDmMessages,
   meId,
+  onCommand,
 }: {
   otherUserId: string;
   fallback: { displayName: string; avatarUrl: string | null; online: boolean } | null;
@@ -641,6 +791,8 @@ function ThreadPane({
   appendDmMessage: (msg: DirectMessage) => void;
   setDmMessages: (conversationId: string, msgs: DirectMessage[]) => void;
   meId: string | null;
+  /** Dispatch slash commands (used for /accept and /decline on the pinned banner). */
+  onCommand: (text: string) => void;
 }) {
   // Resolve conversation reactively — server creates the row on first
   // send, so it may be absent until then. NO_DM_MESSAGES is a stable
@@ -658,6 +810,16 @@ function ThreadPane({
    * (Socket.io drops `dm:new` to offline sockets without replay).
    */
   const dmReseedTick = useChat((s) => s.dmReseedTick);
+  /**
+   * If the OTHER party has a pending friend request to us, surface it
+   * as a pinned banner at the bottom of this thread. The full list
+   * lives in the store; we only care about the one matching the
+   * thread's other user — undefined when there's no pending request.
+   */
+  const pendingFromThisUser = useChat((s) =>
+    s.pendingFriendRequests.find((r) => r.userId === otherUserId),
+  );
+  const removePendingFriendRequest = useChat((s) => s.removePendingFriendRequest);
 
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -665,6 +827,9 @@ function ThreadPane({
   const [hasMore, setHasMore] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastSeenCount = useRef(messages.length);
+  // Reference handed to the formatting toolbar so its wrap-with-markdown
+  // buttons can read selection bounds + restore focus after each edit.
+  const dmInputRef = useRef<HTMLInputElement | null>(null);
 
   const header = useMemo(() => {
     if (conversation) {
@@ -819,28 +984,75 @@ function ThreadPane({
         )}
       </div>
 
+      {/* Pinned friend-request banner. Sits between the message list
+          and the composer so a request from the person whose thread
+          you're viewing is impossible to miss without a single tap.
+          Mirrors the chat-level FriendRequestPrompts behavior:
+          optimistic local removal on click, then the server's
+          friend:request echo re-syncs the canonical state. */}
+      {pendingFromThisUser ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-keep-action/50 bg-keep-action/10 px-3 py-2 text-sm">
+          <span aria-hidden className="text-base text-keep-action">+</span>
+          <span className="min-w-[120px] flex-1 leading-snug">
+            <span className="font-semibold text-keep-text">{pendingFromThisUser.displayName}</span>
+            <span className="text-keep-muted"> sent you a friend request.</span>
+          </span>
+          <span className="flex shrink-0 gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                onCommand(`/accept ${pendingFromThisUser.username}`);
+                removePendingFriendRequest(pendingFromThisUser.userId);
+              }}
+              className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg hover:bg-keep-action/90"
+            >
+              Accept
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onCommand(`/decline ${pendingFromThisUser.username}`);
+                removePendingFriendRequest(pendingFromThisUser.userId);
+              }}
+              className="rounded border border-keep-border bg-keep-bg px-3 py-1 text-xs uppercase tracking-widest text-keep-muted hover:bg-keep-panel hover:text-keep-text"
+            >
+              Decline
+            </button>
+          </span>
+        </div>
+      ) : null}
+
       {error ? (
         <div className="border-t border-keep-accent/40 bg-keep-accent/10 px-3 py-1 text-[11px] text-keep-accent">
           {error}
         </div>
       ) : null}
-      <form onSubmit={send} className="flex shrink-0 items-center gap-1 border-t border-keep-rule bg-keep-banner/40 p-2">
-        <input
-          type="text"
+      <form onSubmit={send} className="flex shrink-0 flex-col gap-1 border-t border-keep-rule bg-keep-banner/40 p-2">
+        <FormattingToolbar
+          inputRef={dmInputRef}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={`Message ${header.displayName}...`}
-          maxLength={4000}
+          onChange={setDraft}
           disabled={busy}
-          className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action disabled:opacity-50"
         />
-        <button
-          type="submit"
-          disabled={busy || !draft.trim()}
-          className="rounded border border-keep-action bg-keep-action/10 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
-        >
-          {busy ? "..." : "Send"}
-        </button>
+        <div className="flex items-center gap-1">
+          <input
+            ref={dmInputRef}
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={`Message ${header.displayName}...`}
+            maxLength={4000}
+            disabled={busy}
+            className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action disabled:opacity-50"
+          />
+          <button
+            type="submit"
+            disabled={busy || !draft.trim()}
+            className="rounded border border-keep-action bg-keep-action/10 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
+          >
+            {busy ? "..." : "Send"}
+          </button>
+        </div>
       </form>
     </>
   );

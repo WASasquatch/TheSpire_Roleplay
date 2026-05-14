@@ -289,6 +289,21 @@ interface ChatState {
    * otherUserId removes the "first-DM bootstrapping" footgun.
    */
   openDmOtherUserId: string | null;
+  /**
+   * Pending friend requests received by the current user. Source of truth
+   * is `/me/friend-requests`; the store mirror powers the in-chat prompt
+   * card and the DM thread's bottom-pinned banner, so both surfaces stay
+   * in sync without each having to refetch independently.
+   */
+  pendingFriendRequests: Array<{
+    userId: string;
+    username: string;
+    displayName: string;
+    avatarUrl: string | null;
+    createdAt: number;
+  }>;
+  setPendingFriendRequests: (list: ChatState["pendingFriendRequests"]) => void;
+  removePendingFriendRequest: (userId: string) => void;
   /** Local mirror of `users.dms_enabled`. Updated from /me/profile + the prefs PUT. */
   dmsEnabled: boolean;
   /**
@@ -616,6 +631,10 @@ export const useChat = create<ChatState>((set) => ({
   dmMessagesByConv: {},
   dmConversations: {},
   openDmOtherUserId: null,
+  pendingFriendRequests: [],
+  setPendingFriendRequests: (list) => set({ pendingFriendRequests: list }),
+  removePendingFriendRequest: (userId) =>
+    set((s) => ({ pendingFriendRequests: s.pendingFriendRequests.filter((r) => r.userId !== userId) })),
   dmsEnabled: true,
   soundPrefs: { dm: true, chat: true, alert: true },
   setSoundPrefs: (p) => set({ soundPrefs: p }),

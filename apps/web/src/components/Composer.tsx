@@ -412,6 +412,14 @@ export function Composer({
   // configured max-height (computed from line-height to stay font-size-aware).
   // useLayoutEffect avoids a flicker where the textarea briefly shows the old
   // height before the resize lands.
+  //
+  // The explicit `minHeight` floor closes a cross-browser inconsistency:
+  // some browsers fold CSS min-height into scrollHeight after the
+  // `style.height = "auto"` reset, others don't. Reading the computed
+  // min-height back and flooring the inline style here guarantees the
+  // textarea never collapses below its CSS floor — important for the
+  // mobile layout where the floor is sized to match the ↵+Send right
+  // column so the row has no dead space below the input.
   useLayoutEffect(() => {
     const el = inputRef.current;
     if (!el) return;
@@ -420,8 +428,10 @@ export function Composer({
     const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
     const padTop = parseFloat(cs.paddingTop) || 0;
     const padBottom = parseFloat(cs.paddingBottom) || 0;
+    const minHeight = parseFloat(cs.minHeight) || 0;
     const maxHeight = lineHeight * MAX_VISIBLE_LINES + padTop + padBottom;
-    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+    const target = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight);
+    el.style.height = `${target}px`;
     el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
   }, [value]);
 
@@ -907,13 +917,32 @@ export function Composer({
           (forum-locked-for-viewer or no-active-topic states) since
           formatting a blocked compose makes no sense. */}
       {!inputDisabled ? (
-        // Left-padded to match the input row's effective left edge on
-        // mobile: the input row prefixes a 40px (`h-10 w-10`) hamburger
-        // toggle + 8px (`gap-2`) before the textarea, so the toolbar
-        // floats 48px off the composer's left padding to land flush
-        // under the textarea instead of under the hamburger. md+ has no
-        // hamburger (rail is always visible), so the offset is dropped.
-        <div className="flex flex-wrap items-center gap-0.5 pl-12 text-xs md:pl-0">
+        // Compact toolbar row. On mobile the rooms-drawer trigger (💬)
+        // lives at the LEFT of this row with a thin vertical divider
+        // after it, freeing the input row below from a 40px-wide
+        // shrink-0 column — that column was eating into the textarea's
+        // width and limiting how much of a long message could be
+        // visible. md+ has the rail always visible, so the 💬 + divider
+        // are hidden and the toolbar's first item is the Bold button.
+        <div className="flex flex-wrap items-center gap-0.5 text-xs">
+          {onOpenRail ? (
+            <>
+              {/* Sizing mirrors FmtButton (`h-8 w-8 text-sm leading-none`)
+                  so the rooms toggle sits flush with the format buttons
+                  to its right — different fixed-height classes were the
+                  source of the misaligned bottom edge. */}
+              <button
+                type="button"
+                onClick={onOpenRail}
+                aria-label="Open rooms"
+                title="Rooms"
+                className="keep-button mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none hover:bg-keep-banner md:hidden"
+              >
+                💬
+              </button>
+              <span aria-hidden className="mr-1 h-5 w-px shrink-0 bg-keep-rule/60 md:hidden" />
+            </>
+          ) : null}
           <FmtButton title="Bold (Ctrl+B)" onClick={() => wrapSelection("**", "**", "bold")}>
             <b>B</b>
           </FmtButton>
@@ -949,25 +978,12 @@ export function Composer({
         </div>
       ) : null}
 
-      <div className="flex items-end gap-2">
-      {/* Mobile-only rooms drawer toggle. Hidden on md+ where the rail
-          is always visible. Uses a chat-bubble glyph (not ☰) so it
-          reads as "rooms / chat" and stays visually distinct from the
-          banner's top-right hamburger, which is the site nav (Rules /
-          Admin / Exit). Two hamburgers in opposite corners read as the
-          same control to users; differentiating the glyph by purpose
-          fixes the confusion. */}
-      {onOpenRail ? (
-        <button
-          type="button"
-          onClick={onOpenRail}
-          aria-label="Open rooms"
-          title="Rooms"
-          className="keep-button flex h-10 w-10 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-base hover:bg-keep-banner md:hidden"
-        >
-          💬
-        </button>
-      ) : null}
+      {/* The rooms-drawer trigger (💬) used to live here as a leading
+          shrink-0 button. It's been relocated into the formatting
+          toolbar row on mobile (md+ never had it), which gives the
+          textarea full row-width and lets longer messages show more
+          lines without scrolling. */}
+      <div className="flex items-stretch gap-2">
       <div className="relative flex-1">
         {/* The popup positions itself above the textarea via bottom-full. */}
         <CompleterPopup
@@ -1015,39 +1031,54 @@ export function Composer({
           // resize-none + auto-grow effect manages height; leading-snug keeps
           // line spacing tight so multi-line posts don't waste vertical room.
           //
-          // min-h-10 / md:min-h-8 match the rail-toggle and Send-button
-          // heights so a single-line textarea sits flush with both. The
-          // auto-grow effect freely sets a larger inline `style.height` for
-          // multi-line input - min-height is a floor, not a cap.
-          className="block min-h-10 w-full resize-none rounded border border-keep-rule bg-keep-bg px-3 py-2 text-base leading-snug outline-none focus:border-keep-action disabled:cursor-not-allowed disabled:opacity-50 md:min-h-8 md:py-1 md:text-sm"
+          // Mobile min-height (`min-h-[68px]`) is tuned to match the right
+          // column's natural height — ↵ (h-6 = 24px) + gap-1 (4px) + Send
+          // (h-10 = 40px) — so a single-line empty textarea sits flush with
+          // the column instead of leaving dead space below it. md+ keeps
+          // the tight `min-h-8` because the ↵ button is hidden and Send
+          // alone is only 32px tall. The auto-grow effect respects this
+          // min via `el.style.height = "auto"` → scrollHeight measurement,
+          // which folds min-height into the natural metric.
+          className="block min-h-[68px] w-full resize-none rounded border border-keep-rule bg-keep-bg px-3 py-2 text-base leading-snug outline-none focus:border-keep-action disabled:cursor-not-allowed disabled:opacity-50 md:min-h-8 md:py-1 md:text-sm"
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
         />
       </div>
-      {/* Mobile-only newline button — fills in for Shift+Enter which the
-          on-screen keyboard can't produce. Matches the rail-toggle's
-          height so the row stays flush. */}
-      <button
-        type="button"
-        onClick={insertNewline}
-        disabled={inputDisabled}
-        aria-label="Insert line break"
-        title="Insert line break"
-        className="keep-button flex h-10 w-10 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-base hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50 md:hidden"
-      >
-        ↵
-      </button>
-      <button
-        type="submit"
-        disabled={submitDisabled}
-        // Pinned to h-10 (mobile) / md:h-8 so the button's height matches
-        // the rail toggle and the textarea's single-line floor exactly.
-        // Without an explicit height, padding-driven sizing was a couple of
-        // pixels shy of the rail toggle and the misalignment was visible.
-        className="keep-button h-10 shrink-0 rounded border border-keep-rule bg-keep-bg px-4 text-sm hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50 md:h-8"
-      >
-        {forumCreating ? "Post topic" : forumReplying ? "Reply" : "Send"}
-      </button>
+      {/* Right column. On mobile the ↵ (newline) button stacks compact
+          on top of Send so the two share a single vertical strip,
+          freeing the textarea to fill the entire row width AND grow
+          taller (the column's total height pushes the items-stretch
+          textarea past its 40px floor for longer messages). On md+
+          the ↵ is hidden (Shift+Enter works on a real keyboard) and
+          the column collapses to just Send.
+          `justify-end` pins both buttons to the bottom of the column
+          so that when the textarea auto-grows to multiple lines the
+          buttons stay near the keyboard / cursor line instead of
+          floating up at the top of an oversized strip. */}
+      <div className="flex shrink-0 flex-col justify-end gap-1">
+        <button
+          type="button"
+          onClick={insertNewline}
+          disabled={inputDisabled}
+          aria-label="Insert line break"
+          title="Insert line break"
+          className="keep-button flex h-6 items-center justify-center rounded border border-keep-rule bg-keep-bg px-2 text-sm hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50 md:hidden"
+        >
+          ↵
+        </button>
+        <button
+          type="submit"
+          disabled={submitDisabled}
+          // h-10 mobile / md:h-8 desktop. The mobile column is now
+          // ↵ (h-6) + gap (4px) + Send (h-10) = 68px total, which
+          // becomes the row's natural height via items-stretch — the
+          // textarea grows to match, giving longer messages noticeably
+          // more visible space.
+          className="keep-button h-10 shrink-0 rounded border border-keep-rule bg-keep-bg px-4 text-sm hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50 md:h-8"
+        >
+          {forumCreating ? "Post topic" : forumReplying ? "Reply" : "Send"}
+        </button>
+      </div>
       </div>
     </form>
   );

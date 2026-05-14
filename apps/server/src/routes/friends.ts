@@ -104,6 +104,97 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     return { friends: entries };
   });
 
+  /**
+   * Send a friend request (or auto-accept if the target had already
+   * asked you). Mirrors the `/friend <name>` slash-command logic in
+   * commands/builtins/friends.ts but returns a structured success /
+   * error response so the Messages modal can show inline confirmation
+   * — the slash-command path emits its results as room system
+   * messages, which the modal can't easily surface.
+   *
+   * Response shape:
+   *   201 { ok: true, status: "sent" | "accepted" | "already_friends" | "already_pending" }
+   *   404 { error: "no_user" }            — username doesn't exist or disabled
+   *   400 { error: "self" }               — friending yourself is silly
+   *   400 { error: "username required" }  — body empty
+   */
+  app.post<{ Body: { username?: string } }>("/me/friend-requests", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const username = (req.body?.username ?? "").trim();
+    if (!username) { reply.code(400); return { error: "username required" }; }
+
+    const target = (await db
+      .select()
+      .from(users)
+      .where(sql`lower(${users.username}) = ${username.toLowerCase()}`)
+      .limit(1))[0];
+    if (!target || target.disabledAt) { reply.code(404); return { error: "no_user" }; }
+    if (target.id === me.id) { reply.code(400); return { error: "self" }; }
+
+    // Same idempotency tree as the slash command: existing accepted edge
+    // is a no-op, existing pending-from-me is also a no-op, existing
+    // pending-from-them auto-accepts (mutual intent).
+    const existing = (await db
+      .select()
+      .from(friends)
+      .where(or(
+        and(eq(friends.frienderUserId, me.id), eq(friends.friendedUserId, target.id)),
+        and(eq(friends.frienderUserId, target.id), eq(friends.friendedUserId, me.id)),
+      ))
+      .limit(1))[0];
+
+    // Capture the narrowed locals into closure-stable consts. TS doesn't
+    // carry the outer null/undefined narrowing into the inner function,
+    // so referencing `me.id` / `target.id` inside a nested function would
+    // re-widen them. These aliases keep the closure type-clean.
+    const meId = me.id;
+    const meUsername = me.username;
+    const targetId = target.id;
+    async function notifyTarget() {
+      // Fan a friend:request event to every live socket of the target so
+      // their inbox/badge refreshes without polling. The payload is
+      // intentionally minimal — the client pulls /me/friend-requests for
+      // canonical state.
+      const sockets = await io.fetchSockets();
+      for (const s of sockets) {
+        const uid = (s.data as { userId?: string }).userId;
+        if (uid !== targetId) continue;
+        s.emit("friend:request", {
+          frienderUserId: meId,
+          frienderUsername: meUsername,
+          frienderDisplayName: meUsername,
+        });
+      }
+    }
+
+    if (existing) {
+      if (existing.status === "accepted") {
+        reply.code(200);
+        return { ok: true, status: "already_friends" as const, username: target.username };
+      }
+      if (existing.frienderUserId === me.id) {
+        reply.code(200);
+        return { ok: true, status: "already_pending" as const, username: target.username };
+      }
+      // Their pending request flips to accepted.
+      await db
+        .update(friends)
+        .set({ status: "accepted" })
+        .where(and(eq(friends.frienderUserId, target.id), eq(friends.friendedUserId, me.id)));
+      await notifyTarget();
+      reply.code(200);
+      return { ok: true, status: "accepted" as const, username: target.username };
+    }
+
+    await db
+      .insert(friends)
+      .values({ frienderUserId: me.id, friendedUserId: target.id, status: "pending" });
+    await notifyTarget();
+    reply.code(201);
+    return { ok: true, status: "sent" as const, username: target.username };
+  });
+
   app.get("/me/friend-requests", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }

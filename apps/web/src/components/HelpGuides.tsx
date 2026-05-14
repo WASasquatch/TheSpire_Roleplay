@@ -856,7 +856,7 @@ font-size:1.4em; color:#5a3a1a">
           <li><b>Worldbuilding</b> - My Worlds, World Catalog.</li>
           <li><b>Roleplay</b> - Set Mood, Set Scene, NPC mode toggle.</li>
           <li><b>Rooms</b> - Find Rooms, List Rooms, New Private Room.</li>
-          <li><b>People</b> - Messages, Friends, All Users, Ignore List. A small unread-count badge appears on the trigger and on the Messages row when someone DMs you.</li>
+          <li><b>People</b> - Messages (DMs + friends + friend requests in one modal), All Users, Ignore List. A small unread-count badge appears on the trigger and on the Messages row when someone DMs you.</li>
           <li><b>Display</b> - Chat color, Font size, Refresh interval.</li>
           <li><b>Account</b> - Edit Profile, Bookmarks, Toggle Away, Help.</li>
         </Bullets>

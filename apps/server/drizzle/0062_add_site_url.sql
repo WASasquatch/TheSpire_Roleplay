@@ -1,0 +1,12 @@
+-- Site URL — optional canonical URL the banner logo links to.
+--
+-- When set, the banner renders the site name / logo image inside an
+-- anchor pointing at this URL (no link styling — the wrapping is
+-- transparent so the logo still reads as a logo, not a chip). Empty
+-- string / NULL = no wrapping; logo renders as a non-interactive
+-- element.
+--
+-- Stored as plain text on the singleton row, alongside the other
+-- branding fields. Admins set it through /admin/settings; validated
+-- against the standard http/https URL schema before persistence.
+ALTER TABLE site_settings ADD COLUMN site_url TEXT NOT NULL DEFAULT '';

@@ -31,6 +31,8 @@ interface Props {
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
+  /** Optional: click the `↪ <author>` chip in a post's header to jump to its parent message. */
+  onJumpToReply?: (messageId: string) => void;
   /** Send a reply targeted at this topic. App.tsx routes this through the chat:input socket emit. */
   onReply: (text: string) => void;
   /** Dismiss the modal. */
@@ -80,6 +82,7 @@ export function ThreadModal({
   onMentionClick,
   onWorldClick,
   onTimeClick,
+  onJumpToReply,
   onReply,
   onClose,
   highlightMessageId,
@@ -246,6 +249,7 @@ export function ThreadModal({
               canPin={canPin}
               canAdminEdit={canAdminEdit}
               onQuotePost={(q) => setDraft((cur) => (cur ? `${cur}\n\n${q}` : q))}
+              {...(onJumpToReply ? { onJumpToReply } : {})}
               onIconClick={onIconClick}
               onNameClick={onNameClick}
               onMentionClick={onMentionClick}
@@ -272,6 +276,7 @@ export function ThreadModal({
                     canPin={canPin}
                     canAdminEdit={canAdminEdit}
                     onQuotePost={(q) => setDraft((cur) => (cur ? `${cur}\n\n${q}` : q))}
+                    {...(onJumpToReply ? { onJumpToReply } : {})}
                     onIconClick={onIconClick}
                     onNameClick={onNameClick}
                     onMentionClick={onMentionClick}

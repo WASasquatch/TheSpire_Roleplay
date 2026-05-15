@@ -39,6 +39,13 @@ interface Props {
   onWorldClick: (slug: string) => void;
   /** Click on the timestamp - pre-fill the composer with /reply <msgid>. Only enabled for chat kinds (say/me/ooc). */
   onTimeClick: (msgId: string) => void;
+  /**
+   * Click on a reply's quote preview — jumps the chat to the parent
+   * message (the one being replied to) and flashes it. Same flow used
+   * by bookmarks; the App wires this to `jumpToMessage(currentRoomId,
+   * id)`. When omitted, the quote stays as plain non-clickable text.
+   */
+  onJumpToReply?: (messageId: string) => void;
   fontStep: 0 | 1 | 2 | 3;
   /**
    * When set, scroll the matching row into view and flash it briefly so a
@@ -185,7 +192,7 @@ function fmtTime(ms: number): string {
   return `${hh}:${mm}:${ss}`;
 }
 
-export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canAdminEdit = false, onQuotePost, forumBuckets, onLoadOlderTopics, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory }: Props) {
+export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canAdminEdit = false, onQuotePost, forumBuckets, onLoadOlderTopics, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   /**
    * Scroll-bookkeeping for flat-mode auto-scroll-vs-preserve. We
@@ -373,6 +380,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         onMentionClick={onMentionClick}
         onWorldClick={onWorldClick}
         onTimeClick={onTimeClick}
+        {...(onJumpToReply ? { onJumpToReply } : {})}
         selfNames={effectiveSelfNames}
       />
     );
@@ -425,6 +433,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         canPin={canPin}
         canAdminEdit={canAdminEdit}
         {...(onQuotePost ? { onQuotePost } : {})}
+        {...(onJumpToReply ? { onJumpToReply } : {})}
         genderByUser={genderByUser}
         adminUserIds={adminUserIds}
         selfUserId={selfUserId}
@@ -614,6 +623,7 @@ function ForumView({
   canPin,
   canAdminEdit,
   onQuotePost,
+  onJumpToReply,
   genderByUser,
   adminUserIds,
   selfUserId,
@@ -653,6 +663,8 @@ function ForumView({
   canAdminEdit: boolean;
   /** Pre-fill the right composer with a markdown blockquote of the post. Optional. */
   onQuotePost?: (quoteText: string) => void;
+  /** Optional: click a reply post's `↪ <author>` chip to jump to the parent. */
+  onJumpToReply?: (messageId: string) => void;
   genderByUser: Map<string, Gender>;
   adminUserIds: Set<string>;
   selfUserId: string | null;
@@ -872,6 +884,7 @@ function ForumView({
                       canPin={canPin}
                       canAdminEdit={canAdminEdit}
                       {...(onQuotePost ? { onQuotePost } : {})}
+                      {...(onJumpToReply ? { onJumpToReply } : {})}
                       // Reply pill activates the topic unconditionally (the
                       // toggle semantic would deactivate when already active —
                       // wrong for "I'm about to reply to this").
@@ -934,6 +947,7 @@ function TopicCard({
   canModerate,
   canPin,
   onQuotePost,
+  onJumpToReply,
   onActivateForReply,
   genderByUser,
   adminUserIds,
@@ -961,6 +975,8 @@ function TopicCard({
   canAdminEdit: boolean;
   /** Optional Quote-button callback. When present, ForumPostBody shows a Quote pill. */
   onQuotePost?: (quoteText: string) => void;
+  /** Optional: click the `↪ <author>` chip on a reply to jump to its parent. */
+  onJumpToReply?: (messageId: string) => void;
   /**
    * Activate the given topic id as the composer's reply target. The Reply
    * pill on each ForumPostBody calls this with the topic's id (replies
@@ -1128,6 +1144,7 @@ function TopicCard({
             canPin={canPin}
             canAdminEdit={canAdminEdit}
             {...(onQuotePost ? { onQuotePost } : {})}
+            {...(onJumpToReply ? { onJumpToReply } : {})}
             onReply={() => onActivateForReply(topic.id)}
             onIconClick={onIconClick}
             onNameClick={onNameClick}
@@ -1160,6 +1177,7 @@ function TopicCard({
                   canPin={canPin}
                   canAdminEdit={canAdminEdit}
                   {...(onQuotePost ? { onQuotePost } : {})}
+                  {...(onJumpToReply ? { onJumpToReply } : {})}
                   onReply={() => onActivateForReply(topic.id)}
                   onIconClick={onIconClick}
                   onNameClick={onNameClick}
@@ -1267,6 +1285,7 @@ export function ForumPostBody({
   onMentionClick,
   onWorldClick,
   onTimeClick,
+  onJumpToReply,
   showAuthorHeader,
   selfNames = [],
 }: {
@@ -1289,6 +1308,8 @@ export function ForumPostBody({
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
+  /** Click the small `↪ <author>` chip in the post header to jump to the parent message. Optional — chip stays non-clickable when omitted. */
+  onJumpToReply?: (messageId: string) => void;
   showAuthorHeader: boolean;
   /** Viewer identities for self-mention highlighting inside this post's body. Optional. */
   selfNames?: ReadonlyArray<string>;
@@ -1318,6 +1339,21 @@ export function ForumPostBody({
     return (
       <div className="rounded border border-dashed border-keep-rule/40 px-2 py-1 text-xs italic text-keep-muted/70">
         [message removed]
+        {/* Admin-only audit reveal. See the chat-line variant for the
+            same rationale: server only emits `originalBody` to admin
+            viewers, so this block stays inert for mods + ordinary
+            users. */}
+        {msg.originalBody ? (
+          <blockquote className="mt-1 border-l-2 border-keep-accent/30 bg-keep-panel/20 px-2 py-0.5 text-[11px] italic text-keep-muted/60">
+            <span
+              className="mr-1 select-none text-[9px] uppercase not-italic tracking-widest text-keep-accent/70"
+              title="Original body, visible to site admins only for audit"
+            >
+              admin audit:
+            </span>
+            <span className="whitespace-pre-wrap">{msg.originalBody}</span>
+          </blockquote>
+        ) : null}
       </div>
     );
   }
@@ -1403,9 +1439,20 @@ export function ForumPostBody({
               {fmtTime(msg.createdAt)}
             </button>
             {msg.replyToDisplayName ? (
-              <span className="truncate italic text-keep-muted">
-                ↪ {msg.replyToDisplayName}
-              </span>
+              onJumpToReply && msg.replyToId ? (
+                <button
+                  type="button"
+                  onClick={() => onJumpToReply(msg.replyToId!)}
+                  className="truncate rounded italic text-keep-muted hover:text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action"
+                  title={`Jump to ${msg.replyToDisplayName}'s post`}
+                >
+                  ↪ {msg.replyToDisplayName}
+                </button>
+              ) : (
+                <span className="truncate italic text-keep-muted">
+                  ↪ {msg.replyToDisplayName}
+                </span>
+              )
             ) : null}
           </div>
         ) : null}
@@ -2009,6 +2056,7 @@ function Line({
   onMentionClick,
   onWorldClick,
   onTimeClick,
+  onJumpToReply,
   selfNames,
 }: {
   msg: ChatMessage;
@@ -2029,6 +2077,9 @@ function Line({
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
+  /** Optional: click the inline reply quote to jump to the parent
+   *  message. When omitted, the quote stays visible but non-clickable. */
+  onJumpToReply?: (messageId: string) => void;
   /** Viewer identity names (master + active char). Drives self-mention highlight in body. */
   selfNames: ReadonlyArray<string>;
 }) {
@@ -2059,13 +2110,37 @@ function Line({
   // the reference they were responding to. `leading-tight` keeps the
   // single-line preview compact at the larger size; `truncate` still
   // caps the run so a long parent body stays one line.
-  const quote = isReply ? (
-    <div className="flex items-baseline gap-1 text-sm leading-tight text-keep-muted">
+  //
+  // When `onJumpToReply` is provided AND the parent's id is known,
+  // wrap the preview in a button so a click jumps to the original
+  // message — same flow as bookmarks. The visual stays mostly
+  // unchanged (hover adds a subtle accent so the affordance is
+  // discoverable) so the quote doesn't suddenly read as a chip.
+  const quoteInner = isReply ? (
+    <>
       <span aria-hidden="true">↪</span>
       <span className="font-semibold">{msg.replyToDisplayName}:</span>
       <span className="truncate italic">{msg.replyToBodySnippet ?? ""}</span>
-    </div>
+    </>
   ) : null;
+  const quote = isReply
+    ? (onJumpToReply && msg.replyToId
+        ? (
+            <button
+              type="button"
+              onClick={() => onJumpToReply(msg.replyToId!)}
+              title={`Jump to ${msg.replyToDisplayName}'s message`}
+              className="flex w-full items-baseline gap-1 rounded text-left text-sm leading-tight text-keep-muted hover:text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action"
+            >
+              {quoteInner}
+            </button>
+          )
+        : (
+            <div className="flex items-baseline gap-1 text-sm leading-tight text-keep-muted">
+              {quoteInner}
+            </div>
+          ))
+    : null;
   const tag = (
     <UserNameTag
       displayName={msg.displayName}
@@ -2091,6 +2166,23 @@ function Line({
       <div className="text-keep-muted/70">
         <span className="mr-2 select-none text-xs tabular-nums">{timeText}</span>
         <span className="italic">[message removed]</span>
+        {/* Admin-only audit reveal: when the server attached the
+            pre-delete body on `originalBody` (it only does so for
+            isAdminRole viewers), surface it underneath as a greyed,
+            indented quote so a site admin can see what got hidden.
+            Mods + room-owner mods don't receive the field at all and
+            this block stays inert. */}
+        {msg.originalBody ? (
+          <blockquote className="ml-6 mt-0.5 border-l-2 border-keep-accent/30 bg-keep-panel/20 px-2 py-0.5 text-[11px] italic text-keep-muted/60">
+            <span
+              className="mr-1 select-none text-[9px] uppercase not-italic tracking-widest text-keep-accent/70"
+              title="Original body, visible to site admins only for audit"
+            >
+              admin audit:
+            </span>
+            <span className="whitespace-pre-wrap">{msg.originalBody}</span>
+          </blockquote>
+        ) : null}
       </div>
     );
   }
@@ -2711,7 +2803,15 @@ function ModControls({ msg, canEdit, canDelete }: { msg: ChatMessage; canEdit: b
     // Visual contract mirrors OwnControls (same h-5 pill row) but every
     // button is accent-tinted so the actor sees they're using a
     // moderation lever, not a self-edit.
-    <span className="inline-flex gap-1 md:absolute md:right-3 md:top-0">
+    //
+    // Visibility: on desktop these are HOVER-ONLY (`md:invisible
+    // md:group-hover:visible md:group-focus-within:visible`) — admins
+    // see the whole room's worth of these buttons on every row
+    // otherwise, which turned the chat into a wall of pills. Same
+    // pattern ReportButton / BookmarkButton use for cross-author
+    // affordances. Mobile follows the parent wrapper's
+    // `hidden group-focus-within:flex` — tap a row to reveal.
+    <span className="inline-flex gap-1 md:absolute md:right-3 md:top-0 md:invisible md:group-hover:visible md:group-focus-within:visible">
       {canEdit ? (
         <button
           type="button"

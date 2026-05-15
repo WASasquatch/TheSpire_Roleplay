@@ -1988,6 +1988,15 @@ function Chat() {
             onMentionClick={onMentionClick}
             onWorldClick={(slug) => setWorldViewerId(slug)}
             onTimeClick={onTimeClick}
+            onJumpToReply={(id) => {
+              // Click on a reply's quote → jump to the parent message
+              // in this room. Reuses the same flow bookmarks use; the
+              // helper handles both flat-room scroll + forum-modal
+              // expand-and-flash. No-op when there's no current room
+              // (shouldn't happen — MessageList only renders inside
+              // one).
+              if (currentRoomId) void jumpToMessage(currentRoomId, id);
+            }}
             fontStep={fontStep}
             highlightMessageId={highlightMessageId}
             onHighlightDone={() => setHighlightMessageId(null)}
@@ -2256,6 +2265,9 @@ function Chat() {
           onMentionClick={onMentionClick}
           onWorldClick={(slug) => setWorldViewerId(slug)}
           onTimeClick={onTimeClick}
+          onJumpToReply={(id) => {
+            if (currentRoomId) void jumpToMessage(currentRoomId, id);
+          }}
           onReply={(text) => send(text, { replyToId: poppedTopic.id })}
           onClose={() => setPoppedTopicId(null)}
           highlightMessageId={highlightMessageId}

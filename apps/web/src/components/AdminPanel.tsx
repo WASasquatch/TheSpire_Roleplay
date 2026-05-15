@@ -188,6 +188,8 @@ interface SettingsRow {
   defaultThemeJson: string | null;
   defaultTheme: Theme;
   siteName: string;
+  /** Canonical site URL the banner logo links to. Empty = no wrapping. */
+  siteUrl: string;
   bannerCoverCss: string | null;
   logoColor: string | null;
   logoFont: string | null;
@@ -588,6 +590,7 @@ function SettingsTab() {
       // which the splash uses to scope its palette.
       setBranding({
         siteName: j.siteName,
+        siteUrl: j.siteUrl ?? "",
         bannerCoverCss: j.bannerCoverCss,
         logoColor: j.logoColor,
         logoFont: j.logoFont,
@@ -823,6 +826,10 @@ function SettingsTab() {
 
 interface BrandingDraft {
   siteName: string;
+  /** Optional canonical site URL the banner logo links to. Empty = no
+   *  wrapping (logo renders bare). When set, banner adds an unstyled
+   *  `<a>` around the logo. */
+  siteUrl: string;
   bannerCoverCss: string;
   logoColor: string;
   logoFont: string;
@@ -850,6 +857,7 @@ function BrandingTab() {
       setData(j);
       setDraft({
         siteName: j.siteName,
+        siteUrl: j.siteUrl ?? "",
         bannerCoverCss: j.bannerCoverCss ?? "",
         logoColor: j.logoColor ?? "",
         logoFont: j.logoFont ?? "",
@@ -872,6 +880,10 @@ function BrandingTab() {
     try {
       const body: Record<string, unknown> = {
         siteName: draft.siteName,
+        // Empty string clears the link wrapping; trim runs before
+        // the server's URL-shape validation so a stray newline can't
+        // sneak past.
+        siteUrl: draft.siteUrl.trim(),
         // Empty strings clear the override (sent as null).
         bannerCoverCss: draft.bannerCoverCss.trim() === "" ? null : draft.bannerCoverCss.trim(),
         logoColor: draft.logoColor.trim() === "" ? null : draft.logoColor.trim(),
@@ -904,6 +916,7 @@ function BrandingTab() {
       // without waiting for the next /site fetch on reload.
       setBranding({
         siteName: j.siteName,
+        siteUrl: j.siteUrl ?? "",
         bannerCoverCss: j.bannerCoverCss,
         logoColor: j.logoColor,
         logoFont: j.logoFont,
@@ -956,6 +969,27 @@ function BrandingTab() {
       </fieldset>
 
       <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Site URL</legend>
+        <input
+          type="url"
+          value={draft.siteUrl}
+          onChange={(e) => setDraft({ ...draft, siteUrl: e.target.value })}
+          maxLength={500}
+          placeholder="https://thespire.games"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+        />
+        <p className="mt-1 text-keep-muted">
+          When set, the banner wraps the site name / logo image in an{" "}
+          unstyled link pointing here — useful for sending visitors back to a
+          marketing landing page or the main domain when the chat lives at a
+          subdomain. The wrapping is invisible (no underline, no color change);
+          the logo still reads as a logo, it just becomes clickable. Must
+          start with <code>http://</code> or <code>https://</code>; leave empty
+          to disable.
+        </p>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
         <legend className="px-1 uppercase tracking-widest text-keep-muted">Banner cover</legend>
         <textarea
           value={draft.bannerCoverCss}
@@ -988,6 +1022,7 @@ function BrandingTab() {
             setDraft((d) => (d ? { ...d, logoUrl: j.url } : d));
             setBranding({
               siteName: j.settings.siteName,
+              siteUrl: j.settings.siteUrl ?? "",
               bannerCoverCss: j.settings.bannerCoverCss,
               logoColor: j.settings.logoColor,
               logoFont: j.settings.logoFont,
@@ -1348,6 +1383,7 @@ function RulesTab() {
       // without waiting for the next /site fetch.
       setBranding({
         siteName: j.siteName,
+        siteUrl: j.siteUrl ?? "",
         bannerCoverCss: j.bannerCoverCss,
         logoColor: j.logoColor,
         logoFont: j.logoFont,

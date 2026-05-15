@@ -9,7 +9,7 @@ import type {
   RoomSummary,
   ServerToClientEvents,
 } from "@thekeep/shared";
-import { extractMentions } from "@thekeep/shared";
+import { extractMentions, isAdminRole } from "@thekeep/shared";
 import {
   bans,
   characters,
@@ -540,6 +540,16 @@ export async function sendRoomBacklogTo(
       .from(ignores)
       .where(eq(ignores.userId, viewerUserId))).map((r) => r.ignoredUserId),
   );
+  // Look the viewer's role up once so the originalBody carve-out below
+  // is consistent with the per-socket gating used by the live
+  // delete-broadcast path. Single row lookup; cheap relative to the
+  // 50-row messages SELECT it rides alongside.
+  const viewerRow = (await db
+    .select({ role: users.role })
+    .from(users)
+    .where(eq(users.id, viewerUserId))
+    .limit(1))[0];
+  const viewerIsAdmin = !!viewerRow && isAdminRole(viewerRow.role);
   const recent = await db
     .select()
     .from(messages)
@@ -579,6 +589,11 @@ export async function sendRoomBacklogTo(
       ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
       ...(m.isSticky ? { isSticky: true } : {}),
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+      // Admin-only audit field. Mirrors the per-socket gating in the
+      // delete route + the history endpoints: site admins receive the
+      // original body of a deleted message; everyone else gets the
+      // bare placeholder.
+      ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
     }));
   socket.emit("message:bulk", backlog);
 }

@@ -24,6 +24,13 @@ export interface AuthMe {
  */
 export interface SiteBranding {
   siteName: string;
+  /**
+   * Canonical site URL the banner logo links to. Empty string = no
+   * wrapping (logo renders bare). The wrapper anchor is intentionally
+   * unstyled — the logo still reads as a logo, not a chip; clicking
+   * it just navigates.
+   */
+  siteUrl: string;
   bannerCoverCss: string | null;
   logoColor: string | null;
   logoFont: string | null;
@@ -88,6 +95,9 @@ export interface SiteBranding {
 
 export const DEFAULT_BRANDING: SiteBranding = {
   siteName: "The Spire",
+  // Empty by default — no logo link wrapping. Admins set this via the
+  // Branding tab; real value arrives on first /site fetch.
+  siteUrl: "",
   bannerCoverCss: null,
   logoColor: null,
   logoFont: null,
@@ -133,6 +143,7 @@ export function loadCachedBranding(): SiteBranding {
     const parsed = JSON.parse(raw) as Partial<SiteBranding>;
     return {
       siteName: typeof parsed.siteName === "string" ? parsed.siteName : DEFAULT_BRANDING.siteName,
+      siteUrl: typeof parsed.siteUrl === "string" ? parsed.siteUrl : DEFAULT_BRANDING.siteUrl,
       bannerCoverCss: typeof parsed.bannerCoverCss === "string" || parsed.bannerCoverCss === null
         ? parsed.bannerCoverCss
         : null,

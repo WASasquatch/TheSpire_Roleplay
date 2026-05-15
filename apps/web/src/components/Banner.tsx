@@ -113,20 +113,27 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
       }`}
     >
       <h1 style={logoStyle} className="font-action text-xl tracking-wide">
-        {branding.logoUrl ? (
-          // Image logo (default install ships /thespire-logo.png; admins can
-          // swap it via /admin/settings or upload via the admin panel). The
-          // <h1> stays for screen-readers + SEO. `max-h` keeps the banner
-          // height stable regardless of source PNG dimensions; the
-          // 1580×446 default lands well within that on retina.
-          <img
-            src={branding.logoUrl}
-            alt={branding.siteName}
-            className="max-h-8 w-auto select-none"
-            draggable={false}
-          />
+        {/* `siteUrl` is the admin-configured canonical home for the
+            site (often a marketing landing page on a sibling domain).
+            When set, wrap the logo in an anchor — `color:inherit` +
+            `no-underline` keep the chip visually identical to the
+            unwrapped form so the logo still reads as a logo. The
+            `rel="home"` hint helps screen readers and crawlers
+            understand the link role. We treat an external host
+            (different origin) as worth `noopener noreferrer` so the
+            target page can't poke `window.opener`; same-origin links
+            don't need it. */}
+        {branding.siteUrl ? (
+          <a
+            href={branding.siteUrl}
+            rel="home noopener noreferrer"
+            className="text-inherit no-underline hover:text-inherit hover:no-underline focus:outline-none focus:ring-1 focus:ring-keep-action"
+            title={branding.siteName}
+          >
+            <LogoInner branding={branding} />
+          </a>
         ) : (
-          branding.siteName
+          <LogoInner branding={branding} />
         )}
       </h1>
 
@@ -253,4 +260,30 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
       ) : null}
     </header>
   );
+}
+
+/**
+ * Logo content shared between the linked and unlinked banner paths.
+ * Pulled out into its own component so the `branding.siteUrl ? <a>…</a>
+ * : <>…</>` ternary in the header stays readable — without it the
+ * image-vs-text branch would be duplicated under both arms of the
+ * outer ternary.
+ */
+function LogoInner({ branding }: { branding: { logoUrl: string; siteName: string } }) {
+  if (branding.logoUrl) {
+    // Image logo (default install ships /thespire-logo.png; admins can
+    // swap it via /admin/settings or upload via the admin panel). The
+    // surrounding <h1> stays for screen-readers + SEO. `max-h` keeps
+    // the banner height stable regardless of source PNG dimensions; the
+    // 1580×446 default lands well within that on retina.
+    return (
+      <img
+        src={branding.logoUrl}
+        alt={branding.siteName}
+        className="max-h-8 w-auto select-none"
+        draggable={false}
+      />
+    );
+  }
+  return <>{branding.siteName}</>;
 }

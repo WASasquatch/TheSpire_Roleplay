@@ -306,6 +306,12 @@ export async function registerRoomsRoutes(
       ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
       ...(m.isSticky ? { isSticky: true } : {}),
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+      // Site admins (admin / masteradmin) see the original body of a
+      // deleted message attached on a separate `originalBody` field so
+      // they can audit what was hidden. Mods + ordinary viewers get
+      // the row without it; their renderer paints the bare
+      // "[message removed]" placeholder.
+      ...(isAdminRole(me.role) && m.deletedAt ? { originalBody: m.body } : {}),
     }));
     return { messages: wire };
   });
@@ -406,6 +412,7 @@ export async function registerRoomsRoutes(
       ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
       ...(m.isSticky ? { isSticky: true } : {}),
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+      ...(isAdminRole(me.role) && m.deletedAt ? { originalBody: m.body } : {}),
     }));
     return { messages: wire, hasMore };
   });
@@ -481,6 +488,10 @@ export async function registerRoomsRoutes(
         ))
         .orderBy(asc(messages.createdAt));
 
+      // Capture the role into a local before defining the inner mapper
+      // so TypeScript's null-narrowing (the `if (!me)` guard above) flows
+      // through. Nested closures don't preserve the narrowing on their own.
+      const viewerIsAdmin = isAdminRole(me.role);
       function rowToWire(m: typeof messages.$inferSelect): ChatMessage {
         return {
           id: m.id,
@@ -508,6 +519,7 @@ export async function registerRoomsRoutes(
           ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
           ...(m.isSticky ? { isSticky: true } : {}),
           ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+          ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
         };
       }
 
@@ -675,6 +687,7 @@ export async function registerRoomsRoutes(
         ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
         ...(m.isSticky ? { isSticky: true } : {}),
         ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+        ...(isAdminRole(me.role) && m.deletedAt ? { originalBody: m.body } : {}),
       }));
       return { topics, hasMore };
     },

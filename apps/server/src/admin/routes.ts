@@ -643,6 +643,28 @@ export async function registerAdminRoutes(
     /** Public site name. Empty becomes "The Spire". */
     siteName: z.string().min(0).max(60).optional(),
     /**
+     * Canonical site URL the banner logo links to. Empty string clears
+     * the wrapping (logo renders bare). Non-empty must be http/https —
+     * the Zod `.url()` refinement rejects bare hostnames or other
+     * schemes, and a max-length cap keeps a runaway paste from getting
+     * persisted.
+     */
+    siteUrl: z
+      .string()
+      .max(500)
+      .refine(
+        (s) => s === "" || /^https?:\/\//i.test(s),
+        { message: "siteUrl must start with http:// or https:// (or be empty to clear)" },
+      )
+      .refine(
+        (s) => {
+          if (s === "") return true;
+          try { new URL(s); return true; } catch { return false; }
+        },
+        { message: "siteUrl must be a valid URL" },
+      )
+      .optional(),
+    /**
      * CSS background shorthand applied to the banner. Pass null to clear.
      * Sanity-capped at 1KB; admins can use url(), gradient(), or solid color.
      */
@@ -717,6 +739,7 @@ export async function registerAdminRoutes(
       defaultThemeJson: s.defaultThemeJson,
       defaultTheme: s.defaultTheme,
       siteName: s.siteName,
+      siteUrl: s.siteUrl,
       bannerCoverCss: s.bannerCoverCss,
       logoColor: s.logoColor,
       logoFont: s.logoFont,
@@ -758,6 +781,7 @@ export async function registerAdminRoutes(
     if (body.sessionTtlMs !== undefined) patch.sessionTtlMs = body.sessionTtlMs;
     if (body.defaultTheme !== undefined) patch.defaultTheme = body.defaultTheme;
     if (body.siteName !== undefined) patch.siteName = body.siteName;
+    if (body.siteUrl !== undefined) patch.siteUrl = body.siteUrl;
     if (body.bannerCoverCss !== undefined) patch.bannerCoverCss = body.bannerCoverCss;
     if (body.logoColor !== undefined) patch.logoColor = body.logoColor;
     if (body.logoFont !== undefined) patch.logoFont = body.logoFont;

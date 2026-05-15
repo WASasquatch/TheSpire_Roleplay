@@ -45,6 +45,17 @@ export interface ChatMessage {
   /** Set when the author deleted the message inside the grace window. Renderer shows "[message removed]". */
   deletedAt?: number | null;
   /**
+   * Original body of a soft-deleted message — surfaced ONLY to viewers
+   * with `isAdminRole(role) === true` so a site admin can audit what
+   * was hidden (in case the author was burying something). Mods,
+   * room-owner mods, and ordinary viewers receive a wire payload
+   * without this field; their renderer keeps showing the bare
+   * "[message removed]" placeholder. The server gates this per-socket
+   * on emit and per-request on history endpoints so non-admins can't
+   * see the deleted content by sniffing the wire.
+   */
+  originalBody?: string | null;
+  /**
    * Thread-category anchor for top-level messages in nested-mode rooms.
    * Null/absent = "Uncategorized" (the renderer's fallback bucket).
    * Replies inherit their parent's category implicitly — this field is

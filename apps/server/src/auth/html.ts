@@ -38,6 +38,27 @@ const ALLOWED_TAGS = [
 ];
 
 /**
+ * Marker attribute the auto-paragraph pass stamps onto every `<br>` it
+ * emits. The save-side strip + the read-side reverse both gate on it
+ * so a `<br>` typed by hand (no marker) sails through every round-trip
+ * untouched — the bug this fixes was that the previous shape-based
+ * strip ("any `<br>` followed by `\n`") couldn't tell user-typed BRs
+ * apart from auto-emitted ones and ate the writer's manual breaks on
+ * save.
+ *
+ * The marker is just `<br data-auto-br>` (empty value — present-or-
+ * absent semantics). sanitize-html is configured to keep this
+ * attribute on `<br>` only; the renderer treats it as a no-op (the
+ * browser ignores unknown data-* attributes and paints a regular
+ * line break).
+ */
+const AUTO_BR = '<br data-auto-br>';
+/** Match an auto-emitted BR regardless of how sanitize-html normalized
+ *  the tag shape (`<br data-auto-br>`, `<br data-auto-br />`, with or
+ *  without quoted value). Case-insensitive. */
+const AUTO_BR_RE = /<br\b[^>]*\bdata-auto-br\b[^>]*>/i;
+
+/**
  * Pre-pass: convert PARAGRAPH-break newlines to `<br>` for inputs that
  * look like plain text. Only runs of 2+ newlines emit `<br>`s — one
  * per extra newline past the first — so hitting Enter once is invisible
@@ -53,36 +74,54 @@ const ALLOWED_TAGS = [
  * `<h3>Title</h3>` followed by two newlines of prose still expects the
  * paragraph rule to fire.
  *
- * IDEMPOTENT. Re-running on a previously-saved bio first strips the
- * `<br>` tags this pass placed immediately before a newline, then
- * re-applies the rule on the cleaned source. Without this, every
- * round-trip through save was concatenating another `<br>` onto each
- * paragraph break — the source of the "my profile keeps gaining blank
- * lines on every save" report.
+ * IDEMPOTENT — and surgical about it. The strip phase only touches
+ * `<br>` tags carrying the `data-auto-br` marker, so a `<br>` the
+ * writer typed (even at end-of-line, the shape that previously looked
+ * indistinguishable from our auto-emit) survives the round-trip
+ * untouched. Without the marker, every re-save was either compounding
+ * `<br>` tags on each paragraph break OR — once we added the
+ * shape-based strip to fix that — silently eating manually-typed
+ * inline `<br>`s.
  */
 function nlToBrForPlainText(input: string): string {
   const hasParagraphStructure = /<(?:p|div|blockquote|pre)\b/i.test(input);
   if (hasParagraphStructure) return input;
   let s = input.replace(/\r\n?/g, "\n");
-  // Strip any auto-added <br> tags directly before a "\n" (or at the
-  // end of input). `[ \t]*` instead of `\s*` between BRs so we don't
-  // accidentally span across a separate paragraph break.
-  s = s.replace(/(?:<br\s*\/?>[ \t]*)+(?=\n|$)/gi, "");
-  // Each "\n\n+" run becomes one source newline plus (count-1) `<br>`s.
-  // Persisting one trailing `\n` keeps the stored HTML human-readable.
-  s = s.replace(/\n{2,}/g, (run) => "<br>".repeat(run.length - 1) + "\n");
+  // Strip ONLY the auto-emitted BRs that ride directly before a "\n"
+  // (or end-of-input). The marker attribute is what distinguishes them
+  // from a `<br>` the user typed. `[ \t]*` (not `\s*`) between BRs so
+  // we don't accidentally span across a separate paragraph break.
+  s = s.replace(
+    new RegExp(
+      `(?:${AUTO_BR_RE.source}[ \\t]*)+(?=\\n|$)`,
+      "gi",
+    ),
+    "",
+  );
+  // Each "\n\n+" run becomes one source newline plus (count-1) marked
+  // <br>s. Persisting one trailing `\n` keeps the stored HTML
+  // human-readable.
+  s = s.replace(/\n{2,}/g, (run) => AUTO_BR.repeat(run.length - 1) + "\n");
   return s;
 }
 
 /**
  * Reverse of {@link nlToBrForPlainText} for the bio editor: undo the
- * `<br>`-padded paragraph breaks the save pass produced so the
+ * marked `<br>`-padded paragraph breaks the save pass produced so the
  * textarea shows clean source text instead of literal `<br>` strings.
- * Each run of N `<br>` tags immediately before a `\n` (or at end of
- * input) expands back to N+1 source newlines, mirroring the save rule
- * exactly. Paragraph-structured bios (with `<p>` / `<div>` /
- * `<blockquote>` / `<pre>`) skip the transform — those were never
- * touched on save, so there's nothing to undo.
+ * Each run of N marked `<br>` tags immediately before a `\n` (or at
+ * end of input) expands back to N+1 source newlines, mirroring the
+ * save rule exactly.
+ *
+ * Only marked BRs are reversed. A `<br>` the writer typed by hand (no
+ * `data-auto-br` attribute) stays in the editor textarea exactly as
+ * they wrote it — same reason as the save-side strip: shape alone
+ * can't tell ours from theirs, so we use the marker as the explicit
+ * tell.
+ *
+ * Paragraph-structured bios (with `<p>` / `<div>` / `<blockquote>` /
+ * `<pre>`) skip the transform — those were never touched on save, so
+ * there's nothing to undo.
  *
  * Used by the owner-only GET paths that feed the editor; viewer-facing
  * read paths still see the persisted HTML with breaks intact.
@@ -92,10 +131,16 @@ export function bioHtmlForEdit(html: string): string {
   const hasParagraphStructure = /<(?:p|div|blockquote|pre)\b/i.test(html);
   if (hasParagraphStructure) return html;
   const normalized = html.replace(/\r\n?/g, "\n");
-  return normalized.replace(/((?:<br\s*\/?>[ \t]*)+)(\n|$)/gi, (_m, brs: string) => {
-    const count = (brs.match(/<br/gi) ?? []).length;
-    return "\n".repeat(count + 1);
-  });
+  return normalized.replace(
+    new RegExp(
+      `((?:${AUTO_BR_RE.source}[ \\t]*)+)(\\n|$)`,
+      "gi",
+    ),
+    (_m, brs: string) => {
+      const count = (brs.match(/<br/gi) ?? []).length;
+      return "\n".repeat(count + 1);
+    },
+  );
 }
 
 /** Sanitize a profile/bio HTML body. Used on save AND on read. */
@@ -115,6 +160,13 @@ export function sanitizeBio(html: string): string {
       "*": ["class", "style", "title"],
       a: ["href", "title", "name"],
       img: ["src", "alt", "title", "width", "height"],
+      // `data-auto-br` rides on the BR tags that `nlToBrForPlainText`
+      // auto-emits for paragraph breaks. The save-side strip and the
+      // read-side reverse both gate on this marker so a `<br>` the
+      // writer typed by hand stays put through round-trips. Browsers
+      // ignore unknown `data-*` attributes at render time, so the
+      // marker is invisible to readers.
+      br: ["data-auto-br"],
       // Tables: colspan/rowspan are pure layout, no security cost.
       // `scope` on th helps screen readers; cheap to allow.
       table: ["class", "style", "title"],

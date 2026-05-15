@@ -61,6 +61,12 @@ export interface SiteSettings {
   defaultThemeJson: string | null;
   /** Public site name shown in the banner, login screen, tab title. */
   siteName: string;
+  /**
+   * Canonical public URL the banner logo links to. Empty string = no
+   * wrapping (the logo renders bare). The banner adds an unstyled
+   * `<a>` around the logo when set.
+   */
+  siteUrl: string;
   /** CSS background shorthand for the banner; null = use theme panel color. */
   bannerCoverCss: string | null;
   /** Hex color override for the logo text; null = inherit theme text. */
@@ -156,6 +162,8 @@ export interface SettingsPatch {
   defaultTheme?: Theme | null;
   /** Public site name. Empty string falls back to "The Spire". */
   siteName?: string;
+  /** Empty string clears; any non-empty http/https URL is stored verbatim. */
+  siteUrl?: string;
   /** Pass null to clear; pass a CSS background shorthand to set. */
   bannerCoverCss?: string | null;
   /** Pass null to clear; pass a #rrggbb hex to set. */
@@ -217,6 +225,11 @@ export async function updateSettings(
     const trimmed = patch.siteName.trim();
     update.siteName = trimmed === "" ? "The Spire" : trimmed;
   }
+  if (patch.siteUrl !== undefined) {
+    // Empty string clears the link wrapping; non-empty is stored
+    // verbatim (route handler is responsible for URL-shape validation).
+    update.siteUrl = patch.siteUrl.trim();
+  }
   if (patch.bannerCoverCss !== undefined) update.bannerCoverCss = patch.bannerCoverCss;
   if (patch.logoColor !== undefined) update.logoColor = patch.logoColor;
   if (patch.logoFont !== undefined) update.logoFont = patch.logoFont;
@@ -268,6 +281,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     defaultTheme,
     defaultThemeJson: row.defaultThemeJson,
     siteName: row.siteName,
+    siteUrl: row.siteUrl,
     bannerCoverCss: row.bannerCoverCss,
     logoColor: row.logoColor,
     logoFont: row.logoFont,

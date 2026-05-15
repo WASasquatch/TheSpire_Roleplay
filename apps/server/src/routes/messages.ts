@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { isAdminRole } from "@thekeep/shared";
-import { eq } from "drizzle-orm";
+import type { Role } from "@thekeep/shared";
+import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
 import type {
@@ -8,7 +9,7 @@ import type {
   ClientToServerEvents,
   ServerToClientEvents,
 } from "@thekeep/shared";
-import { messages, rooms } from "../db/schema.js";
+import { messages, rooms, users } from "../db/schema.js";
 import { sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
 import { getSettings } from "../settings.js";
@@ -35,11 +36,18 @@ async function isForumMessage(db: Db, roomId: string): Promise<boolean> {
 
 const editBody = z.object({ body: z.string().min(1).max(20_000) }).strict();
 
-function toWire(m: typeof messages.$inferSelect): ChatMessage {
+function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMessage {
   // Mirrors the row→ChatMessage shape used in broadcast.ts; if either side
   // adds fields, both should be updated. Snapshotted fields stay as-is on
   // edit (mood, npcVoicedBy, replyTo*, etc.) — only `body` and `editedAt`
   // change.
+  //
+  // Deleted messages: the visible body is stripped to "" for everyone
+  // (renderer paints "[message removed]"). Site admins (admin /
+  // masteradmin) additionally receive the original body on a separate
+  // `originalBody` field so they can audit what got hidden. Mods +
+  // room-owner mods + ordinary viewers don't get the field — gate is
+  // `viewerIsAdmin`, which the caller computes from `isAdminRole(role)`.
   return {
     id: m.id,
     roomId: m.roomId,
@@ -66,6 +74,7 @@ function toWire(m: typeof messages.$inferSelect): ChatMessage {
     ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
     ...(m.isSticky ? { isSticky: true } : {}),
     ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+    ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
   };
 }
 
@@ -189,7 +198,43 @@ export async function registerMessageRoutes(
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
-    io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    // Per-socket emit so site admins (admin / masteradmin) receive the
+    // original body alongside the deletion marker — they need to see
+    // what got hidden in case the author was burying something. Mods,
+    // room-owner mods, and ordinary viewers get the bare wire payload
+    // (no `originalBody` field). This means the deleted content never
+    // crosses the wire to anyone who shouldn't have it.
+    const adminWire = toWire(updated, true);
+    const plainWire = toWire(updated, false);
+    const roomSockets = await io.in(`room:${m.roomId}`).fetchSockets();
+    if (roomSockets.length === 0) return { ok: true };
+    // Look the viewer roles up in one batch — typical room has ≤ 50
+    // sockets, so a single SELECT keyed by userId beats per-socket
+    // round-trips. Sockets with no resolvable userId (unauthenticated
+    // edge cases) get the plain payload by default.
+    const userIds = [
+      ...new Set(
+        roomSockets
+          .map((s) => (s.data as { userId?: string }).userId)
+          .filter((u): u is string => !!u),
+      ),
+    ];
+    const roles =
+      userIds.length === 0
+        ? new Map<string, string>()
+        : new Map(
+            (
+              await db
+                .select({ id: users.id, role: users.role })
+                .from(users)
+                .where(inArray(users.id, userIds))
+            ).map((r) => [r.id, r.role]),
+          );
+    for (const s of roomSockets) {
+      const uid = (s.data as { userId?: string }).userId ?? "";
+      const role = roles.get(uid) ?? "user";
+      s.emit("message:update", isAdminRole(role as Role) ? adminWire : plainWire);
+    }
     return { ok: true };
   });
 

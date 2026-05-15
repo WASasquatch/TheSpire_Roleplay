@@ -652,6 +652,16 @@ export const siteSettings = sqliteTable("site_settings", {
   /** Public site name shown in the banner, login screen, and tab title. */
   siteName: text("site_name").notNull().default("The Spire"),
   /**
+   * Canonical public URL the banner logo links to. Empty string = no
+   * link wrapping; the logo renders as a non-interactive element.
+   * When set, the banner wraps the logo text or image in an `<a>`
+   * pointing at this URL — styling stays identical to the unwrapped
+   * version (no underline, no color change). Useful for pointing at a
+   * marketing landing page, the project README, or just the site's
+   * own home page when the chat lives at a different subdomain.
+   */
+  siteUrl: text("site_url").notNull().default(""),
+  /**
    * Optional CSS background applied to the banner behind the logo. Stored as a
    * full CSS background shorthand so admins can use a url(), gradient, or
    * solid color (e.g. "url(/uploads/banner.jpg) center/cover no-repeat").

@@ -312,6 +312,11 @@ async function main() {
     const s = await getSettings(db);
     return {
       siteName: s.siteName,
+      // Canonical site URL the banner logo links to. Empty string =
+      // no link wrapping; the client renders the logo as a non-
+      // interactive element. Public so the splash + banner can wire
+      // it before login.
+      siteUrl: s.siteUrl,
       bannerCoverCss: s.bannerCoverCss,
       logoColor: s.logoColor,
       logoFont: s.logoFont,

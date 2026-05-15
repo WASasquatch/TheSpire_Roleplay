@@ -180,6 +180,21 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
   // Add-friend / compose form drafts.
   const [addDraft, setAddDraft] = useState("");
   const [composeDraft, setComposeDraft] = useState("");
+  /**
+   * Transient header info for a brand-new compose-to-non-friend target.
+   * Populated from the `/profiles/:name` lookup BEFORE the first message
+   * is sent — without it the ThreadPane has no friend row + no
+   * conversation row to derive the header from, so it falls back to the
+   * "…" placeholder until send creates the conversation. Cleared when
+   * the conversation materializes (a friend/conv row takes over) or
+   * when the user navigates away.
+   */
+  const [composeFallback, setComposeFallback] = useState<{
+    userId: string;
+    characterId: string | null;
+    displayName: string;
+    avatarUrl: string | null;
+  } | null>(null);
   // Inline status strips shown right under each form. Cleared
   // automatically after a few seconds so the strip doesn't shout
   // forever after a successful submit; errors stick until the next
@@ -555,6 +570,19 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
         if ("private" in j) throw new Error("That profile is private.");
         const userId = j.profile?.userId;
         if (!userId) throw new Error("Couldn't resolve user.");
+        // Seed the right-pane header so it shows the resolved name and
+        // avatar immediately. Without this the pane sits on "…" until
+        // the first message creates the conversation row. For a master
+        // hit, the DM lands OOC (characterId null); for a character
+        // hit, pin the first message to that character so it lands in
+        // the right per-identity inbox.
+        const isCharacter = j.kind === "character";
+        setComposeFallback({
+          userId,
+          characterId: isCharacter ? (j.profile.id ?? null) : null,
+          displayName: isCharacter ? j.profile.name : j.profile.username,
+          avatarUrl: j.profile.avatarUrl ?? null,
+        });
         setComposeDraft("");
         setComposeStatus(null);
         selectUser(userId);
@@ -860,10 +888,24 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
               // exactly the per-identity-partition leak the user
               // reported: clicking a character friend opened a chat
               // with their OOC account.
+              // Compose-to-non-friend fallback: when neither a friend
+              // row nor an existing conversation exists yet, fall back
+              // to the transient profile we resolved from
+              // `/profiles/:name`. This keeps the right-pane header
+              // populated (name + avatar) BEFORE the first message
+              // creates a conversation row.
               const selectedRow =
                 friendRows.find((r) => r.userId === selectedUserId)
                   ?? nonFriendConvRows.find((r) => r.userId === selectedUserId)
-                  ?? null;
+                  ?? (composeFallback && composeFallback.userId === selectedUserId
+                      ? {
+                          userId: composeFallback.userId,
+                          characterId: composeFallback.characterId,
+                          displayName: composeFallback.displayName,
+                          avatarUrl: composeFallback.avatarUrl,
+                          online: false,
+                        }
+                      : null);
               return (
                 <ThreadPane
                   otherUserId={selectedUserId}

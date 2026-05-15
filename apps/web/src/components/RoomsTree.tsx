@@ -1,4 +1,13 @@
-import { useMemo, type ComponentType, type SVGProps } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  type SVGProps,
+} from "react";
 import { legibleAgainstBg, type RoomOccupant, type RoomSummary, type Theme } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
 import { AdminIcon, MasterAdminIcon, ModIcon } from "./StaffIcons.js";
@@ -7,6 +16,28 @@ import { UserNameTag } from "./UserNameTag.js";
 
 export interface RoomWithOccupants extends RoomSummary {
   occupants: RoomOccupant[];
+}
+
+/** Bounds for the desktop userlist rail width, in pixels. */
+const MIN_RAIL_WIDTH = 200; // narrow enough that staff icons + a short name still fit
+const MAX_RAIL_WIDTH = 480; // wide enough for long room/character names without eating most of the chat
+const DEFAULT_RAIL_WIDTH = 256; // matches the previous Tailwind `md:w-64` baseline
+const RAIL_WIDTH_STORAGE_KEY = "tk_userlist_width";
+
+/**
+ * Hydrate the rail width from localStorage with a sanity-clamped
+ * fallback. Reading inside the `useState` initializer (not a
+ * `useEffect`) means the first render already uses the saved width
+ * — no visible "snap from default to saved" flash on mount.
+ */
+function loadRailWidth(): number {
+  try {
+    const raw = window.localStorage.getItem(RAIL_WIDTH_STORAGE_KEY);
+    if (!raw) return DEFAULT_RAIL_WIDTH;
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n) && n >= MIN_RAIL_WIDTH && n <= MAX_RAIL_WIDTH) return n;
+  } catch { /* private-mode — fall through to default */ }
+  return DEFAULT_RAIL_WIDTH;
 }
 
 interface Props {
@@ -71,21 +102,95 @@ export function RoomsTree({
     if (idx <= 0) return rooms;
     return [rooms[idx]!, ...rooms.slice(0, idx), ...rooms.slice(idx + 1)];
   }, [rooms, currentRoomId]);
+
+  // Desktop-only horizontal resize for the rail. The user drags the
+  // left edge — pulling LEFT widens the rail (eats into the chat
+  // column), pulling RIGHT narrows it. Value persists per-browser
+  // via localStorage so the choice rides along with the tab.
+  // Mobile keeps the fixed w-72 drawer width since "drag to resize"
+  // doesn't translate to a slide-out panel.
+  const [railWidth, setRailWidth] = useState<number>(loadRailWidth);
+  useEffect(() => {
+    try { window.localStorage.setItem(RAIL_WIDTH_STORAGE_KEY, String(railWidth)); }
+    catch { /* private-mode — width still works for this session */ }
+  }, [railWidth]);
+
+  // Drag state lives on a ref (not React state) so each pointermove
+  // doesn't trigger a re-render of the closure. We re-render via
+  // `setRailWidth` once per frame's worth of movement — React batches
+  // the updates so the userlist re-paint stays smooth even on long
+  // occupant lists.
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  function startResize(e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { startX: e.clientX, startWidth: railWidth };
+  }
+  function moveResize(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!dragRef.current) return;
+    // Drag LEFT (clientX decreases) → rail widens. The math:
+    // `startWidth + (startX - currentX)` because pulling left
+    // increases startX-currentX, which adds to the width.
+    const delta = dragRef.current.startX - e.clientX;
+    const next = Math.min(
+      MAX_RAIL_WIDTH,
+      Math.max(MIN_RAIL_WIDTH, dragRef.current.startWidth + delta),
+    );
+    setRailWidth(next);
+  }
+  function endResize(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!dragRef.current) return;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    dragRef.current = null;
+  }
+
   return (
     <aside
       // Solid bg-keep-bg on mobile so the chat doesn't bleed through the
       // drawer; on md+ keep the subtle panel tint that visually separates
       // the rail from the chat. Slightly wider on mobile (72) to give
       // thumbs a comfortable target.
+      //
+      // Desktop width: `md:w-[var(--keep-rail-width)]` reads the
+      // CSS variable we set inline below from React state. Using a
+      // variable instead of inline `style.width` means the mobile
+      // `w-72` class still wins at narrow viewports without us having
+      // to JS-gate the inline style.
+      //
+      // `md:relative` (not the previous `md:static`) so the absolute-
+      // positioned resize handle below positions against the aside
+      // instead of walking up the layout tree.
       className={`
         keep-app-sidebar
         flex h-full w-72 flex-col border-l border-keep-rule bg-keep-bg text-sm shadow-2xl
         fixed inset-y-0 right-0 z-40 transform transition-transform
         ${drawerOpen ? "translate-x-0" : "translate-x-full"}
-        md:static md:w-64 md:translate-x-0 md:transform-none md:transition-none
+        md:relative md:w-[var(--keep-rail-width)] md:translate-x-0 md:transform-none md:transition-none
         md:bg-keep-banner/30 md:shadow-none
       `}
+      style={{ ["--keep-rail-width" as string]: `${railWidth}px` } as CSSProperties}
     >
+      {/* Resize handle, desktop-only. Sits flush against the rail's
+          left border (covering it visually) so dragging "the border"
+          feels natural. `cursor-ew-resize` is the bidirectional
+          east-west arrow conventionally used for column resizing.
+          The hover/active tints are subtle so the rail doesn't feel
+          like a UI element at rest — the cursor change is the
+          primary affordance. Pointer-capture (via setPointerCapture
+          in `startResize`) keeps the drag tracking even when the
+          cursor strays outside the handle's thin hit area. */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize userlist"
+        title="Drag to resize the userlist"
+        onPointerDown={startResize}
+        onPointerMove={moveResize}
+        onPointerUp={endResize}
+        onPointerCancel={endResize}
+        className="absolute inset-y-0 left-0 z-30 hidden w-1.5 cursor-ew-resize hover:bg-keep-action/30 active:bg-keep-action/50 md:block"
+      />
       {/* Header row - title + room count, with the mobile-only close
           button living inside it (instead of an absolute overlay) so it
           gets real layout space and never covers the room list. */}

@@ -65,8 +65,14 @@ export function UserNameTag({
   const themeBg = useActiveTheme().bg;
   const resolvedColor = resolveMessageColor(color, themeBg);
   return (
-    <span className="inline-flex items-baseline gap-1">
-      {rolePrefix ? <span className="text-keep-muted">{rolePrefix}</span> : null}
+    // `inline-flex min-w-0 max-w-full` lets the tag shrink below
+    // its intrinsic content width when its container (e.g. a
+    // userlist row in a narrow rail) is scrunched. Without
+    // `min-w-0` flex children default to their content size and
+    // refuse to shrink, which is what was causing long usernames
+    // to wrap onto a second line.
+    <span className="inline-flex min-w-0 max-w-full items-baseline gap-1">
+      {rolePrefix ? <span className="shrink-0 text-keep-muted">{rolePrefix}</span> : null}
       {hideIcon ? null : (
         <button
           type="button"
@@ -74,7 +80,10 @@ export function UserNameTag({
           title={`view profile (${g.title})`}
           // px-1 py-0.5 + rounded background on hover gives a real tap
           // target on mobile without changing visual density.
-          className="rounded px-1 py-0.5 text-base leading-none hover:bg-keep-panel hover:underline md:text-sm"
+          // `shrink-0` keeps the gender icon at its natural size when
+          // the row scrunches — only the name button absorbs the
+          // squeeze.
+          className="shrink-0 rounded px-1 py-0.5 text-base leading-none hover:bg-keep-panel hover:underline md:text-sm"
           style={{ color: g.color }}
         >
           {g.icon}
@@ -87,14 +96,22 @@ export function UserNameTag({
           (italic ? `${displayName} - admin` : `whisper ${displayName}`) +
           (away && awayMessage ? ` (away: ${awayMessage})` : "")
         }
-        className={`rounded px-1 py-0.5 font-semibold hover:bg-keep-panel hover:underline${italic ? " italic" : ""}`}
+        // `min-w-0 truncate` is what lets the displayName ellipsize
+        // inside a narrow rail (e.g. after the user drags the
+        // userlist resize handle to a tight width). `truncate` =
+        // `overflow:hidden; text-overflow:ellipsis; white-space:nowrap`,
+        // and `min-w-0` lets this flex child shrink below its
+        // content-size so the ellipsis actually has room to engage.
+        // Without these, long names previously broke onto a new line
+        // and threw the row layout off.
+        className={`min-w-0 truncate rounded px-1 py-0.5 font-semibold hover:bg-keep-panel hover:underline${italic ? " italic" : ""}`}
         style={resolvedColor ? { color: resolvedColor } : undefined}
       >
         {displayName}
       </button>
       {mood ? (
         <span
-          className="ml-1 rounded bg-keep-action/15 px-1 text-[10px] uppercase tracking-wide text-keep-action"
+          className="ml-1 shrink-0 rounded bg-keep-action/15 px-1 text-[10px] uppercase tracking-wide text-keep-action"
           title={`mood: ${mood}`}
         >
           {mood}
@@ -102,13 +119,13 @@ export function UserNameTag({
       ) : null}
       {ooc ? (
         <span
-          className="ml-1 text-[10px] text-keep-muted"
+          className="ml-1 shrink-0 text-[10px] text-keep-muted"
           title="Speaking from their master / OOC account, not as a character"
         >
           (ooc)
         </span>
       ) : null}
-      {away ? <span className="ml-1 text-keep-muted">[away]</span> : null}
+      {away ? <span className="ml-1 shrink-0 text-keep-muted">[away]</span> : null}
     </span>
   );
 }

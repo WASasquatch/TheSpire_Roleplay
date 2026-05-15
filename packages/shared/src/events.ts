@@ -78,6 +78,20 @@ export interface ClientToServerEvents {
     payload: { characterId: string | null },
     ack?: AckFn<{ ok: true; activeCharacterId: string | null; activeCharacterName: string | null } | AckError>,
   ) => void;
+  /**
+   * Signal that the user is *intentionally* leaving — i.e. clicked the
+   * Exit button in the banner. The server flags the socket so the
+   * eventual disconnect emits a "has disconnected." chat broadcast.
+   * Without this signal, a disconnect is treated as transient
+   * (mobile suspend, tab close, network blip) and stays silent in
+   * chat — the userlist still updates either way.
+   *
+   * The client emits this immediately before `disconnect()` and does
+   * not wait for an ack; the server's handler is synchronous in
+   * effect (it sets a flag on `socket.data` that the disconnect
+   * handler reads).
+   */
+  "me:exit": () => void;
 }
 
 /** Events emitted by the server → client. */

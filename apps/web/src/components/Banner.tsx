@@ -79,7 +79,12 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
     // the now-deleted server-side session row by piggybacking the old
     // token.
     clearSessionToken();
-    disconnect();
+    // Pass `intentional: true` so the socket emits `me:exit` before
+    // tearing down. Server reads that flag in the disconnect handler
+    // and fires the "X has disconnected." chat broadcast. Without the
+    // flag the disconnect stays silent (mobile suspend, tab close,
+    // network drop all look identical otherwise).
+    disconnect(true);
     setMe(null);
   }
 

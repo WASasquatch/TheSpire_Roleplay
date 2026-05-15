@@ -3,6 +3,7 @@ import DOMPurify from "dompurify";
 import { VERSION } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { setSessionToken } from "../lib/http.js";
+import { markLoginIntent } from "../lib/socket.js";
 import { themeStyle } from "../lib/theme.js";
 import { AffiliatesCarousel } from "./AffiliatesCarousel.js";
 import { FeaturedWorldsCarousel } from "./FeaturedWorldsCarousel.js";
@@ -542,6 +543,12 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
         // /me/profile + /me/dms fetches and they need the header
         // already in place.
         if (typeof j.sessionToken === "string") setSessionToken(j.sessionToken);
+        // Mark this as an intentional login. The socket's auth callback
+        // reads (and clears) the marker on its next handshake, passing
+        // `intent: "login"` so the server fires the "X has connected."
+        // chat broadcast. Subsequent reconnects after mobile suspend /
+        // network blip don't have the marker and stay silent.
+        markLoginIntent();
         // The server returns role:"masteradmin" for the very first registrant
         // (bootstrap path). Trust the server response so the Admin button
         // appears immediately without requiring a page reload.
@@ -563,6 +570,8 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
         }
         const j = await res.json();
         if (typeof j.sessionToken === "string") setSessionToken(j.sessionToken);
+        // See the register branch above for the same rationale.
+        markLoginIntent();
         setMe({ id: j.id, username: j.username, role: j.role });
       }
     } catch (err) {

@@ -448,7 +448,7 @@ async function main() {
    */
   io.use(async (socket, next) => {
     try {
-      const a = socket.handshake.auth as { token?: unknown; sid?: unknown } | undefined;
+      const a = socket.handshake.auth as { token?: unknown; sid?: unknown; intent?: unknown } | undefined;
       const raw = typeof a?.token === "string" ? a.token : typeof a?.sid === "string" ? a.sid : "";
       const sid = raw.trim();
       if (!sid) return next(new Error("unauthenticated"));
@@ -462,6 +462,15 @@ async function main() {
       (socket.data as { userId: string }).userId = userId;
       (socket.data as { user: typeof user }).user = user;
       (socket.data as { sid: string }).sid = sid;
+      // `intent === "login"` flags this connection as the one created
+      // immediately after a fresh login / register submit. The client
+      // consumes a one-shot sessionStorage marker so this is set on
+      // exactly the first socket connect after a form submit — never
+      // on socket reconnects, never on page reloads. The join broadcast
+      // gates the "X has connected." chat message on this flag so
+      // mobile suspend / network blip / tab reload no longer spam the
+      // chat log; only an actual login produces the announcement.
+      (socket.data as { loginIntent?: boolean }).loginIntent = a?.intent === "login";
       // Per-tab active character. Seeded from the DB-level default
       // (user.activeCharacterId) on connect, then mutated only by
       // commands originating from THIS socket so other tabs the user has
@@ -821,6 +830,17 @@ async function main() {
       ack?.({ ok: true });
     });
 
+    // Intentional exit: client fires this immediately before
+    // disconnecting via the Exit button. The flag tells the
+    // disconnect handler to emit the "X has disconnected." chat
+    // broadcast — otherwise the disconnect is treated as transient
+    // (mobile suspend, tab close, network drop) and stays silent.
+    // No ack needed; the client doesn't wait for one (it disconnects
+    // right after the emit).
+    socket.on("me:exit", () => {
+      (socket.data as { exitIntent?: boolean }).exitIntent = true;
+    });
+
     // We use `disconnecting` (not `disconnect`) because by the time `disconnect`
     // fires, socket.rooms is already empty - we'd miss the room ids we need to
     // notify and check for auto-expiry.
@@ -833,6 +853,15 @@ async function main() {
       const userId = user.id;
       const displayName = user.displayName;
       const socketId = socket.id;
+      // Snapshot the intentional-exit flag too. The Exit button emits
+      // `me:exit` immediately before disconnecting, which sets this
+      // on socket.data — the disconnect handler reads it to decide
+      // whether to fire the "X has disconnected." chat broadcast.
+      // Without an explicit exit, the disconnect stays silent (mobile
+      // suspend, tab close, network drop all look identical on the
+      // wire and shouldn't surface as chat messages). The userlist
+      // updates either way through `broadcastPresence`.
+      const exitIntent = (socket.data as { exitIntent?: boolean }).exitIntent === true;
 
       // Defer the work so the socket actually finishes leaving its rooms first;
       // otherwise expireIfEmpty would still see this socket present.
@@ -874,11 +903,19 @@ async function main() {
                 if (expired) continue;
                 const stillThere = await userHasSocketInRoom(io, userId, id);
                 if (!stillThere) {
-                  // Forum rooms suppress "X has disconnected." — the
-                  // topic feed isn't a chat log and join/leave noise
-                  // doesn't belong there.
+                  // "X has disconnected." fires ONLY when the user
+                  // clicked the Exit button — `exitIntent` is set by
+                  // the `me:exit` socket event the client emits right
+                  // before disconnecting. Without an explicit exit
+                  // (tab close, mobile suspend dropping the socket
+                  // past grace, network drop), the disconnect is
+                  // silent in chat. The userlist update below still
+                  // fires so other viewers see them vanish from the
+                  // rail — they just don't get a chat-log line about
+                  // it. Forum rooms also suppress regardless of
+                  // intent — the topic feed isn't a chat log.
                   const r = (await db.select().from(rooms).where(eq(rooms.id, id)).limit(1))[0];
-                  if (r?.replyMode !== "nested") {
+                  if (exitIntent && r?.replyMode !== "nested") {
                     await addSystemMessage(io, db, id, `${displayName} has disconnected.`);
                   }
                 }
@@ -887,22 +924,14 @@ async function main() {
             });
           } else {
             // Other tabs of this user are still alive: this is a tab close /
-            // room switch, not a session-level disconnect. Emit "left." per
-            // affected room immediately - this is room-local, doesn't affect
-            // the user's overall online status, and never fires from a
-            // transient socket reconnect (those go through the fullyOffline
-            // branch since the reconnecting socket is the only one).
+            // room switch, not a session-level disconnect. The
+            // per-room "X left." chat broadcast is silenced entirely —
+            // a user with multiple tabs flipping between rooms or
+            // closing one of them doesn't deserve chat noise; the
+            // userlist re-broadcast below is the visible signal.
             for (const id of roomIds) {
               const expired = await expireIfEmpty(io, db, id);
               if (expired) continue;
-              const stillThere = await userHasSocketInRoom(io, userId, id, socketId);
-              if (!stillThere) {
-                // Same forum-room suppression as the fully-offline path.
-                const r = (await db.select().from(rooms).where(eq(rooms.id, id)).limit(1))[0];
-                if (r?.replyMode !== "nested") {
-                  await addSystemMessage(io, db, id, `${displayName} left.`);
-                }
-              }
               await broadcastPresence(io, db, id);
             }
           }

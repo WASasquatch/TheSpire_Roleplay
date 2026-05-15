@@ -418,6 +418,36 @@ function isInBootGrace(): boolean {
 }
 
 /**
+ * In-process tracker for "has this user already seen the description
+ * for this room?" Joined the codebase to fix the "room description
+ * fires every time I come back to the tab on mobile" complaint —
+ * the prior implementation only suppressed re-emission during the
+ * 20-second reconnect-grace window, so a longer suspension (screen
+ * off for 30+ min) lost the marker and the description fired again
+ * on the next join.
+ *
+ * Scope is per-process: keys are `userId`, values are sets of room
+ * ids the user has seen the description for during this server's
+ * lifetime. A process restart resets the map and users see each
+ * room's description once again — acceptable, since restarts are
+ * intentional and infrequent. If we ever need durable suppression
+ * across restarts we'd promote this to a `user_seen_descriptions`
+ * table.
+ */
+const seenDescriptions = new Map<string, Set<string>>();
+function hasSeenDescription(userId: string, roomId: string): boolean {
+  return seenDescriptions.get(userId)?.has(roomId) ?? false;
+}
+function markSeenDescription(userId: string, roomId: string): void {
+  let set = seenDescriptions.get(userId);
+  if (!set) {
+    set = new Set();
+    seenDescriptions.set(userId, set);
+  }
+  set.add(roomId);
+}
+
+/**
  * Cancel a pending disconnect for this user, if any. Returns true when one
  * was canceled - meaning this connect is a reconnect inside the grace window
  * and the caller should suppress the "has connected" announcement.
@@ -680,24 +710,18 @@ export async function joinRoom(
     .filter((r) => r.startsWith("room:") && r !== `room:${roomId}`)
     .map((r) => r.slice(5));
 
-  // Drop the user from any previous room before joining the new one. For each
-  // prev room, emit "X left." iff this was their last socket there. Then
-  // expire the prev room if it's now empty (and isn't a system room).
-  //
-  // Forum rooms (replyMode = nested) suppress the "X left." line — the
-  // posting model there is forum-style, not chat, and join/leave noise
-  // would just clutter the topic list.
+  // Drop the user from any previous room before joining the new one.
+  // The per-room "X left." chat broadcast is silenced entirely now —
+  // room moves and tab closes shouldn't generate chat noise. The
+  // userlist update via `broadcastPresence` is the visible signal
+  // (the user disappears from the rail in real time). Only the
+  // explicit Exit-button path (handled in index.ts disconnect)
+  // surfaces a chat message, and only with the "has disconnected."
+  // wording.
   for (const prevId of priorRooms) {
     socket.leave(`room:${prevId}`);
     const expired = await expireIfEmpty(io, db, prevId);
     if (expired) continue;
-    const stillThere = await userHasSocketInRoom(io, user.id, prevId);
-    if (!stillThere) {
-      const prevRoom = (await db.select().from(rooms).where(eq(rooms.id, prevId)).limit(1))[0];
-      if (prevRoom?.replyMode !== "nested") {
-        await addSystemMessage(io, db, prevId, `${user.displayName} left.`);
-      }
-    }
     await broadcastPresence(io, db, prevId);
   }
 
@@ -715,22 +739,18 @@ export async function joinRoom(
   // socket doesn't see it twice (once in backlog, once via room broadcast).
   await sendRoomBacklogTo(socket, db, roomId, user.id);
 
-  // If the room has a /describe set, deliver it to JUST this socket as a
-  // one-shot system message - not persisted, not broadcast. New visitors get
-  // the world/setting description; ongoing chat stays clean. The
-  // `[Description]:` prefix runs inline with the prose so the line reads
-  // like the other system events (joins, kicks, mutes) at a glance.
+  // Room description: fire ONCE per (user, room) over the lifetime of
+  // this process. Previously we only suppressed on reconnect-inside-
+  // grace, so a long mobile suspension (screen off past the 20s grace)
+  // dropped the marker and the description re-fired on the next
+  // joinRoom. The `seenDescriptions` map persists across reconnects
+  // for the life of the server, so a returning mobile tab now only
+  // sees the description on its *original* entry.
   //
-  // Suppressed on reconnect: the user just saw it before the blip, no point
-  // showing it again. (If a reconnect lands them in a different room than
-  // they were in, they don't get the description there either - acceptable
-  // edge case; description is a lightweight nice-to-have, not load-bearing.)
-  //
-  // Also suppressed in forum (nested) rooms — the description is a
-  // chat-flavored welcome and would clutter the topic feed there.
-  // The room banner / metadata surfaces the description via other UI
-  // affordances in those rooms.
-  if (room.description && !isReconnect && room.replyMode !== "nested") {
+  // Forum rooms still skip the description entirely — the topic feed
+  // isn't a chat log, and other UI affordances surface the description
+  // there.
+  if (room.description && !hasSeenDescription(user.id, roomId) && room.replyMode !== "nested") {
     socket.emit("message:new", {
       id: `desc-${nanoid()}`,
       roomId,
@@ -742,36 +762,38 @@ export async function joinRoom(
       color: null,
       createdAt: Date.now(),
     });
+    markSeenDescription(user.id, roomId);
   }
 
-  // Announce arrival only if this is the user's first socket in this room
-  // (multi-tab users don't spam "arrived" each time they switch tabs). The
-  // wording distinguishes a fresh connect from a room switch.
+  // "X has connected." chat broadcast is now gated on an explicit
+  // login intent. The client sets `socket.data.loginIntent = true`
+  // on the handshake immediately after a successful login/register
+  // form submit, and never on any subsequent reconnect — so mobile
+  // suspend, tab close, page reload, network blip, and so on all
+  // remain silent in the chat log. The userlist (broadcastPresence
+  // above) still updates so other viewers see the occupant appear
+  // in the rail.
   //
-  // Three suppression cases:
-  //   - inside the per-user grace window after a recent disconnect (covers
-  //     transient blips during steady-state operation);
-  //   - inside the server-boot quiet window (covers reconnect cohorts after
-  //     a process restart, which would otherwise spam "has connected" once
-  //     per client that returns);
-  //   - room-switches: the user already had a socket here ("arrived") goes
-  //     through, but only when they were online before this socket existed.
+  // The "X arrived." wording for room-switches (multi-tab user
+  // popping into a new room) is dropped entirely — room moves
+  // shouldn't generate chat noise. The userlist is the signal.
+  //
+  // Forum rooms suppress regardless of intent; same rationale as
+  // the description above.
+  const loginIntent =
+    (socket.data as { loginIntent?: boolean }).loginIntent === true;
   const otherSocketHere = await userHasSocketInRoom(io, user.id, roomId, socket.id);
-  const suppressed = isReconnect || (!userWasOnlineBefore && isInBootGrace());
-  // Forum rooms suppress arrival lines — the topic feed is not a chat
-  // log. Watcher pings still fire (those are private DMs to the
-  // watcher, not in-room noise).
   const isForumRoom = room.replyMode === "nested";
-  if (!otherSocketHere && !suppressed && !isForumRoom) {
-    const body = userWasOnlineBefore
-      ? `${user.displayName} arrived.`
-      : `${user.displayName} has connected.`;
-    await addSystemMessage(io, db, roomId, body);
+  if (loginIntent && !otherSocketHere && !isReconnect && !isInBootGrace() && !isForumRoom) {
+    await addSystemMessage(io, db, roomId, `${user.displayName} has connected.`);
   }
-  if (!otherSocketHere && !suppressed && !userWasOnlineBefore) {
+  if (!otherSocketHere && !isReconnect && !userWasOnlineBefore) {
     // Watcher pings: still relevant in forum rooms — they're per-user
     // notifications, not room broadcasts. Fire whenever this is a
-    // true online transition regardless of room type.
+    // true online transition regardless of room type. Decoupled from
+    // the chat broadcast — a watcher should still get pinged when
+    // their friend reconnects after a mobile suspend, even though
+    // the chat itself stays silent.
     await pingWatchers(io, db, user);
   }
 }

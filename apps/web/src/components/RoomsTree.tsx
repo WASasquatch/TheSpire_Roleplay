@@ -1,5 +1,7 @@
-import { useMemo } from "react";
-import type { RoomOccupant, RoomSummary } from "@thekeep/shared";
+import { useMemo, type ComponentType, type SVGProps } from "react";
+import { legibleAgainstBg, type RoomOccupant, type RoomSummary, type Theme } from "@thekeep/shared";
+import { useActiveTheme } from "../lib/theme.js";
+import { AdminIcon, MasterAdminIcon, ModIcon } from "./StaffIcons.js";
 import { ToolPanel } from "./ToolPanel.js";
 import { UserNameTag } from "./UserNameTag.js";
 
@@ -155,6 +157,12 @@ function RoomGroup({
   // name; world buckets sort by world name; "_none" is always last.
   const groups = groupByPrimaryWorld(room.occupants);
   const showHeaders = groups.length > 1; // a single bucket is just a flat list
+  // Active theme drives the legibility nudge that keeps the staff
+  // icons readable against the rail bg — even on a custom palette
+  // where the natural slot color would land too close to the chat
+  // background to read. The rail container uses `bg-keep-bg`, so we
+  // contrast each icon's slot color against `theme.bg`.
+  const theme = useActiveTheme();
 
   return (
     <li
@@ -211,25 +219,48 @@ function RoomGroup({
                 )
               ) : null}
               <ul>
-                {g.users.map((o) => (
+                {g.users.map((o) => {
                   // Composite key — a single account voicing two
                   // different characters in two tabs renders as two
                   // occupant rows (one per identity). Keying on userId
                   // alone would dup-React-key in that case.
-                  <li key={`${o.userId}:${o.characterId ?? ""}`} className="truncate px-3 py-1.5 pl-5 md:py-0.5">
-                    <UserNameTag
-                      displayName={o.displayName}
-                      gender={o.gender}
-                      color={o.chatColor ?? null}
-                      away={o.away}
-                      awayMessage={o.awayMessage ?? null}
-                      rolePrefix={resolveRolePrefix(o)}
-                      ooc={o.characterId === null}
-                      onIconClick={() => onIconClick(o.userId, o.displayName)}
-                      onNameClick={() => onNameClick(o.userId, o.displayName)}
-                    />
-                  </li>
-                ))}
+                  const chip = resolveStaffChip(o, theme);
+                  return (
+                    <li
+                      key={`${o.userId}:${o.characterId ?? ""}`}
+                      className="flex items-center justify-between gap-2 px-3 py-1.5 pl-5 md:py-0.5"
+                    >
+                      <div className="min-w-0 flex-1 truncate">
+                        <UserNameTag
+                          displayName={o.displayName}
+                          gender={o.gender}
+                          color={o.chatColor ?? null}
+                          away={o.away}
+                          awayMessage={o.awayMessage ?? null}
+                          rolePrefix={resolveRolePrefix(o)}
+                          ooc={o.characterId === null}
+                          onIconClick={() => onIconClick(o.userId, o.displayName)}
+                          onNameClick={() => onNameClick(o.userId, o.displayName)}
+                        />
+                      </div>
+                      {chip ? (
+                        <span
+                          className="shrink-0"
+                          // Inline `color` is what the `currentColor`
+                          // fills/strokes inside the SVG pick up. The
+                          // value has already been nudged for legibility
+                          // against the rail bg, so the icon reads
+                          // cleanly across every theme.
+                          style={{ color: chip.color }}
+                          title={chip.title}
+                          aria-label={chip.label}
+                        >
+                          <chip.Icon className="h-4 w-4" />
+                        </span>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             </li>
           ))}
@@ -284,4 +315,81 @@ function resolveRolePrefix(o: RoomOccupant): string {
   if (o.role === "owner") return "♛";
   if (o.role === "mod" || o.accountRole === "mod") return "★";
   return "";
+}
+
+interface StaffChip {
+  /** Accessible name for the SVG icon (announced by screen readers). */
+  label: string;
+  /** Icon component rendered at the row's right edge. Uses
+   *  `currentColor` for fill/stroke so the `color` style on the
+   *  wrapping span drives the paint. */
+  Icon: ComponentType<SVGProps<SVGSVGElement> & { title?: string }>;
+  /** Hex color, already nudged for legibility against the rail bg. */
+  color: string;
+  /** Hover tooltip explaining the tier so newer users learn what each
+   *  icon means without a docs lookup. */
+  title: string;
+}
+
+/**
+ * Resolve the staff-tier icon rendered at the right edge of each
+ * userlist row. Replaces the earlier text chips ("MASTER" / "ADMIN" /
+ * "MOD") which read as giant badges next to short usernames. Icons
+ * carry the same recognition signal at a fraction of the visual
+ * weight.
+ *
+ * Tiers shown most-prominent first, since only one icon is shown per
+ * row and we want the highest authority to win:
+ *   masteradmin   → crown icon in the accent slot (sitewide god-mode)
+ *   admin         → trophy + base icon in the action slot (sitewide
+ *                   moderation)
+ *   mod / owner   → trophy outline icon in the system slot (either
+ *                   site-mod, per-room mod, or per-room owner — all
+ *                   three carry moderation powers and a user asking
+ *                   for help doesn't care which flavor)
+ *   user/trusted  → no icon
+ *
+ * Colors map onto theme slots so a custom palette repaints the icons
+ * along with everything else, and each slot's color is run through
+ * `legibleAgainstBg` against the rail's actual background (`theme.bg`)
+ * so a custom palette that happens to pick a slot color too close to
+ * the bg gets nudged toward legibility before the icon paints.
+ */
+function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
+  if (o.accountRole === "masteradmin") {
+    return {
+      label: "Master admin",
+      Icon: MasterAdminIcon,
+      color: legibleAgainstBg(theme.accent, theme.bg),
+      title:
+        "Master admin — site-wide authority including settings, branding, and account management.",
+    };
+  }
+  if (o.accountRole === "admin") {
+    return {
+      label: "Admin",
+      Icon: AdminIcon,
+      color: legibleAgainstBg(theme.action, theme.bg),
+      title: "Site admin — site-wide moderation across every room.",
+    };
+  }
+  if (o.accountRole === "mod" || o.role === "mod" || o.role === "owner") {
+    return {
+      label:
+        o.accountRole === "mod"
+          ? "Site moderator"
+          : o.role === "owner"
+          ? "Room owner"
+          : "Room moderator",
+      Icon: ModIcon,
+      color: legibleAgainstBg(theme.system, theme.bg),
+      title:
+        o.accountRole === "mod"
+          ? "Site moderator — moderation across every room."
+          : o.role === "owner"
+          ? "Room owner — moderation authority in this room."
+          : "Room moderator — moderation authority in this room.",
+    };
+  }
+  return null;
 }

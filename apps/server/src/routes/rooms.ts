@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { isAdminRole } from "@thekeep/shared";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import { nanoid } from "nanoid";
@@ -720,7 +721,7 @@ export async function registerRoomsRoutes(
       const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
       if (!room) { reply.code(404); return { error: "no room" }; }
       const isOwner = room.ownerId === me.id;
-      if (!(me.role === "admin" || isOwner)) {
+      if (!(isAdminRole(me.role) || isOwner)) {
         reply.code(403);
         return { error: "admin or room owner only" };
       }
@@ -761,7 +762,7 @@ export async function registerRoomsRoutes(
       const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
       if (!room) { reply.code(404); return { error: "no room" }; }
       const isOwner = room.ownerId === me.id;
-      if (!(me.role === "admin" || isOwner)) {
+      if (!(isAdminRole(me.role) || isOwner)) {
         reply.code(403);
         return { error: "admin or room owner only" };
       }
@@ -805,7 +806,7 @@ export async function registerRoomsRoutes(
       const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
       if (!room) { reply.code(404); return { error: "no room" }; }
       const isOwner = room.ownerId === me.id;
-      if (!(me.role === "admin" || isOwner)) {
+      if (!(isAdminRole(me.role) || isOwner)) {
         reply.code(403);
         return { error: "admin or room owner only" };
       }

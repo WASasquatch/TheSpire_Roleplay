@@ -1,4 +1,5 @@
 import argon2 from "argon2";
+import { isAdminRole } from "@thekeep/shared";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { bans, roomInvites, roomMembers, rooms } from "../../db/schema.js";
@@ -12,7 +13,7 @@ import type { CommandContext, CommandHandler } from "../types.js";
  * auto-expired rooms cascade away so they don't count.
  */
 async function checkRoomCap(ctx: CommandContext): Promise<boolean> {
-  if (ctx.user.role === "admin") return true;
+  if (isAdminRole(ctx.user.role)) return true;
   const { maxRoomsPerOwner } = await getSettings(ctx.db);
   if (maxRoomsPerOwner === 0) {
     ctx.socket.emit("error:notice", {
@@ -357,7 +358,7 @@ export const inviteCommand: CommandHandler = {
  * roomMembers role of "owner", or "mod".
  */
 async function callerCanEditRoom(ctx: CommandContext): Promise<boolean> {
-  if (ctx.user.role === "admin") return true;
+  if (isAdminRole(ctx.user.role)) return true;
   const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
   if (!room) return false;
   if (room.ownerId === ctx.user.id) return true;

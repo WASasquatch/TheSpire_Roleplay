@@ -1,0 +1,21 @@
+-- Inline custom-command support.
+--
+-- Some custom commands make sense mid-sentence: `!random`, `!flip`,
+-- `!d20`, etc. — the user wants the templated output spliced into
+-- a plain chat message rather than issued as a standalone `/cmd`.
+-- This migration adds two opt-in columns:
+--
+--   allow_inline      Off by default. When set, the command becomes
+--                     eligible for the `!name` palette in the composer
+--                     and for server-side mid-message expansion.
+--   inline_template   Optional alternate template used for the inline
+--                     path. Falls back to `template` when NULL — the
+--                     admin only needs to author a separate body when
+--                     the standalone wording ("Alice rolls 17 on a
+--                     d20") doesn't sit well embedded mid-sentence
+--                     ("...and rolls 17 on a d20..."). The admin UI
+--                     pre-fills this with a copy of `template` the
+--                     first time the toggle flips on so the author
+--                     has a working starting point.
+ALTER TABLE custom_commands ADD COLUMN allow_inline INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE custom_commands ADD COLUMN inline_template TEXT;

@@ -18,6 +18,8 @@ export type AuditAction =
   | "demote_mod"
   | "promote_admin"
   | "demote_admin"
+  | "promote_masteradmin"
+  | "demote_masteradmin"
   | "promote_trusted"
   | "demote_trusted"
   | "auto_promote_trusted"

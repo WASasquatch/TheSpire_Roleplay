@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
+import { isAdminRole } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { disconnect } from "../lib/socket.js";
 import { clearSessionToken } from "../lib/http.js";
@@ -154,7 +155,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
         >
           Rules
         </button>
-        {me?.role === "admin" && onOpenAdmin ? (
+        {me && isAdminRole(me.role) && onOpenAdmin ? (
           <>
             <span className="text-keep-rule">|</span>
             <button
@@ -231,7 +232,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
             >
               Rules
             </button>
-            {me?.role === "admin" && onOpenAdmin ? (
+            {me && isAdminRole(me.role) && onOpenAdmin ? (
               <button
                 type="button"
                 onClick={fireAdmin}

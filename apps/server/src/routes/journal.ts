@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { isAdminRole } from "@thekeep/shared";
 import { and, asc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -34,7 +35,7 @@ export async function registerJournalRoutes(app: FastifyInstance, db: Db): Promi
     const me = await getSessionUser(req, db);
     const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
     if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
-    const isOwner = me?.id === c.userId || me?.role === "admin";
+    const isOwner = me?.id === c.userId || isAdminRole(me?.role ?? "user");
     const rows = await db
       .select()
       .from(characterJournalEntries)
@@ -58,7 +59,7 @@ export async function registerJournalRoutes(app: FastifyInstance, db: Db): Promi
     if (!me) { reply.code(401); return { error: "auth" }; }
     const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
     if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
-    if (c.userId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+    if (c.userId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
 
     let body;
     try { body = createBody.parse(req.body); }
@@ -92,7 +93,7 @@ export async function registerJournalRoutes(app: FastifyInstance, db: Db): Promi
       if (!me) { reply.code(401); return { error: "auth" }; }
       const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
       if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
-      if (c.userId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+      if (c.userId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
 
       let body;
       try { body = updateBody.parse(req.body); }
@@ -133,7 +134,7 @@ export async function registerJournalRoutes(app: FastifyInstance, db: Db): Promi
       if (!me) { reply.code(401); return { error: "auth" }; }
       const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
       if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
-      if (c.userId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+      if (c.userId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
 
       const existing = (await db
         .select()

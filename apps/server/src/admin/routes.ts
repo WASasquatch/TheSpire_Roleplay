@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { and, asc, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -19,7 +19,7 @@ import {
   users,
   worlds,
 } from "../db/schema.js";
-import { COLOR_TOKEN_OR_HEX_RE, type AuditEntry, type Role } from "@thekeep/shared";
+import { COLOR_TOKEN_OR_HEX_RE, isAdminRole, isMasterAdminRole, type AuditEntry, type Role } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import type { CommandRegistry } from "../commands/registry.js";
 import {
@@ -67,12 +67,26 @@ export async function registerAdminRoutes(
   app.addHook("preHandler", async (req, reply) => {
     if (!req.url.startsWith("/admin")) return;
     const user = await getSessionUser(req);
-    if (!user || user.role !== "admin") {
+    if (!user || !isAdminRole(user.role)) {
       reply.code(403);
       throw new Error("admin only");
     }
     (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser = user;
   });
+
+  // Helper for the destructive-route gate. Every endpoint behind this
+  // (site settings PUT, branding upload, user disable / role mutations
+  // that touch masteradmin) calls it before doing anything; a plain
+  // `admin` gets a 403 and the route handler returns early.
+  function requireMasterAdmin(req: FastifyRequest, reply: FastifyReply): boolean {
+    const u = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
+    if (!u || !isMasterAdminRole(u.role)) {
+      reply.code(403);
+      reply.send({ error: "master admin only" });
+      return false;
+    }
+    return true;
+  }
 
   /* ---------- site overview (admin dashboard) ----------
    *
@@ -730,7 +744,11 @@ export async function registerAdminRoutes(
 
   app.get("/admin/settings", async () => settingsResponse(await getSettings(db)));
 
-  app.put<{ Body: unknown }>("/admin/settings", async (req) => {
+  app.put<{ Body: unknown }>("/admin/settings", async (req, reply) => {
+    // Master-only: this single endpoint backs every Settings,
+    // Branding, and Rules form in the admin panel — every field a
+    // plain admin shouldn't be able to mutate routes through here.
+    if (!requireMasterAdmin(req, reply)) return;
     const body = settingsBody.parse(req.body);
     const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
     // Drop undefined keys - exactOptionalPropertyTypes refuses `{ x: undefined }`
@@ -845,6 +863,8 @@ export async function registerAdminRoutes(
   }
 
   app.post<{ Body: unknown }>("/admin/upload/logo", async (req, reply) => {
+    // Master-only: logo is branding.
+    if (!requireMasterAdmin(req, reply)) return;
     let body: z.infer<typeof uploadLogoBody>;
     try { body = uploadLogoBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
@@ -901,6 +921,15 @@ export async function registerAdminRoutes(
       .regex(COLOR_TOKEN_OR_HEX_RE, "color must be a 6-digit hex like #990000 or a theme:<slot> token")
       .nullable()
       .optional(),
+    /** Opt this command into mid-message `!name` expansion. Defaults to
+     *  false on insert; existing rows untouched by the migration are
+     *  also false so we never silently expose a command to a new
+     *  trigger surface. */
+    allowInline: z.boolean().optional(),
+    /** Optional alternate template for the inline path. Null clears
+     *  back to the fallback (use `template`). Same length cap as the
+     *  main template — both end up rendered through the same engine. */
+    inlineTemplate: z.string().max(2000).nullable().optional(),
   });
 
   app.get("/admin/custom-commands", async () => {
@@ -940,6 +969,8 @@ export async function registerAdminRoutes(
       description: body.description ?? null,
       enabled: body.enabled ?? true,
       color: body.color ?? null,
+      allowInline: body.allowInline ?? false,
+      inlineTemplate: body.inlineTemplate ?? null,
       createdById: sessionUser.id,
     });
     if (body.aliases?.length) {
@@ -982,6 +1013,8 @@ export async function registerAdminRoutes(
           ...(body.description !== undefined ? { description: body.description } : {}),
           ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
           ...(body.color !== undefined ? { color: body.color } : {}),
+          ...(body.allowInline !== undefined ? { allowInline: body.allowInline } : {}),
+          ...(body.inlineTemplate !== undefined ? { inlineTemplate: body.inlineTemplate } : {}),
           updatedAt: new Date(),
         })
         .where(eq(customCommands.id, req.params.id));

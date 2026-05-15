@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { isAdminRole } from "@thekeep/shared";
 import { roomMembers } from "../../db/schema.js";
 import { addMessage } from "../../realtime/broadcast.js";
 import type { CommandContext, CommandHandler } from "../types.js";
@@ -13,7 +14,7 @@ function notice(ctx: CommandContext, code: string, message: string) {
  * banners into someone else's room.
  */
 async function canMarkScene(ctx: CommandContext): Promise<boolean> {
-  if (ctx.user.role === "admin" || ctx.user.role === "mod") return true;
+  if (isAdminRole(ctx.user.role) || ctx.user.role === "mod") return true;
   const member = (await ctx.db
     .select()
     .from(roomMembers)

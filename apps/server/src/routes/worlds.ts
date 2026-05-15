@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { isAdminRole } from "@thekeep/shared";
 import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -357,8 +358,8 @@ async function depthOf(db: Db, parentPageId: string | null): Promise<number> {
   return WORLD_PAGE_DEPTH_CAP + 1;
 }
 
-async function callerCanModerateRoom(db: Db, userId: string, role: string, roomId: string): Promise<boolean> {
-  if (role === "admin") return true;
+async function callerCanModerateRoom(db: Db, userId: string, role: Role, roomId: string): Promise<boolean> {
+  if (isAdminRole(role)) return true;
   const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
   if (!room) return false;
   if (room.ownerId === userId) return true;
@@ -546,7 +547,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     // 400 over a single forbidden enum value would be hostile when the
     // owner's intent is clearly "publish this world."
     let initialStatus: WorldStatus = body.status ?? "active";
-    if (initialStatus === "featured" && me.role !== "admin") initialStatus = "active";
+    if (initialStatus === "featured" && !isAdminRole(me.role)) initialStatus = "active";
 
     const id = nanoid();
     await db.insert(worlds).values({
@@ -622,7 +623,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     if (!me) { reply.code(401); return { error: "auth" }; }
     const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
     if (!w) { reply.code(404); return { error: "not found" }; }
-    if (w.ownerUserId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+    if (w.ownerUserId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
 
     let body;
     try { body = updateWorldBody.parse(req.body); }
@@ -649,7 +650,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       // admins can set `featured`; an owner attempting to self-promote
       // is silently downgraded to `active` for the same UX reason as
       // the create path (no hostile 400 over one field).
-      if (body.status === "featured" && me.role !== "admin") {
+      if (body.status === "featured" && !isAdminRole(me.role)) {
         update.status = "active";
       } else {
         update.status = body.status;
@@ -682,7 +683,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     if (!me) { reply.code(401); return { error: "auth" }; }
     const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
     if (!w) { reply.code(404); return { error: "not found" }; }
-    if (w.ownerUserId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+    if (w.ownerUserId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
     // Find all rooms currently linked to this world so we can re-broadcast
     // their state after the link cascade-deletes (so the chat banner
     // disappears in real time).
@@ -705,7 +706,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       if (!me) { reply.code(401); return { error: "auth" }; }
       const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
       if (!w) { reply.code(404); return { error: "not found" }; }
-      if (w.ownerUserId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+      if (w.ownerUserId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
 
       let body;
       try { body = createPageBody.parse(req.body); }
@@ -767,7 +768,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       if (!me) { reply.code(401); return { error: "auth" }; }
       const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
       if (!w) { reply.code(404); return { error: "not found" }; }
-      if (w.ownerUserId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+      if (w.ownerUserId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
 
       let body;
       try { body = updatePageBody.parse(req.body); }
@@ -847,7 +848,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       if (!me) { reply.code(401); return { error: "auth" }; }
       const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
       if (!w) { reply.code(404); return { error: "not found" }; }
-      if (w.ownerUserId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+      if (w.ownerUserId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
       const existing = (await db
         .select()
         .from(worldPages)
@@ -877,7 +878,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       const w = await resolveWorld(db, body.worldId, me.id, me.role);
       if (!w) { reply.code(404); return { error: "world not found" }; }
       // Linking other people's worlds requires visibility = open.
-      if (w.ownerUserId !== me.id && me.role !== "admin" && w.visibility !== "open") {
+      if (w.ownerUserId !== me.id && !isAdminRole(me.role) && w.visibility !== "open") {
         reply.code(403);
         return { error: "world isn't open for catalog use" };
       }
@@ -920,7 +921,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     // but they can still explicitly "join" to get an explicit membership row
     // (and the option to set the world as their primary). All other users
     // need the world to be open.
-    if (w.ownerUserId !== me.id && w.visibility !== "open" && me.role !== "admin") {
+    if (w.ownerUserId !== me.id && w.visibility !== "open" && !isAdminRole(me.role)) {
       reply.code(403);
       return { error: "this world isn't open for community membership" };
     }
@@ -1075,7 +1076,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     const filtered = rows.filter((r) => {
       if (r.visibility !== "private") return true;
       // Private worlds: visible only if the viewer is the world's owner or admin.
-      return !!me && (me.role === "admin" || r.ownerUserId === me.id);
+      return !!me && (isAdminRole(me.role) || r.ownerUserId === me.id);
     });
     const memberships: WorldMembership[] = await Promise.all(
       filtered.map(async (r) => ({

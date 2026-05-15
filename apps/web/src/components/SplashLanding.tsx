@@ -128,7 +128,24 @@ export function SplashLanding({ onNavigate }: Props) {
                 style={logoStyle}
                 className="font-action text-4xl tracking-wide text-keep-text sm:text-5xl"
               >
-                {siteName}
+                {branding.logoUrl ? (
+                  // Image logo (default install ships /thespire-logo.png,
+                  // admins can replace via /admin/settings or upload).
+                  // The <h1> stays for SEO + screen-readers; alt is the
+                  // siteName so the brand string is still indexable.
+                  // The splash gets a generous max-height since the card
+                  // has the vertical room — matches the size used in
+                  // AuthGate's hero so the splash + login feel of one
+                  // piece.
+                  <img
+                    src={branding.logoUrl}
+                    alt={siteName}
+                    className="mx-auto max-h-24 w-auto select-none sm:max-h-28"
+                    draggable={false}
+                  />
+                ) : (
+                  siteName
+                )}
               </h1>
               <p className="mt-3 text-base text-keep-text/80 sm:text-lg">
                 Build characters. Tell stories. Find your circle.

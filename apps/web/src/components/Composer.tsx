@@ -117,7 +117,17 @@ function topicLabel(t: { title: string | null; body: string }): string {
 }
 
 interface Trigger {
-  kind: "/" | "@" | "whisper-target";
+  /**
+   *   `/`              - leading slash command (only at message start)
+   *   `@`              - mention, anywhere
+   *   `whisper-target` - bare username inside /whisper's first arg
+   *   `!`              - inline custom-command, anywhere, but only with
+   *                      at least one char of name after the `!` (bare
+   *                      `!` doesn't open the palette, since punctuation
+   *                      shouldn't keep popping the picker for every
+   *                      "Wow!" or "stop!")
+   */
+  kind: "/" | "@" | "whisper-target" | "!";
   /** Character offset where the trigger token starts (the `/` or `@` itself,
    *  or for whisper-target, the first char of the username being typed). */
   tokenStart: number;
@@ -204,6 +214,19 @@ function detectTrigger(text: string, caret: number): Trigger | null {
   }
   if (token.startsWith("@")) {
     return { kind: "@", tokenStart: s, query: token.slice(1).toLowerCase() };
+  }
+  if (token.startsWith("!")) {
+    // Bare `!` (no chars after it) is intentionally ignored — otherwise
+    // every "Wow!" or "stop!" would pop the palette mid-sentence. We
+    // also require the `!` to sit at start-of-string OR right after a
+    // whitespace boundary, so word-internal `!` (rare but defensive)
+    // doesn't trigger either. Note: the walk-back loop above already
+    // landed `s` on the first char of the token, so the char at
+    // text[s-1] is the boundary by construction; we just check it
+    // exists and isn't a word char.
+    if (token.length < 2) return null;
+    if (s > 0 && isWordChar(text[s - 1]!)) return null;
+    return { kind: "!", tokenStart: s, query: token.slice(1).toLowerCase() };
   }
   return null;
 }
@@ -375,6 +398,26 @@ export function Composer({
       out.sort((a, b) => a.label.localeCompare(b.label));
       return out.slice(0, MAX_COMPLETIONS);
     }
+    if (trigger.kind === "!") {
+      if (!commands) return [];
+      const out: CompletionItem[] = [];
+      for (const c of commands) {
+        // Only commands with the admin-side "Allow inline use" toggle
+        // appear here — the rest of the slash-only commands stay
+        // invisible to the `!` trigger.
+        if (!c.allowInline) continue;
+        const names = [c.name, ...c.aliases];
+        if (names.some((n) => n.toLowerCase().startsWith(trigger.query))) {
+          out.push({
+            value: `!${c.name}`,
+            label: `!${c.name}`,
+            sublabel: c.description,
+          });
+        }
+      }
+      out.sort((a, b) => a.label.localeCompare(b.label));
+      return out.slice(0, MAX_COMPLETIONS);
+    }
     // @-mention OR whisper-target: filter occupants by displayName prefix.
     // The two share the same item source — the only difference is whether
     // the inserted text carries an `@` prefix (mid-message mention) or
@@ -382,10 +425,21 @@ export function Composer({
     if (!occupants) return [];
     const out: CompletionItem[] = [];
     const wantAt = trigger.kind === "@";
+    // Spaces in a multi-word displayName ("The Doctor", master usernames
+    // typed with NBSP, character names with regular spaces) get rewritten
+    // to NBSP when forming the inserted mention text. The mention regex
+    // is NBSP-friendly but stops at a regular space, so without this
+    // conversion `@The Doctor` would tokenize as just `@The`. NBSP
+    // renders visually identical to a regular space, so users still
+    // SEE "@The Doctor" — they just get a single clickable mention.
+    // The label keeps a regular space for the popup list so picker
+    // results don't look weird.
+    const NBSP = " ";
     for (const o of occupants) {
       if (o.displayName.toLowerCase().startsWith(trigger.query)) {
+        const mentionValue = o.displayName.replace(/ /g, NBSP);
         out.push({
-          value: wantAt ? `@${o.displayName}` : o.displayName,
+          value: wantAt ? `@${mentionValue}` : mentionValue,
           label: wantAt ? `@${o.displayName}` : o.displayName,
           ...(o.away ? { sublabel: "away" } : {}),
         });
@@ -396,10 +450,18 @@ export function Composer({
   }, [trigger, commands, occupants]);
 
   const [selectedIndex, setSelectedIndex] = useState(0);
-  // Reset highlight when the active item set changes shape (e.g. user keeps
-  // typing and the list shortens).
+  // The popup never steals Enter until the user has opted in by pressing
+  // Up/Down (or by clicking, which calls acceptItem directly). Otherwise
+  // typing `/say hi` + Enter would silently mutate into the first matching
+  // command suggestion, which is hostile when the user knows exactly what
+  // they want to send. Tab still accepts as the explicit completion key.
+  const [navigatedSuggestions, setNavigatedSuggestions] = useState(false);
+  // Reset highlight + opt-in flag when the active item set changes shape
+  // (e.g. user keeps typing and the list shortens, or the trigger kind
+  // flips between command/mention).
   useEffect(() => {
     setSelectedIndex(0);
+    setNavigatedSuggestions(false);
   }, [items.length, trigger?.kind]);
 
   useEffect(() => {
@@ -534,14 +596,31 @@ export function Composer({
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex((i) => (i + 1) % items.length);
+        setNavigatedSuggestions(true);
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
         setSelectedIndex((i) => (i - 1 + items.length) % items.length);
+        setNavigatedSuggestions(true);
         return;
       }
-      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.nativeEvent.isComposing)) {
+      // Tab is the explicit "accept the suggestion" key — always honored.
+      // Enter only accepts if the user has already opted into the popup
+      // by pressing Up/Down; otherwise it falls through and submits what
+      // the user actually typed (see comment on navigatedSuggestions).
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const item = items[selectedIndex];
+        if (item) acceptItem(item);
+        return;
+      }
+      if (
+        navigatedSuggestions &&
+        e.key === "Enter" &&
+        !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey &&
+        !e.nativeEvent.isComposing
+      ) {
         e.preventDefault();
         const item = items[selectedIndex];
         if (item) acceptItem(item);

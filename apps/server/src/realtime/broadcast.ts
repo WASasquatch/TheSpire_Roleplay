@@ -28,6 +28,8 @@ import type { LinkedWorldRef } from "@thekeep/shared";
 import { pushToUser } from "../push.js";
 import type { Db } from "../db/index.js";
 import type { CommandContext, SessionUser } from "../commands/types.js";
+import { expandInlineCommands } from "../commands/registry.js";
+import { getSettings } from "../settings.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Sock = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -68,6 +70,35 @@ export async function addMessage(
     title?: string | null;
   },
 ): Promise<void> {
+  // Inline-command expansion. The body may carry user-authored
+  // `!cmd` tokens — either from a plain chat send or from a slash
+  // command's free-form arg ("/me dances and !random"). We run the
+  // expander here so every author path benefits without each handler
+  // remembering to call it. The expander is a no-op for bodies that
+  // don't contain `!`, so this is essentially free for the common
+  // case. System messages bypass this function entirely (they go
+  // through `addSystemMessage`), so server-authored text never sees
+  // the expander.
+  //
+  // After expansion we re-check the size cap: a handful of `!cmd`
+  // tokens with chunky inline templates can blow past
+  // maxMessageLength even when the user-typed input fit. Failing
+  // here drops the send and notifies the user via the same
+  // TOO_LONG channel the dispatcher uses for raw-input rejections.
+  let body = payload.body;
+  const expanded = expandInlineCommands(body, ctx.registry, ctx.user, ctx.roomId);
+  if (expanded !== body) {
+    const { maxMessageLength } = await getSettings(ctx.db);
+    if (expanded.length > maxMessageLength) {
+      ctx.socket.emit("error:notice", {
+        code: "TOO_LONG",
+        message: `Messages capped at ${maxMessageLength} chars after inline-command expansion.`,
+      });
+      return;
+    }
+    body = expanded;
+  }
+
   const id = nanoid();
   const now = new Date();
   // System messages (server-authored via addSystemMessage) bypass this path,
@@ -122,7 +153,7 @@ export async function addMessage(
     characterId: ctx.user.activeCharacterId,
     displayName,
     kind: payload.kind,
-    body: payload.body,
+    body,
     color: colorSnapshot,
     toUserId: payload.toUserId ?? null,
     replyToId: payload.replyToId ?? null,
@@ -159,7 +190,7 @@ export async function addMessage(
     characterId: ctx.user.activeCharacterId,
     displayName,
     kind: payload.kind,
-    body: payload.body,
+    body,
     color: colorSnapshot,
     createdAt: +now,
     ...(payload.toUserId ? { toUserId: payload.toUserId } : {}),
@@ -912,8 +943,8 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   // THIS room — falling back to the DB column would leak a /char run
   // on a sibling tab into this room's occupant display.
   //
-  // Dedupe is on the IDENTITY tuple (userId, tabCharId), not on
-  // userId alone. That makes a user with two tabs voicing two
+  // Dedupe is on the IDENTITY tuple (userId, resolved characterId),
+  // not on userId alone. That makes a user with two tabs voicing two
   // different characters in the same room render as TWO occupants
   // (one per character), which is the per-identity contract the rest
   // of the app (DMs, friends, @mentions) already uses. Two tabs as
@@ -922,45 +953,48 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   // the second tab invisible in the userlist while their messages
   // still flowed through — the bug this comment block now exists to
   // prevent regressing.
-  type Identity = { userId: string; tabCharId: string | null };
-  const identities: Identity[] = [];
-  const seen = new Set<string>();
+  //
+  // Resolution-before-dedup is load-bearing. `tabCharId === undefined`
+  // means "this tab hasn't issued a /char yet, fall back to the user's
+  // DB-default active character." If we'd deduped on the raw value, a
+  // tab with `undefined` and a sibling tab with the same effective
+  // character set explicitly would land in different buckets and both
+  // pass dedup, even though they'd render as the same identity. We
+  // therefore fetch user rows first, then key dedup on the resolved
+  // `(userId, characterId)` tuple — the same tuple the render loop
+  // emits, so the two layers can't disagree.
+  type Raw = { userId: string; tabCharId: string | null | undefined };
+  const raws: Raw[] = [];
   for (const s of sockets) {
     const uid = (s.data as { userId?: string }).userId;
     if (!uid) continue;
     const tabRaw = (s.data as { tabCharId?: string | null }).tabCharId;
-    // `tabCharId === undefined` means "no override yet" — fall back
-    // to the DB default below by leaving it undefined here; the
-    // identity key still needs a stable string, so collapse it to
-    // the empty sentinel after we know the DB default.
-    const tab = tabRaw === undefined ? undefined : tabRaw;
-    // Defer the DB-default resolution until we know the user row, so
-    // the dedup key matches the value we'll render with. For now,
-    // index by `userId::tabCharId` when set, or `userId::?` when
-    // not (the `?` is resolved below).
-    const provisionalKey = `${uid}::${tab === undefined ? "?" : (tab ?? "")}`;
-    if (seen.has(provisionalKey)) continue;
-    seen.add(provisionalKey);
-    identities.push({ userId: uid, tabCharId: tab === undefined ? null : tab });
+    raws.push({ userId: uid, tabCharId: tabRaw });
   }
-  if (!identities.length) return [];
+  if (!raws.length) return [];
 
-  const userIds = [...new Set(identities.map((i) => i.userId))];
+  const userIds = [...new Set(raws.map((r) => r.userId))];
   const userRows = await db
     .select()
     .from(users)
     .where(sql`${users.id} IN (${sql.join(userIds.map((u) => sql`${u}`), sql`, `)})`);
   const userById = new Map(userRows.map((u) => [u.id, u]));
 
-  // For any socket without a tabCharId override (rare — the
-  // handshake seeds one), fall back to the DB column. We do this
-  // after the dedup pass since the fallback only matters for
-  // rendering, not for identity dedup (those sockets had `?` in the
-  // dedup key above and end up as one row per user).
-  const resolvedIdentities = identities.map((i) => {
-    const u = userById.get(i.userId);
-    return { userId: i.userId, characterId: i.tabCharId ?? u?.activeCharacterId ?? null };
-  });
+  const resolvedIdentities: Array<{ userId: string; characterId: string | null }> = [];
+  const seen = new Set<string>();
+  for (const r of raws) {
+    const u = userById.get(r.userId);
+    if (!u) continue;
+    // `tabCharId === undefined` → no per-tab override yet, fall back
+    // to the DB-default active character. `null` → explicit OOC.
+    // A string → /char-switched on this socket.
+    const characterId = r.tabCharId !== undefined ? r.tabCharId : (u.activeCharacterId ?? null);
+    const key = `${r.userId}::${characterId ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    resolvedIdentities.push({ userId: r.userId, characterId });
+  }
+  if (!resolvedIdentities.length) return [];
   const charIds = [...new Set(resolvedIdentities.map((i) => i.characterId).filter((v): v is string => !!v))];
   const charRows = charIds.length
     ? await db

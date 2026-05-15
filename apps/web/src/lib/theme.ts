@@ -1,5 +1,23 @@
+import { createContext, useContext } from "react";
 import type { CSSProperties } from "react";
-import type { Theme } from "@thekeep/shared";
+import { DEFAULT_THEME, type Theme } from "@thekeep/shared";
+
+/**
+ * Read access to the currently-active theme — the same value `applyTheme`
+ * pushed into CSS variables on `<html>`. Components consume this when
+ * they need to make a runtime decision based on the palette (e.g.
+ * choosing a legible variant of a user-picked color against the current
+ * background). The CSS-var path is enough for most styling; the context
+ * exists for code that has to inspect colors imperatively.
+ *
+ * Default to {@link DEFAULT_THEME} so tests and any consumer mounted
+ * outside the provider get sane values instead of nullish guards.
+ */
+export const ActiveThemeContext = createContext<Theme>(DEFAULT_THEME);
+
+export function useActiveTheme(): Theme {
+  return useContext(ActiveThemeContext);
+}
 
 /**
  * Convert "#abc" / "#aabbcc" to a space-separated RGB triple ("170 187 204").

@@ -14,14 +14,28 @@
  *                   linking a world isn't directing attention at a person.
  *
  * Name characters: Unicode letters (\p{L}), numbers (\p{N}), underscore,
- * hyphen — matching the master-username and character-name validators.
+ * hyphen, plus NBSP (U+00A0) — matching the master-username and
+ * character-name validators. Master usernames use NBSP as their "fake
+ * space" separator (`The[NBSP]Doctor`) and the autocomplete inserts
+ * NBSPs in place of any regular spaces in a character displayName, so
+ * a multi-word mention like `@The Doctor` (rendered with NBSP under
+ * the hood) parses as a single token. Regular U+0020 spaces are
+ * deliberately NOT in the class — they'd make the parser greedy and
+ * cause `@Bob waves at someone` to consume the whole tail.
+ *
  * The leading boundary requires a non-name char so "foo@bar" inside an
  * email doesn't fire a mention.
  *
  * The world: prefix matches FIRST in the alternation so "world" can't
  * accidentally parse as a username when followed by `:slug`.
  */
-export const MENTION_NAME_CLASS = "[\\p{L}\\p{N}_\\-]";
+// Inner character set, exported as the bare contents so we can reuse it
+// in BOTH the name class and its negation (the leading-boundary check).
+// Letters, numbers, underscore, hyphen, plus NBSP (the chosen "fake
+// space" for multi-word usernames + autocomplete-inserted character
+// names).
+export const MENTION_NAME_CHARS = "\\p{L}\\p{N}_\\-\\u00A0";
+export const MENTION_NAME_CLASS = `[${MENTION_NAME_CHARS}]`;
 export const MENTION_WORLD_SLUG_CHARS = "[a-z0-9](?:[a-z0-9-]{0,58}[a-z0-9])?";
 
 /**
@@ -29,10 +43,14 @@ export const MENTION_WORLD_SLUG_CHARS = "[a-z0-9](?:[a-z0-9-]{0,58}[a-z0-9])?";
  * carry mutable `lastIndex` state across `.exec` calls; sharing one
  * across an iteration of `matchAll` is fine but sharing a singleton
  * across modules is not.
+ *
+ * Name length cap matches the master / character name validators
+ * (40 chars). Previously this was 32, which silently truncated the
+ * tail of any 33-40 char mention.
  */
 export function mentionRegex(): RegExp {
   return new RegExp(
-    `(?<prefix>^|[^\\p{L}\\p{N}_\\-])@(?:world:(?<worldSlug>${MENTION_WORLD_SLUG_CHARS})|(?<userName>${MENTION_NAME_CLASS}{1,32}))`,
+    `(?<prefix>^|[^${MENTION_NAME_CHARS}])@(?:world:(?<worldSlug>${MENTION_WORLD_SLUG_CHARS})|(?<userName>${MENTION_NAME_CLASS}{1,40}))`,
     "gu",
   );
 }

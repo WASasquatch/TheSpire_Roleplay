@@ -4,6 +4,7 @@ import type {
   ServerToClientEvents,
 } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
+import type { CommandRegistry } from "./registry.js";
 
 import type { Role } from "@thekeep/shared";
 
@@ -34,6 +35,11 @@ export interface CommandContext {
   args: string[];
   /** the alias the user actually typed (lowercased), e.g. "he" for /he - handlers can branch on this */
   invokedAs: string;
+  /** The live command registry. Threaded through so downstream callers
+   *  (notably `addMessage`) can run mid-message `!cmd` expansion against
+   *  the current set of inline-enabled custom commands without each
+   *  handler needing to import the registry directly. */
+  registry: CommandRegistry;
 }
 
 export type CommandResult = void | Promise<void>;

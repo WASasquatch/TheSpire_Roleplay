@@ -121,14 +121,67 @@ export interface CharacterProfile {
 /**
  * Canonical account-role union. Ordered loosely from least to most powerful;
  * `trusted` is a participation-earned auto-promotion that grants elevated
- * rate limits, `mod` and `admin` are manually granted.
+ * rate limits, `mod` / `admin` / `masteradmin` are manually granted.
+ *
+ * The two admin tiers exist because the historical single `admin` role
+ * was god-mode — branding, settings, user disable, role escalation, every
+ * destructive lever. That kept the moderator bench thin because every
+ * promotion was an all-or-nothing trust transfer.
+ *
+ *   `mod`         — room-level moderation only (kick / mute / ban in
+ *                   rooms they moderate). No global powers.
+ *   `admin`       — global moderation: every `mod` power site-wide,
+ *                   plus room delete / message moderation / report
+ *                   triage / custom commands / world admin / title
+ *                   kinds / audit read. Can promote others to `admin`
+ *                   and below. CANNOT touch branding, site settings,
+ *                   rules HTML, user emails / passwords / disable,
+ *                   and CANNOT promote anyone to `masteradmin`.
+ *   `masteradmin` — full god-mode. Everything `admin` does plus the
+ *                   destructive levers listed above. The first
+ *                   registered user bootstraps in as masteradmin.
+ *                   New masteradmins are only mintable by other
+ *                   masteradmins from the admin panel's user editor.
  *
  * Single source of truth — every server route, web component, and API
- * response that types a `role` field must import from here so the four
- * tiers stay in lockstep. Adding a new tier means changing one symbol
- * and letting the compiler surface every site that needs to handle it.
+ * response that types a `role` field must import from here so the tiers
+ * stay in lockstep. Adding a new tier means changing one symbol and
+ * letting the compiler surface every site that needs to handle it.
+ *
+ * `isAdminRole` / `isMasterAdminRole` (below) wrap the two common
+ * checks; please use them rather than open-coding `role === "admin"`
+ * comparisons, since the right answer for "is this user privileged?"
+ * is now "either admin tier" almost everywhere except destructive
+ * route gates.
  */
-export type Role = "user" | "trusted" | "mod" | "admin";
+export type Role = "user" | "trusted" | "mod" | "admin" | "masteradmin";
+
+/** True for both admin tiers — the standard "is this user privileged?" check. */
+export function isAdminRole(role: Role): boolean {
+  return role === "admin" || role === "masteradmin";
+}
+
+/** True only for the top tier — guards destructive endpoints (settings, branding, user disable, masteradmin promotion). */
+export function isMasterAdminRole(role: Role): boolean {
+  return role === "masteradmin";
+}
+
+/**
+ * Numeric rank so the moderation code can ask "does this caller
+ * outrank this target?" without enumerating every tier. Higher number
+ * = more authority. Used to block a lower-tier admin from kicking /
+ * muting / banning a higher-tier one — e.g. a plain admin can't
+ * kick a masteradmin, and a mod can't kick either admin tier.
+ */
+export function roleRank(role: Role): number {
+  switch (role) {
+    case "masteradmin": return 4;
+    case "admin":       return 3;
+    case "mod":         return 2;
+    case "trusted":     return 1;
+    case "user":        return 0;
+  }
+}
 
 export interface MasterProfile {
   userId: string;

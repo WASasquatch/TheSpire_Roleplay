@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { isAdminRole } from "@thekeep/shared";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
@@ -73,11 +74,14 @@ export async function registerMessageRoutes(
   io: Io,
 ): Promise<void> {
   /**
-   * Edit your own message inside the grace window.
+   * Edit a message.
    *
-   * Auth: must be the author. Admins are NOT allowed to edit other users'
-   * messages here — that's a moderation capability outside this endpoint
-   * (intentionally not in scope).
+   * Auth: author within the grace window (flat rooms) / anytime (forum
+   * rooms), OR any admin / masteradmin (no grace window, no room-shape
+   * restriction). Mods are intentionally left out: they can hide a post
+   * via DELETE but rewriting another user's words is reserved for the
+   * admin tier. Authors who miss the edit window can request an admin
+   * touch-up.
    *
    * Replies: when a parent is edited the snapshot in the child's
    * `replyToBodySnippet` is *not* rewritten — child snapshots remain frozen
@@ -95,7 +99,10 @@ export async function registerMessageRoutes(
 
     const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
     if (!m) { reply.code(404); return { error: "not found" }; }
-    if (m.userId !== me.id) { reply.code(403); return { error: "not yours" }; }
+
+    const isAuthor = m.userId === me.id;
+    const isAdmin = isAdminRole(me.role);
+    if (!isAuthor && !isAdmin) { reply.code(403); return { error: "not yours" }; }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
 
     const now = Date.now();
@@ -103,7 +110,9 @@ export async function registerMessageRoutes(
     // Single settings read covers both gates (edit window + size cap)
     // so we don't pay two getSettings round-trips per edit.
     const { maxMessageLength, editGraceMs } = await getSettings(db);
-    if (!forum && now - +m.createdAt > editGraceMs) {
+    // Admins bypass the grace window entirely (a moderation lever for
+    // touch-ups requested by an author after the cap has expired).
+    if (!isAdmin && !forum && now - +m.createdAt > editGraceMs) {
       reply.code(403);
       return { error: `Edit window has closed (${Math.round(editGraceMs / 1000)}s after sending).` };
     }
@@ -156,7 +165,7 @@ export async function registerMessageRoutes(
     if (!m) { reply.code(404); return { error: "not found" }; }
 
     const isAuthor = m.userId === me.id;
-    const isMod = me.role === "mod" || me.role === "admin";
+    const isMod = me.role === "mod" || isAdminRole(me.role);
     if (!isAuthor && !isMod) { reply.code(403); return { error: "not yours" }; }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
 
@@ -212,7 +221,7 @@ export async function registerMessageRoutes(
     if (!forum) { reply.code(400); return { error: "Locking applies only to forum-mode rooms." }; }
 
     const isAuthor = m.userId === me.id;
-    const isMod = me.role === "mod" || me.role === "admin";
+    const isMod = me.role === "mod" || isAdminRole(me.role);
     if (!isAuthor && !isMod) { reply.code(403); return { error: "not yours" }; }
 
     const lockedAt = parsed.locked ? new Date() : null;
@@ -241,7 +250,7 @@ export async function registerMessageRoutes(
   app.patch<{ Params: { id: string }; Body: unknown }>("/messages/:id/sticky", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
-    if (me.role !== "admin") { reply.code(403); return { error: "admins only" }; }
+    if (!isAdminRole(me.role)) { reply.code(403); return { error: "admins only" }; }
 
     let parsed;
     try { parsed = stickyBody.parse(req.body); }

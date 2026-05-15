@@ -12,9 +12,10 @@ import { and, eq } from "drizzle-orm";
 import pino from "pino";
 import { Server as IoServer } from "socket.io";
 import { ZodError } from "zod";
-import type {
-  ClientToServerEvents,
-  ServerToClientEvents,
+import {
+  isAdminRole,
+  type ClientToServerEvents,
+  type ServerToClientEvents,
 } from "@thekeep/shared";
 
 import { db } from "./db/index.js";
@@ -251,7 +252,7 @@ async function main() {
   await registerCommandsRoutes(baseApp, db, registry);
   await registerNavLinkRoutes(baseApp, db, async (req) => {
     const u = await getSessionUser(req, db);
-    return u?.role === "admin";
+    return !!u && isAdminRole(u.role);
   });
   // (Admin routes need io for the room-delete boot-and-redirect flow, so they
   // are registered after the IoServer is constructed below.)

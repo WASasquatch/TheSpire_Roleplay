@@ -38,31 +38,64 @@ const ALLOWED_TAGS = [
 ];
 
 /**
- * Pre-pass: convert newlines to `<br>` for inputs that look like plain
- * text. We only skip the conversion when the input already carries
- * *paragraph-level* wrappers (`<p>`, `<div>`, `<blockquote>`, `<pre>`) —
- * those define their own vertical rhythm and dropping `<br>` between
- * them would add ugly double-gaps. Inline tags (`<br>`, `<b>`, `<i>`),
- * lists, and headings do NOT count as paragraph structure: a writer
- * who typed `<h3>Title</h3>` followed by two newlines of prose still
- * expects those newlines to render as line breaks.
+ * Pre-pass: convert PARAGRAPH-break newlines to `<br>` for inputs that
+ * look like plain text. Only runs of 2+ newlines emit `<br>`s — one
+ * per extra newline past the first — so hitting Enter once is invisible
+ * (HTML collapses the lone newline to whitespace) and hitting Enter
+ * twice gives one blank line. The earlier rule emitted a `<br>` for
+ * every `\n`, which made a casual textarea wrap show up as a paragraph
+ * break and ballooned bios with vertical air the writer never asked for.
  *
- * Without this pass, pasting a bio like:
- *   First paragraph.
+ * Skipped entirely when the input carries paragraph-level wrappers
+ * (`<p>`, `<div>`, `<blockquote>`, `<pre>`) — those already define their
+ * own vertical rhythm. Inline tags (`<br>`, `<b>`, `<i>`), lists, and
+ * headings do NOT count as paragraph structure: a writer who typed
+ * `<h3>Title</h3>` followed by two newlines of prose still expects the
+ * paragraph rule to fire.
  *
- *   Second paragraph.
- * collapses to a single visually unbroken run because the browser
- * treats the source newlines as whitespace. With this pass, the same
- * paste becomes `First paragraph.<br><br>Second paragraph.` and reads
- * the way the author wrote it. The previous version of the regex
- * included `<br>`, so a single inline line-break elsewhere in the bio
- * was enough to disable the whole pass — surprisingly easy to trip,
- * and a common "my paragraph spacing disappeared on save" report.
+ * IDEMPOTENT. Re-running on a previously-saved bio first strips the
+ * `<br>` tags this pass placed immediately before a newline, then
+ * re-applies the rule on the cleaned source. Without this, every
+ * round-trip through save was concatenating another `<br>` onto each
+ * paragraph break — the source of the "my profile keeps gaining blank
+ * lines on every save" report.
  */
 function nlToBrForPlainText(input: string): string {
   const hasParagraphStructure = /<(?:p|div|blockquote|pre)\b/i.test(input);
   if (hasParagraphStructure) return input;
-  return input.replace(/\r\n?/g, "\n").replace(/\n/g, "<br>\n");
+  let s = input.replace(/\r\n?/g, "\n");
+  // Strip any auto-added <br> tags directly before a "\n" (or at the
+  // end of input). `[ \t]*` instead of `\s*` between BRs so we don't
+  // accidentally span across a separate paragraph break.
+  s = s.replace(/(?:<br\s*\/?>[ \t]*)+(?=\n|$)/gi, "");
+  // Each "\n\n+" run becomes one source newline plus (count-1) `<br>`s.
+  // Persisting one trailing `\n` keeps the stored HTML human-readable.
+  s = s.replace(/\n{2,}/g, (run) => "<br>".repeat(run.length - 1) + "\n");
+  return s;
+}
+
+/**
+ * Reverse of {@link nlToBrForPlainText} for the bio editor: undo the
+ * `<br>`-padded paragraph breaks the save pass produced so the
+ * textarea shows clean source text instead of literal `<br>` strings.
+ * Each run of N `<br>` tags immediately before a `\n` (or at end of
+ * input) expands back to N+1 source newlines, mirroring the save rule
+ * exactly. Paragraph-structured bios (with `<p>` / `<div>` /
+ * `<blockquote>` / `<pre>`) skip the transform — those were never
+ * touched on save, so there's nothing to undo.
+ *
+ * Used by the owner-only GET paths that feed the editor; viewer-facing
+ * read paths still see the persisted HTML with breaks intact.
+ */
+export function bioHtmlForEdit(html: string): string {
+  if (!html) return html;
+  const hasParagraphStructure = /<(?:p|div|blockquote|pre)\b/i.test(html);
+  if (hasParagraphStructure) return html;
+  const normalized = html.replace(/\r\n?/g, "\n");
+  return normalized.replace(/((?:<br\s*\/?>[ \t]*)+)(\n|$)/gi, (_m, brs: string) => {
+    const count = (brs.match(/<br/gi) ?? []).length;
+    return "\n".repeat(count + 1);
+  });
 }
 
 /** Sanitize a profile/bio HTML body. Used on save AND on read. */

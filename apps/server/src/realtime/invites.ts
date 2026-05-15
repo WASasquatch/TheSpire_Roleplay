@@ -1,4 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
+import { isAdminRole } from "@thekeep/shared";
 import { roomInvites, roomMembers, rooms, users } from "../db/schema.js";
 import { addMessage } from "./broadcast.js";
 import type { CommandContext } from "../commands/types.js";
@@ -22,7 +23,7 @@ export async function invite(ctx: CommandContext, username: string): Promise<voi
   if (
     role !== "owner" &&
     role !== "mod" &&
-    ctx.user.role !== "admin" &&
+    !isAdminRole(ctx.user.role) &&
     room.ownerId !== ctx.user.id
   ) {
     ctx.socket.emit("error:notice", {

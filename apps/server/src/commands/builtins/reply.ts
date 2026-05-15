@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { isAdminRole } from "@thekeep/shared";
 import { messages } from "../../db/schema.js";
 import { addMessage } from "../../realtime/broadcast.js";
 import type { CommandContext, CommandHandler } from "../types.js";
@@ -70,7 +71,7 @@ export const replyCommand: CommandHandler = {
     // Locked forum topics reject new replies — except from moderators
     // (mod or admin), who can still post in the thread to leave a
     // notice / verdict. Mirrors the plain-say path in dispatch.ts.
-    if (parent.lockedAt && ctx.user.role !== "mod" && ctx.user.role !== "admin") {
+    if (parent.lockedAt && ctx.user.role !== "mod" && !isAdminRole(ctx.user.role)) {
       notice(ctx, "TOPIC_LOCKED", "This topic is locked and isn't accepting new replies.");
       return;
     }

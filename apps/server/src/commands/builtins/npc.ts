@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { isAdminRole } from "@thekeep/shared";
 import { roomMembers, rooms } from "../../db/schema.js";
 import { addMessage, addSystemMessage, broadcastRoomState } from "../../realtime/broadcast.js";
 import type { CommandContext, CommandHandler } from "../types.js";
@@ -105,7 +106,7 @@ export const npcModeCommand: CommandHandler = {
     }
 
     // Owner / room mod / site mod / site admin.
-    let allowed = ctx.user.role === "admin" || ctx.user.role === "mod";
+    let allowed = isAdminRole(ctx.user.role) || ctx.user.role === "mod";
     if (!allowed) {
       const member = (await ctx.db
         .select()

@@ -1,4 +1,5 @@
 import { and, eq, lt } from "drizzle-orm";
+import { isAdminRole } from "@thekeep/shared";
 import { messages, roomMembers, rooms } from "../../db/schema.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
@@ -7,7 +8,7 @@ function notice(ctx: CommandContext, code: string, message: string) {
 }
 
 async function callerCanEditRoom(ctx: CommandContext): Promise<boolean> {
-  if (ctx.user.role === "admin" || ctx.user.role === "mod") return true;
+  if (isAdminRole(ctx.user.role) || ctx.user.role === "mod") return true;
   const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
   if (!room) return false;
   if (room.ownerId === ctx.user.id) return true;

@@ -54,6 +54,10 @@ export async function registerCommandsRoutes(
       description: c.description ?? `(custom - ${c.kind})`,
       subcommands: [],
       isCustom: true,
+      // Surfaced so the composer's `!name` palette can filter to just
+      // the inline-eligible commands. Built-in docs above leave this
+      // off — only custom commands can opt in.
+      ...(c.allowInline ? { allowInline: true } : {}),
     }));
 
     // Builtins protected from shadowing → already only one entry per name.

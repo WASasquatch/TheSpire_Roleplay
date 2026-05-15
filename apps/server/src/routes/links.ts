@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { isAdminRole } from "@thekeep/shared";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -68,7 +69,7 @@ async function resolveScope(
   }
   const c = (await db.select().from(characters).where(eq(characters.id, characterId)).limit(1))[0];
   if (!c || c.deletedAt) return { ok: false, statusCode: 404, error: "not found" };
-  if (c.userId !== me.id && me.role !== "admin") return { ok: false, statusCode: 403, error: "not yours" };
+  if (c.userId !== me.id && !isAdminRole(me.role)) return { ok: false, statusCode: 403, error: "not yours" };
   return { ok: true, scope: { kind: "character", userId: c.userId, characterId: c.id } };
 }
 

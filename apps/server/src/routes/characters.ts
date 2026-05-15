@@ -1,11 +1,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { isAdminRole } from "@thekeep/shared";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { characterPortraits, characters, users } from "../db/schema.js";
-import { sanitizeBio } from "../auth/html.js";
+import { bioHtmlForEdit, sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
 import { getSettings, parseOwnThemeJson, parseUserThemeJson } from "../settings.js";
 import { broadcastPresence } from "../realtime/broadcast.js";
@@ -168,7 +169,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
 
       const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
       if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
-      if (c.userId !== me.id && me.role !== "admin") {
+      if (c.userId !== me.id && !isAdminRole(me.role)) {
         reply.code(403);
         return { error: "not yours" };
       }
@@ -231,11 +232,16 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     if (!me) { reply.code(401); return { error: "auth" }; }
     const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
     if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
-    if (c.userId !== me.id && me.role !== "admin") {
+    if (c.userId !== me.id && !isAdminRole(me.role)) {
       reply.code(403);
       return { error: "not yours - use /profiles/:name to view another character's public profile" };
     }
-    return c;
+    // This endpoint feeds the bio editor's textarea — undo the
+    // paragraph-break `<br>` tags the save pass adds so the writer sees
+    // clean source text instead of literal `<br>` strings. Viewer-facing
+    // profile reads go through /profiles/:name and keep the persisted
+    // HTML as-is for rendering.
+    return { ...c, bioHtml: bioHtmlForEdit(c.bioHtml) };
   });
 
   app.get("/characters", async (req, reply) => {
@@ -311,7 +317,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     if (!me) { reply.code(401); return { error: "auth" }; }
     const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
     if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
-    if (c.userId !== me.id && me.role !== "admin") {
+    if (c.userId !== me.id && !isAdminRole(me.role)) {
       reply.code(403);
       return { error: "not yours" };
     }
@@ -387,7 +393,10 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     return {
       userId: u.id,
       username: u.username,
-      bioHtml: u.bioHtml,
+      // Reverse the paragraph-break `<br>` tags the save pass adds so
+      // the editor's textarea shows clean prose. Viewer-facing master
+      // profiles go through /profiles/:name and keep the persisted HTML.
+      bioHtml: bioHtmlForEdit(u.bioHtml),
       avatarUrl: u.avatarUrl,
       gender: u.gender,
       chatColor: u.chatColor,
@@ -463,7 +472,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     if (!me) { reply.code(401); return { error: "auth" }; }
     const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
     if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
-    if (c.userId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+    if (c.userId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
     const list = await db
       .select()
       .from(characterPortraits)
@@ -478,7 +487,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     if (!me) { reply.code(401); return { error: "auth" }; }
     const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
     if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
-    if (c.userId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+    if (c.userId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
 
     let body;
     try { body = createPortraitBody.parse(req.body); }
@@ -523,7 +532,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       if (!me) { reply.code(401); return { error: "auth" }; }
       const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
       if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
-      if (c.userId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+      if (c.userId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
 
       let body;
       try { body = updatePortraitBody.parse(req.body); }
@@ -556,7 +565,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       if (!me) { reply.code(401); return { error: "auth" }; }
       const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
       if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
-      if (c.userId !== me.id && me.role !== "admin") { reply.code(403); return { error: "not yours" }; }
+      if (c.userId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
 
       const p = (await db
         .select()

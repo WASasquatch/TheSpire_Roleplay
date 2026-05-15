@@ -21,7 +21,7 @@ export const users = sqliteTable(
     /** the master/login username - display fallback when no character is active */
     username: text("username").notNull(),
     passwordHash: text("password_hash").notNull(),
-    role: text("role", { enum: ["user", "trusted", "mod", "admin"] }).notNull().default("user"),
+    role: text("role", { enum: ["user", "trusted", "mod", "admin", "masteradmin"] }).notNull().default("user"),
     /** master profile body (sanitized HTML) shown when /char clear */
     bioHtml: text("bio_html").notNull().default(""),
     avatarUrl: text("avatar_url"),
@@ -542,6 +542,16 @@ export const customCommands = sqliteTable(
      *  Null = inherit the sender's chat color (existing behavior). */
     color: text("color"),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    /** When true, users can splice this command mid-message via `!name`
+     *  (e.g. "...and !random..."). The standalone `/name` path is
+     *  unaffected. Defaults to false so existing commands aren't
+     *  silently exposed to a new trigger surface. */
+    allowInline: integer("allow_inline", { mode: "boolean" }).notNull().default(false),
+    /** Optional alternate template used only when invoked inline. NULL
+     *  falls back to `template`. Lets authors phrase the standalone
+     *  output ("Alice flips heads") differently from the embedded
+     *  form ("flips heads"). */
+    inlineTemplate: text("inline_template"),
     createdById: text("created_by_id")
       .notNull()
       .references(() => users.id, { onDelete: "set null" }),

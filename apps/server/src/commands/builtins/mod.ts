@@ -1,4 +1,5 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { isAdminRole, isMasterAdminRole, roleRank } from "@thekeep/shared";
 import { bans, mutes, roomMembers, rooms, users } from "../../db/schema.js";
 import {
   addMessage,
@@ -34,14 +35,20 @@ async function getRoomMember(ctx: CommandContext, roomId: string, userId: string
 }
 
 /**
- * The keymaster - the longest-tenured admin. Untouchable: cannot be demoted,
- * cannot be kicked or muted by other admins. They're the keys to the keep.
+ * The keymaster - the longest-tenured admin-tier account (admin or
+ * masteradmin). Untouchable: cannot be demoted, cannot be kicked or muted
+ * by other admins. They're the keys to the keep.
+ *
+ * Why include both tiers: the original bootstrap admin became `masteradmin`
+ * in migration 0058. Filtering only on `"admin"` would silently strip the
+ * keymaster protection from them. Keymaster status is about tenure across
+ * the admin-tier as a whole, not about which tier a person currently sits in.
  */
 async function isKeymaster(ctx: CommandContext, userId: string): Promise<boolean> {
   const earliestAdmin = (await ctx.db
     .select()
     .from(users)
-    .where(eq(users.role, "admin"))
+    .where(inArray(users.role, ["admin", "masteradmin"]))
     .orderBy(asc(users.createdAt))
     .limit(1))[0];
   return earliestAdmin?.id === userId;
@@ -52,7 +59,7 @@ async function isKeymaster(ctx: CommandContext, userId: string): Promise<boolean
  * room owner (by row OR by membership row), or room mod.
  */
 async function callerCanModerateRoom(ctx: CommandContext): Promise<boolean> {
-  if (ctx.user.role === "admin") return true;
+  if (isAdminRole(ctx.user.role)) return true;
   const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
   if (!room) return false;
   if (room.ownerId === ctx.user.id) return true;
@@ -65,7 +72,7 @@ async function callerCanModerateRoom(ctx: CommandContext): Promise<boolean> {
  * A room mod can /kick or /mute but can't promote others to mod.
  */
 async function callerOwnsRoom(ctx: CommandContext): Promise<boolean> {
-  if (ctx.user.role === "admin") return true;
+  if (isAdminRole(ctx.user.role)) return true;
   const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
   if (!room) return false;
   if (room.ownerId === ctx.user.id) return true;
@@ -103,7 +110,7 @@ export const kickCommand: CommandHandler = {
     const target = await findUserByName(ctx, name);
     if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
     if (target.id === ctx.user.id) return notice(ctx, "SELF", "Kicking yourself isn't useful.");
-    if (target.role === "admin" && ctx.user.role !== "admin") {
+    if (roleRank(target.role) > roleRank(ctx.user.role)) {
       return notice(ctx, "PERM", "Site admins can't be kicked by non-admins.");
     }
     if (await isKeymaster(ctx, target.id)) {
@@ -193,7 +200,7 @@ export const muteCommand: CommandHandler = {
     const target = await findUserByName(ctx, name);
     if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
     if (target.id === ctx.user.id) return notice(ctx, "SELF", "Muting yourself isn't useful.");
-    if (target.role === "admin" && ctx.user.role !== "admin") {
+    if (roleRank(target.role) > roleRank(ctx.user.role)) {
       return notice(ctx, "PERM", "Site admins can't be muted by non-admins.");
     }
     if (await isKeymaster(ctx, target.id)) {
@@ -349,7 +356,7 @@ export const promoteAdminCommand: CommandHandler = {
     if (!name) return notice(ctx, "EMPTY", "Usage: /promoteadmin <username>");
     const target = await findUserByName(ctx, name);
     if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
-    if (target.role === "admin") return notice(ctx, "ALREADY", `${target.username} is already a site admin.`);
+    if (isAdminRole(target.role)) return notice(ctx, "ALREADY", `${target.username} is already a site admin.`);
 
     const priorRole = target.role;
     await ctx.db.update(users).set({ role: "admin" }).where(eq(users.id, target.id));
@@ -377,6 +384,12 @@ export const demoteAdminCommand: CommandHandler = {
     if (!name) return notice(ctx, "EMPTY", "Usage: /demoteadmin <username>");
     const target = await findUserByName(ctx, name);
     if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
+    // /demoteadmin only handles plain admins. Master admins must be
+    // demoted via the admin panel by another master, since /demoteadmin
+    // has no way to ask "demote to admin" vs "demote to user" anyway.
+    if (target.role === "masteradmin") {
+      return notice(ctx, "NOT_ADMIN", `${target.username} is a master admin - demote via the admin panel.`);
+    }
     if (target.role !== "admin") return notice(ctx, "NOT_ADMIN", `${target.username} isn't a site admin.`);
     if (await isKeymaster(ctx, target.id)) {
       return notice(ctx, "KEYMASTER", "The keymaster (first admin) cannot be demoted.");
@@ -453,7 +466,7 @@ export const banCommand: CommandHandler = {
     const target = await findUserByName(ctx, name);
     if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
     if (target.id === ctx.user.id) return notice(ctx, "SELF", "Banning yourself isn't useful.");
-    if (target.role === "admin" && ctx.user.role !== "admin") {
+    if (roleRank(target.role) > roleRank(ctx.user.role)) {
       return notice(ctx, "PERM", "Site admins can't be banned by non-admins.");
     }
     if (await isKeymaster(ctx, target.id)) {
@@ -581,7 +594,7 @@ export const announceCommand: CommandHandler = {
     // Sitewide variant - recognised by leading "all " (case-insensitive).
     const allMatch = /^all\s+(.+)/i.exec(argsText);
     if (allMatch) {
-      if (ctx.user.role !== "admin") {
+      if (!isAdminRole(ctx.user.role)) {
         return notice(ctx, "PERM", "/announce all is admin-only. Drop 'all' to announce in the current room.");
       }
       const body = allMatch[1]!.trim();

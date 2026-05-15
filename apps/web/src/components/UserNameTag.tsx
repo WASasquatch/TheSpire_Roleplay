@@ -1,6 +1,7 @@
 import { resolveMessageColor } from "@thekeep/shared";
 import type { Gender } from "../lib/gender.js";
 import { genderGlyph } from "../lib/gender.js";
+import { useActiveTheme } from "../lib/theme.js";
 
 interface Props {
   displayName: string;
@@ -58,9 +59,11 @@ export function UserNameTag({
 }: Props) {
   const g = genderGlyph(gender);
   // Resolve theme-slot tokens (e.g. `theme:system`) to a CSS color
-  // that follows the viewer's palette; literal hex strings pass
-  // through unchanged.
-  const resolvedColor = resolveMessageColor(color);
+  // that follows the viewer's palette. Literal hex strings are nudged
+  // toward legibility against the current theme background when the
+  // chosen shade wouldn't meet WCAG contrast.
+  const themeBg = useActiveTheme().bg;
+  const resolvedColor = resolveMessageColor(color, themeBg);
   return (
     <span className="inline-flex items-baseline gap-1">
       {rolePrefix ? <span className="text-keep-muted">{rolePrefix}</span> : null}

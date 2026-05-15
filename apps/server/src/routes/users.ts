@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
+import { isAdminRole, isMasterAdminRole, type ClientToServerEvents, type ServerToClientEvents } from "@thekeep/shared";
 import { characters, users } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
@@ -145,7 +145,7 @@ export async function registerUsersRoutes(
   /** Admin: same shape as /users plus email/role/disabled state. */
   app.get<{ Querystring: { q?: string; offset?: string; limit?: string } }>("/admin/users", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || me.role !== "admin") { reply.code(403); return { error: "admin only" }; }
+    if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
 
     const q = (req.query.q ?? "").trim().toLowerCase();
     const offset = Math.max(0, parseInt(req.query.offset ?? "0", 10) || 0);
@@ -226,14 +226,26 @@ export async function registerUsersRoutes(
   });
 
   /**
-   * Admin user editor. Allows changing username/email/role and toggling
-   * disabled state. Password reset is intentionally out of scope here -
-   * users go through their own flow for that. role bump to "admin" is
-   * allowed from this endpoint (mirrors /promoteadmin).
+   * Admin user editor. Two-tier gating:
+   *   * Both `admin` and `masteradmin` reach this endpoint.
+   *   * Plain `admin` may rename a user and may promote/demote within
+   *     {user, trusted, mod, admin} — they can build the moderation
+   *     team but can't mint another masteradmin and can't demote one
+   *     either.
+   *   * `email` and `disabled` mutations are master-only — both are
+   *     "damage" levers (account lockout, identity reassignment).
+   *   * Promoting TO masteradmin or demoting FROM masteradmin is
+   *     master-only by definition; a plain admin attempting either
+   *     gets 403 so they can't escalate themselves through a chained
+   *     promotion or kneecap the only top-tier admin.
+   *
+   * Password reset is intentionally out of scope here — users go
+   * through their own password-recovery flow for that.
    */
   app.patch<{ Params: { id: string }; Body: unknown }>("/admin/users/:id", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || me.role !== "admin") { reply.code(403); return { error: "admin only" }; }
+    if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
+    const masterOnly = isMasterAdminRole(me.role);
     const { id } = req.params;
     if (id === me.id) { reply.code(400); return { error: "use the profile editor for your own account" }; }
     const target = (await db.select().from(users).where(eq(users.id, id)).limit(1))[0];
@@ -256,9 +268,27 @@ export async function registerUsersRoutes(
     const body = z.object({
       username: masterUsernameSchema.optional(),
       email: z.string().email().max(200).optional(),
-      role: z.enum(["user", "trusted", "mod", "admin"]).optional(),
+      role: z.enum(["user", "trusted", "mod", "admin", "masteradmin"]).optional(),
       disabled: z.boolean().optional(),
     }).parse(req.body);
+
+    // Master-only field gates. We reject EARLY (before any write) so a
+    // plain admin's accidental form submit doesn't half-apply.
+    if (!masterOnly) {
+      if (body.email !== undefined) {
+        reply.code(403); return { error: "master admin only: changing user emails" };
+      }
+      if (body.disabled !== undefined) {
+        reply.code(403); return { error: "master admin only: enabling/disabling accounts" };
+      }
+      // Role transitions that touch the masteradmin tier are master-only
+      // — both promotion TO it and demotion FROM it. Without the latter
+      // guard, a plain admin could quietly demote the master who
+      // appointed them.
+      if (body.role === "masteradmin" || target.role === "masteradmin") {
+        reply.code(403); return { error: "master admin only: changing the masteradmin role" };
+      }
+    }
 
     // Username conflict check (case-insensitive). Email is no longer unique.
     if (body.username && body.username.toLowerCase() !== target.username.toLowerCase()) {
@@ -309,7 +339,9 @@ export async function registerUsersRoutes(
       // can filter cleanly. Trust transitions get their own actions; admin
       // bumps share `promote_admin`/`demote_admin` with the chat command.
       let action: import("@thekeep/shared").AuditAction = "promote_mod";
-      if (body.role === "admin") action = "promote_admin";
+      if (body.role === "masteradmin") action = "promote_masteradmin";
+      else if (target.role === "masteradmin") action = "demote_masteradmin";
+      else if (body.role === "admin") action = "promote_admin";
       else if (target.role === "admin") action = "demote_admin";
       else if (body.role === "trusted") action = "promote_trusted";
       else if (target.role === "trusted") action = "demote_trusted";
@@ -333,7 +365,9 @@ export async function registerUsersRoutes(
    */
   app.delete<{ Params: { id: string } }>("/admin/users/:id", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || me.role !== "admin") { reply.code(403); return { error: "admin only" }; }
+    // Master-only: hard-deleting a user cascades through every FK and
+    // is the most destructive single-row action in the system.
+    if (!me || !isMasterAdminRole(me.role)) { reply.code(403); return { error: "master admin only" }; }
     const { id } = req.params;
     if (id === me.id) { reply.code(400); return { error: "you cannot delete your own account" }; }
     const target = (await db.select().from(users).where(eq(users.id, id)).limit(1))[0];

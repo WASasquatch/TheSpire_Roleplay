@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { resolveMessageColor, type ChatMessage, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
+import { isAdminRole, resolveMessageColor, type ChatMessage, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
+import { useActiveTheme } from "../lib/theme.js";
 import { UserNameTag } from "./UserNameTag.js";
 import type { Gender } from "../lib/gender.js";
 import { parseInline, renderForumBody } from "../lib/markdown.js";
@@ -91,6 +92,14 @@ interface Props {
    */
   canPin?: boolean;
   /**
+   * Viewer can rewrite other users' posts (admin tier only). Mods can
+   * Delete (hide) a post but not edit its text; admins get cross-author
+   * Edit so authors can request a touch-up after the normal edit window
+   * has closed. The server enforces the same gate via `isAdminRole` on
+   * PATCH /messages/:id. Defaults to false.
+   */
+  canAdminEdit?: boolean;
+  /**
    * Optional handler for the Quote button on each forum post. When
    * present, each post in a forum room shows a "Quote" pill in its
    * toolbar; clicking it emits the pre-formatted blockquote text
@@ -176,7 +185,7 @@ function fmtTime(ms: number): string {
   return `${hh}:${mm}:${ss}`;
 }
 
-export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, onQuotePost, forumBuckets, onLoadOlderTopics, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory }: Props) {
+export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canAdminEdit = false, onQuotePost, forumBuckets, onLoadOlderTopics, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   /**
    * Scroll-bookkeeping for flat-mode auto-scroll-vs-preserve. We
@@ -335,7 +344,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   const adminUserIds = new Set<string>();
   for (const o of occupants) {
     genderByUser.set(o.userId, o.gender);
-    if (o.accountRole === "admin") adminUserIds.add(o.userId);
+    if (isAdminRole(o.accountRole)) adminUserIds.add(o.userId);
   }
   // Fall back to an empty list when the caller doesn't supply selfNames
   // (e.g. pre-auth or older callers) — every mention then renders in the
@@ -357,6 +366,8 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         // groups the viewer's own incoming whispers among the noise.
         isRecipient={!!selfUserId && m.toUserId === selfUserId}
         canReport={roomType === "public"}
+        canModerate={canModerate}
+        canAdminEdit={canAdminEdit}
         onIconClick={onIconClick}
         onNameClick={onNameClick}
         onMentionClick={onMentionClick}
@@ -412,6 +423,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         onStartTopicInCategory={onStartTopicInCategory ?? (() => {})}
         canModerate={canModerate}
         canPin={canPin}
+        canAdminEdit={canAdminEdit}
         {...(onQuotePost ? { onQuotePost } : {})}
         genderByUser={genderByUser}
         adminUserIds={adminUserIds}
@@ -600,6 +612,7 @@ function ForumView({
   onStartTopicInCategory,
   canModerate,
   canPin,
+  canAdminEdit,
   onQuotePost,
   genderByUser,
   adminUserIds,
@@ -636,6 +649,8 @@ function ForumView({
   canModerate: boolean;
   /** Viewer is an admin — exposes Pin/Unpin on topics. */
   canPin: boolean;
+  /** Viewer is an admin — exposes cross-author Edit in PostToolbar. */
+  canAdminEdit: boolean;
   /** Pre-fill the right composer with a markdown blockquote of the post. Optional. */
   onQuotePost?: (quoteText: string) => void;
   genderByUser: Map<string, Gender>;
@@ -855,6 +870,7 @@ function ForumView({
                       onPopout={() => onPopoutTopic(topic.id)}
                       canModerate={canModerate}
                       canPin={canPin}
+                      canAdminEdit={canAdminEdit}
                       {...(onQuotePost ? { onQuotePost } : {})}
                       // Reply pill activates the topic unconditionally (the
                       // toggle semantic would deactivate when already active —
@@ -929,6 +945,7 @@ function TopicCard({
   onMentionClick,
   onWorldClick,
   onTimeClick,
+  canAdminEdit,
 }: {
   topic: ChatMessage;
   replies: ChatMessage[];
@@ -940,6 +957,8 @@ function TopicCard({
   canModerate: boolean;
   /** Viewer is an admin — Pin/Unpin button appears in the topic-post toolbar. */
   canPin: boolean;
+  /** Viewer is an admin — Edit button appears on other users' posts. */
+  canAdminEdit: boolean;
   /** Optional Quote-button callback. When present, ForumPostBody shows a Quote pill. */
   onQuotePost?: (quoteText: string) => void;
   /**
@@ -968,6 +987,8 @@ function TopicCard({
     ? replies
     : replies.slice(-NESTED_VISIBLE_REPLIES);
   const hidden = Math.max(0, replies.length - visibleReplies.length);
+  const themeBg = useActiveTheme().bg;
+  const topicAuthorColor = resolveMessageColor(topic.color, themeBg);
 
   return (
     <article
@@ -1071,7 +1092,7 @@ function TopicCard({
                 "rounded font-semibold text-keep-action hover:underline " +
                 (adminUserIds.has(topic.userId) ? "italic" : "")
               }
-              style={topic.color ? { color: topic.color } : undefined}
+              style={topicAuthorColor ? { color: topicAuthorColor } : undefined}
             >
               {topic.displayName}
             </button>
@@ -1105,6 +1126,7 @@ function TopicCard({
             canReport={roomType === "public"}
             canModerate={canModerate}
             canPin={canPin}
+            canAdminEdit={canAdminEdit}
             {...(onQuotePost ? { onQuotePost } : {})}
             onReply={() => onActivateForReply(topic.id)}
             onIconClick={onIconClick}
@@ -1136,6 +1158,7 @@ function TopicCard({
                   canReport={roomType === "public"}
                   canModerate={canModerate}
                   canPin={canPin}
+                  canAdminEdit={canAdminEdit}
                   {...(onQuotePost ? { onQuotePost } : {})}
                   onReply={() => onActivateForReply(topic.id)}
                   onIconClick={onIconClick}
@@ -1236,6 +1259,7 @@ export function ForumPostBody({
   canReport,
   canModerate = false,
   canPin = false,
+  canAdminEdit = false,
   onQuotePost,
   onReply,
   onIconClick,
@@ -1254,6 +1278,8 @@ export function ForumPostBody({
   canModerate?: boolean;
   /** Viewer is an admin. Adds Pin/Unpin to the toolbar for topics. Defaults to false. */
   canPin?: boolean;
+  /** Viewer is an admin. Adds cross-author Edit to the toolbar. Defaults to false. */
+  canAdminEdit?: boolean;
   /** Pre-fill the parent's composer with a markdown blockquote of this post. */
   onQuotePost?: (quoteText: string) => void;
   /** Activate this post's parent topic in the composer for plain reply (no quote). */
@@ -1275,6 +1301,10 @@ export function ForumPostBody({
     () => renderForumBody(msg.body, onMentionClick, onWorldClick, selfNames),
     [msg.body, onMentionClick, onWorldClick, selfNames],
   );
+  // Theme bg drives the legibility nudge that keeps a user-picked color
+  // readable when the current palette flips between light and dark.
+  const themeBg = useActiveTheme().bg;
+  const authorColor = resolveMessageColor(msg.color, themeBg);
 
   // Inline editor state — when editing, the body region is replaced
   // with a textarea + Save/Cancel. Hoisted here (not in PostToolbar) so
@@ -1293,6 +1323,11 @@ export function ForumPostBody({
   }
 
   const showOwnControls = isOwn && REPLYABLE_KINDS.has(msg.kind);
+  // Admins can rewrite anyone's post (cross-author edit). The own-edit
+  // path keeps its existing tooltip; the admin path picks up a distinct
+  // "Admin edit" label in PostToolbar so the actor knows they're using
+  // a moderation lever, not exercising authorship.
+  const showAdminEdit = !isOwn && canAdminEdit && REPLYABLE_KINDS.has(msg.kind);
   const showReport = canReport && !isOwn && REPORTABLE_KINDS.has(msg.kind);
   const showBookmark = BOOKMARKABLE_KINDS.has(msg.kind);
   const editedBadge = msg.editedAt ? (
@@ -1355,7 +1390,7 @@ export function ForumPostBody({
                 "rounded font-semibold text-keep-text hover:text-keep-action " +
                 (isSenderAdmin ? "italic" : "")
               }
-              style={resolveMessageColor(msg.color) ? { color: resolveMessageColor(msg.color)! } : undefined}
+              style={authorColor ? { color: authorColor } : undefined}
             >
               {msg.displayName}
             </button>
@@ -1422,7 +1457,12 @@ export function ForumPostBody({
             isOwn={isOwn}
             canModerate={canModerate}
             canPin={canPin}
-            showEdit={showOwnControls}
+            // Edit is shown to the author (always, in forum rooms) OR to
+            // any admin via the cross-author override. Mods do NOT get
+            // edit: they can hide a post with Delete but cannot rewrite
+            // someone else's words.
+            showEdit={showOwnControls || showAdminEdit}
+            isAdminEdit={!isOwn && showAdminEdit}
             // Delete is shown to the author (within the normal rules)
             // OR to any moderator. The server re-validates the actual
             // permission — this is just the UI affordance.
@@ -1468,6 +1508,7 @@ function PostToolbar({
   canModerate,
   canPin,
   showEdit,
+  isAdminEdit,
   showDelete,
   showBookmark,
   showReport,
@@ -1480,6 +1521,8 @@ function PostToolbar({
   canModerate: boolean;
   canPin: boolean;
   showEdit: boolean;
+  /** True when the Edit button represents an admin cross-author edit (not the author's own edit). Drives the moderation-tinted label + confirm copy. */
+  isAdminEdit: boolean;
   showDelete: boolean;
   showBookmark: boolean;
   showReport: boolean;
@@ -1623,11 +1666,23 @@ function PostToolbar({
       {showEdit ? (
         <button
           type="button"
-          onClick={onEdit}
-          className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 hover:bg-keep-banner hover:text-keep-text"
-          title="Edit this post"
+          onClick={() => {
+            if (isAdminEdit) {
+              const ok = window.confirm(
+                `Edit this post by ${msg.displayName} as an admin? The (edited) badge will appear to all viewers; the original body is preserved server-side for audit.`,
+              );
+              if (!ok) return;
+            }
+            onEdit();
+          }}
+          className={
+            isAdminEdit
+              ? "keep-button rounded border border-keep-accent/40 bg-keep-bg/60 px-2 py-0.5 text-keep-accent/80 hover:bg-keep-accent/10 hover:text-keep-accent"
+              : "keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 hover:bg-keep-banner hover:text-keep-text"
+          }
+          title={isAdminEdit ? `Admin: edit ${msg.displayName}'s post` : "Edit this post"}
         >
-          Edit
+          {isAdminEdit ? "Admin Edit" : "Edit"}
         </button>
       ) : null}
       {showPin ? (
@@ -1947,6 +2002,8 @@ function Line({
   isOwn,
   isRecipient,
   canReport,
+  canModerate,
+  canAdminEdit,
   onIconClick,
   onNameClick,
   onMentionClick,
@@ -1962,6 +2019,10 @@ function Line({
   /** True iff the viewer is the addressed recipient on a whisper. Combined with `isOwn` to decide whether the viewer is a *party* to this whisper, which drives the resting-tint highlight. */
   isRecipient: boolean;
   canReport: boolean;
+  /** Viewer is mod/admin/masteradmin — surfaces a cross-author Delete button on others' lines (no grace window). */
+  canModerate: boolean;
+  /** Viewer is admin/masteradmin — surfaces a cross-author Edit button on others' lines. Stricter than canModerate. */
+  canAdminEdit: boolean;
   /** Unbound - Line binds with the relevant userId/displayName for sender vs recipient. */
   onIconClick: (userId: string, displayName: string) => void;
   onNameClick: (userId: string, displayName: string) => void;
@@ -2038,6 +2099,12 @@ function Line({
   // re-run on every parent render (only when the body changes).
   const bodyParts = useMemo(() => splitMentions(msg.body), [msg.body]);
   const renderedBody = renderParts(bodyParts, onMentionClick, onWorldClick, selfNames);
+  // Resolve the user's stored color once and feed both kind-shaped
+  // body styles below. `themeBg` lets resolveMessageColor swap in a
+  // legible variant of literal hex colors when the chosen shade would
+  // disappear against the current background.
+  const themeBg = useActiveTheme().bg;
+  const bodyColor = resolveMessageColor(msg.color, themeBg);
 
   // Edit/delete controls only apply to the author's own chat-shaped
   // lines and only inside the admin-configured grace window. The
@@ -2047,6 +2114,13 @@ function Line({
   const editGraceMs = useChat((s) => s.branding.editGraceMs);
   const ageMs = Date.now() - msg.createdAt;
   const showOwnControls = isOwn && ageMs < editGraceMs && REPLYABLE_KINDS.has(msg.kind);
+  // Cross-author moderation affordances. Mods get Delete (hide a post);
+  // admins additionally get Edit (rewrite the body). Both bypass the
+  // grace window. Suppressed on the author's own line — that path is
+  // already handled by `showOwnControls` above.
+  const showModDelete = !isOwn && canModerate && !msg.deletedAt && REPLYABLE_KINDS.has(msg.kind);
+  const showAdminEdit = !isOwn && canAdminEdit && !msg.deletedAt && REPLYABLE_KINDS.has(msg.kind);
+  const showModControls = showModDelete || showAdminEdit;
   const editedBadge = msg.editedAt ? (
     <span
       className="ml-1 text-[10px] italic text-keep-muted"
@@ -2060,7 +2134,7 @@ function Line({
   switch (msg.kind) {
     case "me":
       lineEl = (
-        <div className="font-action" style={{ color: resolveMessageColor(msg.color) ?? "rgb(var(--keep-action))" }}>
+        <div className="font-action" style={{ color: bodyColor ?? "rgb(var(--keep-action))" }}>
           {time}{tag} <span className="whitespace-pre-wrap">{renderedBody}</span>{editedBadge}
         </div>
       );
@@ -2168,7 +2242,7 @@ function Line({
     default:
       lineEl = (
         <div>
-          {time}[{tag}] <span className="whitespace-pre-wrap" style={resolveMessageColor(msg.color) ? { color: resolveMessageColor(msg.color)! } : undefined}>{renderedBody}</span>{editedBadge}
+          {time}[{tag}] <span className="whitespace-pre-wrap" style={bodyColor ? { color: bodyColor } : undefined}>{renderedBody}</span>{editedBadge}
         </div>
       );
       break;
@@ -2229,14 +2303,18 @@ function Line({
   //     original hover-revealed behavior. We additionally honor
   //     `group-focus-within` on desktop so a tab-navigating user can
   //     reveal the controls without a mouse.
-  const hasControls = showBookmark || showOwnControls || (showReport && !showOwnControls);
+  // Mods can act directly — surfacing a Report button next to their own
+  // moderation controls would be redundant (and confusing).
+  const effectiveShowReport = showReport && !showOwnControls && !showModControls;
+  const hasControls = showBookmark || showOwnControls || showModControls || effectiveShowReport;
   // On mobile we normally keep the controls hidden until the row gains
   // focus-within (a tap) so the timeline stays uncluttered. The author's
   // own edit/delete row is the exception: hiding it behind a tap was
   // making people think the controls didn't exist. When `showOwnControls`
   // is true, the wrapper is always-flex on mobile so edit/delete are
   // visible on the row without an extra interaction. Other people's
-  // messages keep the tap-to-reveal behavior.
+  // messages keep the tap-to-reveal behavior — mod actions stay
+  // tap-to-reveal too so a moderator's timeline isn't a wall of buttons.
   const controlsClass = showOwnControls
     ? "flex justify-end gap-1 mt-0.5 md:contents"
     : "hidden group-focus-within:flex justify-end gap-1 mt-0.5 md:contents";
@@ -2244,7 +2322,10 @@ function Line({
     <div className={controlsClass}>
       {showBookmark ? <BookmarkButton msg={msg} /> : null}
       {showOwnControls ? <OwnControls msg={msg} /> : null}
-      {showReport && !showOwnControls ? <ReportButton msg={msg} /> : null}
+      {showModControls ? (
+        <ModControls msg={msg} canEdit={showAdminEdit} canDelete={showModDelete} />
+      ) : null}
+      {effectiveShowReport ? <ReportButton msg={msg} /> : null}
     </div>
   ) : null;
 
@@ -2495,6 +2576,148 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
       >
         delete
       </button>
+      {error ? <span className="text-[10px] text-keep-accent">{error}</span> : null}
+    </span>
+  );
+}
+
+/**
+ * Mod / admin cross-author controls on a chat line. Mirrors {@link OwnControls}'s
+ * shape (inline edit input + Save/Cancel; Delete button on the right) but
+ * gates the buttons on the viewer's privileges rather than authorship and
+ * the grace window:
+ *   - `canEdit` (admin tier) renders the Edit button + inline editor.
+ *   - `canDelete` (mod tier or higher) renders the Delete button.
+ * Both bypass the edit window server-side via the `isAdminRole` /
+ * mod gates on PATCH and DELETE /messages/:id. Confirm copy names the
+ * post's author so a moderator double-checks they're acting on the
+ * right line.
+ */
+function ModControls({ msg, canEdit, canDelete }: { msg: ChatMessage; canEdit: boolean; canDelete: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(msg.body);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submitEdit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    if (trimmed === msg.body) { setEditing(false); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/messages/${msg.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: trimmed }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({} as { error?: string }));
+        throw new Error(j.error ?? `HTTP ${res.status}`);
+      }
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "edit failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doDelete() {
+    const ok = window.confirm(
+      `Delete this message from ${msg.displayName}? It will be hidden from users; admins can still review the original body in the audit view.`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/messages/${msg.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({} as { error?: string }));
+        throw new Error(j.error ?? `HTTP ${res.status}`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <form
+        onSubmit={submitEdit}
+        className="mt-1 flex w-full basis-full items-center gap-1"
+        onKeyDown={(e) => {
+          if (e.key === "Escape") { setEditing(false); setDraft(msg.body); }
+        }}
+      >
+        <input
+          // eslint-disable-next-line jsx-a11y/no-autofocus
+          autoFocus
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          className="min-w-0 flex-1 rounded border border-keep-accent bg-keep-bg px-2 py-0.5 text-sm outline-none"
+          aria-label={`Admin edit of ${msg.displayName}'s message`}
+        />
+        <button
+          type="submit"
+          disabled={busy}
+          className="shrink-0 rounded border border-keep-accent bg-keep-accent/10 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+        >
+          {busy ? "..." : "Save"}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setEditing(false); setDraft(msg.body); setError(null); }}
+          className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+        >
+          Cancel
+        </button>
+        {error ? <span className="text-[10px] text-keep-accent">{error}</span> : null}
+      </form>
+    );
+  }
+
+  return (
+    // Visual contract mirrors OwnControls (same h-5 pill row) but every
+    // button is accent-tinted so the actor sees they're using a
+    // moderation lever, not a self-edit.
+    <span className="inline-flex gap-1 md:absolute md:right-3 md:top-0">
+      {canEdit ? (
+        <button
+          type="button"
+          onClick={() => {
+            const ok = window.confirm(
+              `Edit this message from ${msg.displayName} as an admin? The (edited) badge will appear to all viewers; the original body is preserved server-side for audit.`,
+            );
+            if (!ok) return;
+            setDraft(msg.body);
+            setEditing(true);
+          }}
+          title={`Admin: edit ${msg.displayName}'s message`}
+          className="flex h-5 items-center rounded border border-keep-accent/40 bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-accent/80 hover:bg-keep-accent/10 hover:text-keep-accent"
+        >
+          admin edit
+        </button>
+      ) : null}
+      {canDelete ? (
+        <button
+          type="button"
+          onClick={doDelete}
+          title={`Hide ${msg.displayName}'s message`}
+          disabled={busy}
+          className="flex h-5 items-center rounded border border-keep-accent/60 bg-keep-accent/10 px-1.5 text-[10px] font-semibold leading-none text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+        >
+          mod delete
+        </button>
+      ) : null}
       {error ? <span className="text-[10px] text-keep-accent">{error}</span> : null}
     </span>
   );

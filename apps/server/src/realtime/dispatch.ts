@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import type { Server as IoServer, Socket } from "socket.io";
+import { isAdminRole } from "@thekeep/shared";
 import type {
   ClientToServerEvents,
   Role,
@@ -102,7 +103,11 @@ export async function dispatchChatInput(args: {
   // budget; everyone else uses the default cap. The limiter applies to ALL
   // chat:input - slash commands included - because a flood of /me or /roll
   // is just as disruptive as a flood of plain text.
-  if (user.role !== "admin" && user.role !== "mod") {
+  // Both admin tiers + mods bypass the rate limit — moderation
+  // flurries (rapid kicks, mutes, /announce sequences) shouldn't get
+  // throttled. Adding masteradmin via isAdminRole keeps both admin
+  // tiers exempt without enumerating them here.
+  if (!isAdminRole(user.role) && user.role !== "mod") {
     const max = user.role === "trusted" ? RATE_MAX_TRUSTED : RATE_MAX;
     const rate = checkChatRate(user.id, Date.now(), max);
     if (!rate.ok) {
@@ -177,7 +182,7 @@ export async function dispatchChatInput(args: {
     const roomRow = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
     const isForum = roomRow?.replyMode === "nested";
     const ctx: CommandContext = {
-      io, socket, db, user, roomId,
+      io, socket, db, registry, user, roomId,
       argsText: parsed.argsText,
       args: [],
       invokedAs: "say",
@@ -236,10 +241,10 @@ export async function dispatchChatInput(args: {
           return;
         }
         // Locked topics reject new replies for users — but moderators
-        // (role mod or admin) bypass the gate so they can post locks/
-        // verdicts/notices in the same thread the lock applies to.
+        // (role mod or admin/masteradmin) bypass the gate so they can post
+        // locks/verdicts/notices in the same thread the lock applies to.
         // Mirrors the slash-command path in commands/builtins/reply.ts.
-        if (parent.lockedAt && user.role !== "mod" && user.role !== "admin") {
+        if (parent.lockedAt && user.role !== "mod" && !isAdminRole(user.role)) {
           socket.emit("error:notice", {
             code: "TOPIC_LOCKED",
             message: "This topic is locked and isn't accepting new replies.",
@@ -293,7 +298,7 @@ export async function dispatchChatInput(args: {
   }
 
   const ctx: CommandContext = {
-    io, socket, db, user, roomId,
+    io, socket, db, registry, user, roomId,
     argsText: parsed.argsText,
     args: parsed.args,
     invokedAs: parsed.command,
@@ -311,8 +316,9 @@ export async function dispatchChatInput(args: {
 
 function hasPermission(user: SessionUser, required: Role): boolean {
   // `trusted` sits between `user` and `mod` - elevated rate limits / extra
-  // privileges, but no moderation authority. Maps to ordinal 1; the next
-  // tier (`mod`) is 2 so a `mod`-required command still rejects `trusted`.
-  const order = { user: 0, trusted: 1, mod: 2, admin: 3 } as const;
+  // privileges, but no moderation authority. `masteradmin` is strictly
+  // above `admin`, so an `admin`-required command also accepts a
+  // masteradmin without enumerating the tier explicitly.
+  const order = { user: 0, trusted: 1, mod: 2, admin: 3, masteradmin: 4 } as const;
   return order[user.role] >= order[required];
 }

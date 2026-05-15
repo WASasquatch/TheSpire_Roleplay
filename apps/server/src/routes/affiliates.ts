@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { isAdminRole } from "@thekeep/shared";
 import { asc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -29,7 +30,7 @@ interface SessionUserCtx {
 
 async function requireAdmin(req: FastifyRequest, db: Db): Promise<SessionUserCtx | null> {
   const me = await getSessionUser(req, db);
-  if (!me || me.role !== "admin") return null;
+  if (!me || !isAdminRole(me.role)) return null;
   return me;
 }
 

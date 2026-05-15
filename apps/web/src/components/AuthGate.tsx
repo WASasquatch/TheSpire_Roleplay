@@ -542,7 +542,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
         // /me/profile + /me/dms fetches and they need the header
         // already in place.
         if (typeof j.sessionToken === "string") setSessionToken(j.sessionToken);
-        // The server returns role:"admin" for the very first registrant
+        // The server returns role:"masteradmin" for the very first registrant
         // (bootstrap path). Trust the server response so the Admin button
         // appears immediately without requiring a page reload.
         setMe({ id: j.id, username: j.username, role: j.role ?? "user" });

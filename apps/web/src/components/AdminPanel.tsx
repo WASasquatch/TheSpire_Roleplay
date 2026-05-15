@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import DOMPurify from "dompurify";
 import type { AuditEntry, ReportEntry, Role, Theme, ThemeableTextSlot, ThreadCategory } from "@thekeep/shared";
-import { DEFAULT_THEME, normalizeTheme, resolveMessageColor, THEMEABLE_TEXT_SLOTS } from "@thekeep/shared";
+import { DEFAULT_THEME, isMasterAdminRole, normalizeTheme, resolveMessageColor, THEMEABLE_TEXT_SLOTS } from "@thekeep/shared";
+import { useActiveTheme } from "../lib/theme.js";
 import { readError } from "../lib/http.js";
 import { parseInline } from "../lib/markdown.js";
 import { listStyles } from "../lib/ornaments/index.js";
@@ -19,6 +20,15 @@ type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliate
 
 export function AdminPanel({ onClose, onLinksChanged }: Props) {
   const [tab, setTab] = useState<Tab>("overview");
+  // Master-admin gating for the destructive-control tabs. A plain
+  // `admin` keeps moderation tools (rooms, users, reports, audit,
+  // titles, commands, nav links, affiliates) but loses Settings,
+  // Branding, and Rules — the three surfaces that let an attacker
+  // materially damage the public face of the site, change caps that
+  // affect every user, or rewrite legal/policy text. The two
+  // `masterOnly*` references below are also used downstream by
+  // UsersTab to hide email / disable / masteradmin-role controls.
+  const isMaster = useChat((s) => isMasterAdminRole(s.me?.role ?? "user"));
 
   return (
     <Modal onClose={onClose} zIndex={50}>
@@ -41,9 +51,17 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
               padding on md+ so it never underlines the tab labels. */}
           <nav className="keep-scroll-strip flex min-w-0 flex-1 gap-1 overflow-x-auto text-xs uppercase tracking-widest">
             <TabBtn active={tab === "overview"} onClick={() => setTab("overview")}>Overview</TabBtn>
-            <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>Settings</TabBtn>
-            <TabBtn active={tab === "branding"} onClick={() => setTab("branding")}>Branding</TabBtn>
-            <TabBtn active={tab === "rules"} onClick={() => setTab("rules")}>Rules</TabBtn>
+            {/* Master-only tabs. We don't render them for plain admins
+                so the panel doesn't dangle clickable surfaces that
+                404 server-side. The route handlers still enforce the
+                gate independently. */}
+            {isMaster ? (
+              <>
+                <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>Settings</TabBtn>
+                <TabBtn active={tab === "branding"} onClick={() => setTab("branding")}>Branding</TabBtn>
+                <TabBtn active={tab === "rules"} onClick={() => setTab("rules")}>Rules</TabBtn>
+              </>
+            ) : null}
             <TabBtn active={tab === "links"} onClick={() => setTab("links")}>Nav Links</TabBtn>
             <TabBtn active={tab === "affiliates"} onClick={() => setTab("affiliates")}>Affiliates</TabBtn>
             <TabBtn active={tab === "commands"} onClick={() => setTab("commands")}>Commands</TabBtn>
@@ -60,9 +78,10 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
 
         <div className="max-h-[78vh] overflow-y-auto p-4">
           {tab === "overview" ? <OverviewTab /> : null}
-          {tab === "settings" ? <SettingsTab /> : null}
-          {tab === "branding" ? <BrandingTab /> : null}
-          {tab === "rules" ? <RulesTab /> : null}
+          {/* Master-only render gates mirror the tab visibility above. */}
+          {tab === "settings" && isMaster ? <SettingsTab /> : null}
+          {tab === "branding" && isMaster ? <BrandingTab /> : null}
+          {tab === "rules" && isMaster ? <RulesTab /> : null}
           {tab === "links" ? <LinksTab onLinksChanged={onLinksChanged} /> : null}
           {tab === "affiliates" ? <AffiliatesTab /> : null}
           {tab === "commands" ? <CommandsTab /> : null}
@@ -1777,6 +1796,10 @@ interface CustomCmdRow {
   aliases: string[];
   /** Hex color override; null = inherit sender's chatColor. */
   color: string | null;
+  /** When true, users can splice this command mid-message via `!name`. */
+  allowInline: boolean;
+  /** Alternate template for the inline path. Null falls back to `template`. */
+  inlineTemplate: string | null;
 }
 
 interface CustomCmdInput {
@@ -1788,6 +1811,9 @@ interface CustomCmdInput {
   enabled?: boolean;
   /** Pass null to clear; pass a #rrggbb hex to set. */
   color?: string | null;
+  allowInline?: boolean;
+  /** Pass null to clear the override (fall back to `template`). */
+  inlineTemplate?: string | null;
 }
 
 function CommandsTab() {
@@ -1958,8 +1984,34 @@ function CommandForm({
   const [description, setDescription] = useState(initial?.description ?? "");
   // null = inherit sender's chat color (default). A hex string overrides.
   const [color, setColor] = useState<string | null>(initial?.color ?? null);
+  // Inline-use toggle. Off by default for new commands and for existing
+  // rows pre-feature (the migration sets allow_inline = 0).
+  const [allowInline, setAllowInline] = useState<boolean>(initial?.allowInline ?? false);
+  // Inline template. Persisted separately so the standalone wording can
+  // stay as "{sender} flips heads" while the inline form reads "flips
+  // heads" without the leading name.
+  const [inlineTemplate, setInlineTemplate] = useState<string>(
+    initial?.inlineTemplate ?? initial?.template ?? "",
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Preview reads against the operator's current theme bg so the
+  // contrast adjustment applied at message-render time also shows up
+  // in the live preview.
+  const themeBg = useActiveTheme().bg;
+  const previewColor = resolveMessageColor(color, themeBg);
+
+  // First-enable hint: when the user flips Allow Inline on with nothing
+  // authored yet for the inline body, seed it with the current main
+  // template so they have a working starting point rather than an empty
+  // box. We only seed on the toggle transition (not on every keystroke
+  // in the main template) so we don't clobber later author edits.
+  function onToggleAllowInline(next: boolean) {
+    if (next && !inlineTemplate.trim()) {
+      setInlineTemplate(template);
+    }
+    setAllowInline(next);
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -1981,6 +2033,30 @@ function CommandForm({
         if (color) body.color = color;
       } else if (color !== (initial?.color ?? null)) {
         body.color = color;
+      }
+      // Inline fields. Toggling Allow-Inline off DOESN'T clear the
+      // stored inline_template — the server gates the lookup on
+      // allow_inline, so a stored body is harmless. Preserving it
+      // means an admin who toggles off then back on doesn't lose
+      // their authored override.
+      if (mode === "create") {
+        if (allowInline) {
+          body.allowInline = true;
+          if (inlineTemplate.trim()) body.inlineTemplate = inlineTemplate;
+        }
+      } else {
+        if (allowInline !== (initial?.allowInline ?? false)) {
+          body.allowInline = allowInline;
+        }
+        // Only send inlineTemplate changes while the toggle is on; when
+        // off, leave the stored value alone (see comment above).
+        if (allowInline) {
+          const initialInline = initial?.inlineTemplate ?? null;
+          const nextInline = inlineTemplate.trim() ? inlineTemplate : null;
+          if (nextInline !== initialInline) {
+            body.inlineTemplate = nextInline;
+          }
+        }
       }
       await onSubmit(body);
     } catch (err) {
@@ -2044,6 +2120,40 @@ function CommandForm({
             className="w-full rounded border border-keep-rule px-2 py-1 font-mono"
           />
         </label>
+        <div className="col-span-2 flex items-start gap-2">
+          <input
+            id={`allow-inline-${initial?.id ?? "new"}`}
+            type="checkbox"
+            checked={allowInline}
+            onChange={(e) => onToggleAllowInline(e.target.checked)}
+            className="mt-0.5"
+          />
+          <label htmlFor={`allow-inline-${initial?.id ?? "new"}`} className="flex-1">
+            <span className="block uppercase tracking-widest text-keep-muted">Allow inline use</span>
+            <span className="block text-[10px] text-keep-muted">
+              Lets users splice this command into a sentence with <code>!{name || "name"}</code>.
+              The standalone <code>/{name || "name"}</code> form keeps working either way.
+            </span>
+          </label>
+        </div>
+        {allowInline ? (
+          <label className="col-span-2">
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">
+              Inline template
+            </span>
+            <textarea
+              value={inlineTemplate}
+              onChange={(e) => setInlineTemplate(e.target.value)}
+              placeholder="flips heads"
+              rows={2}
+              className="w-full rounded border border-keep-rule px-2 py-1 font-mono"
+            />
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              Rendered when invoked inline (no <code>{"{target}"}</code> / <code>{"{args}"}</code> —
+              inline mode has no slot for them). Leave blank to reuse the main template.
+            </span>
+          </label>
+        ) : null}
         <label className="col-span-2">
           <span className="mb-1 block uppercase tracking-widest text-keep-muted">Aliases</span>
           <input
@@ -2200,7 +2310,7 @@ function CommandForm({
         <div className="mb-0.5 text-[10px] uppercase tracking-widest text-keep-muted">
           Preview (Sigrid runs /{name || "..."} Bran tightly)
         </div>
-        <div style={resolveMessageColor(color) ? { color: resolveMessageColor(color)! } : undefined}>
+        <div style={previewColor ? { color: previewColor } : undefined}>
           {kind === "action"
             ? <span><b>Sigrid</b> {parseInline(" " + preview)}</span>
             : <span>[<b>Sigrid</b>] {parseInline(preview)}</span>}
@@ -3413,6 +3523,12 @@ function UsersTab() {
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<AdminUserRow | null>(null);
+  // Mirror of the panel-level master-admin check. Threaded through to
+  // the edit form so it can lock the master-only fields (email,
+  // disabled, masteradmin role promotion) and to the row action cell
+  // so a plain admin doesn't see a Delete button that the server would
+  // refuse anyway.
+  const isMaster = useChat((s) => isMasterAdminRole(s.me?.role ?? "user"));
 
   async function reload() {
     setLoading(true);
@@ -3469,8 +3585,10 @@ function UsersTab() {
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-keep-muted">
           Every registered account, including disabled ones. Search matches
-          username and email. Editing role to "admin" grants full sitewide
-          control - same as <code>/promoteadmin</code>.
+          username and email. Editing role to "admin" grants global
+          moderation - same as <code>/promoteadmin</code>. "masteradmin"
+          (master-only to set) additionally unlocks settings, branding,
+          rules, account-disable, and email changes.
         </p>
         <input
           value={q}
@@ -3510,13 +3628,15 @@ function UsersTab() {
                 <td className="px-2 py-1 font-mono">{u.email}</td>
                 <td className="px-2 py-1 text-center">
                   <span className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
-                    u.role === "admin"
-                      ? "bg-keep-accent/20 text-keep-accent"
-                      : u.role === "mod"
-                        ? "bg-keep-action/20 text-keep-action"
-                        : "bg-keep-muted/20 text-keep-muted"
+                    u.role === "masteradmin"
+                      ? "bg-keep-accent/30 text-keep-accent font-semibold"
+                      : u.role === "admin"
+                        ? "bg-keep-accent/20 text-keep-accent"
+                        : u.role === "mod"
+                          ? "bg-keep-action/20 text-keep-action"
+                          : "bg-keep-muted/20 text-keep-muted"
                   }`}>
-                    {u.role}
+                    {u.role === "masteradmin" ? "master" : u.role}
                   </span>
                 </td>
                 <td className="px-2 py-1 text-center">
@@ -3543,13 +3663,19 @@ function UsersTab() {
                   >
                     Edit
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => destroy(u)}
-                    className="rounded border border-keep-accent/60 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
-                  >
-                    Delete
-                  </button>
+                  {/* Delete is master-only — hard-deleting a user
+                      cascades through every FK and is one of the
+                      most destructive single-row actions in the
+                      system. */}
+                  {isMaster ? (
+                    <button
+                      type="button"
+                      onClick={() => destroy(u)}
+                      className="rounded border border-keep-accent/60 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
+                    >
+                      Delete
+                    </button>
+                  ) : null}
                 </td>
               </tr>
             ))}
@@ -3560,6 +3686,7 @@ function UsersTab() {
       {editing ? (
         <UserEditForm
           user={editing}
+          isMaster={isMaster}
           onCancel={() => setEditing(null)}
           onSubmit={(body) => patch(editing.userId, body)}
         />
@@ -3570,10 +3697,19 @@ function UsersTab() {
 
 function UserEditForm({
   user,
+  isMaster,
   onCancel,
   onSubmit,
 }: {
   user: AdminUserRow;
+  /**
+   * Whether the caller is a master admin. Drives the field-level
+   * lockdown — only masters get email + disabled controls and the
+   * masteradmin role option. Plain admins still see the row but the
+   * inputs are absent (the server enforces the same gate so the UI
+   * just stays honest about what's possible).
+   */
+  isMaster: boolean;
   onCancel: () => void;
   onSubmit: (body: Record<string, unknown>) => Promise<void>;
 }) {
@@ -3583,6 +3719,12 @@ function UserEditForm({
   const [disabled, setDisabled] = useState(user.disabled);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // A plain admin can't act on a masteradmin target at all (no
+  // demote, no rename, etc.) — the row stays read-only so they don't
+  // submit a save that would 403. Self-edits route through the
+  // profile editor instead, so we don't need to special-case "is me".
+  const targetIsMaster = user.role === "masteradmin";
+  const locked = !isMaster && targetIsMaster;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -3622,38 +3764,58 @@ function UserEditForm({
             className="w-full rounded border border-keep-rule px-2 py-1"
           />
         </label>
-        <label>
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Email</span>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            maxLength={200}
-            className="w-full rounded border border-keep-rule px-2 py-1"
-          />
-        </label>
+        {/* Email is master-only — it's an account-recovery vector and
+            changing it amounts to identity reassignment. Plain admins
+            see the value read-only via the directory but can't mutate. */}
+        {isMaster ? (
+          <label>
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Email</span>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              maxLength={200}
+              className="w-full rounded border border-keep-rule px-2 py-1"
+            />
+          </label>
+        ) : null}
         <label>
           <span className="mb-1 block uppercase tracking-widest text-keep-muted">Role</span>
           <select
             value={role}
             onChange={(e) => setRole(e.target.value as Role)}
-            className="w-full rounded border border-keep-rule px-2 py-1"
+            disabled={locked}
+            className="w-full rounded border border-keep-rule px-2 py-1 disabled:bg-keep-banner/30"
           >
             <option value="user">user</option>
             <option value="trusted">trusted</option>
             <option value="mod">mod</option>
             <option value="admin">admin</option>
+            {/* `masteradmin` is master-only on both ends — only a
+                master can mint another master, and only a master can
+                strip an existing master's role. A plain admin sees
+                the option absent (it'd 403 server-side anyway). */}
+            {isMaster ? <option value="masteradmin">masteradmin</option> : null}
           </select>
         </label>
-        <label className="flex items-end gap-2 pb-1">
-          <input
-            type="checkbox"
-            checked={disabled}
-            onChange={(e) => setDisabled(e.target.checked)}
-          />
-          <span>Disabled (account cannot log in)</span>
-        </label>
+        {/* Disabled toggle is master-only — disabling is an account
+            lockout, which the spec scoped to top-tier admins only. */}
+        {isMaster ? (
+          <label className="flex items-end gap-2 pb-1">
+            <input
+              type="checkbox"
+              checked={disabled}
+              onChange={(e) => setDisabled(e.target.checked)}
+            />
+            <span>Disabled (account cannot log in)</span>
+          </label>
+        ) : null}
       </div>
+      {locked ? (
+        <div className="mt-2 rounded border border-keep-rule bg-keep-banner/30 p-2 text-[11px] text-keep-muted">
+          This user is a master admin. Only another master admin can edit their profile or change their role.
+        </div>
+      ) : null}
 
       {error ? <div className="mt-2 text-keep-accent">{error}</div> : null}
 
@@ -3667,7 +3829,7 @@ function UserEditForm({
         </button>
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || locked}
           className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
         >
           {submitting ? "Saving..." : "Save"}

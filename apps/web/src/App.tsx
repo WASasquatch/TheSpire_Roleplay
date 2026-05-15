@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, WorldDetail } from "@thekeep/shared";
-import { DEFAULT_THEME, normalizeTheme, VERSION } from "@thekeep/shared";
+import { DEFAULT_THEME, isAdminRole, normalizeTheme, VERSION } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
 import { SplashLanding } from "./components/SplashLanding.js";
@@ -27,7 +27,7 @@ import { WelcomeModal } from "./components/WelcomeModal.js";
 import { getSocket, disconnect as disconnectSocket } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
-import { applyFontPrefs, applyTheme, themeStyle, type UiFontScale } from "./lib/theme.js";
+import { ActiveThemeContext, applyFontPrefs, applyTheme, themeStyle, type UiFontScale } from "./lib/theme.js";
 import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
 import { fire as fireNotification, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
@@ -1837,11 +1837,17 @@ function Chat() {
   // Viewer-side moderator gate. Used to expose Lock/Unlock + cross-
   // author Delete in the forum UI. The server is authoritative on
   // every action — this only controls UI affordance visibility.
-  const canModerate = me?.role === "mod" || me?.role === "admin";
+  const canModerate = me?.role === "mod" || (!!me && isAdminRole(me.role));
   // Viewer-side admin gate. Stricter than canModerate; controls Pin /
   // Unpin visibility on topic cards. The server enforces admin-only
   // on PATCH /messages/:id/sticky too.
-  const canPin = me?.role === "admin";
+  const canPin = !!me && isAdminRole(me.role);
+  // Viewer-side cross-author edit gate. Admin tier (admin / masteradmin)
+  // can edit any user's post — the moderation lever for author touch-up
+  // requests that miss the normal grace window. Mods can hide a post
+  // via Delete but cannot rewrite words. The server re-checks via
+  // `isAdminRole(me.role)` on PATCH /messages/:id.
+  const canAdminEdit = !!me && isAdminRole(me.role);
   const activeTopic = useMemo(() => {
     if (!activeTopicId) return null;
     const m = messages.find((x) => x.id === activeTopicId);
@@ -1872,16 +1878,23 @@ function Chat() {
   }, [poppedTopicId, poppedTopic]);
 
   return (
-    // Pin the entire chat shell to the viewport with position: fixed so
-    // document-level scroll (autoFocus on the composer scrolling things
-    // into view, mobile chrome address-bar resize, etc.) can't shift it
-    // out from under the user. inset-0 (top/right/bottom/left = 0) anchors
-    // it to all four edges of the layout viewport, which is what older
-    // browsers fall back to. h-dvh overrides the height where supported,
-    // so on mobile keyboards the shell shrinks with the visual viewport
-    // and the composer follows instead of being pushed beneath the
-    // keyboard. overflow-hidden keeps any internal flex child that grows
-    // past its allocated height from leaking back into document overflow.
+    // ActiveThemeContext exposes `activeTheme` to descendants that need to
+    // inspect the palette imperatively at render time — currently the
+    // message renderers that nudge a player's chosen text color toward a
+    // legible variant against the current background. The CSS-var path
+    // (set by applyTheme above) still drives all standard styling; this
+    // is just for components that must branch on the bg color in JS.
+    <ActiveThemeContext.Provider value={activeTheme}>
+    {/* Pin the entire chat shell to the viewport with position: fixed so
+        document-level scroll (autoFocus on the composer scrolling things
+        into view, mobile chrome address-bar resize, etc.) can't shift it
+        out from under the user. inset-0 (top/right/bottom/left = 0) anchors
+        it to all four edges of the layout viewport, which is what older
+        browsers fall back to. h-dvh overrides the height where supported,
+        so on mobile keyboards the shell shrinks with the visual viewport
+        and the composer follows instead of being pushed beneath the
+        keyboard. overflow-hidden keeps any internal flex child that grows
+        past its allocated height from leaking back into document overflow. */}
     <div className="fixed inset-0 flex h-dvh flex-col overflow-hidden">
       {/* Theme-style ambient overlay. The active StyleGenerator (medieval-
           parchment in Phase 1) emits an SVG gradient stack as a CSS var
@@ -1892,7 +1905,7 @@ function Chat() {
       <Banner
         navLinksVersion={navLinksVersion}
         onOpenRules={() => setRulesOpen(true)}
-        {...(me?.role === "admin" ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
+        {...(me && isAdminRole(me.role) ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
       <StaleVersionBanner />
       {room?.linkedWorld ? (
@@ -1984,6 +1997,7 @@ function Chat() {
               : {})}
             canModerate={canModerate}
             canPin={canPin}
+            canAdminEdit={canAdminEdit}
             onQuotePost={(quoteText) => {
               // Inline forum-view quote: pre-fill the MAIN composer.
               // Append to whatever's already typed so the user can
@@ -2116,7 +2130,7 @@ function Chat() {
           // wouldn't gain anything from being warned about their own
           // content; admins need to see profiles for moderation regardless
           // of how the author marked them.
-          bypassNsfwGate={!!me && (me.id === openProfile.profile.userId || me.role === "admin")}
+          bypassNsfwGate={!!me && (me.id === openProfile.profile.userId || isAdminRole(me.role))}
           // Whisper / ignore are noise on your own profile - they're for
           // interacting with someone else. Suppress when the profile's
           // owning userId matches the viewer (covers your master profile
@@ -2219,7 +2233,7 @@ function Chat() {
           onSaved={() => setThemeVersion((v) => v + 1)}
         />
       ) : null}
-      {adminOpen && me?.role === "admin" ? (
+      {adminOpen && me && isAdminRole(me.role) ? (
         <AdminPanel
           onClose={() => setAdminOpen(false)}
           onLinksChanged={() => setNavLinksVersion((v) => v + 1)}
@@ -2235,6 +2249,7 @@ function Chat() {
           roomType={room?.type ?? null}
           canModerate={canModerate}
           canPin={canPin}
+          canAdminEdit={canAdminEdit}
           occupants={occ}
           onIconClick={onIconClick}
           onNameClick={onNameClick}
@@ -2351,6 +2366,7 @@ function Chat() {
         />
       ) : null}
     </div>
+    </ActiveThemeContext.Provider>
   );
 }
 

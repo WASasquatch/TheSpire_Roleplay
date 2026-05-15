@@ -259,7 +259,11 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
         email: body.email,
         username: body.username,
         passwordHash: await hashPassword(body.password),
-        role: isFirstUser ? "admin" : "user",
+        // The bootstrap user gets `masteradmin` so they hold every
+        // lever needed to configure a fresh install (branding,
+        // settings, rules, role escalation). Subsequent users default
+        // to plain `user` and are promoted by hand.
+        role: isFirstUser ? "masteradmin" : "user",
       });
     } catch (err) {
       // Race: two simultaneous registrations for the same username slip past
@@ -280,7 +284,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       id,
       username: body.username,
       sessionToken,
-      ...(isFirstUser ? { role: "admin", bootstrap: true } : {}),
+      ...(isFirstUser ? { role: "masteradmin", bootstrap: true } : {}),
     };
   });
 

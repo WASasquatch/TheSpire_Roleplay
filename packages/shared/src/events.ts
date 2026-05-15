@@ -225,6 +225,10 @@ export interface CommandDoc {
   description: string;
   subcommands: SubcommandDocWire[];
   isCustom: boolean;
+  /** True iff this is a custom command authored with the inline-use
+   *  toggle on. The composer surfaces these in the `!name` palette;
+   *  built-ins are always false. */
+  allowInline?: boolean;
 }
 
 export interface SubcommandDocWire {

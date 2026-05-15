@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { ChatMessage, RoomOccupant } from "@thekeep/shared";
+import { isAdminRole, resolveMessageColor, type ChatMessage, type RoomOccupant } from "@thekeep/shared";
 import type { Gender } from "../lib/gender.js";
 import { Composer } from "./Composer.js";
 import { ForumAvatar, ForumPostBody, topicHeading } from "./MessageList.js";
 import { parseInline } from "../lib/markdown.js";
+import { useActiveTheme } from "../lib/theme.js";
 
 interface Props {
   /** The topic message being focused. */
@@ -20,6 +21,8 @@ interface Props {
   canModerate: boolean;
   /** Viewer is an admin. Adds Pin/Unpin to the topic post toolbar. */
   canPin: boolean;
+  /** Viewer is an admin. Adds the cross-author Edit button to every post's toolbar. */
+  canAdminEdit: boolean;
   /** Room occupants — only used to derive gender + admin flags for the rendered posts so styling matches the inline forum view. */
   occupants: RoomOccupant[];
   /** Standard click handlers shared with the main forum view; passed through to ForumPostBody. */
@@ -70,6 +73,7 @@ export function ThreadModal({
   roomType,
   canModerate,
   canPin,
+  canAdminEdit,
   occupants,
   onIconClick,
   onNameClick,
@@ -148,10 +152,12 @@ export function ThreadModal({
   const adminUserIds = new Set<string>();
   for (const o of occupants) {
     genderByUser.set(o.userId, o.gender);
-    if (o.accountRole === "admin") adminUserIds.add(o.userId);
+    if (isAdminRole(o.accountRole)) adminUserIds.add(o.userId);
   }
 
   const heading = topicHeading(topic);
+  const themeBg = useActiveTheme().bg;
+  const topicAuthorColor = resolveMessageColor(topic.color, themeBg);
 
   return (
     <div
@@ -202,7 +208,7 @@ export function ThreadModal({
                   "rounded font-semibold text-keep-action hover:underline " +
                   (adminUserIds.has(topic.userId) ? "italic" : "")
                 }
-                style={topic.color ? { color: topic.color } : undefined}
+                style={topicAuthorColor ? { color: topicAuthorColor } : undefined}
               >
                 {topic.displayName}
               </button>
@@ -238,6 +244,7 @@ export function ThreadModal({
               canReport={roomType === "public"}
               canModerate={canModerate}
               canPin={canPin}
+              canAdminEdit={canAdminEdit}
               onQuotePost={(q) => setDraft((cur) => (cur ? `${cur}\n\n${q}` : q))}
               onIconClick={onIconClick}
               onNameClick={onNameClick}
@@ -263,6 +270,7 @@ export function ThreadModal({
                     canReport={roomType === "public"}
                     canModerate={canModerate}
                     canPin={canPin}
+                    canAdminEdit={canAdminEdit}
                     onQuotePost={(q) => setDraft((cur) => (cur ? `${cur}\n\n${q}` : q))}
                     onIconClick={onIconClick}
                     onNameClick={onNameClick}

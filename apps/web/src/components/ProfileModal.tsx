@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
+import { isAdminRole } from "@thekeep/shared";
 import type { CharacterPortrait, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
 import { genderGlyph } from "../lib/gender.js";
@@ -90,7 +91,19 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   // Stat entries that actually have a value - empty fields are dropped so
   // a half-filled character doesn't show a row of dashes.
   const statEntries = stats ? collectStatEntries(stats) : [];
-  const isCompletelyBlank = !bio && statEntries.length === 0 && !avatar && titles.length === 0 && links.length === 0 && journal.length === 0;
+  // Portraits live on the character profile only — master profiles don't
+  // carry a gallery, so master views fall back to length 0. The blank
+  // check counts them as "filled out" so a character with only gallery
+  // images (no bio/stats/avatar) still shows the gallery instead of the
+  // empty-profile placeholder.
+  const portraitCount = isChar ? profile.profile.portraits.length : 0;
+  const isCompletelyBlank = !bio
+    && statEntries.length === 0
+    && !avatar
+    && titles.length === 0
+    && links.length === 0
+    && journal.length === 0
+    && portraitCount === 0;
 
   return (
     <Modal onClose={onClose} variant="mobile-fullscreen">
@@ -225,7 +238,7 @@ function ProfileBody({
                       profile (characters are owned by a master that already
                       shows it). Site admins/mods are surfaced so visitors can
                       tell who's staff at a glance. */}
-                  {profile.profile.role === "admin" ? (
+                  {isAdminRole(profile.profile.role) ? (
                     <span className="ml-1 italic text-keep-action">· Admin</span>
                   ) : profile.profile.role === "mod" ? (
                     <span className="ml-1 italic text-keep-action">· Moderator</span>

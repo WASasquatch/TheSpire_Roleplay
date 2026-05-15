@@ -1,5 +1,7 @@
 import { Fragment, useState, type ReactNode } from "react";
+import { customCmdCssToStyle, splitOnCode, VMARK_SPAN_RE } from "@thekeep/shared";
 import { splitMentions } from "./mentions.js";
+import { useActiveTheme } from "./theme.js";
 
 /**
  * Inline markdown renderer for chat message bodies.
@@ -180,9 +182,37 @@ const HTML_TAG_ALIASES: Record<string, (children: ReactNode[]) => ReactNode> = {
 };
 
 const HTML_OPEN_RE = /^<([a-zA-Z]+)>/;
+/** Opener for `<font color="#rrggbb">` / `<font color='#rgb'>`. Single-
+ *  attribute only — that's the one attribute users actually reach for in
+ *  IRC-era HTML and it keeps the parser tiny. The color value is required
+ *  and must be a 3- or 6-digit hex literal; anything else falls through
+ *  to the literal-text path. */
+const FONT_OPEN_RE = /^<font\s+color\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))\s*>/i;
+const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}){1,2}$/;
 
 function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
   if (text[i] !== "<") return null;
+
+  // <font color="..."> — special-cased first since the generic
+  // HTML_OPEN_RE requires zero attributes and would otherwise miss it.
+  const fontOpen = FONT_OPEN_RE.exec(text.slice(i));
+  if (fontOpen) {
+    const raw = (fontOpen[1] ?? fontOpen[2] ?? fontOpen[3] ?? "").trim();
+    if (!HEX_COLOR_RE.test(raw)) return null;
+    const openLen = fontOpen[0].length;
+    const closeRe = /<\/font\s*>/i;
+    const rest = text.slice(i + openLen);
+    const closeMatch = closeRe.exec(rest);
+    if (!closeMatch) return null;
+    const closeStart = i + openLen + closeMatch.index;
+    const closeEnd = closeStart + closeMatch[0].length;
+    const inner = text.slice(i + openLen, closeStart);
+    return {
+      end: closeEnd,
+      node: <span style={{ color: raw }}>{parseInline(inner, depth + 1)}</span>,
+    };
+  }
+
   const open = HTML_OPEN_RE.exec(text.slice(i));
   if (!open) return null;
   const tag = open[1]!.toLowerCase();
@@ -209,20 +239,66 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
  * Markdown-significant characters that a leading backslash can escape.
  * Covers every delimiter `tryToken` would otherwise consume — asterisk,
  * underscore, tilde, pipe, backtick, the link/image brackets, the HTML
- * tag opener, and the backslash itself (so users can type a literal `\`
- * without it being read as the start of an escape). This is what lets
- * old-school IRC-style actions like `\*boinks Kaal\*` survive into the
- * rendered line with their asterisks intact.
+ * tag opener, the `@` (mention) and `!` (inline-command / image) triggers,
+ * and the backslash itself (so users can type a literal `\` without it
+ * being read as the start of an escape). This is what lets old-school
+ * IRC-style actions like `\*boinks Kaal\*` survive into the rendered line
+ * with their asterisks intact.
+ *
+ * `@` and `!` only matter when this renderer is the one reading them
+ * (e.g. messenger DMs, where there's no upstream mention/command pass);
+ * for chat and forum bodies, `splitMentions` and the server-side inline-
+ * command expander honor the same escapes before this code runs and
+ * already strip the leading backslash. Including them here keeps the
+ * escape contract uniform across every surface.
  */
-const MD_ESCAPABLE = new Set("*_~|`[]()!<>\\");
+const MD_ESCAPABLE = new Set("*_~|`[]()!<>\\@");
 
 function tryToken(text: string, i: number, depth: number): TokenMatch | null {
+  // Verified inline command — wins over everything else so the ✓
+  // tooltip stays attached to authentic server output. The marker uses
+  // U+2063 + U+27E6/U+27E7 brackets (see packages/shared/src/inlineMark.ts);
+  // the strip-before-expand pass on the server ensures the only way
+  // these characters reach the renderer is through `expandInlineCommands`.
+  if (text.charCodeAt(i) === 0x2063) {
+    // Anchor the marker regex at this position by slicing and resetting
+    // lastIndex; matchAll's iterator is fine but exec is cheaper for a
+    // single attempt.
+    VMARK_SPAN_RE.lastIndex = 0;
+    const m = VMARK_SPAN_RE.exec(text.slice(i));
+    if (m && m.index === 0) {
+      const name = m.groups?.name ?? "cmd";
+      const content = m.groups?.content ?? "";
+      // Optional CSS payload: URI-encoded on the wire (so the `|`
+      // separator and `⟧` close-bracket can never appear inside the
+      // value). decodeURIComponent can throw on a malformed payload
+      // (an inline marker the user managed to forge before the server's
+      // strip pass, or a corrupt round-trip); fall back to no CSS in
+      // that case rather than losing the whole verified span.
+      let css: string | null = null;
+      const rawCss = m.groups?.css;
+      if (rawCss) {
+        try { css = decodeURIComponent(rawCss); }
+        catch { css = null; }
+      }
+      return {
+        end: i + m[0].length,
+        node: (
+          <VerifiedInline cmd={name} css={css}>
+            {parseInline(content, depth + 1)}
+          </VerifiedInline>
+        ),
+      };
+    }
+  }
+
   // Backslash escape: `\X` where X is a markdown-special char renders
   // as the literal X with the backslash itself stripped. Highest-
-  // priority check so an escape always wins over the matching
-  // delimiter's normal interpretation, regardless of context (italic,
-  // bold, code, etc.). A lone trailing backslash falls through and
-  // renders as itself via the plain-text path.
+  // priority check (after the verification marker) so an escape always
+  // wins over the matching delimiter's normal interpretation,
+  // regardless of context (italic, bold, code, etc.). A lone trailing
+  // backslash falls through and renders as itself via the plain-text
+  // path.
   if (text[i] === "\\") {
     const next = text[i + 1];
     if (next && MD_ESCAPABLE.has(next)) {
@@ -282,6 +358,40 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
           };
         }
       }
+    }
+  }
+
+  // Fenced code block: ```optional-lang\n...content...\n```
+  //
+  // Checked BEFORE the single-backtick inline rule so a triple-fence
+  // isn't mistaken for three empty inline spans. Content is literal —
+  // no further markdown / mention / autolink parsing happens inside.
+  // The optional language hint (the run of non-newline chars after the
+  // opening ```) is stripped from the rendered output but its presence
+  // marks the opener as "fenced" rather than "three inline backticks
+  // back-to-back."
+  if (ch === "`" && ch2 === "`" && ch3 === "`") {
+    const close = text.indexOf("```", i + 3);
+    if (close >= i + 3) {
+      // Strip the language hint that runs from `i+3` to the first
+      // newline (if any). When there's no newline before the close,
+      // treat the whole opener as a single-line fence.
+      let contentStart = i + 3;
+      const firstNl = text.indexOf("\n", contentStart);
+      if (firstNl >= 0 && firstNl < close) {
+        contentStart = firstNl + 1;
+      }
+      // Trim one trailing newline before the closing fence so the
+      // rendered block doesn't carry an empty final line.
+      const contentEnd = close > 0 && text[close - 1] === "\n" ? close - 1 : close;
+      return {
+        end: close + 3,
+        node: (
+          <pre className="my-1 overflow-x-auto rounded bg-keep-panel/60 px-2 py-1 font-mono text-[0.9em]">
+            <code>{text.slice(contentStart, contentEnd)}</code>
+          </pre>
+        ),
+      };
     }
   }
 
@@ -457,6 +567,57 @@ export function parseInline(text: string, depth: number = 0): ReactNode[] {
 }
 
 /**
+ * Wrapper for a server-verified inline command expansion. The text
+ * inside `children` came from `expandInlineCommands` on the server (the
+ * marker is stripped from user input before expansion, so anything
+ * reaching the renderer inside the verification brackets is guaranteed
+ * authentic). The visible affordance is a small ✓ that appears at the
+ * end of the span; the tooltip names the underlying command so a
+ * reader hovering "( rolls 🎲 1d20: 12 )" sees "Verified: this came
+ * from the /roll command" rather than having to take the rolling
+ * player's word for it.
+ *
+ * The span itself doesn't change typography — the inline output should
+ * read naturally with the surrounding sentence. The ✓ is rendered as
+ * a faint superscript glyph after the content so it doesn't push other
+ * tokens around.
+ */
+function VerifiedInline({
+  cmd,
+  css,
+  children,
+}: {
+  cmd: string;
+  /** Optional sanitized CSS declaration list to paint the body span.
+   *  Already URL-decoded by parseInline; null when the command had no
+   *  CSS override. Parsed into a React style object here so the same
+   *  per-command palette an admin sees on the standalone `/cmd` form
+   *  also fires when the command is spliced inline via `!cmd`. */
+  css: string | null;
+  children: ReactNode;
+}) {
+  // Read the viewer's theme so an admin-picked color inside the CSS
+  // gets legibility-nudged the same way per-user chat colors do.
+  // Subtle: the verification ring (`bg-keep-system-100/40`) already
+  // tints the surrounding span, but the body text underneath still
+  // needs to contrast with the chat's main background, which is
+  // approximately `theme.bg`.
+  const themeBg = useActiveTheme().bg;
+  const inlineStyle = customCmdCssToStyle(css, themeBg);
+  return (
+    <span
+      className="rounded bg-keep-system-100/40 px-0.5 ring-1 ring-inset ring-keep-system/40"
+      title={`Verified: ran the /${cmd} command`}
+      style={inlineStyle ?? undefined}
+    >
+      {children}
+      <span aria-hidden className="ml-0.5 align-super text-[0.7em] text-keep-system">✓</span>
+      <span className="sr-only"> (verified /{cmd} output)</span>
+    </span>
+  );
+}
+
+/**
  * Click-to-reveal span for `||spoiler||` markdown. Renders as a muted
  * blocked-out chip until clicked; the underlying text is in the DOM so screen
  * readers and copy/paste still work, but it's visually masked. Once revealed
@@ -512,7 +673,11 @@ function SpoilerSpan({ children }: { children: ReactNode }) {
  * Grouping rule: any line whose first non-whitespace run is `>` is
  * part of a quote. Adjacent quote lines fuse into one blockquote;
  * the `> ` prefix (or just `>`) is stripped from each line before
- * the inline parser runs on the body.
+ * the inline parser runs on the body. Lines inside a fenced ```code```
+ * block are exempt — the body is first split into code vs. text
+ * regions via `splitOnCode`, and only the text regions undergo the
+ * blockquote pass. This way a `> ` line inside a code snippet stays
+ * literal instead of getting reclassified as a quote.
  */
 export function renderForumBody(
   body: string,
@@ -526,51 +691,55 @@ export function renderForumBody(
    */
   selfNames: ReadonlyArray<string> = [],
 ): ReactNode {
-  const lines = body.split("\n");
-  type Group = { kind: "quote" | "normal"; lines: string[] };
-  const groups: Group[] = [];
-  for (const line of lines) {
-    const isQuote = /^\s*>/.test(line);
-    const last = groups[groups.length - 1];
-    if (last && last.kind === (isQuote ? "quote" : "normal")) {
-      last.lines.push(line);
-    } else {
-      groups.push({ kind: isQuote ? "quote" : "normal", lines: [line] });
+  const out: ReactNode[] = [];
+  splitOnCode(body).forEach((seg, segIdx) => {
+    if (seg.kind === "code") {
+      // Hand the raw fenced/inline snippet to parseInline so the same
+      // <pre>/<code> styling fires whether the post is in a forum or a
+      // chat line.
+      out.push(<Fragment key={`c${segIdx}`}>{parseInline(seg.raw)}</Fragment>);
+      return;
     }
-  }
-
-  return groups.map((g, idx) => {
-    if (g.kind === "quote") {
-      // Strip the leading `>` (and one optional following space) from
-      // every line so the inner text reads cleanly. Leaves any
-      // existing markdown inside the quote intact — `> **bold**`
-      // renders the bold inside the blockquote.
-      const stripped = g.lines.map((l) => l.replace(/^\s*>\s?/, "")).join("\n");
-      const parts = splitMentions(stripped);
-      return (
-        <blockquote
-          key={`q${idx}`}
-          // border-l + muted bg gives the conventional quote look.
-          // `my-1` separates it from surrounding paragraphs;
-          // `whitespace-pre-wrap` preserves newlines inside the
-          // quote so multi-line quotes read correctly.
-          className="my-1 whitespace-pre-wrap border-l-2 border-keep-action/50 bg-keep-banner/40 px-3 py-1 text-keep-muted italic"
-        >
+    const lines = seg.raw.split("\n");
+    type Group = { kind: "quote" | "normal"; lines: string[] };
+    const groups: Group[] = [];
+    for (const line of lines) {
+      const isQuote = /^\s*>/.test(line);
+      const last = groups[groups.length - 1];
+      if (last && last.kind === (isQuote ? "quote" : "normal")) {
+        last.lines.push(line);
+      } else {
+        groups.push({ kind: isQuote ? "quote" : "normal", lines: [line] });
+      }
+    }
+    groups.forEach((g, idx) => {
+      if (g.kind === "quote") {
+        // Strip the leading `>` (and one optional following space) from
+        // every line so the inner text reads cleanly. Leaves any
+        // existing markdown inside the quote intact — `> **bold**`
+        // renders the bold inside the blockquote.
+        const stripped = g.lines.map((l) => l.replace(/^\s*>\s?/, "")).join("\n");
+        const parts = splitMentions(stripped);
+        out.push(
+          <blockquote
+            key={`q${segIdx}-${idx}`}
+            className="my-1 whitespace-pre-wrap border-l-2 border-keep-action/50 bg-keep-banner/40 px-3 py-1 text-keep-muted italic"
+          >
+            {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames)}
+          </blockquote>,
+        );
+        return;
+      }
+      const joined = g.lines.join("\n");
+      const parts = splitMentions(joined);
+      out.push(
+        <Fragment key={`p${segIdx}-${idx}`}>
           {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames)}
-        </blockquote>
+        </Fragment>,
       );
-    }
-    // Normal text group. We join with newlines and rely on the
-    // containing `whitespace-pre-wrap` div to preserve them, exactly
-    // the same way the body rendered before this wrapper existed.
-    const joined = g.lines.join("\n");
-    const parts = splitMentions(joined);
-    return (
-      <Fragment key={`p${idx}`}>
-        {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames)}
-      </Fragment>
-    );
+    });
   });
+  return out;
 }
 
 /**

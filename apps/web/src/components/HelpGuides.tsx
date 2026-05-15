@@ -209,6 +209,14 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode }> = [
             Same controls.
           </li>
           <li>
+            Typing <K>!</K> mid-message opens an autocomplete popup of <b>inline commands</b> —
+            these splice their result into the sentence instead of running as a standalone command.
+            <K>!roll</K> drops in a dice roll, <K>!roll:3d6</K> with a custom dice spec, and admins
+            can mark their own custom commands as inline. Real expansions show a small ✓ that names
+            the underlying command on hover, so a typed-by-hand fake doesn't pass for the real
+            output. Type <K>{`\\!roll`}</K> (with a leading backslash) to keep the literal text.
+          </li>
+          <li>
             Anything not starting with <K>/</K> is a normal "say" message. Wrap a sentence in
             <K>/me {`<action>`}</K> to post a third-person action ("Sigrid draws her sword.").
           </li>

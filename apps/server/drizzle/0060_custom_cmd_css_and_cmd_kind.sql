@@ -1,0 +1,24 @@
+-- Custom-command CSS + per-message cmd_css snapshot + new "cmd" message kind.
+--
+-- 1. custom_commands.css
+--    Admin-authored CSS declaration list ("font-weight: bold; color: #4a8;").
+--    Validated against a hex / RGB / typography allow-list before save (see
+--    `sanitizeCustomCmdCss` in packages/shared/src/customCmdCss.ts). Null/empty
+--    means "no override" — the command body picks up whatever the default
+--    chat styling provides.
+--
+-- 2. messages.cmd_css
+--    Snapshot of the resolved css string at send time. Frozen on the row so a
+--    later edit to the command's css doesn't restyle historical messages —
+--    same "snapshot" rationale as `display_name`, `color`, etc.
+--
+-- 3. messages.kind acquires a new "cmd" value
+--    Drizzle's `text(... enum: [...])` is a TypeScript-level hint only — the
+--    underlying SQLite column is plain TEXT, so no DDL change is needed to
+--    permit the new value. Existing rows continue to use their prior kinds
+--    ("me" / "say"); new custom-command sends go out as "cmd". The renderer
+--    skips the auto-display-name prefix for cmd kind, letting the template's
+--    {sender} placeholder control where the name appears (or whether it
+--    appears at all).
+ALTER TABLE custom_commands ADD COLUMN css TEXT;
+ALTER TABLE messages ADD COLUMN cmd_css TEXT;

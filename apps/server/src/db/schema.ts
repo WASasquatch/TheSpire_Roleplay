@@ -319,7 +319,7 @@ export const messages = sqliteTable(
     /** snapshot - display name at send time (so renames don't rewrite history) */
     displayName: text("display_name").notNull(),
     kind: text("kind", {
-      enum: ["say", "me", "system", "whisper", "roll", "announce", "scene", "npc", "ooc"],
+      enum: ["say", "me", "cmd", "system", "whisper", "roll", "announce", "scene", "npc", "ooc"],
     })
       .notNull()
       .default("say"),
@@ -392,6 +392,13 @@ export const messages = sqliteTable(
      * `PATCH /messages/:id/sticky`.
      */
     isSticky: integer("is_sticky", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Server-validated CSS snapshot for `kind: "cmd"` rows. Frozen on the
+     * row at send time so a later edit to the underlying custom command's
+     * CSS doesn't restyle historical messages — same snapshot pattern used
+     * for `display_name`, `color`, etc. Null on every other kind.
+     */
+    cmdCss: text("cmd_css"),
     createdAt: ts("created_at"),
   },
   (t) => ({
@@ -552,6 +559,13 @@ export const customCommands = sqliteTable(
      *  output ("Alice flips heads") differently from the embedded
      *  form ("flips heads"). */
     inlineTemplate: text("inline_template"),
+    /** Optional CSS declaration list applied to the rendered command
+     *  body (e.g. `font-weight: bold; color: #4a8;`). Validated against
+     *  the typography/color allow-list in
+     *  packages/shared/src/customCmdCss.ts before storage. Null = use
+     *  the default chat styling.
+     */
+    css: text("css"),
     createdById: text("created_by_id")
       .notNull()
       .references(() => users.id, { onDelete: "set null" }),

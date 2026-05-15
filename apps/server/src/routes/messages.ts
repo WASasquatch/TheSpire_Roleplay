@@ -65,6 +65,7 @@ function toWire(m: typeof messages.$inferSelect): ChatMessage {
     ...(m.lockedAt ? { lockedAt: +m.lockedAt } : {}),
     ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
     ...(m.isSticky ? { isSticky: true } : {}),
+    ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
   };
 }
 

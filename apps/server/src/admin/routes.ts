@@ -19,7 +19,7 @@ import {
   users,
   worlds,
 } from "../db/schema.js";
-import { COLOR_TOKEN_OR_HEX_RE, isAdminRole, isMasterAdminRole, type AuditEntry, type Role } from "@thekeep/shared";
+import { COLOR_TOKEN_OR_HEX_RE, CUSTOM_CMD_CSS_MAX_LEN, isAdminRole, isMasterAdminRole, sanitizeCustomCmdCss, type AuditEntry, type Role } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import type { CommandRegistry } from "../commands/registry.js";
 import {
@@ -930,6 +930,17 @@ export async function registerAdminRoutes(
      *  back to the fallback (use `template`). Same length cap as the
      *  main template — both end up rendered through the same engine. */
     inlineTemplate: z.string().max(2000).nullable().optional(),
+    /** Optional CSS declaration list applied to the rendered body. Stored
+     *  as raw text (e.g. `font-weight: bold; color: #4a8;`) and validated
+     *  on save against {@link sanitizeCustomCmdCss} — any property not in
+     *  the typography/color allow-list, or any value that doesn't match
+     *  the per-property regex, is dropped before persistence. Pass null
+     *  to clear. */
+    css: z
+      .string()
+      .max(CUSTOM_CMD_CSS_MAX_LEN)
+      .nullable()
+      .optional(),
   });
 
   app.get("/admin/custom-commands", async () => {
@@ -961,6 +972,11 @@ export async function registerAdminRoutes(
     }
     const id = nanoid();
     const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+    // CSS gets sanitized here on write — any property not in the allow-
+    // list (or any value that fails its per-property regex) is dropped,
+    // so the persisted value is always already safe to feed straight
+    // back to the renderer.
+    const safeCss = body.css == null ? body.css : sanitizeCustomCmdCss(body.css) || null;
     await db.insert(customCommands).values({
       id,
       name: body.name.toLowerCase(),
@@ -971,6 +987,7 @@ export async function registerAdminRoutes(
       color: body.color ?? null,
       allowInline: body.allowInline ?? false,
       inlineTemplate: body.inlineTemplate ?? null,
+      css: safeCss ?? null,
       createdById: sessionUser.id,
     });
     if (body.aliases?.length) {
@@ -1015,6 +1032,9 @@ export async function registerAdminRoutes(
           ...(body.color !== undefined ? { color: body.color } : {}),
           ...(body.allowInline !== undefined ? { allowInline: body.allowInline } : {}),
           ...(body.inlineTemplate !== undefined ? { inlineTemplate: body.inlineTemplate } : {}),
+          ...(body.css !== undefined
+            ? { css: body.css == null ? null : sanitizeCustomCmdCss(body.css) || null }
+            : {}),
           updatedAt: new Date(),
         })
         .where(eq(customCommands.id, req.params.id));

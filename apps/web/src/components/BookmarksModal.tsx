@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Bookmark } from "@thekeep/shared";
+import { customCmdCssToStyle, resolveMessageColor, type Bookmark } from "@thekeep/shared";
+import { parseInline } from "../lib/markdown.js";
+import { useActiveTheme } from "../lib/theme.js";
 import { readError } from "../lib/http.js";
 import { Modal } from "./Modal.js";
 
@@ -207,6 +209,18 @@ function Row({
   const m = bookmark.message;
   const when = new Date(m.createdAt).toLocaleString();
   const removed = m.body === "[message removed]";
+  // Match the chat renderer's styling pass so a bookmarked kind="cmd"
+  // row reads in the same palette + CSS the user remembers seeing
+  // when they bookmarked it. `useActiveTheme().bg` lets the legibility
+  // nudge swap in a contrastier variant of an admin-set color when
+  // the viewer's theme would have made it unreadable.
+  const themeBg = useActiveTheme().bg;
+  const color = resolveMessageColor(m.color, themeBg);
+  const cmdStyle = m.kind === "cmd" ? customCmdCssToStyle(m.cmdCss ?? null, themeBg) : null;
+  const bodyStyle = {
+    ...(color ? { color } : {}),
+    ...(cmdStyle ?? {}),
+  };
   return (
     <div className="group px-2 py-2 hover:bg-keep-banner/30">
       <div className="flex items-baseline justify-between gap-2 text-[10px] uppercase tracking-widest text-keep-muted">
@@ -224,7 +238,12 @@ function Row({
         className="mt-1 block w-full text-left text-sm leading-snug hover:underline"
         title="Jump to this message"
       >
-        <span className={removed ? "italic text-keep-muted" : "break-words"}>{m.body}</span>
+        <span
+          className={removed ? "italic text-keep-muted" : "break-words"}
+          style={removed ? undefined : bodyStyle}
+        >
+          {removed ? m.body : parseInline(m.body)}
+        </span>
       </button>
       {bookmark.note ? (
         <div className="mt-1 break-words rounded border-l-2 border-keep-action/40 bg-keep-action/5 px-2 py-0.5 text-xs italic text-keep-text/85">

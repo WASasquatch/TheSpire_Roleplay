@@ -69,4 +69,16 @@ export interface CommandHandler {
   /** restricts who can run it */
   permission?: Role;
   run(ctx: CommandContext): CommandResult;
+  /**
+   * Opt-in inline expansion. When set, the registry includes this
+   * builtin in the `!name` mid-message pool. The function receives any
+   * `:arg` payload the user supplied (`!roll:3d6` → `"3d6"`; bare
+   * `!roll` → `""`), the calling user, and the host room id, and
+   * returns either the rendered substitute string OR `null` to leave
+   * the `!name` token literal (e.g. malformed args). The returned text
+   * is wrapped in the shared verification marker by the dispatcher so
+   * the client renderer can paint a ✓ tooltip distinguishing real
+   * server expansions from a user typing the same text into chat.
+   */
+  inline?: (args: string, user: SessionUser, roomId: string) => string | null;
 }

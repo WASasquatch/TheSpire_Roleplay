@@ -305,6 +305,7 @@ export async function registerRoomsRoutes(
       ...(m.lockedAt ? { lockedAt: +m.lockedAt } : {}),
       ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
       ...(m.isSticky ? { isSticky: true } : {}),
+      ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
     }));
     return { messages: wire };
   });
@@ -404,6 +405,7 @@ export async function registerRoomsRoutes(
       ...(m.lockedAt ? { lockedAt: +m.lockedAt } : {}),
       ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
       ...(m.isSticky ? { isSticky: true } : {}),
+      ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
     }));
     return { messages: wire, hasMore };
   });
@@ -505,6 +507,7 @@ export async function registerRoomsRoutes(
           ...(m.lockedAt ? { lockedAt: +m.lockedAt } : {}),
           ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
           ...(m.isSticky ? { isSticky: true } : {}),
+          ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
         };
       }
 
@@ -671,6 +674,7 @@ export async function registerRoomsRoutes(
         ...(m.lockedAt ? { lockedAt: +m.lockedAt } : {}),
         ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
         ...(m.isSticky ? { isSticky: true } : {}),
+        ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
       }));
       return { topics, hasMore };
     },

@@ -101,6 +101,14 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
         body: m.deletedAt ? "[message removed]" : m.body,
         createdAt: +m.createdAt,
         replyToId: m.replyToId ?? null,
+        // Snapshot color + cmd-css so the bookmark preview paints the
+        // same way the row reads in chat. `kind: "cmd"` rows especially
+        // depend on this — without the css the bookmarked snippet drops
+        // back to plain text and an admin-styled command (italic + a
+        // theme color) renders inconsistently between the live chat and
+        // the bookmarks viewer.
+        ...(m.color ? { color: m.color } : {}),
+        ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
       };
       out.push({
         id: r.id,

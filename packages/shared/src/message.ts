@@ -1,6 +1,10 @@
 export type MessageKind =
   | "say"      // normal chat: "<DisplayName>: <body>"
   | "me"       // action: "<DisplayName> <body>"  (no brackets, no colon)
+  | "cmd"      // custom-command output: body is self-contained ({sender} is
+               // expanded inline by the template, so the renderer does NOT
+               // auto-prepend the display name like it does for "me"/"say").
+               // Optional `cmdCss` styles the body.
   | "system"   // server notice (joins, kicks, topic changes)
   | "whisper"  // 1:1 private message - only sender + recipient receive
   | "roll"     // dice roll output: "<DisplayName> rolls 1d20: 17"
@@ -82,6 +86,15 @@ export interface ChatMessage {
    * this; the forum view shows a 📌 indicator. Defaults to false.
    */
   isSticky?: boolean;
+  /**
+   * Server-validated CSS to apply to the rendered body of a `kind: "cmd"`
+   * message. Stored verbatim as a CSS declaration list ("font-weight: bold;
+   * color: #4a8" etc.); the renderer parses + camel-cases the properties
+   * before applying them as an inline style. Snapshotted at send time so a
+   * later edit to the underlying custom command's CSS doesn't restyle
+   * historical messages. Absent on every kind except `cmd`.
+   */
+  cmdCss?: string | null;
 }
 
 /**

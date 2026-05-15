@@ -1,26 +1,48 @@
 import { eq } from "drizzle-orm";
+import {
+  markVerified,
+  sanitizeCustomCmdCss,
+  splitOnCode,
+  stripVerificationMarkers,
+} from "@thekeep/shared";
 import { customCommandAliases, customCommands } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import type { CommandContext, CommandHandler, SessionUser } from "./types.js";
 
 /**
  * Per-name inline-command metadata. Populated alongside the regular
- * command map during `reloadCustom`. Only commands whose admin row has
- * `allow_inline = true` land in here — the lookup powers both the
- * `/commands` doc payload (so the composer can filter its `!` palette)
- * and the mid-message expansion pass in dispatch.ts.
+ * command map during `reloadCustom` (custom commands) and at builtin
+ * registration time (builtins that expose an `inline` handler).
+ *
+ * The `render` closure unifies the two sources — custom commands run
+ * their template through `renderTemplateWithVars`, builtins run their
+ * `inline()` callback. The `expandInlineCommands` site doesn't care
+ * which kind it's invoking.
  *
  * Keyed by every name + alias so callers can resolve case-insensitively
  * without re-scanning aliases on each hit.
  */
 export interface InlineCommandEntry {
   canonicalName: string;
-  template: string;
-  /** Optional per-command color (hex or `theme:<slot>`). Inline expansion
-   *  ignores this today because the spliced text rides inside the host
-   *  message's color, but we keep it on the record so future callers can
-   *  apply formatting if we ever decide to ship colored inline pills. */
-  color: string | null;
+  /** True when the entry came from a builtin (e.g. `/roll`); false for
+   *  admin-authored custom commands. Informational — currently only used
+   *  to gate things like "show this in the !palette but not the admin
+   *  CSS editor." */
+  builtin: boolean;
+  /** Snapshotted CSS to apply to the rendered span. Always null for
+   *  builtin inlines; for custom commands it carries whatever the admin
+   *  saved on the row (sanitized). The dispatcher does NOT currently
+   *  weave this into the host message body since the inline output
+   *  rides as plain text spliced into a chat message of its own kind;
+   *  reserved for a future styling pass that wraps the marker in a
+   *  span with this style applied. */
+  css: string | null;
+  /** Render the inline replacement text. `args` is whatever the user
+   *  typed after a `:` delimiter (`!roll:3d6` → `"3d6"`; bare `!roll`
+   *  → `""`). Returning null tells the dispatcher to leave the original
+   *  `!name[:arg]` token literal in place (used for invalid dice
+   *  expressions etc.). */
+  render(args: string, user: SessionUser, roomId: string): string | null;
 }
 
 /**
@@ -51,6 +73,23 @@ export class CommandRegistry {
       const k = alias.toLowerCase();
       this.byName.set(k, handler);
       this.builtinNames.add(k);
+    }
+    // Builtins that opted into inline expansion get folded into the
+    // same inline registry as custom commands. The render shape is
+    // unified — `expandInlineCommands` doesn't know the difference.
+    if (handler.inline) {
+      const inlineFn = handler.inline;
+      const entry: InlineCommandEntry = {
+        canonicalName: handler.name.toLowerCase(),
+        builtin: true,
+        css: null,
+        render: (args, user, roomId) => inlineFn(args, user, roomId),
+      };
+      this.inlineByName.set(handler.name.toLowerCase(), entry);
+      for (const alias of handler.aliases ?? []) {
+        this.inlineByName.set(alias.toLowerCase(), entry);
+      }
+      this.inlineCanonicalNames.add(handler.name.toLowerCase());
     }
   }
 
@@ -96,10 +135,23 @@ export class CommandRegistry {
         const inlineBody = c.inlineTemplate && c.inlineTemplate.trim()
           ? c.inlineTemplate
           : c.template;
+        // Sanitize the CSS at load time so a hostile direct DB write
+        // can't smuggle a disallowed property through; this is the same
+        // pass the admin-route POST applies, applied defensively.
+        const css = sanitizeCustomCmdCss(c.css ?? "") || null;
         const entry: InlineCommandEntry = {
           canonicalName: handler.name,
-          template: inlineBody,
-          color: c.color,
+          builtin: false,
+          css,
+          render: (_args, user, roomId) =>
+            renderTemplateWithVars(inlineBody, {
+              name: user.displayName,
+              sender: user.displayName,
+              target: "",
+              args: "",
+              rest: "",
+              ...commonVars(roomId),
+            }),
         };
         for (const n of allNames) {
           if (this.builtinNames.has(n)) continue;
@@ -170,9 +222,15 @@ function makeCustomHandler(
     description: string | null;
     /** Optional per-command color (hex). Null = inherit sender's chat color. */
     color: string | null;
+    /** Optional CSS declaration list, applied to the rendered body. */
+    css: string | null;
   },
   aliases: string[],
 ): CommandHandler {
+  // Defensive sanitization mirrors the admin POST/PATCH pass — keeps a
+  // direct DB write from sneaking a disallowed property into the live
+  // broadcast.
+  const safeCss = sanitizeCustomCmdCss(c.css ?? "") || null;
   return {
     name: c.name.toLowerCase(),
     aliases: aliases.map((a) => a.toLowerCase()),
@@ -180,12 +238,24 @@ function makeCustomHandler(
     async run(ctx) {
       const rendered = renderTemplate(c.template, ctx);
       const { addMessage } = await import("../realtime/broadcast.js");
+      // Custom commands always emit `kind: "cmd"` now. The renderer
+      // for cmd kind does NOT auto-prepend the display name — the
+      // template's `{sender}` placeholder controls placement. Legacy
+      // installations are migrated by 0061 which prepends `{sender} `
+      // to every template lacking the placeholder so historical
+      // behaviour is preserved on upgrade.
+      //
+      // We still track the original action/say distinction via the
+      // (untyped on the wire) command row, but the message itself no
+      // longer needs it — styling diverges by `kind: "cmd"` instead
+      // of by the legacy "me"/"say" split.
       await addMessage(ctx, {
-        kind: c.kind === "action" ? "me" : "say",
+        kind: "cmd",
         body: rendered,
         // Only override when the admin set a color; otherwise let the
         // sender's /color preference flow through.
         ...(c.color ? { color: c.color } : {}),
+        ...(safeCss ? { cmdCss: safeCss } : {}),
       });
     },
   };
@@ -286,23 +356,47 @@ function commonVars(roomId: string): Record<string, string> {
  *   - the name starts with a letter and is built from the same alphabet
  *     custom-command names use (the admin route validates this on insert).
  *
+ * The named "prefix" group captures the character immediately before
+ * the `!` (or empty at start of input) so `expandInlineCommands` can
+ * recognize a `\!` backslash escape and leave that occurrence literal.
+ *
  * The capture group is the bare name (no leading `!`). Used both server-
  * side in `expandInlineCommands` and indirectly mirrored by the composer
  * trigger detector (which has its own caret-aware variant).
  */
-const INLINE_TRIGGER_RE = /(?<![\w!])!([a-z][a-z0-9_-]{0,31})/gi;
+const INLINE_TRIGGER_RE =
+  /(?<prefix>^|[^\w!])!(?<name>[a-z][a-z0-9_-]{0,31})(?::(?<arg>[A-Za-z0-9]+))?/gi;
 
 /**
- * Expand every `!name` token in a chat-message body using the registry's
- * inline-eligible commands. Unknown names — or names whose command exists
- * but isn't inline-enabled — are left as literal `!name` text. The
- * standalone slash-command path is unaffected.
+ * Expand every `!name[:arg]` token in a chat-message body using the
+ * registry's inline-eligible commands. Unknown names — or names whose
+ * command exists but isn't inline-enabled — are left as literal
+ * `!name[:arg]` text. The standalone slash-command path is unaffected.
  *
- * Inline templates render with empty `target`/`args`/`rest` since there
- * is no way to syntactically delimit args inside a sentence; authors
- * that need parameterized output should keep using `/cmd args`. The
- * sender / time / date / room vars + dice / choose / math helpers cover
- * the realistic inline use cases (`!random`, `!flip`, `!d20`, etc.).
+ * Suppression rules so a writer can show what a command LOOKS like
+ * without firing it:
+ *   - Tokens inside an inline `code` span or a fenced ```code``` block
+ *     are left literal (the shared `splitOnCode` segmenter identifies
+ *     those regions; this function only walks the text segments).
+ *   - A backslash immediately before the `!` escapes the trigger: the
+ *     backslash is stripped and `!name` survives as literal text.
+ *   - Pre-existing verification markers (a user who typed the literal
+ *     marker characters into chat trying to fake authentic output)
+ *     are stripped BEFORE expansion runs, so the only way the markers
+ *     reach a recipient is via a real expansion this function just
+ *     produced. This is what makes the renderer's ✓ tooltip claim
+ *     ("this actually came from the server-side command") trustworthy.
+ *
+ * Inline calls accept an optional `:arg` payload after the name —
+ * `!roll:3d6`, `!flip:coin`, etc. Custom-command inline templates
+ * ignore the arg (they render with empty `target`/`args`/`rest`);
+ * builtins that opt in via {@link CommandHandler.inline} receive it
+ * directly. Authors that need richer parameterization should keep
+ * using `/cmd args`.
+ *
+ * Every real expansion is wrapped in {@link markVerified} so the client
+ * can paint the verification tooltip; the wrapper rides through
+ * persistence and re-broadcast unchanged.
  */
 export function expandInlineCommands(
   body: string,
@@ -310,20 +404,36 @@ export function expandInlineCommands(
   user: SessionUser,
   roomId: string,
 ): string {
+  // Always strip pre-existing markers first — this is what guarantees
+  // every marker the client sees came from this function on this call.
+  const cleaned = stripVerificationMarkers(body);
   // Cheap escape hatch: bodies with no `!` at all skip the regex entirely.
-  if (!body.includes("!")) return body;
-  return body.replace(INLINE_TRIGGER_RE, (match, name: string) => {
-    const entry = registry.resolveInline(name);
-    if (!entry) return match;
-    return renderTemplateWithVars(entry.template, {
-      name: user.displayName,
-      sender: user.displayName,
-      target: "",
-      args: "",
-      rest: "",
-      ...commonVars(roomId),
-    });
-  });
+  if (!cleaned.includes("!")) return cleaned;
+  return splitOnCode(cleaned)
+    .map((seg) => {
+      if (seg.kind === "code") return seg.raw;
+      return seg.raw.replace(
+        INLINE_TRIGGER_RE,
+        (match: string, prefix: string, name: string, arg: string | undefined) => {
+          // Backslash escape — strip the `\`, keep the literal `!name[:arg]`.
+          if (prefix === "\\") return arg ? `!${name}:${arg}` : `!${name}`;
+          const entry = registry.resolveInline(name);
+          if (!entry) return match;
+          const rendered = entry.render(arg ?? "", user, roomId);
+          if (rendered === null) return match;
+          // Build the replacement so the captured prefix character isn't
+          // dropped (it's part of the match), and wrap the body in
+          // verification markers so the client paints the ✓ tooltip.
+          // `entry.css` rides through the marker (URI-encoded) so the
+          // renderer can apply the command's sanitized style to the
+          // spliced span — without this an admin's `font-style: italic`
+          // CSS only fired on the standalone `/cmd` form, not on the
+          // inline `!cmd` form.
+          return prefix + markVerified(entry.canonicalName, rendered, entry.css);
+        },
+      );
+    })
+    .join("");
 }
 
 /**

@@ -68,6 +68,14 @@ export async function addMessage(
      * responsible for trimming and length-capping; we just persist it.
      */
     title?: string | null;
+    /**
+     * Snapshot CSS for `kind: "cmd"` rows. Set by the custom-command
+     * handler from the (sanitized) admin-authored value on the
+     * command row. Frozen on the message so a later edit to the
+     * command's CSS doesn't restyle history. Ignored for every other
+     * kind.
+     */
+    cmdCss?: string | null;
   },
 ): Promise<void> {
   // Inline-command expansion. The body may carry user-authored
@@ -164,6 +172,10 @@ export async function addMessage(
     threadCategoryId: payload.threadCategoryId ?? null,
     title: payload.title ?? null,
     avatarUrl: avatarSnapshot,
+    // Frozen snapshot of the command's CSS at send time. Only meaningful
+    // for `kind: "cmd"` rows; left null on every other kind even when the
+    // caller forgot to omit it.
+    cmdCss: payload.kind === "cmd" ? (payload.cmdCss ?? null) : null,
     // last_activity_at on insert:
     //   - top-level row (topic, or any flat-chat message): its own
     //     createdAt — for forum topics this seeds the ordering before
@@ -206,6 +218,10 @@ export async function addMessage(
     // don't (the column is unused on reply rows, and the parent's
     // separate UPDATE above is what the client listens for).
     ...(payload.replyToId ? {} : { lastActivityAt: +now }),
+    // Only attach cmdCss for kind="cmd" so the wire payload stays
+    // minimal for other kinds (a stray null would be harmless but adds
+    // noise to every chat line).
+    ...(payload.kind === "cmd" && payload.cmdCss ? { cmdCss: payload.cmdCss } : {}),
   };
   await emitFiltered(ctx.io, ctx.db, ctx.roomId, ctx.user.id, out);
 
@@ -562,6 +578,7 @@ export async function sendRoomBacklogTo(
       ...(m.lockedAt ? { lockedAt: +m.lockedAt } : {}),
       ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
       ...(m.isSticky ? { isSticky: true } : {}),
+      ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
     }));
   socket.emit("message:bulk", backlog);
 }

@@ -1,3 +1,5 @@
+import { splitOnCode } from "./codemask.js";
+
 /**
  * Mention parsing — shared between client (rendering + ping detection) and
  * server (push-trigger fan-out). Single regex with named capture groups so
@@ -60,12 +62,24 @@ export function mentionRegex(): RegExp {
  * mentions. Used on both sides for notification gating: the client to
  * decide whether to surface a desktop toast, the server to decide
  * whether to push to an offline recipient.
+ *
+ * Mirrors the render-side suppression rules so a name typed inside a
+ * code span or escaped with a leading backslash doesn't ping someone:
+ *   - `@…` inside `code` or fenced ```code``` is skipped (the shared
+ *     `splitOnCode` segmenter identifies those regions).
+ *   - A `\` immediately before the `@` escapes the mention; the captured
+ *     prefix tells us when to skip.
  */
 export function extractMentions(body: string): string[] {
   const out: string[] = [];
-  for (const m of body.matchAll(mentionRegex())) {
-    const userName = m.groups?.userName;
-    if (userName) out.push(userName.toLowerCase());
+  for (const seg of splitOnCode(body)) {
+    if (seg.kind === "code") continue;
+    for (const m of seg.raw.matchAll(mentionRegex())) {
+      const userName = m.groups?.userName;
+      if (!userName) continue;
+      if ((m.groups?.prefix ?? "") === "\\") continue;
+      out.push(userName.toLowerCase());
+    }
   }
   return out;
 }

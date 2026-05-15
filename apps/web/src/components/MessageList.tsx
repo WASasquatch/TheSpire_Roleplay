@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { isAdminRole, resolveMessageColor, type ChatMessage, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { customCmdCssToStyle, isAdminRole, resolveMessageColor, type ChatMessage, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
 import { UserNameTag } from "./UserNameTag.js";
 import type { Gender } from "../lib/gender.js";
@@ -1682,7 +1682,7 @@ function PostToolbar({
           }
           title={isAdminEdit ? `Admin: edit ${msg.displayName}'s post` : "Edit this post"}
         >
-          {isAdminEdit ? "Admin Edit" : "Edit"}
+          Edit
         </button>
       ) : null}
       {showPin ? (
@@ -2139,6 +2139,28 @@ function Line({
         </div>
       );
       break;
+    case "cmd": {
+      // Custom-command output — the template controls placement via
+      // `{sender}`, so the renderer does NOT auto-prepend the display
+      // name like it does for "me"/"say". The body styles itself with
+      // the snapshotted CSS (when the admin set one); fall through to
+      // the sender's color otherwise. Wrapped in an inline span so the
+      // CSS only paints the body, not the timestamp.
+      // `themeBg` is fed in so an admin-set `color: #hex` inside the CSS
+      // gets nudged for legibility against the viewer's current palette
+      // (same legibility pass that runs on per-user chat colors).
+      const cmdStyle = customCmdCssToStyle(msg.cmdCss ?? null, themeBg);
+      const bodyStyle: CSSProperties = { ...(cmdStyle ?? {}) };
+      if (bodyColor) bodyStyle.color = bodyColor;
+      lineEl = (
+        <div>
+          {time}
+          <span className="whitespace-pre-wrap" style={bodyStyle}>{renderedBody}</span>
+          {editedBadge}
+        </div>
+      );
+      break;
+    }
     case "roll":
       lineEl = (
         <div className="text-keep-system">
@@ -2704,7 +2726,7 @@ function ModControls({ msg, canEdit, canDelete }: { msg: ChatMessage; canEdit: b
           title={`Admin: edit ${msg.displayName}'s message`}
           className="flex h-5 items-center rounded border border-keep-accent/40 bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-accent/80 hover:bg-keep-accent/10 hover:text-keep-accent"
         >
-          admin edit
+          edit
         </button>
       ) : null}
       {canDelete ? (
@@ -2715,7 +2737,7 @@ function ModControls({ msg, canEdit, canDelete }: { msg: ChatMessage; canEdit: b
           disabled={busy}
           className="flex h-5 items-center rounded border border-keep-accent/60 bg-keep-accent/10 px-1.5 text-[10px] font-semibold leading-none text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
         >
-          mod delete
+          delete
         </button>
       ) : null}
       {error ? <span className="text-[10px] text-keep-accent">{error}</span> : null}

@@ -85,4 +85,30 @@ export const rollCommand: CommandHandler = {
         : `rolls ${dice}: [${rolls.join(", ")}] = ${total}`;
     await addMessage(ctx, { kind: "roll", body });
   },
+  /**
+   * Inline form: `!roll` defaults to 1d20; `!roll:3d6` lets a writer
+   * embed an arbitrary dice expression mid-sentence. Output is
+   * parenthesized to match the convention used by custom inline commands
+   * ("Sigrid hands him the dagger ( rolls 🎲 1d20: 17 ) and waits") and
+   * gets wrapped in the shared verification marker by the dispatcher so
+   * the client renderer paints the ✓ tooltip.
+   *
+   * `args` here is the `:arg` payload only (the part after the colon).
+   * Anything malformed returns null so the original `!roll[:…]` token
+   * survives as literal text instead of silently disappearing.
+   */
+  inline(args) {
+    const spec = (args || "1d20").trim();
+    const parsed = parseDice(spec);
+    if (typeof parsed === "string") return null;
+    const rolls: number[] = [];
+    for (let i = 0; i < parsed.count; i++) {
+      rolls.push(randomInt(1, parsed.sides + 1));
+    }
+    const total = rolls.reduce((a, b) => a + b, 0);
+    const dice = `${parsed.count}d${parsed.sides}`;
+    const result =
+      parsed.count === 1 ? String(total) : `[${rolls.join(", ")}] = ${total}`;
+    return `( rolls 🎲 ${dice}: ${result} )`;
+  },
 };

@@ -1,7 +1,16 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import DOMPurify from "dompurify";
 import type { AuditEntry, ReportEntry, Role, Theme, ThemeableTextSlot, ThreadCategory } from "@thekeep/shared";
-import { DEFAULT_THEME, isMasterAdminRole, normalizeTheme, resolveMessageColor, THEMEABLE_TEXT_SLOTS } from "@thekeep/shared";
+import {
+  DEFAULT_THEME,
+  CUSTOM_CMD_CSS_MAX_LEN,
+  customCmdCssToStyle,
+  isMasterAdminRole,
+  normalizeTheme,
+  resolveMessageColor,
+  sanitizeCustomCmdCss,
+  THEMEABLE_TEXT_SLOTS,
+} from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
 import { readError } from "../lib/http.js";
 import { parseInline } from "../lib/markdown.js";
@@ -1800,6 +1809,9 @@ interface CustomCmdRow {
   allowInline: boolean;
   /** Alternate template for the inline path. Null falls back to `template`. */
   inlineTemplate: string | null;
+  /** Optional CSS declaration list applied to the rendered body. Validated
+   *  against the typography/color allow-list server-side. */
+  css: string | null;
 }
 
 interface CustomCmdInput {
@@ -1814,6 +1826,8 @@ interface CustomCmdInput {
   allowInline?: boolean;
   /** Pass null to clear the override (fall back to `template`). */
   inlineTemplate?: string | null;
+  /** Pass null to clear the CSS, or a declaration list to set. */
+  css?: string | null;
 }
 
 function CommandsTab() {
@@ -1976,14 +1990,38 @@ function CommandForm({
   onDelete?: () => Promise<void>;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
-  const [kind, setKind] = useState<"action" | "say">(initial?.kind ?? "action");
-  // Pre-fill new templates with `{sender} ` so authors see the variable
-  // available; they can erase or rearrange it as needed.
-  const [template, setTemplate] = useState(initial?.template ?? "{sender} ");
+  const [kind, setKindRaw] = useState<"action" | "say">(initial?.kind ?? "action");
+  // Kind picker acts as a "preset loader" in create mode: switching to
+  // action vs say also seeds the template, CSS, and color to match what
+  // each legacy chat shape used to render as — `{sender} <body>` in
+  // italic + theme:action for action, `[{sender}] <body>` with default
+  // styling for say. The presets give a one-click starting point that
+  // mirrors how a baseline /me or /say would have looked, so a fresh
+  // command immediately reads "right" before the admin tweaks it. We
+  // only auto-fill when the field is still on the OTHER kind's preset
+  // (or empty) — once the admin has authored their own value, the
+  // toggle stops clobbering it.
+  const KIND_PRESETS = {
+    action: {
+      template: "{sender} ",
+      css: "font-style: italic",
+      color: "theme:action" as string | null,
+    },
+    say: {
+      template: "[{sender}] ",
+      css: "",
+      color: null as string | null,
+    },
+  } as const;
+  const [template, setTemplate] = useState(
+    initial?.template ?? KIND_PRESETS[initial?.kind ?? "action"].template,
+  );
   const [aliases, setAliases] = useState((initial?.aliases ?? []).join(" "));
   const [description, setDescription] = useState(initial?.description ?? "");
   // null = inherit sender's chat color (default). A hex string overrides.
-  const [color, setColor] = useState<string | null>(initial?.color ?? null);
+  const [color, setColor] = useState<string | null>(
+    initial?.color ?? KIND_PRESETS[initial?.kind ?? "action"].color,
+  );
   // Inline-use toggle. Off by default for new commands and for existing
   // rows pre-feature (the migration sets allow_inline = 0).
   const [allowInline, setAllowInline] = useState<boolean>(initial?.allowInline ?? false);
@@ -1993,6 +2031,37 @@ function CommandForm({
   const [inlineTemplate, setInlineTemplate] = useState<string>(
     initial?.inlineTemplate ?? initial?.template ?? "",
   );
+  // Raw CSS declaration list. Empty string = no override; non-empty
+  // gets validated against the typography/color allow-list on save.
+  // Preview applies a client-side parse of the same input so an admin
+  // sees exactly which declarations survived.
+  const [css, setCss] = useState<string>(
+    initial?.css ?? KIND_PRESETS[initial?.kind ?? "action"].css,
+  );
+
+  /**
+   * Kind setter that also threads the preset through template / css /
+   * color when the admin is creating a new command and the relevant
+   * fields are still on the OLD kind's preset (or empty). Edit-mode
+   * picks update only the kind; the admin owns the other fields and
+   * we don't want a stray click to clobber a customized template.
+   */
+  function setKind(next: "action" | "say") {
+    const prev = kind;
+    setKindRaw(next);
+    if (mode === "edit" || prev === next) return;
+    const prevPreset = KIND_PRESETS[prev];
+    const nextPreset = KIND_PRESETS[next];
+    if (template.trim() === "" || template === prevPreset.template) {
+      setTemplate(nextPreset.template);
+    }
+    if (css.trim() === "" || css === prevPreset.css) {
+      setCss(nextPreset.css);
+    }
+    if (color === prevPreset.color) {
+      setColor(nextPreset.color);
+    }
+  }
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Preview reads against the operator's current theme bg so the
@@ -2000,6 +2069,20 @@ function CommandForm({
   // in the live preview.
   const themeBg = useActiveTheme().bg;
   const previewColor = resolveMessageColor(color, themeBg);
+  // Run the same sanitizer the server uses on save so the preview
+  // reflects exactly which declarations will survive. Anything dropped
+  // here (e.g. an unsupported property like `position`) just won't
+  // show up in the rendered preview — surprises the author *before*
+  // they hit save.
+  const sanitizedCss = useMemo(() => sanitizeCustomCmdCss(css), [css]);
+  // Pass `themeBg` so a color value in the CSS gets the same legibility
+  // nudge against the operator's current palette that the chat renderer
+  // applies — keeps the preview honest about what the command will look
+  // like to viewers on different themes.
+  const previewCssStyle = useMemo(
+    () => customCmdCssToStyle(sanitizedCss, themeBg),
+    [sanitizedCss, themeBg],
+  );
 
   // First-enable hint: when the user flips Allow Inline on with nothing
   // authored yet for the inline body, seed it with the current main
@@ -2057,6 +2140,16 @@ function CommandForm({
             body.inlineTemplate = nextInline;
           }
         }
+      }
+      // CSS field. Send as null when the textarea is empty so the
+      // server clears the column; otherwise send the trimmed raw input
+      // (the server re-runs sanitizeCustomCmdCss before persisting).
+      if (mode === "create") {
+        if (css.trim()) body.css = css.trim();
+      } else {
+        const initialCss = initial?.css ?? null;
+        const nextCss = css.trim() ? css.trim() : null;
+        if (nextCss !== initialCss) body.css = nextCss;
       }
       await onSubmit(body);
     } catch (err) {
@@ -2249,6 +2342,39 @@ function CommandForm({
         </label>
       </div>
 
+      {/* Custom CSS — admin-authored declaration list applied to the
+          rendered body. The textarea is intentionally small (most
+          authors only want a property or two — bold, italic, a glow
+          via text-shadow); the hard cap matches the server's
+          CUSTOM_CMD_CSS_MAX_LEN. Sanitization runs locally on every
+          keystroke so the preview reflects exactly what survives the
+          allow-list. */}
+      <label className="mt-2 block text-[11px]">
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">
+          Custom CSS (optional)
+        </span>
+        <textarea
+          value={css}
+          onChange={(e) => setCss(e.target.value)}
+          rows={2}
+          maxLength={CUSTOM_CMD_CSS_MAX_LEN}
+          placeholder="font-weight: bold; text-shadow: 0 0 4px #4a8;"
+          className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px]"
+        />
+        <span className="mt-0.5 block text-[10px] text-keep-muted">
+          Allowed: <code>color</code>, <code>background-color</code>, <code>font-weight</code>,
+          <code> font-style</code>, <code>font-family</code>, <code>font-size</code>,
+          <code> line-height</code>, <code>letter-spacing</code>, <code>text-decoration</code>,
+          <code> text-align</code>, <code>text-transform</code>, <code>text-shadow</code>,
+          <code> opacity</code>, <code>font-variant</code>. Anything else is dropped on save.
+        </span>
+        {css.trim() && sanitizedCss !== css.trim().replace(/;\s*$/, "") ? (
+          <span className="mt-0.5 block text-[10px] italic text-keep-accent">
+            Some declarations were filtered: <code>{sanitizedCss || "(all dropped)"}</code>
+          </span>
+        ) : null}
+      </label>
+
       <details className="mt-3 text-[11px]">
         <summary className="cursor-pointer text-keep-muted">Template syntax</summary>
         <div className="mt-1 space-y-2">
@@ -2310,10 +2436,20 @@ function CommandForm({
         <div className="mb-0.5 text-[10px] uppercase tracking-widest text-keep-muted">
           Preview (Sigrid runs /{name || "..."} Bran tightly)
         </div>
-        <div style={previewColor ? { color: previewColor } : undefined}>
-          {kind === "action"
-            ? <span><b>Sigrid</b> {parseInline(" " + preview)}</span>
-            : <span>[<b>Sigrid</b>] {parseInline(preview)}</span>}
+        <div
+          style={{
+            ...(previewColor ? { color: previewColor } : {}),
+            ...(previewCssStyle ?? {}),
+          }}
+        >
+          {/* Custom commands now emit kind="cmd" — the chat renderer
+              doesn't auto-prepend the display name, so the preview
+              mirrors that contract: whatever the template expanded to
+              IS the entire visible line. Authors who want the name
+              still showing must include `{sender}` in the template
+              (legacy commands had `{sender} ` prefixed by migration
+              0061). */}
+          {parseInline(preview)}
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CommandDoc } from "@thekeep/shared";
+import { markVerified } from "@thekeep/shared";
 import { parseInline } from "../lib/markdown.js";
 import { HelpGuides } from "./HelpGuides.js";
 import { Modal } from "./Modal.js";
@@ -179,14 +180,17 @@ const FORMATTING_ROWS: Array<{ syntax: string; example: string; note?: string }>
   { syntax: "_italic_", example: "talk _quietly_ now", note: "underscores require word boundaries - `snake_case_var` won't italicize" },
   { syntax: "***bold-italic***", example: "***both at once***" },
   { syntax: "~~strikethrough~~", example: "~~not a ghost~~" },
+  { syntax: "||spoiler||", example: "the killer is ||the butler||", note: "renders as a black box; click to reveal." },
   { syntax: "`code`", example: "press `Enter` to send" },
+  { syntax: "```fenced```", example: "```\nmulti-line\ncode block\n```", note: "triple backticks on their own line(s) for a preformatted block. Content inside is literal — no further markdown / mention / inline-command interpretation." },
   { syntax: "[link text](https://url)", example: "[the Spire](https://thespire.example)", note: "http and https URLs only - `javascript:` schemes are dropped silently" },
   { syntax: "https://url", example: "see https://example.com for details", note: "bare URLs are auto-linked at word boundaries" },
   { syntax: "![alt](https://image-url)", example: "![cat](https://example.com/cat.png)", note: "renders as a link with a Show image toggle - opt-in so loading the image doesn't leak your IP to the host" },
   { syntax: "https://.../photo.png", example: "screenshot: https://example.com/screenshot.png", note: "image URLs ending in png/jpg/jpeg/gif/webp/svg/bmp/avif also get the Show image toggle" },
   { syntax: "@username", example: "thanks @sigrid!", note: "click to open their profile; matches a master account or active character" },
   { syntax: "@world:slug", example: "anyone for a game in @world:ironreach?", note: "click to open the world viewer; slug is the world's URL slug (lowercase + hyphens)" },
-  { syntax: "\\* escape", example: "\\*boinks Kaal on the head\\*", note: "put a backslash before a markdown character (* _ ~ | ` etc.) to keep it literal — useful for old-school IRC-style actions where you want the asterisks to show" },
+  { syntax: `<font color="#hex">text</font>`, example: `<font color="#a83232">red text</font>`, note: "puts a one-off color on a chunk of text. Color must be a 3- or 6-digit hex literal; anything else falls through as plain text. The viewer's theme nudges the value toward legibility if it would disappear against their chat background." },
+  { syntax: "\\* escape", example: "\\*boinks Kaal on the head\\*", note: "put a backslash before any of * _ ~ | ` [ ] ( ) ! < > @ \\ to keep it literal. Use `\\@name` to type an @username without pinging, or `\\!cmd` to write the command name without firing it." },
 ];
 
 /**
@@ -281,6 +285,89 @@ function FormattingHelp() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="mt-5 border-t border-keep-rule/40 pt-3">
+        <h3 className="mb-1 font-action text-sm uppercase tracking-widest text-keep-text">
+          Inline commands
+        </h3>
+        <p className="text-keep-muted">
+          Some commands can be spliced mid-sentence with a leading{" "}
+          <code className="font-mono text-keep-action">!</code> instead of being run as a standalone
+          slash command. Type the command's name and the server replaces it with the rendered text in
+          place, without breaking your sentence apart.
+        </p>
+
+        <div className="mt-2 overflow-hidden rounded border border-keep-border">
+          <table className="w-full text-[12px]">
+            <thead className="bg-keep-panel/50 text-[10px] uppercase tracking-widest text-keep-muted">
+              <tr>
+                <th className="w-1/2 px-2 py-1 text-left">You type</th>
+                <th className="w-1/2 px-2 py-1 text-left">Roughly what it produces</th>
+              </tr>
+            </thead>
+            <tbody>
+              {/* Each row pairs the literal text a user would type
+                  against the rendered output produced by running it
+                  through the *real* markdown parser — including the
+                  verification marker that the server adds in production.
+                  That way the docs and the live renderer can't drift:
+                  any visual change to <VerifiedInline /> shows up here
+                  on the next render. */}
+              <tr className="border-t border-keep-border align-top">
+                <td className="px-2 py-1.5 font-mono text-keep-text">
+                  she rolls a d20 !roll and waits
+                </td>
+                <td className="px-2 py-1.5 text-keep-text">
+                  {parseInline(
+                    `she rolls a d20 ${markVerified("roll", "( rolls 🎲 1d20: 17 )")} and waits`,
+                  )}
+                </td>
+              </tr>
+              <tr className="border-t border-keep-border align-top">
+                <td className="px-2 py-1.5 font-mono text-keep-text">
+                  she rolls !roll:3d6 for damage
+                </td>
+                <td className="px-2 py-1.5 text-keep-text">
+                  {parseInline(
+                    `she rolls ${markVerified("roll", "( rolls 🎲 3d6: [4, 2, 6] = 12 )")} for damage`,
+                  )}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p className="mt-2 text-keep-muted">
+          The small <span className="text-keep-system">✓</span> next to a spliced result is the{" "}
+          <b>verification mark</b> — hover it and you'll see which command produced the text.
+          If you ever see output styled like a command but{" "}
+          <em>without</em> the ✓, someone is typing the same characters by hand to fake a result;
+          only output the server actually ran carries the mark.
+        </p>
+
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-[11px] text-keep-muted">
+          <li>
+            <b>What's inline-callable</b> depends on the install. The composer's{" "}
+            <code className="font-mono text-keep-action">!</code> palette lists every command an
+            admin enabled inline; <code className="font-mono text-keep-action">/roll</code> is
+            inline by default (use <code className="font-mono text-keep-action">!roll</code> or{" "}
+            <code className="font-mono text-keep-action">!roll:3d6</code>).
+          </li>
+          <li>
+            <b>Optional argument.</b> The bit after a colon — like{" "}
+            <code className="font-mono text-keep-action">:3d6</code> on roll — is passed to the
+            command. Most custom commands don't take args inline and quietly ignore them.
+          </li>
+          <li>
+            <b>Want to type one literally?</b> Put a backslash in front:{" "}
+            <code className="font-mono text-keep-action">{`\\!roll`}</code> stays as the literal
+            text "<code className="font-mono text-keep-action">!roll</code>". Same for{" "}
+            <code className="font-mono text-keep-action">{`\\@name`}</code> when you want to say a
+            username without pinging it. Putting either inside <code className="font-mono text-keep-action">`code`</code>{" "}
+            or a fenced block also keeps them literal.
+          </li>
+        </ul>
       </div>
 
       <div className="mt-5 border-t border-keep-rule/40 pt-3">

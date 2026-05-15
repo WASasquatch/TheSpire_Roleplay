@@ -37,4 +37,12 @@ export interface BookmarkedMessage {
   createdAt: number;
   /** When the bookmarked message is itself a reply, the parent's id — used to render a "[in thread]" hint. */
   replyToId: string | null;
+  /** Snapshotted hex / theme:slot color from the row. Drives the body
+   *  text color the same way the inline chat renderer does so a bookmarked
+   *  /cmd output reads in the same palette the user saw at send time. */
+  color?: string | null;
+  /** Snapshotted CSS for `kind: "cmd"` rows. Applied as an inline style
+   *  on the rendered body in the bookmarks viewer so the preview matches
+   *  what the message looked like in chat. */
+  cmdCss?: string | null;
 }

@@ -122,7 +122,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   return (
     <header
       style={headerStyle}
-      className={`keep-app-banner relative flex items-center justify-between border-b border-keep-rule px-4 py-2 ${
+      className={`keep-app-banner relative z-30 flex items-center justify-between border-b border-keep-rule px-4 py-2 ${
         branding.bannerCoverCss ? "" : "bg-keep-banner"
       }`}
     >
@@ -242,7 +242,13 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
       {/* Mobile dropdown. Fixed-viewport backdrop catches outside-clicks
           so tapping the chat closes the menu. The panel itself sits
           absolutely under the header, right-aligned, with stacked
-          rows. Z is above the chat content but below modals (z-40/50). */}
+          rows. The themed banner CSS sets `isolation: isolate`, which
+          creates a stacking context — so the header itself carries
+          `z-30` above to lift the whole context above the chat
+          `<main>` sibling; otherwise the dropdown's z-40 would be
+          trapped inside the banner's context and paint *under* the
+          later-in-DOM chat content. Modals (z-40/50, fixed inset-0)
+          still float above. */}
       {menuOpen ? (
         <>
           <button

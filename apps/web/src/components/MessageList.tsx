@@ -2558,10 +2558,30 @@ function Line({
       // Whisper line uses the theme's "action" slot - distinct from say/me
       // (white-ish text) and from system (muted), and themes cleanly: forest
       // green on Parchment, purple on Twilight, etc.
+      //
+      // Layout: flex with `items-baseline` + `flex-wrap` so the body text
+      // sits on the same baseline as the sender + recipient name tags
+      // even when the sender's rank gem makes the line height taller.
+      // (The bare inline render was leaving sender/recipient `align-middle`
+      // chips centered on the line height while the body text rode the
+      // text baseline below them — visibly staggered on whispers because
+      // there are TWO name tags plus several text spans, and on narrow
+      // viewports the body wraps and lands below the prefix where the
+      // misalignment is most obvious.) `break-words` on the body span
+      // lets long unbreakable runs (URLs, no-space text) wrap inside the
+      // row instead of pushing the line past the right edge where the
+      // hover-revealed action buttons would clip them. Tiny horizontal
+      // gap on the flex container keeps the `whispers` / `:` separators
+      // visually spaced now that the raw " " whitespace tokens between
+      // children no longer survive flex layout.
       lineEl = (
-        <div className="text-keep-action">
-          {time}{inlineAvatar}{tag} <span className="text-keep-muted">whispers</span> {recipientTag}
-          <span className="text-keep-muted">:</span> <span className="whitespace-pre-wrap">{renderedBody}</span>{editedBadge}
+        <div className="flex flex-wrap items-baseline gap-x-1 text-keep-action">
+          {time}{inlineAvatar}{tag}
+          <span className="text-keep-muted">whispers</span>
+          {recipientTag}
+          <span className="-ml-1 text-keep-muted">:</span>
+          <span className="min-w-0 whitespace-pre-wrap break-words">{renderedBody}</span>
+          {editedBadge}
         </div>
       );
       break;

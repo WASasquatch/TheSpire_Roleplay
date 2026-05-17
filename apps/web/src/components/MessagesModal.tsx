@@ -1543,12 +1543,22 @@ function ThreadPane({
 }
 
 function DmRow({ msg, isMine }: { msg: DirectMessage; isMine: boolean }) {
+  // Tap-to-reveal timestamp footer. DMs hide their send time by default
+  // to keep threads visually clean; tapping a bubble surfaces the full
+  // date+time underneath. Toggling again hides it. Clicks on inline
+  // links/buttons inside the body don't toggle — they navigate normally.
+  const [showTime, setShowTime] = useState(false);
   if (msg.deletedAt) {
     return (
       <li className={"flex " + (isMine ? "justify-end" : "justify-start")}>
         <span className="text-[11px] italic text-keep-muted/70">[message removed]</span>
       </li>
     );
+  }
+  function toggleTime(e: React.MouseEvent<HTMLDivElement>) {
+    const t = e.target as HTMLElement;
+    if (t.closest("a, button")) return;
+    setShowTime((v) => !v);
   }
   // Layout: the row is a full-width flex container; the inner bubble is
   // content-sized but capped at 85% of the row. Without the flex
@@ -1557,10 +1567,11 @@ function DmRow({ msg, isMine }: { msg: DirectMessage; isMine: boolean }) {
   // character per line on short messages ("Hey there" rendered as
   // "Hey\nthere"). justify-end / justify-start places the bubble.
   return (
-    <li className={"flex " + (isMine ? "justify-end" : "justify-start")}>
+    <li className={"flex flex-col " + (isMine ? "items-end" : "items-start")}>
       <div
+        onClick={toggleTime}
         className={
-          "max-w-[85%] rounded-lg px-2 py-1 " +
+          "max-w-[85%] cursor-pointer rounded-lg px-2 py-1 " +
           (isMine ? "bg-keep-action/15 text-keep-text" : "bg-keep-banner/70 text-keep-text")
         }
       >
@@ -1572,6 +1583,21 @@ function DmRow({ msg, isMine }: { msg: DirectMessage; isMine: boolean }) {
         </div>
         {msg.editedAt ? <span className="text-[9px] italic text-keep-muted">(edited)</span> : null}
       </div>
+      {showTime ? (
+        <span className="mt-0.5 px-2 text-[10px] text-keep-muted">
+          {formatDmTime(msg.createdAt)}
+        </span>
+      ) : null}
     </li>
   );
+}
+
+/** Bubble timestamp footer — locale-formatted date + time on a single
+ *  line. `dateStyle: "medium"` + `timeStyle: "short"` lands on e.g.
+ *  "May 17, 2026, 6:34 PM" in en-US without runaway length. */
+function formatDmTime(ms: number): string {
+  return new Date(ms).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }

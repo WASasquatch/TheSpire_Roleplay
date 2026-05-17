@@ -38,6 +38,15 @@
   --keep-action: 30 95 184;     /* #1e5fb8 */
   --keep-accent: 53 116 162;    /* #3574a2 */
   --keep-system: 122 90 26;     /* #7a5a1a */
+  /* Derived neon variants — same hue AND saturation as the user's
+   * action/accent, only their lightness clamped down to a mid-dark
+   * ceiling (~42%) so glow blurs don't bleach toward white. Re-emitted
+   * at theme-apply time by lib/theme.ts; these defaults match the
+   * default seed action/accent above (which are already at-or-below
+   * the lightness ceiling, so neon == base for the seed). Consumed
+   * only by the scifi glow rules — harmless on medieval/modern. */
+  --keep-action-neon: 30 95 184;   /* default action — already at ceiling */
+  --keep-accent-neon: 53 116 162;  /* default accent — already at ceiling */
 }
 
 @layer base {
@@ -59,6 +68,14 @@
    */
   body {
     font-family: var(--keep-font-family, ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif);
+    /* Global soft halo on all text. `text-shadow` is an inherited
+     * property, so setting it once on `body` propagates to every
+     * descendant unless an element explicitly overrides with
+     * `text-shadow: none` (or its own value). Zero offset + 2px blur
+     * at 0.2 alpha reads as a non-directional rim glow rather than
+     * a drop — pops text off the bg blooms / parchment grain without
+     * implying a fake light source. */
+    text-shadow: 0px 0px 2px rgba(0, 0, 0, 0.2);
   }
 }
 
@@ -111,6 +128,45 @@
 }
 .keep-scroll-strip::-webkit-scrollbar {
   display: none; /* WebKit / Blink: hide entirely */
+}
+
+/* Earning burst chips — the floating "+5 coins" / "+12 XP" badges
+ * that pop above the totals in EarningStatsStrip when a credit
+ * lands. Bounce in, hold readably, then drift upward and fade out.
+ * The hold phase is the bulk of the lifetime so users can actually
+ * READ the number — earlier the chip flew through in ~1.6s and was
+ * easy to miss in peripheral vision. Total runtime is 3.2s; the
+ * component's setTimeout that removes the chip from React state
+ * must match (see EarningStatsStrip's `bursts` cleanup). The
+ * `translateX(-50%)` on every frame keeps the chip centered over
+ * the anchor (pouch icon / XP label) since the wrapper uses
+ * `left-1/2 -translate-x-1/2`; without it the keyframe transform
+ * would override the centering. */
+@keyframes earn-burst {
+  0%   { opacity: 0;   transform: translate(-50%, 4px)   scale(0.85); }
+  12%  { opacity: 1;   transform: translate(-50%, -4px)  scale(1.25); }
+  22%  { opacity: 1;   transform: translate(-50%, -6px)  scale(1.0); }
+  78%  { opacity: 1;   transform: translate(-50%, -8px)  scale(1.0); }
+  100% { opacity: 0;   transform: translate(-50%, -22px) scale(0.95); }
+}
+.earn-burst {
+  animation: earn-burst 3.2s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  /* Float above the `keep-accent-rail` divider (z-index 5) that sits
+   * just above the composer. Without an explicit z-index the chip
+   * was rendering UNDER the rail's glow band — visible as a faded
+   * "+3" stuck below the accent stripe instead of cleanly popping up
+   * out of the pouch icon. pointer-events:none stays so the chip
+   * never blocks clicks even when it floats over the chat. */
+  z-index: 20;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .earn-burst {
+    /* Skip the bounce, but keep the fade so the credit is still
+     * visible without motion. */
+    animation: none;
+    opacity: 1;
+  }
 }
 @media (min-width: 768px) {
   .keep-scroll-strip {
@@ -173,11 +229,39 @@
     radial-gradient(ellipse at top, rgb(var(--keep-bg-100)) 0%, rgb(var(--keep-bg)) 55%, rgb(var(--keep-bg-400)) 100%);
 }
 
+/* Parchment texture overlay (medieval only). A fixed pseudo-element
+ * sits between the body background and the rest of the document so
+ * the grey-noise texture is layered over whatever palette the user
+ * picked, at low opacity, without tinting their color choices —
+ * the body's radial gradient still drives the actual hue, and the
+ * texture only adds surface noise on top of it. z-index: -1 (combined
+ * with the body forming its own stacking context via `isolation`)
+ * keeps the overlay behind every UI element. `pointer-events: none`
+ * is required so the overlay never intercepts clicks/scrolls. */
+[data-theme-style="medieval"] body {
+  isolation: isolate;
+}
+[data-theme-style="medieval"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: url("/assets/themes/parchment/parchment_texture_grey.jpg");
+  background-repeat: repeat;
+  opacity: 0.25;
+  pointer-events: none;
+  z-index: -1;
+}
+
 /* Frames (modals, topic cards, composer rails). Flat panel, double
  * inset rule, dropshadow directly below the surface to read as a
- * tome page resting on the desk. */
+ * tome page resting on the desk. `position: relative` + `isolation`
+ * give the frame its own stacking context so the parchment ::before
+ * below stays contained within it (and z-index: -1 doesn't escape
+ * upward past the frame). */
 [data-theme-style="medieval"] .keep-frame,
 [data-theme-style="medieval"] .keep-panel {
+  position: relative;
+  isolation: isolate;
   background-color: rgb(var(--keep-panel));
   border: 1px solid rgb(var(--keep-border-500));
   border-radius: 2px;
@@ -187,6 +271,27 @@
     inset 0 1px 0 rgb(var(--keep-panel-100) / 0.7),
     0 4px 0 rgb(var(--keep-border-500) / 0.12),
     0 8px 18px -6px rgb(var(--keep-border-500) / 0.25);
+}
+
+/* Parchment texture on frames/panels. `z-index: -1` paints the
+ * overlay between the frame's own background-color and its
+ * non-positioned children (per the CSS stacking-context paint
+ * order: bg-color → negative-z positioned descendants → static
+ * descendants → positive-z descendants). The isolation rule above
+ * guarantees the negative z-index doesn't bleed past the frame.
+ * `border-radius: inherit` keeps the texture clipped to the
+ * frame's rounded corners. */
+[data-theme-style="medieval"] .keep-frame::before,
+[data-theme-style="medieval"] .keep-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("/assets/themes/parchment/parchment_texture_grey.jpg");
+  background-repeat: repeat;
+  opacity: 0.25;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: -1;
 }
 
 /* Buttons — opt-in via `.keep-button`. Link-style banner / nav
@@ -272,8 +377,14 @@
  * style paints these consistently so the whole app reads as one
  * piece. These are opt-in via specific classes (rather than bare
  * `header` / `aside`) because modal sub-components also use those
- * element tags and would otherwise inherit the chat-banner look. */
+ * element tags and would otherwise inherit the chat-banner look.
+ *
+ * `position: relative` + `isolation: isolate` give each shell its
+ * own stacking context so the parchment `::before` (z-index: -1
+ * below) stays clipped to its bounds without bleeding into siblings. */
 [data-theme-style="medieval"] .keep-app-banner {
+  position: relative;
+  isolation: isolate;
   background-color: rgb(var(--keep-panel-200)) !important;
   border-bottom: 1px solid rgb(var(--keep-border-500)) !important;
   box-shadow:
@@ -282,6 +393,18 @@
     0 4px 12px -4px rgb(var(--keep-border-500) / 0.30);
 }
 [data-theme-style="medieval"] .keep-app-sidebar {
+  /* DO NOT add `position: relative` here. The sidebar's positioning is
+   * managed by Tailwind: `fixed translate-x-full` at mobile (rail
+   * off-screen as a drawer), `lg:relative` at >=1024px (rail in
+   * normal flow). An explicit `position: relative` here would
+   * override the mobile `fixed` (higher CSS specificity: theme
+   * selector + class beats utility class), making the rail render
+   * in-flow at mobile, eat 18rem on the right, and squeeze the chat
+   * into a narrow column. `isolation: isolate` gives the sidebar its
+   * own stacking context for the ::before parchment overlay without
+   * forcing a `position` value.
+   */
+  isolation: isolate;
   background-color: rgb(var(--keep-panel-200)) !important;
   border-left: 1px solid rgb(var(--keep-border-500)) !important;
   box-shadow:
@@ -289,11 +412,30 @@
     -4px 0 12px -4px rgb(var(--keep-border-500) / 0.18);
 }
 [data-theme-style="medieval"] .keep-composer {
+  position: relative;
+  isolation: isolate;
   background-color: rgb(var(--keep-panel-200)) !important;
   border-top: 1px solid rgb(var(--keep-border-500)) !important;
   box-shadow:
     inset 0 1px 0 rgb(var(--keep-bg-100) / 0.45),
     0 -4px 12px -4px rgb(var(--keep-border-500) / 0.18);
+}
+
+/* Parchment overlay on the shell surfaces. Same z-index: -1 trick as
+ * the frame/panel rule above — paints between the surface's own
+ * background-color and its children. `pointer-events: none` keeps
+ * the overlay click-through. */
+[data-theme-style="medieval"] .keep-app-banner::before,
+[data-theme-style="medieval"] .keep-app-sidebar::before,
+[data-theme-style="medieval"] .keep-composer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("/assets/themes/parchment/parchment_texture_grey.jpg");
+  background-repeat: repeat;
+  opacity: 0.25;
+  pointer-events: none;
+  z-index: -1;
 }
 
 /* ----------------------------------------------------------------
@@ -480,103 +622,148 @@
     radial-gradient(circle 500px at 50% 62%, rgb(var(--keep-action) / 0.18) 0%, transparent 70%),
     linear-gradient(180deg, rgb(var(--keep-bg-500)) 0%, rgb(var(--keep-bg-400)) 50%, rgb(var(--keep-bg)) 100%);
   background-attachment: fixed;
+  /* `isolation: isolate` makes <body> its own stacking context so the
+   * z-index: -1 cyber-texture overlay below paints between body's
+   * background-gradient layers and the rest of the UI without bleeding
+   * up past the chat shell. Mirrors the medieval body rule above. */
+  isolation: isolate;
 }
 
-/* Frames — frosted glass with a real tube-light edge. The 1px
- * border is a near-white tint of the user's action color (mixed
- * 30%/70% action/white via color-mix) — this is the "hot core"
- * of a fluorescent tube, which reads bright regardless of which
- * palette the user picked. The halo expands outward in the
- * saturated base action color across multiple blur radii.
- * Sharp corners. */
+/* Subtle cyber-grid texture noise layered over the gradient backdrop
+ * — same overlay recipe Medieval uses for parchment, swapped for the
+ * scifi asset. Sits behind every UI element via z-index: -1 inside the
+ * body's isolated stacking context. Opacity tuned lower than parchment
+ * (0.12 vs 0.25) because the gradient under it is already busy with
+ * radial-gradient bloom and a high-contrast texture would fight the
+ * neon glow rather than complement it. */
+[data-theme-style="scifi"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: url("/assets/themes/scifi/cyber_texture_grey.png");
+  background-repeat: repeat;
+  opacity: 0.12;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Frames — frosted glass with a real tube-light edge. Same color-mix-
+ * with-white recipe as before (gives the soft pastel rim look), but
+ * routed through `--keep-action-neon` instead of raw `--keep-action`
+ * so the underlying color is already darkened before the white admix.
+ * Net effect: the eye sees the original soft, slightly-desaturated
+ * neon look, just dimmer — no extra brightness, no extra hue shift. */
 [data-theme-style="scifi"] .keep-frame,
 [data-theme-style="scifi"] .keep-panel {
+  /* `position: relative` + `isolation` give each frame its own
+   * stacking context so the cyber-texture ::before below stays
+   * contained within it (z-index: -1 doesn't escape past the frame).
+   * Matches the medieval frame pattern. */
+  position: relative;
+  isolation: isolate;
   background-color: rgb(var(--keep-panel) / 0.5);
   backdrop-filter: blur(16px) saturate(1.3);
   -webkit-backdrop-filter: blur(16px) saturate(1.3);
-  border: 1px solid color-mix(in srgb, rgb(var(--keep-action)) 30%, white);
+  /* Border is a diagonal gradient so the neon edge looks like it's
+   * being lit by the body's bg blooms: the action-color (cyan) bloom
+   * lives at viewport 12% 8% and the accent (magenta) at 90% 94%, so
+   * we brighten action-neon toward TL, dim through the middle, then
+   * brighten accent-neon toward BR. The flat `border:` line below is
+   * the fallback if a browser drops border-image. */
+  border: 1px solid rgb(var(--keep-action-neon) / 0.65);
+  border-image: linear-gradient(
+    135deg,
+    rgb(var(--keep-action-neon)) 0%,
+    rgb(var(--keep-action-neon) / 0.55) 35%,
+    rgb(var(--keep-accent-neon) / 0.55) 65%,
+    rgb(var(--keep-accent-neon)) 100%
+  ) 1;
   border-radius: 0;
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, rgb(var(--keep-action)) 25%, white) ,
-    inset 0 0 28px rgb(var(--keep-action) / 0.12),
-    0 0 0 1px rgb(var(--keep-action) / 0.45),
-    0 0 14px color-mix(in srgb, rgb(var(--keep-action)) 50%, white) ,
-    0 0 32px rgb(var(--keep-action) / 0.45),
-    0 0 64px -8px rgb(var(--keep-accent) / 0.35),
-    0 18px 56px -12px rgb(var(--keep-bg-500) / 0.55);
+    inset 0 0 14px rgb(var(--keep-action-neon) / 0.10),
+    0 0 10px rgb(var(--keep-action-neon) / 0.22),
+    0 0 26px -6px rgb(var(--keep-accent-neon) / 0.16),
+    0 14px 42px -12px rgb(var(--keep-bg-500) / 0.55);
+}
+/* Cyber-texture overlay on frames/panels — same z-index: -1 trick
+ * the medieval rule uses. Paints between the frame's own
+ * background-color/backdrop-filter layer and its non-positioned
+ * children. `border-radius: inherit` keeps the overlay clipped to
+ * whatever corners the frame happens to have (0 in scifi but the
+ * inherit is correct insurance). */
+[data-theme-style="scifi"] .keep-frame::before,
+[data-theme-style="scifi"] .keep-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("/assets/themes/scifi/cyber_texture_grey.png");
+  background-repeat: repeat;
+  opacity: 0.12;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: -1;
 }
 
-/* Buttons (opt-in via `.keep-button`) — glass tile with a true
- * neon tube-light border. The 1px border is near-white (action
- * mixed with white via color-mix), so it always reads as a bright
- * core regardless of how saturated the user's action color is.
- * The halo is in saturated base action; on hover the accent color
- * also enters the bloom so the button momentarily reads in two
- * colors. */
+/* Buttons (opt-in via `.keep-button`) — glass tile with a true neon
+ * tube-light border. Borders + halos route through `--keep-action-neon`
+ * (full-sat, mid-dark derivation) so the palette neon reads as a
+ * saturated edge instead of a pale lit-from-white sliver. Surface
+ * tints (button bg) keep the user's raw action color. */
 [data-theme-style="scifi"] .keep-button:not([disabled]) {
   background-color: rgb(var(--keep-panel) / 0.35);
   color: rgb(var(--keep-text));
-  border: 1px solid color-mix(in srgb, rgb(var(--keep-action)) 35%, white);
+  border: 1px solid rgb(var(--keep-action-neon) / 0.65);
   border-radius: 0;
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   box-shadow:
-    inset 0 0 10px rgb(var(--keep-action) / 0.12),
-    0 0 0 1px rgb(var(--keep-action) / 0.40),
-    0 0 8px color-mix(in srgb, rgb(var(--keep-action)) 50%, white),
-    0 0 24px -2px rgb(var(--keep-action) / 0.35);
+    inset 0 0 6px rgb(var(--keep-action-neon) / 0.10),
+    0 0 6px rgb(var(--keep-action-neon) / 0.18),
+    0 0 14px -4px rgb(var(--keep-action-neon) / 0.14);
   transition: background-color 160ms ease, box-shadow 160ms ease,
               border-color 160ms ease, color 160ms ease;
 }
 [data-theme-style="scifi"] .keep-button:not([disabled]):hover {
-  background-color: rgb(var(--keep-action) / 0.18);
-  border-color: color-mix(in srgb, rgb(var(--keep-action)) 15%, white);
+  background-color: rgb(var(--keep-action) / 0.14);
+  border-color: rgb(var(--keep-action-neon));
   color: rgb(var(--keep-text));
   box-shadow:
-    inset 0 0 14px rgb(var(--keep-action) / 0.22),
-    0 0 0 1px rgb(var(--keep-action) / 0.70),
-    0 0 12px color-mix(in srgb, rgb(var(--keep-action)) 30%, white),
-    0 0 32px rgb(var(--keep-action) / 0.55),
-    0 0 56px -8px rgb(var(--keep-accent) / 0.40);
+    inset 0 0 8px rgb(var(--keep-action-neon) / 0.18),
+    0 0 8px rgb(var(--keep-action-neon) / 0.28),
+    0 0 20px -4px rgb(var(--keep-accent-neon) / 0.20);
 }
 [data-theme-style="scifi"] .keep-button:not([disabled]):active {
-  background-color: rgb(var(--keep-action) / 0.32);
+  background-color: rgb(var(--keep-action) / 0.24);
   box-shadow:
-    inset 0 0 18px rgb(var(--keep-action) / 0.32),
-    0 0 0 1px white,
-    0 0 16px color-mix(in srgb, rgb(var(--keep-action)) 20%, white),
-    0 0 42px rgb(var(--keep-action) / 0.70);
+    inset 0 0 10px rgb(var(--keep-action-neon) / 0.24),
+    0 0 8px rgb(var(--keep-action-neon) / 0.35);
 }
 
-/* Inputs — recessed glass pits with a near-white tube-light core
- * on focus. Idle border is dimmer (40% mix toward white) so
- * inactive fields don't compete with focused ones; focused border
- * goes hot-white (15% mix) and grows a strong halo. */
+/* Inputs — recessed glass pits with a saturated tube-light core on
+ * focus. Borders + halos use the neon derivation so a focused field
+ * reads as a saturated rim, not as a near-white outline. */
 [data-theme-style="scifi"] input,
 [data-theme-style="scifi"] textarea,
 [data-theme-style="scifi"] select {
   background-color: rgb(var(--keep-bg-500) / 0.55);
   color: rgb(var(--keep-text));
-  border: 1px solid color-mix(in srgb, rgb(var(--keep-action)) 55%, white);
+  border: 1px solid rgb(var(--keep-action-neon) / 0.55);
   border-radius: 0;
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   box-shadow:
-    inset 0 0 8px rgb(var(--keep-action) / 0.10),
-    inset 0 1px 2px rgb(var(--keep-bg-500) / 0.5),
-    0 0 6px rgb(var(--keep-action) / 0.20);
+    inset 0 0 4px rgb(var(--keep-action-neon) / 0.08),
+    inset 0 1px 2px rgb(var(--keep-bg-500) / 0.5);
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 [data-theme-style="scifi"] input:focus,
 [data-theme-style="scifi"] textarea:focus,
 [data-theme-style="scifi"] select:focus {
   outline: none;
-  border-color: color-mix(in srgb, rgb(var(--keep-action)) 15%, white);
+  border-color: rgb(var(--keep-action-neon));
   box-shadow:
-    inset 0 0 14px rgb(var(--keep-action) / 0.22),
-    0 0 0 1px color-mix(in srgb, rgb(var(--keep-action)) 30%, white),
-    0 0 12px color-mix(in srgb, rgb(var(--keep-action)) 40%, white),
-    0 0 28px rgb(var(--keep-action) / 0.55);
+    inset 0 0 6px rgb(var(--keep-action-neon) / 0.16),
+    0 0 8px rgb(var(--keep-action-neon) / 0.22);
 }
 
 [data-theme-style="scifi"] h1,
@@ -596,26 +783,24 @@
   background-color: rgb(var(--keep-panel) / 0.4) !important;
   background-image:
     linear-gradient(90deg,
-      rgb(var(--keep-accent) / 0.18) 0%,
-      rgb(var(--keep-accent) / 0.08) 50%,
+      rgb(var(--keep-accent) / 0.14) 0%,
+      rgb(var(--keep-accent) / 0.06) 50%,
       rgb(var(--keep-accent) / 0) 100%) !important;
-  color: color-mix(in srgb, rgb(var(--keep-accent)) 30%, white) !important;
-  border-top: 1px solid color-mix(in srgb, rgb(var(--keep-accent)) 35%, white) !important;
-  border-bottom: 1px solid color-mix(in srgb, rgb(var(--keep-accent)) 35%, white) !important;
+  color: rgb(var(--keep-accent-neon)) !important;
+  border-top: 1px solid rgb(var(--keep-accent-neon) / 0.55) !important;
+  border-bottom: 1px solid rgb(var(--keep-accent-neon) / 0.55) !important;
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, rgb(var(--keep-accent)) 10%, white),
-    inset 0 -1px 0 color-mix(in srgb, rgb(var(--keep-accent)) 10%, white),
-    0 0 12px rgb(var(--keep-accent) / 0.30),
-    0 4px 18px -4px rgb(var(--keep-accent) / 0.25);
-  text-shadow: 0 0 8px rgb(var(--keep-accent) / 0.55);
+    0 0 6px rgb(var(--keep-accent-neon) / 0.18),
+    0 2px 8px -4px rgb(var(--keep-accent-neon) / 0.16);
+  text-shadow: 0 0 4px rgb(var(--keep-accent-neon) / 0.30);
 }
 /* The chevron + count children of the section header need their own
  * color override — the parent rule's `color: ...` only sets the
  * default text node color, and these spans have explicit
  * `text-keep-muted` from tailwind that wins on specificity. */
 [data-theme-style="scifi"] .keep-section-header .text-keep-muted {
-  color: color-mix(in srgb, rgb(var(--keep-accent)) 45%, white) !important;
-  text-shadow: 0 0 6px rgb(var(--keep-accent) / 0.45);
+  color: rgb(var(--keep-accent-neon) / 0.80) !important;
+  text-shadow: 0 0 3px rgb(var(--keep-accent-neon) / 0.25);
 }
 
 [data-theme-style="scifi"] .keep-row {
@@ -627,19 +812,19 @@
  * etc.) so the chat shell has two neons in active use, not just
  * one. Cyan stays for active/current; pink fires on hover. */
 [data-theme-style="scifi"] .keep-row:hover {
-  background-color: rgb(var(--keep-accent) / 0.08);
+  background-color: rgb(var(--keep-accent) / 0.06);
   box-shadow:
-    inset 0 0 14px rgb(var(--keep-accent) / 0.14),
-    inset 3px 0 0 color-mix(in srgb, rgb(var(--keep-accent)) 30%, white);
+    inset 0 0 8px rgb(var(--keep-accent-neon) / 0.10),
+    inset 3px 0 0 rgb(var(--keep-accent-neon) / 0.75);
 }
 /* Active row stays in the primary (action) neon but gains an outer
  * accent-color halo so the active state reads as dual-tone. */
 [data-theme-style="scifi"] .keep-row[data-active="true"] {
-  background-color: rgb(var(--keep-action) / 0.20);
+  background-color: rgb(var(--keep-action) / 0.14);
   box-shadow:
-    inset 3px 0 0 color-mix(in srgb, rgb(var(--keep-action)) 25%, white),
-    inset 0 0 20px rgb(var(--keep-action) / 0.20),
-    0 0 24px -4px rgb(var(--keep-accent) / 0.30);
+    inset 3px 0 0 rgb(var(--keep-action-neon) / 0.85),
+    inset 0 0 10px rgb(var(--keep-action-neon) / 0.14),
+    0 0 12px -6px rgb(var(--keep-accent-neon) / 0.18);
 }
 
 /* Banner — tube-light bottom edge in the ACTION color (the
@@ -650,33 +835,88 @@
  * of how saturated the user's action color is, so it always reads
  * as a glowing tube and never as a flat colored line. */
 [data-theme-style="scifi"] .keep-app-banner {
+  /* `position: relative` + `isolation` so the cyber-texture ::before
+   * (below) anchors and stays scoped — same pattern as medieval. */
+  position: relative;
+  isolation: isolate;
   background-color: rgb(var(--keep-panel) / 0.30) !important;
   backdrop-filter: blur(18px) saturate(1.35);
   -webkit-backdrop-filter: blur(18px) saturate(1.35);
-  border-top: 1px solid color-mix(in srgb, rgb(var(--keep-action)) 60%, white) !important;
-  border-bottom: 1px solid color-mix(in srgb, rgb(var(--keep-action)) 15%, white) !important;
-  box-shadow:
-    inset 0 -1px 0 color-mix(in srgb, rgb(var(--keep-action)) 10%, white),
-    inset 0 -6px 14px rgb(var(--keep-action) / 0.28),
-    0 1px 0 color-mix(in srgb, rgb(var(--keep-action)) 25%, white),
-    0 3px 12px color-mix(in srgb, rgb(var(--keep-action)) 40%, white),
-    0 8px 28px rgb(var(--keep-action) / 0.55),
-    0 20px 64px -4px rgb(var(--keep-action) / 0.28) !important;
+  /* The flat 1px tube + uniform box-shadow that used to live here are
+   * replaced by the ::after pseudo below so the whole emission — hot
+   * core + wide halo — can fade horizontally as a single shape. The
+   * transparent border keeps the banner's layout height unchanged
+   * vs. the Tailwind `border-b` utility on the element. */
+  border-bottom: 1px solid transparent !important;
+  box-shadow: none !important;
+}
+/* Position-aware neon emission. Sits just below the banner so the
+ * hot core lines up with the banner's bottom edge and the halo
+ * spills down into the chat area below (where the body bokeh has a
+ * transparent backdrop, so the halo blends with the bg bloom rather
+ * than being covered by an opaque sibling).
+ *
+ * Layers (back-to-front in the CSS stack):
+ *  1. Radial halo: an ellipse centered on the hot peak; tall enough
+ *     to look like fluorescent bloom, narrow enough not to wash the
+ *     whole bar. Origin at 17% / 0% so it appears anchored to the
+ *     bright core right where the body's top-left cyan bloom lives.
+ *  2. Hot core (1px tall): horizontal gradient that ramps from a
+ *     mid-intensity tail on the LEFT, peaks at x=17% (under the body
+ *     bloom), and decays to fully transparent by the right side. The
+ *     right ~half of the bar reads as unlit, matching the user's
+ *     "the bar is the source" mental model. */
+[data-theme-style="scifi"] .keep-app-banner::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 36px;
+  pointer-events: none;
+  background-image:
+    linear-gradient(
+      90deg,
+      rgb(var(--keep-action-neon) / 0.55) 0%,
+      rgb(var(--keep-action-neon)) 17%,
+      rgb(var(--keep-action-neon) / 0.40) 40%,
+      rgb(var(--keep-action-neon) / 0.10) 70%,
+      transparent 100%
+    ),
+    radial-gradient(
+      ellipse 56% 100% at 17% 0%,
+      rgb(var(--keep-action-neon) / 0.42) 0%,
+      rgb(var(--keep-action-neon) / 0.18) 35%,
+      rgb(var(--keep-action-neon) / 0) 70%
+    );
+  background-repeat: no-repeat, no-repeat;
+  background-size: 100% 1px, 100% 100%;
+  background-position: top left, top left;
 }
 /* Sidebar — action-colored tube on the left edge facing the chat.
- * Same recipe rotated 90°, glow projects right into the chat. */
+ * Same recipe rotated 90°, glow projects right into the chat.
+ *
+ * DO NOT add `position: relative` here. The sidebar's positioning is
+ * managed by Tailwind: `fixed translate-x-full` at mobile (rail
+ * off-screen as a drawer), `lg:relative` at >=1024px (rail in
+ * normal flow). An explicit `position: relative` here would
+ * override the mobile `fixed` (higher CSS specificity: theme
+ * selector + class beats utility class), making the rail render
+ * in-flow at mobile, eat 18rem on the right, and squeeze the chat
+ * into a narrow column — exact bug we hit and fixed in medieval.
+ * `isolation: isolate` is enough on its own to scope the
+ * cyber-texture ::before's z-index without needing to set a
+ * position value here. */
 [data-theme-style="scifi"] .keep-app-sidebar {
+  isolation: isolate;
   background-color: rgb(var(--keep-panel) / 0.28) !important;
   backdrop-filter: blur(18px) saturate(1.35);
   -webkit-backdrop-filter: blur(18px) saturate(1.35);
-  border-left: 1px solid color-mix(in srgb, rgb(var(--keep-action)) 15%, white) !important;
+  border-left: 1px solid rgb(var(--keep-action-neon) / 0.75) !important;
   box-shadow:
-    inset 1px 0 0 color-mix(in srgb, rgb(var(--keep-action)) 10%, white),
-    inset 6px 0 14px rgb(var(--keep-action) / 0.28),
-    -1px 0 0 color-mix(in srgb, rgb(var(--keep-action)) 25%, white),
-    -3px 0 12px color-mix(in srgb, rgb(var(--keep-action)) 40%, white),
-    -8px 0 28px rgb(var(--keep-action) / 0.55),
-    -20px 0 64px -4px rgb(var(--keep-action) / 0.28) !important;
+    inset 3px 0 8px rgb(var(--keep-action-neon) / 0.14),
+    -4px 0 14px rgb(var(--keep-action-neon) / 0.22),
+    -12px 0 32px -8px rgb(var(--keep-action-neon) / 0.14) !important;
 }
 /* Composer — ACCENT-colored tube on the top edge (the secondary
  * neon — typically pink/magenta complementing the action color).
@@ -685,20 +925,72 @@
  * → accent, with the inside of the bar tinted accent so even the
  * BODY of the composer reads pink, not just the edge. */
 [data-theme-style="scifi"] .keep-composer {
+  /* `position: relative` + `isolation` for the cyber-texture ::before
+   * (below) — same pattern as medieval composer / scifi banner. */
+  position: relative;
+  isolation: isolate;
   background-color: rgb(var(--keep-panel) / 0.30) !important;
   background-image:
-    linear-gradient(180deg, rgb(var(--keep-accent) / 0.12) 0%, rgb(var(--keep-accent) / 0.02) 100%) !important;
+    linear-gradient(180deg, rgb(var(--keep-accent) / 0.08) 0%, rgb(var(--keep-accent) / 0) 100%) !important;
   backdrop-filter: blur(18px) saturate(1.4);
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
-  border-top: 2px solid color-mix(in srgb, rgb(var(--keep-accent)) 15%, white) !important;
-  border-bottom: 1px solid color-mix(in srgb, rgb(var(--keep-accent)) 60%, white) !important;
-  box-shadow:
-    inset 0 2px 0 color-mix(in srgb, rgb(var(--keep-accent)) 5%, white),
-    inset 0 8px 18px rgb(var(--keep-accent) / 0.32),
-    0 -1px 0 color-mix(in srgb, rgb(var(--keep-accent)) 20%, white),
-    0 -4px 14px color-mix(in srgb, rgb(var(--keep-accent)) 35%, white),
-    0 -10px 32px rgb(var(--keep-accent) / 0.60),
-    0 -24px 72px -4px rgb(var(--keep-accent) / 0.35) !important;
+  /* See the banner rule above for the rationale: the 1px tube +
+   * uniform box-shadow are replaced by the position-aware ::after
+   * pseudo below so the emission can fade horizontally as one
+   * shape. Transparent border preserves the original layout height. */
+  border-top: 1px solid transparent !important;
+  box-shadow: none !important;
+}
+/* Mirror of the banner emission, anchored to the composer's top
+ * edge. Peak at x=83% — under the body's bottom-right accent bloom
+ * (radial at viewport 90% 94%) — fading off to the left so the
+ * left side of the composer reads as unlit. Halo radiates UPWARD
+ * into the chat area above. */
+[data-theme-style="scifi"] .keep-composer::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 36px;
+  pointer-events: none;
+  background-image:
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      rgb(var(--keep-accent-neon) / 0.10) 30%,
+      rgb(var(--keep-accent-neon) / 0.40) 60%,
+      rgb(var(--keep-accent-neon)) 83%,
+      rgb(var(--keep-accent-neon) / 0.55) 100%
+    ),
+    radial-gradient(
+      ellipse 56% 100% at 83% 100%,
+      rgb(var(--keep-accent-neon) / 0.42) 0%,
+      rgb(var(--keep-accent-neon) / 0.18) 35%,
+      rgb(var(--keep-accent-neon) / 0) 70%
+    );
+  background-repeat: no-repeat, no-repeat;
+  background-size: 100% 1px, 100% 100%;
+  background-position: bottom left, bottom left;
+}
+
+/* Cyber texture overlay on the shell surfaces. Same z-index: -1
+ * trick as the frame/panel rule above — paints between the surface's
+ * own background-color/backdrop-filter layer and its children.
+ * Mirrors the medieval shell overlay block, swapped to the scifi
+ * asset and lower opacity (the neon glow under it is busy enough
+ * that a darker texture would compete rather than complement). */
+[data-theme-style="scifi"] .keep-app-banner::before,
+[data-theme-style="scifi"] .keep-app-sidebar::before,
+[data-theme-style="scifi"] .keep-composer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("/assets/themes/scifi/cyber_texture_grey.png");
+  background-repeat: repeat;
+  opacity: 0.12;
+  pointer-events: none;
+  z-index: -1;
 }
 
 /* ============================================================
@@ -737,13 +1029,51 @@
   box-shadow: 0 4px 8px -2px rgb(var(--keep-accent) / 0.30);
 }
 [data-theme-style="scifi"] .keep-accent-rail {
-  background-color: color-mix(in srgb, rgb(var(--keep-accent)) 20%, white);
-  box-shadow:
-    0 0 6px color-mix(in srgb, rgb(var(--keep-accent)) 30%, white),
-    0 0 12px rgb(var(--keep-accent) / 0.85),
-    0 0 28px rgb(var(--keep-accent) / 0.55),
-    0 0 56px rgb(var(--keep-accent) / 0.30),
-    0 0 96px -4px rgb(var(--keep-accent) / 0.18);
+  /* Accent rail = thin hot core nested inside the banner/composer
+   * emission. Peak at x=90% (under the body's bottom-right magenta
+   * bloom). The OLD rule painted a constant `accent-neon / 0.75`
+   * background-color underneath the gradient which made the rail
+   * visible across its whole width and defeated the horizontal
+   * fade — leaving the bottom of the chat shell bright on the left
+   * even though the composer's pseudo was fading correctly. Now
+   * transparent on the dim side so the gradient fully owns the
+   * visible color, and the box-shadow halo is removed for the same
+   * reason: it painted uniformly along the 28px spread regardless
+   * of the gradient. The banner/composer ::after pseudo already
+   * contributes a wider radial halo at the bright peak that
+   * envelops the rail's y-range, so removing the rail's own glow
+   * doesn't lose the tube-light effect — it just stops the dim
+   * half from accumulating diffuse magenta. */
+  background-color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    rgb(var(--keep-accent-neon) / 0.05) 0%,
+    rgb(var(--keep-accent-neon) / 0.10) 50%,
+    rgb(var(--keep-accent-neon) / 0.30) 75%,
+    rgb(var(--keep-accent-neon)) 90%,
+    rgb(var(--keep-accent-neon) / 0.75) 100%
+  );
+  box-shadow: none;
+}
+
+/* Header rail override — no body bloom sits under this rail's bright
+ * end (the upper-right ambient is system / action-100, not accent),
+ * so a flat magenta peak there read as a bare neon strip floating on
+ * its own ambient. Swap the bright stops to a darker blue/purple so
+ * the rail's right end sinks into the chat shell's purple haze
+ * instead of competing with it. Hardcoded RGB at the bright stops
+ * (rather than a palette var) is intentional — these are blends
+ * tuned against the scifi body's purple/indigo tones, not a hue the
+ * user's palette controls. */
+[data-theme-style="scifi"] .keep-accent-rail[data-rail="header"] {
+  background-image: linear-gradient(
+    90deg,
+    rgb(var(--keep-accent-neon) / 0.05) 0%,
+    rgb(var(--keep-accent-neon) / 0.10) 50%,
+    rgba(98, 36, 188, 0.30) 75%,
+    rgb(51, 38, 97) 90%,
+    rgba(59, 44, 113, 0.75) 100%
+  );
 }
 
 /* Anchor / no-op for components that opt into the frame system

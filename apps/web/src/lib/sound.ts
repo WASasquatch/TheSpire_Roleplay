@@ -1,11 +1,15 @@
 /**
  * In-app sound effects.
  *
- * Three discrete events, each bound to its own bundled mp3 in
- * /public/audio/:
- *   - ping  → inbound DM (any conversation)
- *   - tap   → inbound chat message / action in a room
- *   - alert → admin announcement / system event
+ * Four discrete sound files, each bound to a class of event:
+ *   - ping    → inbound DM (any conversation). Cross-room 1:1.
+ *   - whisper → inbound whisper directed at the viewer in a room.
+ *     Distinct from DM so the two feel different even when both
+ *     are 1:1 attention requests — DM is "someone is reaching out
+ *     from outside this room", whisper is "someone in this room is
+ *     speaking just to you."
+ *   - tap     → inbound chat / action in a room (excluding whispers)
+ *   - alert   → admin announcement / system event
  *
  * Per-user prefs live in the Zustand store (`soundPrefs`) and are
  * persisted server-side via /me/profile. A disabled event short-
@@ -25,16 +29,18 @@
  */
 import { useChat } from "../state/store.js";
 
-type SoundEvent = "ping" | "tap" | "alert";
+type SoundEvent = "ping" | "whisper" | "tap" | "alert";
 
 const SOUND_FILES: Record<SoundEvent, string> = {
   ping: "/audio/ping.mp3",
+  whisper: "/audio/whisper.mp3",
   tap: "/audio/tap.mp3",
   alert: "/audio/alert.mp3",
 };
 
 const VOLUMES: Record<SoundEvent, number> = {
   ping: 0.5,
+  whisper: 0.5,
   tap: 0.5,
   alert: 0.7,
 };
@@ -93,6 +99,7 @@ function isEnabled(event: SoundEvent): boolean {
   if (isUserAway()) return false;
   const prefs = useChat.getState().soundPrefs;
   if (event === "ping") return prefs.dm;
+  if (event === "whisper") return prefs.whisper;
   if (event === "tap") return prefs.chat;
   return prefs.alert;
 }
@@ -117,5 +124,6 @@ function play(event: SoundEvent): void {
 }
 
 export function playPing(): void { play("ping"); }
+export function playWhisper(): void { play("whisper"); }
 export function playTap(): void { play("tap"); }
 export function playAlert(): void { play("alert"); }

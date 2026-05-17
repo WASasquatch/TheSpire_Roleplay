@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useChat } from "../state/store.js";
 import { SearchBar } from "./SearchBar.js";
+import { CloseButton } from "./CloseButton.js";
 
 /** Shape of `/characters` rows — narrow projection of the server payload. */
 interface CharacterRow {
@@ -174,13 +175,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
           <div className="absolute inset-x-0 bottom-full z-40 max-h-[calc(100dvh-14rem)] overflow-y-auto rounded-t border-x border-t border-keep-rule bg-keep-bg shadow-2xl">
             <header className="sticky top-0 flex items-center justify-between border-b border-keep-rule bg-keep-banner px-3 py-2">
               <span className="text-xs font-action uppercase tracking-widest">Tools</span>
-              <button
-                type="button"
-                onClick={() => setDrawerOpen(false)}
-                className="text-xs text-keep-muted hover:text-keep-text"
-              >
-                close
-              </button>
+              <CloseButton onClick={() => setDrawerOpen(false)} />
             </header>
 
             <SectionHeader title="Worldbuilding" />
@@ -332,7 +327,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
           left, messenger icon owns the right — fixed-width so it
           doesn't push the identity label around. All three buttons
           (identity, envelope, Tools) share the same explicit height
-          (h-9 mobile / md:h-7 desktop) so they line up regardless of
+          (h-9 mobile / lg:h-7 desktop) so they line up regardless of
           their font-size differences. Without the fixed heights the
           envelope's `text-base` glyph would render taller than the
           identity's `text-xs` label and the row's bottom edges would
@@ -359,7 +354,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
             ? `${messagesBadgeTotal} unread message${messagesBadgeTotal === 1 ? "" : "s"} or friend request${messagesBadgeTotal === 1 ? "" : "s"} — open Messages`
             : "Open Messages"}
           aria-label="Open Messages"
-          className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-sm leading-none hover:bg-keep-banner md:h-7 md:w-7"
+          className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-sm leading-none hover:bg-keep-banner lg:h-7 lg:w-7"
         >
           <span aria-hidden>✉</span>
           {messagesBadgeTotal > 0 ? (
@@ -378,7 +373,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
         type="button"
         onClick={() => setDrawerOpen((v) => !v)}
         title="Open the tools drawer"
-        className={`mt-1 flex h-9 w-full items-center justify-center gap-2 rounded border border-keep-rule text-xs font-semibold uppercase tracking-widest md:h-7 ${
+        className={`mt-1 flex h-9 w-full items-center justify-center gap-2 rounded border border-keep-rule text-xs font-semibold uppercase tracking-widest lg:h-7 ${
           drawerOpen ? "bg-keep-banner" : "bg-keep-bg hover:bg-keep-banner"
         }`}
       >
@@ -475,7 +470,7 @@ function IdentityButton({
                     <button
                       type="button"
                       onClick={() => onSwitch(c.name)}
-                      className="flex w-full items-center gap-2 border-b border-keep-rule/40 px-3 py-1.5 text-left text-sm hover:bg-keep-banner/40 md:py-1"
+                      className="flex w-full items-center gap-2 border-b border-keep-rule/40 px-3 py-1.5 text-left text-sm hover:bg-keep-banner/40 lg:py-1"
                     >
                       <Avatar url={c.avatarUrl} name={c.name} />
                       <span className="min-w-0 flex-1 truncate text-keep-text">{c.name}</span>
@@ -495,7 +490,7 @@ function IdentityButton({
                 type="button"
                 onClick={onLeave}
                 title="Drop the active character and return to your master (OOC) account."
-                className="flex w-full items-center justify-center gap-1 border-t border-keep-rule bg-keep-accent/10 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-keep-accent hover:bg-keep-accent/20 md:py-1"
+                className="flex w-full items-center justify-center gap-1 border-t border-keep-rule bg-keep-accent/10 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-keep-accent hover:bg-keep-accent/20 lg:py-1"
               >
                 ← Leave Character (OOC)
               </button>
@@ -512,12 +507,12 @@ function IdentityButton({
             ? "Switch character or return to OOC"
             : "Switch into a character"
         }
-        // Height locked to h-9 mobile / md:h-7 desktop to match the
+        // Height locked to h-9 mobile / lg:h-7 desktop to match the
         // adjacent envelope shortcut and the Tools trigger below.
         // Without the explicit height the row's bottom edges drift
         // apart whenever one button's content has a different font-
         // size than its siblings.
-        className={`flex h-9 w-full items-center justify-center gap-2 rounded border border-keep-rule text-xs font-semibold uppercase tracking-widest md:h-7 ${
+        className={`flex h-9 w-full items-center justify-center gap-2 rounded border border-keep-rule text-xs font-semibold uppercase tracking-widest lg:h-7 ${
           open
             ? "bg-keep-banner"
             : inCharacter
@@ -644,7 +639,7 @@ function MenuItem({
       // adjacent rows visually fuse into a single list. Active rows
       // get a left accent stripe + banner tint instead of a full
       // background swap — preserves row text contrast across themes.
-      className={`flex w-full items-center gap-3 border-b border-keep-rule/40 px-3 py-1.5 text-left text-sm md:py-1 ${
+      className={`flex w-full items-center gap-3 border-b border-keep-rule/40 px-3 py-1.5 text-left text-sm lg:py-1 ${
         active
           ? "border-l-2 border-l-keep-action bg-keep-banner/60 pl-[10px]"
           : "hover:bg-keep-banner/40"
@@ -687,14 +682,14 @@ function InlineForm({
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs outline-none focus:border-keep-action md:py-1"
+        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs outline-none focus:border-keep-action lg:py-1"
         // eslint-disable-next-line jsx-a11y/no-autofocus
         autoFocus
       />
       <div className="flex gap-1">
         <button
           type="submit"
-          className="keep-button flex-1 rounded border border-keep-rule bg-keep-banner px-2 py-1.5 text-xs hover:bg-keep-banner/80 md:py-1"
+          className="keep-button flex-1 rounded border border-keep-rule bg-keep-banner px-2 py-1.5 text-xs hover:bg-keep-banner/80 lg:py-1"
         >
           {submitLabel}
         </button>
@@ -703,7 +698,7 @@ function InlineForm({
             key={b.label}
             type="button"
             onClick={b.onClick}
-            className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs hover:bg-keep-banner md:py-1"
+            className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs hover:bg-keep-banner lg:py-1"
           >
             {b.label}
           </button>
@@ -730,7 +725,7 @@ function PrivateForm({ onSubmit }: { onSubmit: (name: string, password: string) 
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="room name"
-        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs outline-none focus:border-keep-action md:py-1"
+        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs outline-none focus:border-keep-action lg:py-1"
         // eslint-disable-next-line jsx-a11y/no-autofocus
         autoFocus
       />
@@ -739,12 +734,12 @@ function PrivateForm({ onSubmit }: { onSubmit: (name: string, password: string) 
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         placeholder="password"
-        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs outline-none focus:border-keep-action md:py-1"
+        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs outline-none focus:border-keep-action lg:py-1"
       />
       <button
         type="submit"
         disabled={!name.trim() || !password.trim()}
-        className="keep-button w-full rounded border border-keep-rule bg-keep-banner px-2 py-1.5 text-xs hover:bg-keep-banner/80 disabled:opacity-50 md:py-1"
+        className="keep-button w-full rounded border border-keep-rule bg-keep-banner px-2 py-1.5 text-xs hover:bg-keep-banner/80 disabled:opacity-50 lg:py-1"
       >
         Create room
       </button>
@@ -779,7 +774,7 @@ function RefreshPicker({ current, onPick }: { current: number; onPick: (n: numbe
             <button
               type="button"
               onClick={() => onPick(p.value)}
-              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-left hover:bg-keep-banner md:py-1"
+              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-left hover:bg-keep-banner lg:py-1"
             >
               {p.label}
             </button>
@@ -795,7 +790,7 @@ function RefreshPicker({ current, onPick }: { current: number; onPick: (n: numbe
           placeholder="seconds"
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
-          className="flex-1 rounded border border-keep-rule px-2 py-1.5 md:py-1"
+          className="flex-1 rounded border border-keep-rule px-2 py-1.5 lg:py-1"
         />
         <button
           type="button"
@@ -803,7 +798,7 @@ function RefreshPicker({ current, onPick }: { current: number; onPick: (n: numbe
             const n = parseInt(custom, 10);
             if (Number.isFinite(n) && n >= 5 && n <= 3600) onPick(n);
           }}
-          className="rounded border border-keep-rule bg-keep-banner px-2 py-1.5 hover:bg-keep-banner/80 md:py-1"
+          className="rounded border border-keep-rule bg-keep-banner px-2 py-1.5 hover:bg-keep-banner/80 lg:py-1"
         >
           Set
         </button>
@@ -811,7 +806,7 @@ function RefreshPicker({ current, onPick }: { current: number; onPick: (n: numbe
       <button
         type="button"
         onClick={() => onPick(0)}
-        className="w-full rounded border border-keep-rule bg-keep-bg py-1.5 hover:bg-keep-banner md:py-1"
+        className="w-full rounded border border-keep-rule bg-keep-bg py-1.5 hover:bg-keep-banner lg:py-1"
       >
         Off
       </button>
@@ -829,7 +824,7 @@ function ColorPicker({ onPick, onClear }: { onPick: (hex: string) => void; onCle
             key={c}
             type="button"
             onClick={() => onPick(c)}
-            className="h-7 w-full rounded border border-keep-rule md:h-5"
+            className="h-7 w-full rounded border border-keep-rule lg:h-5"
             style={{ backgroundColor: c }}
             aria-label={c}
             title={c}
@@ -841,19 +836,19 @@ function ColorPicker({ onPick, onClear }: { onPick: (hex: string) => void; onCle
           type="color"
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
-          className="h-8 w-10 cursor-pointer border border-keep-rule md:h-6 md:w-8"
+          className="h-8 w-10 cursor-pointer border border-keep-rule lg:h-6 lg:w-8"
         />
         <input
           type="text"
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
-          className="flex-1 rounded border border-keep-rule px-2 py-1.5 font-mono md:py-1"
+          className="flex-1 rounded border border-keep-rule px-2 py-1.5 font-mono lg:py-1"
           maxLength={7}
         />
         <button
           type="button"
           onClick={() => onPick(custom)}
-          className="rounded border border-keep-rule bg-keep-banner px-2 py-1.5 hover:bg-keep-banner/80 md:py-1"
+          className="rounded border border-keep-rule bg-keep-banner px-2 py-1.5 hover:bg-keep-banner/80 lg:py-1"
         >
           Set
         </button>
@@ -861,7 +856,7 @@ function ColorPicker({ onPick, onClear }: { onPick: (hex: string) => void; onCle
       <button
         type="button"
         onClick={onClear}
-        className="keep-button mt-1 w-full rounded border border-keep-rule bg-keep-bg py-1.5 hover:bg-keep-banner md:py-1"
+        className="keep-button mt-1 w-full rounded border border-keep-rule bg-keep-bg py-1.5 hover:bg-keep-banner lg:py-1"
       >
         Clear
       </button>

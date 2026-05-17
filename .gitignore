@@ -119,6 +119,16 @@ fly.toml.local
 /tmp/
 /scratch/
 
+# Ad-hoc shell scripts dropped at the repo root for one-shot codemods or
+# personal dev launchers. Prefix with `.tmp-` and they'll stay local —
+# anything worth keeping should graduate to scripts/.
+/.tmp-*
+
+# Windows NTFS Alternate Data Stream sidecars left behind by files
+# downloaded from a browser and copied through the WSL bridge. Pure
+# metadata, useless on disk.
+*:Zone.Identifier
+
 # Local-only security audit notes — findings, exploit paths, status of
 # each item. Useful as a working doc but not for the public repo (avoid
 # advertising live issues to attackers).
@@ -127,3 +137,9 @@ SECURITY-NOTES.md
 
 # Local-only working doc tracking in-flight feature scope across sessions.
 plan.md
+plan_patch.md
+plan_minor.md
+plan_major.md
+
+# Scratchpad for in-progress commit messages drafted between sessions.
+commit.md

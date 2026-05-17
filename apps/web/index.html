@@ -76,6 +76,20 @@
     }
     </script>
 
+    <!-- Reading-font catalog. These match the dropdown in ProfileEditor
+         (Settings → Reading & accessibility → Font family) — loading
+         them up-front keeps the picker preview accurate and avoids a
+         FOUT when a user selects one. `display=swap` keeps text
+         visible during the swap; preconnect saves a couple round-trips
+         on first paint. Weights 400/700 only — chat doesn't use heavier
+         display weights. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Inter:wght@400;700&family=Lato:wght@400;700&family=Lora:wght@400;700&family=Merriweather:wght@400;700&family=Open+Sans:wght@400;700&family=Roboto:wght@400;700&family=Roboto+Slab:wght@400;700&family=Source+Sans+3:wght@400;700&display=swap"
+    />
+
     <!-- HEAD_EXTRA: server splices admin-configured analytics scripts here. -->
   </head>
   <body>

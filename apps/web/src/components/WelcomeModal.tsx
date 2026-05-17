@@ -48,7 +48,7 @@ export function WelcomeModal({ html, hash, onDismissed }: Props) {
     // welcome re-renders next page load. The button is the only path out.
     <Modal onClose={onDismissed} closeOnBackdrop={false} closeOnEscape={false} zIndex={50}>
       <div
-        className="flex max-h-[85vh] w-full flex-col overflow-hidden rounded border border-keep-border bg-keep-bg text-keep-text shadow-2xl md:w-[min(720px,78vw)]"
+        className="keep-frame flex max-h-[85vh] w-full flex-col overflow-hidden rounded bg-keep-bg text-keep-text md:w-[min(720px,78vw)]"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">

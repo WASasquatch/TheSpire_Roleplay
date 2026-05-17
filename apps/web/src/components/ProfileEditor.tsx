@@ -16,11 +16,15 @@ import {
   type PushState,
 } from "../lib/push.js";
 import { readError } from "../lib/http.js";
+import { fetchEarningMe, patchEarningSettings } from "../lib/earning.js";
 import { useChat } from "../state/store.js";
+import { useEarning, lookupRankTier } from "../state/earning.js";
 import { StylePicker } from "./AdminPanel.js";
-import { Modal } from "./Modal.js";
+import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
+import { CloseButton } from "./CloseButton.js";
+import { DisplayPrivacyRow } from "./DisplayPrivacyRow.js";
 
 interface Props {
   /** Initial selection. The user can switch via the dropdown. */
@@ -54,13 +58,25 @@ interface MasterData {
   notifyPref?: NotifyPref;
   /** Per-event in-app sound toggles. Account-level (not per-character). */
   soundDmEnabled?: boolean;
+  soundWhisperEnabled?: boolean;
   soundChatEnabled?: boolean;
   soundAlertEnabled?: boolean;
+  /** Input-behavior opt-outs (account-level). See SoundRow / InputBehaviorRow. */
+  disableInputHistory?: boolean;
+  disableThesaurus?: boolean;
+  /** Userlist display: when true, rank sigil replaces gender glyph in rail. */
+  useRankAsUserlistIcon?: boolean;
   role?: Role;
   isPublic?: boolean;
   isNsfw?: boolean;
-  /** Admin-tunable input caps. Surfaced so the bio counter matches the server's accept threshold. */
-  limits?: { maxBioLength: number; maxMessageLength: number };
+  /** Admin-tunable input caps. Surfaced so each composer's counter matches the server's accept threshold. */
+  limits?: {
+    maxBioLength: number;
+    maxMessageLength: number;
+    maxDirectMessageLength: number;
+    maxForumPostLength: number;
+    maxForumTopicTitleLength: number;
+  };
 }
 
 interface CharacterRow {
@@ -142,11 +158,17 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   const [uiFontScale, setUiFontScale] = useState<UiFontScale | null>(null);
   const [notifyPref, setNotifyPref] = useState<NotifyPref>("mentions");
   // Per-event in-app sound toggles. Account-level (master target only); a
-  // character switch doesn't carry its own audio prefs. All three default
+  // character switch doesn't carry its own audio prefs. All default
   // to enabled to match the server schema.
   const [soundDmEnabled, setSoundDmEnabled] = useState<boolean>(true);
+  const [soundWhisperEnabled, setSoundWhisperEnabled] = useState<boolean>(true);
   const [soundChatEnabled, setSoundChatEnabled] = useState<boolean>(true);
   const [soundAlertEnabled, setSoundAlertEnabled] = useState<boolean>(true);
+  // Per-user input-behavior toggles. Default off (= features on). Pushed
+  // through `useChat.setInputPrefs` on save so the live Composer/Synonym
+  // popup picks them up without a reload.
+  const [disableInputHistory, setDisableInputHistory] = useState<boolean>(false);
+  const [disableThesaurus, setDisableThesaurus] = useState<boolean>(false);
   // Public + NSFW visibility flags. Default isPublic=true, isNsfw=false to
   // match the schema. NSFW=true forces isPublic=false on save (server
   // enforces this too); the UI mirrors that by disabling the Public box.
@@ -256,8 +278,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           );
           setNotifyPref(master.notifyPref ?? "mentions");
           setSoundDmEnabled(master.soundDmEnabled ?? true);
+          setSoundWhisperEnabled(master.soundWhisperEnabled ?? true);
           setSoundChatEnabled(master.soundChatEnabled ?? true);
           setSoundAlertEnabled(master.soundAlertEnabled ?? true);
+          setDisableInputHistory(master.disableInputHistory ?? false);
+          setDisableThesaurus(master.disableThesaurus ?? false);
           setIsPublic(master.isPublic ?? true);
           setIsNsfw(master.isNsfw ?? false);
           setPortraits([]); // master has no gallery; only characters do
@@ -347,8 +372,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             uiFontScale,
             notifyPref,
             soundDmEnabled,
+            soundWhisperEnabled,
             soundChatEnabled,
             soundAlertEnabled,
+            disableInputHistory,
+            disableThesaurus,
             chatColor,
             isPublic,
             isNsfw,
@@ -365,8 +393,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             gender,
             notifyPref,
             soundDmEnabled,
+            soundWhisperEnabled,
             soundChatEnabled,
             soundAlertEnabled,
+            disableInputHistory,
+            disableThesaurus,
             styleKey: userStyleKey,
             uiFontFamily: uiFontFamily && uiFontFamily.trim() !== "" ? uiFontFamily.trim() : null,
             uiFontScale,
@@ -386,8 +417,16 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         // no need to wait for the next /me/profile reload.
         useChat.getState().setSoundPrefs({
           dm: soundDmEnabled,
+          whisper: soundWhisperEnabled,
           chat: soundChatEnabled,
           alert: soundAlertEnabled,
+        });
+        // Mirror the input-behavior opt-outs into the store so the
+        // Composer (history) + SynonymPopup (thesaurus) honor the new
+        // values before the next /me/profile refresh runs.
+        useChat.getState().setInputPrefs({
+          disableHistory: disableInputHistory,
+          disableThesaurus,
         });
       } else {
         const r = await fetch(`/characters/${target.id}`, {
@@ -504,6 +543,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
    * the user can preview unsaved edits while iterating.
    */
   const [previewing, setPreviewing] = useState(false);
+  // Real authenticated user id, used by the preview path so the
+  // ProfileModal's earning fetch (`/earning/users/:id`) resolves to
+  // the actual rank/XP/currency for the viewer. The original
+  // implementation used the stub string "preview" which 404'd the
+  // fetch and silently hid the earning chips on the in-editor
+  // preview.
+  const myUserId = useChat((s) => s.me?.id ?? null);
   const previewProfile: ProfileView | null = useMemo(() => {
     const previewTheme = theme ?? DEFAULT_THEME;
     if (target.kind === "master") {
@@ -511,7 +557,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
       return {
         kind: "master",
         profile: {
-          userId: "preview",
+          userId: myUserId ?? "preview",
           username: master.username,
           bioHtml: bioHtml,
           avatarUrl: avatarUrl.trim() || null,
@@ -525,6 +571,15 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           isPublic: isNsfw ? false : isPublic,
           isNsfw,
           createdAt: Date.now(),
+          // Preview is a local-only render of unsaved edits, so we
+          // don't query lifetime activity counters here — the real
+          // numbers land when the editor closes and the user opens
+          // their own profile from chat.
+          // Preview is a local render of unsaved edits — don't run the
+          // server-side count aggregation here. Null per field tells
+          // the ProfileModal to render "private" placeholders rather
+          // than fake "0" numbers that imply the user has never posted.
+          metrics: { chatMessages: null, forumTopics: null, forumReplies: null },
         },
       };
     }
@@ -532,7 +587,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
       kind: "character",
       profile: {
         id: target.id,
-        userId: "preview",
+        // Real owning userId so the ProfileModal preview fetches
+        // actual earning. See master branch above for context.
+        userId: myUserId ?? "preview",
         name,
         bioHtml,
         stats,
@@ -552,9 +609,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         isNsfw,
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        metrics: { chatMessages: 0, forumTopics: 0, forumReplies: 0 },
       },
     };
-  }, [target, master, name, bioHtml, avatarUrl, gender, stats, theme, portraits, links, isPublic, isNsfw]);
+  }, [target, master, myUserId, name, bioHtml, avatarUrl, gender, stats, theme, portraits, links, isPublic, isNsfw]);
 
   const targetOptions = useMemo(() => {
     return [
@@ -572,11 +630,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   const targetValue = target.kind === "master" ? "master:" : `character:${target.id}`;
 
   return (
-    <Modal onClose={onClose} zIndex={50}>
+    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <form
         onSubmit={save}
         onClick={(e) => e.stopPropagation()}
-        className="keep-frame flex h-[92vh] w-full flex-col rounded bg-keep-parchment md:w-[78vw] md:max-w-[1600px]"
+        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-parchment`}
       >
         {/* header - fixed */}
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-keep-rule bg-keep-banner px-4 py-2">
@@ -628,9 +686,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
               </button>
             ) : null}
           </div>
-          <button type="button" onClick={onClose} className="shrink-0 text-sm text-keep-muted hover:text-keep-text">
-            close
-          </button>
+          <CloseButton onClick={onClose} />
         </div>
 
         {/* Tab strip. Replaces the old mobile-only Settings/Description
@@ -839,30 +895,53 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                       Reading &amp; accessibility
                     </legend>
                     <p className="mb-2 text-[10px] text-keep-muted">
-                      Override the interface font and size if the defaults are
-                      hard to read. Empty font = use the site default. Any
-                      fallback font your browser doesn't recognize is silently
-                      skipped, so bad values just degrade — they don't break
-                      the page.
+                      Pick a font and a size to override the defaults if the
+                      regular interface is hard to read. The Google web fonts
+                      load automatically; the rest are system fonts every OS
+                      ships with. Leave on "Default" to follow the site's
+                      built-in font.
                     </p>
                     <label className="block text-xs">
                       <span className="mb-1 block uppercase tracking-widest text-keep-muted">
-                        Font family (CSS)
+                        Font family
                       </span>
-                      <input
-                        type="text"
+                      <select
                         value={uiFontFamily ?? ""}
                         onChange={(e) => setUiFontFamily(e.target.value === "" ? null : e.target.value)}
-                        placeholder={`e.g. "Verdana", sans-serif`}
-                        maxLength={200}
-                        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
-                      />
-                      <span className="mt-1 block text-[10px] text-keep-muted">
-                        Examples: <code>"Georgia", serif</code> ·
-                        {" "}<code>"Verdana", sans-serif</code> ·
-                        {" "}<code>"Comic Sans MS", sans-serif</code> ·
-                        {" "}<code>"Atkinson Hyperlegible", sans-serif</code>
-                      </span>
+                        // Render the dropdown trigger in the currently-
+                        // selected font so the preview is visible without
+                        // having to save first. Per-option font previews
+                        // are attempted via inline `style.fontFamily`;
+                        // some browsers honor it in the open dropdown,
+                        // some show all options in the default UI font —
+                        // both behaviors are acceptable.
+                        style={uiFontFamily ? { fontFamily: uiFontFamily } : undefined}
+                        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+                      >
+                        <option value="">Default (site font)</option>
+                        <optgroup label="Sans-serif (Google)">
+                          <option value='"Roboto", sans-serif' style={{ fontFamily: '"Roboto", sans-serif' }}>Roboto</option>
+                          <option value='"Open Sans", sans-serif' style={{ fontFamily: '"Open Sans", sans-serif' }}>Open Sans</option>
+                          <option value='"Inter", sans-serif' style={{ fontFamily: '"Inter", sans-serif' }}>Inter</option>
+                          <option value='"Lato", sans-serif' style={{ fontFamily: '"Lato", sans-serif' }}>Lato</option>
+                          <option value='"Source Sans 3", sans-serif' style={{ fontFamily: '"Source Sans 3", sans-serif' }}>Source Sans 3</option>
+                        </optgroup>
+                        <optgroup label="Serif (Google)">
+                          <option value='"Lora", serif' style={{ fontFamily: '"Lora", serif' }}>Lora</option>
+                          <option value='"Merriweather", serif' style={{ fontFamily: '"Merriweather", serif' }}>Merriweather</option>
+                          <option value='"Roboto Slab", serif' style={{ fontFamily: '"Roboto Slab", serif' }}>Roboto Slab</option>
+                        </optgroup>
+                        <optgroup label="Accessibility">
+                          <option value='"Atkinson Hyperlegible", sans-serif' style={{ fontFamily: '"Atkinson Hyperlegible", sans-serif' }}>Atkinson Hyperlegible</option>
+                          <option value='"Comic Sans MS", "Chalkboard SE", sans-serif' style={{ fontFamily: '"Comic Sans MS", "Chalkboard SE", sans-serif' }}>Comic Sans (dyslexia-friendly)</option>
+                        </optgroup>
+                        <optgroup label="System fonts">
+                          <option value='system-ui, sans-serif' style={{ fontFamily: 'system-ui, sans-serif' }}>System sans-serif</option>
+                          <option value='Georgia, serif' style={{ fontFamily: 'Georgia, serif' }}>Georgia</option>
+                          <option value='Verdana, sans-serif' style={{ fontFamily: 'Verdana, sans-serif' }}>Verdana</option>
+                          <option value='Arial, sans-serif' style={{ fontFamily: 'Arial, sans-serif' }}>Arial</option>
+                        </optgroup>
+                      </select>
                     </label>
                     <label className="mt-3 block text-xs">
                       <span className="mb-1 block uppercase tracking-widest text-keep-muted">
@@ -915,13 +994,38 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                 {!isCharacter ? (
                   <SoundRow
                     dm={soundDmEnabled}
+                    whisper={soundWhisperEnabled}
                     chat={soundChatEnabled}
                     alert={soundAlertEnabled}
                     onChangeDm={setSoundDmEnabled}
+                    onChangeWhisper={setSoundWhisperEnabled}
                     onChangeChat={setSoundChatEnabled}
                     onChangeAlert={setSoundAlertEnabled}
                   />
                 ) : null}
+                {!isCharacter ? (
+                  <InputBehaviorRow
+                    disableHistory={disableInputHistory}
+                    disableThesaurus={disableThesaurus}
+                    onChangeDisableHistory={setDisableInputHistory}
+                    onChangeDisableThesaurus={setDisableThesaurus}
+                  />
+                ) : null}
+                {/* Earning — Currency privacy. Master-only; characters
+                    inherit the master's privacy flag and don't have their
+                    own. Self-saving (immediate PATCH to
+                    /earning/me/settings), so it doesn't ride the
+                    profile form's Save button. */}
+                {!isCharacter ? <CurrencyPrivacyRow /> : null}
+                {/* Rank-visibility toggles + metric privacy. Both
+                    are per-master-account preferences; characters
+                    don't have separate versions, so we gate the
+                    render on `!isCharacter`. Self-saving via the
+                    /me/profile PUT for the same reason CurrencyPrivacyRow
+                    self-saves — the row sits alongside other privacy
+                    sections and "checked it, expected it, didn't see
+                    a Save button" was a sharp paper-cut earlier. */}
+                {!isCharacter ? <DisplayPrivacyRow /> : null}
               </div>
             ) : null}
 
@@ -1072,7 +1176,7 @@ function CreateCharacterModal({
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        className="w-[min(420px,96vw)] rounded border border-keep-rule bg-keep-parchment p-4 shadow-xl"
+        className="keep-frame w-[min(420px,96vw)] rounded bg-keep-parchment p-4"
       >
         <h3 className="mb-2 font-action text-lg">New character</h3>
         <label className="block text-xs">
@@ -1723,23 +1827,27 @@ function NotificationsRow({
  * settings — saved when the user clicks Save in the editor footer, not
  * on toggle.
  *
- * All three default on; users opt out of the noises they find
+ * All four default on; users opt out of the noises they find
  * intrusive. The toggles take effect immediately on save thanks to the
  * Zustand store push in the parent's onSubmit — no need to reload the
  * page or the Audio elements.
  */
 function SoundRow({
   dm,
+  whisper,
   chat,
   alert,
   onChangeDm,
+  onChangeWhisper,
   onChangeChat,
   onChangeAlert,
 }: {
   dm: boolean;
+  whisper: boolean;
   chat: boolean;
   alert: boolean;
   onChangeDm: (v: boolean) => void;
+  onChangeWhisper: (v: boolean) => void;
   onChangeChat: (v: boolean) => void;
   onChangeAlert: (v: boolean) => void;
 }) {
@@ -1760,6 +1868,20 @@ function SoundRow({
           <span className="block text-keep-text">Direct messages (ping)</span>
           <span className="block text-[10px] text-keep-muted">
             Plays when someone DMs you, anywhere in the app.
+          </span>
+        </span>
+      </label>
+      <label className="mb-1 flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={whisper}
+          onChange={(e) => onChangeWhisper(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="block text-keep-text">Whispers (whisper)</span>
+          <span className="block text-[10px] text-keep-muted">
+            Plays when someone whispers to you in chat. Distinct from DMs so an in-room whisper sounds different from a cross-room ping.
           </span>
         </span>
       </label>
@@ -1791,6 +1913,205 @@ function SoundRow({
           </span>
         </span>
       </label>
+    </fieldset>
+  );
+}
+
+/**
+ * Input behavior opt-outs. Two toggles for composer features that some
+ * users find intrusive rather than helpful:
+ *   - Command/post history (ArrowUp recall) — easy to brush ArrowUp by
+ *     accident while moving the cursor; with history off, the arrow
+ *     keys do nothing but move the caret.
+ *   - Thesaurus on highlight — the synonym popup opens whenever a word
+ *     is selected, which surprises users who highlight just to copy.
+ *
+ * Both default off (= feature enabled) for new accounts; flipping the
+ * checkbox + Save persists the preference to /me/profile and pushes
+ * it into the chat store so it takes effect immediately.
+ */
+function InputBehaviorRow({
+  disableHistory,
+  disableThesaurus,
+  onChangeDisableHistory,
+  onChangeDisableThesaurus,
+}: {
+  disableHistory: boolean;
+  disableThesaurus: boolean;
+  onChangeDisableHistory: (v: boolean) => void;
+  onChangeDisableThesaurus: (v: boolean) => void;
+}) {
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Input behavior</legend>
+      <p className="mb-2 text-[10px] text-keep-muted">
+        Quiet down composer features you don't want to see while typing.
+      </p>
+      <label className="mb-1 flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={disableHistory}
+          onChange={(e) => onChangeDisableHistory(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="block text-keep-text">Disable command and message history</span>
+          <span className="block text-[10px] text-keep-muted">
+            Turns off the ArrowUp / ArrowDown recall of recently sent messages and commands in the chat composer.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={disableThesaurus}
+          onChange={(e) => onChangeDisableThesaurus(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="block text-keep-text">Disable synonym popup on highlighted words</span>
+          <span className="block text-[10px] text-keep-muted">
+            Stops the thesaurus list from appearing when you select a word inside the composer.
+          </span>
+        </span>
+      </label>
+    </fieldset>
+  );
+}
+
+/**
+ * Earning — hide-Currency toggle.
+ *
+ * Master-scope only (character pools cascade off the master flag).
+ * Saves immediately on change rather than riding the profile form's
+ * Save button, so the toggle doesn't get stranded by an unrelated
+ * validation error elsewhere in the form. Pulls initial state from
+ * the Earning store (which the App-level useEffect refreshes on
+ * sign-in); falls back to a direct /earning/me fetch when the
+ * store hasn't loaded yet.
+ */
+function CurrencyPrivacyRow() {
+  const snapshot = useEarning((s) => s.snapshot);
+  const refresh = useEarning((s) => s.refresh);
+  const [hideCurrency, setHideCurrency] = useState<boolean | null>(snapshot?.master.hideCurrencyCount ?? null);
+  const [hideXp, setHideXp] = useState<boolean | null>(snapshot?.master.hideXpCount ?? null);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  // When the store snapshot lands after this row mounted, fold the
+  // server value in. Only overwrite null (initial) state so we don't
+  // clobber an in-flight optimistic toggle.
+  useEffect(() => {
+    if (!snapshot) return;
+    if (hideCurrency === null) setHideCurrency(!!snapshot.master.hideCurrencyCount);
+    if (hideXp === null) setHideXp(!!snapshot.master.hideXpCount);
+  }, [snapshot, hideCurrency, hideXp]);
+
+  // Direct fetch fallback when the editor opened before /earning/me ever ran.
+  useEffect(() => {
+    if (snapshot || (hideCurrency !== null && hideXp !== null)) return;
+    let cancelled = false;
+    fetchEarningMe()
+      .then((r) => {
+        if (cancelled) return;
+        if (hideCurrency === null) setHideCurrency(!!r.master.hideCurrencyCount);
+        if (hideXp === null) setHideXp(!!r.master.hideXpCount);
+      })
+      .catch(() => { /* user can still toggle — server is source of truth on save */ });
+    return () => { cancelled = true; };
+  }, [snapshot, hideCurrency, hideXp]);
+
+  async function save(kind: "currency" | "xp", next: boolean) {
+    if (kind === "currency") setHideCurrency(next); else setHideXp(next);
+    setSaving(true);
+    setErr(null);
+    try {
+      await patchEarningSettings(
+        kind === "currency" ? { hideCurrencyCount: next } : { hideXpCount: next },
+      );
+      setSavedFlash(true);
+      void refresh();
+      window.setTimeout(() => setSavedFlash(false), 1500);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to save");
+      if (kind === "currency") setHideCurrency(!next); else setHideXp(!next);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Current totals readout — so the user sees their own Earning state
+  // here, not just the privacy toggles. Mirrors what the chat strip
+  // shows; pulled from the same snapshot so it stays in sync with
+  // live `earning:earned` updates.
+  const master = snapshot?.master ?? null;
+  const { rank, tierRow } = lookupRankTier(snapshot, master?.rankKey ?? null, master?.tier ?? null);
+  const rankLabel = rank ? `${rank.name}${tierRow ? ` ${tierRow.label}` : ""}` : "Unranked";
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Earning</legend>
+      <div className="mb-2 flex flex-wrap items-center gap-3 rounded border border-keep-rule bg-keep-bg/50 px-2 py-1.5">
+        <span className="font-action uppercase tracking-widest text-keep-text">{rankLabel}</span>
+        <span aria-hidden className="h-4 w-px shrink-0 bg-keep-rule/60" />
+        <span className="inline-flex items-center gap-1">
+          <img
+            src="/assets/earning/cache_pouch.png"
+            alt=""
+            aria-hidden
+            className="select-none"
+            style={{ width: "1.75rem", height: "1.75rem" }}
+            draggable={false}
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+          />
+          <span className="font-semibold tabular-nums text-keep-text">{(master?.currency ?? 0).toLocaleString()}</span>
+        </span>
+        <span aria-hidden className="h-4 w-px shrink-0 bg-keep-rule/60" />
+        <span className="inline-flex items-baseline gap-1">
+          <span className="font-semibold tabular-nums text-keep-text">{(master?.xp ?? 0).toLocaleString()}</span>
+          <span className="uppercase tracking-widest text-keep-muted">XP</span>
+        </span>
+      </div>
+      <p className="mb-2 text-[10px] text-keep-muted">
+        Rank, tier, and sigil are always visible on your profile. XP and Currency totals can be
+        hidden independently.
+      </p>
+      <label className="mb-2 flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={hideCurrency ?? false}
+          disabled={saving || hideCurrency === null}
+          onChange={(e) => void save("currency", e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="block text-keep-text">Hide my Currency total from other users</span>
+          <span className="block text-[10px] text-keep-muted">
+            Other users see "private" instead of your balance in /currency lookups and on your public profile.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={hideXp ?? false}
+          disabled={saving || hideXp === null}
+          onChange={(e) => void save("xp", e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="block text-keep-text">Hide my XP total from other users</span>
+          <span className="block text-[10px] text-keep-muted">
+            Other users see "private" instead of your XP on your profile and in /exp lookups.
+          </span>
+        </span>
+      </label>
+      {err ? (
+        <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-[10px] text-keep-accent">{err}</div>
+      ) : null}
+      {savedFlash ? (
+        <div className="mt-1 text-[10px] text-keep-system">Saved.</div>
+      ) : null}
     </fieldset>
   );
 }

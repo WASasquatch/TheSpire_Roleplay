@@ -2,6 +2,9 @@ import { resolveMessageColor } from "@thekeep/shared";
 import type { Gender } from "../lib/gender.js";
 import { genderGlyph } from "../lib/gender.js";
 import { useActiveTheme } from "../lib/theme.js";
+import { BorderedAvatar } from "./BorderedAvatar.js";
+import { RankSigil } from "./RankSigil.js";
+import { StyledName } from "./StyledName.js";
 
 interface Props {
   displayName: string;
@@ -17,8 +20,6 @@ interface Props {
    */
   onIconClick: () => void;
   onNameClick: () => void;
-  /** "★" / "♛" indicator preceding the icon (room role). */
-  rolePrefix?: string;
   /**
    * Hide the gender icon entirely. Used by the chat message log so message
    * lines stay tight; the userlist still shows icons (and remains the
@@ -36,6 +37,45 @@ interface Props {
    * rather than a badge that competes with mood/role markers.
    */
   ooc?: boolean;
+  /**
+   * Earning rank/tier — drives the inline sigil rendered before the
+   * name. Optional; nulls / missing values render no sigil. The
+   * RankSigil component itself reads the catalog from the earning
+   * store, so the caller only needs to pass the (key, tier) tuple.
+   *
+   * Sized `sm` by default (chat-line / forum-header use). The
+   * userlist passes `md` for a slightly larger glyph.
+   */
+  rankKey?: string | null;
+  tier?: number | null;
+  rankSigilSize?: "sm" | "md" | "lg";
+  /**
+   * Which rank-icon set to render. `tier` (default) uses the per-tier
+   * chevron from the catalog — the existing chat-line / forum-header
+   * art. `gem` uses the abridged six-gem set (`gem_rank_N.png`), one
+   * per top-level rank, with tier ignored. Userlist callers pass
+   * `gem` because the rail has no room for the tier-distinct chevron
+   * detail and the rank category alone is enough.
+   */
+  rankIconVariant?: "tier" | "gem";
+  /**
+   * Earning — equipped name style + per-user config for the
+   * styled-name renderer. Both null when the user has nothing
+   * equipped; the tag falls back to a plain text name button.
+   * Source is the live occupant payload (broadcast.ts populates it
+   * per-room from user_active_cosmetics + user_owned_name_styles).
+   */
+  nameStyleKey?: string | null;
+  nameStyleConfig?: Record<string, unknown> | null;
+  /**
+   * Earning — when set AND `avatarUrl` is non-null AND the user
+   * has the `inline_avatar` cosmetic active, the gender-icon click
+   * target is swapped for a bordered avatar (per plan.md Phase 4
+   * spec). Users without the cosmetic keep the gender icon.
+   */
+  avatarUrl?: string | null;
+  selectedBorderRankKey?: string | null;
+  inlineAvatar?: boolean;
 }
 
 /**
@@ -51,11 +91,19 @@ export function UserNameTag({
   awayMessage,
   onIconClick,
   onNameClick,
-  rolePrefix,
   hideIcon,
   italic,
   mood,
   ooc,
+  rankKey,
+  tier,
+  rankSigilSize,
+  rankIconVariant = "tier",
+  nameStyleKey,
+  nameStyleConfig,
+  avatarUrl,
+  selectedBorderRankKey,
+  inlineAvatar,
 }: Props) {
   const g = genderGlyph(gender);
   // Resolve theme-slot tokens (e.g. `theme:system`) to a CSS color
@@ -71,24 +119,117 @@ export function UserNameTag({
     // `min-w-0` flex children default to their content size and
     // refuse to shrink, which is what was causing long usernames
     // to wrap onto a second line.
-    <span className="inline-flex min-w-0 max-w-full items-baseline gap-1">
-      {rolePrefix ? <span className="shrink-0 text-keep-muted">{rolePrefix}</span> : null}
-      {hideIcon ? null : (
-        <button
-          type="button"
-          onClick={onIconClick}
-          title={`view profile (${g.title})`}
-          // px-1 py-0.5 + rounded background on hover gives a real tap
-          // target on mobile without changing visual density.
-          // `shrink-0` keeps the gender icon at its natural size when
-          // the row scrunches — only the name button absorbs the
-          // squeeze.
-          className="shrink-0 rounded px-1 py-0.5 text-base leading-none hover:bg-keep-panel hover:underline md:text-sm"
-          style={{ color: g.color }}
-        >
-          {g.icon}
-        </button>
-      )}
+    //
+    // `items-center` (not baseline) because the rank sigil is an
+    // image with no text baseline of its own — under items-baseline
+    // it sits flush with the bottom of the line while the username
+    // text rides its own baseline, and the two end up visibly
+    // staggered (image floats above the name). Center keeps the
+    // sigil, gender glyph, and name visually aligned regardless of
+    // their individual intrinsic heights.
+    //
+    // `align-middle` on the OUTER wrapper centers the whole tag on
+    // the SURROUNDING text's middle line (timestamp + body). Without
+    // it the inline-flex falls back to baseline alignment with the
+    // line's text, so a taller child (the gem rank sigil at 1.6em,
+    // for example) pushes the whole tag upward and the username +
+    // gem end up floating above the timestamp / body. With this
+    // class the tag sits centered on the line and the gem +
+    // username line up with the rest of the chat row.
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1 align-middle">
+      {(() => {
+        // Icon slot priority (only when an icon slot is shown at all —
+        // chat lines pass `hideIcon` so this branch doesn't render
+        // there). Order is deliberate:
+        //
+        //   1. Bordered avatar — opt-in cosmetic. Wins over everything
+        //      else because it's the most deliberately equipped piece
+        //      of identity art.
+        //   2. Rank sigil — RANK ALWAYS REPLACES THE GENDER GLYPH WHEN
+        //      THE USER HAS A RANK. There is no per-user toggle: a
+        //      resolved rank IS the user's primary identity badge, and
+        //      stacking gender + rank in the same row reads as visual
+        //      clutter (the legacy behavior). Falls back to gender
+        //      automatically for unranked accounts, so flipping nothing
+        //      on a fresh account doesn't leave the row icon-less.
+        //   3. Gender glyph — the original Unicode badge. Renders only
+        //      when there's no avatar AND no resolved rank.
+        if (hideIcon) return null;
+        if (inlineAvatar && avatarUrl) {
+          return (
+            <BorderedAvatar
+              avatarUrl={avatarUrl}
+              name={displayName}
+              borderRankKey={selectedBorderRankKey ?? null}
+              size="sm"
+              onClick={onIconClick}
+              title={`view profile (${g.title})`}
+              className="shrink-0"
+            />
+          );
+        }
+        // Rank-resolution check. Gem variant only needs `rankKey` (the
+        // catalog lookup happens inside RankSigil and ignores tier).
+        // Tier variant requires both `rankKey` and `tier` because each
+        // tier has its own art. Either way, when the rank renders in
+        // the icon slot the standalone-after-icon sigil below is
+        // suppressed to avoid showing the same image twice in a row.
+        const hasResolvedRank =
+          rankKey != null &&
+          (rankIconVariant === "gem" || tier != null);
+        if (hasResolvedRank) {
+          return (
+            <button
+              type="button"
+              onClick={onIconClick}
+              title={`view profile (${displayName})`}
+              className="shrink-0 rounded px-0.5 py-0.5 leading-none hover:bg-keep-panel"
+            >
+              <RankSigil rankKey={rankKey} tier={tier ?? null} size={rankSigilSize ?? "md"} variant={rankIconVariant} />
+            </button>
+          );
+        }
+        return (
+          <button
+            type="button"
+            onClick={onIconClick}
+            title={`view profile (${g.title})`}
+            // px-1 py-0.5 + rounded background on hover gives a real tap
+            // target on mobile without changing visual density.
+            // `shrink-0` keeps the gender icon at its natural size when
+            // the row scrunches — only the name button absorbs the
+            // squeeze. font-size in em so the glyph scales with the
+            // container's font-size (driven by the chat/rail font-step
+            // setting). 1em matches the surrounding text; the Unicode
+            // gender glyphs read clearly at this size.
+            className="shrink-0 rounded px-1 py-0.5 leading-none hover:bg-keep-panel hover:underline"
+            style={{ color: g.color, fontSize: "1em" }}
+          >
+            {g.icon}
+          </button>
+        );
+      })()}
+      {/* Standalone inline rank sigil. Renders in two cases:
+          1. Chat lines (`hideIcon`) — no icon slot, so the rank sits
+             here right before the name.
+          2. Avatar in the icon slot — rank gets a small repeat slot
+             after the avatar so the rank still shows even when the
+             cosmetic owns the click target.
+          Suppressed when the rank is ALREADY in the icon slot (icon
+          slot rendered the rank because the user is ranked + has no
+          avatar cosmetic), to keep the rail from showing two of the
+          same image side by side. */}
+      {(() => {
+        const hasResolvedRank =
+          rankKey != null &&
+          (rankIconVariant === "gem" || tier != null);
+        if (!hasResolvedRank) return null;
+        const rankWasInIconSlot = !hideIcon && !(inlineAvatar && avatarUrl);
+        if (rankWasInIconSlot) return null;
+        return (
+          <RankSigil rankKey={rankKey ?? null} tier={tier ?? null} size={rankSigilSize ?? "sm"} variant={rankIconVariant} />
+        );
+      })()}
       <button
         type="button"
         onClick={onNameClick}
@@ -104,14 +245,36 @@ export function UserNameTag({
         // content-size so the ellipsis actually has room to engage.
         // Without these, long names previously broke onto a new line
         // and threw the row layout off.
-        className={`min-w-0 truncate rounded px-1 py-0.5 font-semibold hover:bg-keep-panel hover:underline${italic ? " italic" : ""}`}
-        style={resolvedColor ? { color: resolvedColor } : undefined}
+        //
+        // `py-0.5` only — no horizontal padding: it pushed the
+        // username away from the surrounding "[" / ":" punctuation
+        // that wraps it in chat lines. The hover background still
+        // reads on hover thanks to the rounded background sitting
+        // tight against the text glyphs.
+        className={`min-w-0 truncate rounded py-0.5 font-semibold hover:bg-keep-panel hover:underline${italic ? " italic" : ""}`}
+        // Inline chatColor is preserved as a fallback for users with
+        // no equipped style — StyledName below paints over it when a
+        // template's CSS sets `color` directly, but when the style
+        // CSS doesn't touch color (e.g. a glow-only effect), the
+        // user's picked chat color still bleeds through.
+        style={resolvedColor && !nameStyleKey ? { color: resolvedColor } : undefined}
       >
-        {displayName}
+        <StyledName
+          displayName={displayName}
+          styleKey={nameStyleKey ?? null}
+          config={nameStyleConfig ?? null}
+          // Pass the resolved chatColor as the base color for the
+          // plain-text fallback so unstyled users keep their per-
+          // character color.
+          baseColor={resolvedColor}
+        />
       </button>
       {mood ? (
         <span
-          className="ml-1 shrink-0 rounded bg-keep-action/15 px-1 text-[10px] uppercase tracking-wide text-keep-action"
+          // No `px-1` here either — same rationale as the username
+          // button: punctuation around the chip ("[", ":") sits
+          // adjacent enough that horizontal padding read as a gap.
+          className="shrink-0 rounded bg-keep-action/15 text-[10px] uppercase tracking-wide text-keep-action"
           title={`mood: ${mood}`}
         >
           {mood}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useChat } from "../state/store.js";
 
 /**
  * Thesaurus popup that activates on text selection inside an input
@@ -27,6 +28,10 @@ export function SynonymPopup({
   value: string;
   onChange: (next: string) => void;
 }) {
+  // Per-user opt-out — when set, this component does nothing: no
+  // listeners, no fetches, no popup. Lives in the chat store so a
+  // toggle in the profile editor takes effect immediately.
+  const disableThesaurus = useChat((s) => s.inputPrefs.disableThesaurus);
   const [synonyms, setSynonyms] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const [highlightedIdx, setHighlightedIdx] = useState(0);
@@ -63,6 +68,15 @@ export function SynonymPopup({
   // avoid firing a network request for every keystroke while the user
   // drags a selection.
   useEffect(() => {
+    // Opt-out: skip the listener entirely so dragging a selection
+    // doesn't fire a /thesaurus request even silently. Also closes
+    // any popup that was open at the moment the user flipped the
+    // toggle on.
+    if (disableThesaurus) {
+      setOpen(false);
+      setSynonyms([]);
+      return;
+    }
     function onSelectionChange() {
       const sel = readSelection();
       if (!sel) {
@@ -107,7 +121,7 @@ export function SynonymPopup({
       document.removeEventListener("selectionchange", onSelectionChange);
       if (fetchTimerRef.current != null) window.clearTimeout(fetchTimerRef.current);
     };
-  }, [value, inputRef]);
+  }, [value, inputRef, disableThesaurus]);
 
   // Keyboard navigation. Attached to the input via capture-phase
   // window listener so the popup can preempt the input's own

@@ -63,7 +63,23 @@ interface Props {
    */
   isOpen?: boolean;
   onClose?: () => void;
+  /**
+   * Same 0–3 reading-size step the Tools menu cycles for the chat
+   * surface. Applied to the rail's root container as a font-size in
+   * em so descendants — userlist names, icon glyphs sized with `em`,
+   * room headers — scale together with the chat lines. Default 1
+   * (medium) when omitted keeps the rail at its historic size.
+   */
+  fontStep?: 0 | 1 | 2 | 3;
 }
+
+/**
+ * Same step → em map the chat surface uses (see MessageList.FONT_EM).
+ * Hoisted here so the rail can read it without importing MessageList.
+ * Keep the two arrays in sync; the Tools-menu cycle button labels
+ * (0–3) assume identical scaling on both surfaces.
+ */
+const RAIL_FONT_EM = ["1.15em", "1.3em", "1.5em", "1.75em"] as const;
 
 /**
  * Right-rail navigation: each room (public always, plus the private room the
@@ -85,6 +101,7 @@ export function RoomsTree({
   onOpenMessages,
   isOpen,
   onClose,
+  fontStep = 1,
 }: Props) {
   // Mobile drawer: fixed-positioned slide-out from the right. md+ falls
   // back to the original static, always-visible rail. We avoid a separate
@@ -166,10 +183,21 @@ export function RoomsTree({
         flex h-full w-72 flex-col border-l border-keep-rule bg-keep-bg text-sm shadow-2xl
         fixed inset-y-0 right-0 z-40 transform transition-transform
         ${drawerOpen ? "translate-x-0" : "translate-x-full"}
-        md:relative md:w-[var(--keep-rail-width)] md:translate-x-0 md:transform-none md:transition-none
-        md:bg-keep-banner/30 md:shadow-none
+        lg:relative lg:w-[var(--keep-rail-width)] lg:translate-x-0 lg:transform-none lg:transition-none
+        lg:bg-keep-banner/30 lg:shadow-none
       `}
-      style={{ ["--keep-rail-width" as string]: `${railWidth}px` } as CSSProperties}
+      style={{
+        ["--keep-rail-width" as string]: `${railWidth}px`,
+        // The Tools-menu font-size cycle drives the chat surface via
+        // an em font-size on MessageList. Mirror it here so the rail
+        // — userlist rows, room headers, all the descendants that
+        // inherit `font-size` and the em-sized icons in
+        // [UserNameTag.tsx](./UserNameTag.tsx) — scale in lockstep.
+        // Items in the rail still using rem-based Tailwind sizes
+        // (text-xs etc.) stay fixed, which is the intended floor:
+        // labels stay readable even at the smallest step.
+        fontSize: RAIL_FONT_EM[fontStep],
+      } as CSSProperties}
     >
       {/* Resize handle, desktop-only. Sits flush against the rail's
           left border (covering it visually) so dragging "the border"
@@ -189,12 +217,12 @@ export function RoomsTree({
         onPointerMove={moveResize}
         onPointerUp={endResize}
         onPointerCancel={endResize}
-        className="absolute inset-y-0 left-0 z-30 hidden w-1.5 cursor-ew-resize hover:bg-keep-action/30 active:bg-keep-action/50 md:block"
+        className="absolute inset-y-0 left-0 z-30 hidden w-1.5 cursor-ew-resize hover:bg-keep-action/30 active:bg-keep-action/50 lg:block"
       />
       {/* Header row - title + room count, with the mobile-only close
           button living inside it (instead of an absolute overlay) so it
           gets real layout space and never covers the room list. */}
-      <div className="flex items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-2 md:bg-transparent md:py-1.5">
+      <div className="flex items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-2 lg:bg-transparent lg:py-1.5">
         <span className="text-xs uppercase tracking-widest text-keep-muted">
           Rooms <span className="text-keep-rule">({rooms.length})</span>
         </span>
@@ -202,7 +230,7 @@ export function RoomsTree({
           <button
             type="button"
             onClick={onClose}
-            className="keep-button flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-base text-keep-text hover:bg-keep-banner md:hidden"
+            className="keep-button flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-base text-keep-text hover:bg-keep-banner lg:hidden"
             aria-label="Close rooms"
             title="Close rooms drawer"
           >
@@ -278,7 +306,7 @@ function RoomGroup({
         type="button"
         onClick={() => onRoomClick(room.id)}
         title={room.topic ?? ""}
-        className={`flex w-full items-baseline justify-between px-3 py-2.5 text-left font-bold hover:bg-keep-banner/30 hover:text-keep-accent md:py-1 ${
+        className={`flex w-full items-baseline justify-between px-3 py-2.5 text-left font-bold hover:bg-keep-banner/30 hover:text-keep-accent lg:py-1 ${
           isCurrent ? "text-keep-action" : "text-keep-accent"
         }`}
       >
@@ -287,10 +315,34 @@ function RoomGroup({
               nested rooms persist their conversations as threaded
               replies (forum-style) so newcomers know which mode the
               room is in before they enter. */}
+          {/* Room-mode glyph. PNG icons (board.png / scroll.png) replace
+              the emoji equivalents (🧵 / 💬) per the Earning asset
+              pack so the rail reads consistently across platforms
+              regardless of OS emoji font. */}
           {room.replyMode === "nested" ? (
-            <span title="threaded conversations — replies persist as forum-style threads" className="mr-1">🧵</span>
+            <img
+              src="/assets/icons/board.png"
+              alt=""
+              aria-hidden
+              title="threaded conversations — replies persist as forum-style threads"
+              className="mr-1 inline-block shrink-0 select-none align-middle"
+              // em-sized so the icon scales with the rail's fontSize
+              // (driven by the Tools-menu font-step setting). 1.4em is
+              // a tad larger than the room-name's cap-height so the
+              // icon reads as a label glyph at every step.
+              style={{ minWidth: "1.4em", minHeight: "1.4em", width: "1.4em", height: "1.4em" }}
+              draggable={false}
+            />
           ) : (
-            <span title="flat chat — chronological, ephemeral feel" className="mr-1">💬</span>
+            <img
+              src="/assets/icons/scroll.png"
+              alt=""
+              aria-hidden
+              title="flat chat — chronological, ephemeral feel"
+              className="mr-1 inline-block shrink-0 select-none align-middle"
+              style={{ minWidth: "1.4em", minHeight: "1.4em", width: "1.4em", height: "1.4em" }}
+              draggable={false}
+            />
           )}
           {isPrivate ? <span title="private - password required" className="mr-1">🔒</span> : null}
           {room.name}
@@ -298,7 +350,7 @@ function RoomGroup({
         <span className="ml-2 shrink-0 font-normal text-keep-muted">({room.occupants.length})</span>
       </button>
       {room.occupants.length === 0 ? (
-        <div className="px-5 pb-2 text-[11px] italic text-keep-muted md:pb-1">empty</div>
+        <div className="px-5 pb-2 text-[11px] italic text-keep-muted lg:pb-1">empty</div>
       ) : (
         <ul className="pb-1">
           {groups.map((g) => (
@@ -311,13 +363,13 @@ function RoomGroup({
                     title={`Open ${g.world.name} (by ${g.world.ownerUsername})`}
                     // py-1.5 mobile / py-0.5 desktop. Section banding via
                     // muted/25 - same pattern used for hover highlights.
-                    className="flex w-full items-baseline justify-between bg-keep-muted/25 px-3 py-1.5 text-left text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-muted/40 md:py-0.5"
+                    className="flex w-full items-baseline justify-between bg-keep-muted/25 px-3 py-1.5 text-left text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-muted/40 lg:py-0.5"
                   >
                     <span className="truncate">{g.world.name}</span>
                     <span className="ml-2 shrink-0">{g.users.length}</span>
                   </button>
                 ) : (
-                  <div className="bg-keep-muted/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-keep-muted/70 md:py-0.5">
+                  <div className="bg-keep-muted/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-keep-muted/70 lg:py-0.5">
                     Unaffiliated
                     <span className="ml-2">{g.users.length}</span>
                   </div>
@@ -333,7 +385,7 @@ function RoomGroup({
                   return (
                     <li
                       key={`${o.userId}:${o.characterId ?? ""}`}
-                      className="flex items-center justify-between gap-2 px-3 py-1.5 pl-5 md:py-0.5"
+                      className="flex items-center justify-between gap-2 px-3 py-1.5 pl-5 lg:py-0.5"
                     >
                       <div className="min-w-0 flex-1 truncate">
                         <UserNameTag
@@ -342,8 +394,35 @@ function RoomGroup({
                           color={o.chatColor ?? null}
                           away={o.away}
                           awayMessage={o.awayMessage ?? null}
-                          rolePrefix={resolveRolePrefix(o)}
                           ooc={o.characterId === null}
+                          // Userlist rank sigil — drives from the live
+                          // occupant's pool rank (per-character when
+                          // attached, master pool otherwise). Slightly
+                          // larger glyph than the chat-line sigil since
+                          // the rail has room. Userlist uses the
+                          // abridged `gem` variant (gem_rank_1.png …
+                          // gem_rank_6.png) — one icon per top-level
+                          // rank, tier ignored — because the rail row
+                          // has no room for the per-tier chevron detail
+                          // and the rank category alone is enough.
+                          rankKey={o.rankKey ?? null}
+                          tier={o.tier ?? null}
+                          rankSigilSize="md"
+                          rankIconVariant="gem"
+                          // Active name style — live from the occupant
+                          // payload, so style edits update the rail
+                          // instantly on the next presence broadcast.
+                          nameStyleKey={o.activeNameStyleKey ?? null}
+                          nameStyleConfig={o.nameStyleConfig ?? null}
+                          // Phase 4 — inline-avatar cosmetic swaps the
+                          // gender-icon click target for a bordered
+                          // avatar. UserNameTag honors `inlineAvatar`
+                          // only when an avatarUrl is also available
+                          // (a user with the cosmetic but no avatar
+                          // keeps the gender-icon affordance).
+                          avatarUrl={o.avatarUrl ?? null}
+                          selectedBorderRankKey={o.selectedBorderRankKey ?? null}
+                          inlineAvatar={o.inlineAvatarEnabled}
                           onIconClick={() => onIconClick(o.userId, o.displayName)}
                           onNameClick={() => onNameClick(o.userId, o.displayName)}
                         />
@@ -406,20 +485,6 @@ function groupByPrimaryWorld(occupants: RoomOccupant[]): OccupantGroup[] {
     if (!b.world) return -1;
     return a.world.name.toLowerCase().localeCompare(b.world.name.toLowerCase());
   });
-}
-
-/**
- * Resolve the small role chip rendered before a user's name. Owner takes
- * precedence; otherwise either a per-room mod OR a site-level mod gets a
- * star (a site mod is conceptually "a mod for every room", so it makes
- * sense to share the marker). Site admins use italics instead - handled
- * elsewhere via UserNameTag's `italic` prop - so admin doesn't need a
- * prefix here.
- */
-function resolveRolePrefix(o: RoomOccupant): string {
-  if (o.role === "owner") return "♛";
-  if (o.role === "mod" || o.accountRole === "mod") return "★";
-  return "";
 }
 
 interface StaffChip {

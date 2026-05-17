@@ -3,8 +3,9 @@ import type { CommandDoc } from "@thekeep/shared";
 import { markVerified } from "@thekeep/shared";
 import { parseInline } from "../lib/markdown.js";
 import { HelpGuides } from "./HelpGuides.js";
-import { Modal } from "./Modal.js";
+import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { useChat } from "../state/store.js";
+import { CloseButton } from "./CloseButton.js";
 
 interface Props {
   /** Initial filter - pre-fills the search box (e.g. /help char). */
@@ -76,10 +77,10 @@ export function HelpModal({ initialFilter, onClose }: Props) {
   }, [commands, filter]);
 
   return (
-    <Modal onClose={onClose} zIndex={50}>
+    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex h-[90vh] w-full flex-col rounded border border-keep-border bg-keep-bg shadow-xl md:w-[78vw] md:max-w-[1100px]"
+        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg`}
       >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-keep-border bg-keep-panel px-4 py-2">
           <div className="flex items-center gap-2">
@@ -107,7 +108,7 @@ export function HelpModal({ initialFilter, onClose }: Props) {
           ) : (
             <div className="flex-1" />
           )}
-          <button onClick={onClose} className="text-sm text-keep-muted hover:text-keep-text">close</button>
+          <CloseButton onClick={onClose} />
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -187,6 +188,7 @@ const FORMATTING_ROWS: Array<{ syntax: string; example: string; note?: string }>
   { syntax: "https://url", example: "see https://example.com for details", note: "bare URLs are auto-linked at word boundaries" },
   { syntax: "![alt](https://image-url)", example: "![cat](https://example.com/cat.png)", note: "renders as a link with a Show image toggle - opt-in so loading the image doesn't leak your IP to the host" },
   { syntax: "https://.../photo.png", example: "screenshot: https://example.com/screenshot.png", note: "image URLs ending in png/jpg/jpeg/gif/webp/svg/bmp/avif also get the Show image toggle" },
+  { syntax: "https://youtu.be/...", example: "lookbook clip: https://youtu.be/dQw4w9WgXcQ", note: "YouTube and Vimeo links get a Show video toggle next to the link - click to play it inline. Works for youtube.com/watch, youtu.be, youtube.com/shorts, and vimeo.com URLs" },
   { syntax: "@username", example: "thanks @sigrid!", note: "click to open their profile; matches a master account or active character" },
   { syntax: "@world:slug", example: "anyone for a game in @world:ironreach?", note: "click to open the world viewer; slug is the world's URL slug (lowercase + hyphens)" },
   { syntax: `<font color="#hex">text</font>`, example: `<font color="#a83232">red text</font>`, note: "puts a one-off color on a chunk of text. Color must be a 3- or 6-digit hex literal; anything else falls through as plain text. The viewer's theme nudges the value toward legibility if it would disappear against their chat background." },
@@ -490,6 +492,12 @@ function FormattingHelp() {
             click to load it inline (max 480×360). The image's host can see
             your IP only if you click; <code>referrerPolicy="no-referrer"</code>{" "}
             blocks the chat URL from leaking via Referer.
+          </li>
+          <li>
+            <b>Videos stay opt-in too.</b> Paste a YouTube or Vimeo link and
+            you'll see a "Show video" button. Click to play it inline; the
+            video stays off the page until you do, so the link won't ping
+            anyone's tracker just because someone scrolled past it.
           </li>
         </ul>
       </details>

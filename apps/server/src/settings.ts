@@ -4,6 +4,8 @@ import type { Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
 import { siteSettings } from "./db/schema.js";
+import type { EarningConfig } from "./earning/config.js";
+import { parseEarningConfig, normalizeEarningConfig } from "./earning/config.js";
 
 /**
  * Stable, short hash of the welcome HTML used to decide whether a user has
@@ -88,6 +90,12 @@ export interface SiteSettings {
   maxRoomsPerOwner: number;
   /** Cap on chat message body length. */
   maxMessageLength: number;
+  /** Cap on direct-message body length (independent from chat). */
+  maxDirectMessageLength: number;
+  /** Cap on forum post body length (topics + replies in nested rooms). */
+  maxForumPostLength: number;
+  /** Cap on the title of a forum topic. */
+  maxForumTopicTitleLength: number;
   /**
    * Author-edit / author-delete grace window in ms for flat chat
    * rooms. Mods and admins bypass the gate entirely; forum (nested)
@@ -128,6 +136,13 @@ export interface SiteSettings {
   defaultStyleKey: string;
   /** Iteration of the DEFAULT_WORLDS seed last applied to system worlds. The boot seeder compares against SEED_VERSION in seed_worlds.ts and overwrites when this is behind. */
   worldsSeedVersion: number;
+  /**
+   * Earning system runtime config — every award rate, cap, and
+   * transfer gate the engine reads. Always populated (parse failure
+   * or NULL column falls back to DEFAULT_EARNING_CONFIG so the
+   * engine can trust the shape unconditionally).
+   */
+  earningConfig: EarningConfig;
   updatedAt: number;
 }
 
@@ -181,6 +196,9 @@ export interface SettingsPatch {
   maxAccountsPerEmail?: number;
   maxRoomsPerOwner?: number;
   maxMessageLength?: number;
+  maxDirectMessageLength?: number;
+  maxForumPostLength?: number;
+  maxForumTopicTitleLength?: number;
   /** Author-edit/delete grace window in ms (chat rooms). */
   editGraceMs?: number;
   maxBioLength?: number;
@@ -205,6 +223,14 @@ export interface SettingsPatch {
   newUserWelcomeHtml?: string;
   /** Site-wide default theme style key. */
   defaultStyleKey?: string;
+  /**
+   * Earning system config patch. Pass the full EarningConfig object;
+   * partial input is normalized via `normalizeEarningConfig` so missing
+   * keys fall back to defaults. Null clears the override and reverts to
+   * DEFAULT_EARNING_CONFIG. Validation gates (masteradmin-only fields,
+   * range checks, etc.) belong in the admin route handler.
+   */
+  earningConfig?: EarningConfig | null;
 }
 
 export async function updateSettings(
@@ -238,6 +264,9 @@ export async function updateSettings(
   if (patch.maxAccountsPerEmail !== undefined) update.maxAccountsPerEmail = patch.maxAccountsPerEmail;
   if (patch.maxRoomsPerOwner !== undefined) update.maxRoomsPerOwner = patch.maxRoomsPerOwner;
   if (patch.maxMessageLength !== undefined) update.maxMessageLength = patch.maxMessageLength;
+  if (patch.maxDirectMessageLength !== undefined) update.maxDirectMessageLength = patch.maxDirectMessageLength;
+  if (patch.maxForumPostLength !== undefined) update.maxForumPostLength = patch.maxForumPostLength;
+  if (patch.maxForumTopicTitleLength !== undefined) update.maxForumTopicTitleLength = patch.maxForumTopicTitleLength;
   if (patch.editGraceMs !== undefined) update.editGraceMs = patch.editGraceMs;
   if (patch.maxBioLength !== undefined) update.maxBioLength = patch.maxBioLength;
   if (patch.registrationOpen !== undefined) update.registrationOpen = patch.registrationOpen;
@@ -250,6 +279,12 @@ export async function updateSettings(
   if (patch.activityFeedsEnabled !== undefined) update.activityFeedsEnabled = patch.activityFeedsEnabled;
   if (patch.featuredWorldsEnabled !== undefined) update.featuredWorldsEnabled = patch.featuredWorldsEnabled;
   if (patch.defaultStyleKey !== undefined) update.defaultStyleKey = patch.defaultStyleKey;
+  if (patch.earningConfig !== undefined) {
+    update.earningConfigJson =
+      patch.earningConfig === null
+        ? null
+        : JSON.stringify(normalizeEarningConfig(patch.earningConfig));
+  }
   if (patch.newUserWelcomeHtml !== undefined) {
     // Only bump the welcome's edit timestamp when the text actually changed.
     // The audience filter (`user.createdAt > newUserWelcomeUpdatedAt`)
@@ -290,6 +325,9 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     maxAccountsPerEmail: row.maxAccountsPerEmail,
     maxRoomsPerOwner: row.maxRoomsPerOwner,
     maxMessageLength: row.maxMessageLength,
+    maxDirectMessageLength: row.maxDirectMessageLength,
+    maxForumPostLength: row.maxForumPostLength,
+    maxForumTopicTitleLength: row.maxForumTopicTitleLength,
     editGraceMs: row.editGraceMs,
     maxBioLength: row.maxBioLength,
     registrationOpen: row.registrationOpen,
@@ -308,6 +346,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     newUserWelcomeUpdatedAt: row.newUserWelcomeUpdatedAt ? +row.newUserWelcomeUpdatedAt : null,
     defaultStyleKey: row.defaultStyleKey,
     worldsSeedVersion: row.worldsSeedVersion,
+    earningConfig: parseEarningConfig(row.earningConfigJson),
     updatedAt: +row.updatedAt,
   };
 }

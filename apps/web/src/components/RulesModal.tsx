@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
-import { Modal } from "./Modal.js";
+import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
+import { CloseButton } from "./CloseButton.js";
 
 interface RulesPayload {
   rulesHtml: string;
@@ -37,14 +38,14 @@ export function RulesModal({ onClose }: Props) {
   }, []);
 
   return (
-    <Modal onClose={onClose} zIndex={50}>
+    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex h-[85vh] w-full flex-col rounded border border-keep-border bg-keep-bg shadow-xl md:w-[78vw] md:max-w-[820px]"
+        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg`}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-keep-border bg-keep-panel px-4 py-2">
           <h2 className="font-action text-lg">Rules</h2>
-          <button onClick={onClose} className="text-sm text-keep-muted hover:text-keep-text">close</button>
+          <CloseButton onClick={onClose} />
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">

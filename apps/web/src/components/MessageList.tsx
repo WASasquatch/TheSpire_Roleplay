@@ -1,11 +1,16 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { customCmdCssToStyle, isAdminRole, resolveMessageColor, type ChatMessage, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
+import { BorderedAvatar, type BorderedAvatarSize } from "./BorderedAvatar.js";
+import { RankSigil } from "./RankSigil.js";
+import { StyledName } from "./StyledName.js";
 import { UserNameTag } from "./UserNameTag.js";
 import type { Gender } from "../lib/gender.js";
 import { parseInline, renderForumBody } from "../lib/markdown.js";
 import { splitMentions } from "../lib/mentions.js";
+import { extractMentions } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
+import { useMentionsCache, requestMentionResolve } from "../state/mentions.js";
 import { readError } from "../lib/http.js";
 
 interface Props {
@@ -177,12 +182,21 @@ const NO_SELF_NAMES: ReadonlyArray<string> = [];
 
 // Font-size cycle for the local Size button. Values are em-units so they
 // compose with the user's profile-level UI font size: a user on "Large"
-// (18px html base) sees `1em` = 18px chat; bumping the local step to 3
-// scales to 18 × 1.3 = ~23px. A user on the default 16px base sees the
-// "natural" 16px chat at step 1, etc. Storing this as px (the previous
-// shape) would override the profile preference and leave accessibility
-// users stuck at whatever the renderer baked in.
-const FONT_EM = ["0.8em", "1em", "1.15em", "1.3em"] as const;
+// (18px html base) sees the bottom step as 18 × 1.15 = ~21px, the top
+// step as 18 × 1.75 = ~31px. A user on the default 16px base sees the
+// "natural" 16px chat unmodified only by going lower than the cycle's
+// floor (i.e. profile fontScale = Small). Storing this as px (the
+// previous shape) would override the profile preference and leave
+// accessibility users stuck at whatever the renderer baked in.
+//
+// The whole ladder was shifted up — step 0 is now what step 2 used to
+// be, step 1 what step 3 used to be — because the old smallest steps
+// (0.8em / 1em) read as cramped on the modern chat surface and almost
+// no one was selecting them. Keep MessageList.FONT_EM and
+// [RoomsTree.tsx](./RoomsTree.tsx)'s RAIL_FONT_EM in lockstep so the
+// chat surface and the rail scale together when the Tools-menu cycle
+// flips.
+const FONT_EM = ["1.15em", "1.3em", "1.5em", "1.75em"] as const;
 
 function fmtTime(ms: number): string {
   const d = new Date(ms);
@@ -349,9 +363,27 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   // someone who's left renders without italics, which is fine (italics is
   // decorative, not load-bearing identification).
   const adminUserIds = new Set<string>();
+  // Earning — equipped name style + cosmetic state keyed by userId.
+  // Falls back to plain rendering for backlog from users who've left
+  // the room (matches the gender / admin-italics fallbacks above —
+  // styling is decorative, not load-bearing).
+  const styleByUser = new Map<string, { key: string; config: Record<string, unknown> | null }>();
+  const cosmeticsByUser = new Map<string, {
+    avatarUrl: string | null;
+    selectedBorderRankKey: string | null;
+    inlineAvatarEnabled: boolean;
+  }>();
   for (const o of occupants) {
     genderByUser.set(o.userId, o.gender);
     if (isAdminRole(o.accountRole)) adminUserIds.add(o.userId);
+    if (o.activeNameStyleKey) {
+      styleByUser.set(o.userId, { key: o.activeNameStyleKey, config: o.nameStyleConfig });
+    }
+    cosmeticsByUser.set(o.userId, {
+      avatarUrl: o.avatarUrl,
+      selectedBorderRankKey: o.selectedBorderRankKey,
+      inlineAvatarEnabled: o.inlineAvatarEnabled,
+    });
   }
   // Fall back to an empty list when the caller doesn't supply selfNames
   // (e.g. pre-auth or older callers) — every mention then renders in the
@@ -365,6 +397,8 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       <Line
         msg={m}
         gender={genderByUser.get(m.userId) ?? "undisclosed"}
+        nameStyle={styleByUser.get(m.userId) ?? null}
+        senderCosmetics={cosmeticsByUser.get(m.userId) ?? null}
         isSenderAdmin={adminUserIds.has(m.userId)}
         isRecipientAdmin={!!m.toUserId && adminUserIds.has(m.toUserId)}
         isOwn={!!selfUserId && m.userId === selfUserId}
@@ -744,10 +778,13 @@ function ForumView({
       ref={scrollRef as React.RefObject<HTMLDivElement>}
       // No horizontal padding on mobile so topic cards reach the viewport
       // edges — every pixel of side gutter is one or two characters of
-      // reading width that otherwise gets eaten by chrome. md+ restores
+      // reading width that otherwise gets eaten by chrome. lg+ restores
       // the gutter since desktop has plenty of horizontal room and the
-      // visual breathing room reads as intentional, not cramped.
-      className="min-h-0 flex-1 overflow-y-auto py-2 leading-relaxed md:px-4"
+      // visual breathing room reads as intentional, not cramped. The
+      // breakpoint is `lg` to match the rest of the chat shell — the
+      // rail stays in drawer mode until `lg` so the chat needs the
+      // full viewport gutter-free at every `< lg` width.
+      className="min-h-0 flex-1 overflow-y-auto py-2 leading-relaxed lg:px-4"
       style={{ fontSize: FONT_EM[fontStep] }}
     >
       {sections.map((s) => {
@@ -808,10 +845,15 @@ function ForumView({
                 // though we're no longer sticky on mobile/tablet).
                 style={{ backgroundColor: "rgb(var(--keep-panel))" }}
                 // Full-bleed math (-mx-4 + w-[calc(100%+2rem)]) only applies
-                // on md+ where the ForumView root re-adds its px-4 gutter.
-                // On mobile the root is edge-to-edge, so the header is
-                // already full-bleed at plain `w-full`.
-                className="keep-section-header mb-2 flex w-full cursor-pointer items-baseline justify-between gap-3 border-y border-keep-rule px-4 py-2 text-left text-[1.1rem] font-semibold uppercase tracking-widest text-keep-text shadow-sm hover:brightness-95 md:-mx-4 md:w-[calc(100%+2rem)] lg:sticky lg:top-0 lg:z-30"
+                // on lg+ where the chat scroll root re-adds its px-4 gutter
+                // (see [MessageList.tsx](./MessageList.tsx)'s `lg:px-4`).
+                // On mobile / mid-width the root is edge-to-edge, so the
+                // header is already full-bleed at plain `w-full`. Pinning
+                // the breakpoint to lg keeps the negative-margin trick in
+                // lockstep with the gutter it's compensating for — earlier
+                // the two diverged (md vs lg) and headers overflowed the
+                // chat container at 768–1023px widths.
+                className="keep-section-header mb-2 flex w-full cursor-pointer items-baseline justify-between gap-3 border-y border-keep-rule px-4 py-2 text-left text-[1.1rem] font-semibold uppercase tracking-widest text-keep-text shadow-sm hover:brightness-95 lg:-mx-4 lg:w-[calc(100%+2rem)] lg:sticky lg:top-0 lg:z-30"
                 title={isCollapsed ? "Expand category" : "Collapse category"}
               >
                 {/* Left span: name + chevron. min-w-0 + truncate so a
@@ -1058,6 +1100,8 @@ function TopicCard({
         <ForumAvatar
           src={topic.avatarUrl ?? null}
           name={topic.displayName}
+          userId={topic.userId}
+          size={48}
           onClick={(e) => {
             e.stopPropagation();
             onIconClick(topic.userId, topic.displayName);
@@ -1208,48 +1252,57 @@ export function ForumAvatar({
   name,
   onClick,
   size = 32,
+  userId,
+  borderRankKey,
 }: {
   src: string | null;
   name: string;
   onClick?: (e: React.MouseEvent) => void;
+  /** Numeric size for backward compat. Mapped to BorderedAvatar's
+   *  size enum: anything ≥28 gets the `md` showcase slot (frame
+   *  container at 1.5× the avatar); smaller is a bare circle. */
   size?: number;
+  /** When provided, ForumAvatar looks up the author's currently-
+   *  equipped border in the chat store's occupant cache. Used by
+   *  forum topic/reply call sites so the same border the user
+   *  picked in the Earning dashboard frames their forum posts. */
+  userId?: string | null;
+  /** Direct border override — wins over `userId` lookup. */
+  borderRankKey?: string | null;
 }) {
-  const initial = (name.trim()[0] ?? "?").toUpperCase();
-  const style = { width: `${size}px`, height: `${size}px` } as const;
-  const inner = src ? (
-    <img
-      src={src}
-      alt=""
-      className="h-full w-full rounded-full object-cover"
-      loading="lazy"
-      onError={(e) => {
-        // Drop the broken image so the fallback initial shows.
-        (e.currentTarget as HTMLImageElement).style.display = "none";
-      }}
-    />
-  ) : (
-    <span className="select-none text-sm font-semibold text-keep-muted">{initial}</span>
-  );
-  if (onClick) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        style={style}
-        className="keep-button flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-keep-rule bg-keep-banner hover:border-keep-action"
-        title={`View ${name}'s profile`}
-      >
-        {inner}
-      </button>
-    );
-  }
+  const occupantBorderRankKey = useChat((s) => {
+    if (!userId) return null;
+    for (const list of Object.values(s.occupants)) {
+      const row = list.find((o) => o.userId === userId);
+      if (row) return row.selectedBorderRankKey;
+    }
+    return null;
+  });
+  // Fall back to live occupant avatar when the message snapshot
+  // didn't carry one (older messages, system rows, etc.). Lets a
+  // user who set their avatar AFTER posting still see the new
+  // portrait on their existing forum posts without a backfill.
+  const occupantAvatarUrl = useChat((s) => {
+    if (!userId) return null;
+    for (const list of Object.values(s.occupants)) {
+      const row = list.find((o) => o.userId === userId);
+      if (row?.avatarUrl) return row.avatarUrl;
+    }
+    return null;
+  });
+  const effectiveBorder = borderRankKey ?? occupantBorderRankKey;
+  const effectiveSrc = src ?? occupantAvatarUrl;
+  const mappedSize: BorderedAvatarSize =
+    size <= 22 ? "sm" : size <= 28 ? "md" : size <= 48 ? "lg" : "xl";
   return (
-    <div
-      style={style}
-      className="flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-keep-rule bg-keep-banner"
-    >
-      {inner}
-    </div>
+    <BorderedAvatar
+      avatarUrl={effectiveSrc}
+      name={name}
+      borderRankKey={effectiveBorder ?? null}
+      size={mappedSize}
+      {...(onClick ? { onClick } : {})}
+      title={`View ${name}'s profile`}
+    />
   );
 }
 
@@ -1318,14 +1371,31 @@ export function ForumPostBody({
   // (`> quoted text` line prefix) render as styled <blockquote>
   // elements — needed by the Quote-reply flow. Flat-chat lines still
   // use the inline parser (see the `Line` component further down).
+  const knownMentions = useMentionsCache((s) => {
+    void s.version;
+    return s.known;
+  });
+  useEffect(() => {
+    const names = extractMentions(msg.body);
+    if (names.length > 0) requestMentionResolve(names);
+  }, [msg.body]);
   const renderedBody = useMemo(
-    () => renderForumBody(msg.body, onMentionClick, onWorldClick, selfNames),
-    [msg.body, onMentionClick, onWorldClick, selfNames],
+    () => renderForumBody(msg.body, onMentionClick, onWorldClick, selfNames, knownMentions),
+    [msg.body, onMentionClick, onWorldClick, selfNames, knownMentions],
   );
   // Theme bg drives the legibility nudge that keeps a user-picked color
   // readable when the current palette flips between light and dark.
   const themeBg = useActiveTheme().bg;
   const authorColor = resolveMessageColor(msg.color, themeBg);
+  // Earning — equipped name style for this post's author, looked up
+  // in the current room's occupant cache. Backlog from authors no
+  // longer present renders unstyled; matches the chat-line policy.
+  const authorStyle = useChat((s) => {
+    const room = s.occupants[msg.roomId] ?? [];
+    const found = room.find((o) => o.userId === msg.userId);
+    if (!found || !found.activeNameStyleKey) return null;
+    return { key: found.activeNameStyleKey, config: found.nameStyleConfig };
+  });
 
   // Inline editor state — when editing, the body region is replaced
   // with a textarea + Save/Cancel. Hoisted here (not in PostToolbar) so
@@ -1409,27 +1479,48 @@ export function ForumPostBody({
         <ForumAvatar
           src={msg.avatarUrl ?? null}
           name={msg.displayName}
+          userId={msg.userId}
           onClick={(e) => {
             e.stopPropagation();
             onIconClick(msg.userId, msg.displayName);
           }}
-          size={26}
+          size={32}
         />
       ) : null}
       <div className="min-w-0 flex-1">
         {showAuthorHeader ? (
           <div className="flex items-baseline gap-2 text-[11px]">
-            <button
-              type="button"
-              onClick={() => onNameClick(msg.userId, msg.displayName)}
-              className={
-                "rounded font-semibold text-keep-text hover:text-keep-action " +
-                (isSenderAdmin ? "italic" : "")
-              }
-              style={authorColor ? { color: authorColor } : undefined}
-            >
-              {msg.displayName}
-            </button>
+            {/* Forum-header rank sigil. Reads from the message-row
+                snapshot so a later rank-up doesn't rewrite the
+                badge on a historical post. Gem variant matches the
+                chat-line treatment so chronological + threaded
+                surfaces share one visual language for ranks. */}
+            <RankSigil rankKey={msg.rankKey ?? null} tier={msg.tier ?? null} size="md" variant="gem" />
+            {/* Author name button. Suppressed for /me posts because the
+                action body below renders as "DisplayName <body>" in the
+                action color — repeating the name in the header would
+                read as "Kaal\nKaal raises his sword". Profile access
+                stays available via the avatar tile on the left. */}
+            {msg.kind === "me" ? null : (
+              <button
+                type="button"
+                onClick={() => onNameClick(msg.userId, msg.displayName)}
+                className={
+                  "rounded font-semibold text-keep-text hover:text-keep-action " +
+                  (isSenderAdmin ? "italic" : "")
+                }
+                // Author color only applies when no style is active —
+                // a style's CSS typically owns the color directly.
+                style={authorColor && !authorStyle ? { color: authorColor } : undefined}
+              >
+                <StyledName
+                  displayName={msg.displayName}
+                  styleKey={authorStyle?.key ?? null}
+                  config={authorStyle?.config ?? null}
+                  baseColor={authorColor}
+                />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onTimeClick(msg.id)}
@@ -1491,6 +1582,31 @@ export function ForumPostBody({
                 {editBusy ? "Saving…" : "Save"}
               </button>
             </div>
+          </div>
+        ) : msg.kind === "me" ? (
+          // Action posts read seamlessly: "<DisplayName> <body>" in
+          // the action color, mirroring the chat-line /me treatment
+          // (see the `case "me"` branch in [renderChatLine](./MessageList.tsx)).
+          // The header's name button is suppressed above so the name
+          // appears exactly once, integrated into the action sentence —
+          // `/me raises his sword` → "Kaal raises his sword" rather
+          // than a name header followed by an awkward bare verb body.
+          // StyledName preserves any equipped name-style glamour
+          // (gradients, glow) on the prefix; the rest of the body
+          // takes the action color.
+          <div
+            className="whitespace-pre-wrap font-action"
+            style={{ color: authorColor ?? "rgb(var(--keep-action))" }}
+          >
+            <StyledName
+              displayName={msg.displayName}
+              styleKey={authorStyle?.key ?? null}
+              config={authorStyle?.config ?? null}
+              baseColor={authorColor}
+            />
+            {" "}
+            {renderedBody}
+            {editedBadge}
           </div>
         ) : (
           <div className="whitespace-pre-wrap text-keep-text">
@@ -1997,6 +2113,20 @@ function renderParts(
   onMentionClick: (name: string) => void,
   onWorldClick: (slug: string) => void,
   selfNames: ReadonlyArray<string> = [],
+  /**
+   * Lowercased Set of names that resolve to a real, clickable
+   * profile (master username OR any non-deleted character name).
+   * Sourced from the global mentions cache (`state/mentions.ts`),
+   * which batch-resolves unknown names against `/mentions/resolve`
+   * and populates this set asynchronously. Mentions not in this
+   * set (and not in `selfNames`) render as plain `@text` rather
+   * than as a styled chip — typos and dangling `@bobs` don't
+   * dress up as broken-looking links.
+   *
+   * When `null` or omitted, every mention is styled — kept as
+   * the fallback for surfaces that don't subscribe to the cache.
+   */
+  knownNames?: ReadonlySet<string> | null,
 ): ReactNode[] {
   // Lower-cased Set so the inner check is O(1). Empty when no viewer
   // identity is known yet (pre-auth), which falls through to the
@@ -2022,6 +2152,15 @@ function renderParts(
       );
     } else {
       const isSelf = selfSet.has(p.name);
+      // If the caller supplied a known-names set and this name isn't
+      // in it (and isn't a self identity), fall back to plain text —
+      // matches the rule: only valid users get the chip treatment;
+      // typos and dangling @bobs stay as literal text.
+      const isKnown = isSelf || (knownNames ? knownNames.has(p.name) : true);
+      if (!isKnown) {
+        out.push(<Fragment key={i}>@{p.raw}</Fragment>);
+        return;
+      }
       const className = isSelf
         ? "rounded bg-keep-system-100 px-1 font-semibold text-keep-system-500 ring-1 ring-keep-system/40 hover:bg-keep-system-200 focus:outline-none focus:ring-2"
         : "rounded px-0.5 font-semibold text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action";
@@ -2044,6 +2183,8 @@ function renderParts(
 function Line({
   msg,
   gender,
+  nameStyle,
+  senderCosmetics,
   isSenderAdmin,
   isRecipientAdmin,
   isOwn,
@@ -2061,6 +2202,14 @@ function Line({
 }: {
   msg: ChatMessage;
   gender: Gender;
+  /** Equipped name style for the sender, from the live occupant cache. Null when nothing equipped or sender has left the room. */
+  nameStyle: { key: string; config: Record<string, unknown> | null } | null;
+  /** Cosmetic state for the sender (avatar + border + inline-avatar toggle). Null = sender no longer in room — inline avatar suppressed for backlog. */
+  senderCosmetics: {
+    avatarUrl: string | null;
+    selectedBorderRankKey: string | null;
+    inlineAvatarEnabled: boolean;
+  } | null;
   isSenderAdmin: boolean;
   isRecipientAdmin: boolean;
   isOwn: boolean;
@@ -2103,6 +2252,26 @@ function Line({
       {timeText}
     </span>
   );
+  // Phase 4 inline avatar — round 16px portrait that sits between
+  // the timestamp and the styled name when the author has the
+  // `inline_avatar` cosmetic enabled. Border ring (if any) wraps it
+  // using the author's currently-selected border. Backlog from a
+  // sender no longer in the room rendering without this is fine —
+  // the lookup just returns null and the line collapses to the
+  // standard layout.
+  const inlineAvatar = (senderCosmetics?.inlineAvatarEnabled && (senderCosmetics.avatarUrl || msg.avatarUrl))
+    ? (
+      <BorderedAvatar
+        avatarUrl={senderCosmetics.avatarUrl ?? msg.avatarUrl ?? null}
+        name={msg.displayName}
+        borderRankKey={senderCosmetics.selectedBorderRankKey}
+        size="xs"
+        onClick={() => onIconClick(msg.userId, msg.displayName)}
+        title={`view ${msg.displayName}'s profile`}
+        className="mr-1 align-middle"
+      />
+    )
+    : null;
   const isReply = !!(msg.replyToId && msg.replyToDisplayName);
   // Quote preview reads at the chat body size (`text-sm`), not the
   // smaller meta size. Previously this rendered at `text-xs` which was
@@ -2120,7 +2289,17 @@ function Line({
     <>
       <span aria-hidden="true">↪</span>
       <span className="font-semibold">{msg.replyToDisplayName}:</span>
-      <span className="truncate italic">{msg.replyToBodySnippet ?? ""}</span>
+      {/* Parse the snippet through the inline markdown renderer so
+          `[link text](url)`, **bold**, *italic*, `code`, and other
+          inline markers render as proper elements instead of leaking
+          their raw markdown source into the quote preview. The
+          `[&_a]:pointer-events-none` + neutralized link styling
+          stops the inner `<a>` from intercepting the parent button's
+          jump-to-reply click (and from rendering as a competing
+          interactive affordance — the quote IS the affordance). */}
+      <span className="truncate italic [&_a]:pointer-events-none [&_a]:text-current [&_a]:no-underline">
+        {parseInline(msg.replyToBodySnippet ?? "")}
+      </span>
     </>
   ) : null;
   const quote = isReply
@@ -2148,6 +2327,24 @@ function Line({
       color={msg.color}
       italic={isSenderAdmin}
       mood={msg.moodSnapshot ?? null}
+      // Snapshot from the message row itself — rank at send time
+      // never gets rewritten by a later rank-up. Matches the
+      // display-name / color / mood snapshot pattern.
+      rankKey={msg.rankKey ?? null}
+      tier={msg.tier ?? null}
+      // Chat feed uses the abridged gem icons (one per rank, tier
+      // ignored) at the md em-size so they read clearly against the
+      // line of text and ride the Tools-menu font cycle along with
+      // everything else in the message stream.
+      rankSigilSize="md"
+      rankIconVariant="gem"
+      // Name style — live lookup from the current room's occupant
+      // cache (no snapshot on the message row). Backlog from a
+      // sender who has left the room renders unstyled, which is
+      // intentional: stale styling on offline-author messages is
+      // weirder than a clean fallback.
+      nameStyleKey={nameStyle?.key ?? null}
+      nameStyleConfig={nameStyle?.config ?? null}
       // Deliberately NOT passing `ooc` here. It'd repeat on every utterance
       // and stack with mood/away into a wall of chips. The userlist (and
       // rooms tree) carries the OOC marker - that's the canonical "who's
@@ -2190,7 +2387,21 @@ function Line({
   // Memoize the parsed parts on body so the splitMentions regex doesn't
   // re-run on every parent render (only when the body changes).
   const bodyParts = useMemo(() => splitMentions(msg.body), [msg.body]);
-  const renderedBody = renderParts(bodyParts, onMentionClick, onWorldClick, selfNames);
+  // Subscribe to the mentions cache version + known set so the render
+  // re-fires after a batch resolve lands (the resolver mutates Sets
+  // in place; the version bump is what triggers React to re-evaluate).
+  const knownMentions = useMentionsCache((s) => {
+    void s.version;
+    return s.known;
+  });
+  // Kick off resolution for any mention names in this body that the
+  // cache hasn't seen yet. Debounced + deduped inside the cache, so
+  // calling this on every Line render is cheap.
+  useEffect(() => {
+    const names = extractMentions(msg.body);
+    if (names.length > 0) requestMentionResolve(names);
+  }, [msg.body]);
+  const renderedBody = renderParts(bodyParts, onMentionClick, onWorldClick, selfNames, knownMentions);
   // Resolve the user's stored color once and feed both kind-shaped
   // body styles below. `themeBg` lets resolveMessageColor swap in a
   // legible variant of literal hex colors when the chosen shade would
@@ -2206,12 +2417,22 @@ function Line({
   const editGraceMs = useChat((s) => s.branding.editGraceMs);
   const ageMs = Date.now() - msg.createdAt;
   const showOwnControls = isOwn && ageMs < editGraceMs && REPLYABLE_KINDS.has(msg.kind);
-  // Cross-author moderation affordances. Mods get Delete (hide a post);
-  // admins additionally get Edit (rewrite the body). Both bypass the
-  // grace window. Suppressed on the author's own line — that path is
-  // already handled by `showOwnControls` above.
-  const showModDelete = !isOwn && canModerate && !msg.deletedAt && REPLYABLE_KINDS.has(msg.kind);
-  const showAdminEdit = !isOwn && canAdminEdit && !msg.deletedAt && REPLYABLE_KINDS.has(msg.kind);
+  // Moderation affordances. Mods get Delete (hide a post); admins
+  // additionally get Edit (rewrite the body). Both bypass the grace
+  // window — that's the whole point of the moderation lever, and the
+  // server (apps/server/src/routes/messages.ts) enforces the same
+  // bypass when `isAdminRole(role)` / mod is true.
+  //
+  // Critically: these apply to the author's OWN past-grace posts too,
+  // not just cross-author. Without that, a masteradmin who let their
+  // own message age past the grace window would lose the edit/delete
+  // buttons entirely (the in-grace `showOwnControls` would be false
+  // AND the old `!isOwn` clause locked them out of ModControls). The
+  // gate is just "not currently showing OwnControls" — within-grace
+  // own posts keep the standard OwnControls path so the UI doesn't
+  // render both row variants on top of each other.
+  const showModDelete = canModerate && !msg.deletedAt && REPLYABLE_KINDS.has(msg.kind) && !showOwnControls;
+  const showAdminEdit = canAdminEdit && !msg.deletedAt && REPLYABLE_KINDS.has(msg.kind) && !showOwnControls;
   const showModControls = showModDelete || showAdminEdit;
   const editedBadge = msg.editedAt ? (
     <span
@@ -2227,7 +2448,7 @@ function Line({
     case "me":
       lineEl = (
         <div className="font-action" style={{ color: bodyColor ?? "rgb(var(--keep-action))" }}>
-          {time}{tag} <span className="whitespace-pre-wrap">{renderedBody}</span>{editedBadge}
+          {time}{inlineAvatar}{tag} <span className="whitespace-pre-wrap">{renderedBody}</span>{editedBadge}
         </div>
       );
       break;
@@ -2256,7 +2477,7 @@ function Line({
     case "roll":
       lineEl = (
         <div className="text-keep-system">
-          {time}{tag} <span className="whitespace-pre-wrap">🎲 {renderedBody}</span>{editedBadge}
+          {time}{inlineAvatar}{tag} <span className="whitespace-pre-wrap">🎲 {renderedBody}</span>{editedBadge}
         </div>
       );
       break;
@@ -2339,7 +2560,7 @@ function Line({
       // green on Parchment, purple on Twilight, etc.
       lineEl = (
         <div className="text-keep-action">
-          {time}{tag} <span className="text-keep-muted">whispers</span> {recipientTag}
+          {time}{inlineAvatar}{tag} <span className="text-keep-muted">whispers</span> {recipientTag}
           <span className="text-keep-muted">:</span> <span className="whitespace-pre-wrap">{renderedBody}</span>{editedBadge}
         </div>
       );
@@ -2348,7 +2569,7 @@ function Line({
     case "ooc":
       lineEl = (
         <div className="text-keep-muted">
-          {time}[{tag}] <span className="whitespace-pre-wrap">{renderedBody}</span>{editedBadge}
+          {time}{inlineAvatar}[{tag}] <span className="whitespace-pre-wrap">{renderedBody}</span>{editedBadge}
         </div>
       );
       break;
@@ -2356,7 +2577,7 @@ function Line({
     default:
       lineEl = (
         <div>
-          {time}[{tag}] <span className="whitespace-pre-wrap" style={bodyColor ? { color: bodyColor } : undefined}>{renderedBody}</span>{editedBadge}
+          {time}{inlineAvatar}[{tag}] <span className="whitespace-pre-wrap" style={bodyColor ? { color: bodyColor } : undefined}>{renderedBody}</span>{editedBadge}
         </div>
       );
       break;
@@ -2626,34 +2847,48 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
       // inside a horizontal flex container in some future caller.
       <form
         onSubmit={submitEdit}
-        className="mt-1 flex w-full basis-full items-center gap-1"
+        className="mt-1 flex w-full basis-full flex-col gap-1"
         onKeyDown={(e) => {
           if (e.key === "Escape") { setEditing(false); setDraft(msg.body); }
         }}
       >
-        <input
+        <textarea
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
-          type="text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          className="min-w-0 flex-1 rounded border border-keep-action bg-keep-bg px-2 py-0.5 text-sm outline-none"
+          // Auto-grow with the draft: floor at 1 row so single-line edits
+          // keep the original inline feel, cap at 10 so a long forum body
+          // doesn't blow the row's vertical budget.
+          rows={Math.min(10, Math.max(1, draft.split("\n").length))}
+          // Enter saves (mirrors the composer's send-on-Enter convention);
+          // Shift+Enter inserts a newline. Without this override the form's
+          // onSubmit would never fire because <textarea> swallows Enter.
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }
+          }}
+          className="min-w-0 flex-1 resize-y rounded border border-keep-action bg-keep-bg px-2 py-1 text-sm outline-none"
         />
-        <button
-          type="submit"
-          disabled={busy}
-          className="shrink-0 rounded border border-keep-action bg-keep-action/10 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
-        >
-          {busy ? "..." : "Save"}
-        </button>
-        <button
-          type="button"
-          onClick={() => { setEditing(false); setDraft(msg.body); setError(null); }}
-          className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-        >
-          Cancel
-        </button>
-        {error ? <span className="text-[10px] text-keep-accent">{error}</span> : null}
+        <div className="flex items-center justify-end gap-1">
+          {error ? <span className="mr-auto text-[10px] text-keep-accent">{error}</span> : null}
+          <button
+            type="button"
+            onClick={() => { setEditing(false); setDraft(msg.body); setError(null); }}
+            className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy}
+            className="shrink-0 rounded border border-keep-action bg-keep-action/10 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
+          >
+            {busy ? "..." : "Save"}
+          </button>
+        </div>
       </form>
     );
   }
@@ -2766,35 +3001,43 @@ function ModControls({ msg, canEdit, canDelete }: { msg: ChatMessage; canEdit: b
     return (
       <form
         onSubmit={submitEdit}
-        className="mt-1 flex w-full basis-full items-center gap-1"
+        className="mt-1 flex w-full basis-full flex-col gap-1"
         onKeyDown={(e) => {
           if (e.key === "Escape") { setEditing(false); setDraft(msg.body); }
         }}
       >
-        <input
+        <textarea
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
-          type="text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          className="min-w-0 flex-1 rounded border border-keep-accent bg-keep-bg px-2 py-0.5 text-sm outline-none"
+          rows={Math.min(10, Math.max(1, draft.split("\n").length))}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }
+          }}
+          className="min-w-0 flex-1 resize-y rounded border border-keep-accent bg-keep-bg px-2 py-1 text-sm outline-none"
           aria-label={`Admin edit of ${msg.displayName}'s message`}
         />
-        <button
-          type="submit"
-          disabled={busy}
-          className="shrink-0 rounded border border-keep-accent bg-keep-accent/10 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
-        >
-          {busy ? "..." : "Save"}
-        </button>
-        <button
-          type="button"
-          onClick={() => { setEditing(false); setDraft(msg.body); setError(null); }}
-          className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-        >
-          Cancel
-        </button>
-        {error ? <span className="text-[10px] text-keep-accent">{error}</span> : null}
+        <div className="flex items-center justify-end gap-1">
+          {error ? <span className="mr-auto text-[10px] text-keep-accent">{error}</span> : null}
+          <button
+            type="button"
+            onClick={() => { setEditing(false); setDraft(msg.body); setError(null); }}
+            className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy}
+            className="shrink-0 rounded border border-keep-accent bg-keep-accent/10 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+          >
+            {busy ? "..." : "Save"}
+          </button>
+        </div>
       </form>
     );
   }

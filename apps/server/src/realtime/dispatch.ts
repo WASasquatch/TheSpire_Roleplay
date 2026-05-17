@@ -89,11 +89,23 @@ export async function dispatchChatInput(args: {
 
   const trimmed = text.trim();
   if (!trimmed) return;
-  // Admin-configurable cap; the cached settings read is essentially free
-  // after the first hit.
-  const { maxMessageLength } = await getSettings(db);
-  if (trimmed.length > maxMessageLength) {
-    socket.emit("error:notice", { code: "TOO_LONG", message: `Messages capped at ${maxMessageLength} chars.` });
+  // Admin-configurable caps. Forum posts get a separate (typically
+  // larger) ceiling because long-form forum bodies routinely exceed
+  // chat's cap. We pick the ceiling here so a runaway paste hits the
+  // right limit early — the second forum-only post-length check
+  // farther down is the "did this specific forum send fit?" gate,
+  // while this one is the "is this input even sane?" pre-filter.
+  const settings = await getSettings(db);
+  const { maxMessageLength, maxForumPostLength, maxForumTopicTitleLength } = settings;
+  // Use the larger of the two so a forum-bound long body isn't
+  // rejected before we know it's destined for a forum room. The
+  // forum-specific check inside the nested-mode branch enforces the
+  // exact `maxForumPostLength` cap; chat-bound input is gated below
+  // by the standard `maxMessageLength` check after the room is
+  // resolved.
+  const earlyCap = Math.max(maxMessageLength, maxForumPostLength);
+  if (trimmed.length > earlyCap) {
+    socket.emit("error:notice", { code: "TOO_LONG", message: `Messages capped at ${earlyCap} chars.` });
     return;
   }
 
@@ -181,6 +193,20 @@ export async function dispatchChatInput(args: {
   if (parsed.command === null) {
     const roomRow = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
     const isForum = roomRow?.replyMode === "nested";
+    // Per-surface cap. Forum bodies allow up to maxForumPostLength;
+    // flat chat bodies use the lower maxMessageLength. The early
+    // gate above used the larger of the two so this branch can apply
+    // the right one with a clean error message.
+    const effectiveCap = isForum ? maxForumPostLength : maxMessageLength;
+    if (trimmed.length > effectiveCap) {
+      socket.emit("error:notice", {
+        code: "TOO_LONG",
+        message: isForum
+          ? `Forum posts capped at ${effectiveCap} chars.`
+          : `Messages capped at ${effectiveCap} chars.`,
+      });
+      return;
+    }
     const ctx: CommandContext = {
       io, socket, db, registry, user, roomId,
       argsText: parsed.argsText,
@@ -192,7 +218,7 @@ export async function dispatchChatInput(args: {
       // should never send an empty topic title with no replyToId, but
       // we reject defensively.
       if (threadTitle && !replyToId) {
-        const cappedTitle = threadTitle.trim().slice(0, 120);
+        const cappedTitle = threadTitle.trim().slice(0, maxForumTopicTitleLength);
         if (!cappedTitle) {
           socket.emit("error:notice", {
             code: "EMPTY_TITLE",
@@ -297,11 +323,52 @@ export async function dispatchChatInput(args: {
     return;
   }
 
+  // Forum-thread auto-binding. When the composer was scoped to an
+  // active topic (`replyToId` in the payload) AND the room is nested
+  // mode, hydrate a fully validated reply tuple here and attach it
+  // to the CommandContext. `addMessage` then auto-inherits it for
+  // every non-system send so /me / /roll / /scene / /npc / etc. all
+  // land as replies under the topic the composer was bound to,
+  // instead of leaking out as fresh top-level posts. Validation
+  // mirrors the plain-reply path above; on any failure (room is
+  // flat, parent missing/deleted/locked, parent is itself a reply)
+  // we just leave replyContext undefined and the message goes
+  // through unchanged — that's the safe degrade for a stale client
+  // submitting against a topic the user can no longer reply to.
+  let replyContext: CommandContext["replyContext"] | undefined;
+  if (replyToId) {
+    const roomRow = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
+    if (roomRow?.replyMode === "nested") {
+      const parent = (await db
+        .select()
+        .from(messages)
+        .where(eq(messages.id, replyToId))
+        .limit(1))[0];
+      if (
+        parent &&
+        parent.roomId === roomId &&
+        !parent.replyToId &&
+        !parent.deletedAt &&
+        (!parent.lockedAt || user.role === "mod" || isAdminRole(user.role))
+      ) {
+        const snippet = parent.body.length > 120
+          ? `${parent.body.slice(0, 120)}…`
+          : parent.body;
+        replyContext = {
+          replyToId: parent.id,
+          replyToDisplayName: parent.displayName,
+          replyToBodySnippet: snippet,
+        };
+      }
+    }
+  }
+
   const ctx: CommandContext = {
     io, socket, db, registry, user, roomId,
     argsText: parsed.argsText,
     args: parsed.args,
     invokedAs: parsed.command,
+    ...(replyContext ? { replyContext } : {}),
   };
 
   try {

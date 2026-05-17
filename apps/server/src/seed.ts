@@ -9,6 +9,8 @@ import { recordAudit } from "./audit.js";
 import { sanitizeBio } from "./auth/html.js";
 import { DEFAULT_WORLDS, WORLDS_SEED_VERSION } from "./seed_worlds.js";
 import type { Db } from "./db/index.js";
+import { runBackfillIfNeeded } from "./earning/backfill.js";
+import { schedulePresenceSweep } from "./earning/sweeps.js";
 
 /**
  * Default system rooms shipped on every fresh install. Each one is a
@@ -428,9 +430,29 @@ export function startJanitor(
   const sessionId = setInterval(() => void sweepSessions(), 60 * 1000);
   const messageId = setInterval(() => void sweepMessages(), 60 * 60 * 1000);
   const trustId = setInterval(() => void sweepTrustPromotions(), 60 * 60 * 1000);
+
+  // Earning — one-shot historical XP backfill + recurring presence sweep.
+  //
+  // Backfill is idempotent: the function self-skips when
+  // `earningConfig.backfill.completedAt` is already set OR when the
+  // configured rate is zero. Failures inside log + continue so a
+  // backfill hiccup doesn't block the rest of the janitor.
+  //
+  // Presence sweep is `null`-tolerant for io so the no-io test path
+  // (passed when running migrations without booting socket.io) just
+  // skips the schedule.
+  void runBackfillIfNeeded(db, log).catch((err) => log.error({ err }, "[earning] backfill failed"));
+  let cancelPresence: (() => void) | null = null;
+  if (io) {
+    void schedulePresenceSweep(db, io, log).then((cancel) => {
+      cancelPresence = cancel;
+    }).catch((err) => log.error({ err }, "[earning] presence sweep scheduling failed"));
+  }
+
   return () => {
     clearInterval(sessionId);
     clearInterval(messageId);
     clearInterval(trustId);
+    if (cancelPresence) cancelPresence();
   };
 }

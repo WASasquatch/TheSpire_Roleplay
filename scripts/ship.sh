@@ -4,10 +4,15 @@
 # Default flow:
 #   1. Refuse to run from a non-main branch (use git directly for PR work)
 #   2. Type-check shared / server / web (catch obvious mistakes pre-deploy)
-#   3. Stage apps/ + packages/ + README.md (deliberately narrow - skips
-#      dotfiles, SECURITY-AUDIT.md, /tmp scratch, etc.); README is included
-#      so deploy/changelog notes ship alongside code. Use --all to also pick
-#      up other root-level files (fly.toml, Dockerfile, scripts/, etc.).
+#   3. Stage apps/ + packages/ + README.md + pnpm-lock.yaml + root
+#      package.json (deliberately narrow - skips dotfiles, SECURITY-AUDIT.md,
+#      /tmp scratch, etc.); README is included so deploy/changelog notes
+#      ship alongside code, and the lockfile + root package.json are
+#      auto-staged because they're tightly coupled to any workspace
+#      package.json edit (otherwise a `pnpm add` deploys a half-update and
+#      the Docker `pnpm install --frozen-lockfile` step fails). Use --all
+#      to also pick up other root-level files (fly.toml, Dockerfile,
+#      scripts/, etc.).
 #   4. Commit with the supplied message (skipped if there's nothing staged)
 #   5. Push origin main
 #   6. flyctl deploy
@@ -19,6 +24,13 @@
 #
 # Flags:
 #   -m, --message TEXT   Commit message (positional arg also works).
+#                        If TEXT is the path to an existing regular file,
+#                        the file's contents are used as the message —
+#                        handy for keeping a multi-paragraph log in
+#                        commit.md and shipping it with --commit commit.md.
+#   --commit TEXT        Alias for --message. Reads more naturally when
+#                        called via remote-deploy.sh (`--commit "msg"`
+#                        or `--commit commit.md`).
 #   -a, --all            Stage with `git add -A` instead of the narrow
 #                        apps/+packages/+README.md default. Use when
 #                        shipping changes to other root-level files
@@ -42,6 +54,12 @@
 #   --reseed             Stage removal of the SKIP_DEFAULT_SEED secret so the
 #                        next deploy reseeds missing default rooms again.
 #                        Mutually exclusive with --no-seed.
+#   --bump LEVEL         Bump the version in packages/shared/src/version.ts
+#                        before staging. LEVEL is one of: patch, minor, major.
+#                        The edit is included in the same commit so the
+#                        version landing on prod matches the commit history.
+#                        Ignored when --deploy-only is also set (no commit
+#                        happens in that mode).
 #   -h, --help           Show this help text.
 
 set -euo pipefail
@@ -65,10 +83,11 @@ DEPLOY_ONLY=0
 REMOTE_BUILD=0
 STAGE_ALL=0
 SEED_TOGGLE=""   # "off" → set SKIP_DEFAULT_SEED=1; "on" → unset; "" → leave alone
+BUMP_LEVEL=""    # "patch" / "minor" / "major" or "" to skip the version bump
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -m|--message)
+    -m|--message|--commit)
       MSG="$2"; shift 2 ;;
     -a|--all)
       STAGE_ALL=1; shift ;;
@@ -94,8 +113,18 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       SEED_TOGGLE="on"; shift ;;
+    --bump)
+      case "${2:-}" in
+        patch|minor|major) BUMP_LEVEL="$2"; shift 2 ;;
+        "")
+          echo "ship: --bump requires a level (patch|minor|major)." >&2
+          exit 1 ;;
+        *)
+          echo "ship: --bump level must be patch|minor|major (got '${2}')." >&2
+          exit 1 ;;
+      esac ;;
     -h|--help)
-      sed -n '2,42p' "$0"
+      sed -n '2,63p' "$0"
       exit 0 ;;
     -*)
       echo "ship: unknown flag: $1" >&2
@@ -111,6 +140,24 @@ while [[ $# -gt 0 ]]; do
       shift ;;
   esac
 done
+
+# ----- message-from-file -----
+# If the supplied message is a path to a regular file, slurp the file's
+# contents as the commit message. Lets `--commit commit.md` work the
+# same way `git commit -F commit.md` would. The detection is "exists +
+# is a file"; anything else (including a literal message that contains
+# spaces, punctuation, or a path that doesn't exist) is treated as a
+# verbatim message. Empty / whitespace-only files are rejected so a
+# stale or never-written commit.md doesn't produce a blank commit.
+if [[ -n "$MSG" && -f "$MSG" ]]; then
+  MSG_SRC="$MSG"
+  MSG="$(cat "$MSG_SRC")"
+  if [[ -z "${MSG//[[:space:]]/}" ]]; then
+    echo "ship: --commit file '$MSG_SRC' is empty (or whitespace-only)." >&2
+    exit 1
+  fi
+  echo "==> Using commit message from $MSG_SRC ($(wc -l <"$MSG_SRC" | tr -d ' ') line(s))."
+fi
 
 # ----- branch guard -----
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
@@ -148,6 +195,17 @@ if [[ "$DEPLOY_ONLY" -eq 1 ]]; then
   exit 0
 fi
 
+# ----- version bump -----
+# Done BEFORE typecheck + staging so the bumped version.ts is part of the
+# same commit as the changes it represents. The bump script is a tiny
+# string substitution that can't fail typecheck, but running typecheck
+# after it (rather than before) means the committed state is what we
+# actually validated.
+if [[ -n "$BUMP_LEVEL" ]]; then
+  echo "==> Bumping version ($BUMP_LEVEL)..."
+  bash scripts/bump.sh "$BUMP_LEVEL"
+fi
+
 # ----- typecheck -----
 if [[ "$SKIP_TYPECHECK" -eq 0 ]]; then
   echo "==> Type-checking..."
@@ -159,7 +217,9 @@ fi
 # ----- stage + commit -----
 # Whether we have anything to commit determines whether MSG is required.
 # With --all, "changes" means anything in the working tree (respecting
-# .gitignore via --exclude-standard); without it, narrow to apps/+packages/.
+# .gitignore via --exclude-standard); without it, narrow to apps/+packages/
+# (+ README.md + pnpm-lock.yaml + root package.json, which are all tracked
+# so the initial `git diff HEAD` already catches edits to them).
 HAS_CHANGES=0
 if ! git diff --quiet HEAD || ! git diff --cached --quiet; then
   HAS_CHANGES=1
@@ -169,8 +229,9 @@ if [[ "$STAGE_ALL" -eq 1 ]]; then
     HAS_CHANGES=1
   fi
 else
-  # README.md is tracked already so it shows up via the diff check above;
-  # untracked-file detection only needs to scan apps/ and packages/.
+  # README.md, pnpm-lock.yaml, and root package.json are tracked already
+  # so they show up via the diff check above; untracked-file detection
+  # only needs to scan apps/ and packages/.
   if [[ -n "$(git ls-files --others --exclude-standard apps packages)" ]]; then
     HAS_CHANGES=1
   fi
@@ -186,12 +247,23 @@ if [[ "$HAS_CHANGES" -eq 1 ]]; then
     echo "==> Staging all tracked + untracked changes (.gitignore filters)..."
     git add -A
   else
-    echo "==> Staging apps + packages + README.md..."
+    echo "==> Staging apps + packages + README.md + pnpm-lock.yaml + root package.json..."
     git add apps packages
     # README.md is included so deploy/changelog notes ride along with code
     # changes. The conditional avoids a fatal error on a brand-new clone
     # where README hasn't been touched.
     if [[ -f README.md ]]; then git add README.md; fi
+    # pnpm-lock.yaml + root package.json are tightly coupled to any
+    # workspace package.json change — `pnpm add <pkg>` updates both
+    # the workspace's package.json (under apps/ or packages/, already
+    # staged above) AND the root lockfile/package.json. Shipping the
+    # apps/ change without the matching lockfile bump would land a
+    # deploy where Docker's `pnpm install --frozen-lockfile` fails.
+    # Staging them unconditionally is safe: when they're unchanged
+    # they're a no-op, and when they ARE changed they almost always
+    # belong with the workspace edit that triggered them.
+    if [[ -f pnpm-lock.yaml ]]; then git add pnpm-lock.yaml; fi
+    if [[ -f package.json ]]; then git add package.json; fi
   fi
   if git diff --cached --quiet; then
     if [[ "$STAGE_ALL" -eq 1 ]]; then

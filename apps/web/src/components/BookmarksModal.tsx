@@ -3,7 +3,8 @@ import { customCmdCssToStyle, resolveMessageColor, type Bookmark } from "@thekee
 import { parseInline } from "../lib/markdown.js";
 import { useActiveTheme } from "../lib/theme.js";
 import { readError } from "../lib/http.js";
-import { Modal } from "./Modal.js";
+import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
+import { CloseButton } from "./CloseButton.js";
 
 interface Props {
   onClose: () => void;
@@ -117,17 +118,11 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
     <Modal onClose={onClose} variant="mobile-fullscreen">
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex h-dvh w-full flex-col overflow-hidden bg-keep-bg text-keep-text md:h-auto md:max-h-[85vh] md:w-[78vw] md:max-w-[960px] md:rounded md:border md:border-keep-border md:shadow-xl"
+        className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
           <h2 className="font-action text-lg">Bookmarks</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-sm text-keep-muted hover:text-keep-text"
-          >
-            close
-          </button>
+          <CloseButton onClick={onClose} />
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">

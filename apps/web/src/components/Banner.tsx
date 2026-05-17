@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { isAdminRole } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
+import { useEarning } from "../state/earning.js";
 import { disconnect } from "../lib/socket.js";
 import { clearSessionToken } from "../lib/http.js";
 
@@ -18,6 +19,8 @@ interface Props {
   navLinksVersion: number;
   onOpenAdmin?: () => void;
   onOpenRules: () => void;
+  /** Opens the Earning dashboard modal. */
+  onOpenEarning: () => void;
 }
 
 /**
@@ -31,10 +34,15 @@ interface Props {
  * the active theme's panel color / text color / font-action stack when not
  * overridden, so a fresh install still looks coherent.
  */
-export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
+export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning }: Props) {
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
   const branding = useChat((s) => s.branding);
+  // Earning indicator dot — small marker next to the link when the
+  // user has unacknowledged rank-up notifications. Reads from the
+  // store directly so it stays live with `earning:rankup` socket
+  // events without prop drilling.
+  const earningHasNew = useEarning((s) => s.unackRankUps.length > 0);
   const [links, setLinks] = useState<NavLinkRow[]>([]);
   // Mobile-only dropdown state. The desktop inline nav is always
   // rendered; this just toggles a hamburger panel that mirrors the
@@ -108,6 +116,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
   // need it.
   function fireRules() { onOpenRules(); setMenuOpen(false); }
   function fireAdmin() { if (onOpenAdmin) onOpenAdmin(); setMenuOpen(false); }
+  function fireEarning() { onOpenEarning(); setMenuOpen(false); }
   function fireLogout() { setMenuOpen(false); void logout(); }
 
   return (
@@ -144,7 +153,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
 
       {/* Desktop nav. Hidden below md+; the hamburger button + dropdown
           below handle narrow screens. */}
-      <nav className="hidden items-center gap-3 text-xs uppercase tracking-widest text-keep-muted md:flex">
+      <nav className="hidden items-center gap-3 text-xs uppercase tracking-widest text-keep-muted lg:flex">
         {links.map((l, i) => (
           <span key={l.id} className="flex items-center gap-3">
             {i > 0 ? <span className="text-keep-rule">|</span> : null}
@@ -159,6 +168,31 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
           </span>
         ))}
         {links.length > 0 ? <span className="text-keep-rule">|</span> : null}
+        {/* Only render the Earning link for signed-in users — the
+            dashboard requires auth and the link itself shouldn't tease
+            anonymous splash visitors. */}
+        {me ? (
+          <>
+            <button
+              type="button"
+              onClick={onOpenEarning}
+              className="relative uppercase tracking-widest text-keep-muted hover:text-keep-text"
+              title="Your Earning — XP, Currency, ranks, and cosmetics"
+            >
+              Earning
+              {/* Tiny dot when there's an unacknowledged rank-up. Sits
+                  to the top-right of the label so it's discoverable
+                  without competing with the link text. */}
+              {earningHasNew ? (
+                <span
+                  aria-hidden
+                  className="absolute -top-0.5 -right-1 inline-block h-1.5 w-1.5 rounded-full bg-keep-action"
+                />
+              ) : null}
+            </button>
+            <span className="text-keep-rule">|</span>
+          </>
+        ) : null}
         <button
           type="button"
           onClick={onOpenRules}
@@ -200,7 +234,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
         aria-expanded={menuOpen}
         aria-label={menuOpen ? "Close menu" : "Open menu"}
         title="Menu"
-        className="flex h-9 w-9 items-center justify-center rounded border border-keep-rule bg-keep-bg/60 text-lg text-keep-text hover:bg-keep-banner md:hidden"
+        className="flex h-9 w-9 items-center justify-center rounded border border-keep-rule bg-keep-bg/60 text-lg text-keep-text hover:bg-keep-banner lg:hidden"
       >
         {menuOpen ? "✕" : "☰"}
       </button>
@@ -215,10 +249,10 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
             type="button"
             aria-label="Close menu"
             onClick={() => setMenuOpen(false)}
-            className="fixed inset-0 z-30 cursor-default bg-transparent md:hidden"
+            className="fixed inset-0 z-30 cursor-default bg-transparent lg:hidden"
           />
           <nav
-            className="absolute right-2 top-full z-40 mt-1 flex w-56 flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg text-sm shadow-2xl md:hidden"
+            className="absolute right-2 top-full z-40 mt-1 flex w-56 flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg text-sm shadow-2xl lg:hidden"
           >
             {links.map((l) => (
               <a
@@ -237,6 +271,18 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules }: Props) {
                 render as flat link-style rows matching the <a> siblings
                 above. The shared <nav> already gives them a rounded outer
                 container; individual items have no border-radius. */}
+            {me ? (
+              <button
+                type="button"
+                onClick={fireEarning}
+                className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
+              >
+                <span>Earning</span>
+                {earningHasNew ? (
+                  <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-keep-action" />
+                ) : null}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={fireRules}

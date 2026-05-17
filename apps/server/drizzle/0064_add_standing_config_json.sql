@@ -1,0 +1,24 @@
+-- Standing system config column.
+--
+-- Single JSON blob on the singleton site_settings row holding every
+-- numeric input the XP / Currency / Rank engine touches: per-source
+-- × per-pool award amounts, body floor, presence cap, multi-character
+-- divisor, Currency transfer caps + account-age gates, and the
+-- one-time historical-message backfill rate.
+--
+-- A JSON blob instead of 30+ flat columns because:
+--   - the shape is deeply nested (awards.message.say.{xp,currency},
+--     enabledSources.message.{xp,currency}, ...) and a flat column
+--     per leaf would balloon site_settings unreadably
+--   - admin edits replace the whole document atomically via the
+--     structured Awards-tab form, so partial-column updates aren't
+--     needed
+--   - the shape will evolve (new sources, new caps) and JSON keeps
+--     migration churn out of the hot path
+--
+-- NULL is tolerated by the runtime: getSettings() falls back to
+-- DEFAULT_STANDING_CONFIG (apps/server/src/standing/config.ts). The
+-- companion 0065 migration writes the same defaults into the column
+-- so the admin UI starts with a concrete document to edit.
+ALTER TABLE `site_settings`
+  ADD COLUMN `standing_config_json` text;

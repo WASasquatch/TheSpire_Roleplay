@@ -11,3 +11,7 @@ node_modules
 **/data/*.wal
 README.md
 phpMyChat
+
+# Local-only junk that should never enter the Docker build context.
+.tmp-*
+*:Zone.Identifier

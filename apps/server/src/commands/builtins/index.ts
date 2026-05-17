@@ -45,6 +45,7 @@ import {
   unbanCommand,
   unmuteCommand,
 } from "./mod.js";
+import { currencyCommand, expCommand } from "./earning.js";
 
 /** Registers all built-in commands. Must run before custom commands are loaded. */
 export function registerBuiltins(reg: CommandRegistry): void {
@@ -98,5 +99,8 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(demoteCommand);
   reg.registerBuiltin(promoteAdminCommand);
   reg.registerBuiltin(demoteAdminCommand);
+  // Earning
+  reg.registerBuiltin(currencyCommand);
+  reg.registerBuiltin(expCommand);
   reg.registerBuiltin(makeHelpCommand(() => reg));
 }

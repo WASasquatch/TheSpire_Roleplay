@@ -5,6 +5,8 @@ import { Composer } from "./Composer.js";
 import { ForumAvatar, ForumPostBody, topicHeading } from "./MessageList.js";
 import { parseInline } from "../lib/markdown.js";
 import { useActiveTheme } from "../lib/theme.js";
+import { MODAL_CARD_CONTENT } from "./Modal.js";
+import { CloseButton } from "./CloseButton.js";
 
 interface Props {
   /** The topic message being focused. */
@@ -164,7 +166,7 @@ export function ThreadModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/60 p-2 md:p-4"
+      className="fixed inset-0 z-50 flex items-stretch justify-stretch bg-black/60 lg:items-center lg:justify-center lg:p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -172,7 +174,7 @@ export function ThreadModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="keep-frame flex h-full w-full flex-col overflow-hidden rounded-md bg-keep-bg md:w-[78vw] md:max-w-[1200px]"
+        className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg lg:rounded-md`}
       >
         {/* Header strip: avatar + title + close. Title is the same
             heading helper the inline forum card uses, so the modal
@@ -181,7 +183,8 @@ export function ThreadModal({
           <ForumAvatar
             src={topic.avatarUrl ?? null}
             name={topic.displayName}
-            size={36}
+            userId={topic.userId}
+            size={48}
             onClick={(e) => {
               e.stopPropagation();
               onIconClick(topic.userId, topic.displayName);
@@ -220,19 +223,15 @@ export function ThreadModal({
               </span>
             </div>
           </div>
-          <button
-            type="button"
+          {/* h-10 w-10 on mobile gives a comfortable 40px touch target
+              (close to the 44px WCAG recommendation); md+ falls back
+              to CloseButton's default h-7 since pointer precision is
+              higher and we want visual parity with the other modals. */}
+          <CloseButton
             onClick={onClose}
-            aria-label="Close focused view"
-            title="Close focused view"
-            // h-10 w-10 on mobile gives a comfortable 40px touch target
-            // (close to the 44px WCAG recommendation; the icon itself
-            // is small but the tappable hit area covers more); md+
-            // can stay tighter since pointer precision is higher.
-            className="keep-button flex h-10 w-10 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-base text-keep-muted hover:bg-keep-banner hover:text-keep-text md:h-8 md:w-8 md:text-sm"
-          >
-            ✕
-          </button>
+            label="Close focused view"
+            className="h-10 w-10 md:h-7 md:w-7"
+          />
         </header>
 
         {/* Scrollable thread body. Topic post first, then the reply

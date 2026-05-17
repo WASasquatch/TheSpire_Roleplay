@@ -30,6 +30,59 @@ export function markLoginIntent(): void {
 }
 
 /**
+ * Per-tab "which character is this tab voicing" cache. sessionStorage
+ * (not localStorage) so each tab keeps its own identity — opening a
+ * sibling tab MUST NOT inherit this tab's character choice, that's the
+ * whole point of the per-tab tabCharId system.
+ *
+ * Set on the client whenever the server emits `me:character-update` for
+ * this tab. Read by the socket handshake so a reconnect (network blip,
+ * mobile suspend, page reload) replays the identity back to the server
+ * instead of letting the server re-seed from the DB — the DB's
+ * `users.activeCharacterId` is shared across all tabs and would
+ * happily hand this tab a different identity than the one its UI is
+ * still rendering, leaking messages out under the wrong character.
+ *
+ * Values: "" (empty string) means "no override / fall back to the DB
+ * default" — used on first connect when no character has been picked
+ * yet. A real character id is the sticky override. The literal sentinel
+ * "ooc" represents an explicit OOC choice (master account) and is
+ * distinguished from "no override" so a reconnect-after-/char-clear
+ * doesn't bounce the tab back into the DB-default character.
+ */
+const TAB_CHAR_KEY = "tk_tab_char_id";
+const TAB_CHAR_OOC = "ooc";
+
+/**
+ * Persist the tab's current voicing identity. Pass the active
+ * character id (string) for in-character, `null` for OOC, or
+ * `undefined` to clear the override and fall back to the DB default
+ * on the next handshake.
+ */
+export function rememberTabCharacter(characterId: string | null | undefined): void {
+  try {
+    if (characterId === undefined) {
+      window.sessionStorage.removeItem(TAB_CHAR_KEY);
+    } else if (characterId === null) {
+      window.sessionStorage.setItem(TAB_CHAR_KEY, TAB_CHAR_OOC);
+    } else {
+      window.sessionStorage.setItem(TAB_CHAR_KEY, characterId);
+    }
+  } catch { /* private-mode — drop silently; the reconnect path then falls back to the DB default */ }
+}
+
+function loadTabCharacter(): string | null | undefined {
+  try {
+    const raw = window.sessionStorage.getItem(TAB_CHAR_KEY);
+    if (raw === null) return undefined;
+    if (raw === TAB_CHAR_OOC) return null;
+    return raw;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Lazily instantiate the singleton socket. We pull the per-tab bearer
  * token from sessionStorage *at construction time* and pass it via the
  * Socket.io `auth` handshake field — that's what the server reads in
@@ -68,7 +121,21 @@ export function getSocket(): Socket<ServerToClientEvents, ClientToServerEvents> 
           window.sessionStorage.removeItem(LOGIN_INTENT_KEY);
         }
       } catch { /* private-mode — proceed without intent */ }
-      cb(intent ? { token, intent } : { token });
+      // Per-tab voicing identity, replayed on every handshake so a
+      // reconnect (network blip, mobile suspend, reload) restores this
+      // tab's chosen character even if a sibling tab has /char'd to a
+      // different identity in the meantime. Three states:
+      //   undefined → no override; server falls back to the DB default
+      //   null      → explicit OOC (master account)
+      //   string    → character id
+      // The wire shape uses `tabCharId: string | null` — the absence of
+      // the field altogether means "no override," matching the field's
+      // `undefined` default on the server.
+      const tabChar = loadTabCharacter();
+      const auth: { token: string; intent?: "login"; tabCharId?: string | null } = { token };
+      if (intent) auth.intent = intent;
+      if (tabChar !== undefined) auth.tabCharId = tabChar;
+      cb(auth);
     },
   });
   return socket;
@@ -95,4 +162,12 @@ export function disconnect(intentional = false): void {
     socket.disconnect();
   }
   socket = null;
+  if (intentional) {
+    // Intentional disconnect = the Exit button. Clear the per-tab
+    // character cache so a follow-up login on the same tab doesn't
+    // resurrect the previous user's identity. Transient disconnects
+    // (network blip / mobile suspend) deliberately leave the cache in
+    // place — that IS the point of replaying it on the next handshake.
+    rememberTabCharacter(undefined);
+  }
 }

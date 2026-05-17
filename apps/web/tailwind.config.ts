@@ -49,7 +49,19 @@ export default {
           "Arial",
           "sans-serif",
         ],
-        action: ["Georgia", "Cambria", "Times New Roman", "serif"],
+        // `font-action` is the slot used for /me action lines, modal
+        // titles, rank chips, and other "set me apart from body
+        // copy" surfaces. We funnel it through the user's font-pref
+        // CSS variable first so a user-selected font (Roboto, Lora,
+        // Atkinson Hyperlegible, etc.) propagates here too — the
+        // Georgia/Cambria stack remains as the fallback when no
+        // preference is set. Inline `style="font-family: …"` and
+        // any more-specific CSS rule still override per the normal
+        // cascade, so an admin's custom-command template that
+        // explicitly sets a font keeps winning.
+        action: [
+          'var(--keep-font-family, Georgia, Cambria, "Times New Roman", serif)',
+        ],
       },
       colors: {
         keep: {

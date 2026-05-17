@@ -29,6 +29,7 @@ import {
 } from "../realtime/broadcast.js";
 import { getSettings, updateSettings } from "../settings.js";
 import { recordAudit } from "../audit.js";
+import { registerAdminEarningRoutes } from "./earning.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -73,6 +74,13 @@ export async function registerAdminRoutes(
     }
     (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser = user;
   });
+
+  // Earning — admin endpoints (Awards + Ranks tabs). Both tiers can
+  // read; the PUT awards handler enforces masteradmin-only on the
+  // multi-character divisor + backfill rate fields internally. The
+  // Ranks endpoints accept asset uploads under the shared
+  // `uploads/ranks/` directory served by the static handler.
+  registerAdminEarningRoutes(app, { db, io, uploadsRoot, getSessionUser });
 
   // Helper for the destructive-route gate. Every endpoint behind this
   // (site settings PUT, branding upload, user disable / role mutations
@@ -480,6 +488,10 @@ export async function registerAdminRoutes(
       userId: sessionUser.id,
       role: "owner",
     }).onConflictDoNothing();
+    // Live-publish the new room into every connected client's rooms tree.
+    // No one is in the room yet so broadcastRoomState/Presence would be
+    // no-ops here; emit the pulse directly.
+    io.emit("rooms:tree-changed");
     return { id, name: body.name, type: body.type };
   });
 
@@ -617,6 +629,12 @@ export async function registerAdminRoutes(
     if (landing && remoteSockets.length > 0) {
       await broadcastRoomState(io, db, landing.id);
     }
+    // A room vanished from the world; every connected rail needs to know,
+    // not just the ones who happened to be inside it. broadcastRoomState
+    // above only fires when the deleted room had live occupants — an empty
+    // archived room going away would otherwise be invisible until the 20s
+    // backstop poll.
+    io.emit("rooms:tree-changed");
 
     return { ok: true, deleted: room.id, name: room.name };
   });
@@ -691,6 +709,12 @@ export async function registerAdminRoutes(
     maxRoomsPerOwner: z.number().int().min(0).max(1000).optional(),
     /** 100..50000 chars per chat message. */
     maxMessageLength: z.number().int().min(100).max(50_000).optional(),
+    /** 100..50000 chars per direct message body. */
+    maxDirectMessageLength: z.number().int().min(100).max(50_000).optional(),
+    /** 100..50000 chars per forum post body (topic OR reply). */
+    maxForumPostLength: z.number().int().min(100).max(50_000).optional(),
+    /** 10..500 chars on a forum topic title — keep titles list-renderable. */
+    maxForumTopicTitleLength: z.number().int().min(10).max(500).optional(),
     /**
      * Author-edit / author-delete grace window in ms for chat + DM
      * messages. 0..7 days. Mods and admins bypass the gate. Forum
@@ -748,6 +772,9 @@ export async function registerAdminRoutes(
       maxAccountsPerEmail: s.maxAccountsPerEmail,
       maxRoomsPerOwner: s.maxRoomsPerOwner,
       maxMessageLength: s.maxMessageLength,
+      maxDirectMessageLength: s.maxDirectMessageLength,
+      maxForumPostLength: s.maxForumPostLength,
+      maxForumTopicTitleLength: s.maxForumTopicTitleLength,
       editGraceMs: s.editGraceMs,
       maxBioLength: s.maxBioLength,
       registrationOpen: s.registrationOpen,
@@ -790,6 +817,9 @@ export async function registerAdminRoutes(
     if (body.maxAccountsPerEmail !== undefined) patch.maxAccountsPerEmail = body.maxAccountsPerEmail;
     if (body.maxRoomsPerOwner !== undefined) patch.maxRoomsPerOwner = body.maxRoomsPerOwner;
     if (body.maxMessageLength !== undefined) patch.maxMessageLength = body.maxMessageLength;
+    if (body.maxDirectMessageLength !== undefined) patch.maxDirectMessageLength = body.maxDirectMessageLength;
+    if (body.maxForumPostLength !== undefined) patch.maxForumPostLength = body.maxForumPostLength;
+    if (body.maxForumTopicTitleLength !== undefined) patch.maxForumTopicTitleLength = body.maxForumTopicTitleLength;
     if (body.editGraceMs !== undefined) patch.editGraceMs = body.editGraceMs;
     if (body.maxBioLength !== undefined) patch.maxBioLength = body.maxBioLength;
     if (body.registrationOpen !== undefined) patch.registrationOpen = body.registrationOpen;
@@ -1044,6 +1074,25 @@ export async function registerAdminRoutes(
       if (!existing) {
         reply.code(404);
         return { error: "not found" };
+      }
+      if (body.name !== undefined) {
+        const nextName = body.name.toLowerCase();
+        if (nextName !== existing.name) {
+          const conflict = registry.resolve(nextName);
+          if (conflict && conflict.name !== existing.name) {
+            reply.code(409);
+            return { error: "name conflicts with an existing command", existing: conflict.name };
+          }
+        }
+      }
+      if (body.aliases !== undefined) {
+        for (const a of body.aliases) {
+          const conflict = registry.resolve(a);
+          if (conflict && conflict.name !== existing.name) {
+            reply.code(409);
+            return { error: `alias "${a}" conflicts with an existing command` };
+          }
+        }
       }
       await db
         .update(customCommands)

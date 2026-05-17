@@ -33,6 +33,8 @@ export type AuditAction =
   // Account management
   | "user_disable"
   | "user_enable"
+  | "password_reset"
+  | "earning_reset"
   | "character_delete_admin"
   | "title_dissolve_admin"
   // Reports

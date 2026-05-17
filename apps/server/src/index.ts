@@ -62,6 +62,7 @@ import { initPush } from "./push.js";
 import { registerCommandsRoutes } from "./routes/commands.js";
 import { registerNavLinkRoutes } from "./routes/nav-links.js";
 import { registerRoomsRoutes } from "./routes/rooms.js";
+import { registerEarningRoutes } from "./routes/earning.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { registerThesaurusRoutes } from "./routes/thesaurus.js";
 import { registerUsersRoutes } from "./routes/users.js";
@@ -400,6 +401,7 @@ async function main() {
   // Idempotent on subsequent starts; survives deploys via the persisted keys.
   await initPush(db);
   await registerStatsRoutes(baseApp, db, io);
+  await registerEarningRoutes(baseApp, db, io);
   await registerThesaurusRoutes(baseApp, db);
   await registerUsersRoutes(baseApp, db, io);
   await registerRoomsRoutes(baseApp, db, io);
@@ -448,7 +450,12 @@ async function main() {
    */
   io.use(async (socket, next) => {
     try {
-      const a = socket.handshake.auth as { token?: unknown; sid?: unknown; intent?: unknown } | undefined;
+      const a = socket.handshake.auth as {
+        token?: unknown;
+        sid?: unknown;
+        intent?: unknown;
+        tabCharId?: unknown;
+      } | undefined;
       const raw = typeof a?.token === "string" ? a.token : typeof a?.sid === "string" ? a.sid : "";
       const sid = raw.trim();
       if (!sid) return next(new Error("unauthenticated"));
@@ -471,12 +478,56 @@ async function main() {
       // mobile suspend / network blip / tab reload no longer spam the
       // chat log; only an actual login produces the announcement.
       (socket.data as { loginIntent?: boolean }).loginIntent = a?.intent === "login";
-      // Per-tab active character. Seeded from the DB-level default
-      // (user.activeCharacterId) on connect, then mutated only by
-      // commands originating from THIS socket so other tabs the user has
-      // open keep their own identity. `undefined` here means "follow the
-      // DB"; an explicit value (string or null) is a sticky override.
-      (socket.data as { tabCharId?: string | null }).tabCharId = user.activeCharacterId;
+      // Per-tab active character. Two seed sources, in order of priority:
+      //
+      //   1. `auth.tabCharId` — the client's persisted per-tab identity,
+      //      replayed on every (re)connect from sessionStorage. The
+      //      string value is a character id; `null` is an explicit OOC
+      //      choice; undefined/missing means "no override, fall back to
+      //      the DB". This is the multi-tab safety net: without it, a
+      //      reconnect would re-seed from `users.activeCharacterId`,
+      //      which a sibling tab may have mutated — the reconnected tab
+      //      would then start posting messages tagged with the sibling
+      //      tab's character even though its own UI still shows the
+      //      original identity.
+      //
+      //   2. `user.activeCharacterId` — the DB default, used on the
+      //      very first connect of a new tab before any /char has been
+      //      issued. Always falls through to OOC when the user has no
+      //      character set.
+      //
+      // We validate any string id against `characters` to ensure the
+      // user actually owns it (defensive: handshake auth is client-
+      // supplied, so don't trust the id blind). Invalid ids degrade
+      // silently to the DB default — same behavior as a stale tab
+      // whose character was deleted by another session.
+      let tabCharId: string | null = user.activeCharacterId;
+      if (typeof a?.tabCharId === "string") {
+        const c = (await db
+          .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters)
+          .where(eq(characters.id, a.tabCharId))
+          .limit(1))[0];
+        if (c && c.userId === userId && !c.deletedAt) {
+          tabCharId = c.id;
+        }
+      } else if (a?.tabCharId === null) {
+        // Explicit OOC handshake — the user's last action on this tab
+        // was /char clear (or never switched in), and they want to
+        // stay master-voiced even though the DB may default elsewhere.
+        tabCharId = null;
+      }
+      (socket.data as { tabCharId?: string | null }).tabCharId = tabCharId;
+      // Sync the in-memory user's activeCharacterId + displayName to
+      // match the resolved tabCharId. Otherwise the user object the
+      // socket carries until the next loadSessionUser still reflects
+      // the DB default, and any early handler (e.g. room:join's
+      // presence broadcast) would render this socket under the wrong
+      // identity for the first beat.
+      if (tabCharId !== user.activeCharacterId) {
+        user.activeCharacterId = tabCharId;
+        user.displayName = await resolveDisplayName(db, userId, tabCharId);
+      }
       next();
     } catch (err) {
       next(err as Error);
@@ -589,17 +640,61 @@ async function main() {
           return;
         }
         Object.assign(user, fresh);
-        // Per-tab character override. After the DB reload above, restore
-        // this socket's sticky `tabCharId` so a /char invoked on another
-        // tab doesn't silently retag THIS tab's outgoing messages.
-        // `tabCharId === undefined` means "no override set yet" (the
-        // handshake always seeds it, so in practice this branch falls
-        // through and the DB value is used).
-        const tabCharId = (socket.data as { tabCharId?: string | null }).tabCharId;
-        if (tabCharId !== undefined) {
-          user.activeCharacterId = tabCharId;
-          user.displayName = await resolveDisplayName(db, user.id, tabCharId);
+        // Identity resolution for this send, in priority order:
+        //
+        //   1. `payload.asCharacterId` — the client's per-send claim
+        //      pulled from its React state. This is the source of
+        //      truth: it's what the user's UI says they're voicing
+        //      RIGHT NOW. Validated against the user's owned
+        //      characters; invalid (deleted / not owned) degrades
+        //      silently to (2) so a stale tab doesn't get its send
+        //      rejected.
+        //   2. `socket.data.tabCharId` — the socket-scoped override
+        //      from the handshake / last /char on this socket. The
+        //      legacy path, kept as a fallback for older clients that
+        //      don't ship `asCharacterId`.
+        //   3. `fresh.activeCharacterId` — the DB default, applied
+        //      when neither of the above is set.
+        //
+        // Without (1), a multi-tab race could let the server hand
+        // this tab an identity its UI hasn't agreed to: sibling tab
+        // /char SwitchToA mutates the shared `users.activeCharacterId`,
+        // a reconnect on this tab re-seeds tabCharId from that DB
+        // value, and the next send goes out tagged as A even though
+        // this tab's UI is still rendering OOC.
+        let resolvedCharId: string | null = user.activeCharacterId;
+        const claim = payload.asCharacterId;
+        if (typeof claim === "string") {
+          const c = (await db
+            .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+            .from(characters)
+            .where(eq(characters.id, claim))
+            .limit(1))[0];
+          if (c && c.userId === user.id && !c.deletedAt) {
+            resolvedCharId = c.id;
+          } else {
+            // Invalid claim → fall through to tabCharId (legacy path).
+            const tabCharId = (socket.data as { tabCharId?: string | null }).tabCharId;
+            if (tabCharId !== undefined) resolvedCharId = tabCharId;
+          }
+        } else if (claim === null) {
+          // Explicit OOC claim.
+          resolvedCharId = null;
+        } else {
+          // No claim — legacy path (tabCharId fallback).
+          const tabCharId = (socket.data as { tabCharId?: string | null }).tabCharId;
+          if (tabCharId !== undefined) resolvedCharId = tabCharId;
         }
+        if (resolvedCharId !== user.activeCharacterId) {
+          user.activeCharacterId = resolvedCharId;
+          user.displayName = await resolveDisplayName(db, user.id, resolvedCharId);
+        }
+        // Keep the socket's sticky tabCharId in sync with the resolved
+        // identity. This way a follow-up event handler that reads
+        // socket.data.tabCharId (e.g. a presence broadcast triggered
+        // by this send) sees the latest authoritative value, and a
+        // reconnect-replay round-trip stays consistent.
+        (socket.data as { tabCharId?: string | null }).tabCharId = resolvedCharId;
         // Validate the thread-category bucket (if any) belongs to the
         // target room. Race condition: an admin can delete the category
         // between the user opening the picker and submitting. Rather
@@ -1008,6 +1103,12 @@ async function main() {
        *     ws:// is treated as same-origin per the CSP3 spec).
        *   - `frame-ancestors 'none'` is the modern replacement for
        *     X-Frame-Options: DENY; we ship both for older browsers.
+       *   - `frame-src` lists only the embed origins that the markdown
+       *     renderer's "Show video" toggle can build src URLs for (see
+       *     `parseVideoEmbed` in apps/web/src/lib/markdown.tsx). Keep this
+       *     list in sync with the providers supported there — every new
+       *     provider needs both a parser branch AND a frame-src origin or
+       *     the iframe will silently fail with a CSP violation.
        */
       function buildCsp(nonce: string): string {
         return [
@@ -1024,6 +1125,7 @@ async function main() {
           "object-src 'none'",
           "base-uri 'self'",
           "frame-ancestors 'none'",
+          "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com",
           "form-action 'self'",
           "upgrade-insecure-requests",
         ].join("; ");

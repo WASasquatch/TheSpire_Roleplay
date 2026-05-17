@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { WorldMembership, WorldSummary, WorldVisibility } from "@thekeep/shared";
 import { deriveSlug } from "../lib/worlds.js";
 import { readError } from "../lib/http.js";
-import { Modal } from "./Modal.js";
+import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
+import { CloseButton } from "./CloseButton.js";
 
 interface Props {
   onClose: () => void;
@@ -93,9 +94,9 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
   }
 
   return (
-    <Modal onClose={onClose} zIndex={50}>
+    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
-        className="flex max-h-[88vh] w-full flex-col overflow-hidden rounded border border-keep-rule bg-keep-parchment shadow-xl md:w-[78vw] md:max-w-[960px]"
+        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-parchment`}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
@@ -116,7 +117,7 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
             >
               + New world
             </button>
-            <button type="button" onClick={onClose} className="text-sm text-keep-muted hover:text-keep-text">close</button>
+            <CloseButton onClick={onClose} />
           </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">

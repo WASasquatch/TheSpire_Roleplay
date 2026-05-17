@@ -12,6 +12,7 @@ import type {
 import { extractMentions, isAdminRole } from "@thekeep/shared";
 import {
   bans,
+  characterEarning,
   characters,
   friends,
   ignores,
@@ -20,16 +21,23 @@ import {
   roomMembers,
   roomWorldLinks,
   rooms,
+  userActiveCosmetics,
+  userOwnedNameStyles,
+  userEarning,
   users,
   worldMembers,
   worlds,
 } from "../db/schema.js";
+import { inArray } from "drizzle-orm";
 import type { LinkedWorldRef } from "@thekeep/shared";
 import { pushToUser } from "../push.js";
 import type { Db } from "../db/index.js";
 import type { CommandContext, SessionUser } from "../commands/types.js";
 import { expandInlineCommands } from "../commands/registry.js";
 import { getSettings } from "../settings.js";
+import { awardForForum, awardForMessage } from "../earning/award.js";
+import { readPoolRank } from "../earning/resolver.js";
+import { routeMessage } from "../earning/routing.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Sock = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -107,6 +115,45 @@ export async function addMessage(
     body = expanded;
   }
 
+  // Forum-thread auto-binding. When the dispatcher hydrated a reply
+  // context (composer was scoped to an active topic in a nested-mode
+  // room) AND this send didn't already specify its own reply target
+  // AND the message kind is a per-author chat shape (not a room-wide
+  // event), inherit the thread tuple so /me, /roll, /scene, /npc,
+  // etc. all land as replies under the topic the composer was bound
+  // to instead of leaking out as fresh top-level posts. Per the
+  // user's request ("commands should really just work in forums as
+  // replies to threads"), this auto-binding is the default for every
+  // speech-shaped kind.
+  //
+  // Excludes:
+  //   - `system`   — /kick, /mute, /lock, /topic, etc. are room-wide
+  //                  notices; threading them under whichever topic the
+  //                  composer happened to be on misrepresents their
+  //                  scope.
+  //   - `announce` — admin broadcasts are explicitly room-wide too.
+  //   - `whisper`  — DMs don't route through this function in practice,
+  //                  but listing the kind here is a belt-and-suspenders
+  //                  against a future caller picking up the auto-bind
+  //                  for a recipient-targeted send.
+  //
+  // Explicit payload.replyToId (e.g. the /reply builtin) wins so
+  // callers can always override.
+  if (
+    !payload.replyToId &&
+    ctx.replyContext &&
+    payload.kind !== "system" &&
+    payload.kind !== "announce" &&
+    payload.kind !== "whisper"
+  ) {
+    payload = {
+      ...payload,
+      replyToId: ctx.replyContext.replyToId,
+      replyToDisplayName: ctx.replyContext.replyToDisplayName,
+      replyToBodySnippet: ctx.replyContext.replyToBodySnippet,
+    };
+  }
+
   const id = nanoid();
   const now = new Date();
   // System messages (server-authored via addSystemMessage) bypass this path,
@@ -154,6 +201,45 @@ export async function addMessage(
       .limit(1))[0];
     if (u?.avatarUrl) avatarSnapshot = u.avatarUrl;
   }
+  // Rank snapshot. Routed the same way the award engine routes credits:
+  // IC line → character pool's rank; OOC line → master pool's rank.
+  // Lookup before insert so we can persist + emit the rank with the
+  // outgoing message in a single round-trip. Best-effort: failure
+  // leaves the snapshot null (renderer shows no sigil for the line)
+  // but never breaks the send.
+  //
+  // Privacy gate (per-user `showRankInChat`): when off, we skip the
+  // lookup and persist null/null on this message. The user's existing
+  // messages keep whatever rank was snapshotted at their send time —
+  // the toggle affects FUTURE sends only, matching the snapshot
+  // contract that other fields (color, displayName, mood) follow.
+  let rankKeySnapshot: string | null = null;
+  let tierSnapshot: number | null = null;
+  let authorShowRankInChat = true;
+  try {
+    const u = (await ctx.db
+      .select({ showRankInChat: users.showRankInChat })
+      .from(users)
+      .where(eq(users.id, ctx.user.id))
+      .limit(1))[0];
+    if (u) authorShowRankInChat = u.showRankInChat;
+  } catch { /* tolerate: default-on means a transient lookup failure errs toward showing the rank */ }
+  if (authorShowRankInChat) {
+    try {
+      const scope = routeMessage(payload.kind, ctx.user.activeCharacterId);
+      if (scope.kind !== "none") {
+        const ownerId = scope.kind === "character"
+          ? (ctx.user.activeCharacterId as string)
+          : ctx.user.id;
+        const rank = await readPoolRank(ctx.db, scope.kind === "character" ? "character" : "user", ownerId);
+        rankKeySnapshot = rank.rankKey;
+        tierSnapshot = rank.tier;
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[earning] rank snapshot lookup failed", { err });
+    }
+  }
   await ctx.db.insert(messages).values({
     id,
     roomId: ctx.roomId,
@@ -176,6 +262,8 @@ export async function addMessage(
     // for `kind: "cmd"` rows; left null on every other kind even when the
     // caller forgot to omit it.
     cmdCss: payload.kind === "cmd" ? (payload.cmdCss ?? null) : null,
+    rankKey: rankKeySnapshot,
+    tier: tierSnapshot,
     // last_activity_at on insert:
     //   - top-level row (topic, or any flat-chat message): its own
     //     createdAt — for forum topics this seeds the ordering before
@@ -222,6 +310,10 @@ export async function addMessage(
     // minimal for other kinds (a stray null would be harmless but adds
     // noise to every chat line).
     ...(payload.kind === "cmd" && payload.cmdCss ? { cmdCss: payload.cmdCss } : {}),
+    // Rank snapshot — only attach when present so the wire stays
+    // light for unranked authors.
+    ...(rankKeySnapshot ? { rankKey: rankKeySnapshot } : {}),
+    ...(tierSnapshot != null ? { tier: tierSnapshot } : {}),
   };
   await emitFiltered(ctx.io, ctx.db, ctx.roomId, ctx.user.id, out);
 
@@ -241,6 +333,57 @@ export async function addMessage(
   // author's display name - never the body. The user has to come back to
   // the chat to read what was said.
   void pushTriggers(ctx.io, ctx.db, out, ctx.user, payload.kind);
+
+  // Fire-and-forget Earning award. Failures inside the engine are
+  // logged but never surfaced — a flaky award path must not break
+  // message persistence (we just persisted + broadcast above).
+  //
+  // Routing:
+  //   - Forum topic (top-level post in a nested-mode room) → awardForForum 'topic'
+  //   - Forum reply (replyToId set in a nested-mode room)  → awardForForum 'reply'
+  //   - Everything else (flat chat, whispers, OOC, etc.)   → awardForMessage
+  //
+  // Forum/chat split matters because the two carry independent
+  // per-source amounts in EarningConfig. The room replyMode is the
+  // authoritative signal — `payload.title` alone is not enough (a
+  // flat room could in principle persist a title via /topic), and
+  // `payload.replyToId` can also appear on flat rooms as a quote-
+  // reply that isn't a forum post.
+  void (async () => {
+    try {
+      const room = (await ctx.db
+        .select({ replyMode: rooms.replyMode })
+        .from(rooms)
+        .where(eq(rooms.id, ctx.roomId))
+        .limit(1))[0];
+      const isForum = room?.replyMode === "nested";
+      if (isForum && (payload.title || payload.replyToId)) {
+        await awardForForum({
+          db: ctx.db,
+          io: ctx.io,
+          userId: ctx.user.id,
+          kind: payload.replyToId ? "reply" : "topic",
+          messageId: id,
+          roomId: ctx.roomId,
+        });
+        return;
+      }
+      await awardForMessage({
+        db: ctx.db,
+        io: ctx.io,
+        userId: ctx.user.id,
+        characterId: ctx.user.activeCharacterId,
+        defaultActiveCharacterId: ctx.user.activeCharacterId,
+        kind: payload.kind,
+        body,
+        roomId: ctx.roomId,
+        messageId: id,
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[earning] award hook failed", { messageId: id, err });
+    }
+  })();
 }
 
 /**
@@ -619,6 +762,8 @@ export async function sendRoomBacklogTo(
       ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
       ...(m.isSticky ? { isSticky: true } : {}),
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+      ...(m.rankKey ? { rankKey: m.rankKey } : {}),
+      ...(m.tier != null ? { tier: m.tier } : {}),
       // Admin-only audit field. Mirrors the per-socket gating in the
       // delete route + the history endpoints: site admins receive the
       // original body of a deleted message; everyone else gets the
@@ -875,11 +1020,24 @@ export async function broadcastRoomState(
   const summary = await buildRoomSummary(db, room);
   const occupants = await currentOccupants(io, db, roomId);
   io.to(`room:${roomId}`).emit("room:state", { room: summary, occupants });
+  // Tree-wide invalidate. Room metadata changed (topic, replyMode,
+  // owner, archive flip, etc.) — anyone with a rooms rail open
+  // needs to know. Sockets in other rooms wouldn't see the room-
+  // scoped emit above, so they'd be stuck on a stale tree until
+  // the 20s backstop poll. Payload-free pulse; the client refetches
+  // `/rooms` (debounced) and re-renders.
+  io.emit("rooms:tree-changed");
 }
 
 export async function broadcastPresence(io: Io, db: Db, roomId: string): Promise<void> {
   const occupants = await currentOccupants(io, db, roomId);
   io.to(`room:${roomId}`).emit("presence:update", { roomId, occupants });
+  // Same tree-invalidate as broadcastRoomState. Presence changes the
+  // occupant count next to each room in the rail, and the only way
+  // a viewer in room A finds out about a join/leave in room B is to
+  // re-fetch the rooms tree. Client-side debounce coalesces a flurry
+  // (rapid /char switches, mass disconnect) into a single refetch.
+  io.emit("rooms:tree-changed");
 }
 
 /**
@@ -965,6 +1123,10 @@ export async function expireIfEmpty(io: Io, db: Db, roomId: string): Promise<boo
   const sockets = await io.in(`room:${roomId}`).fetchSockets();
   if (sockets.length > 0) return false;
   await db.update(rooms).set({ archivedAt: new Date() }).where(eq(rooms.id, roomId));
+  // Archived rooms are filtered out of the tree, so the rail in every
+  // open client just got stale. Caller skips broadcastPresence on the
+  // expired branch, so we emit the tree pulse here instead.
+  io.emit("rooms:tree-changed");
   return true;
 }
 
@@ -1110,6 +1272,87 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     ]),
   );
 
+  // Earning — batched rank lookup for sigil rendering. We pull the
+  // denormalized (rankKey, tier) from user_earning for every user in
+  // the occupant set, and from character_earning for every active
+  // character. The occupant render below picks the pool that matches
+  // the resolved identity (character pool when attached, master pool
+  // otherwise). Both queries skip when there are no candidates.
+  const userEarningRows = userIds.length
+    ? await db
+        .select({ userId: userEarning.userId, rankKey: userEarning.rankKey, tier: userEarning.tier })
+        .from(userEarning)
+        .where(inArray(userEarning.userId, userIds))
+    : [];
+  const userRankByUser = new Map(userEarningRows.map((r) => [r.userId, { rankKey: r.rankKey, tier: r.tier }]));
+  const charEarningRows = charIds.length
+    ? await db
+        .select({ characterId: characterEarning.characterId, rankKey: characterEarning.rankKey, tier: characterEarning.tier })
+        .from(characterEarning)
+        .where(inArray(characterEarning.characterId, charIds))
+    : [];
+  const charRankByChar = new Map(charEarningRows.map((r) => [r.characterId, { rankKey: r.rankKey, tier: r.tier }]));
+
+  // Active name style + per-user config for styled-name rendering.
+  // We also pull `inlineAvatarEnabled` off the same row so the
+  // cosmetic-toggle propagates in a single query — both fields live
+  // on user_active_cosmetics anyway.
+  const activeCosmeticsRows = userIds.length
+    ? await db
+        .select({
+          userId: userActiveCosmetics.userId,
+          activeNameStyleKey: userActiveCosmetics.activeNameStyleKey,
+          inlineAvatarEnabled: userActiveCosmetics.inlineAvatarEnabled,
+        })
+        .from(userActiveCosmetics)
+        .where(inArray(userActiveCosmetics.userId, userIds))
+    : [];
+  const activeStyleByUser = new Map(
+    activeCosmeticsRows
+      .filter((r): r is { userId: string; activeNameStyleKey: string; inlineAvatarEnabled: boolean } => r.activeNameStyleKey !== null)
+      .map((r) => [r.userId, r.activeNameStyleKey]),
+  );
+  const inlineAvatarByUser = new Map(
+    activeCosmeticsRows.map((r) => [r.userId, !!r.inlineAvatarEnabled]),
+  );
+  // Selected border rank — keyed by the SCOPE of the occupant
+  // (character row's selectedBorderRankKey when attached, master row's
+  // otherwise). We've already pulled both earning tables above for
+  // rank/tier; reuse the same query results by re-issuing two
+  // lightweight column selections rather than threading the field
+  // through the larger result set.
+  const userBorderRows = userIds.length
+    ? await db
+        .select({ userId: userEarning.userId, selectedBorderRankKey: userEarning.selectedBorderRankKey })
+        .from(userEarning)
+        .where(inArray(userEarning.userId, userIds))
+    : [];
+  const userBorderByUser = new Map(userBorderRows.map((r) => [r.userId, r.selectedBorderRankKey]));
+  const charBorderRows = charIds.length
+    ? await db
+        .select({ characterId: characterEarning.characterId, selectedBorderRankKey: characterEarning.selectedBorderRankKey })
+        .from(characterEarning)
+        .where(inArray(characterEarning.characterId, charIds))
+    : [];
+  const charBorderByChar = new Map(charBorderRows.map((r) => [r.characterId, r.selectedBorderRankKey]));
+  const ownedStyleRows = activeStyleByUser.size > 0
+    ? await db
+        .select({ userId: userOwnedNameStyles.userId, styleKey: userOwnedNameStyles.styleKey, configJson: userOwnedNameStyles.configJson })
+        .from(userOwnedNameStyles)
+        .where(inArray(userOwnedNameStyles.userId, [...activeStyleByUser.keys()]))
+    : [];
+  // Index by (userId, styleKey) so the render loop can do a single
+  // map lookup on the user's active key.
+  const ownedConfigByUserStyle = new Map<string, Record<string, unknown> | null>();
+  for (const r of ownedStyleRows) {
+    let parsed: Record<string, unknown> | null = null;
+    if (r.configJson) {
+      try { parsed = JSON.parse(r.configJson) as Record<string, unknown>; }
+      catch { /* malformed JSON — fall back to defaults */ }
+    }
+    ownedConfigByUserStyle.set(`${r.userId}::${r.styleKey}`, parsed);
+  }
+
   // Render one occupant per resolved identity. Two characters of the
   // same player in the same room (two tabs voicing different chars)
   // come out as two rows; the same character on multiple tabs (or
@@ -1140,6 +1383,31 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     // with their OOC color in the rail and a different color on the
     // line, which looks broken.
     const effectiveColor = c?.chatColor ?? u.chatColor;
+    // Pick the pool whose rank should drive THIS occupant's sigil.
+    // Same scope rule the award engine uses: an in-character row
+    // shows the character pool's rank, an OOC row shows the master
+    // pool's rank. Falls back to nulls when the pool has no earning
+    // row yet (fresh account / unranked).
+    const poolRank = c
+      ? (charRankByChar.get(c.id) ?? { rankKey: null, tier: null })
+      : (userRankByUser.get(u.id) ?? { rankKey: null, tier: null });
+    // Active style is master-scoped (one equip choice per user, not
+    // per character) so we key on userId regardless of attached
+    // character. Falls through to null when the user has nothing
+    // equipped or never bought a style.
+    const activeStyleKey = activeStyleByUser.get(u.id) ?? null;
+    const nameStyleConfig = activeStyleKey
+      ? (ownedConfigByUserStyle.get(`${u.id}::${activeStyleKey}`) ?? null)
+      : null;
+    // Avatar + border + inline-avatar toggle. Avatar follows the
+    // character / master fallback already used for chat-line
+    // snapshots in addMessage. Border picks the scope-appropriate
+    // earning row.
+    const occupantAvatarUrl = c?.avatarUrl ?? u.avatarUrl ?? null;
+    const selectedBorderRankKey = c
+      ? (charBorderByChar.get(c.id) ?? null)
+      : (userBorderByUser.get(u.id) ?? null);
+    const inlineAvatarEnabled = inlineAvatarByUser.get(u.id) ?? false;
     out.push({
       userId: u.id,
       displayName: c ? c.name : u.username,
@@ -1152,6 +1420,20 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
       accountRole: u.role,
       mood: u.currentMood,
       primaryWorld: primaryWorldByUser.get(u.id) ?? null,
+      // Per-user toggle. When `showRankInUserlist` is off, the
+      // broadcast omits the rank fields entirely (renders as
+      // null/null on the wire) so the UserNameTag falls back to the
+      // gender glyph automatically — no extra prop wiring needed
+      // downstream. Toggling re-fires presence on the next /me/profile
+      // save (see characters.ts re-broadcast gate).
+      rankKey: u.showRankInUserlist ? poolRank.rankKey : null,
+      tier: u.showRankInUserlist ? poolRank.tier : null,
+      activeNameStyleKey: activeStyleKey,
+      nameStyleConfig,
+      avatarUrl: occupantAvatarUrl,
+      selectedBorderRankKey,
+      inlineAvatarEnabled,
+      useRankAsUserlistIcon: u.useRankAsUserlistIcon,
     });
   }
   return out;

@@ -15,9 +15,12 @@ import { useActiveTheme } from "../lib/theme.js";
 import { readError } from "../lib/http.js";
 import { parseInline } from "../lib/markdown.js";
 import { listStyles } from "../lib/ornaments/index.js";
-import { Modal } from "./Modal.js";
+import { AdminEarningTab } from "./AdminEarningTab.js";
+import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { useChat } from "../state/store.js";
+import { useEarning } from "../state/earning.js";
+import { CloseButton } from "./CloseButton.js";
 
 interface Props {
   onClose: () => void;
@@ -25,7 +28,26 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "users" | "reports" | "audit";
+type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "audit";
+
+/** Single source of truth for tabs. Order here = order in both the
+ *  desktop strip and the mobile dropdown. `masterOnly` tabs are gated
+ *  to masteradmin role; plain admins don't see them in either picker. */
+const TAB_ITEMS: ReadonlyArray<{ id: Tab; label: string; masterOnly?: boolean }> = [
+  { id: "overview", label: "Overview" },
+  { id: "settings", label: "Settings", masterOnly: true },
+  { id: "branding", label: "Branding", masterOnly: true },
+  { id: "rules", label: "Rules", masterOnly: true },
+  { id: "links", label: "Nav Links" },
+  { id: "affiliates", label: "Affiliates" },
+  { id: "commands", label: "Commands" },
+  { id: "titles", label: "Titles" },
+  { id: "earning", label: "Earning" },
+  { id: "rooms", label: "Rooms" },
+  { id: "users", label: "Users" },
+  { id: "reports", label: "Reports" },
+  { id: "audit", label: "Audit" },
+];
 
 export function AdminPanel({ onClose, onLinksChanged }: Props) {
   const [tab, setTab] = useState<Tab>("overview");
@@ -40,52 +62,56 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
   const isMaster = useChat((s) => isMasterAdminRole(s.me?.role ?? "user"));
 
   return (
-    <Modal onClose={onClose} zIndex={50}>
+    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
         onClick={(e) => e.stopPropagation()}
-        className="keep-frame max-h-[92vh] w-full overflow-hidden rounded bg-keep-parchment md:w-[78vw] md:max-w-[1200px]"
+        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-parchment`}
       >
-        {/* Header. Three flex children: Admin title (shrink-0), the tab
-            strip (flex-1 + min-w-0 + overflow-x-auto so it scrolls
-            horizontally on narrow viewports), and the close button
-            (shrink-0 so it's always reachable no matter how many tabs
-            are defined). Previously the close button got pushed off the
-            right edge on mobile because the tab strip's intrinsic width
-            grew past the viewport. */}
-        <div className="flex items-center gap-2 border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="shrink-0 font-action text-lg">Admin</h2>
-          {/* `keep-scroll-strip` (defined in styles.css) hides the
-              scrollbar on mobile so swipe is the only affordance, and
-              swaps in a thin themed scrollbar with reserved bottom
-              padding on md+ so it never underlines the tab labels. */}
-          <nav className="keep-scroll-strip flex min-w-0 flex-1 gap-1 overflow-x-auto text-xs uppercase tracking-widest">
-            <TabBtn active={tab === "overview"} onClick={() => setTab("overview")}>Overview</TabBtn>
-            {/* Master-only tabs. We don't render them for plain admins
-                so the panel doesn't dangle clickable surfaces that
-                404 server-side. The route handlers still enforce the
-                gate independently. */}
-            {isMaster ? (
-              <>
-                <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>Settings</TabBtn>
-                <TabBtn active={tab === "branding"} onClick={() => setTab("branding")}>Branding</TabBtn>
-                <TabBtn active={tab === "rules"} onClick={() => setTab("rules")}>Rules</TabBtn>
-              </>
-            ) : null}
-            <TabBtn active={tab === "links"} onClick={() => setTab("links")}>Nav Links</TabBtn>
-            <TabBtn active={tab === "affiliates"} onClick={() => setTab("affiliates")}>Affiliates</TabBtn>
-            <TabBtn active={tab === "commands"} onClick={() => setTab("commands")}>Commands</TabBtn>
-            <TabBtn active={tab === "titles"} onClick={() => setTab("titles")}>Titles</TabBtn>
-            <TabBtn active={tab === "rooms"} onClick={() => setTab("rooms")}>Rooms</TabBtn>
-            <TabBtn active={tab === "users"} onClick={() => setTab("users")}>Users</TabBtn>
-            <TabBtn active={tab === "reports"} onClick={() => setTab("reports")}>Reports</TabBtn>
-            <TabBtn active={tab === "audit"} onClick={() => setTab("audit")}>Audit</TabBtn>
-          </nav>
-          <button onClick={onClose} className="shrink-0 text-sm text-keep-muted hover:text-keep-text">
-            close
-          </button>
+        {/* Header. On mobile (< md) we collapse the tab strip to a
+            full-width <select> dropdown showing the active section,
+            with the close button glued to its right edge — earlier
+            iterations had a horizontally-scrolling tab strip that
+            visually overlapped the close button and made it hard to
+            tap. Desktop keeps the scrollable strip since there's room
+            for it. Both pickers feed the same `setTab` setter and read
+            from the shared TAB_ITEMS array so they can't drift apart. */}
+        <div className="border-b border-keep-rule bg-keep-banner">
+          {/* Mobile: title + dropdown + close, single row, no scroll. */}
+          <div className="flex items-center gap-2 px-2 py-2 md:hidden">
+            <h2 className="shrink-0 font-action text-base">Admin</h2>
+            <select
+              value={tab}
+              onChange={(e) => setTab(e.target.value as Tab)}
+              aria-label="Admin section"
+              className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+            >
+              {TAB_ITEMS.filter((t) => !t.masterOnly || isMaster).map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+            <CloseButton onClick={onClose} />
+          </div>
+
+          {/* Desktop: title + horizontally-scrollable tab strip + close. */}
+          <div className="hidden items-center gap-2 px-4 py-2 md:flex">
+            <h2 className="shrink-0 font-action text-lg">Admin</h2>
+            {/* `keep-scroll-strip` hides the scrollbar on touch and
+                swaps in a thin themed scrollbar on md+ so it never
+                underlines the tab labels. */}
+            <nav className="keep-scroll-strip flex min-w-0 flex-1 gap-1 overflow-x-auto text-xs uppercase tracking-widest">
+              {TAB_ITEMS.filter((t) => !t.masterOnly || isMaster).map((t) => (
+                <TabBtn key={t.id} active={tab === t.id} onClick={() => setTab(t.id)}>{t.label}</TabBtn>
+              ))}
+            </nav>
+            <CloseButton onClick={onClose} />
+          </div>
         </div>
 
-        <div className="max-h-[78vh] overflow-y-auto p-4">
+        {/* `overflow-x-auto` lets wide tables scroll horizontally within
+            the body instead of being clipped by the frame's
+            `overflow-hidden` — which previously hid table columns
+            entirely on mobile. */}
+        <div className="max-h-[78vh] overflow-y-auto overflow-x-auto p-3 sm:p-4">
           {tab === "overview" ? <OverviewTab /> : null}
           {/* Master-only render gates mirror the tab visibility above. */}
           {tab === "settings" && isMaster ? <SettingsTab /> : null}
@@ -95,6 +121,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
           {tab === "affiliates" ? <AffiliatesTab /> : null}
           {tab === "commands" ? <CommandsTab /> : null}
           {tab === "titles" ? <TitleKindsTab /> : null}
+          {tab === "earning" ? <AdminEarningTab /> : null}
           {tab === "rooms" ? <RoomsTab /> : null}
           {tab === "users" ? <UsersTab /> : null}
           {tab === "reports" ? <ReportsTab /> : null}
@@ -199,6 +226,9 @@ interface SettingsRow {
   maxAccountsPerEmail: number;
   maxRoomsPerOwner: number;
   maxMessageLength: number;
+  maxDirectMessageLength: number;
+  maxForumPostLength: number;
+  maxForumTopicTitleLength: number;
   /** Author edit/delete grace window in ms for chat + DM messages. */
   editGraceMs: number;
   maxBioLength: number;
@@ -496,6 +526,9 @@ function SettingsTab() {
   const [maxEmail, setMaxEmail] = useState("");
   const [maxRooms, setMaxRooms] = useState("");
   const [maxMsgLen, setMaxMsgLen] = useState("");
+  const [maxDmLen, setMaxDmLen] = useState("");
+  const [maxForumLen, setMaxForumLen] = useState("");
+  const [maxForumTitleLen, setMaxForumTitleLen] = useState("");
   // Edit-grace window stored as a duration string (e.g. "5m", "30s",
   // "1h") so admins can pick the right unit for the room's pace.
   // Persisted as ms via parseDurationMs. "0" disables editing entirely
@@ -524,6 +557,9 @@ function SettingsTab() {
       setMaxEmail(String(j.maxAccountsPerEmail));
       setMaxRooms(String(j.maxRoomsPerOwner));
       setMaxMsgLen(String(j.maxMessageLength));
+      setMaxDmLen(String(j.maxDirectMessageLength));
+      setMaxForumLen(String(j.maxForumPostLength));
+      setMaxForumTitleLen(String(j.maxForumTopicTitleLength));
       setEditGrace(formatMs(j.editGraceMs));
       setMaxBioLen(String(j.maxBioLength));
       setRegOpen(j.registrationOpen);
@@ -563,7 +599,10 @@ function SettingsTab() {
         maxCharactersPerUser: intOrThrow("Max characters/user", maxChars, 1, 1000),
         maxAccountsPerEmail: intOrThrow("Max accounts/email", maxEmail, 1, 50),
         maxRoomsPerOwner: intOrThrow("Max rooms/owner", maxRooms, 0, 1000),
-        maxMessageLength: intOrThrow("Max message length", maxMsgLen, 100, 50_000),
+        maxMessageLength: intOrThrow("Max chat message length", maxMsgLen, 100, 50_000),
+        maxDirectMessageLength: intOrThrow("Max DM length", maxDmLen, 100, 50_000),
+        maxForumPostLength: intOrThrow("Max forum post length", maxForumLen, 100, 50_000),
+        maxForumTopicTitleLength: intOrThrow("Max forum topic title length", maxForumTitleLen, 10, 500),
         editGraceMs,
         maxBioLength: intOrThrow("Max bio length", maxBioLen, 1000, 200_000),
         registrationOpen: regOpen,
@@ -685,12 +724,36 @@ function SettingsTab() {
             max={1000}
           />
           <LimitField
-            label="Max message length"
-            hint="Hard cap on chat body length (chars)."
+            label="Max chat message length"
+            hint="Hard cap on flat-chat body length (chars)."
             value={maxMsgLen}
             onChange={setMaxMsgLen}
             min={100}
             max={50_000}
+          />
+          <LimitField
+            label="Max direct message length"
+            hint="Hard cap on DM body length (chars). Independent from chat so private long-form conversations can have more room."
+            value={maxDmLen}
+            onChange={setMaxDmLen}
+            min={100}
+            max={50_000}
+          />
+          <LimitField
+            label="Max forum post length"
+            hint="Hard cap on forum topic + reply body length (chars) in nested rooms. Typically larger than chat to allow long-form posts."
+            value={maxForumLen}
+            onChange={setMaxForumLen}
+            min={100}
+            max={50_000}
+          />
+          <LimitField
+            label="Max forum topic title length"
+            hint="Hard cap on a forum topic title (chars). Kept short so titles stay list-renderable in the topic picker."
+            value={maxForumTitleLen}
+            onChange={setMaxForumTitleLen}
+            min={10}
+            max={500}
           />
           <label className="text-xs">
             <span className="mb-1 block uppercase tracking-widest text-keep-muted">
@@ -1634,7 +1697,8 @@ function LinksTab({ onLinksChanged }: { onLinksChanged: () => void }) {
           No links yet. Add one above.
         </div>
       ) : (
-        <table className="w-full text-xs">
+        <div className="-mx-1 overflow-x-auto px-1">
+        <table className="w-full min-w-[560px] text-xs">
           <thead className="bg-keep-banner/50 text-keep-muted uppercase tracking-widest">
             <tr>
               <th className="px-2 py-1 text-left">Pos</th>
@@ -1651,6 +1715,7 @@ function LinksTab({ onLinksChanged }: { onLinksChanged: () => void }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );
@@ -1688,14 +1753,14 @@ function NewLinkForm({ onCreate }: { onCreate: (i: NavLinkInput) => Promise<void
   return (
     <form onSubmit={submit} className="rounded border border-keep-rule bg-keep-bg p-2 text-xs">
       <div className="mb-1 font-semibold">Add a link</div>
-      <div className="grid grid-cols-12 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-12">
         <input
           required
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           placeholder="Label (e.g. Rules)"
           maxLength={40}
-          className="col-span-3 rounded border border-keep-rule px-2 py-1"
+          className="col-span-2 rounded border border-keep-rule px-2 py-1 sm:col-span-3"
         />
         <input
           required
@@ -1703,7 +1768,7 @@ function NewLinkForm({ onCreate }: { onCreate: (i: NavLinkInput) => Promise<void
           onChange={(e) => setHref(e.target.value)}
           placeholder="https://example.com or /path"
           maxLength={500}
-          className="col-span-5 rounded border border-keep-rule px-2 py-1"
+          className="col-span-2 rounded border border-keep-rule px-2 py-1 sm:col-span-5"
         />
         <input
           type="number"
@@ -1717,7 +1782,7 @@ function NewLinkForm({ onCreate }: { onCreate: (i: NavLinkInput) => Promise<void
         <select
           value={target}
           onChange={(e) => setTarget(e.target.value as "_self" | "_blank")}
-          className="col-span-2 rounded border border-keep-rule px-2 py-1"
+          className="col-span-1 rounded border border-keep-rule px-2 py-1 sm:col-span-2"
         >
           <option value="_blank">new tab</option>
           <option value="_self">same tab</option>
@@ -1725,7 +1790,7 @@ function NewLinkForm({ onCreate }: { onCreate: (i: NavLinkInput) => Promise<void
         <button
           type="submit"
           disabled={submitting}
-          className="keep-button col-span-1 rounded border border-keep-rule bg-keep-banner px-2 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
+          className="keep-button col-span-2 rounded border border-keep-rule bg-keep-banner px-2 py-1 disabled:opacity-50 hover:bg-keep-banner/80 sm:col-span-1"
         >
           {submitting ? "..." : "Add"}
         </button>
@@ -1914,25 +1979,39 @@ function CommandsTab() {
 
   async function destroy(id: string) {
     if (!window.confirm("Delete this command?")) return;
-    const r = await fetch(`/admin/custom-commands/${id}`, {
-      method: "DELETE",
-      credentials: "include",
-    });
-    if (!r.ok) throw new Error(await readError(r));
-    await reload();
+    setError(null);
+    try {
+      const r = await fetch(`/admin/custom-commands/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      // Optimistic remove + close the edit form. The reload below
+      // confirms against the server, but doing it eagerly fixes the
+      // "deleted row stays visible until I refresh the whole app"
+      // bug — previously the edit form stayed open with the now-
+      // deleted command shown, and any subsequent re-add of the
+      // same name looked like the old row had necroed back.
+      setEditing(null);
+      setAdding(false);
+      setCmds((prev) => prev.filter((c) => c.id !== id));
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "delete failed");
+    }
   }
 
   return (
     <div className="space-y-3">
-      <div className="flex items-start justify-between">
-        <div className="text-xs text-keep-muted max-w-[60%]">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="text-xs text-keep-muted sm:max-w-[60%]">
           User-authored slash commands beyond the built-ins. Built-in names
           (<code>/me</code>, <code>/char</code>, etc.) are protected and can't be shadowed.
         </div>
         <button
           type="button"
           onClick={() => { setAdding(true); setEditing(null); }}
-          className="rounded border border-keep-rule bg-keep-banner px-3 py-1 text-xs hover:bg-keep-banner/80"
+          className="self-end rounded border border-keep-rule bg-keep-banner px-3 py-1 text-xs hover:bg-keep-banner/80 sm:self-auto"
         >
           + New command
         </button>
@@ -1967,7 +2046,8 @@ function CommandsTab() {
           No custom commands yet.
         </div>
       ) : (
-        <table className="w-full text-xs">
+        <div className="-mx-1 overflow-x-auto px-1">
+        <table className="w-full min-w-[560px] text-xs">
           <thead className="bg-keep-banner/50 text-keep-muted uppercase tracking-widest">
             <tr>
               <th className="px-2 py-1 text-left">Name</th>
@@ -2007,6 +2087,7 @@ function CommandsTab() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );
@@ -2209,11 +2290,11 @@ function CommandForm({
 
   return (
     <form onSubmit={submit} className="rounded border border-keep-rule bg-keep-bg p-3 text-xs">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="font-semibold">{mode === "create" ? "New command" : `Edit /${initial?.name}`}</div>
-        <button type="button" onClick={onCancel} className="text-keep-muted hover:text-keep-text">cancel</button>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="font-semibold truncate">{mode === "create" ? "New command" : `Edit /${initial?.name}`}</div>
+        <button type="button" onClick={onCancel} className="shrink-0 text-keep-muted hover:text-keep-text">cancel</button>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label>
           <span className="mb-1 block uppercase tracking-widest text-keep-muted">Name</span>
           <input
@@ -2221,11 +2302,15 @@ function CommandForm({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="hug"
-            disabled={mode === "edit"}
             maxLength={32}
             pattern="[a-zA-Z][a-zA-Z0-9_-]*"
-            className="w-full rounded border border-keep-rule px-2 py-1 disabled:bg-keep-banner/30"
+            className="w-full rounded border border-keep-rule px-2 py-1"
           />
+          {mode === "edit" ? (
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              Rename to fix typos. Aliases and history follow the new name.
+            </span>
+          ) : null}
         </label>
         <label>
           <span className="mb-1 block uppercase tracking-widest text-keep-muted">Kind</span>
@@ -2758,8 +2843,8 @@ function TitleKindsTab() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-start justify-between">
-        <div className="text-xs text-keep-muted max-w-[60%]">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="text-xs text-keep-muted sm:max-w-[60%]">
           Catalog of mutual-title kinds. Users invoke these via{" "}
           <code>/request &lt;slug&gt; &lt;user&gt;</code>. <code>{"{target}"}</code> in the
           format string is replaced with the other party's display name.
@@ -2770,7 +2855,7 @@ function TitleKindsTab() {
         <button
           type="button"
           onClick={() => { setAdding(true); setEditing(null); }}
-          className="rounded border border-keep-rule bg-keep-banner px-3 py-1 text-xs hover:bg-keep-banner/80"
+          className="self-end rounded border border-keep-rule bg-keep-banner px-3 py-1 text-xs hover:bg-keep-banner/80 sm:self-auto"
         >
           + New title kind
         </button>
@@ -2805,7 +2890,8 @@ function TitleKindsTab() {
           No title kinds yet.
         </div>
       ) : (
-        <table className="w-full text-xs">
+        <div className="-mx-1 overflow-x-auto px-1">
+        <table className="w-full min-w-[720px] text-xs">
           <thead className="bg-keep-banner/50 text-keep-muted uppercase tracking-widest">
             <tr>
               <th className="px-2 py-1 text-left">Slug</th>
@@ -2843,6 +2929,7 @@ function TitleKindsTab() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );
@@ -3153,8 +3240,8 @@ function RoomsTab() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-start justify-between gap-2">
-        <p className="max-w-[60%] text-xs text-keep-muted">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <p className="text-xs text-keep-muted sm:max-w-[60%]">
           Every room with member count and metadata. Admin-created rooms can
           be flagged as <b>system</b> rooms - they're permanent (don't auto-expire
           when empty) and protected from deletion. Private room message logs
@@ -3163,7 +3250,7 @@ function RoomsTab() {
         <button
           type="button"
           onClick={() => setEditing({ mode: "create" })}
-          className="rounded border border-keep-rule bg-keep-banner px-3 py-1 text-xs hover:bg-keep-banner/80"
+          className="self-end rounded border border-keep-rule bg-keep-banner px-3 py-1 text-xs hover:bg-keep-banner/80 sm:self-auto"
         >
           + New room
         </button>
@@ -3187,7 +3274,8 @@ function RoomsTab() {
       {loading ? (
         <div className="text-keep-muted text-xs">loading...</div>
       ) : (
-        <table className="w-full text-xs">
+        <div className="-mx-1 overflow-x-auto px-1">
+        <table className="w-full min-w-[640px] text-xs">
           <thead className="bg-keep-banner/50 text-keep-muted uppercase tracking-widest">
             <tr>
               <th className="px-2 py-1 text-left">Name</th>
@@ -3256,13 +3344,14 @@ function RoomsTab() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {selected ? (
         <div className="rounded border border-keep-rule bg-keep-bg p-3 text-xs">
-          <div className="mb-2 flex items-center justify-between">
-            <div><b>{selected.name}</b> - members</div>
-            <button type="button" onClick={() => setSelected(null)} className="text-keep-muted">close</button>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="truncate"><b>{selected.name}</b> - members</div>
+            <CloseButton onClick={() => setSelected(null)} />
           </div>
           {occupants.length === 0 ? (
             <div className="text-keep-muted">(empty)</div>
@@ -3315,13 +3404,13 @@ function RoomForm({
 
   return (
     <form onSubmit={submit} className="rounded border border-keep-rule bg-keep-bg p-3 text-xs">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="font-semibold">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="font-semibold truncate">
           {mode === "create" ? "New room" : `Edit ${original?.name ?? ""}`}
         </div>
-        <button type="button" onClick={onCancel} className="text-keep-muted hover:text-keep-text">cancel</button>
+        <button type="button" onClick={onCancel} className="shrink-0 text-keep-muted hover:text-keep-text">cancel</button>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="col-span-1">
           <span className="mb-1 block uppercase tracking-widest text-keep-muted">Name</span>
           <input
@@ -3754,8 +3843,8 @@ function UsersTab() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-keep-muted">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <p className="text-xs text-keep-muted sm:max-w-[60%]">
           Every registered account, including disabled ones. Search matches
           username and email. Editing role to "admin" grants global
           moderation - same as <code>/promoteadmin</code>. "masteradmin"
@@ -3766,7 +3855,7 @@ function UsersTab() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search username/email"
-          className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs sm:w-auto sm:shrink-0"
         />
       </div>
 
@@ -3781,7 +3870,8 @@ function UsersTab() {
           No users match.
         </div>
       ) : (
-        <table className="w-full text-xs">
+        <div className="-mx-1 overflow-x-auto px-1">
+        <table className="w-full min-w-[640px] text-xs">
           <thead className="bg-keep-banner/50 text-keep-muted uppercase tracking-widest">
             <tr>
               <th className="px-2 py-1 text-left">Username</th>
@@ -3853,6 +3943,7 @@ function UsersTab() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {editing ? (
@@ -4007,7 +4098,489 @@ function UserEditForm({
           {submitting ? "Saving..." : "Save"}
         </button>
       </div>
+
+      {/* Master-only admin tools, separated from the main edit so
+          each operation is its own POST. Hidden for plain admins —
+          all the routes 403 server-side anyway, but keeping the UI
+          honest avoids the "why doesn't this button work" question. */}
+      {isMaster && !locked ? (
+        <div className="mt-4 space-y-3 border-t border-keep-rule pt-3">
+          <PasswordResetSection userId={user.userId} username={user.username} />
+          <EarningGrantSection username={user.username} />
+          <CosmeticGrantSection username={user.username} />
+          <EarningResetSection username={user.username} />
+        </div>
+      ) : null}
     </form>
+  );
+}
+
+/* =========================================================
+ *  Master-admin per-user tools (live inside UserEditForm)
+ *
+ *  Each section owns its own state + submit handler. The shared
+ *  password / grant / reset endpoints all take the username (the
+ *  earning grants already work that way; password reset is /admin/
+ *  users/:id). Errors surface inline per section so a failed grant
+ *  doesn't blow away the rest of the edit form's state.
+ * ========================================================= */
+
+function PasswordResetSection({ userId, username }: { userId: string; username: string }) {
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function submit() {
+    setErr(null);
+    setOk(false);
+    if (next.length < 8) { setErr("Password must be at least 8 chars."); return; }
+    if (next !== confirm) { setErr("Passwords don't match."); return; }
+    setBusy(true);
+    try {
+      const r = await fetch(`/admin/users/${userId}/password`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword: next }),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      setOk(true);
+      setNext("");
+      setConfirm("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "reset failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generate() {
+    setErr(null); setOk(false); setCopied(false);
+    const pw = generateStrongPassword(20);
+    setNext(pw);
+    setConfirm(pw);
+    // Best-effort clipboard copy. navigator.clipboard requires
+    // a secure context (https or localhost) AND a user gesture —
+    // the click on this button qualifies for both. Falls back to
+    // a hidden-textarea + execCommand on older browsers / non-
+    // secure contexts. Either way the password is in the inputs
+    // so the admin can copy manually if needed.
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(pw);
+        setCopied(true);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = pw;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand("copy");
+          setCopied(true);
+        } finally {
+          document.body.removeChild(ta);
+        }
+      }
+      window.setTimeout(() => setCopied(false), 3000);
+    } catch {
+      // Silent — the password is visible in the inputs; admin can
+      // select + copy by hand if the clipboard API rejected.
+    }
+  }
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-2">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Reset password for {username}</legend>
+      <div className="grid grid-cols-2 gap-2">
+        <label>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">New password</span>
+          <input
+            type="text"
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            autoComplete="new-password"
+            minLength={8}
+            maxLength={200}
+            className="w-full rounded border border-keep-rule px-2 py-1 font-mono"
+          />
+        </label>
+        <label>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Confirm</span>
+          <input
+            type="text"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            autoComplete="new-password"
+            minLength={8}
+            maxLength={200}
+            className="w-full rounded border border-keep-rule px-2 py-1 font-mono"
+          />
+        </label>
+      </div>
+      <p className="mt-1 text-[10px] text-keep-muted">
+        The user's active sessions are dropped on reset; they'll have to log in again with the new password. Generate fills both fields with a 20-char password and copies it to the clipboard so you can paste it into whatever channel you're using to hand it back.
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void generate()}
+          disabled={busy}
+          className="keep-button rounded border border-keep-rule bg-keep-banner/40 px-3 py-1 text-keep-text hover:bg-keep-banner disabled:opacity-50"
+        >
+          Generate
+        </button>
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={busy || !next || !confirm}
+          className="keep-button rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+        >
+          {busy ? "Resetting…" : "Reset password"}
+        </button>
+        {copied ? <span className="text-keep-system">Copied to clipboard.</span> : null}
+        {err ? <span className="text-keep-accent">{err}</span> : null}
+        {ok ? <span className="text-keep-system">Password reset.</span> : null}
+      </div>
+    </fieldset>
+  );
+}
+
+/**
+ * Generate a `length`-char password using the platform CSPRNG. The
+ * alphabet drops easily-confused glyphs (0/O, 1/l/I) so a verbally
+ * dictated password doesn't trip the recipient up — admins commonly
+ * read these out over chat or paste into help-desk tickets where
+ * font choices make those ambiguous.
+ */
+function generateStrongPassword(length: number): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%^&*?";
+  const bytes = new Uint8Array(length);
+  (globalThis.crypto ?? (window as { crypto: Crypto }).crypto).getRandomValues(bytes);
+  let out = "";
+  for (let i = 0; i < length; i++) {
+    out += alphabet[bytes[i]! % alphabet.length];
+  }
+  return out;
+}
+
+function EarningGrantSection({ username }: { username: string }) {
+  const [xp, setXp] = useState("");
+  const [currency, setCurrency] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+
+  async function grant() {
+    setErr(null); setOk(null);
+    const xpDelta = parseInt(xp || "0", 10) || 0;
+    const currencyDelta = parseInt(currency || "0", 10) || 0;
+    if (xpDelta === 0 && currencyDelta === 0) { setErr("Enter an XP or Currency amount (positive to grant, negative to revoke)."); return; }
+    setBusy(true);
+    try {
+      if (xpDelta !== 0) {
+        const r = await fetch("/admin/earning/grant-xp", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, amount: xpDelta }),
+        });
+        if (!r.ok) throw new Error(await readError(r));
+      }
+      if (currencyDelta !== 0) {
+        const r = await fetch("/admin/earning/grant-currency", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, amount: currencyDelta }),
+        });
+        if (!r.ok) throw new Error(await readError(r));
+      }
+      setOk(`Granted ${xpDelta} XP, ${currencyDelta} Currency.`);
+      setXp(""); setCurrency("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "grant failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-2">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Grant XP / Currency</legend>
+      <div className="grid grid-cols-2 gap-2">
+        <label>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">XP (+ / -)</span>
+          <input
+            type="number"
+            value={xp}
+            onChange={(e) => setXp(e.target.value)}
+            placeholder="100"
+            className="w-full rounded border border-keep-rule px-2 py-1 font-mono"
+          />
+        </label>
+        <label>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Currency (+ / -)</span>
+          <input
+            type="number"
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value)}
+            placeholder="100"
+            className="w-full rounded border border-keep-rule px-2 py-1 font-mono"
+          />
+        </label>
+      </div>
+      <p className="mt-1 text-[10px] text-keep-muted">
+        Goes through the live earning engine — rank recomputes, the user's wallet updates live, the ledger gets an audit row. Negative values revoke.
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void grant()}
+          disabled={busy}
+          className="keep-button rounded border border-keep-action/60 bg-keep-action/10 px-3 py-1 text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
+        >
+          {busy ? "Granting…" : "Grant"}
+        </button>
+        {err ? <span className="text-keep-accent">{err}</span> : null}
+        {ok ? <span className="text-keep-system">{ok}</span> : null}
+      </div>
+    </fieldset>
+  );
+}
+
+function CosmeticGrantSection({ username }: { username: string }) {
+  const snapshot = useEarning((s) => s.snapshot);
+  const [pickedStyle, setPickedStyle] = useState<string>("");
+  const [pickedBorder, setPickedBorder] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  // Live snapshot of the TARGET user's ownership, refreshed after
+  // every grant/revoke. We can't use the admin's own /earning/me
+  // for this — we need to see what THEY own. The lightweight
+  // /admin/earning/user-ownership endpoint returns key arrays.
+  const [owned, setOwned] = useState<{ styles: string[]; borders: string[] }>({ styles: [], borders: [] });
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/admin/earning/user-ownership?username=${encodeURIComponent(username)}`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j) return;
+        setOwned({
+          styles: Array.isArray(j.ownedStyles) ? j.ownedStyles : [],
+          borders: Array.isArray(j.ownedBorders) ? j.ownedBorders : [],
+        });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [username, refreshKey]);
+
+  async function callAction(path: string, payload: Record<string, unknown>, successMsg: string) {
+    setErr(null); setOk(null); setBusy(true);
+    try {
+      const r = await fetch(path, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      setOk(successMsg);
+      setRefreshKey((k) => k + 1);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "request failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const styles = snapshot?.catalog.nameStyles ?? [];
+  const borderRanks = (snapshot?.catalog.rankTiers ?? []).filter((t) => t.tier === 4 && !!t.borderImageUrl);
+  const styleNameByKey = new Map(styles.map((s) => [s.key, s.name]));
+  const rankNameByKey = new Map((snapshot?.catalog.ranks ?? []).map((r) => [r.key, r.name]));
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-2">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Cosmetics: grant / revoke</legend>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Name style</span>
+          <div className="flex gap-1">
+            <select
+              value={pickedStyle}
+              onChange={(e) => setPickedStyle(e.target.value)}
+              className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1"
+            >
+              <option value="">— pick —</option>
+              {styles.map((s) => (
+                <option key={s.key} value={s.key}>{s.name}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => pickedStyle && void callAction("/admin/earning/grant-style", { username, styleKey: pickedStyle }, `Granted style "${pickedStyle}".`)}
+              disabled={busy || !pickedStyle}
+              className="shrink-0 rounded border border-keep-action/60 bg-keep-action/10 px-2 text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
+            >
+              Grant
+            </button>
+          </div>
+        </div>
+        <div>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Border (tier-IV rank)</span>
+          <div className="flex gap-1">
+            <select
+              value={pickedBorder}
+              onChange={(e) => setPickedBorder(e.target.value)}
+              className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1"
+            >
+              <option value="">— pick —</option>
+              {borderRanks.map((t) => {
+                const rank = snapshot?.catalog.ranks.find((r) => r.key === t.rankKey);
+                return (
+                  <option key={t.rankKey} value={t.rankKey}>{rank?.name ?? t.rankKey}</option>
+                );
+              })}
+            </select>
+            <button
+              type="button"
+              onClick={() => pickedBorder && void callAction("/admin/earning/grant-border", { username, rankKey: pickedBorder }, `Granted border for rank "${pickedBorder}".`)}
+              disabled={busy || !pickedBorder}
+              className="shrink-0 rounded border border-keep-action/60 bg-keep-action/10 px-2 text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
+            >
+              Grant
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Currently-owned list with per-item Revoke. Driven off the
+          live /admin/earning/user-ownership response so the panel
+          reflects the actual server state — including any grants
+          made via /earning purchase flows OR earlier admin grants
+          in the same session. */}
+      {owned.styles.length > 0 || owned.borders.length > 0 ? (
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <div>
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Owned styles</span>
+            {owned.styles.length === 0 ? (
+              <div className="text-keep-muted">(none)</div>
+            ) : (
+              <ul className="space-y-1">
+                {owned.styles.map((k) => (
+                  <li key={k} className="flex items-center justify-between gap-1 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1">
+                    <span className="truncate" title={k}>{styleNameByKey.get(k) ?? k}</span>
+                    <button
+                      type="button"
+                      onClick={() => void callAction("/admin/earning/revoke-style", { username, styleKey: k }, `Revoked style "${k}".`)}
+                      disabled={busy}
+                      className="shrink-0 rounded border border-keep-accent/60 bg-keep-accent/10 px-2 text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+                    >
+                      Revoke
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div>
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Owned borders</span>
+            {owned.borders.length === 0 ? (
+              <div className="text-keep-muted">(none)</div>
+            ) : (
+              <ul className="space-y-1">
+                {owned.borders.map((k) => (
+                  <li key={k} className="flex items-center justify-between gap-1 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1">
+                    <span className="truncate" title={k}>{rankNameByKey.get(k) ?? k}</span>
+                    <button
+                      type="button"
+                      onClick={() => void callAction("/admin/earning/revoke-border", { username, rankKey: k }, `Revoked border "${k}".`)}
+                      disabled={busy}
+                      className="shrink-0 rounded border border-keep-accent/60 bg-keep-accent/10 px-2 text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+                    >
+                      Revoke
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      ) : (
+        <p className="mt-1 text-[10px] text-keep-muted">(User owns no cosmetics yet.)</p>
+      )}
+
+      <p className="mt-1 text-[10px] text-keep-muted">
+        Grants bypass normal Currency / rank gates. Revokes also clear the equipped slot if the item was active. Both are idempotent.
+      </p>
+      <div className="mt-1 flex items-center gap-2">
+        {err ? <span className="text-keep-accent">{err}</span> : null}
+        {ok ? <span className="text-keep-system">{ok}</span> : null}
+      </div>
+    </fieldset>
+  );
+}
+
+function EarningResetSection({ username }: { username: string }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState(false);
+
+  async function reset() {
+    setErr(null); setOk(false);
+    const confirmed = window.confirm(
+      `Hard-reset ${username}'s earning state?\n\nThis wipes:\n` +
+      "  • Master XP, Currency, rank, tier, and peak\n" +
+      "  • Every character pool (XP / Currency / rank)\n" +
+      "  • Owned name styles\n" +
+      "  • Owned rank borders\n" +
+      "  • Equipped cosmetics\n\n" +
+      "Cannot be undone. Use for testing earning flows from scratch."
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/admin/earning/reset-user", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username }),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      setOk(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "reset failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <fieldset className="rounded border border-keep-accent/40 p-2">
+      <legend className="px-1 uppercase tracking-widest text-keep-accent">Reset earning state</legend>
+      <p className="text-[10px] text-keep-muted">
+        Destructive test affordance — clears the user's XP / Currency / rank / peak, drops every character pool to zero, and removes all owned styles + borders. Useful for testing earning flows from a clean slate.
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void reset()}
+          disabled={busy}
+          className="keep-button rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+        >
+          {busy ? "Resetting…" : "Reset earning"}
+        </button>
+        {err ? <span className="text-keep-accent">{err}</span> : null}
+        {ok ? <span className="text-keep-system">Earning reset.</span> : null}
+      </div>
+    </fieldset>
   );
 }
 
@@ -4091,9 +4664,9 @@ function ReportsTab() {
 
   return (
     <section className="space-y-2 text-sm">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="font-action text-base">Reports queue</h3>
-        <div className="flex gap-2 text-xs">
+        <div className="flex flex-wrap gap-2 text-xs">
           {(["open", "reviewed", "dismissed", "all"] as const).map((s) => (
             <button
               key={s}
@@ -4208,7 +4781,7 @@ function AuditTab() {
 
   return (
     <section className="space-y-2 text-sm">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="font-action text-base">Audit log</h3>
         <div className="flex items-center gap-2 text-xs">
           <input
@@ -4216,12 +4789,12 @@ function AuditTab() {
             value={actionFilter}
             onChange={(e) => setActionFilter(e.target.value.trim())}
             placeholder="Filter by action (e.g. ban)"
-            className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5"
+            className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 sm:flex-none"
           />
           <button
             type="button"
             onClick={() => setRefreshKey((k) => k + 1)}
-            className="rounded border border-keep-rule bg-keep-banner/40 px-2 py-0.5 hover:bg-keep-banner"
+            className="shrink-0 rounded border border-keep-rule bg-keep-banner/40 px-2 py-0.5 hover:bg-keep-banner"
           >
             Refresh
           </button>
@@ -4340,7 +4913,7 @@ function AffiliatesTab() {
 
   return (
     <section className="space-y-3 text-sm">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-action text-base">Affiliates / Partners / Sponsors</h3>
         <button
           type="button"

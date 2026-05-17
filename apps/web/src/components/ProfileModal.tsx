@@ -3,10 +3,14 @@ import DOMPurify from "dompurify";
 import { isAdminRole } from "@thekeep/shared";
 import type { CharacterPortrait, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
+import { BorderedAvatar } from "./BorderedAvatar.js";
+import { CloseButton } from "./CloseButton.js";
 import { genderGlyph } from "../lib/gender.js";
 import type { Gender } from "../lib/gender.js";
 import { profileShareUrl } from "../lib/profiles.js";
-import { Modal } from "./Modal.js";
+import { fetchPublicEarning, type PublicEarningResponse } from "../lib/earning.js";
+import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
+import { RankSigil } from "./RankSigil.js";
 
 interface Props {
   profile: ProfileView;
@@ -120,7 +124,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
         // become absurd on ultra-wide monitors, capped at 85vh tall, with
         // the original border / rounded / shadow treatment.
         style={themeStyle(ownerTheme)}
-        className="flex h-dvh w-full flex-col overflow-hidden bg-keep-bg text-keep-text md:h-auto md:max-h-[85vh] md:w-[78vw] md:max-w-[1400px] md:rounded md:border md:border-keep-border md:shadow-xl"
+        className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
         onClick={(e) => e.stopPropagation()}
       >
         {gated ? (
@@ -209,13 +213,50 @@ function ProfileBody({
   activeCharacterAction: { label: string; onClick: () => void } | undefined;
 }) {
   const isChar = profile.kind === "character";
+  // Earning — fetch the master pool's rank/tier so the hero can show
+  // a rank chip below the name. One-shot fetch on mount; bad responses
+  // (404, network blip) leave earning=null and the hero falls back
+  // to no chip. Lives here rather than in App because the modal can
+  // be opened from many surfaces (chat name click, userlist icon,
+  // /whois) and we want every entry point to see the chip.
+  const [earning, setEarning] = useState<PublicEarningResponse | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchPublicEarning(profile.profile.userId)
+      .then((r) => { if (!cancelled) setEarning(r); })
+      .catch(() => { /* unranked / not-found / network — hide the chip */ });
+    return () => { cancelled = true; };
+  }, [profile.profile.userId]);
   return (
     <>
       {/* Hero band - always visible, themed with the owner's panel color. */}
-        <div className="flex shrink-0 items-start gap-4 border-b border-keep-rule bg-keep-panel px-5 py-4">
-          <Avatar url={avatar} name={name} />
+        {/* `items-center` on the hero so the rank/name/account stack
+            sits at the avatar's vertical midline. The avatar (xl =
+            124px + frame container) is taller than the three text
+            rows; with `items-start` the text floated at the top and
+            left a tall empty gutter under it. `min-h` matches the
+            framed avatar's footprint so the band always reserves the
+            full portrait height even when the user has no border
+            equipped (no jumpy resize when the border lands). */}
+        <div className="flex shrink-0 items-center gap-4 border-b border-keep-rule bg-keep-panel px-5 py-4">
+          {/* Profile hero portrait uses BorderedAvatar so the user's
+              equipped rank border frames the avatar exactly the way
+              it does in chat / forum / Earning catalog. `xl` slot
+              gives a 124px portrait inside a 186px frame container.
+              The frame only renders when the user has both reached
+              tier IV AND equipped that rank's border via the Earning
+              dashboard. */}
+          <BorderedAvatar
+            avatarUrl={avatar}
+            name={name}
+            size="xl"
+            borderRankKey={earning?.selectedBorderRankKey ?? null}
+          />
           <div className="min-w-0 flex-1">
-            <div className="flex items-baseline gap-2">
+            {/* Name + XP + Currency row. `items-center` (not baseline)
+                so chips with image content (the coin pouch) line up
+                vertically with the username's visual midline. */}
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="font-action text-2xl tracking-wide" title={name}>
                 {name}
               </h2>
@@ -227,7 +268,48 @@ function ProfileBody({
               >
                 {genderGlyph(gender).icon}
               </span>
+              {earning?.xp != null ? (
+                <span
+                  className="inline-flex h-8 items-center gap-1 rounded border border-keep-rule bg-keep-bg/60 px-2 text-sm uppercase tracking-widest text-keep-muted"
+                  title="Experience"
+                >
+                  <span className="font-semibold tabular-nums text-keep-text">{earning.xp.toLocaleString()}</span>
+                  <span>XP</span>
+                </span>
+              ) : null}
+              {earning?.currency != null ? (
+                <span
+                  className="inline-flex h-8 items-center gap-1 rounded border border-keep-rule bg-keep-bg/60 px-2 text-sm"
+                  title="Currency"
+                >
+                  <img
+                    src="/assets/earning/cache_pouch.png"
+                    alt=""
+                    aria-hidden
+                    className="select-none"
+                    style={{ width: "1.75rem", height: "1.75rem" }}
+                    draggable={false}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                  <span className="font-semibold tabular-nums text-keep-text">{earning.currency.toLocaleString()}</span>
+                </span>
+              ) : null}
             </div>
+            {/* Mobile rank lockup — sigil at md (18px) with a smaller
+                title so it nests cleanly UNDER the name on tight
+                viewports. The desktop variant (lg+) lives in a
+                separate column off to the right of the hero and is
+                hidden here. `mb-0` keeps it from pushing the account
+                meta down. */}
+            {earning?.rankKey && earning.tier != null ? (
+              <div className="mb-0 mt-1 flex items-center gap-2 lg:hidden">
+                <RankSigil rankKey={earning.rankKey} tier={earning.tier} size="md" />
+                <span className="font-action text-xs uppercase tracking-widest text-keep-text">
+                  {earning.rankName ?? earning.rankKey}
+                  {earning.tierLabel ? <span className="ml-1 text-keep-muted">{earning.tierLabel}</span> : null}
+                </span>
+              </div>
+            ) : null}
             <div className="mt-0.5 text-xs uppercase tracking-widest text-keep-muted">
               {profile.kind === "character" ? (
                 "Character"
@@ -306,14 +388,24 @@ function ProfileBody({
               </div>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="ml-2 shrink-0 text-sm text-keep-muted hover:text-keep-text"
-            aria-label="Close"
-          >
-            close
-          </button>
+          {/* Desktop rank lockup — pushed to the right edge of the
+              hero (ml-auto). Sigil at xl (64px), title at text-xl.
+              Hidden below lg so mobile renders the inline variant
+              that lives under the name. */}
+          {earning?.rankKey && earning.tier != null ? (
+            <div className="ml-auto hidden items-center gap-3 lg:flex">
+              <RankSigil rankKey={earning.rankKey} tier={earning.tier} size="xl" />
+              <span className="font-action text-xl uppercase tracking-widest text-keep-text">
+                {earning.rankName ?? earning.rankKey}
+                {earning.tierLabel ? <span className="ml-2 text-keep-muted">{earning.tierLabel}</span> : null}
+              </span>
+            </div>
+          ) : null}
+          {/* `self-start` anchors the close affordance to the top of
+              the vertically-centered hero so the hero text can ride
+              the avatar's midline without dragging the close button
+              with it. */}
+          <CloseButton onClick={onClose} className="ml-2 self-start" />
         </div>
 
         {/* Body - scrolls independently of the hero */}
@@ -366,6 +458,53 @@ function ProfileBody({
                   </dl>
                 </Section>
               ) : null}
+
+              {/* Activity counters — lifetime totals computed server-side
+                  at fetch time. Scoped per identity: character profile
+                  shows that character's posts; master profile shows
+                  everything authored under the user account. Zero is a
+                  legitimate value (brand-new account, never posted) so
+                  the section always renders rather than hiding when
+                  totals are 0 — "0 posts" IS information.
+
+                  Per-metric privacy: when the user has the matching
+                  hide-flag set on /me/profile, the server returns null
+                  for that field and we render "private" instead of the
+                  number. The tile still renders so the user's intent
+                  ("I am opting out") is visible to viewers — silently
+                  hiding the whole tile would read as "they never
+                  posted any forum topics" which is a different claim. */}
+              <Section title="Activity">
+                <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
+                  {[
+                    { key: "chat", label: "Chat messages", value: profile.profile.metrics.chatMessages },
+                    { key: "topics", label: "Forum topics", value: profile.profile.metrics.forumTopics },
+                    { key: "replies", label: "Forum replies", value: profile.profile.metrics.forumReplies },
+                  ].map((m) => {
+                    const isPrivate = m.value === null;
+                    return (
+                      <div
+                        key={m.key}
+                        className="flex flex-col items-center gap-0.5 rounded border border-keep-rule/40 bg-keep-bg/40 px-2 py-1.5"
+                      >
+                        <dd
+                          className={
+                            isPrivate
+                              ? "text-sm uppercase tracking-widest text-keep-muted"
+                              : "font-action text-xl tabular-nums text-keep-text"
+                          }
+                          title={isPrivate ? `${m.label} hidden by user` : undefined}
+                        >
+                          {isPrivate ? "private" : m.value!.toLocaleString()}
+                        </dd>
+                        <dt className="text-[10px] uppercase tracking-widest text-keep-muted">
+                          {m.label}
+                        </dt>
+                      </div>
+                    );
+                  })}
+                </dl>
+              </Section>
 
               {links.length > 0 ? (
                 <Section title="Links">
@@ -534,7 +673,11 @@ function Avatar({ url, name }: { url: string | null; name: string }) {
       <img
         src={url}
         alt={name}
-        className="h-24 w-24 shrink-0 rounded border border-keep-border object-cover sm:h-28 sm:w-28"
+        // Round portrait — matches the chat-line + userlist treatment so
+        // the head avatar reads the same everywhere. The "full size"
+        // gallery view further down in the modal keeps its natural
+        // rectangular crop; only this hero is circular.
+        className="h-24 w-24 shrink-0 rounded-full border border-keep-border object-cover sm:h-28 sm:w-28"
       />
     );
   }
@@ -548,7 +691,7 @@ function Avatar({ url, name }: { url: string | null; name: string }) {
     .join("") || "?";
   return (
     <div
-      className="flex h-24 w-24 shrink-0 items-center justify-center rounded border border-keep-border bg-keep-bg text-2xl font-semibold uppercase tracking-wide text-keep-muted sm:h-28 sm:w-28"
+      className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full border border-keep-border bg-keep-bg text-2xl font-semibold uppercase tracking-wide text-keep-muted sm:h-28 sm:w-28"
       aria-hidden
       title={`${name} hasn't set a main profile image yet.`}
     >

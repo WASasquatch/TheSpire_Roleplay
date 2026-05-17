@@ -74,6 +74,8 @@ function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMes
     ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
     ...(m.isSticky ? { isSticky: true } : {}),
     ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+    ...(m.rankKey ? { rankKey: m.rankKey } : {}),
+    ...(m.tier != null ? { tier: m.tier } : {}),
     ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
   };
 }
@@ -119,7 +121,7 @@ export async function registerMessageRoutes(
     const forum = await isForumMessage(db, m.roomId);
     // Single settings read covers both gates (edit window + size cap)
     // so we don't pay two getSettings round-trips per edit.
-    const { maxMessageLength, editGraceMs } = await getSettings(db);
+    const { maxMessageLength, maxForumPostLength, editGraceMs } = await getSettings(db);
     // Admins bypass the grace window entirely (a moderation lever for
     // touch-ups requested by an author after the cap has expired).
     if (!isAdmin && !forum && now - +m.createdAt > editGraceMs) {
@@ -127,13 +129,20 @@ export async function registerMessageRoutes(
       return { error: `Edit window has closed (${Math.round(editGraceMs / 1000)}s after sending).` };
     }
 
-    // Apply the same length cap as fresh messages so editing isn't a back
-    // door around maxMessageLength.
+    // Apply the same per-surface length cap as fresh messages so
+    // editing isn't a back door around the configured limit. Forum
+    // posts use the larger forum cap; flat-chat edits use the chat
+    // cap.
     const trimmed = body.body.trim();
     if (!trimmed) { reply.code(400); return { error: "empty" }; }
-    if (trimmed.length > maxMessageLength) {
+    const effectiveCap = forum ? maxForumPostLength : maxMessageLength;
+    if (trimmed.length > effectiveCap) {
       reply.code(413);
-      return { error: `Messages capped at ${maxMessageLength} chars.` };
+      return {
+        error: forum
+          ? `Forum posts capped at ${effectiveCap} chars.`
+          : `Messages capped at ${effectiveCap} chars.`,
+      };
     }
 
     // Re-sanitise for kinds whose bodies feed renderers that trust them. We

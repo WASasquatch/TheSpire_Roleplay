@@ -106,6 +106,24 @@ export interface ChatMessage {
    * historical messages. Absent on every kind except `cmd`.
    */
   cmdCss?: string | null;
+  /**
+   * Snapshot of the author's Earning rank at send time. Drives the
+   * inline sigil next to the display name on chat lines + forum
+   * headers without forcing the renderer to look up each sender's
+   * live rank.
+   *
+   * Snapshot scope mirrors the IC/OOC routing rule:
+   *   - IC messages (kind != ooc/whisper and characterId set):
+   *     character-pool rank
+   *   - OOC messages (kind === ooc/whisper, or characterId null):
+   *     master-pool rank
+   *
+   * Null/absent = pool had no rank at send time (fresh account, or
+   * every rank disabled). Renderer falls back to no sigil.
+   */
+  rankKey?: string | null;
+  /** Rank-tier snapshot. 1..N where 1 is the lowest enabled tier. Null when rankKey is null. */
+  tier?: number | null;
 }
 
 /**

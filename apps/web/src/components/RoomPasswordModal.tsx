@@ -61,7 +61,7 @@ export function RoomPasswordModal({ roomId, roomName, socket, onClose }: Props) 
       <form
         onSubmit={submit}
         onClick={(e) => e.stopPropagation()}
-        className="w-full rounded border border-keep-border bg-keep-bg p-5 text-keep-text shadow-xl md:w-[min(440px,78vw)]"
+        className="keep-frame w-full rounded bg-keep-bg p-5 text-keep-text md:w-[min(440px,78vw)]"
       >
         <h2 className="font-action text-lg">Private room</h2>
         <p className="mt-1 text-sm text-keep-muted">

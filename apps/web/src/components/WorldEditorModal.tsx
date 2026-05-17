@@ -17,8 +17,9 @@ import {
 import { buildWorldTree, deriveSlug, type WorldTreeNode } from "../lib/worlds.js";
 import { readError } from "../lib/http.js";
 import { themeStyle } from "../lib/theme.js";
-import { Modal } from "./Modal.js";
+import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { ThemePicker } from "./ThemePicker.js";
+import { CloseButton } from "./CloseButton.js";
 
 interface Props {
   worldId: string;
@@ -95,10 +96,10 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
   // the world author's palette without leaking into the chat behind us.
   const modalStyle = detail?.world.theme ? themeStyle(detail.world.theme) : undefined;
   return (
-    <Modal onClose={onClose} zIndex={50}>
+    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
         style={modalStyle}
-        className="flex max-h-[92vh] w-full flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg text-keep-text shadow-xl md:w-[78vw] md:max-w-[1400px]"
+        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg text-keep-text`}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
@@ -106,13 +107,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
             {detail ? `Edit world: ${detail.world.name}` : "Edit world"}
             {detail ? <span className="ml-2 text-xs text-keep-muted">/{detail.world.slug}</span> : null}
           </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-sm text-keep-muted hover:text-keep-text"
-          >
-            close
-          </button>
+          <CloseButton onClick={onClose} />
         </header>
 
         {error ? (

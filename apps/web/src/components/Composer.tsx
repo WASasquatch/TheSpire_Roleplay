@@ -10,8 +10,10 @@ import {
 } from "react";
 import type { CommandDoc, RoomOccupant, ThreadCategory } from "@thekeep/shared";
 import { CompleterPopup, type CompletionItem } from "./CompleterPopup.js";
+import { EarningStatsStrip } from "./EarningStatsStrip.js";
 import { SynonymPopup } from "./SynonymPopup.js";
 import { useChat } from "../state/store.js";
+import { markMentionKnown } from "../state/mentions.js";
 
 interface Props {
   value: string;
@@ -88,6 +90,13 @@ interface Props {
    * the active topic is locked.
    */
   canModerate?: boolean;
+  /**
+   * Opens the Earning dashboard modal. Click target for the
+   * EarningStatsStrip rendered in the composer toolbar area. Set
+   * by App and threaded through here so the strip can navigate
+   * without needing direct access to App's modal state.
+   */
+  onOpenEarning?: () => void;
   /**
    * Parent-supplied "preferred category for the next new topic" signal,
    * typically wired to the forum view's last-clicked section. Tristate:
@@ -266,24 +275,46 @@ export function Composer({
   placeholder,
   canModerate,
   preferredCategoryId,
+  onOpenEarning,
 }: Props) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastValueRef = useRef(value);
 
-  // Input history. Each successful send pushes its trimmed body onto a ring
-  // buffer (deduped against the most recent entry). ArrowUp/ArrowDown walk
-  // the buffer when the value is single-line and the autocomplete popup
-  // isn't active, mimicking the IRC / terminal convention. The draft you
-  // had typed before entering history mode is restored when ArrowDown
-  // takes you past the newest entry, so casually browsing history doesn't
-  // cost you in-progress text.
+  // Input history. Each successful send pushes its trimmed body onto a
+  // ring buffer (deduped against the most recent entry). ArrowUp opens
+  // a *popup* of past sends (most recent first) that the user picks
+  // from explicitly — pressing ArrowUp does NOT overwrite the current
+  // draft. Only Enter on a highlighted entry (or a click) replaces the
+  // textarea. This matches the way the @ / / completers behave and
+  // keeps the arrow keys from clobbering text the user is actively
+  // editing.
   //
-  // Refs (not state) since none of this affects rendering directly — the
-  // visible text already lives in the parent's `value`. Lives for the
+  // historyRef holds the buffer itself (no React state — the visible
+  // text already lives in the parent's `value`). `historyOpen`/`Index`
+  // ARE state because the popup needs to render. Lives for the
   // Composer's lifetime; logging out unmounts the chat and clears it.
   const historyRef = useRef<string[]>([]);
-  const historyIndexRef = useRef<number | null>(null);
-  const draftBeforeHistoryRef = useRef<string>("");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  // Account-level opt-out. When set, the popup never opens — ArrowUp
+  // falls through to its native caret-movement behavior. Pulled from
+  // the chat store so a toggle in the profile editor takes effect
+  // immediately.
+  const disableHistory = useChat((s) => s.inputPrefs.disableHistory);
+  // Active identity. We don't reset historyRef on character switch
+  // (the buffer is per-tab IRC-style, not per-identity), but if the
+  // popup is open at the moment of the switch we close it so the
+  // user's eye doesn't get pulled to a stale picker while they
+  // re-orient to the new identity. Also closes on the user flipping
+  // disableHistory mid-popup so the toggle takes effect immediately.
+  const activeCharacterId = useChat((s) => s.activeCharacterId);
+  useEffect(() => {
+    if (historyOpen) {
+      setHistoryOpen(false);
+      setHistoryIndex(0);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCharacterId, disableHistory]);
 
   // Thread-category picker state. Only meaningful for nested-mode rooms
   // with at least one category. `selectedCategoryId === null` ==
@@ -297,6 +328,10 @@ export function Composer({
   useEffect(() => {
     if (!topicCreateMode) setTopicTitle("");
   }, [topicCreateMode]);
+  // Admin-configured cap for forum topic titles. Read from the chat
+  // store so a tuning change picks up live (the store is hydrated
+  // from /me/profile on first auth-ed boot).
+  const maxTopicTitleLength = useChat((s) => s.inputLimits.maxForumTopicTitleLength);
 
   useEffect(() => {
     if (!roomId) {
@@ -376,6 +411,59 @@ export function Composer({
   const [caret, setCaret] = useState<number>(value.length);
   const trigger = useMemo(() => detectTrigger(value, caret), [value, caret]);
 
+  // Server-backed mention suggestions. Occupant filtering only finds
+  // people currently in this room; this hits the existing `/users?q=`
+  // endpoint so a user can autocomplete an offline friend's master
+  // username or any of their characters' names too. Debounced so we
+  // don't fire a request on every keystroke. The race-condition guard
+  // (`reqIdRef`) drops stale responses when the user keeps typing.
+  type ServerSuggestion = { name: string; sublabel?: string; online: boolean };
+  const [serverSuggestions, setServerSuggestions] = useState<ServerSuggestion[]>([]);
+  const searchReqRef = useRef(0);
+  useEffect(() => {
+    if (!trigger || (trigger.kind !== "@" && trigger.kind !== "whisper-target")) {
+      setServerSuggestions([]);
+      return;
+    }
+    const q = trigger.query;
+    if (q.length < 1) { setServerSuggestions([]); return; }
+    const myReq = ++searchReqRef.current;
+    const handle = window.setTimeout(() => {
+      fetch(`/users?q=${encodeURIComponent(q)}&limit=8`, { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (myReq !== searchReqRef.current) return;
+          if (!j || !Array.isArray(j.users)) { setServerSuggestions([]); return; }
+          const out: ServerSuggestion[] = [];
+          for (const u of j.users as Array<{
+            username: string;
+            online: boolean;
+            characters?: Array<{ id: string; name: string }>;
+            activeCharacterId?: string | null;
+          }>) {
+            // Master username always suggested when it prefix-matches.
+            if (u.username.toLowerCase().startsWith(q)) {
+              out.push({ name: u.username, online: u.online });
+            }
+            // Character names that prefix-match too — typing `@ly`
+            // should surface a character named "Lyra" even if her
+            // master account name doesn't start with "ly".
+            for (const c of u.characters ?? []) {
+              if (!c.name.toLowerCase().startsWith(q)) continue;
+              out.push({
+                name: c.name,
+                online: u.online,
+                sublabel: u.activeCharacterId === c.id ? `${u.username} (active)` : u.username,
+              });
+            }
+          }
+          setServerSuggestions(out);
+        })
+        .catch(() => { if (myReq === searchReqRef.current) setServerSuggestions([]); });
+    }, 120);
+    return () => window.clearTimeout(handle);
+  }, [trigger?.kind, trigger?.query]);
+
   // Build completion items from the current trigger + sources.
   const items: CompletionItem[] = useMemo(() => {
     if (!trigger) return [];
@@ -418,13 +506,15 @@ export function Composer({
       out.sort((a, b) => a.label.localeCompare(b.label));
       return out.slice(0, MAX_COMPLETIONS);
     }
-    // @-mention OR whisper-target: filter occupants by displayName prefix.
-    // The two share the same item source — the only difference is whether
-    // the inserted text carries an `@` prefix (mid-message mention) or
-    // not (a bare username after `/whisper`).
-    if (!occupants) return [];
-    const out: CompletionItem[] = [];
-    const wantAt = trigger.kind === "@";
+    // @-mention OR whisper-target. Two sources, merged:
+    //   1. Occupants of the current room (instant — fastest path for
+    //      "who's here right now").
+    //   2. Server `/users?q=` suggestions (catches offline folks +
+    //      characters not currently in this room — the autocomplete
+    //      previously left you stuck if you forgot the exact spelling
+    //      of someone not in the room).
+    // Dedupe by lowercased name so an occupant doesn't appear twice
+    // when the server returns them too.
     // Spaces in a multi-word displayName ("The Doctor", master usernames
     // typed with NBSP, character names with regular spaces) get rewritten
     // to NBSP when forming the inserted mention text. The mention regex
@@ -435,19 +525,36 @@ export function Composer({
     // The label keeps a regular space for the popup list so picker
     // results don't look weird.
     const NBSP = " ";
-    for (const o of occupants) {
-      if (o.displayName.toLowerCase().startsWith(trigger.query)) {
-        const mentionValue = o.displayName.replace(/ /g, NBSP);
-        out.push({
-          value: wantAt ? `@${mentionValue}` : mentionValue,
-          label: wantAt ? `@${o.displayName}` : o.displayName,
-          ...(o.away ? { sublabel: "away" } : {}),
-        });
+    const out: CompletionItem[] = [];
+    const wantAt = trigger.kind === "@";
+    const seen = new Set<string>();
+    const push = (displayName: string, sublabel?: string) => {
+      const key = displayName.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      const mentionValue = displayName.replace(/ /g, NBSP);
+      out.push({
+        value: wantAt ? `@${mentionValue}` : mentionValue,
+        label: wantAt ? `@${displayName}` : displayName,
+        ...(sublabel ? { sublabel } : {}),
+      });
+    };
+    if (occupants) {
+      for (const o of occupants) {
+        if (o.displayName.toLowerCase().startsWith(trigger.query)) {
+          push(o.displayName, o.away ? "away" : undefined);
+        }
       }
     }
+    // Sort the occupant slice before appending server hits so the
+    // local block stays stable as server responses arrive (otherwise
+    // the picker re-alphabetizes and jumps on each network update).
     out.sort((a, b) => a.label.localeCompare(b.label));
+    for (const s of serverSuggestions) {
+      push(s.name, s.sublabel);
+    }
     return out.slice(0, MAX_COMPLETIONS);
-  }, [trigger, commands, occupants]);
+  }, [trigger, commands, occupants, serverSuggestions]);
 
   const [selectedIndex, setSelectedIndex] = useState(0);
   // The popup never steals Enter until the user has opted in by pressing
@@ -519,8 +626,10 @@ export function Composer({
       buf.push(t);
       if (buf.length > HISTORY_MAX) buf.shift();
     }
-    historyIndexRef.current = null;
-    draftBeforeHistoryRef.current = "";
+    // Close any open history popup on send (the user committed; the
+    // recall context is done).
+    setHistoryOpen(false);
+    setHistoryIndex(0);
 
     // Forum-mode routing. Server enforces these structurally; here we
     // just pick the right payload shape based on which UI mode we're
@@ -578,6 +687,18 @@ export function Composer({
     const next = value.slice(0, t.tokenStart) + inserted + value.slice(caret);
     onChange(next);
     const newCaret = t.tokenStart + inserted.length;
+    // Prime the mentions-validity cache so the resulting `@name`
+    // renders as a chip on the FIRST render after send — skips the
+    // `/mentions/resolve` round-trip that would otherwise leave the
+    // mention briefly as plain text. The picker only surfaces names
+    // the server vouched for (occupants are by definition real users;
+    // server suggestions came from /users?q=), so marking them known
+    // here is safe. Whisper-target completions (no `@` prefix) get
+    // primed too — same name, same validity, same future render.
+    if (t.kind === "@" || t.kind === "whisper-target") {
+      const picked = item.value.startsWith("@") ? item.value.slice(1) : item.value;
+      if (picked) markMentionKnown(picked);
+    }
     // setSelectionRange has to wait for the controlled value to flush, so
     // schedule it after the next paint.
     requestAnimationFrame(() => {
@@ -636,43 +757,86 @@ export function Composer({
       }
     }
 
-    // History navigation. Only kicks in for single-line input so it
-    // doesn't fight cursor movement inside a multi-line draft, and only
-    // when no modifier keys are held (Shift+Arrow selects, Ctrl/Alt+Arrow
-    // word-jumps - both should pass through). The popup branch above has
-    // already returned for its own arrow handling.
-    if (!e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !value.includes("\n")) {
+    // History popup. ArrowUp opens it; once open, ArrowUp / ArrowDown
+    // navigate within it; Enter accepts the highlighted entry; Esc
+    // dismisses. Two gates on the open-trigger:
+    //   1. Account-level opt-out (`disableHistory`) — when set, the
+    //      popup never opens. The arrow keys fall through to native
+    //      caret movement.
+    //   2. Caret must be on the FIRST line of the textarea. Walking the
+    //      cursor up through multi-line text used to pop the recall
+    //      and clobber the draft mid-paragraph; gating to the first
+    //      line restores the normal "move cursor up to the line above"
+    //      behavior everywhere except where there is no line above.
+    //
+    // Modifier keys (Shift / Ctrl / Alt / Meta) bypass the popup
+    // entirely so selection + word-jump shortcuts still work as the
+    // OS expects.
+    //
+    // CRUCIALLY: opening the popup does NOT replace the textarea's
+    // value. The user picks an entry explicitly with Enter or by
+    // clicking — until then, the in-progress draft is untouched.
+    if (historyOpen) {
       if (e.key === "ArrowUp") {
-        const buf = historyRef.current;
-        if (buf.length === 0) return; // nothing to recall - let the key through
         e.preventDefault();
-        const cur = historyIndexRef.current;
-        if (cur === null) {
-          // Entering history mode - stash whatever was being typed so
-          // ArrowDown past the newest entry can restore it.
-          draftBeforeHistoryRef.current = value;
-          historyIndexRef.current = 0;
-        } else {
-          historyIndexRef.current = Math.min(cur + 1, buf.length - 1);
-        }
-        recallText(buf[buf.length - 1 - historyIndexRef.current]!);
+        setHistoryIndex((i) => Math.min(i + 1, historyRef.current.length - 1));
         return;
       }
-      if (e.key === "ArrowDown" && historyIndexRef.current !== null) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setHistoryIndex((i) => {
+          const next = i - 1;
+          if (next < 0) {
+            // Walked past the most recent entry — close the popup
+            // rather than wrapping around. Keeps the muscle memory
+            // of "down past the bottom of a list closes it."
+            setHistoryOpen(false);
+            return 0;
+          }
+          return next;
+        });
+        return;
+      }
+      if (
+        e.key === "Enter" &&
+        !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey &&
+        !e.nativeEvent.isComposing
+      ) {
         e.preventDefault();
         const buf = historyRef.current;
-        const next = historyIndexRef.current - 1;
-        if (next < 0) {
-          // Past the newest entry - exit history mode and restore the
-          // draft the user had typed before they started browsing.
-          const draft = draftBeforeHistoryRef.current;
-          historyIndexRef.current = null;
-          draftBeforeHistoryRef.current = "";
-          recallText(draft);
-        } else {
-          historyIndexRef.current = next;
-          recallText(buf[buf.length - 1 - next]!);
-        }
+        const picked = buf[buf.length - 1 - historyIndex];
+        setHistoryOpen(false);
+        setHistoryIndex(0);
+        if (picked !== undefined) recallText(picked);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setHistoryOpen(false);
+        setHistoryIndex(0);
+        return;
+      }
+      // Any other key (typing, arrow-left/right, etc.) closes the
+      // popup and falls through to the normal handler — the user is
+      // signaling they're done browsing history.
+      setHistoryOpen(false);
+      setHistoryIndex(0);
+    }
+    if (!disableHistory && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && e.key === "ArrowUp") {
+      // First-line gate. With no newlines anywhere, every caret
+      // position is on the first line; otherwise the caret must be
+      // at or before the first newline to qualify. Read the live
+      // selectionStart in case the controlled-value `caret` lags
+      // behind (e.g. a click-to-position that hasn't yet routed
+      // through onSelect).
+      const el = inputRef.current;
+      const caretPos = el?.selectionStart ?? caret;
+      const firstNewline = value.indexOf("\n");
+      const onFirstLine = firstNewline === -1 || caretPos <= firstNewline;
+      if (onFirstLine && historyRef.current.length > 0) {
+        e.preventDefault();
+        setHistoryOpen(true);
+        setHistoryIndex(0);
         return;
       }
     }
@@ -699,7 +863,7 @@ export function Composer({
   // and the Enter key on most mobile keyboards is bound to submit — so
   // multi-line posters need an explicit button. Inserts at the caret (or
   // replaces the selection) and restores the caret one char past the
-  // inserted newline. Visible only on mobile via `md:hidden`.
+  // inserted newline. Visible only on mobile via `lg:hidden`.
   function insertNewline() {
     const el = inputRef.current;
     if (!el) return;
@@ -851,7 +1015,7 @@ export function Composer({
           every state without disturbing the desktop layout (md+ has
           the rooms tree always visible). */}
       {inputDisabled && onOpenRail ? (
-        <div className="flex md:hidden">
+        <div className="flex lg:hidden">
           <button
             type="button"
             onClick={onOpenRail}
@@ -859,7 +1023,9 @@ export function Composer({
             title="Rooms"
             className="keep-button flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none hover:bg-keep-banner"
           >
-            💬
+            {/* scroll.png replaces the 💬 chat-bubble emoji for the
+                rooms-drawer trigger per the Earning asset pack. */}
+            <img src="/assets/icons/scroll.png" alt="" aria-hidden className="h-5 w-5 select-none" draggable={false} />
           </button>
         </div>
       ) : null}
@@ -969,7 +1135,7 @@ export function Composer({
                 // Tap-target sizing: comfortable 32px height on mobile
                 // so the cancel-out path is easy to hit; md+ stays
                 // compact since pointer precision is higher.
-                className="keep-button flex h-8 items-center rounded border border-keep-rule/60 bg-keep-bg px-3 normal-case tracking-normal text-keep-muted hover:bg-keep-banner hover:text-keep-text md:h-6 md:px-2"
+                className="keep-button flex h-8 items-center rounded border border-keep-rule/60 bg-keep-bg px-3 normal-case tracking-normal text-keep-muted hover:bg-keep-banner hover:text-keep-text lg:h-6 lg:px-2"
               >
                 Cancel
               </button>
@@ -979,7 +1145,7 @@ export function Composer({
             type="text"
             value={topicTitle}
             onChange={(e) => setTopicTitle(e.target.value)}
-            maxLength={120}
+            maxLength={maxTopicTitleLength}
             placeholder="Topic title"
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
             // eslint-disable-next-line jsx-a11y/no-autofocus
@@ -1010,7 +1176,9 @@ export function Composer({
           it only renders for the legacy / flat case. */}
       {!isForumRoom && showCategoryPicker ? (
         <label className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-keep-muted">
-          <span aria-hidden>🧵</span>
+          {/* board.png replaces the 🧵 sewing-thread emoji for forum/
+              thread affordances per the Earning asset pack. */}
+          <img src="/assets/icons/board.png" alt="" aria-hidden className="h-3.5 w-3.5 select-none" draggable={false} />
           <span>Thread:</span>
           <select
             value={effectiveCategoryId ?? ""}
@@ -1031,6 +1199,15 @@ export function Composer({
           when nothing is selected. Hidden when the input is disabled
           (forum-locked-for-viewer or no-active-topic states) since
           formatting a blocked compose makes no sense. */}
+      {/* Earning stats strip — mobile placement: a standalone row
+          above the formatting toolbar. Self-hides when the earning
+          snapshot hasn't loaded. The desktop placement lives inside
+          the toolbar below (pushed right via ml-auto). */}
+      {!inputDisabled && onOpenEarning ? (
+        <div className="mb-1 lg:hidden">
+          <EarningStatsStrip onOpenEarning={onOpenEarning} className="w-full justify-between" />
+        </div>
+      ) : null}
       {!inputDisabled ? (
         // Compact toolbar row. On mobile the rooms-drawer trigger (💬)
         // lives at the LEFT of this row with a thin vertical divider
@@ -1051,11 +1228,14 @@ export function Composer({
                 onClick={onOpenRail}
                 aria-label="Open rooms"
                 title="Rooms"
-                className="keep-button mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none hover:bg-keep-banner md:hidden"
+                className="keep-button mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none hover:bg-keep-banner lg:hidden"
               >
-                💬
+                {/* scroll.png — same asset swap as the disabled-state
+                    drawer trigger above, applied to the live toolbar
+                    drawer button. */}
+                <img src="/assets/icons/scroll.png" alt="" aria-hidden className="h-5 w-5 select-none" draggable={false} />
               </button>
-              <span aria-hidden className="mr-1 h-5 w-px shrink-0 bg-keep-rule/60 md:hidden" />
+              <span aria-hidden className="mr-1 h-5 w-px shrink-0 bg-keep-rule/60 lg:hidden" />
             </>
           ) : null}
           <FmtButton title="Bold (Ctrl+B)" onClick={() => wrapSelection("**", "**", "bold")}>
@@ -1090,6 +1270,15 @@ export function Composer({
           <FmtButton title="Image — inserts ![alt](url)" onClick={() => insertLinkOrImage("image")}>
             <span aria-hidden>🖼</span>
           </FmtButton>
+          {/* Earning stats strip — desktop placement: pushed to the
+              right of the formatting buttons via ml-auto. Hidden on
+              mobile where the strip lives ABOVE the toolbar in its
+              own row (see the conditional just above). */}
+          {onOpenEarning ? (
+            <div className="ml-auto hidden lg:flex">
+              <EarningStatsStrip onOpenEarning={onOpenEarning} />
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -1113,6 +1302,50 @@ export function Composer({
             textarea — Enter or click swaps the highlighted word for
             the chosen synonym. */}
         <SynonymPopup inputRef={inputRef} value={value} onChange={onChange} />
+        {/* History popup. Opens on ArrowUp (when the caret is on the
+            first line of the textarea). Shows most-recent sends first
+            without touching the in-progress draft — the user has to
+            highlight + Enter (or click) to actually replace the
+            text. Same bottom-full anchor as the other two popups so
+            it slides up out of the textarea's top edge. */}
+        {historyOpen && historyRef.current.length > 0 ? (
+          <ul
+            role="listbox"
+            aria-label="Recent sends"
+            className="absolute bottom-full left-0 z-30 mb-1 max-h-56 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl"
+          >
+            <li className="border-b border-keep-rule/40 bg-keep-banner/40 px-2 py-1 text-[10px] uppercase tracking-widest text-keep-muted">
+              Recent sends — Enter to insert
+            </li>
+            {historyRef.current
+              .slice()
+              .reverse()
+              .map((entry, i) => (
+                <li key={`${i}-${entry}`}>
+                  <button
+                    type="button"
+                    // onMouseDown so the click lands before the
+                    // textarea's blur (same Safari workaround the
+                    // synonym/mention popups use).
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setHistoryOpen(false);
+                      setHistoryIndex(0);
+                      recallText(entry);
+                    }}
+                    onMouseEnter={() => setHistoryIndex(i)}
+                    className={`block w-full truncate px-2 py-1 text-left text-xs ${
+                      i === historyIndex
+                        ? "bg-keep-banner/60 text-keep-text"
+                        : "text-keep-text hover:bg-keep-banner/40"
+                    }`}
+                  >
+                    {entry}
+                  </button>
+                </li>
+              ))}
+          </ul>
+        ) : null}
         <textarea
           ref={inputRef}
           value={value}
@@ -1126,6 +1359,18 @@ export function Composer({
           onClick={syncCaret}
           onSelect={syncCaret}
           onKeyDown={onKeyDown}
+          // Close the history popup if the textarea loses focus. The
+          // popup's accept buttons use onMouseDown + preventDefault to
+          // keep the textarea focused while clicking, so an actual
+          // blur means the user clicked away (or tabbed out). Without
+          // this, the popup would stay visible after focus shift and
+          // re-anchor next time the user types into the textarea.
+          onBlur={() => {
+            if (historyOpen) {
+              setHistoryOpen(false);
+              setHistoryIndex(0);
+            }
+          }}
           rows={1}
           // enterKeyHint relabels the on-screen keyboard's return key to
           // "Send" so mobile users see the right affordance — Enter
@@ -1160,7 +1405,7 @@ export function Composer({
           // alone is only 32px tall. The auto-grow effect respects this
           // min via `el.style.height = "auto"` → scrollHeight measurement,
           // which folds min-height into the natural metric.
-          className="block min-h-[68px] w-full resize-none rounded border border-keep-rule bg-keep-bg px-3 py-2 text-base leading-snug outline-none focus:border-keep-action disabled:cursor-not-allowed disabled:opacity-50 md:min-h-8 md:py-1 md:text-sm"
+          className="block min-h-[68px] w-full resize-none rounded border border-keep-rule bg-keep-bg px-3 py-2 text-base leading-snug outline-none focus:border-keep-action disabled:cursor-not-allowed disabled:opacity-50 lg:min-h-8 lg:py-1 lg:text-sm"
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
         />
@@ -1183,19 +1428,24 @@ export function Composer({
           disabled={inputDisabled}
           aria-label="Insert line break"
           title="Insert line break"
-          className="keep-button flex h-6 items-center justify-center rounded border border-keep-rule bg-keep-bg px-2 text-sm hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50 md:hidden"
+          className="keep-button flex h-6 items-center justify-center rounded border border-keep-rule bg-keep-bg px-2 text-sm hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50 lg:hidden"
         >
           ↵
         </button>
         <button
           type="submit"
           disabled={submitDisabled}
-          // h-10 mobile / md:h-8 desktop. The mobile column is now
+          // h-10 mobile / lg:h-8 desktop. The mobile column is now
           // ↵ (h-6) + gap (4px) + Send (h-10) = 68px total, which
           // becomes the row's natural height via items-stretch — the
           // textarea grows to match, giving longer messages noticeably
-          // more visible space.
-          className="keep-button h-10 shrink-0 rounded border border-keep-rule bg-keep-bg px-4 text-sm hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50 md:h-8"
+          // more visible space. Breakpoint pinned to `lg` so the
+          // mobile-vs-desktop boundary matches the rest of the chat
+          // shell (rail visibility, ↵ button, format toolbar position)
+          // — at viewports between `md` (768) and `lg` (1024) the rail
+          // is still in drawer mode and the composer needs to keep its
+          // mobile sizing to match.
+          className="keep-button h-10 shrink-0 rounded border border-keep-rule bg-keep-bg px-4 text-sm hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50 lg:h-8"
         >
           {forumCreating ? "Post topic" : forumReplying ? "Reply" : "Send"}
         </button>

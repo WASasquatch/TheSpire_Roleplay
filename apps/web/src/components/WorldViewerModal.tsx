@@ -4,7 +4,8 @@ import type { WorldDetail, WorldPage } from "@thekeep/shared";
 import { buildWorldTree, parseWorldFromUrl, syncWorldUrl, worldShareUrl, type WorldTreeNode } from "../lib/worlds.js";
 import { readError } from "../lib/http.js";
 import { themeStyle } from "../lib/theme.js";
-import { Modal } from "./Modal.js";
+import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
+import { CloseButton } from "./CloseButton.js";
 
 interface Props {
   worldId: string;
@@ -151,7 +152,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
     <Modal onClose={onClose} variant="mobile-fullscreen" zIndex={50}>
       <div
         style={modalStyle}
-        className="flex h-dvh w-full flex-col overflow-hidden bg-keep-bg text-keep-text md:h-auto md:max-h-[92vh] md:w-[78vw] md:max-w-[1600px] md:rounded md:border md:border-keep-rule md:shadow-xl"
+        className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-keep-rule bg-keep-banner px-4 py-2">
@@ -193,13 +194,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
                 Edit
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-sm text-keep-muted hover:text-keep-text"
-            >
-              close
-            </button>
+            <CloseButton onClick={onClose} />
           </div>
         </header>
 

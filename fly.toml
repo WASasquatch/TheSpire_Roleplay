@@ -11,8 +11,15 @@
 #   external 80 → that port (and 443 with TLS termination). Users hit
 #   https://<app>.fly.dev with no port suffix; force_https=true upgrades :80
 #   to :443 automatically.
-# - DATABASE_URL points at /data/thekeep.sqlite which lives on the mounted
+# - SQLITE_PATH points at /data/thekeep.sqlite which lives on the mounted
 #   volume so the SQLite file survives deploys and machine restarts.
+#   (Named SQLITE_PATH and not DATABASE_URL because flyctl flags any
+#   var named DATABASE_URL as "potentially sensitive" — that heuristic
+#   assumes a Postgres-style connection string with embedded credentials,
+#   but our value is just a filesystem path on the mounted volume, so
+#   the rename clears the warning without smuggling a non-secret into
+#   the secrets store. DATABASE_URL still works as a fallback on the
+#   server side for anyone with an existing local .env.)
 # - SESSION_SECRET MUST be set as a Fly secret before the first deploy or
 #   the server will refuse to start (its index.ts has a min-length guard).
 
@@ -27,7 +34,7 @@ primary_region = "sjc"     # any Fly region; pick what's near your users
   NODE_ENV = "production"
   PORT = "8080"
   WEB_ORIGIN = ""
-  DATABASE_URL = "/data/thekeep.sqlite"
+  SQLITE_PATH = "/data/thekeep.sqlite"
   LOG_LEVEL = "info"
 
 # Persistent SQLite storage. The volume's name must match the `source` here.

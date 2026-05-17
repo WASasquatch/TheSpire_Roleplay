@@ -866,4 +866,111 @@ foot of the mountains. Speaks little. Watches everything.</p>
       </>
     ),
   },
+
+  {
+    id: "earning",
+    title: "Earning: XP, Currency, ranks, and cosmetics",
+    body: (
+      <>
+        <P>
+          Earning is the long-term reward layer for being part of the community. Every chat
+          message, forum post, and quiet stretch of presence in a room earns you{" "}
+          <b>Experience (XP)</b> and <b>Currency</b> in parallel — XP grows your <b>rank</b>{" "}
+          (the sigil shown next to your name), Currency stays in your wallet for spending on
+          name styles, avatar borders, and other cosmetics.
+        </P>
+        <P>
+          Open <b>Earning</b> from the top banner to see your wallet, rank progress, activity
+          ledger, and everything available to buy.
+        </P>
+
+        <Heading>How you earn</Heading>
+        <Bullets>
+          <li>
+            <b>Chat messages</b> in a room — the body has to be a few characters long, so a
+            single "ok" doesn't count.
+          </li>
+          <li>
+            <b>Forum posts and replies</b> in nested-mode rooms.
+          </li>
+          <li>
+            <b>Presence</b> — staying active in a room awards a small amount every few minutes,
+            capped per day. "Active" means you posted or scrolled history in that block.
+          </li>
+        </Bullets>
+        <P>
+          When you're posting <i>as a character</i>, your earnings credit that character's pool;
+          OOC channels and forum posts credit your master account. Both pools have their own
+          rank. You can level a favorite character while keeping your master rank separate.
+        </P>
+
+        <Heading>Slash commands</Heading>
+        <Bullets>
+          <li>
+            <K>/currency</K> — show your wallet (master + active character).
+          </li>
+          <li>
+            <K>/currency [user]</K> — peek at another user's balance (honors their privacy
+            toggle).
+          </li>
+          <li>
+            <K>/currency send [target] [amount]</K> — send Currency to another user OR
+            character. Subject to daily caps and account-age gates set by the admin.
+          </li>
+          <li>
+            <K>/exp</K> — show your XP, rank, and tier. If you've reached the capstone of any
+            rank (Tier IV: Verified), the line also lists which borders you can buy.
+          </li>
+          <li>
+            <K>/exp [user]</K> — look up another user's rank. Rank is always public.
+          </li>
+        </Bullets>
+
+        <Heading>Ranks and tiers</Heading>
+        <P>
+          The ladder has six ranks shipped by default: New Arrival, Active, Recognized,
+          Established, Distinguished, Legacy Member. Each has four tiers (I, II, III, IV:
+          Verified — the capstone). Crossing into a new tier surfaces a quiet ribbon at the top
+          of the chat ("you've reached Recognized III") that you can dismiss. Reaching Tier IV
+          of any rank unlocks that rank's <b>border frame</b> for purchase.
+        </P>
+        <P>
+          Your <b>sigil</b> — the small badge next to your name in chat, the userlist, and on
+          forum posts — always tracks your current rank/tier. It updates automatically.
+        </P>
+
+        <Heading>Cosmetics you can buy</Heading>
+        <Bullets>
+          <li>
+            <b>Name styles</b> — gradient, glow, pulsing, panning, etc. Buy in the Earning
+            dashboard's Name Styles section, customize the colors, and equip. Your styled name
+            shows in chat, the userlist, and forum posts. Colors stay legible against both
+            light and dark themes.
+          </li>
+          <li>
+            <b>Rank borders</b> — circular frames that wrap your avatar. Available only after
+            you've reached Tier IV of a given rank. You can own multiple and pick which one
+            you display.
+          </li>
+          <li>
+            <b>Inline avatar in chat</b> — once bought, your round avatar shows after the
+            timestamp on every chat line. It also replaces the gender icon in the userlist as
+            the click-target for opening your profile.
+          </li>
+        </Bullets>
+
+        <Heading>Privacy</Heading>
+        <P>
+          Open <b>Earning → Settings</b> to hide your Currency total from other users (or via
+          the profile editor's Privacy tab). Your rank and XP stay visible — rank is meant as a
+          public identity tag.
+        </P>
+
+        <Tip>
+          New here? Earning is opt-in by participation, not opt-in by clicking. Just chat
+          normally and you'll see your first rank within a session or two.
+        </Tip>
+      </>
+    ),
+  },
 ];

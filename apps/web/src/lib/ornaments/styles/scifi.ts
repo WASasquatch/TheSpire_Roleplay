@@ -67,11 +67,35 @@ function makeTexture(p: OrnamentPalette): string {
 }
 
 function makeCorner(p: OrnamentPalette, corner: "tl" | "tr" | "bl" | "br"): string {
-  const neon = p.action[2] ?? "#00ffd5";
-  const lit = p.action[1] ?? "#88ffea";
+  // Top corners pull from the action ramp (cyan in the default palette,
+  // matching the body's cyan bloom at viewport 12% 8% / 68% 28%); bottom
+  // corners pull from accent (magenta, matching the bloom at 90% 94% /
+  // 22% 76%). The result: each L-bracket is brightest at its outer tip,
+  // fading back to the current dim "neon" along the legs — reads as if
+  // the body bg blooms are casting onto the chrome.
+  const isTop = corner === "tl" || corner === "tr";
+  const bright = (isTop ? p.action[0] : p.accent[0]) ?? (isTop ? "#bff7f1" : "#ffc7e8");
+  const base   = (isTop ? p.action[2] : p.accent[2]) ?? (isTop ? "#00ffd5" : "#ff00aa");
+  const lit    = p.action[1] ?? "#88ffea";
+  // Radial gradient centered on the outer tip (0,0 in the path's local
+  // frame). After the per-corner transform below, that tip lands at the
+  // actual outer corner of the frame, so the brightest spot points away
+  // from the panel into the ambient bloom — exactly where the light is.
+  // Gradient ID is per-corner so multiple corner backgrounds on one page
+  // can't collide. `userSpaceOnUse` keeps the radius literal-pixels.
+  const gid = `scifi-corner-${corner}`;
+  const defs = `
+    <defs>
+      <radialGradient id="${gid}" cx="0" cy="0" r="22" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stop-color="${bright}" stop-opacity="1"/>
+        <stop offset="60%" stop-color="${base}" stop-opacity="0.85"/>
+        <stop offset="100%" stop-color="${base}" stop-opacity="0.55"/>
+      </radialGradient>
+    </defs>
+  `;
   // Chopped-tip L-bracket: 14 px legs that taper at the outer end.
   const stroke = `
-    <path d="M0 6 L6 0 L18 0 L18 2 L7 2 L2 7 L2 18 L0 18 Z" fill="${neon}" opacity="0.85"/>
+    <path d="M0 6 L6 0 L18 0 L18 2 L7 2 L2 7 L2 18 L0 18 Z" fill="url(#${gid})"/>
     <path d="M0 6 L6 0 L18 0 L18 2 L7 2 L2 7 L2 18 L0 18 Z" fill="none" stroke="${lit}" stroke-width="0.3" opacity="0.6"/>
   `;
   const transform =
@@ -81,6 +105,7 @@ function makeCorner(p: OrnamentPalette, corner: "tl" | "tr" | "bl" | "br"): stri
     "translate(32 32) scale(-1 -1)";
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+      ${defs}
       <g transform="${transform}">${stroke}</g>
     </svg>
   `;

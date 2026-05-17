@@ -55,8 +55,13 @@ ENV PORT=8080
 # WEB_ORIGIN="" disables CORS — the bundle is served same-origin in prod.
 ENV WEB_ORIGIN=""
 # Persistent SQLite path. Fly.io mounts a volume at /data; in plain Docker
-# you can `-v thespire_data:/data`.
-ENV DATABASE_URL=/data/thekeep.sqlite
+# you can `-v thespire_data:/data`. Named SQLITE_PATH (not DATABASE_URL)
+# because flyctl flags any var named DATABASE_URL as "potentially
+# sensitive" — its heuristic assumes a Postgres-style connection string
+# with credentials, but our value is just a filesystem path. The server
+# still falls back to DATABASE_URL for anyone with an existing local
+# .env, so this rename is purely cosmetic on the dev side.
+ENV SQLITE_PATH=/data/thekeep.sqlite
 
 EXPOSE 8080
 

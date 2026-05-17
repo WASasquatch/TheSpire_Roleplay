@@ -370,6 +370,22 @@ interface ChatState {
   branding: SiteBranding;
   setBranding: (b: SiteBranding) => void;
 
+  /**
+   * Admin-configurable input length caps. Loaded from `/me/profile`
+   * on first auth-ed bootstrap so any composer (chat, DM, forum
+   * topic title, bio) can pull the live cap from a single source.
+   * Defaults match the server's schema defaults; populated for real
+   * once /me/profile lands.
+   */
+  inputLimits: {
+    maxBioLength: number;
+    maxMessageLength: number;
+    maxDirectMessageLength: number;
+    maxForumPostLength: number;
+    maxForumTopicTitleLength: number;
+  };
+  setInputLimits: (l: ChatState["inputLimits"]) => void;
+
   /* =========================================================
    *  Direct messages (Phase 4)
    * ========================================================= */
@@ -431,8 +447,18 @@ interface ChatState {
    * Read by `lib/sound.ts` before every play() so a toggle in the
    * profile editor takes effect immediately, without an Audio reload.
    */
-  soundPrefs: { dm: boolean; chat: boolean; alert: boolean };
-  setSoundPrefs: (p: { dm: boolean; chat: boolean; alert: boolean }) => void;
+  soundPrefs: { dm: boolean; whisper: boolean; chat: boolean; alert: boolean };
+  setSoundPrefs: (p: { dm: boolean; whisper: boolean; chat: boolean; alert: boolean }) => void;
+  /**
+   * Per-user input-behavior opt-outs. Mirrors two boolean columns on
+   * `users` (disable_input_history, disable_thesaurus). Read by the
+   * Composer + SynonymPopup so a profile-editor toggle takes effect
+   * immediately, no reload needed. Both default to `false` (= feature
+   * enabled) so a freshly mounted store before /me/profile lands
+   * behaves identically to a user who has never touched the toggles.
+   */
+  inputPrefs: { disableHistory: boolean; disableThesaurus: boolean };
+  setInputPrefs: (p: { disableHistory: boolean; disableThesaurus: boolean }) => void;
   /**
    * Counter bumped each time the socket (re)connects. Any open
    * ThreadPane watches this and re-runs its history seed when it
@@ -790,6 +816,17 @@ export const useChat = create<ChatState>((set) => ({
     set({ branding: b });
   },
 
+  // Defaults mirror the server-side defaults in db/schema.ts; populated
+  // for real once `/me/profile` lands and feeds setInputLimits.
+  inputLimits: {
+    maxBioLength: 50_000,
+    maxMessageLength: 4000,
+    maxDirectMessageLength: 4000,
+    maxForumPostLength: 8000,
+    maxForumTopicTitleLength: 120,
+  },
+  setInputLimits: (l) => set({ inputLimits: l }),
+
   /* ----- direct messages ----- */
   dmMessagesByConv: {},
   dmConversations: {},
@@ -799,8 +836,10 @@ export const useChat = create<ChatState>((set) => ({
   removePendingFriendRequest: (userId) =>
     set((s) => ({ pendingFriendRequests: s.pendingFriendRequests.filter((r) => r.userId !== userId) })),
   dmsEnabled: true,
-  soundPrefs: { dm: true, chat: true, alert: true },
+  soundPrefs: { dm: true, whisper: true, chat: true, alert: true },
   setSoundPrefs: (p) => set({ soundPrefs: p }),
+  inputPrefs: { disableHistory: false, disableThesaurus: false },
+  setInputPrefs: (p) => set({ inputPrefs: p }),
   dmReseedTick: 0,
 
   setDmConversations: (list) => set(() => {

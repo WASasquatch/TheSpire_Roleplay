@@ -306,6 +306,8 @@ export async function registerRoomsRoutes(
       ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
       ...(m.isSticky ? { isSticky: true } : {}),
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+      ...(m.rankKey ? { rankKey: m.rankKey } : {}),
+      ...(m.tier != null ? { tier: m.tier } : {}),
       // Site admins (admin / masteradmin) see the original body of a
       // deleted message attached on a separate `originalBody` field so
       // they can audit what was hidden. Mods + ordinary viewers get
@@ -412,6 +414,8 @@ export async function registerRoomsRoutes(
       ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
       ...(m.isSticky ? { isSticky: true } : {}),
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+      ...(m.rankKey ? { rankKey: m.rankKey } : {}),
+      ...(m.tier != null ? { tier: m.tier } : {}),
       ...(isAdminRole(me.role) && m.deletedAt ? { originalBody: m.body } : {}),
     }));
     return { messages: wire, hasMore };
@@ -519,6 +523,8 @@ export async function registerRoomsRoutes(
           ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
           ...(m.isSticky ? { isSticky: true } : {}),
           ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+          ...(m.rankKey ? { rankKey: m.rankKey } : {}),
+          ...(m.tier != null ? { tier: m.tier } : {}),
           ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
         };
       }
@@ -687,6 +693,8 @@ export async function registerRoomsRoutes(
         ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
         ...(m.isSticky ? { isSticky: true } : {}),
         ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+        ...(m.rankKey ? { rankKey: m.rankKey } : {}),
+        ...(m.tier != null ? { tier: m.tier } : {}),
         ...(isAdminRole(me.role) && m.deletedAt ? { originalBody: m.body } : {}),
       }));
       return { topics, hasMore };

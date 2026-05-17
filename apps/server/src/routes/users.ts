@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import { isAdminRole, isMasterAdminRole, type ClientToServerEvents, type ServerToClientEvents } from "@thekeep/shared";
-import { characters, users } from "../db/schema.js";
+import { characters, messages, userEarning, users } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
 import type { Db } from "../db/index.js";
@@ -25,13 +25,26 @@ export async function registerUsersRoutes(
   db: Db,
   io: Io,
 ): Promise<void> {
-  app.get<{ Querystring: { q?: string; offset?: string; limit?: string } }>("/users", async (req, reply) => {
+  app.get<{ Querystring: { q?: string; offset?: string; limit?: string; rank?: string; sort?: string } }>("/users", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
 
     const q = (req.query.q ?? "").trim().toLowerCase();
     const offset = Math.max(0, parseInt(req.query.offset ?? "0", 10) || 0);
     const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit ?? "100", 10) || 100));
+    // Optional rank filter (master pool rank). Empty string / missing
+    // disables the filter. We don't validate against the rank catalog
+    // here — an unknown key just returns zero matches, which is the
+    // same shape an admin-disabled rank would produce.
+    const rankFilter = (req.query.rank ?? "").trim();
+    // Sort mode. Default mirrors the historic behavior: online first,
+    // then alphabetical. New modes let the UI surface "most active"
+    // and "newest" without paging through everyone alphabetically.
+    const sortMode: "online" | "messages" | "joined" | "name" = (() => {
+      const s = (req.query.sort ?? "").trim().toLowerCase();
+      if (s === "messages" || s === "joined" || s === "name") return s;
+      return "online";
+    })();
 
     // Match search query against master username OR any of the user's
     // character names. Disabled accounts (disabledAt set) and the system
@@ -65,9 +78,9 @@ export async function registerUsersRoutes(
       matchedUserIds = allMasters.map((r) => r.id);
     }
 
-    const total = matchedUserIds.length;
-
-    // Sort: online users first (alphabetical), then offline (alphabetical).
+    // Online lookup happens up-front so the alphabetical-online sort
+    // and the "messages" sort can both reference the set without two
+    // separate fetchSockets() round trips.
     const sockets = await io.fetchSockets();
     const onlineUserIds = new Set<string>();
     for (const s of sockets) {
@@ -76,6 +89,52 @@ export async function registerUsersRoutes(
     }
 
     if (matchedUserIds.length === 0) return { users: [], total: 0, offset, limit };
+
+    // Rank lookup (master pool only — character pools cascade
+    // independently and would confuse a single "rank" column on a
+    // user row). Joined in via a separate query rather than a SQL
+    // join so the matched-user-ids list stays the size driver and
+    // the response shape is consistent for users with no earning row.
+    const rankRows = await db
+      .select({
+        userId: userEarning.userId,
+        rankKey: userEarning.rankKey,
+        tier: userEarning.tier,
+      })
+      .from(userEarning)
+      .where(sql`${userEarning.userId} IN (${sql.join(matchedUserIds.map((u) => sql`${u}`), sql`, `)})`);
+    const rankByUser = new Map(rankRows.map((r) => [r.userId, { rankKey: r.rankKey, tier: r.tier }]));
+
+    // Filter by rank AFTER the lookup so the SQL doesn't have to
+    // INNER JOIN (which would silently drop unranked users). Users
+    // with no earning row never match a rank filter — same outcome
+    // as "rank ≠ requested".
+    if (rankFilter) {
+      matchedUserIds = matchedUserIds.filter((uid) => rankByUser.get(uid)?.rankKey === rankFilter);
+    }
+    const total = matchedUserIds.length;
+    if (matchedUserIds.length === 0) return { users: [], total: 0, offset, limit };
+
+    // Lifetime message count per user — single GROUP BY for the
+    // matched set. Same kind set the profile `chatMessages` counter
+    // uses, plus topics/replies, so the row's number matches "all
+    // visible posts you've ever made" without forcing the user to
+    // open the profile to see it. Soft-deleted rows excluded;
+    // system / cmd / announce / whisper kinds excluded (they're
+    // either server chrome or private).
+    const countRows = await db
+      .select({
+        userId: messages.userId,
+        n: sql<number>`count(*)`,
+      })
+      .from(messages)
+      .where(and(
+        sql`${messages.userId} IN (${sql.join(matchedUserIds.map((u) => sql`${u}`), sql`, `)})`,
+        isNull(messages.deletedAt),
+        sql`${messages.kind} IN ('say', 'me', 'ooc', 'roll', 'scene', 'npc')`,
+      ))
+      .groupBy(messages.userId);
+    const messageCountByUser = new Map(countRows.map((r) => [r.userId, Number(r.n)]));
 
     const userRows = await db
       .select({
@@ -88,6 +147,13 @@ export async function registerUsersRoutes(
         activeCharacterId: users.activeCharacterId,
         createdAt: users.createdAt,
         lastLoginAt: users.lastLoginAt,
+        // Per-element privacy flags. Pulled here so we can null the
+        // summed `messageCount` for users who've opted any of the
+        // three categories private — the sum would leak the bulk
+        // even if every per-category count on the profile is hidden.
+        hideChatMessageCount: users.hideChatMessageCount,
+        hideForumTopicCount: users.hideForumTopicCount,
+        hideForumReplyCount: users.hideForumReplyCount,
       })
       .from(users)
       .where(sql`${users.id} IN (${sql.join(matchedUserIds.map((u) => sql`${u}`), sql`, `)})`);
@@ -113,31 +179,96 @@ export async function registerUsersRoutes(
       charsByUser.set(c.userId, list);
     }
 
+    // Effective message-count getter that respects per-element
+    // privacy. When the user has ANY of the three hide flags set, the
+    // summed count would still leak the bulk of their activity even
+    // though each per-category number is private. The fix: treat
+    // their messageCount as null (rendered "private") at the
+    // directory level, and sort them as 0 in the messages sort so
+    // hiding doesn't accidentally float them to the top of "most
+    // active".
+    function effectiveCount(uid: string, hideChat: boolean, hideTopics: boolean, hideReplies: boolean): number | null {
+      if (hideChat || hideTopics || hideReplies) return null;
+      return messageCountByUser.get(uid) ?? 0;
+    }
+
+    const hideFlagsByUser = new Map(userRows.map((u) => [u.id, {
+      chat: u.hideChatMessageCount,
+      topics: u.hideForumTopicCount,
+      replies: u.hideForumReplyCount,
+    }]));
+
     const sorted = userRows.sort((a, b) => {
-      const aOn = onlineUserIds.has(a.id) ? 0 : 1;
-      const bOn = onlineUserIds.has(b.id) ? 0 : 1;
-      if (aOn !== bOn) return aOn - bOn;
-      return a.username.localeCompare(b.username);
+      switch (sortMode) {
+        case "messages": {
+          // Highest message count first. Privacy-hidden users sort as
+          // 0 so they don't accidentally float to the top — opting
+          // into privacy means accepting demoted directory ordering.
+          // Ties break alphabetically so the list stays stable for
+          // users at the same level.
+          const aFlags = hideFlagsByUser.get(a.id);
+          const bFlags = hideFlagsByUser.get(b.id);
+          const aN = aFlags ? (effectiveCount(a.id, aFlags.chat, aFlags.topics, aFlags.replies) ?? 0) : 0;
+          const bN = bFlags ? (effectiveCount(b.id, bFlags.chat, bFlags.topics, bFlags.replies) ?? 0) : 0;
+          if (aN !== bN) return bN - aN;
+          return a.username.localeCompare(b.username);
+        }
+        case "joined": {
+          // Newest accounts first. Useful for spotting fresh members
+          // to welcome / vouch for.
+          return +b.createdAt - +a.createdAt;
+        }
+        case "name": {
+          // Pure alphabetical, ignoring online status. Easier to scan
+          // when you're looking for a specific user and you don't
+          // know whether they're online.
+          return a.username.localeCompare(b.username);
+        }
+        case "online":
+        default: {
+          // Historic default — online users first, then offline,
+          // alphabetical within each band.
+          const aOn = onlineUserIds.has(a.id) ? 0 : 1;
+          const bOn = onlineUserIds.has(b.id) ? 0 : 1;
+          if (aOn !== bOn) return aOn - bOn;
+          return a.username.localeCompare(b.username);
+        }
+      }
     });
 
-    const page = sorted.slice(offset, offset + limit).map((u) => ({
-      userId: u.id,
-      username: u.username,
-      gender: u.gender,
-      avatarUrl: u.avatarUrl,
-      chatColor: u.chatColor,
-      online: onlineUserIds.has(u.id),
-      away: u.awayMessage != null,
-      awayMessage: u.awayMessage,
-      activeCharacterId: u.activeCharacterId,
-      createdAt: +u.createdAt,
-      lastLoginAt: u.lastLoginAt ? +u.lastLoginAt : null,
-      characters: (charsByUser.get(u.id) ?? []).map((c) => ({
-        id: c.id,
-        name: c.name,
-        avatarUrl: c.avatarUrl,
-      })),
-    }));
+    const page = sorted.slice(offset, offset + limit).map((u) => {
+      const rank = rankByUser.get(u.id) ?? null;
+      return {
+        userId: u.id,
+        username: u.username,
+        gender: u.gender,
+        avatarUrl: u.avatarUrl,
+        chatColor: u.chatColor,
+        online: onlineUserIds.has(u.id),
+        away: u.awayMessage != null,
+        awayMessage: u.awayMessage,
+        activeCharacterId: u.activeCharacterId,
+        createdAt: +u.createdAt,
+        lastLoginAt: u.lastLoginAt ? +u.lastLoginAt : null,
+        // Master-pool rank (key + tier). Null when the user has no
+        // earning row yet or is below the lowest enabled tier. The
+        // client resolves the rank name + sigil URL via the cached
+        // earning catalog rather than re-shipping it here per-row.
+        rankKey: rank?.rankKey ?? null,
+        rankTier: rank?.tier ?? null,
+        // Lifetime visible-post count (chat + forum). Powers the
+        // "Most active" sort + the per-row badge in UsersModal.
+        // Null when ANY per-element hide flag is set — the directory
+        // sum would otherwise leak the bulk the user is trying to
+        // keep private. Renderer should display "private" in place.
+        messageCount: effectiveCount(u.id, u.hideChatMessageCount, u.hideForumTopicCount, u.hideForumReplyCount),
+        characters: (charsByUser.get(u.id) ?? []).map((c) => ({
+          id: c.id,
+          name: c.name,
+          avatarUrl: c.avatarUrl,
+        })),
+      };
+    });
 
     return { users: page, total, offset, limit };
   });
@@ -359,6 +490,49 @@ export async function registerUsersRoutes(
   });
 
   /**
+   * Admin password reset. Hashes the provided plaintext and writes
+   * it to the target user's `password_hash`. Bumps the audit log and
+   * disconnects any live sockets that account had so they're forced
+   * to re-authenticate with the new password.
+   *
+   * Master-admin only — handing out password resets is the most
+   * destructive single-user lever (effectively account takeover from
+   * the admin chair). Plain admins can't reach it.
+   */
+  app.patch<{ Params: { id: string }; Body: unknown }>("/admin/users/:id/password", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me || !isMasterAdminRole(me.role)) { reply.code(403); return { error: "master admin only" }; }
+    const { id } = req.params;
+    const target = (await db.select().from(users).where(eq(users.id, id)).limit(1))[0];
+    if (!target || target.username === "system") { reply.code(404); return { error: "not found" }; }
+
+    const { z } = await import("zod");
+    const body = z.object({
+      newPassword: z.string().min(8).max(200),
+    }).parse(req.body);
+
+    const { hashPassword } = await import("../auth/passwords.js");
+    const hash = await hashPassword(body.newPassword);
+    await db.update(users).set({ passwordHash: hash }).where(eq(users.id, id));
+
+    // Force-kick any live sessions so they have to re-auth.
+    const sockets = await io.fetchSockets();
+    for (const s of sockets) {
+      const uid = (s.data as { userId?: string }).userId;
+      if (uid !== id) continue;
+      s.emit("auth:expired");
+      s.disconnect(true);
+    }
+
+    await recordAudit(db, {
+      actorUserId: me.id,
+      action: "password_reset",
+      targetUserId: id,
+    });
+    return { ok: true };
+  });
+
+  /**
    * Hard-delete a user. Cascades through every FK - characters, room_members,
    * messages (kept by `set null` for displayName history), bans, mutes,
    * sessions. System and self are off-limits.
@@ -388,5 +562,76 @@ export async function registerUsersRoutes(
       metadata: { hardDelete: true, username: target.username, email: target.email },
     });
     return { ok: true };
+  });
+
+  /**
+   * Batch-resolve a list of `@mention` names to "exists or not."
+   *
+   * Used by the message renderer so a mention chip only lights up
+   * when the name actually resolves to a master username OR the
+   * active-character name of an existing user — typos and dangling
+   * `@bobs` stay as plain text instead of dressing up as a clickable
+   * (but-broken) chip.
+   *
+   * Input names are lowercased on both sides for case-insensitive
+   * matching. The response lists only the names that resolved; any
+   * input name not in the response is implicitly invalid (the client
+   * treats it as such).
+   *
+   * Hard cap of 64 names per call — a single message can only
+   * contain so many mentions, and most messages have ≤2. The renderer
+   * batches across visible messages but won't exceed the cap.
+   */
+  app.post<{ Body: unknown }>("/mentions/resolve", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+
+    const body = req.body as { names?: unknown };
+    const raw = Array.isArray(body?.names) ? body.names : [];
+    const names = raw
+      .filter((n): n is string => typeof n === "string" && n.length > 0 && n.length <= 64)
+      .map((n) => n.toLowerCase())
+      .slice(0, 64);
+    if (names.length === 0) return { valid: [] };
+
+    // Master usernames first — globally unique, fast hit. NB: only
+    // non-disabled accounts (the system sentinel + any deactivated
+    // accounts shouldn't surface as clickable mentions).
+    const userMatches = await db
+      .select({ username: users.username })
+      .from(users)
+      .where(
+        and(
+          isNull(users.disabledAt),
+          sql`${users.username} != 'system'`,
+          sql`lower(${users.username}) IN (${sql.join(names.map((n) => sql`${n}`), sql`, `)})`,
+        ),
+      );
+    const valid = new Set(userMatches.map((u) => u.username.toLowerCase()));
+
+    // Character names — match against any non-deleted character of
+    // a non-disabled owner. The active-character constraint that the
+    // push pipeline (broadcast.ts) applies is intentionally NOT used
+    // here: that gate is about whether a mention should ping someone
+    // RIGHT NOW. The renderer's question is "is this a real name with
+    // a clickable profile?" — and an inactive character still has a
+    // profile.
+    const remaining = names.filter((n) => !valid.has(n));
+    if (remaining.length > 0) {
+      const charMatches = await db
+        .select({ name: characters.name })
+        .from(characters)
+        .innerJoin(users, eq(users.id, characters.userId))
+        .where(
+          and(
+            isNull(characters.deletedAt),
+            isNull(users.disabledAt),
+            sql`lower(${characters.name}) IN (${sql.join(remaining.map((n) => sql`${n}`), sql`, `)})`,
+          ),
+        );
+      for (const c of charMatches) valid.add(c.name.toLowerCase());
+    }
+
+    return { valid: Array.from(valid) };
   });
 }

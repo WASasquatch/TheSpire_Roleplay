@@ -17,6 +17,8 @@ import { RoomPasswordModal } from "./components/RoomPasswordModal.js";
 import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
 import { MessagesModal } from "./components/MessagesModal.js";
 import { RulesModal } from "./components/RulesModal.js";
+import { EarningDashboard } from "./components/EarningDashboard.js";
+import { EarningRibbon } from "./components/EarningRibbon.js";
 import { ThreadModal } from "./components/ThreadModal.js";
 import { UsersModal } from "./components/UsersModal.js";
 import { WorldCatalogModal } from "./components/WorldCatalogModal.js";
@@ -24,15 +26,17 @@ import { WorldEditorModal } from "./components/WorldEditorModal.js";
 import { WorldViewerModal } from "./components/WorldViewerModal.js";
 import { WorldsListModal } from "./components/WorldsListModal.js";
 import { WelcomeModal } from "./components/WelcomeModal.js";
-import { getSocket, disconnect as disconnectSocket } from "./lib/socket.js";
+import { getSocket, disconnect as disconnectSocket, rememberTabCharacter } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
 import { ActiveThemeContext, applyFontPrefs, applyTheme, themeStyle, type UiFontScale } from "./lib/theme.js";
 import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
-import { fire as fireNotification, shouldNotify, type NotifyPref } from "./lib/notifications.js";
+import { fire as fireNotification, permission as notifPermission, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
-import { playAlert, playPing, playTap } from "./lib/sound.js";
+import { playAlert, playPing, playTap, playWhisper } from "./lib/sound.js";
 import { useChat, type SiteBranding } from "./state/store.js";
+import { useEarning } from "./state/earning.js";
+import { injectNameStyles } from "./lib/nameStyleInjector.js";
 
 export function App() {
   const me = useChat((s) => s.me);
@@ -102,6 +106,30 @@ export function App() {
       });
     return () => { cancelled = true; };
   }, [setMe, setAuthChecked]);
+
+  // Earning — refresh the cached snapshot when a user signs in (so
+  // the Banner indicator dot and the dashboard load with up-to-date
+  // wallets + unack rank-ups), reset to the empty state on sign-out
+  // so the next account doesn't briefly see the previous user's
+  // numbers before the next fetch lands.
+  useEffect(() => {
+    if (me) {
+      void useEarning.getState().refresh();
+    } else {
+      useEarning.getState().reset();
+    }
+  }, [me?.id]);
+
+  // Name styles — inject the catalog's CSS into <head> whenever the
+  // snapshot lands or admins reload it. Idempotent re-injection: the
+  // helper rewrites the shared <style> tag only when the concatenated
+  // CSS actually changed. Subscription via Zustand's hook so the
+  // effect re-runs on any catalog edit (an admin tweak surfaces live
+  // on the next /earning/me fetch).
+  const nameStyleCatalog = useEarning((s) => s.snapshot?.catalog.nameStyles);
+  useEffect(() => {
+    if (nameStyleCatalog) injectNameStyles(nameStyleCatalog);
+  }, [nameStyleCatalog]);
 
   // Backstop poll: re-verify the session every 60s so admin-shortened TTLs
   // (or janitor sweeps) drop the user back to the login splash even if they
@@ -658,6 +686,7 @@ function Chat() {
 
   const [adminOpen, setAdminOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [earningOpen, setEarningOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState<{ filter?: string } | null>(null);
   const [usersOpen, setUsersOpen] = useState<{ query?: string } | null>(null);
   /**
@@ -816,7 +845,17 @@ function Chat() {
           soundDmEnabled?: boolean;
           soundChatEnabled?: boolean;
           soundAlertEnabled?: boolean;
+          soundWhisperEnabled?: boolean;
+          disableInputHistory?: boolean;
+          disableThesaurus?: boolean;
           welcome?: { html: string; hash: string } | null;
+          limits?: {
+            maxBioLength?: number;
+            maxMessageLength?: number;
+            maxDirectMessageLength?: number;
+            maxForumPostLength?: number;
+            maxForumTopicTitleLength?: number;
+          };
         };
         // The server returns user.theme which already falls back to the
         // site default when the user has nothing explicit set
@@ -835,6 +874,10 @@ function Chat() {
           if (!profileSeededRef.current) {
             setActiveCharacterId(u.activeCharacterId);
             setActiveCharacterName(u.activeCharacterName ?? null);
+            // Initial seed — persist for handshake replay on reconnect.
+            // We only do this once per tab (gated by profileSeededRef),
+            // matching the seed-once policy for activeCharacterId itself.
+            rememberTabCharacter(u.activeCharacterId);
             profileSeededRef.current = true;
           }
           if (u.notifyPref) setNotifyPref(u.notifyPref);
@@ -844,9 +887,34 @@ function Chat() {
           // event has a chance to fire.
           useChat.getState().setSoundPrefs({
             dm: u.soundDmEnabled ?? true,
+            whisper: u.soundWhisperEnabled ?? true,
             chat: u.soundChatEnabled ?? true,
             alert: u.soundAlertEnabled ?? true,
           });
+          // Input-behavior opt-outs. Composer reads disableHistory to
+          // gate the ArrowUp recall; SynonymPopup reads disableThesaurus
+          // to skip its `selectionchange` listener entirely. Defaults
+          // stay false so the features remain on for accounts that
+          // haven't touched the toggles.
+          useChat.getState().setInputPrefs({
+            disableHistory: u.disableInputHistory ?? false,
+            disableThesaurus: u.disableThesaurus ?? false,
+          });
+          // Admin-configured input caps. Composers (chat, DM, forum
+          // topic title, bio editor) read these from the store so a
+          // tuning change picks up on the next /me/profile load
+          // instead of requiring a deploy. Missing fields fall back
+          // to the cached defaults already in the store.
+          if (u.limits) {
+            const cur = useChat.getState().inputLimits;
+            useChat.getState().setInputLimits({
+              maxBioLength: u.limits.maxBioLength ?? cur.maxBioLength,
+              maxMessageLength: u.limits.maxMessageLength ?? cur.maxMessageLength,
+              maxDirectMessageLength: u.limits.maxDirectMessageLength ?? cur.maxDirectMessageLength,
+              maxForumPostLength: u.limits.maxForumPostLength ?? cur.maxForumPostLength,
+              maxForumTopicTitleLength: u.limits.maxForumTopicTitleLength ?? cur.maxForumTopicTitleLength,
+            });
+          }
           setUserStyleKey(typeof u.styleKey === "string" ? u.styleKey : null);
           setUiFontFamily(typeof u.uiFontFamily === "string" ? u.uiFontFamily : null);
           setUiFontScale(
@@ -1092,22 +1160,49 @@ function Chat() {
       // an open FriendsModal will lag slightly until the user re-
       // opens it; acceptable for a non-live affordance.
     });
+    // Global rooms-tree invalidation. Server-emits this any time room
+    // creation/deletion/archival/metadata/presence anywhere in the app
+    // could change the rooms tree the user sees. Debounced because a
+    // flurry of presence updates (mass reconnect, restart) would
+    // otherwise hammer /rooms.
+    let treeDebounceId: number | null = null;
+    socket.on("rooms:tree-changed", () => {
+      if (treeDebounceId != null) window.clearTimeout(treeDebounceId);
+      treeDebounceId = window.setTimeout(() => {
+        setRoomsTreeVersion((v) => v + 1);
+        treeDebounceId = null;
+      }, 400);
+    });
     socket.on("message:new", (msg: ChatMessage) => {
       // Append to the chat backlog regardless of mode — replies and
       // flat-chat messages live here, and the forum reply view reads
       // replies from this buffer.
       appendMessage(msg);
 
-      // Sound effects. Three discrete events:
-      //   announce → alert.mp3 (admin megaphone)
+      // Sound effects. Discrete events:
+      //   announce → alert.mp3   (admin megaphone)
+      //   whisper  → whisper.mp3 (1:1 private contact in-room. Has
+      //                           its own dedicated sound now that
+      //                           we ship a fourth audio file —
+      //                           previously folded into the DM
+      //                           ping. Distinct from DM so a
+      //                           whisper "they spoke to me here"
+      //                           and a DM "they reached out from
+      //                           outside" feel different even though
+      //                           both are 1:1.)
       //   anything else (except system + our own) → tap.mp3
       // System notices (joins/kicks/topic changes) stay silent — they
       // would dogpile on a busy room. Our own outbound messages stay
-      // silent — the user already knows they sent something.
+      // silent — the user already knows they sent something. Recipient
+      // gate on whispers: msg.toUserId must match meId so the sender's
+      // own outgoing whisper doesn't ping itself (the sender's tab
+      // already sees the line they composed).
       const meId = useChat.getState().me?.id ?? null;
       if (msg.kind === "announce") {
         playAlert();
-      } else if (msg.kind !== "system" && msg.userId !== meId) {
+      } else if (msg.kind === "whisper" && msg.toUserId === meId) {
+        playWhisper();
+      } else if (msg.kind !== "system" && msg.kind !== "whisper" && msg.userId !== meId) {
         playTap();
       }
 
@@ -1273,6 +1368,13 @@ function Chat() {
       setActiveCharacterId(aci);
       setActiveCharacterName(acn);
       setThemeVersion((v) => v + 1);
+      // Persist the per-tab voicing identity so a socket reconnect
+      // (network blip, mobile suspend, page reload) restores this tab's
+      // character via the handshake instead of letting the server
+      // re-seed from `users.activeCharacterId` (which a sibling tab
+      // may have mutated to a different character in the meantime).
+      // See [socket.ts](./lib/socket.ts)'s `rememberTabCharacter`.
+      rememberTabCharacter(aci);
     });
 
     /**
@@ -1333,7 +1435,34 @@ function Chat() {
       // (the server fans every send to the sender's sockets too so
       // multi-tab works). Same posture as the room-message tap sound.
       const meIdForDm = useChat.getState().me?.id ?? null;
-      if (message.senderId !== meIdForDm) playPing();
+      if (message.senderId !== meIdForDm) {
+        playPing();
+        // Desktop notification when the tab is hidden — matches the
+        // message:new path's policy. Without this DMs were silent on
+        // a backgrounded tab even with browser notification permission
+        // granted, leaving users with only the OS push (which the
+        // server gate suppresses when ANY of their sockets is live).
+        // notifyPref is intentionally bypassed: DMs are direct
+        // person-to-person contact, the inbox equivalent of an `@`
+        // mention. "off" still mutes them; "mentions" and "all" both
+        // fire a toast.
+        if (
+          document.hidden &&
+          notifyPref !== "off" &&
+          notifPermission() === "granted"
+        ) {
+          try {
+            const n = new Notification(`Direct message from ${message.displayName}`, {
+              body: message.body.length > 140 ? `${message.body.slice(0, 140)}…` : message.body,
+              icon: "/favicon.ico",
+              // Tag groups by sender so a chatty DM partner doesn't
+              // stack a dozen toasts — the latest replaces prior.
+              tag: `tk-dm-${message.senderId}`,
+            });
+            n.onclick = () => { window.focus(); n.close(); };
+          } catch { /* construction failure — non-fatal */ }
+        }
+      }
       // Pull the conversation list if we don't already know this
       // conversation — otherwise the rail won't surface it. Cheap;
       // /me/dms is bounded by the user's own DM count.
@@ -1429,10 +1558,22 @@ function Chat() {
     socket.on("commands:updated", () => {
       useChat.getState().bumpCommandsVersion();
     });
+    // Earning — wallet/rank live updates. The store's apply* actions
+    // are no-ops when the snapshot hasn't loaded yet, so a credit that
+    // lands before the user opens the dashboard just gets reconciled
+    // by the next /earning/me fetch.
+    socket.on("earning:earned", (payload) => {
+      useEarning.getState().applyEarned(payload);
+    });
+    socket.on("earning:rankup", (payload) => {
+      useEarning.getState().applyRankUp(payload);
+    });
 
     return () => {
       socket.off("room:state");
       socket.off("presence:update");
+      socket.off("rooms:tree-changed");
+      if (treeDebounceId != null) window.clearTimeout(treeDebounceId);
       socket.off("message:new");
       socket.off("message:bulk");
       socket.off("message:update");
@@ -1447,6 +1588,8 @@ function Chat() {
       socket.off("dm:read");
       socket.off("friend:request");
       socket.off("commands:updated");
+      socket.off("earning:earned");
+      socket.off("earning:rankup");
       socket.off("connect", onConnect);
     };
   }, [socket, setRoom, setOccupants, appendMessage, updateMessage, setMessages, setCurrentRoom, setNotice, setOpenProfile, openEditor, setRefreshIntervalSec, setMe, prependOwnForumTopic, queuePendingForumTopic, bumpTopicActivity, updateForumTopic, removeForumTopic]);
@@ -1462,6 +1605,14 @@ function Chat() {
       ...(opts?.threadCategoryId ? { threadCategoryId: opts.threadCategoryId } : {}),
       ...(opts?.threadTitle ? { threadTitle: opts.threadTitle } : {}),
       ...(opts?.replyToId ? { replyToId: opts.replyToId } : {}),
+      // Authoritative per-send identity claim. This tab's React state
+      // for activeCharacterId is the source of truth — sending it on
+      // every chat:input closes the cross-tab race where the server's
+      // socket-scoped tabCharId can drift from the UI (reconnect
+      // re-seed from DB, sibling tab's /char clear updating the
+      // shared user row, etc.). The server validates the claim
+      // against owned characters before honoring it.
+      asCharacterId: activeCharacterId,
     });
   }
 
@@ -1657,26 +1808,31 @@ function Chat() {
   }
 
   /**
-   * Click on the name - pre-fill the composer with `/whisper <name> ` so the
-   * user can finish typing and Enter. For your own name we fall back to the
-   * icon behavior (open editor) since whispering yourself is useless.
+   * Click on the name - PREPEND `/whisper <name> ` to whatever the user
+   * is already drafting so they don't lose in-progress text. For your
+   * own name we fall back to the icon behavior (open editor) since
+   * whispering yourself is useless.
+   *
+   * Prepend instead of overwrite: clicking a name while composing a
+   * message used to destroy the draft. Preserving the existing text
+   * lets the user re-target a message they were already writing.
    */
   function onNameClick(userId: string, displayName: string) {
     if (me && userId === me.id) {
       send("/profile");
       return;
     }
-    setComposerText(`/whisper ${displayName} `);
+    setComposerText((cur) => `/whisper ${displayName} ${cur ?? ""}`);
   }
 
   /**
-   * Click on a message's timestamp - pre-fill the composer with `/reply <id> `
-   * so the user can finish typing and Enter. Mirrors the /whisper-on-name
-   * pattern. Only enabled by MessageList for replyable kinds (say/me/ooc);
+   * Click on a message's timestamp - PREPEND `/reply <id> ` to the
+   * current composer text. Mirrors the /whisper-on-name pattern.
+   * Only enabled by MessageList for replyable kinds (say/me/ooc);
    * the server re-validates on submit.
    */
   function onTimeClick(msgId: string) {
-    setComposerText(`/reply ${msgId} `);
+    setComposerText((cur) => `/reply ${msgId} ${cur ?? ""}`);
   }
 
   /**
@@ -1905,9 +2061,14 @@ function Chat() {
       <Banner
         navLinksVersion={navLinksVersion}
         onOpenRules={() => setRulesOpen(true)}
+        onOpenEarning={() => setEarningOpen(true)}
         {...(me && isAdminRole(me.role) ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
       <StaleVersionBanner />
+      {/* Earning — persistent rank-up ribbon. Only renders when the
+          user has unacknowledged rank-ups. Tucked under the version
+          banner so deploy nags still take precedence. */}
+      <EarningRibbon onOpenEarning={() => setEarningOpen(true)} />
       {room?.linkedWorld ? (
         <button
           type="button"
@@ -1938,8 +2099,13 @@ function Chat() {
           as a clean colored strip without the bloom. The strip exists
           as its own element rather than a border on a container so it
           can project its glow downward into the chat without being
-          clipped by the parent. */}
-      <div aria-hidden className="keep-accent-rail" />
+          clipped by the parent. `data-rail="header"` distinguishes
+          this one from the matching rail above the composer so the
+          scifi style can paint it in a darker blue/purple (no bg
+          bloom underneath this rail's bright end, so a flat magenta
+          peak read as a bare neon strip floating on its own — the
+          purple lets it sink into the ambient instead). */}
+      <div aria-hidden className="keep-accent-rail" data-rail="header" />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* The friends list used to live here as an always-visible
             48px-wide rail, but a column that narrow couldn't fit
@@ -2063,10 +2229,13 @@ function Chat() {
               flips, which clears the card via the store re-sync. */}
           <FriendRequestPrompts />
           {/* Second accent rail — sits between the message stream and
-              the composer. Same component as the header rail; the per-
-              style CSS gives it identical decoration so the chat is
-              visually bracketed by two glowing accent strips. */}
-          <div aria-hidden className="keep-accent-rail" />
+              the composer. Same base class as the header rail, but
+              `data-rail="footer"` lets the scifi style keep the
+              canonical magenta peak here because the body's bottom-
+              right accent bloom sits directly under this rail's
+              bright end — so the rail genuinely emits into the
+              bloom rather than floating on bare ambient. */}
+          <div aria-hidden className="keep-accent-rail" data-rail="footer" />
           <Composer
             value={composerText}
             onChange={setComposerText}
@@ -2092,12 +2261,13 @@ function Chat() {
             }}
             onCancelTopicCreate={() => setTopicCreateMode(false)}
             onLeaveThread={() => setActiveTopicId(null)}
+            onOpenEarning={() => setEarningOpen(true)}
           />
         </main>
         {/* Mobile-only backdrop when rail drawer is open */}
         {railOpen ? (
           <div
-            className="fixed inset-0 z-30 bg-black/60 md:hidden"
+            className="fixed inset-0 z-30 bg-black/60 lg:hidden"
             onClick={() => setRailOpen(false)}
             aria-hidden="true"
           />
@@ -2128,6 +2298,7 @@ function Chat() {
           onOpenMessages={() => { setMessagesOpen(true); setRailOpen(false); }}
           isOpen={railOpen}
           onClose={() => setRailOpen(false)}
+          fontStep={fontStep}
         />
       </div>
       {notice ? <Toast notice={notice} onDismiss={() => setNotice(null)} /> : null}
@@ -2148,7 +2319,9 @@ function Chat() {
             ? {
                 onWhisper: (name: string) => {
                   setOpenProfile(null);
-                  setComposerText(`/whisper ${name} `);
+                  // Prepend rather than overwrite — the user may have
+                  // had a draft going when they opened the profile.
+                  setComposerText((cur) => `/whisper ${name} ${cur ?? ""}`);
                 },
                 // Open the DM floating panel. The conversation is
                 // looked up by `otherUserId` server-side; if no
@@ -2249,6 +2422,7 @@ function Chat() {
         />
       ) : null}
       {rulesOpen ? <RulesModal onClose={() => setRulesOpen(false)} /> : null}
+      {earningOpen ? <EarningDashboard onClose={() => setEarningOpen(false)} /> : null}
       {poppedTopic ? (
         <ThreadModal
           topic={poppedTopic}

@@ -74,6 +74,12 @@ export function themeStyle(theme: Theme): CSSProperties {
   for (const slot of VAR_KEYS) {
     out[`--keep-${slot}`] = hexToRgbTriple(theme[slot]);
   }
+  // Derived neon variants — same hue as the user's pick, but normalized
+  // to full saturation + mid-dark luminance so glow/halo treatments in
+  // styles like scifi read as a rich saturated neon instead of a
+  // washed-out near-white. See `buildNeon` for the recipe.
+  out["--keep-action-neon"] = buildNeon(theme.action);
+  out["--keep-accent-neon"] = buildNeon(theme.accent);
   out.colorScheme = isDarkTheme(theme) ? "dark" : "light";
   return out as CSSProperties;
 }
@@ -101,6 +107,14 @@ export function applyTheme(theme: Theme): void {
       root.style.setProperty(`--keep-${slot}-${step}`, ramp[i]!);
     }
   }
+  // Derived neon variants for glow/halo treatments. Same hue as the
+  // user's picked action / accent, but normalized to full saturation +
+  // mid-dark luminance — read as rich saturated neons regardless of
+  // whether the user picked a washed-out pastel or a near-black accent.
+  // Consumed by the scifi theme's tube-light rules; harmless on
+  // medieval/modern (they don't reference these vars).
+  root.style.setProperty("--keep-action-neon", buildNeon(theme.action));
+  root.style.setProperty("--keep-accent-neon", buildNeon(theme.accent));
   root.style.colorScheme = isDarkTheme(theme) ? "dark" : "light";
   document.body.setAttribute("data-theme-bg", theme.bg);
 }
@@ -183,6 +197,37 @@ export function applyFontPrefs(prefs: {
  * +/- 18% is broad enough to read as a distinct tier in the UI
  * without crossing into a perceptually different color.
  */
+/**
+ * Derive a "neon" RGB triple from a base hex. Preserves the user's hue
+ * but clamps both saturation and lightness toward a muted dusty-pastel
+ * band so scifi glow treatments don't read as a hot signage tube
+ * regardless of how vivid the user's pick is.
+ *
+ *   saturation → clamped to a 55% ceiling (anything above gets dropped
+ *                to 55%; lower-sat picks pass through unchanged)
+ *   lightness  → clamped to a 55% ceiling (already-darker picks pass
+ *                through; brighter picks get pulled to the mid-tone)
+ *
+ * Both are CEILINGS, never floors — picking a muted slate or a deep
+ * burgundy leaves those characteristics intact. The clamp only fires
+ * for picks that would otherwise bleach to near-white when blurred
+ * (saturated accent #ff6b8a → muted dusty pink ≈ #c46a7e), giving the
+ * "soft pastel" tone the design calls for without the user having to
+ * pick a soft pastel themselves.
+ *
+ * Returns "r g b" (space-separated, Tailwind-compatible). Falls back
+ * to "0 0 0" on parse failure — same posture as the other helpers.
+ */
+export function buildNeon(baseHex: string): string {
+  const rgb = hexToRgb(baseHex);
+  if (!rgb) return "0 0 0";
+  const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+  const s = Math.min(hsl.s, 55);
+  const l = Math.min(hsl.l, 55);
+  const out = hslToRgb(hsl.h, s, l);
+  return `${out.r} ${out.g} ${out.b}`;
+}
+
 export function buildRamp(baseHex: string): string[] {
   const rgb = hexToRgb(baseHex);
   if (!rgb) return ["0 0 0", "0 0 0", "0 0 0", "0 0 0", "0 0 0"];

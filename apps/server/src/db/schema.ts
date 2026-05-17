@@ -95,6 +95,79 @@ export const users = sqliteTable(
     soundAlertEnabled: integer("sound_alert_enabled", { mode: "boolean" })
       .notNull()
       .default(true),
+    /**
+     * Per-event whisper sound (whisper.mp3). Split out from
+     * `soundDmEnabled` once the project shipped a fourth audio file
+     * dedicated to whispers — previously both DM and whisper rode
+     * the same `ping` event because we only had three sound assets.
+     * Default on, opt-out, matching the other sound prefs.
+     */
+    soundWhisperEnabled: integer("sound_whisper_enabled", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    /**
+     * Per-user input-behavior toggles. Both default off (= feature on).
+     *   disableInputHistory — kills ArrowUp/ArrowDown command-history
+     *                         recall in the composer. Some users brush
+     *                         the arrows while moving the cursor and
+     *                         want the recall gone.
+     *   disableThesaurus    — kills the synonym popup that opens when
+     *                         a word is highlighted. Annoying to users
+     *                         who highlight just to copy.
+     */
+    disableInputHistory: integer("disable_input_history", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    disableThesaurus: integer("disable_thesaurus", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    /**
+     * Userlist display preference. When true AND the user has a
+     * resolved rank, the rooms-tree row renders the rank sigil in
+     * place of the gender glyph (saves horizontal space and makes
+     * the rank itself the profile click target). When false (default)
+     * or when no rank is resolved, the gender glyph renders as
+     * before and no rank sigil is shown next to the name.
+     */
+    useRankAsUserlistIcon: integer("use_rank_as_userlist_icon", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    /**
+     * Display + privacy prefs (migration 0077).
+     *
+     *   showRankInUserlist — default true. When false, the user's
+     *     userlist row drops back to the gender glyph instead of the
+     *     rank gem. Broadcast.ts nulls the occupant's rankKey/tier
+     *     when this is off, so the existing UserNameTag conditional
+     *     ("show rank if rank exists, else gender") naturally falls
+     *     through to the gender path without needing extra props.
+     *   showRankInChat — default true. When false, addMessage
+     *     snapshots null rank fields on outgoing messages from this
+     *     author. Affects FUTURE sends only; past messages keep
+     *     whatever was snapshotted at the time.
+     *
+     *   hideChatMessageCount / hideForumTopicCount / hideForumReplyCount
+     *     — default false. When true, the corresponding counter on
+     *     `ProfileMetrics` returns null instead of the real number,
+     *     and the ProfileModal renders "private" in its place. The
+     *     three counters are independent so users can hide just the
+     *     one they're shy about.
+     */
+    showRankInUserlist: integer("show_rank_in_userlist", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    showRankInChat: integer("show_rank_in_chat", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    hideChatMessageCount: integer("hide_chat_message_count", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    hideForumTopicCount: integer("hide_forum_topic_count", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    hideForumReplyCount: integer("hide_forum_reply_count", { mode: "boolean" })
+      .notNull()
+      .default(false),
     /** Free-text "away" reason; null means the user is present. */
     awayMessage: text("away_message"),
     awaySince: integer("away_since", { mode: "timestamp_ms" }),
@@ -399,6 +472,15 @@ export const messages = sqliteTable(
      * for `display_name`, `color`, etc. Null on every other kind.
      */
     cmdCss: text("cmd_css"),
+    /**
+     * Earning rank snapshot at send time — drives the chat-line sigil.
+     * Same snapshot posture as displayName / color: a later rank-up or
+     * a rank-disable doesn't rewrite history. Scope follows the IC/OOC
+     * routing rule (character pool for IC, master pool for OOC).
+     * Null = sender was unranked at send time.
+     */
+    rankKey: text("rank_key"),
+    tier: integer("tier"),
     createdAt: ts("created_at"),
   },
   (t) => ({
@@ -697,6 +779,26 @@ export const siteSettings = sqliteTable("site_settings", {
   /** Hard cap on chat message body length (matches dispatch.ts MAX_BODY default). */
   maxMessageLength: integer("max_message_length").notNull().default(4000),
   /**
+   * Hard cap on direct-message body length. Independent of chat so admins
+   * can give DMs a longer write surface (long-form back-and-forth between
+   * two people often needs more room than public chat); defaults to the
+   * same value as chat so behavior is unchanged unless explicitly tuned.
+   */
+  maxDirectMessageLength: integer("max_direct_message_length").notNull().default(4000),
+  /**
+   * Hard cap on forum post body length (topics + replies in nested-mode
+   * rooms). Separate from chat because forum bodies are typically
+   * longer-form (worldbuilding posts, lore drops, multi-paragraph
+   * replies) and admins often want a larger ceiling than for chat.
+   */
+  maxForumPostLength: integer("max_forum_post_length").notNull().default(8000),
+  /**
+   * Hard cap on the topic title at the top of a forum thread. Capped
+   * because titles are list-rendered in the topic-picker UI and a
+   * runaway title would push other rows off-screen.
+   */
+  maxForumTopicTitleLength: integer("max_forum_topic_title_length").notNull().default(120),
+  /**
    * Author-edit / author-delete grace window in ms. After this many
    * ms since createdAt, edits and deletes are rejected for the author.
    * Mods and admins bypass the gate entirely. Forum (nested) rooms
@@ -777,6 +879,20 @@ export const siteSettings = sqliteTable("site_settings", {
    * versioning scheme — implicitly v1.
    */
   worldsSeedVersion: integer("worlds_seed_version").notNull().default(0),
+  /**
+   * Earning system configuration — every numeric input the XP /
+   * Currency / Rank engine touches. Stored as a single JSON blob
+   * (versus 30+ flat columns) because the shape is deeply nested
+   * (per-source × per-pool award amounts, transfer caps, backfill
+   * settings, etc.) and admin edits replace the whole object via
+   * the structured Awards-tab form. Null = engine reads the
+   * DEFAULT_EARNING_CONFIG bundled in code; migration 0065 seeds
+   * the same defaults into this column so the admin UI has a
+   * concrete document to edit from day one.
+   *
+   * Shape: see EarningConfig in apps/server/src/earning/config.ts.
+   */
+  earningConfigJson: text("earning_config_json"),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
 });
@@ -1388,6 +1504,315 @@ export const bookmarks = sqliteTable(
   }),
 );
 
+/* ============================================================
+ * Earning — earned-currency (XP + Currency) + Rank ladder +
+ * cosmetics catalog. Drives the participation system described in
+ * plan.md. All numeric values + asset paths in the catalog tables
+ * are admin-managed from the Earning area of the admin panel; the
+ * engine itself reads them every award so there is no in-code
+ * hardcoding of thresholds, rates, or asset URLs.
+ *
+ * Two scopes are tracked in parallel:
+ *   user_earning      one row per user (master / OOC pool)
+ *   character_earning one row per character (IC pool)
+ * IC chat credits character scope; OOC chat / forum credits master
+ * scope. See apps/server/src/earning/routing.ts for the rule set.
+ * ============================================================ */
+
+/* ---------- ranks ----------
+ * The named identity ladder ("New Arrival", "Active", ...). Six
+ * rows are seeded by migration 0065; admins can rename, reorder,
+ * disable, or add brand-new ranks from the admin panel.
+ *
+ * `enabled = 0` is a soft close: existing rank-holders keep their
+ * rank, but the XP→rank resolver skips disabled rows when placing
+ * new earners. Used for time-limited founding tiers like
+ * "Legacy Member" which is enabled during beta then disabled after
+ * GA so no future user can earn into it.
+ */
+export const ranks = sqliteTable("ranks", {
+  /** Stable slug, e.g. "new_arrival". Immutable after create. */
+  key: text("key").primaryKey(),
+  /** Display name shown in chat / userlist / dashboard. Admin-editable. */
+  name: text("name").notNull(),
+  /** Display order, low → high (1 = lowest rank). */
+  order: integer("order").notNull().default(0),
+  /** Soft-close flag. 0 = skipped by the XP→rank resolver. */
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  createdAt: ts("created_at"),
+  updatedAt: ts("updated_at"),
+});
+
+/* ---------- rank_tiers ----------
+ * Sub-levels within a rank (I, II, III, IV). Tier IV is the
+ * "Verified" capstone of each rank (Tier IV of rank 6 is called
+ * "Eternalized"). Crossing a tier IV threshold unlocks eligibility
+ * to buy that rank's border frame (`borderImageUrl`).
+ *
+ * Eligibility persists via `maxRankKeyEverHeld` / `maxTierEverHeld`
+ * on the earning rows — once a user has ever crossed Tier IV of a
+ * rank they retain the right to buy that border even if admins
+ * raise the threshold later.
+ */
+export const rankTiers = sqliteTable(
+  "rank_tiers",
+  {
+    id: id(),
+    rankKey: text("rank_key")
+      .notNull()
+      .references(() => ranks.key, { onDelete: "cascade" }),
+    /** 1..4 by default; admins can extend a rank with more tiers. */
+    tier: integer("tier").notNull(),
+    /** Display label, e.g. "I", "II", "III", "IV: Verified". */
+    label: text("label").notNull(),
+    /** Crossing this XP places the user at this tier of this rank. */
+    xpThreshold: integer("xp_threshold").notNull().default(0),
+    /** Sigil PNG URL — bundled default `/assets/ranks/...` or `/uploads/ranks/<hash>.png`. */
+    sigilImageUrl: text("sigil_image_url").notNull().default(""),
+    /** Avatar border PNG URL. Set only for Tier IV (the capstone). */
+    borderImageUrl: text("border_image_url"),
+    /** Currency cost to purchase this rank's border. Tier IV only. */
+    borderCost: integer("border_cost"),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    rankTierUq: uniqueIndex("rank_tiers_rank_tier_uq").on(t.rankKey, t.tier),
+    xpIdx: index("rank_tiers_xp_idx").on(t.xpThreshold),
+  }),
+);
+
+/* ---------- name_styles ----------
+ * Admin-authored HTML + CSS templates with a {username} placeholder
+ * users can buy and equip to style their displayed name in chat /
+ * forums / userlist. No JavaScript — animations are CSS-only via
+ * @keyframes, eliminating any stored-XSS surface even with
+ * admin-only authoring.
+ */
+export const nameStyles = sqliteTable("name_styles", {
+  key: text("key").primaryKey(),
+  /** Admin-facing label, e.g. "Sunset Gradient". */
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  /** HTML template — must include the literal `{username}` placeholder. */
+  template: text("template").notNull(),
+  /** Scoped CSS (animations via @keyframes). */
+  styleCss: text("style_css").notNull().default(""),
+  /** Currency cost to purchase this style. 0 = free. */
+  cost: integer("cost").notNull().default(0),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  /** Seed-protected styles cannot be deleted, only edited. */
+  isBuiltin: integer("is_builtin", { mode: "boolean" }).notNull().default(false),
+  order: integer("order").notNull().default(0),
+  createdAt: ts("created_at"),
+  updatedAt: ts("updated_at"),
+});
+
+/* ---------- cosmetics ----------
+ * Purchasable feature catalog distinct from name styles and
+ * borders. Phase 4 seeds two rows: `inline_avatar` (round avatar
+ * after the timestamp in chat) and `rank_border` (placeholder row
+ * for the border-purchase flow — the actual per-rank prices live
+ * on `rank_tiers.borderCost`).
+ */
+export const cosmetics = sqliteTable("cosmetics", {
+  /** Stable slug, e.g. "inline_avatar". Immutable after create. */
+  key: text("key").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  /** Flat Currency price. For `rank_border` this is ignored; prices live on rank_tiers. */
+  cost: integer("cost").notNull().default(0),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  /** Per-cosmetic config JSON (e.g. avatar pixel size for `inline_avatar`). */
+  configJson: text("config_json"),
+  createdAt: ts("created_at"),
+  updatedAt: ts("updated_at"),
+});
+
+/* ---------- user_earning ----------
+ * Per-master-account pool. Created on first earn (or lazily on first
+ * dashboard read). `rankKey` + `tier` are denormalized — recomputed
+ * by the resolver every time XP changes so callers can read the
+ * current rank without re-running the resolver. `maxRankKeyEverHeld`
+ * + `maxTierEverHeld` capture the user's all-time peak so border
+ * eligibility persists even if admins raise thresholds later.
+ */
+export const userEarning = sqliteTable("user_earning", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  xp: integer("xp").notNull().default(0),
+  currency: integer("currency").notNull().default(0),
+  /** Current rank (denormalized; null = below Rank 1). */
+  rankKey: text("rank_key"),
+  /** Current tier within rank (1..N; null when rankKey is null). */
+  tier: integer("tier"),
+  /** Highest rank ever held — never decreases. Drives "once eligible, always eligible" border purchasing. */
+  maxRankKeyEverHeld: text("max_rank_key_ever_held"),
+  maxTierEverHeld: integer("max_tier_ever_held"),
+  /** Hides this user's Currency total from other users when set. Self always sees own. */
+  hideCurrencyCount: integer("hide_currency_count", { mode: "boolean" }).notNull().default(false),
+  /** Hides this user's XP total from other users when set. Self always sees own. Rank stays public regardless. */
+  hideXpCount: integer("hide_xp_count", { mode: "boolean" }).notNull().default(false),
+  /** Which owned border is currently equipped on the master avatar (null = none). */
+  selectedBorderRankKey: text("selected_border_rank_key"),
+  createdAt: ts("created_at"),
+  updatedAt: ts("updated_at"),
+});
+
+/* ---------- character_earning ----------
+ * Per-character pool, mirrors user_earning. Activity performed as
+ * a character credits this row (and per the "every logged-in
+ * character earns full" rule, every active character of the same
+ * user gets the same award).
+ */
+export const characterEarning = sqliteTable("character_earning", {
+  characterId: text("character_id")
+    .primaryKey()
+    .references(() => characters.id, { onDelete: "cascade" }),
+  xp: integer("xp").notNull().default(0),
+  currency: integer("currency").notNull().default(0),
+  rankKey: text("rank_key"),
+  tier: integer("tier"),
+  maxRankKeyEverHeld: text("max_rank_key_ever_held"),
+  maxTierEverHeld: integer("max_tier_ever_held"),
+  /** Per-character border equip choice (drawn from the owner's user_owned_borders set). */
+  selectedBorderRankKey: text("selected_border_rank_key"),
+  createdAt: ts("created_at"),
+  updatedAt: ts("updated_at"),
+});
+
+/* ---------- earning_ledger ----------
+ * Append-only audit of every XP / Currency delta on either scope.
+ * `scope` + `ownerId` together identify the pool (the FK relation
+ * cannot be modeled in Drizzle because ownerId points to different
+ * tables depending on scope — same pattern as audit_log's loose
+ * target columns).
+ *
+ * Reason vocabulary lives in apps/server/src/earning/ledger.ts.
+ * Common values: message_ic, message_ooc, forum_topic, forum_reply,
+ * presence_ic, presence_ooc, purchase_<cosmetic_key>,
+ * border_purchase_<rank_key>, currency_send_out, currency_send_in,
+ * character_deleted_currency_rollover, admin_grant, admin_revoke,
+ * backfill_message_xp.
+ */
+export const earningLedger = sqliteTable(
+  "earning_ledger",
+  {
+    id: id(),
+    scope: text("scope", { enum: ["user", "character"] }).notNull(),
+    ownerId: text("owner_id").notNull(),
+    xpDelta: integer("xp_delta").notNull().default(0),
+    currencyDelta: integer("currency_delta").notNull().default(0),
+    reason: text("reason").notNull(),
+    /** Optional JSON blob for source-specific context (room id, recipient id, etc.). */
+    metadataJson: text("metadata_json"),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    ownerTimeIdx: index("earning_ledger_owner_time_idx").on(t.scope, t.ownerId, t.createdAt),
+    reasonIdx: index("earning_ledger_reason_idx").on(t.reason, t.createdAt),
+  }),
+);
+
+/* ---------- user_owned_borders ----------
+ * Borders are user-owned (not per-character). Each owned border can
+ * be equipped independently on the master pool and on each of the
+ * user's characters via the matching `selectedBorderRankKey` columns.
+ */
+export const userOwnedBorders = sqliteTable(
+  "user_owned_borders",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    rankKey: text("rank_key")
+      .notNull()
+      .references(() => ranks.key, { onDelete: "cascade" }),
+    acquiredAt: ts("acquired_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.rankKey] }),
+    userIdx: index("user_owned_borders_user_idx").on(t.userId),
+  }),
+);
+
+/* ---------- user_owned_name_styles ----------
+ * Records ownership + per-user customization. `configJson` stores
+ * the user's color picks etc. as `{ color1, color2, glow, ... }`;
+ * the StyledName renderer materializes these into CSS custom
+ * properties before mounting the template.
+ */
+export const userOwnedNameStyles = sqliteTable(
+  "user_owned_name_styles",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    styleKey: text("style_key")
+      .notNull()
+      .references(() => nameStyles.key, { onDelete: "cascade" }),
+    /** Per-user customization JSON (color picks, glow strength, etc.). */
+    configJson: text("config_json"),
+    acquiredAt: ts("acquired_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.styleKey] }),
+    userIdx: index("user_owned_name_styles_user_idx").on(t.userId),
+  }),
+);
+
+/* ---------- user_active_cosmetics ----------
+ * One row per user holding the currently-equipped cosmetic state.
+ * Created lazily on first equip.
+ */
+export const userActiveCosmetics = sqliteTable("user_active_cosmetics", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** Inline-avatar cosmetic equipped on chat lines. Requires ownership recorded in earning_ledger. */
+  inlineAvatarEnabled: integer("inline_avatar_enabled", { mode: "boolean" }).notNull().default(false),
+  /** Currently-active name style (FK; set null on style delete). */
+  activeNameStyleKey: text("active_name_style_key")
+    .references(() => nameStyles.key, { onDelete: "set null" }),
+  updatedAt: ts("updated_at"),
+});
+
+/* ---------- earning_notifications ----------
+ * Persists unacknowledged rank-up and tier-up events so the chat
+ * ribbon survives reloads. Cleared by POST
+ * /earning/me/notifications/rankup/ack. Per the project ethos
+ * memory there are no popup toasts — this table backs a quiet,
+ * dismissible ribbon and a dropdown indicator dot.
+ */
+export const earningNotifications = sqliteTable(
+  "earning_notifications",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** 'rankup' is the only kind in Phase 1; reserved for future expansion. */
+    kind: text("kind", { enum: ["rankup"] }).notNull().default("rankup"),
+    /** Scope on which the rank-up happened — master pool or one of the user's characters. */
+    scope: text("scope", { enum: ["user", "character"] }).notNull(),
+    /** characterId when scope = 'character'; null for scope = 'user'. */
+    characterId: text("character_id"),
+    fromRankKey: text("from_rank_key"),
+    fromTier: integer("from_tier"),
+    toRankKey: text("to_rank_key").notNull(),
+    toTier: integer("to_tier").notNull(),
+    /** Comma-joined rank keys whose borders the user just became eligible to buy (capstone crossings). */
+    newlyEligibleBorderKeys: text("newly_eligible_border_keys").notNull().default(""),
+    acknowledgedAt: integer("acknowledged_at", { mode: "timestamp_ms" }),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    userUnreadIdx: index("earning_notifications_user_unread_idx").on(t.userId, t.acknowledgedAt),
+  }),
+);
+
 export type DbUser = typeof users.$inferSelect;
 export type DbCharacter = typeof characters.$inferSelect;
 export type DbRoom = typeof rooms.$inferSelect;
@@ -1413,3 +1838,14 @@ export type DbWatch = DbFriend;
 export type DbPushSubscription = typeof pushSubscriptions.$inferSelect;
 export type DbBookmark = typeof bookmarks.$inferSelect;
 export type DbRoomThreadCategory = typeof roomThreadCategories.$inferSelect;
+export type DbRank = typeof ranks.$inferSelect;
+export type DbRankTier = typeof rankTiers.$inferSelect;
+export type DbNameStyle = typeof nameStyles.$inferSelect;
+export type DbCosmetic = typeof cosmetics.$inferSelect;
+export type DbUserEarning = typeof userEarning.$inferSelect;
+export type DbCharacterEarning = typeof characterEarning.$inferSelect;
+export type DbEarningLedger = typeof earningLedger.$inferSelect;
+export type DbUserOwnedBorder = typeof userOwnedBorders.$inferSelect;
+export type DbUserOwnedNameStyle = typeof userOwnedNameStyles.$inferSelect;
+export type DbUserActiveCosmetics = typeof userActiveCosmetics.$inferSelect;
+export type DbEarningNotification = typeof earningNotifications.$inferSelect;

@@ -123,6 +123,39 @@ const masterUpdateBody = z.object({
   soundDmEnabled: z.boolean().optional(),
   soundChatEnabled: z.boolean().optional(),
   soundAlertEnabled: z.boolean().optional(),
+  soundWhisperEnabled: z.boolean().optional(),
+  /**
+   * Input-behavior opt-outs. Default off (= features stay on) so
+   * existing users don't notice a change until they tick the box.
+   * Both are account-wide — switching characters doesn't reset them.
+   */
+  disableInputHistory: z.boolean().optional(),
+  disableThesaurus: z.boolean().optional(),
+  /**
+   * Userlist display preference — render the rank sigil instead of
+   * the gender glyph in rooms-tree rows. Self-hides when the user
+   * has no resolved rank. Default false. (Legacy field — kept for
+   * back-compat; the actual rank-icon swap is now unconditional.)
+   */
+  useRankAsUserlistIcon: z.boolean().optional(),
+  /**
+   * Per-surface rank visibility. Both default true (rank shown). When
+   * off, the corresponding render skips the rank gem. Userlist takes
+   * effect immediately via a presence re-broadcast; chat takes effect
+   * on the user's NEXT send (past messages keep their snapshotted
+   * rank).
+   */
+  showRankInUserlist: z.boolean().optional(),
+  showRankInChat: z.boolean().optional(),
+  /**
+   * Per-metric profile privacy. When true, the matching ProfileMetrics
+   * field returns null and the modal renders "private" instead of the
+   * real count. Mirrors `user_earning.hide_currency_count` /
+   * `hide_xp_count` for the activity counters.
+   */
+  hideChatMessageCount: z.boolean().optional(),
+  hideForumTopicCount: z.boolean().optional(),
+  hideForumReplyCount: z.boolean().optional(),
   /**
    * Master / OOC chat color. Drives the chat color for OOC messages
    * AND acts as the fallback for any character whose own chat color
@@ -424,6 +457,15 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       soundDmEnabled: u.soundDmEnabled,
       soundChatEnabled: u.soundChatEnabled,
       soundAlertEnabled: u.soundAlertEnabled,
+      soundWhisperEnabled: u.soundWhisperEnabled,
+      disableInputHistory: u.disableInputHistory,
+      disableThesaurus: u.disableThesaurus,
+      useRankAsUserlistIcon: u.useRankAsUserlistIcon,
+      showRankInUserlist: u.showRankInUserlist,
+      showRankInChat: u.showRankInChat,
+      hideChatMessageCount: u.hideChatMessageCount,
+      hideForumTopicCount: u.hideForumTopicCount,
+      hideForumReplyCount: u.hideForumReplyCount,
       role: u.role,
       isPublic: u.isPublic,
       isNsfw: u.isNsfw,
@@ -436,6 +478,9 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       limits: {
         maxBioLength: settings.maxBioLength,
         maxMessageLength: settings.maxMessageLength,
+        maxDirectMessageLength: settings.maxDirectMessageLength,
+        maxForumPostLength: settings.maxForumPostLength,
+        maxForumTopicTitleLength: settings.maxForumTopicTitleLength,
       },
     };
   });
@@ -650,6 +695,15 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         ...(body.soundDmEnabled !== undefined ? { soundDmEnabled: body.soundDmEnabled } : {}),
         ...(body.soundChatEnabled !== undefined ? { soundChatEnabled: body.soundChatEnabled } : {}),
         ...(body.soundAlertEnabled !== undefined ? { soundAlertEnabled: body.soundAlertEnabled } : {}),
+        ...(body.soundWhisperEnabled !== undefined ? { soundWhisperEnabled: body.soundWhisperEnabled } : {}),
+        ...(body.disableInputHistory !== undefined ? { disableInputHistory: body.disableInputHistory } : {}),
+        ...(body.disableThesaurus !== undefined ? { disableThesaurus: body.disableThesaurus } : {}),
+        ...(body.useRankAsUserlistIcon !== undefined ? { useRankAsUserlistIcon: body.useRankAsUserlistIcon } : {}),
+        ...(body.showRankInUserlist !== undefined ? { showRankInUserlist: body.showRankInUserlist } : {}),
+        ...(body.showRankInChat !== undefined ? { showRankInChat: body.showRankInChat } : {}),
+        ...(body.hideChatMessageCount !== undefined ? { hideChatMessageCount: body.hideChatMessageCount } : {}),
+        ...(body.hideForumTopicCount !== undefined ? { hideForumTopicCount: body.hideForumTopicCount } : {}),
+        ...(body.hideForumReplyCount !== undefined ? { hideForumReplyCount: body.hideForumReplyCount } : {}),
         // Master chat color. Mirrors the `/color` slash command's
         // master-scope write — this is the value that drives OOC
         // messages and acts as the fallback for any character whose
@@ -659,9 +713,19 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         ...(body.isPublic !== undefined || body.isNsfw !== undefined ? { isPublic, isNsfw } : {}),
       })
       .where(eq(users.id, me.id));
-    if (body.chatColor !== undefined) {
+    if (
+      body.chatColor !== undefined ||
+      body.useRankAsUserlistIcon !== undefined ||
+      body.showRankInUserlist !== undefined
+    ) {
       // Same userlist re-broadcast as the character PUT does — keeps
-      // every viewer's occupant row in sync with the new color metadata.
+      // every viewer's occupant row in sync with the new metadata.
+      // useRankAsUserlistIcon needs the same treatment: a fresh toggle
+      // has to repaint every viewer's rail (the rank sigil takes over
+      // the icon slot for this user's rows everywhere), otherwise the
+      // change wouldn't show until the next presence event a room
+      // happens to fire (a join, a leave, a /char switch by someone
+      // else).
       const sockets = await io.fetchSockets();
       const rooms = new Set<string>();
       for (const s of sockets) {

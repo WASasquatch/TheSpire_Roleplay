@@ -25,8 +25,13 @@ import { splitOnCode } from "./codemask.js";
  * deliberately NOT in the class — they'd make the parser greedy and
  * cause `@Bob waves at someone` to consume the whole tail.
  *
- * The leading boundary requires a non-name char so "foo@bar" inside an
- * email doesn't fire a mention.
+ * The leading boundary requires start-of-string, whitespace, or `\`
+ * (the escape character). Earlier this accepted any non-name char,
+ * which caused `@user` substrings inside URLs (e.g. tiktok.com/@user)
+ * to be parsed as mentions — the `/` before `@` counted as a
+ * boundary. Restricting to whitespace + start of input makes the
+ * mention a true word-level token: it has to stand alone, not appear
+ * embedded in a path, email, or other punctuation-rich string.
  *
  * The world: prefix matches FIRST in the alternation so "world" can't
  * accidentally parse as a username when followed by `:slug`.
@@ -52,7 +57,7 @@ export const MENTION_WORLD_SLUG_CHARS = "[a-z0-9](?:[a-z0-9-]{0,58}[a-z0-9])?";
  */
 export function mentionRegex(): RegExp {
   return new RegExp(
-    `(?<prefix>^|[^${MENTION_NAME_CHARS}])@(?:world:(?<worldSlug>${MENTION_WORLD_SLUG_CHARS})|(?<userName>${MENTION_NAME_CLASS}{1,40}))`,
+    `(?<prefix>^|[\\s\\\\])@(?:world:(?<worldSlug>${MENTION_WORLD_SLUG_CHARS})|(?<userName>${MENTION_NAME_CLASS}{1,40}))`,
     "gu",
   );
 }

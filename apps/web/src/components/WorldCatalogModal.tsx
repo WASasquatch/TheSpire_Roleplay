@@ -6,7 +6,8 @@ import type {
 } from "@thekeep/shared";
 import { CANONICAL_TAGS, CONTENT_WARNINGS } from "@thekeep/shared";
 import { readError } from "../lib/http.js";
-import { Modal } from "./Modal.js";
+import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
+import { CloseButton } from "./CloseButton.js";
 
 interface Props {
   /** Current room id for "Use in this room". If null, the link button is hidden. */
@@ -181,20 +182,14 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
   }
 
   return (
-    <Modal onClose={onClose} zIndex={50}>
+    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
-        className="flex max-h-[88vh] w-full flex-col overflow-hidden rounded border border-keep-rule bg-keep-parchment shadow-xl md:w-[78vw] md:max-w-[1100px]"
+        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-parchment`}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
           <h2 className="font-action text-lg">World catalog</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-sm text-keep-muted hover:text-keep-text"
-          >
-            close
-          </button>
+          <CloseButton onClick={onClose} />
         </header>
 
         {/* Filter strip. Search + genre on the first row; tags + CWs as

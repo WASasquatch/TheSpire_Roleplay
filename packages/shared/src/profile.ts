@@ -83,6 +83,37 @@ export interface ProfileLink {
   textColor: string | null;
 }
 
+/**
+ * Activity counters surfaced on profile views. Each field is a
+ * lifetime aggregate computed at profile-fetch time so the numbers
+ * are always fresh — no denormalized column to drift, no janitor
+ * job to maintain.
+ *
+ * Scoped per identity:
+ *   - master profile  → counts every message authored under the
+ *     user account, character-attached or not.
+ *   - character profile → counts only messages authored AS that
+ *     specific character (characterId match).
+ *
+ * Each count excludes server-side soft-deleted rows so a moderation
+ * hide doesn't suddenly drop a user's lifetime number, but the
+ * original author still gets credit for "having posted" — the
+ * post existed, the user typed it.
+ */
+export interface ProfileMetrics {
+  /**
+   * Chat-shaped lines in flat-mode rooms (`say` / `me` / `ooc` /
+   * `roll` / `scene` / `npc`). Null when the user has set
+   * `hideChatMessageCount` — the renderer shows "private" in place
+   * of a number.
+   */
+  chatMessages: number | null;
+  /** Top-level forum-topic openings. Null when `hideForumTopicCount` is set. */
+  forumTopics: number | null;
+  /** Forum replies (any kind with a `replyToId`). Null when `hideForumReplyCount` is set. */
+  forumReplies: number | null;
+}
+
 export interface CharacterProfile {
   id: string;
   userId: string;
@@ -116,6 +147,8 @@ export interface CharacterProfile {
   isNsfw: boolean;
   createdAt: number;
   updatedAt: number;
+  /** Lifetime activity counters scoped to this character. */
+  metrics: ProfileMetrics;
 }
 
 /**
@@ -202,6 +235,8 @@ export interface MasterProfile {
   isPublic: boolean;
   isNsfw: boolean;
   createdAt: number;
+  /** Lifetime activity counters scoped to this master account (every character). */
+  metrics: ProfileMetrics;
 }
 
 /** What `/profile` returns: either the master, or the active character. */

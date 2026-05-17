@@ -1,0 +1,21 @@
+-- Rank-snapshot columns on messages.
+--
+-- Matches the existing snapshot pattern (display_name, color, mood,
+-- avatar_url, npc_voiced_by, cmd_css): freeze the author's standing
+-- rank at send time so the chat-line renderer doesn't need a per-row
+-- live lookup, AND a later rank-up (or a rank-disable) doesn't
+-- silently rewrite the look of past lines.
+--
+-- Scope-routed at insert time per the IC/OOC rule:
+--   IC line (kind != ooc/whisper AND character_id set) → character
+--                                                        pool's rank
+--   OOC line (kind = ooc/whisper OR character_id NULL) → master pool
+--
+-- Both columns are nullable: a fresh account / unranked user posts
+-- with NULL, and the renderer falls back to no sigil. No FK to ranks
+-- because admins can delete a rank without erasing the history that
+-- referenced it (same posture as room name / category SET NULL
+-- elsewhere).
+ALTER TABLE messages ADD COLUMN rank_key TEXT;
+--> statement-breakpoint
+ALTER TABLE messages ADD COLUMN tier INTEGER;

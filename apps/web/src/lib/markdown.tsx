@@ -15,8 +15,10 @@ import { useActiveTheme } from "./theme.js";
  *   `code`                           → <code>
  *   [text](https://url)              → <a>  (http/https only)
  *   ![alt](https://image-url)        → image with "Show image" toggle
- *   bare http(s)://url autolink      → <a>, with image toggle when the URL
- *                                       ends in a common image extension
+ *   bare http(s)://url autolink      → <a>, with a "Show image" toggle when the
+ *                                       URL ends in a common image extension,
+ *                                       or a "Show video" toggle when the URL
+ *                                       is a recognized YouTube / Vimeo link
  *   @mention                         → handled separately by splitMentions
  *
  * Block-level markdown (#, lists, tables, blockquotes, fenced code) is NOT
@@ -327,7 +329,7 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
           const alt = text.slice(i + 2, closeB);
           return {
             end: closeP + 1,
-            node: <UrlOrImage url={url} alt={alt} forceImage />,
+            node: <UrlOrMedia url={url} alt={alt} forceImage />,
           };
         }
       }
@@ -523,7 +525,7 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
       // to the normal text-flush path because we only consume `url` here.
       return {
         end: i + url.length,
-        node: <UrlOrImage url={url} />,
+        node: <UrlOrMedia url={url} />,
         // (`trailing` is intentionally NOT consumed; the outer parseInline
         // loop emits it as plain text after the autolink.)
       };
@@ -690,6 +692,13 @@ export function renderForumBody(
    * keep-action color. Optional — when omitted no self-detection runs.
    */
   selfNames: ReadonlyArray<string> = [],
+  /**
+   * Lowercased set of names known to resolve to a real profile.
+   * Mentions not in this set (and not in `selfNames`) render as plain
+   * text. When omitted, every mention is styled — fallback for
+   * callers that don't subscribe to the mention cache.
+   */
+  knownMentions?: ReadonlySet<string> | null,
 ): ReactNode {
   const out: ReactNode[] = [];
   splitOnCode(body).forEach((seg, segIdx) => {
@@ -725,7 +734,7 @@ export function renderForumBody(
             key={`q${segIdx}-${idx}`}
             className="my-1 whitespace-pre-wrap border-l-2 border-keep-action/50 bg-keep-banner/40 px-3 py-1 text-keep-muted italic"
           >
-            {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames)}
+            {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames, knownMentions)}
           </blockquote>,
         );
         return;
@@ -734,7 +743,7 @@ export function renderForumBody(
       const parts = splitMentions(joined);
       out.push(
         <Fragment key={`p${segIdx}-${idx}`}>
-          {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames)}
+          {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames, knownMentions)}
         </Fragment>,
       );
     });
@@ -754,6 +763,7 @@ function renderPartsInline(
   onMentionClick: (name: string) => void,
   onWorldClick: (slug: string) => void,
   selfNames: ReadonlyArray<string> = [],
+  knownMentions?: ReadonlySet<string> | null,
 ): ReactNode[] {
   // Lowercase + Set for O(1) per-mention lookup. Cheap to rebuild
   // per render; selfNames is typically 0–2 entries.
@@ -775,6 +785,12 @@ function renderPartsInline(
         </button>,
       );
     } else {
+      const isSelf = selfSet.has(p.name);
+      const isKnown = isSelf || (knownMentions ? knownMentions.has(p.name) : true);
+      if (!isKnown) {
+        out.push(<Fragment key={i}>@{p.raw}</Fragment>);
+        return;
+      }
       out.push(renderMentionButton(p.raw, p.name, selfSet, onMentionClick, i));
     }
   });
@@ -819,6 +835,118 @@ function renderMentionButton(
 
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:\?[^\s]*)?(?:#[^\s]*)?$/i;
 
+interface VideoEmbed {
+  /** Which provider this URL belongs to — drives the iframe title for a11y. */
+  provider: "youtube" | "vimeo";
+  /**
+   * The fully-formed embed URL we'll drop into the iframe `src`. Always
+   * constructed from a parsed video id (and, for unlisted Vimeo videos, the
+   * required hash) — never the raw user URL — so an attacker can't smuggle
+   * `?autoplay=1&jsapi=1&...` style payloads into the iframe by pasting a
+   * crafted link.
+   */
+  src: string;
+}
+
+// Video ids: YouTube uses 11-char `[A-Za-z0-9_-]`, but the embed endpoint
+// accepts any non-empty id, and we want to be tolerant of provider changes.
+// Floor at 6 chars to reject obvious garbage like `/watch?v=a`.
+const VIDEO_ID_RE = /^[\w-]{6,}$/;
+const VIMEO_HASH_RE = /^[\w-]{4,}$/;
+
+/**
+ * Detect embeddable video URLs and return a sanitized embed src, or null
+ * when the URL isn't a recognized video link. Mirrors `IMAGE_EXT_RE`'s role
+ * in `UrlOrMedia` — gates whether the "Show video" toggle appears.
+ *
+ * Supported shapes:
+ *   YouTube watch:   https://(www.|m.)youtube.com/watch?v=ID[&...]
+ *   YouTube short:   https://youtu.be/ID[?...]
+ *   YouTube shorts:  https://(www.)youtube.com/shorts/ID[?...]
+ *   YouTube embed:   https://(www.)youtube.com/embed/ID[?...]
+ *   Vimeo:           https://vimeo.com/ID[/HASH]
+ *   Vimeo player:    https://player.vimeo.com/video/ID[?h=HASH...]
+ *
+ * Privacy: YouTube videos go through `youtube-nocookie.com` and Vimeo gets
+ * `?dnt=1` so the viewer's IP/cookies aren't shared with the provider's
+ * tracking pipeline beyond what's strictly needed to play the video. The
+ * iframe itself only loads once the user clicks "Show video", same as the
+ * existing image toggle, so a paste of `youtu.be/...` doesn't auto-ping
+ * YouTube on every chat render.
+ */
+function parseVideoEmbed(url: string): VideoEmbed | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  const host = u.hostname.replace(/^www\./, "").toLowerCase();
+
+  // YouTube — short link form.
+  if (host === "youtu.be") {
+    const id = u.pathname.slice(1).split("/")[0] ?? "";
+    if (VIDEO_ID_RE.test(id)) {
+      return { provider: "youtube", src: `https://www.youtube-nocookie.com/embed/${id}` };
+    }
+    return null;
+  }
+
+  // YouTube — long-form watch / shorts / direct embed.
+  if (host === "youtube.com" || host === "m.youtube.com") {
+    if (u.pathname === "/watch") {
+      const id = u.searchParams.get("v") ?? "";
+      if (VIDEO_ID_RE.test(id)) {
+        return { provider: "youtube", src: `https://www.youtube-nocookie.com/embed/${id}` };
+      }
+      return null;
+    }
+    const shortsMatch = u.pathname.match(/^\/shorts\/([\w-]+)/);
+    if (shortsMatch && VIDEO_ID_RE.test(shortsMatch[1]!)) {
+      return { provider: "youtube", src: `https://www.youtube-nocookie.com/embed/${shortsMatch[1]}` };
+    }
+    const embedMatch = u.pathname.match(/^\/embed\/([\w-]+)/);
+    if (embedMatch && VIDEO_ID_RE.test(embedMatch[1]!)) {
+      return { provider: "youtube", src: `https://www.youtube-nocookie.com/embed/${embedMatch[1]}` };
+    }
+    return null;
+  }
+
+  // Vimeo — public video page (and unlisted videos that carry a hash in the
+  // path after the numeric id, like vimeo.com/123456789/abcd1234).
+  if (host === "vimeo.com") {
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (parts.length >= 1 && /^\d+$/.test(parts[0]!)) {
+      const id = parts[0]!;
+      const hash = parts[1] && VIMEO_HASH_RE.test(parts[1]) ? parts[1] : null;
+      const src = hash
+        ? `https://player.vimeo.com/video/${id}?h=${hash}&dnt=1`
+        : `https://player.vimeo.com/video/${id}?dnt=1`;
+      return { provider: "vimeo", src };
+    }
+    return null;
+  }
+
+  // Vimeo — direct player URL (already an embed). Rebuild from the parsed
+  // id rather than passing the user URL through, so query/fragment payloads
+  // can't piggy-back into the iframe src.
+  if (host === "player.vimeo.com") {
+    const m = u.pathname.match(/^\/video\/(\d+)/);
+    if (m) {
+      const id = m[1]!;
+      const hash = u.searchParams.get("h");
+      const src = hash && VIMEO_HASH_RE.test(hash)
+        ? `https://player.vimeo.com/video/${id}?h=${hash}&dnt=1`
+        : `https://player.vimeo.com/video/${id}?dnt=1`;
+      return { provider: "vimeo", src };
+    }
+    return null;
+  }
+
+  return null;
+}
+
 /**
  * Truncate a URL to a readable display form for autolinks. The full URL
  * stays in the `href` (and in the `title` tooltip) — only the visible
@@ -857,7 +985,7 @@ export function compactUrl(url: string): string {
   }
 }
 
-interface UrlOrImageProps {
+interface UrlOrMediaProps {
   url: string;
   /**
    * Optional alt text - supplied only by explicit `![alt](url)` markdown.
@@ -867,26 +995,41 @@ interface UrlOrImageProps {
   /**
    * When true, treat as image regardless of file extension. Triggered by
    * `![...](...)` syntax where the user has explicitly asked for an image.
+   * Suppresses video detection — the explicit syntax wins.
    */
   forceImage?: boolean;
 }
 
 /**
- * URL renderer with optional image preview. The preview is opt-in (the
- * "Show image" toggle) so a user pasting an image URL doesn't immediately
- * leak everyone's IP to whoever hosts it. `referrerPolicy="no-referrer"`
- * blocks the chat URL from leaking via Referer when the image IS shown.
+ * URL renderer with optional inline preview for images and embeddable
+ * videos. The preview is opt-in (the "Show image" / "Show video" toggle)
+ * so a paste of `youtu.be/...` or a `.png` URL doesn't immediately leak
+ * the viewer's IP to whoever hosts it. For images, `referrerPolicy=
+ * "no-referrer"` blocks the chat URL from leaking via Referer when the
+ * image IS shown; for videos, the iframe loads `youtube-nocookie.com` /
+ * `player.vimeo.com?dnt=1` so the provider's tracking surface is the
+ * minimum needed to play the file.
  *
- * Image dimensions are capped via CSS (480×360, object-contain) so a
- * hostile or careless paster can't blow out the message column with a 4k
- * image. We can't enforce file-byte-size client-side without a proxy, so
- * the cap is purely visual.
+ * Image dimensions are capped via CSS (max 60vh tall, 30vw wide on md+,
+ * object-contain) so a hostile or careless paster can't blow out the
+ * message column with a 4k image. Video previews share the same 480px
+ * desktop cap but lock to a 16:9 aspect so the iframe doesn't squash on
+ * narrow viewports. We can't enforce file-byte-size client-side without
+ * a proxy, so the caps are purely visual.
+ *
+ * Image and video detection are mutually exclusive in practice (no host
+ * serves a `.png` from `youtube.com/watch?v=...`); when both somehow
+ * match, image wins, mirroring the precedence in `tryToken` where
+ * explicit `![alt](url)` markdown sets `forceImage`.
  */
-function UrlOrImage({ url, alt, forceImage }: UrlOrImageProps) {
+function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
   const [shown, setShown] = useState(false);
   const looksLikeImage = forceImage || IMAGE_EXT_RE.test(url);
+  // Skip video detection when the URL is already claimed by an image — saves
+  // a URL-parse on every chat line, and respects `forceImage` from `![](...)`.
+  const video = !looksLikeImage ? parseVideoEmbed(url) : null;
   // Only compact bare autolinks (no alt). Explicit `[label](url)` links go
-  // through tryToken's [link] branch — they never reach UrlOrImage. An
+  // through tryToken's [link] branch — they never reach UrlOrMedia. An
   // `![alt](image-url)` does reach here with alt set, and we leave the alt
   // text alone since the author chose it deliberately.
   const display = alt || compactUrl(url);
@@ -904,7 +1047,14 @@ function UrlOrImage({ url, alt, forceImage }: UrlOrImageProps) {
     </a>
   );
 
-  if (!looksLikeImage) return link;
+  if (!looksLikeImage && !video) return link;
+
+  const buttonLabel = shown ? "Hide" : looksLikeImage ? "Show image" : "Show video";
+  const buttonTitle = shown
+    ? "Hide the inline preview"
+    : looksLikeImage
+      ? "Load and display this image inline"
+      : "Load and play this video inline";
 
   return (
     <span>
@@ -913,11 +1063,11 @@ function UrlOrImage({ url, alt, forceImage }: UrlOrImageProps) {
         type="button"
         onClick={() => setShown((s) => !s)}
         className="rounded border border-keep-rule bg-keep-panel/60 px-1.5 py-0 text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-panel hover:text-keep-text"
-        title={shown ? "Hide the inline preview" : "Load and display this image inline"}
+        title={buttonTitle}
       >
-        {shown ? "Hide" : "Show image"}
+        {buttonLabel}
       </button>
-      {shown ? (
+      {shown && looksLikeImage ? (
         <span className="mt-1 block">
           {/*
             Viewport-relative cap: 95% of the screen width on mobile so
@@ -934,6 +1084,27 @@ function UrlOrImage({ url, alt, forceImage }: UrlOrImageProps) {
             loading="lazy"
             referrerPolicy="no-referrer"
             className="block max-h-[60vh] max-w-[95vw] rounded border border-keep-rule object-contain md:max-w-[30vw]"
+          />
+        </span>
+      ) : null}
+      {shown && video ? (
+        <span className="mt-1 block w-full max-w-[95vw] md:max-w-[480px]">
+          {/*
+            16:9 aspect via `aspect-video` keeps the iframe shape regardless
+            of how wide the chat column is. `referrerPolicy=
+            "strict-origin-when-cross-origin"` is the minimum YouTube /
+            Vimeo accept; "no-referrer" makes the player refuse to load on
+            some YouTube videos. `allowFullScreen` lets the user pop the
+            video out without leaving the page.
+          */}
+          <iframe
+            src={video.src}
+            title={video.provider === "youtube" ? "YouTube video player" : "Vimeo video player"}
+            loading="lazy"
+            referrerPolicy="strict-origin-when-cross-origin"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            className="block aspect-video w-full rounded border border-keep-rule"
           />
         </span>
       ) : null}

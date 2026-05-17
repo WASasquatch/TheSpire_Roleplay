@@ -30,6 +30,26 @@ export interface ClientToServerEvents {
       threadCategoryId?: string | null;
       threadTitle?: string;
       replyToId?: string;
+      /**
+       * Authoritative per-send identity claim from the client. The tab's
+       * current React state for `activeCharacterId` — string for a
+       * character, `null` for OOC (master), omitted to fall back to the
+       * server's stored `socket.data.tabCharId`.
+       *
+       * Why this exists alongside the socket-scoped tabCharId: the
+       * tabCharId is seeded at handshake and can drift from the UI's
+       * actual state across reconnects, multi-tab DB-default races, or
+       * cross-tab /char-clear side effects. Sending the identity on
+       * every chat:input collapses all those failure modes — the
+       * server validates the claim against the user's owned characters
+       * and uses it as the source of truth for THIS send's display
+       * name + per-character pool routing.
+       *
+       * Invalid claims (character isn't owned or has been deleted) are
+       * silently degraded to the socket's tabCharId — same safe fallback
+       * the handshake middleware uses.
+       */
+      asCharacterId?: string | null;
     },
     ack?: AckFn<{ ok: true } | AckError>,
   ) => void;
@@ -102,6 +122,18 @@ export interface ServerToClientEvents {
   "message:update": (msg: ChatMessage) => void;
   "room:state": (payload: { room: RoomSummary; occupants: RoomOccupant[] }) => void;
   "presence:update": (payload: { roomId: string; occupants: RoomOccupant[] }) => void;
+  /**
+   * Global "your cached rooms tree is stale" pulse. Fired by the server
+   * whenever a room is created, deleted, archived, has its metadata
+   * changed, or sees a presence change (someone joined/left). Sockets
+   * receive it regardless of which room they're parked in — that's the
+   * point: the rooms rail shows EVERY visible room, so a refresh has to
+   * cross room boundaries. The client debounces refetches (a presence
+   * burst from a join shouldn't fire many GETs); fast enough to feel
+   * live, slow enough to coalesce. Payload-free — the client refetches
+   * `/rooms` and re-renders from the response.
+   */
+  "rooms:tree-changed": () => void;
   /** Server-driven UI hints - open the character editor, prompt for password, etc. */
   "ui:hint": (hint: UiHint) => void;
   /** Soft errors surfaced to the user (bad command, not in room, etc.). */
@@ -203,6 +235,50 @@ export interface ServerToClientEvents {
    * fetch per receiver).
    */
   "commands:updated": () => void;
+  /**
+   * Earning — XP / Currency credited. Emitted to every live socket
+   * of the affected user after the ledger row + earning row update
+   * land. Carries enough state for the Earning dashboard wallet
+   * widget to live-update without a refetch. One event per credited
+   * scope (so a single IC chat can fan out into multiple events when
+   * the user has more than one logged-in character).
+   *
+   * `scope === 'character'` carries the character id in `ownerId`;
+   * `scope === 'user'` carries the user id (same as the recipient's
+   * own user id).
+   */
+  "earning:earned": (payload: {
+    scope: "user" | "character";
+    ownerId: string;
+    xpDelta: number;
+    currencyDelta: number;
+    xpTotal: number;
+    currencyTotal: number;
+    rankKey: string | null;
+    tier: number | null;
+    reason: string;
+  }) => void;
+  /**
+   * Earning — rank or tier crossing. Fired alongside `earning:earned`
+   * when the credit moved the user across a tier boundary. Drives the
+   * persistent rank-up ribbon UI and the dashboard "What's new" pin.
+   * Per the project ethos memory, the client renders a quiet ribbon,
+   * never a popup toast.
+   *
+   * `notificationId` matches the row in `earning_notifications` that
+   * persists the event across reloads — the client passes it back to
+   * the ack endpoint when the user dismisses the ribbon.
+   */
+  "earning:rankup": (payload: {
+    notificationId: string;
+    scope: "user" | "character";
+    characterId: string | null;
+    fromRankKey: string | null;
+    fromTier: number | null;
+    toRankKey: string;
+    toTier: number;
+    newlyEligibleBorderKeys: string[];
+  }) => void;
 }
 
 export type UiHint =

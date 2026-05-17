@@ -5,13 +5,14 @@ import type {
   DirectMessageHistoryPage,
   InboxIdentityCount,
 } from "@thekeep/shared";
-import { Modal } from "./Modal.js";
+import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { useChat } from "../state/store.js";
 import { readError, withIdentityQuery } from "../lib/http.js";
 import { parseInline } from "../lib/markdown.js";
 import { FormattingToolbar } from "./FormattingToolbar.js";
 import { SynonymPopup } from "./SynonymPopup.js";
 import { UsernameAutocomplete } from "./UsernameAutocomplete.js";
+import { CloseButton } from "./CloseButton.js";
 
 interface Props {
   onClose: () => void;
@@ -597,18 +598,18 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
     <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
         onClick={(e) => e.stopPropagation()}
-        // Mobile: edge-to-edge fullscreen (no border-radius, full dvh).
-        // Desktop: centered card with the existing 78vw/1100px cap and
-        // 85vh height. `100dvh` follows the browser's *dynamic* viewport
-        // so the on-screen keyboard doesn't paint the modal off-screen
-        // on iOS Safari / Chrome Android — `100vh` would.
-        className="flex h-[100dvh] w-full flex-col overflow-hidden border border-keep-border bg-keep-bg shadow-xl md:h-[85vh] md:w-[78vw] md:max-w-[1100px] md:rounded"
+        // Mobile: edge-to-edge fullscreen via MODAL_CARD_CONTENT.
+        // Desktop: centered card at the standard 75vw/2400px cap.
+        // `keep-frame` lets each theme own the border, corner radius,
+        // shadow, and the parchment/cyber texture overlay — same
+        // pattern AdminPanel / ProfileEditor / EarningDashboard use
+        // so DM modal matches the rest of the themed shell instead
+        // of reading as a bare bg-keep-bg rectangle.
+        className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg lg:rounded`}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
           <h2 className="font-action text-lg">Messages</h2>
-          <button type="button" onClick={onClose} className="text-sm text-keep-muted hover:text-keep-text">
-            close
-          </button>
+          <CloseButton onClick={onClose} />
         </header>
 
         {/* Mobile-only tab strip. Lets users flip between the inbox
@@ -1010,7 +1011,10 @@ function Avatar({
   const [errored, setErrored] = useState(false);
   return (
     <span
-      className="relative inline-block shrink-0 overflow-hidden rounded border border-keep-rule bg-keep-banner"
+      // Round avatar — matches the chat-line / userlist / profile
+      // treatment so the DM rail and conversation thread agree
+      // visually with everywhere else.
+      className="relative inline-block shrink-0 overflow-hidden rounded-full border border-keep-rule bg-keep-banner"
       style={{ width: size, height: size }}
     >
       {url && !errored ? (
@@ -1231,6 +1235,10 @@ function ThreadPane({
   const conversation = useChat(
     (s) => Object.values(s.dmConversations).find((c) => c.otherUserId === otherUserId) ?? null,
   );
+  // Admin-configured DM length cap — server is the source of truth,
+  // this mirrors it so the input's maxLength matches what the send
+  // path will accept.
+  const maxDmLength = useChat((s) => s.inputLimits.maxDirectMessageLength);
   // My identity for this thread — forwarded from the parent modal's
   // inbox filter. Drives `?characterId=` on history fetches and the
   // read-marker POST so the server scopes the thread to my pinned
@@ -1516,7 +1524,7 @@ function ThreadPane({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder={`Message ${header.displayName}...`}
-              maxLength={4000}
+              maxLength={maxDmLength}
               disabled={busy}
               className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action disabled:opacity-50"
             />

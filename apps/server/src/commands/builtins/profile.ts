@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { characterJournalEntries, characterPortraits, characters, profileLinks, users } from "../../db/schema.js";
-import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileLink, ProfileView } from "@thekeep/shared";
+import { characterJournalEntries, characterPortraits, characters, messages, profileLinks, rooms, users } from "../../db/schema.js";
+import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileLink, ProfileMetrics, ProfileView } from "@thekeep/shared";
 import { parseUserThemeJson } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
 import type { CommandHandler } from "../types.js";
@@ -78,6 +78,119 @@ async function listPublicJournal(
 }
 
 /**
+ * Compute lifetime activity counters for a profile view. Scoping:
+ *   - Master profile  → every message authored under the user account
+ *     (every character + master OOC), so the count reflects "all the
+ *     time you've spent here". `characterId` is null.
+ *   - Character profile → only messages where `messages.characterId`
+ *     matches that character's id.
+ *
+ * Three counters in a single query each (no joins per row):
+ *   - chatMessages : kind in the chat-shaped set, in flat-mode rooms.
+ *                    Excludes whispers (private, not a "look at me
+ *                    posting" signal), system/announce/cmd (server
+ *                    chrome, not the user's voice), and forum kinds
+ *                    (covered separately below).
+ *   - forumTopics  : the top-level post that opens a topic — `title`
+ *                    is set AND `replyToId` is null (and we filter on
+ *                    nested rooms so a stray legacy title on a flat
+ *                    row doesn't inflate the count).
+ *   - forumReplies : any non-deleted message with `replyToId` set in
+ *                    a nested room. Replies to flat-room messages
+ *                    (rare; quote-replies in flat chats) don't count.
+ *
+ * Soft-deleted messages are EXCLUDED so a moderation hide reduces the
+ * counter — the user no longer "has" that post in any meaningful
+ * sense. The author's hard counters survive their own re-publishes
+ * since the message id is the row identity.
+ */
+async function computeProfileMetrics(
+  db: import("../../db/index.js").Db,
+  userId: string,
+  characterId: string | null,
+): Promise<ProfileMetrics> {
+  // Privacy flags live on the user row regardless of which character
+  // is being profiled — they're per-account preferences, not per
+  // identity. One query, three booleans; defaults to "show" if the
+  // row is somehow missing.
+  const u = (await db
+    .select({
+      hideChatMessageCount: users.hideChatMessageCount,
+      hideForumTopicCount: users.hideForumTopicCount,
+      hideForumReplyCount: users.hideForumReplyCount,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1))[0];
+  const hideChat = u?.hideChatMessageCount ?? false;
+  const hideTopics = u?.hideForumTopicCount ?? false;
+  const hideReplies = u?.hideForumReplyCount ?? false;
+  // Short-circuit each branch when its hide flag is set — saves the
+  // COUNT(*) query and returns null directly. Useful both for the
+  // tiny perf win and so a "private" metric can't accidentally leak
+  // via a server log of the underlying SQL.
+
+  // Identity scope — character pool counts messages tagged with that
+  // character; master pool counts every message the user authored
+  // regardless of character attachment.
+  const identityWhere = characterId === null
+    ? eq(messages.userId, userId)
+    : and(eq(messages.userId, userId), eq(messages.characterId, characterId));
+
+  // Chat: flat-room messages of a chat-shape kind. `messages` joins
+  // `rooms` on roomId so we can gate on the room's replyMode without
+  // denormalizing the flag onto every message row.
+  const chatRow = hideChat ? null : (await db
+    .select({ n: sql<number>`count(*)` })
+    .from(messages)
+    .innerJoin(rooms, eq(rooms.id, messages.roomId))
+    .where(and(
+      identityWhere,
+      isNull(messages.deletedAt),
+      isNull(messages.replyToId),
+      eq(rooms.replyMode, "flat"),
+      sql`${messages.kind} IN ('say', 'me', 'ooc', 'roll', 'scene', 'npc')`,
+    )))[0];
+
+  // Forum topics: top-level entries in nested rooms (title is set,
+  // no parent). The `title IS NOT NULL` clause matches the seed-side
+  // contract — the forum dispatcher writes `title` only when the
+  // message is a topic-create.
+  const topicRow = hideTopics ? null : (await db
+    .select({ n: sql<number>`count(*)` })
+    .from(messages)
+    .innerJoin(rooms, eq(rooms.id, messages.roomId))
+    .where(and(
+      identityWhere,
+      isNull(messages.deletedAt),
+      isNull(messages.replyToId),
+      eq(rooms.replyMode, "nested"),
+      sql`${messages.title} IS NOT NULL`,
+    )))[0];
+
+  // Forum replies: every non-deleted message with a parent, in a
+  // nested room. We don't filter by `kind` here because the inherit-
+  // thread-context fix lets /me / /roll / /scene / /npc inherit the
+  // parent topic, and those should count as replies too.
+  const replyRow = hideReplies ? null : (await db
+    .select({ n: sql<number>`count(*)` })
+    .from(messages)
+    .innerJoin(rooms, eq(rooms.id, messages.roomId))
+    .where(and(
+      identityWhere,
+      isNull(messages.deletedAt),
+      sql`${messages.replyToId} IS NOT NULL`,
+      eq(rooms.replyMode, "nested"),
+    )))[0];
+
+  return {
+    chatMessages: hideChat ? null : Number(chatRow?.n ?? 0),
+    forumTopics: hideTopics ? null : Number(topicRow?.n ?? 0),
+    forumReplies: hideReplies ? null : Number(replyRow?.n ?? 0),
+  };
+}
+
+/**
  * Resolve a name (master username OR character name) to a ProfileView.
  * Used by both /whois and the HTTP profile endpoint, plus the click-to-view
  * flow on the userlist.
@@ -145,6 +258,7 @@ async function lookupProfile(
         isPublic: u.isPublic,
         isNsfw: u.isNsfw,
         createdAt: +u.createdAt,
+        metrics: await computeProfileMetrics(db, u.id, null),
       },
     };
   }
@@ -185,6 +299,7 @@ async function lookupProfile(
       isNsfw: c.isNsfw,
       createdAt: +c.createdAt,
       updatedAt: +c.updatedAt,
+      metrics: await computeProfileMetrics(db, c.userId, c.id),
     },
   };
 }
@@ -249,6 +364,7 @@ async function lookupRandomProfile(
         isPublic: u.isPublic,
         isNsfw: u.isNsfw,
         createdAt: +u.createdAt,
+        metrics: await computeProfileMetrics(db, u.id, null),
       },
     };
   }
@@ -286,6 +402,7 @@ async function lookupRandomProfile(
       isNsfw: c.isNsfw,
       createdAt: +c.createdAt,
       updatedAt: +c.updatedAt,
+      metrics: await computeProfileMetrics(db, c.userId, c.id),
     },
   };
 }

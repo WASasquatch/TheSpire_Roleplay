@@ -25,6 +25,8 @@ export default defineConfig({
       "/site": "http://localhost:3001",
       "/rules": "http://localhost:3001",
       "/thesaurus": "http://localhost:3001",
+      "/earning": "http://localhost:3001",
+      "/mentions": "http://localhost:3001",
       "/socket.io": {
         target: "http://localhost:3001",
         ws: true,

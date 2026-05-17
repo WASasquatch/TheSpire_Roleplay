@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Gender } from "../lib/gender.js";
 import { genderGlyph } from "../lib/gender.js";
-import { Modal } from "./Modal.js";
+import { useEarning } from "../state/earning.js";
+import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
+import { CloseButton } from "./CloseButton.js";
+import { RankSigil } from "./RankSigil.js";
 
 export interface UserRow {
   userId: string;
@@ -15,8 +18,16 @@ export interface UserRow {
   activeCharacterId: string | null;
   createdAt: number;
   lastLoginAt: number | null;
+  /** Master-pool rank key — drives the per-row gem icon. Null = unranked. */
+  rankKey: string | null;
+  /** Current tier within the rank (1..N). Tier label is resolved client-side from the earning catalog. */
+  rankTier: number | null;
+  /** Lifetime visible-post count (chat + forum). Null = user opted into per-element privacy; renderer shows "private". */
+  messageCount: number | null;
   characters: Array<{ id: string; name: string; avatarUrl: string | null }>;
 }
+
+type SortMode = "online" | "messages" | "joined" | "name";
 
 interface Props {
   onClose: () => void;
@@ -39,12 +50,25 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
   const [rows, setRows] = useState<UserRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState(initialQuery ?? "");
+  // Rank filter (master-pool rank key) — "" means "any rank". Populated
+  // from the live earning catalog so admins adding / disabling ranks
+  // see the dropdown change without a code release.
+  const [rankFilter, setRankFilter] = useState<string>("");
+  const [sortMode, setSortMode] = useState<SortMode>("online");
+  const ranks = useEarning((s) => s.snapshot?.catalog.ranks ?? []);
 
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
     const handle = window.setTimeout(() => {
-      const url = q.trim() ? `/users?q=${encodeURIComponent(q.trim())}` : "/users";
+      // Build query: q + optional rank filter + sort mode. The server
+      // applies them all (rank narrows the set; sort orders the page).
+      const params = new URLSearchParams();
+      if (q.trim()) params.set("q", q.trim());
+      if (rankFilter) params.set("rank", rankFilter);
+      if (sortMode !== "online") params.set("sort", sortMode);
+      const qs = params.toString();
+      const url = qs ? `/users?${qs}` : "/users";
       fetch(url, { credentials: "include", signal: controller.signal })
         .then(async (r) => {
           if (!r.ok) throw new Error(`status ${r.status}`);
@@ -57,7 +81,7 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
         });
     }, 200); // debounce search keystrokes
     return () => { cancelled = true; controller.abort(); window.clearTimeout(handle); };
-  }, [q]);
+  }, [q, rankFilter, sortMode]);
 
   // Local count for the heading - useful when search narrows the list.
   const counts = useMemo(() => {
@@ -68,26 +92,59 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
   }, [rows]);
 
   return (
-    <Modal onClose={onClose} zIndex={50}>
+    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex h-[90vh] w-full flex-col rounded border border-keep-border bg-keep-bg shadow-xl md:w-[78vw] md:max-w-[960px]"
+        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg`}
       >
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-keep-border bg-keep-panel px-4 py-2">
-          <div className="flex items-baseline gap-2">
-            <h2 className="font-action text-lg">Users</h2>
-            <span className="text-xs text-keep-muted">
-              {counts.online} online · {counts.total} shown
-            </span>
+        <div className="flex shrink-0 flex-col gap-2 border-b border-keep-border bg-keep-panel px-4 py-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-baseline gap-2">
+              <h2 className="font-action text-lg">Users</h2>
+              <span className="text-xs text-keep-muted">
+                {counts.online} online · {counts.total} shown
+              </span>
+            </div>
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search master or character names..."
+              autoFocus
+              className="flex-1 rounded border border-keep-border bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
+            />
+            <CloseButton onClick={onClose} />
           </div>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search master or character names..."
-            autoFocus
-            className="flex-1 rounded border border-keep-border bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
-          />
-          <button onClick={onClose} className="text-sm text-keep-muted hover:text-keep-text">close</button>
+          {/* Filter + sort controls. Render even when the catalog
+              hasn't loaded (the rank dropdown just shows "Any rank"
+              and the user can still sort/search). */}
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <label className="flex items-center gap-1 text-keep-muted">
+              <span className="uppercase tracking-widest">Rank</span>
+              <select
+                value={rankFilter}
+                onChange={(e) => setRankFilter(e.target.value)}
+                className="rounded border border-keep-border bg-keep-bg px-1.5 py-0.5 text-keep-text outline-none focus:border-keep-action"
+              >
+                <option value="">Any rank</option>
+                {ranks.map((r) => (
+                  <option key={r.key} value={r.key}>{r.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1 text-keep-muted">
+              <span className="uppercase tracking-widest">Sort</span>
+              <select
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as SortMode)}
+                className="rounded border border-keep-border bg-keep-bg px-1.5 py-0.5 text-keep-text outline-none focus:border-keep-action"
+              >
+                <option value="online">Online first</option>
+                <option value="messages">Most active</option>
+                <option value="joined">Newest</option>
+                <option value="name">Name (A–Z)</option>
+              </select>
+            </label>
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -105,35 +162,52 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
                     <button
                       type="button"
                       onClick={() => onOpenName(u.username)}
-                      className="flex items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-keep-panel"
+                      className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-keep-panel"
                       title={`View ${u.username}'s profile`}
                     >
-                      <span aria-hidden style={{ color: genderGlyph(u.gender).color }}>{genderGlyph(u.gender).icon}</span>
+                      {/* Rank gem replaces the gender icon when the
+                          user has a rank, matching the in-chat rule.
+                          Falls back to the gender glyph for unranked
+                          accounts so the row is never icon-less. */}
+                      {u.rankKey ? (
+                        <RankSigil rankKey={u.rankKey} tier={u.rankTier} size="md" variant="gem" />
+                      ) : (
+                        <span aria-hidden style={{ color: genderGlyph(u.gender).color }}>{genderGlyph(u.gender).icon}</span>
+                      )}
                       <span
-                        className="font-semibold"
+                        className="truncate font-semibold"
                         style={u.chatColor ? { color: u.chatColor } : undefined}
                       >
                         {u.username}
                       </span>
                       {u.online ? (
-                        <span className="ml-1 inline-block h-2 w-2 rounded-full bg-keep-action" title="online" />
+                        <span className="ml-1 inline-block h-2 w-2 shrink-0 rounded-full bg-keep-action" title="online" />
                       ) : (
-                        <span className="ml-1 inline-block h-2 w-2 rounded-full bg-keep-muted/40" title="offline" />
+                        <span className="ml-1 inline-block h-2 w-2 shrink-0 rounded-full bg-keep-muted/40" title="offline" />
                       )}
                       {u.away ? (
                         <span
-                          className="ml-1 rounded bg-keep-system/15 px-1 text-[10px] uppercase tracking-widest text-keep-system"
+                          className="ml-1 shrink-0 rounded bg-keep-system/15 px-1 text-[10px] uppercase tracking-widest text-keep-system"
                           title={u.awayMessage ?? ""}
                         >
                           away
                         </span>
                       ) : null}
                     </button>
-                    <span className="text-[10px] text-keep-muted tabular-nums">
-                      {u.lastLoginAt
-                        ? `seen ${new Date(u.lastLoginAt).toLocaleDateString()}`
-                        : `joined ${new Date(u.createdAt).toLocaleDateString()}`}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-2 text-[10px] text-keep-muted tabular-nums">
+                      {/* Lifetime visible-post count. "0" still shows
+                          (it IS information: this user has signed up
+                          but never posted). */}
+                      <span title={u.messageCount === null ? "Posts hidden by user" : "Lifetime posts (chat + forum)"}>
+                        {u.messageCount === null ? "private" : `${u.messageCount.toLocaleString()} posts`}
+                      </span>
+                      <span aria-hidden className="text-keep-rule">·</span>
+                      <span>
+                        {u.lastLoginAt
+                          ? `seen ${new Date(u.lastLoginAt).toLocaleDateString()}`
+                          : `joined ${new Date(u.createdAt).toLocaleDateString()}`}
+                      </span>
+                    </div>
                   </div>
 
                   {u.characters.length ? (

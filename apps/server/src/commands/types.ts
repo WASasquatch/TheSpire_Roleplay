@@ -40,6 +40,28 @@ export interface CommandContext {
    *  the current set of inline-enabled custom commands without each
    *  handler needing to import the registry directly. */
   registry: CommandRegistry;
+  /**
+   * Forum-thread context the dispatcher hydrated from the chat:input
+   * payload. Set ONLY when:
+   *   - the room is in nested (forum) mode
+   *   - the payload carried a `replyToId`
+   *   - the referenced parent is a valid, undeleted top-level topic in
+   *     the same room that the user is allowed to reply to
+   *
+   * When present, `addMessage` automatically attaches the reply tuple
+   * to any non-system message it persists — so `/me`, `/roll`,
+   * `/scene`, etc. all land as replies under the topic the composer
+   * was bound to instead of leaking out as new top-level posts.
+   *
+   * Undefined for flat rooms, plain top-level sends, and sends that
+   * failed the parent-validity check (the dispatcher logs but drops
+   * silently in that case).
+   */
+  replyContext?: {
+    replyToId: string;
+    replyToDisplayName: string;
+    replyToBodySnippet: string;
+  };
 }
 
 export type CommandResult = void | Promise<void>;

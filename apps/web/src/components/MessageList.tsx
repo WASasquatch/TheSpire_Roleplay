@@ -402,6 +402,25 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       selectedBorderRankKey: o.selectedBorderRankKey,
       inlineAvatarEnabled: o.inlineAvatarEnabled,
     });
+    // ALSO write the master/OOC identity (`identityKey(userId, null)`)
+    // for this user — even when the occupant row represents a
+    // character, the wire carries the user's master slot fields too.
+    // This is what lets past OOC messages from a user currently
+    // voicing a character render with the master's equipped style
+    // and cosmetics instead of falling through to plain. If the
+    // occupant IS the OOC row (characterId === null), this is a
+    // no-op overwrite of the row we just wrote.
+    const masterKey = identityKey(o.userId, null);
+    if (!styleByIdentity.has(masterKey) && o.masterNameStyleKey) {
+      styleByIdentity.set(masterKey, { key: o.masterNameStyleKey, config: o.masterNameStyleConfig });
+    }
+    if (!cosmeticsByIdentity.has(masterKey)) {
+      cosmeticsByIdentity.set(masterKey, {
+        avatarUrl: o.masterAvatarUrl,
+        selectedBorderRankKey: o.masterSelectedBorderRankKey,
+        inlineAvatarEnabled: o.masterInlineAvatarEnabled,
+      });
+    }
     // Keep a fallback by userId only for the gender map so the
     // existing default-keyed lookups elsewhere still resolve to
     // something sane for chat lines that authored before the

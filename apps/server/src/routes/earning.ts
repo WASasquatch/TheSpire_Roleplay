@@ -31,6 +31,8 @@ type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 import { nanoid } from "nanoid";
 import {
   characterEarning,
+  characterOwnedBorders,
+  characterOwnedNameStyles,
   characters,
   cosmetics,
   nameStyles,
@@ -60,6 +62,13 @@ const patchSettingsBody = z.object({
   hideCurrencyCount: z.boolean().optional(),
   hideXpCount: z.boolean().optional(),
   selectedBorderRankKey: z.string().nullable().optional(),
+  /**
+   * Per-identity scope for `selectedBorderRankKey`. Null/omitted
+   * writes the master's user_earning row; a character id writes
+   * that character's character_earning row. Ownership of the
+   * border is checked against the same scope's ownership table.
+   */
+  characterId: z.string().nullable().optional(),
 }).strict();
 
 const ackBody = z.object({
@@ -252,7 +261,11 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       if (v) characterViews.push(v);
     }
 
-    // Owned cosmetics + currently-equipped state.
+    // Owned cosmetics + currently-equipped state. Per-identity:
+    // master rows from user_owned_*, character rows from
+    // character_owned_*. Each set is independent — a master who
+    // bought Embers does NOT make their character own it, and vice
+    // versa.
     const ownedStyleRows = await db
       .select()
       .from(userOwnedNameStyles)
@@ -261,6 +274,19 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .select()
       .from(userOwnedBorders)
       .where(eq(userOwnedBorders.userId, me.id));
+    const charIdsForOwnership = charsOfMine.map((c) => c.id);
+    const charOwnedStyleRows = charIdsForOwnership.length
+      ? await db
+          .select()
+          .from(characterOwnedNameStyles)
+          .where(inArray(characterOwnedNameStyles.characterId, charIdsForOwnership))
+      : [];
+    const charOwnedBorderRows = charIdsForOwnership.length
+      ? await db
+          .select()
+          .from(characterOwnedBorders)
+          .where(inArray(characterOwnedBorders.characterId, charIdsForOwnership))
+      : [];
     const activeCosmeticsRow = (await db
       .select()
       .from(userActiveCosmetics)
@@ -332,12 +358,25 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           order: r.order,
         })),
       },
+      // Master-only owned lists (unchanged shape for back-compat).
       ownedStyles: ownedStyleRows.map((r) => ({
         styleKey: r.styleKey,
         configJson: r.configJson,
         acquiredAt: +r.acquiredAt,
       })),
       ownedBorders: ownedBorderRows.map((r) => ({
+        rankKey: r.rankKey,
+        acquiredAt: +r.acquiredAt,
+      })),
+      // Per-character owned lists, keyed by character id. Each entry
+      // mirrors the master shape. Empty maps when the character
+      // hasn't purchased anything from their own pool yet.
+      ownedStylesByCharacter: groupByCharacter(charOwnedStyleRows, (r) => ({
+        styleKey: r.styleKey,
+        configJson: r.configJson,
+        acquiredAt: +r.acquiredAt,
+      })),
+      ownedBordersByCharacter: groupByCharacter(charOwnedBorderRows, (r) => ({
         rankKey: r.rankKey,
         acquiredAt: +r.acquiredAt,
       })),
@@ -476,7 +515,51 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     try { body = patchSettingsBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
 
-    // Ensure the row exists before patching.
+    const characterId = body.characterId ?? null;
+    if (characterId) {
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+        .from(characters)
+        .where(eq(characters.id, characterId))
+        .limit(1))[0];
+      if (!c || c.userId !== me.id || c.deletedAt) {
+        reply.code(403);
+        return { error: "not your character" };
+      }
+    }
+
+    if (characterId) {
+      // Per-character path: hide flags don't apply (those are
+      // master-only privacy prefs), only the border equip routes
+      // here. Ensure the character_earning row exists.
+      await db.insert(characterEarning).values({ characterId }).onConflictDoNothing();
+      if (body.selectedBorderRankKey !== undefined) {
+        let value: string | null = null;
+        if (body.selectedBorderRankKey !== null) {
+          const owned = (await db
+            .select()
+            .from(characterOwnedBorders)
+            .where(and(
+              eq(characterOwnedBorders.characterId, characterId),
+              eq(characterOwnedBorders.rankKey, body.selectedBorderRankKey),
+            ))
+            .limit(1))[0];
+          if (!owned) {
+            reply.code(403);
+            return { error: "this character doesn't own that border" };
+          }
+          value = body.selectedBorderRankKey;
+        }
+        await db
+          .update(characterEarning)
+          .set({ selectedBorderRankKey: value, updatedAt: new Date() })
+          .where(eq(characterEarning.characterId, characterId));
+      }
+      await rebroadcastPresenceForUser(me.id);
+      return { ok: true };
+    }
+
+    // Master path — unchanged behavior.
     await db.insert(userEarning).values({ userId: me.id }).onConflictDoNothing();
 
     const update: Partial<typeof userEarning.$inferInsert> = { updatedAt: new Date() };
@@ -486,7 +569,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       if (body.selectedBorderRankKey === null) {
         update.selectedBorderRankKey = null;
       } else {
-        // Validate ownership — never accept a border the caller hasn't bought.
+        // Validate ownership against master's owned borders.
         const owned = (await db
           .select()
           .from(userOwnedBorders)
@@ -604,9 +687,21 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    *      must reference an owned + enabled style.
    * ========================================================= */
 
-  const purchaseStyleBody = z.object({}).strict().optional();
+  const purchaseStyleBody = z.object({
+    /**
+     * Per-identity purchase scope. Omit / null debits the master
+     * Currency pool and writes to `user_owned_name_styles` (the
+     * master/OOC's owned list). A character id debits that
+     * character's pool and writes to `character_owned_name_styles`.
+     * Each identity owns separately — Kaal buying Embers does NOT
+     * make WAS own it, and vice versa. Caller must own the character.
+     */
+    characterId: z.string().nullable().optional(),
+  }).strict().optional();
   const patchStyleConfigBody = z.object({
     config: z.record(z.unknown()).nullable().optional(),
+    /** Per-identity scope. Defaults to master/OOC. */
+    characterId: z.string().nullable().optional(),
   }).strict();
   const equipStyleBody = z.object({
     styleKey: z.string().nullable(),
@@ -631,32 +726,61 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     async (req, reply) => {
       const me = await getSessionUser(req, db);
       if (!me) { reply.code(401); return { error: "auth" }; }
-      try { purchaseStyleBody.parse(req.body ?? {}); }
+      let body: z.infer<typeof purchaseStyleBody> | undefined;
+      try { body = purchaseStyleBody.parse(req.body ?? {}); }
       catch { reply.code(400); return { error: "invalid body" }; }
+      const characterId = body?.characterId ?? null;
+      if (characterId) {
+        const c = (await db
+          .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters)
+          .where(eq(characters.id, characterId))
+          .limit(1))[0];
+        if (!c || c.userId !== me.id || c.deletedAt) {
+          reply.code(403);
+          return { error: "not your character" };
+        }
+      }
 
       // Entire purchase runs in one sqlite transaction so the funds
       // check, ownership insert, currency debit, and ledger insert
-      // can't race against another concurrent purchase by the same
-      // user. Earlier version did read → check → insert without a
-      // transaction; a parallel buy could spend the same Currency
-      // twice.
+      // can't race. Per-identity scope routes to the right ownership
+      // table (`user_owned_*` for master, `character_owned_*` for a
+      // character) and debits the matching pool.
       const outcome = runPurchaseTxn(db, me.id, {
+        characterId,
         validate: (tx) => {
           const style = tx.select().from(nameStyles).where(eq(nameStyles.key, req.params.key)).limit(1).all()[0];
           if (!style || !style.enabled) return { ok: false, status: 404, error: "style not found or disabled" };
-          const already = tx.select().from(userOwnedNameStyles).where(and(
-            eq(userOwnedNameStyles.userId, me.id),
-            eq(userOwnedNameStyles.styleKey, req.params.key),
-          )).limit(1).all()[0];
-          if (already) return { ok: false, status: 409, error: "already owned" };
+          if (characterId) {
+            const already = tx.select().from(characterOwnedNameStyles).where(and(
+              eq(characterOwnedNameStyles.characterId, characterId),
+              eq(characterOwnedNameStyles.styleKey, req.params.key),
+            )).limit(1).all()[0];
+            if (already) return { ok: false, status: 409, error: "already owned" };
+          } else {
+            const already = tx.select().from(userOwnedNameStyles).where(and(
+              eq(userOwnedNameStyles.userId, me.id),
+              eq(userOwnedNameStyles.styleKey, req.params.key),
+            )).limit(1).all()[0];
+            if (already) return { ok: false, status: 409, error: "already owned" };
+          }
           return { ok: true, cost: style.cost };
         },
         grant: (tx) => {
-          tx.insert(userOwnedNameStyles).values({
-            userId: me.id,
-            styleKey: req.params.key,
-            configJson: null,
-          }).run();
+          if (characterId) {
+            tx.insert(characterOwnedNameStyles).values({
+              characterId,
+              styleKey: req.params.key,
+              configJson: null,
+            }).run();
+          } else {
+            tx.insert(userOwnedNameStyles).values({
+              userId: me.id,
+              styleKey: req.params.key,
+              configJson: null,
+            }).run();
+          }
         },
         reason: `purchase_${req.params.key}`,
         metadata: { kind: "name_style", styleKey: req.params.key },
@@ -667,7 +791,14 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           ? { error: outcome.error, required: outcome.required, balance: outcome.balance }
           : { error: outcome.error };
       }
-      await emitWalletUpdate(io, me.id, outcome.final, -outcome.cost, `purchase_${req.params.key}`);
+      await emitWalletUpdate(
+        io,
+        me.id,
+        outcome.final,
+        -outcome.cost,
+        `purchase_${req.params.key}`,
+        characterId ? { scope: "character", ownerId: characterId } : { scope: "user" },
+      );
       return { ok: true };
     },
   );
@@ -681,19 +812,45 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       try { body = patchStyleConfigBody.parse(req.body); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
 
-      const owned = (await db
-        .select()
-        .from(userOwnedNameStyles)
-        .where(and(eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, req.params.key)))
-        .limit(1))[0];
-      if (!owned) {
-        reply.code(404);
-        return { error: "not owned" };
+      const characterId = body.characterId ?? null;
+      if (characterId) {
+        const c = (await db
+          .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters)
+          .where(eq(characters.id, characterId))
+          .limit(1))[0];
+        if (!c || c.userId !== me.id || c.deletedAt) {
+          reply.code(403);
+          return { error: "not your character" };
+        }
+        const owned = (await db
+          .select()
+          .from(characterOwnedNameStyles)
+          .where(and(
+            eq(characterOwnedNameStyles.characterId, characterId),
+            eq(characterOwnedNameStyles.styleKey, req.params.key),
+          ))
+          .limit(1))[0];
+        if (!owned) { reply.code(404); return { error: "not owned" }; }
+        await db
+          .update(characterOwnedNameStyles)
+          .set({ configJson: body.config ? JSON.stringify(body.config) : null })
+          .where(and(
+            eq(characterOwnedNameStyles.characterId, characterId),
+            eq(characterOwnedNameStyles.styleKey, req.params.key),
+          ));
+      } else {
+        const owned = (await db
+          .select()
+          .from(userOwnedNameStyles)
+          .where(and(eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, req.params.key)))
+          .limit(1))[0];
+        if (!owned) { reply.code(404); return { error: "not owned" }; }
+        await db
+          .update(userOwnedNameStyles)
+          .set({ configJson: body.config ? JSON.stringify(body.config) : null })
+          .where(and(eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, req.params.key)));
       }
-      await db
-        .update(userOwnedNameStyles)
-        .set({ configJson: body.config ? JSON.stringify(body.config) : null })
-        .where(and(eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, req.params.key)));
       // Style config (colors / glow / outline) feeds straight into the
       // occupant payload's `activeStyleConfig`, so a refresh here lands
       // the tweak live without a peer-side reload.
@@ -710,16 +867,31 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
 
     if (body.styleKey) {
-      // Validate ownership + enabled. Ownership remains account-wide
-      // so the check stays keyed on userId; the equip slot below is
-      // what partitions per-identity. Disabled styles surface a
-      // clean 409 rather than leaving a no-op active key on the row.
-      const owned = (await db
-        .select()
-        .from(userOwnedNameStyles)
-        .where(and(eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, body.styleKey)))
-        .limit(1))[0];
-      if (!owned) { reply.code(403); return { error: "you don't own that style" }; }
+      // Ownership check scoped to the same identity we're about to
+      // equip on. Master/OOC reads user_owned_name_styles; per-
+      // character reads character_owned_name_styles. The same
+      // styleKey can be owned by one identity and not the other
+      // since migration 0086, so a master's purchase does NOT let
+      // a character equip the same style — they have to buy it
+      // from their own pool.
+      if (body.characterId) {
+        const owned = (await db
+          .select()
+          .from(characterOwnedNameStyles)
+          .where(and(
+            eq(characterOwnedNameStyles.characterId, body.characterId),
+            eq(characterOwnedNameStyles.styleKey, body.styleKey),
+          ))
+          .limit(1))[0];
+        if (!owned) { reply.code(403); return { error: "this character doesn't own that style" }; }
+      } else {
+        const owned = (await db
+          .select()
+          .from(userOwnedNameStyles)
+          .where(and(eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, body.styleKey)))
+          .limit(1))[0];
+        if (!owned) { reply.code(403); return { error: "you don't own that style" }; }
+      }
       const style = (await db
         .select({ enabled: nameStyles.enabled })
         .from(nameStyles)
@@ -814,24 +986,33 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   }).strict();
 
   /**
-   * Helper: has the caller ever purchased this cosmetic? We use the
-   * ledger as the source of truth (immutable audit), rather than a
-   * separate ownership table, so admin grants + future unique cases
-   * (free promo cosmetics, etc.) all flow through the same path.
+   * Helper: has this identity (master user OR character) ever
+   * purchased this cosmetic? We use the ledger as the source of
+   * truth — `scope` + `ownerId` partition by identity, so each
+   * character has its own "ever purchased" history. Admin grants
+   * and free promo cosmetics still flow through the same ledger
+   * insert.
    */
-  async function hasPurchased(userId: string, cosmeticKey: string): Promise<boolean> {
+  async function hasPurchased(scope: "user" | "character", ownerId: string, cosmeticKey: string): Promise<boolean> {
     const reason = `purchase_${cosmeticKey}`;
     const r = (await db
       .select({ id: earningLedger.id })
       .from(earningLedger)
       .where(and(
-        eq(earningLedger.scope, "user"),
-        eq(earningLedger.ownerId, userId),
+        eq(earningLedger.scope, scope),
+        eq(earningLedger.ownerId, ownerId),
         eq(earningLedger.reason, reason),
       ))
       .limit(1))[0];
     return !!r;
   }
+
+  const purchaseCosmeticBody = z.object({
+    /** Per-identity scope. Master/OOC if null; character id debits
+     *  that character's pool and grants ownership scoped to the
+     *  character (ledger row with scope="character"). */
+    characterId: z.string().nullable().optional(),
+  }).strict().optional();
 
   app.post<{ Params: { key: string }; Body: unknown }>(
     "/earning/me/cosmetics/:key/purchase",
@@ -847,34 +1028,65 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         reply.code(404);
         return { error: "unknown cosmetic key" };
       }
+      let body: z.infer<typeof purchaseCosmeticBody> | undefined;
+      try { body = purchaseCosmeticBody.parse(req.body ?? {}); }
+      catch { reply.code(400); return { error: "invalid body" }; }
+      const characterId = body?.characterId ?? null;
+      if (characterId) {
+        const c = (await db
+          .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters)
+          .where(eq(characters.id, characterId))
+          .limit(1))[0];
+        if (!c || c.userId !== me.id || c.deletedAt) {
+          reply.code(403);
+          return { error: "not your character" };
+        }
+      }
       const outcome = runPurchaseTxn(db, me.id, {
+        characterId,
         validate: (tx) => {
           const cosmetic = tx.select().from(cosmetics).where(eq(cosmetics.key, req.params.key)).limit(1).all()[0];
           if (!cosmetic || !cosmetic.enabled) return { ok: false, status: 404, error: "cosmetic not found or disabled" };
-          // Ownership check via the ledger: a prior purchase row is the
-          // canonical record. Looks up via a single indexed query.
-          const existingPurchase = tx.select({ id: earningLedger.id }).from(earningLedger).where(and(
-            eq(earningLedger.scope, "user"),
-            eq(earningLedger.ownerId, me.id),
-            eq(earningLedger.reason, `purchase_${req.params.key}`),
-          )).limit(1).all()[0];
+          // Per-identity ownership check. Master's prior purchase
+          // does NOT count as ownership for a character (and vice
+          // versa) — each identity has its own ledger trail.
+          const existingPurchase = characterId
+            ? tx.select({ id: earningLedger.id }).from(earningLedger).where(and(
+                eq(earningLedger.scope, "character"),
+                eq(earningLedger.ownerId, characterId),
+                eq(earningLedger.reason, `purchase_${req.params.key}`),
+              )).limit(1).all()[0]
+            : tx.select({ id: earningLedger.id }).from(earningLedger).where(and(
+                eq(earningLedger.scope, "user"),
+                eq(earningLedger.ownerId, me.id),
+                eq(earningLedger.reason, `purchase_${req.params.key}`),
+              )).limit(1).all()[0];
           if (existingPurchase) return { ok: false, status: 409, error: "already owned" };
           return { ok: true, cost: cosmetic.cost };
         },
         grant: (tx) => {
-          // Auto-enable on first purchase so the buy → see-it-immediately
-          // loop works without an extra equip click.
-          const existing = tx.select().from(userActiveCosmetics).where(eq(userActiveCosmetics.userId, me.id)).limit(1).all()[0];
-          if (existing) {
-            tx.update(userActiveCosmetics)
-              .set({ inlineAvatarEnabled: true, updatedAt: new Date() })
-              .where(eq(userActiveCosmetics.userId, me.id))
-              .run();
-          } else {
-            tx.insert(userActiveCosmetics).values({
-              userId: me.id,
-              inlineAvatarEnabled: true,
+          // Auto-enable on first purchase, writing to the right
+          // identity's slot (character_earning when character-scoped,
+          // user_active_cosmetics for master/OOC).
+          if (characterId) {
+            tx.insert(characterEarning).values({ characterId, inlineAvatarEnabled: true }).onConflictDoUpdate({
+              target: characterEarning.characterId,
+              set: { inlineAvatarEnabled: true, updatedAt: new Date() },
             }).run();
+          } else {
+            const existing = tx.select().from(userActiveCosmetics).where(eq(userActiveCosmetics.userId, me.id)).limit(1).all()[0];
+            if (existing) {
+              tx.update(userActiveCosmetics)
+                .set({ inlineAvatarEnabled: true, updatedAt: new Date() })
+                .where(eq(userActiveCosmetics.userId, me.id))
+                .run();
+            } else {
+              tx.insert(userActiveCosmetics).values({
+                userId: me.id,
+                inlineAvatarEnabled: true,
+              }).run();
+            }
           }
         },
         reason: `purchase_${req.params.key}`,
@@ -886,10 +1098,14 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           ? { error: outcome.error, required: outcome.required, balance: outcome.balance }
           : { error: outcome.error };
       }
-      await emitWalletUpdate(io, me.id, outcome.final, -outcome.cost, `purchase_${req.params.key}`);
-      // Inline-avatar purchase auto-enables the cosmetic in the grant
-      // step, so peers need a fresh occupant snapshot to see the new
-      // avatar tile appear on the user's chat lines without reload.
+      await emitWalletUpdate(
+        io,
+        me.id,
+        outcome.final,
+        -outcome.cost,
+        `purchase_${req.params.key}`,
+        characterId ? { scope: "character", ownerId: characterId } : { scope: "user" },
+      );
       await rebroadcastPresenceForUser(me.id);
       return { ok: true };
     },
@@ -907,10 +1123,8 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       let body: z.infer<typeof equipCosmeticBody>;
       try { body = equipCosmeticBody.parse(req.body); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
-      if (body.enabled && !(await hasPurchased(me.id, req.params.key))) {
-        reply.code(403);
-        return { error: "purchase required" };
-      }
+      // Per-identity purchase check — character-scoped equip requires
+      // the CHARACTER to have purchased; master-scoped requires master.
       if (body.characterId) {
         const c = (await db
           .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
@@ -921,6 +1135,10 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           reply.code(403);
           return { error: "not your character" };
         }
+        if (body.enabled && !(await hasPurchased("character", body.characterId, req.params.key))) {
+          reply.code(403);
+          return { error: "this character hasn't purchased it" };
+        }
         await db
           .insert(characterEarning)
           .values({ characterId: c.id, inlineAvatarEnabled: body.enabled })
@@ -929,6 +1147,10 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             set: { inlineAvatarEnabled: body.enabled, updatedAt: new Date() },
           });
       } else {
+        if (body.enabled && !(await hasPurchased("user", me.id, req.params.key))) {
+          reply.code(403);
+          return { error: "purchase required" };
+        }
         const existing = (await db
           .select()
           .from(userActiveCosmetics)
@@ -971,14 +1193,38 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    *  validation, so we just reuse that for unequip / switch.
    * ========================================================= */
 
-  app.post<{ Params: { rankKey: string } }>(
+  const purchaseBorderBody = z.object({
+    /** Per-identity purchase scope, same shape as the style purchase
+     *  endpoint. Null/omitted = master; character id = that character
+     *  pays from their own pool and owns the border in
+     *  `character_owned_borders`. */
+    characterId: z.string().nullable().optional(),
+  }).strict().optional();
+
+  app.post<{ Params: { rankKey: string }; Body: unknown }>(
     "/earning/me/borders/:rankKey/purchase",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
       if (!me) { reply.code(401); return { error: "auth" }; }
       const rankKey = req.params.rankKey;
+      let body: z.infer<typeof purchaseBorderBody> | undefined;
+      try { body = purchaseBorderBody.parse(req.body ?? {}); }
+      catch { reply.code(400); return { error: "invalid body" }; }
+      const characterId = body?.characterId ?? null;
+      if (characterId) {
+        const c = (await db
+          .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters)
+          .where(eq(characters.id, characterId))
+          .limit(1))[0];
+        if (!c || c.userId !== me.id || c.deletedAt) {
+          reply.code(403);
+          return { error: "not your character" };
+        }
+      }
 
       const outcome = runPurchaseTxn(db, me.id, {
+        characterId,
         validate: (tx) => {
           const rankRow = tx.select().from(ranks).where(eq(ranks.key, rankKey)).limit(1).all()[0];
           if (!rankRow) return { ok: false, status: 404, error: "rank not found" };
@@ -989,12 +1235,20 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           if (!tier4 || !tier4.borderImageUrl || tier4.borderCost == null) {
             return { ok: false, status: 404, error: "no border configured for this rank" };
           }
-          // Lazy create earning row before reading peak.
-          tx.insert(userEarning).values({ userId: me.id }).onConflictDoNothing().run();
-          const earning = tx.select().from(userEarning).where(eq(userEarning.userId, me.id)).limit(1).all()[0]!;
-          // Eligibility: peaked at this rank's Tier IV, OR climbed past
-          // (peak order > target order means every lower capstone was
-          // necessarily traversed).
+          // Eligibility: read peak rank from the scope-appropriate
+          // earning row. Characters earn their own rank progression,
+          // so a character that hasn't peaked at Tier IV can't buy
+          // its own border even if their master has.
+          let earning: { maxRankKeyEverHeld: string | null; maxTierEverHeld: number | null };
+          if (characterId) {
+            tx.insert(characterEarning).values({ characterId }).onConflictDoNothing().run();
+            const row = tx.select().from(characterEarning).where(eq(characterEarning.characterId, characterId)).limit(1).all()[0]!;
+            earning = { maxRankKeyEverHeld: row.maxRankKeyEverHeld, maxTierEverHeld: row.maxTierEverHeld };
+          } else {
+            tx.insert(userEarning).values({ userId: me.id }).onConflictDoNothing().run();
+            const row = tx.select().from(userEarning).where(eq(userEarning.userId, me.id)).limit(1).all()[0]!;
+            earning = { maxRankKeyEverHeld: row.maxRankKeyEverHeld, maxTierEverHeld: row.maxTierEverHeld };
+          }
           let eligible = false;
           if (earning.maxRankKeyEverHeld === rankKey && (earning.maxTierEverHeld ?? 0) >= 4) {
             eligible = true;
@@ -1009,27 +1263,43 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               error: "Reach Tier IV of this rank before purchasing its border.",
             };
           }
-          const already = tx.select().from(userOwnedBorders).where(and(
-            eq(userOwnedBorders.userId, me.id),
-            eq(userOwnedBorders.rankKey, rankKey),
-          )).limit(1).all()[0];
-          if (already) return { ok: false, status: 409, error: "already owned" };
+          // Already-owned check against the scope-appropriate table.
+          if (characterId) {
+            const already = tx.select().from(characterOwnedBorders).where(and(
+              eq(characterOwnedBorders.characterId, characterId),
+              eq(characterOwnedBorders.rankKey, rankKey),
+            )).limit(1).all()[0];
+            if (already) return { ok: false, status: 409, error: "already owned" };
+          } else {
+            const already = tx.select().from(userOwnedBorders).where(and(
+              eq(userOwnedBorders.userId, me.id),
+              eq(userOwnedBorders.rankKey, rankKey),
+            )).limit(1).all()[0];
+            if (already) return { ok: false, status: 409, error: "already owned" };
+          }
           return { ok: true, cost: tier4.borderCost };
         },
         grant: (tx) => {
-          tx.insert(userOwnedBorders).values({
-            userId: me.id,
-            rankKey,
-          }).onConflictDoNothing().run();
-          // Auto-equip on first purchase so the user sees the border
-          // immediately. They can change later via PATCH
-          // /earning/me/settings { selectedBorderRankKey }.
-          const cur = tx.select({ selected: userEarning.selectedBorderRankKey }).from(userEarning).where(eq(userEarning.userId, me.id)).limit(1).all()[0];
-          if (!cur?.selected) {
-            tx.update(userEarning)
-              .set({ selectedBorderRankKey: rankKey, updatedAt: new Date() })
-              .where(eq(userEarning.userId, me.id))
-              .run();
+          if (characterId) {
+            tx.insert(characterOwnedBorders).values({ characterId, rankKey }).onConflictDoNothing().run();
+            // Auto-equip on first character purchase. Reads /
+            // writes `character_earning.selected_border_rank_key`.
+            const cur = tx.select({ selected: characterEarning.selectedBorderRankKey }).from(characterEarning).where(eq(characterEarning.characterId, characterId)).limit(1).all()[0];
+            if (!cur?.selected) {
+              tx.update(characterEarning)
+                .set({ selectedBorderRankKey: rankKey, updatedAt: new Date() })
+                .where(eq(characterEarning.characterId, characterId))
+                .run();
+            }
+          } else {
+            tx.insert(userOwnedBorders).values({ userId: me.id, rankKey }).onConflictDoNothing().run();
+            const cur = tx.select({ selected: userEarning.selectedBorderRankKey }).from(userEarning).where(eq(userEarning.userId, me.id)).limit(1).all()[0];
+            if (!cur?.selected) {
+              tx.update(userEarning)
+                .set({ selectedBorderRankKey: rankKey, updatedAt: new Date() })
+                .where(eq(userEarning.userId, me.id))
+                .run();
+            }
           }
         },
         reason: `border_purchase_${rankKey}`,
@@ -1041,13 +1311,17 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           ? { error: outcome.error, required: outcome.required, balance: outcome.balance }
           : { error: outcome.error };
       }
-      await emitWalletUpdate(io, me.id, outcome.final, -outcome.cost, `border_purchase_${rankKey}`);
-      // Border purchase auto-equips when the user has no border set
-      // yet (see the `grant` step above). Refresh occupants so peers
-      // see the new bordered avatar immediately. When a border was
-      // already equipped the broadcast is still cheap — no occupant
-      // shape changes — and the symmetry beats branching on the
-      // auto-equip path.
+      await emitWalletUpdate(
+        io,
+        me.id,
+        outcome.final,
+        -outcome.cost,
+        `border_purchase_${rankKey}`,
+        characterId ? { scope: "character", ownerId: characterId } : { scope: "user" },
+      );
+      // Border purchase auto-equips when the identity has no border set
+      // yet. Refresh occupants so peers see the new bordered avatar
+      // immediately.
       await rebroadcastPresenceForUser(me.id);
       return { ok: true };
     },
@@ -1056,6 +1330,26 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
 
 function safeParse(json: string): unknown {
   try { return JSON.parse(json); } catch { return null; }
+}
+
+/**
+ * Bucket character-owned rows into a `{ [characterId]: T[] }` map.
+ * Used by `/earning/me` to ship per-character ownership lists in
+ * one round trip — the dashboard reads the map indexed by the
+ * currently-active character id, falling back to the master fields
+ * when no character is active.
+ */
+function groupByCharacter<R, T>(
+  rows: readonly R[],
+  shape: (r: R) => T,
+): Record<string, T[]> {
+  const out: Record<string, T[]> = {};
+  for (const r of rows) {
+    const cid = (r as { characterId: string }).characterId;
+    const list = out[cid] ?? (out[cid] = []);
+    list.push(shape(r));
+  }
+  return out;
 }
 
 /** Outcome returned by `runPurchaseTxn`. */
@@ -1107,11 +1401,59 @@ function runPurchaseTxn(
     grant: (tx: Parameters<Parameters<Db["transaction"]>[0]>[0]) => void;
     reason: string;
     metadata: Record<string, unknown>;
+    /**
+     * Optional character scope. When set, the transaction debits the
+     * character's currency pool (`character_earning`) and tags the
+     * ledger row with scope='character'. The caller is responsible
+     * for validating that the character belongs to `userId` BEFORE
+     * calling — this helper just routes the pool. When null/omitted
+     * the original master-pool behavior runs.
+     */
+    characterId?: string | null;
   },
 ): PurchaseOutcome {
   return db.transaction((tx): PurchaseOutcome => {
     const v = opts.validate(tx);
     if (!v.ok) return { ok: false, status: v.status, error: v.error };
+    const charId = opts.characterId ?? null;
+    if (charId) {
+      // Character pool debit. Lazily ensures a character_earning row
+      // exists so brand-new characters can still purchase. The
+      // ledger row uses scope='character' + ownerId=characterId so
+      // the audit trail attributes the spend to the right identity.
+      tx.insert(characterEarning).values({ characterId: charId }).onConflictDoNothing().run();
+      const earning = tx.select().from(characterEarning).where(eq(characterEarning.characterId, charId)).limit(1).all()[0];
+      const balance = earning?.currency ?? 0;
+      if (balance < v.cost) {
+        return { ok: false, status: 402, error: "insufficient funds", required: v.cost, balance };
+      }
+      opts.grant(tx);
+      const newCurrency = balance - v.cost;
+      tx.update(characterEarning).set({
+        currency: newCurrency,
+        updatedAt: new Date(),
+      }).where(eq(characterEarning.characterId, charId)).run();
+      tx.insert(earningLedger).values({
+        id: nanoid(),
+        scope: "character",
+        ownerId: charId,
+        xpDelta: 0,
+        currencyDelta: -v.cost,
+        reason: opts.reason,
+        metadataJson: JSON.stringify({ ...opts.metadata, cost: v.cost, characterId: charId }),
+      }).run();
+      return {
+        ok: true,
+        cost: v.cost,
+        final: {
+          xp: earning?.xp ?? 0,
+          currency: newCurrency,
+          rankKey: earning?.rankKey ?? null,
+          tier: earning?.tier ?? null,
+        },
+      };
+    }
+    // Master pool path — unchanged from the original behavior.
     tx.insert(userEarning).values({ userId }).onConflictDoNothing().run();
     const earning = tx.select().from(userEarning).where(eq(userEarning.userId, userId)).limit(1).all()[0];
     const balance = earning?.currency ?? 0;
@@ -1160,14 +1502,18 @@ async function emitWalletUpdate(
   final: { xp: number; currency: number; rankKey: string | null; tier: number | null },
   currencyDelta: number,
   reason: string,
+  /** Scope of the wallet that was debited. When `scope` is "character"
+   *  the `ownerId` on the wire is the character id (not the user id);
+   *  the master-pool path keeps the existing user-scope wire shape. */
+  scope: { scope: "user"; ownerId?: undefined } | { scope: "character"; ownerId: string } = { scope: "user" },
 ): Promise<void> {
   const sockets = await io.fetchSockets();
   for (const s of sockets) {
     const uid = (s.data as { userId?: string }).userId;
     if (uid !== userId) continue;
     s.emit("earning:earned", {
-      scope: "user",
-      ownerId: userId,
+      scope: scope.scope,
+      ownerId: scope.scope === "character" ? scope.ownerId : userId,
       xpDelta: 0,
       currencyDelta,
       xpTotal: final.xp,

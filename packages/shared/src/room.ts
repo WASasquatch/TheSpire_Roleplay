@@ -85,6 +85,18 @@ export interface RoomOccupant {
   activeNameStyleKey: string | null;
   nameStyleConfig: Record<string, unknown> | null;
   /**
+   * The user's MASTER/OOC name style + config — present even when
+   * the occupant is voicing a character. The chat renderer uses
+   * this to style past messages the user authored OOC (where
+   * `message.characterId === null`) while still using the active
+   * character's style for the current row. Without this the
+   * renderer would have no master entry to look up when a user
+   * voicing a character is currently in the room, and their OOC
+   * backlog would render unstyled.
+   */
+  masterNameStyleKey: string | null;
+  masterNameStyleConfig: Record<string, unknown> | null;
+  /**
    * Earning — purchasable cosmetic state for the occupant.
    *
    *  avatarUrl                  Resolved per-identity avatar (character
@@ -103,6 +115,16 @@ export interface RoomOccupant {
   avatarUrl: string | null;
   selectedBorderRankKey: string | null;
   inlineAvatarEnabled: boolean;
+  /**
+   * Master/OOC fallbacks for the avatar + border + inline-avatar
+   * cosmetics. Same rationale as the master name-style fields
+   * above — past OOC messages from a user currently voicing a
+   * character still render with the user's master cosmetic
+   * choices, not the character's.
+   */
+  masterAvatarUrl: string | null;
+  masterSelectedBorderRankKey: string | null;
+  masterInlineAvatarEnabled: boolean;
   /**
    * Userlist display preference. When true AND the occupant has a
    * resolved rank, the rooms-tree row renders the rank sigil in place

@@ -1817,6 +1817,55 @@ export const userOwnedNameStyles = sqliteTable(
   }),
 );
 
+/* ---------- character_owned_name_styles ----------
+ * Per-character ownership ledger for name styles (migration 0086).
+ * Mirror of `user_owned_name_styles` keyed by character_id instead
+ * of user_id. Each character carries its own owned list, purchased
+ * from that character's currency pool. `configJson` holds the
+ * character's color picks for THIS style — independent of any
+ * other identity's config for the same styleKey.
+ */
+export const characterOwnedNameStyles = sqliteTable(
+  "character_owned_name_styles",
+  {
+    characterId: text("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    styleKey: text("style_key")
+      .notNull()
+      .references(() => nameStyles.key, { onDelete: "cascade" }),
+    configJson: text("config_json"),
+    acquiredAt: ts("acquired_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.characterId, t.styleKey] }),
+    characterIdx: index("character_owned_name_styles_character_idx").on(t.characterId),
+  }),
+);
+
+/* ---------- character_owned_borders ----------
+ * Per-character border ownership (migration 0086). Mirror of
+ * `user_owned_borders` keyed by character_id. Characters purchase
+ * borders from their own currency pool and equip them via the
+ * existing `character_earning.selected_border_rank_key` column.
+ */
+export const characterOwnedBorders = sqliteTable(
+  "character_owned_borders",
+  {
+    characterId: text("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    rankKey: text("rank_key")
+      .notNull()
+      .references(() => ranks.key, { onDelete: "cascade" }),
+    acquiredAt: ts("acquired_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.characterId, t.rankKey] }),
+    characterIdx: index("character_owned_borders_character_idx").on(t.characterId),
+  }),
+);
+
 /* ---------- user_active_cosmetics ----------
  * One row per user holding the currently-equipped cosmetic state.
  * Created lazily on first equip.
@@ -1901,5 +1950,7 @@ export type DbCharacterEarning = typeof characterEarning.$inferSelect;
 export type DbEarningLedger = typeof earningLedger.$inferSelect;
 export type DbUserOwnedBorder = typeof userOwnedBorders.$inferSelect;
 export type DbUserOwnedNameStyle = typeof userOwnedNameStyles.$inferSelect;
+export type DbCharacterOwnedBorder = typeof characterOwnedBorders.$inferSelect;
+export type DbCharacterOwnedNameStyle = typeof characterOwnedNameStyles.$inferSelect;
 export type DbUserActiveCosmetics = typeof userActiveCosmetics.$inferSelect;
 export type DbEarningNotification = typeof earningNotifications.$inferSelect;

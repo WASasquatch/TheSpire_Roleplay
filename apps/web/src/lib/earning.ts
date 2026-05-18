@@ -101,8 +101,14 @@ export interface EarningMeResponse {
   master: PoolView;
   characters: PoolView[];
   catalog: { ranks: RankRow[]; rankTiers: RankTierRow[]; nameStyles: NameStyleCatalogRow[] };
+  /** Master/OOC's owned styles (since migration 0086). Characters
+   *  carry their own owned lists in `ownedStylesByCharacter`. */
   ownedStyles: OwnedStyle[];
   ownedBorders: OwnedBorder[];
+  /** Per-character owned styles, keyed by character id. Empty entry
+   *  / missing key means the character hasn't bought anything yet. */
+  ownedStylesByCharacter: Record<string, OwnedStyle[]>;
+  ownedBordersByCharacter: Record<string, OwnedBorder[]>;
   activeCosmetics: ActiveCosmetics;
   notifications: RankUpRecord[];
 }
@@ -229,6 +235,10 @@ export async function patchEarningSettings(body: {
   hideCurrencyCount?: boolean;
   hideXpCount?: boolean;
   selectedBorderRankKey?: string | null;
+  /** Per-identity scope for border equip (selectedBorderRankKey).
+   *  Hide flags ignore characterId — they're master-only privacy
+   *  preferences. Null/omitted = master pool. */
+  characterId?: string | null;
 }): Promise<void> {
   const r = await fetch("/earning/me/settings", {
     method: "PATCH",
@@ -347,12 +357,17 @@ export async function deleteAdminTier(id: string): Promise<void> {
 
 /* ---------- Self — cosmetic + border purchase / equip ---------- */
 
-export async function purchaseCosmetic(key: string): Promise<void> {
+export async function purchaseCosmetic(
+  key: string,
+  /** Per-identity scope. Null = master pool drains; character id =
+   *  that character pays from their own pool. */
+  characterId: string | null = null,
+): Promise<void> {
   const r = await fetch(`/earning/me/cosmetics/${encodeURIComponent(key)}/purchase`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({}),
+    body: JSON.stringify({ characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -373,34 +388,44 @@ export async function equipCosmetic(
   if (!r.ok) throw new Error(await readError(r));
 }
 
-export async function purchaseBorder(rankKey: string): Promise<void> {
+export async function purchaseBorder(
+  rankKey: string,
+  characterId: string | null = null,
+): Promise<void> {
   const r = await fetch(`/earning/me/borders/${encodeURIComponent(rankKey)}/purchase`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({}),
+    body: JSON.stringify({ characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
 
 /* ---------- Self — name-style purchase / config / equip ---------- */
 
-export async function purchaseNameStyle(styleKey: string): Promise<void> {
+export async function purchaseNameStyle(
+  styleKey: string,
+  characterId: string | null = null,
+): Promise<void> {
   const r = await fetch(`/earning/me/name-styles/${encodeURIComponent(styleKey)}/purchase`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({}),
+    body: JSON.stringify({ characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
 
-export async function patchNameStyleConfig(styleKey: string, config: Record<string, unknown> | null): Promise<void> {
+export async function patchNameStyleConfig(
+  styleKey: string,
+  config: Record<string, unknown> | null,
+  characterId: string | null = null,
+): Promise<void> {
   const r = await fetch(`/earning/me/name-styles/${encodeURIComponent(styleKey)}/config`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ config }),
+    body: JSON.stringify({ config, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }

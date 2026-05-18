@@ -13,6 +13,7 @@ import { extractMentions, isAdminRole } from "@thekeep/shared";
 import {
   bans,
   characterEarning,
+  characterOwnedNameStyles,
   characters,
   friends,
   ignores,
@@ -1368,37 +1369,41 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
         .where(inArray(characterEarning.characterId, charIds))
     : [];
   const charBorderByChar = new Map(charBorderRows.map((r) => [r.characterId, r.selectedBorderRankKey]));
-  // Pull owned-style configs for every user who has SOME active style
-  // (master or character). Ownership is still account-wide; the per-
-  // identity active key just selects which row's config to use. We
-  // OR the two key sets so a user with a style equipped on a
-  // character but not on master still gets the config pulled.
-  const usersWithAnyActiveStyle = new Set<string>([
-    ...masterActiveStyleByUser.keys(),
-    ...charActiveRows
-      .filter((r) => r.activeNameStyleKey !== null)
-      .map((r) => {
-        const c = charById.get(r.characterId);
-        return c ? c.userId : "";
-      })
-      .filter(Boolean),
-  ]);
-  const ownedStyleRows = usersWithAnyActiveStyle.size > 0
+  // Pull owned-style configs per identity (since migration 0086).
+  // Master configs come from `user_owned_name_styles`; per-character
+  // configs come from `character_owned_name_styles`. We only fetch
+  // the rows for users / characters that actually have a style
+  // active, so the lookup is bounded by what the render loop needs.
+  const usersWithMasterStyle = [...masterActiveStyleByUser.keys()];
+  const charsWithStyle = charActiveRows
+    .filter((r) => r.activeNameStyleKey !== null)
+    .map((r) => r.characterId);
+  const masterOwnedStyleRows = usersWithMasterStyle.length > 0
     ? await db
         .select({ userId: userOwnedNameStyles.userId, styleKey: userOwnedNameStyles.styleKey, configJson: userOwnedNameStyles.configJson })
         .from(userOwnedNameStyles)
-        .where(inArray(userOwnedNameStyles.userId, [...usersWithAnyActiveStyle]))
+        .where(inArray(userOwnedNameStyles.userId, usersWithMasterStyle))
     : [];
-  // Index by (userId, styleKey) so the render loop can do a single
-  // map lookup on the user's active key.
-  const ownedConfigByUserStyle = new Map<string, Record<string, unknown> | null>();
-  for (const r of ownedStyleRows) {
-    let parsed: Record<string, unknown> | null = null;
-    if (r.configJson) {
-      try { parsed = JSON.parse(r.configJson) as Record<string, unknown>; }
-      catch { /* malformed JSON — fall back to defaults */ }
-    }
-    ownedConfigByUserStyle.set(`${r.userId}::${r.styleKey}`, parsed);
+  const charOwnedStyleRows = charsWithStyle.length > 0
+    ? await db
+        .select({ characterId: characterOwnedNameStyles.characterId, styleKey: characterOwnedNameStyles.styleKey, configJson: characterOwnedNameStyles.configJson })
+        .from(characterOwnedNameStyles)
+        .where(inArray(characterOwnedNameStyles.characterId, charsWithStyle))
+    : [];
+  // Index by identity tuple so the render loop's lookup is a single
+  // map get. Master rows use the "u::<userId>::<styleKey>" key
+  // pattern; character rows use "c::<charId>::<styleKey>".
+  const ownedConfigByIdentityStyle = new Map<string, Record<string, unknown> | null>();
+  function parseConfig(json: string | null): Record<string, unknown> | null {
+    if (!json) return null;
+    try { return JSON.parse(json) as Record<string, unknown>; }
+    catch { return null; }
+  }
+  for (const r of masterOwnedStyleRows) {
+    ownedConfigByIdentityStyle.set(`u::${r.userId}::${r.styleKey}`, parseConfig(r.configJson));
+  }
+  for (const r of charOwnedStyleRows) {
+    ownedConfigByIdentityStyle.set(`c::${r.characterId}::${r.styleKey}`, parseConfig(r.configJson));
   }
 
   // Render one occupant per resolved identity. Two characters of the
@@ -1439,18 +1444,29 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     const poolRank = c
       ? (charRankByChar.get(c.id) ?? { rankKey: null, tier: null })
       : (userRankByUser.get(u.id) ?? { rankKey: null, tier: null });
-    // Active style is per-identity since migration 0085: the
-    // character's `character_earning.active_name_style_key` when the
-    // occupant is on a character, the master's
-    // `user_active_cosmetics.active_name_style_key` when OOC. Owned
-    // styles + their config are still keyed by userId (account-wide
-    // ownership), so the config lookup uses the user id regardless
-    // of which scope supplied the style key.
+    // Active style + its config are both per-identity since
+    // migration 0086: characters read from `character_earning`
+    // (active) + `character_owned_name_styles` (config); the master
+    // reads from `user_active_cosmetics` + `user_owned_name_styles`.
+    // Each character can hold a different style than the master and
+    // tune its colors independently.
     const activeStyleKey = c
       ? (charActiveStyleByChar.get(c.id) ?? null)
       : (masterActiveStyleByUser.get(u.id) ?? null);
     const nameStyleConfig = activeStyleKey
-      ? (ownedConfigByUserStyle.get(`${u.id}::${activeStyleKey}`) ?? null)
+      ? (c
+          ? (ownedConfigByIdentityStyle.get(`c::${c.id}::${activeStyleKey}`) ?? null)
+          : (ownedConfigByIdentityStyle.get(`u::${u.id}::${activeStyleKey}`) ?? null))
+      : null;
+    // Also surface the user's MASTER slot independently. When this
+    // occupant is voicing a character, the master slot is what the
+    // renderer should use for any of the user's OOC backlog (and
+    // for OOC whispers, etc.) — without it the chat renderer has
+    // no entry for `identityKey(userId, null)` while the user is
+    // attached to a character, and OOC messages render unstyled.
+    const masterStyleKey = masterActiveStyleByUser.get(u.id) ?? null;
+    const masterStyleConfig = masterStyleKey
+      ? (ownedConfigByIdentityStyle.get(`u::${u.id}::${masterStyleKey}`) ?? null)
       : null;
     // Avatar + border + inline-avatar toggle. Avatar follows the
     // character / master fallback already used for chat-line
@@ -1464,6 +1480,13 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     const inlineAvatarEnabled = c
       ? (charInlineAvatarByChar.get(c.id) ?? false)
       : (masterInlineAvatarByUser.get(u.id) ?? false);
+    // Master-slot fallbacks for the user's OOC identity. The chat
+    // renderer indexes a separate identityKey(userId, null) entry
+    // for OOC messages; these fields populate that entry even when
+    // the occupant row represents the user's current character.
+    const masterAvatarUrl = u.avatarUrl ?? null;
+    const masterSelectedBorderRankKey = userBorderByUser.get(u.id) ?? null;
+    const masterInlineAvatarEnabled = masterInlineAvatarByUser.get(u.id) ?? false;
     out.push({
       userId: u.id,
       displayName: c ? c.name : u.username,
@@ -1486,9 +1509,14 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
       tier: u.showRankInUserlist ? poolRank.tier : null,
       activeNameStyleKey: activeStyleKey,
       nameStyleConfig,
+      masterNameStyleKey: masterStyleKey,
+      masterNameStyleConfig: masterStyleConfig,
       avatarUrl: occupantAvatarUrl,
       selectedBorderRankKey,
       inlineAvatarEnabled,
+      masterAvatarUrl,
+      masterSelectedBorderRankKey,
+      masterInlineAvatarEnabled,
       useRankAsUserlistIcon: u.useRankAsUserlistIcon,
     });
   }

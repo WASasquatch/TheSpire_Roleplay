@@ -609,21 +609,30 @@ function NameStylesTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.ge
   const [err, setErr] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const styles = snapshot.catalog.nameStyles;
+  // Owned list for the CURRENT identity (master = `ownedStyles`,
+  // character = `ownedStylesByCharacter[id]`). Each identity owns
+  // separately since migration 0086 — a master who bought Embers
+  // does NOT make their characters own it; characters have to buy
+  // from their own pool.
+  const ownedStylesForIdentity = useMemo(() => {
+    if (activeCharacterId) {
+      return snapshot.ownedStylesByCharacter?.[activeCharacterId] ?? [];
+    }
+    return snapshot.ownedStyles;
+  }, [activeCharacterId, snapshot.ownedStyles, snapshot.ownedStylesByCharacter]);
   const ownedKeys = useMemo(
-    () => new Set(snapshot.ownedStyles.map((o) => o.styleKey)),
-    [snapshot.ownedStyles],
+    () => new Set(ownedStylesForIdentity.map((o) => o.styleKey)),
+    [ownedStylesForIdentity],
   );
   const owned = styles.filter((s) => ownedKeys.has(s.key));
   const available = styles.filter((s) => !ownedKeys.has(s.key));
-  // Active equipped style for the CURRENT identity (per-character or
-  // master). The /earning/me payload carries both: top-level fields
-  // are master, `byCharacter[id]` is the per-character map.
+  // Active equipped style for the CURRENT identity.
   const activeKey = activeCharacterId
     ? (snapshot.activeCosmetics.byCharacter?.[activeCharacterId]?.activeNameStyleKey ?? null)
     : snapshot.activeCosmetics.activeNameStyleKey;
   const ownedConfigByKey = useMemo(() => {
     const out = new Map<string, Record<string, unknown> | null>();
-    for (const o of snapshot.ownedStyles) {
+    for (const o of ownedStylesForIdentity) {
       let cfg: Record<string, unknown> | null = null;
       if (o.configJson) {
         try { cfg = JSON.parse(o.configJson) as Record<string, unknown>; }
@@ -632,14 +641,17 @@ function NameStylesTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.ge
       out.set(o.styleKey, cfg);
     }
     return out;
-  }, [snapshot.ownedStyles]);
+  }, [ownedStylesForIdentity]);
 
   async function buy(key: string, cost: number) {
-    if (!window.confirm(`Buy this style for ${cost} Currency?`)) return;
+    const who = activeCharacterId ? "this character" : "your master account";
+    if (!window.confirm(`Buy this style for ${cost} Currency from ${who}'s pool?`)) return;
     setBusyKey(key);
     setErr(null);
     try {
-      await purchaseNameStyle(key);
+      // Pool drain scopes to current identity: character-active
+      // debits character_earning, OOC debits user_earning.
+      await purchaseNameStyle(key, activeCharacterId);
       await refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");
@@ -665,7 +677,7 @@ function NameStylesTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.ge
     setBusyKey(key);
     setErr(null);
     try {
-      await patchNameStyleConfig(key, config);
+      await patchNameStyleConfig(key, config, activeCharacterId);
       await refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Save failed");
@@ -674,7 +686,16 @@ function NameStylesTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.ge
     }
   }
 
-  const previewName = me?.username ?? "Username";
+  // Preview name reflects the current identity — the active
+  // character's display name when one is active, otherwise the
+  // master username. The character display name comes from the
+  // snapshot's `characters[]` pool view (ownerId === characterId
+  // for character pools).
+  const activeCharacterDisplayName = useMemo(() => {
+    if (!activeCharacterId) return null;
+    return snapshot.characters.find((c) => c.ownerId === activeCharacterId)?.displayName ?? null;
+  }, [activeCharacterId, snapshot.characters]);
+  const previewName = activeCharacterDisplayName || me?.username || "Username";
 
   return (
     <div className="space-y-3">
@@ -869,7 +890,12 @@ function AvailableStyleCard({
         </button>
       </div>
       <div className="mt-3 rounded border border-keep-rule/60 bg-keep-bg/60 px-3 py-2 text-2xl font-bold">
-        <StyledName displayName={previewName} styleKey={style.key} config={{ color1: "#ff7a45", color2: "#ffb47a", glow: "rgba(255,170,80,0.6)" }} />
+        {/* No config override — each style paints in its catalog
+            defaults (Embers → fire orange, Neon Sign → neon pink,
+            Aurora → tropical, etc.). The Available preview used to
+            hardcode an orange palette which made every style look
+            like a fire variant regardless of its actual design. */}
+        <StyledName displayName={previewName} styleKey={style.key} config={null} />
       </div>
     </div>
   );
@@ -908,6 +934,12 @@ function normalizeHex(s: string): string {
 
 function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {} }) {
   const refresh = useEarning((s) => s.refresh);
+  // Per-identity scope: borders are partitioned the same way name
+  // styles are. The active character buys / equips from its own
+  // character_earning pool; the master/OOC buys / equips from
+  // user_earning. Ownership lives in `character_owned_borders` or
+  // `user_owned_borders` accordingly.
+  const activeCharacterId = useChat((s) => s.activeCharacterId);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // Pull the viewer's own avatar from the room-occupant cosmetics
@@ -926,11 +958,27 @@ function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getSt
     return null;
   });
 
+  // Owned + equipped border for the CURRENT identity. Character
+  // active = pull from `ownedBordersByCharacter[id]` and
+  // `characters[i].selectedBorderRankKey`; OOC/master = pull from
+  // `ownedBorders` and `master.selectedBorderRankKey`.
+  const activeCharacterView = useMemo(() => {
+    if (!activeCharacterId) return null;
+    return snapshot.characters.find((c) => c.ownerId === activeCharacterId) ?? null;
+  }, [activeCharacterId, snapshot.characters]);
+  const ownedBordersForIdentity = useMemo(() => {
+    if (activeCharacterId) {
+      return snapshot.ownedBordersByCharacter?.[activeCharacterId] ?? [];
+    }
+    return snapshot.ownedBorders;
+  }, [activeCharacterId, snapshot.ownedBorders, snapshot.ownedBordersByCharacter]);
   const ownedKeys = useMemo(
-    () => new Set(snapshot.ownedBorders.map((b) => b.rankKey)),
-    [snapshot.ownedBorders],
+    () => new Set(ownedBordersForIdentity.map((b) => b.rankKey)),
+    [ownedBordersForIdentity],
   );
-  const selectedKey = snapshot.master.selectedBorderRankKey;
+  const selectedKey = activeCharacterId
+    ? (activeCharacterView?.selectedBorderRankKey ?? null)
+    : snapshot.master.selectedBorderRankKey;
 
   // Capstone tiers (Tier IV with a borderImageUrl + cost).
   const capstones = useMemo(() => {
@@ -944,11 +992,17 @@ function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getSt
       .sort((a, b) => a.rank!.order - b.rank!.order);
   }, [snapshot.catalog]);
 
-  // Eligibility map. We pre-compute it once rather than per-card
-  // because the calculation walks the rank order list.
+  // Eligibility against the CURRENT identity's peak rank/tier — a
+  // character that hasn't peaked at Tier IV can't buy its own
+  // border even when the master has. Mirrors the server-side check
+  // in the border purchase handler.
   const eligibleKeys = useMemo(() => {
-    const peakKey = snapshot.master.maxRankKeyEverHeld;
-    const peakTier = snapshot.master.maxTierEverHeld ?? 0;
+    const peakKey = activeCharacterId
+      ? (activeCharacterView?.maxRankKeyEverHeld ?? null)
+      : snapshot.master.maxRankKeyEverHeld;
+    const peakTier = activeCharacterId
+      ? (activeCharacterView?.maxTierEverHeld ?? 0)
+      : (snapshot.master.maxTierEverHeld ?? 0);
     if (!peakKey) return new Set<string>();
     const peakRank = snapshot.catalog.ranks.find((r) => r.key === peakKey);
     if (!peakRank) return new Set<string>();
@@ -958,14 +1012,15 @@ function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getSt
       else if (r.order === peakRank.order && peakTier >= 4) out.add(r.key);
     }
     return out;
-  }, [snapshot.master.maxRankKeyEverHeld, snapshot.master.maxTierEverHeld, snapshot.catalog.ranks]);
+  }, [activeCharacterId, activeCharacterView, snapshot.master, snapshot.catalog.ranks]);
 
   async function buy(rankKey: string) {
-    if (!window.confirm("Buy this rank's border?")) return;
+    const who = activeCharacterId ? "this character" : "your master account";
+    if (!window.confirm(`Buy this rank's border from ${who}'s pool?`)) return;
     setBusyKey(rankKey);
     setErr(null);
     try {
-      await purchaseBorder(rankKey);
+      await purchaseBorder(rankKey, activeCharacterId);
       await refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");
@@ -978,7 +1033,7 @@ function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getSt
     setBusyKey(rankKey ?? "__unequip__");
     setErr(null);
     try {
-      await patchEarningSettings({ selectedBorderRankKey: rankKey });
+      await patchEarningSettings({ selectedBorderRankKey: rankKey, characterId: activeCharacterId });
       await refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Equip failed");
@@ -1224,11 +1279,12 @@ function CosmeticsTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.get
     : masterEnabled;
 
   async function doBuy() {
-    if (!window.confirm(`Buy "${inlineAvatarRow!.name}" for ${inlineAvatarRow!.cost} Currency?`)) return;
+    const who = activeCharacterId ? "this character" : "your master account";
+    if (!window.confirm(`Buy "${inlineAvatarRow!.name}" for ${inlineAvatarRow!.cost} Currency from ${who}'s pool?`)) return;
     setBusy(true);
     setErr(null);
     try {
-      await purchaseCosmetic("inline_avatar");
+      await purchaseCosmetic("inline_avatar", activeCharacterId);
       await refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");

@@ -492,6 +492,25 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.filter = `drop-shadow(0 -2px 5px ${glow})`;
   }
 
+  // Neon Sign — lit state baked. Solid color face + neon-pink halo
+  // via text-shadow (inner) and drop-shadow filter (outer). The
+  // flicker keyframes live in the catalog rule; this fallback just
+  // makes sure the lit look is right when the catalog CSS hasn't
+  // landed yet (the name reads as a static glowing sign until then,
+  // then starts cycling once the cascade applies).
+  if (c1 && className === "ns-neon-sign") {
+    out.color = c1;
+    const neonGlow = cssVars["--user-glow"] ?? "#ff1493";
+    out.textShadow = `0 0 2px ${neonGlow}, 0 0 6px ${neonGlow}, 0 0 12px ${neonGlow}`;
+    // Static lit-state filter. Migration 0092 collapsed the
+    // dim-breath + dead-blip flicker into a single animation that
+    // explicitly sets filter on every keyframe, so the inline
+    // baker fallback just needs to render the lit baseline for
+    // the brief moment before the catalog rule loads and takes
+    // over via its keyframes.
+    out.filter = `drop-shadow(0 0 2px ${neonGlow}) drop-shadow(0 0 5px ${neonGlow})`;
+  }
+
   // Shadow + glow filters re-baked with the glow color literal so
   // they show even when the CSS-var cascade misses. Widths kept in
   // lockstep with migration 0080's softened catalog values.

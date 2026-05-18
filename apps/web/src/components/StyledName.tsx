@@ -105,6 +105,15 @@ export function StyledName({ displayName, styleKey, config, baseColor, overrideR
     if (!tag) {
       tag = document.createElement("style");
       tag.setAttribute("data-name-style-instance", instanceClass);
+      // Stamp the CSP nonce so strict prod `style-src 'self' 'nonce-…'`
+      // doesn't block this dynamic stylesheet. The meta tag carrying
+      // the nonce is rendered server-side into the SPA shell; we
+      // re-read it here on each per-instance style creation rather
+      // than caching, since the nonce rotates per response and a
+      // page reload may have landed a fresh one.
+      const nonceMeta = document.head.querySelector('meta[name="csp-nonce"]') as HTMLMetaElement | null;
+      const nonce = nonceMeta?.content || "";
+      if (nonce) tag.setAttribute("nonce", nonce);
       document.head.appendChild(tag);
       styleTagRef.current = tag;
     }

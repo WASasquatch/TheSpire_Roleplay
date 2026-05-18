@@ -175,24 +175,43 @@ export function applyTheme(theme: Theme): void {
  * Kept as a closed set so the UI stays readable at every step — a
  * free-numeric scale would invite both microscopic and unusable
  * settings.
+ *
+ * Each tier carries TWO values: desktop and mobile. Mobile devices
+ * render text relatively larger than desktop at the same px size
+ * (smaller physical screen, closer reading distance, OS-level system
+ * scaling on most phones), so the chat shell drops every tier by 2px
+ * on small viewports. A user who picked "medium" still has the same
+ * relative size step they'd expect; the absolute px just reflects
+ * the device class.
  */
 export type UiFontScale = "small" | "medium" | "large" | "xl";
 
-const FONT_SCALE_PX: Record<UiFontScale, number> = {
-  small: 14,
-  medium: 16,
-  large: 18,
-  xl: 20,
+const FONT_SCALE_PX: Record<UiFontScale, { desktop: number; mobile: number }> = {
+  small:  { desktop: 14, mobile: 12 },
+  medium: { desktop: 16, mobile: 14 },
+  large:  { desktop: 18, mobile: 16 },
+  xl:     { desktop: 20, mobile: 18 },
 };
+
+/** CSS media query that flags a viewport as "mobile" for font-scale
+ *  purposes. 767px == one pixel below Tailwind's `md` breakpoint
+ *  (768px), so phones in portrait and small tablets get the mobile
+ *  scale; landscape phones, larger tablets, and every desktop fall to
+ *  the desktop tiers. */
+const MOBILE_FONT_MQ = "(max-width: 767px)";
 
 /**
  * Resolve a stored scale value to its px equivalent. Null / unknown
- * inputs collapse to 16px (medium / browser default), so a missing
- * preference leaves the document untouched.
+ * inputs collapse to the medium tier so a missing preference leaves
+ * the document untouched.
+ *
+ * Pass `isMobile` to pick the mobile-scaled value for the same tier;
+ * default to the desktop value when the flag is unknown (callers that
+ * don't yet observe viewport state still get a sensible answer).
  */
-export function fontScalePx(scale: UiFontScale | null | undefined): number {
-  if (scale && FONT_SCALE_PX[scale] !== undefined) return FONT_SCALE_PX[scale];
-  return FONT_SCALE_PX.medium;
+export function fontScalePx(scale: UiFontScale | null | undefined, isMobile = false): number {
+  const tier = scale && FONT_SCALE_PX[scale] ? FONT_SCALE_PX[scale] : FONT_SCALE_PX.medium;
+  return isMobile ? tier.mobile : tier.desktop;
 }
 
 /**
@@ -212,14 +231,32 @@ export function fontScalePx(scale: UiFontScale | null | undefined): number {
 export function applyFontPrefs(prefs: {
   fontFamily: string | null;
   fontScale: UiFontScale | null;
-}): void {
+}): () => void {
   const root = document.documentElement;
   if (prefs.fontFamily && prefs.fontFamily.trim() !== "") {
     root.style.setProperty("--keep-font-family", prefs.fontFamily);
   } else {
     root.style.removeProperty("--keep-font-family");
   }
-  root.style.fontSize = `${fontScalePx(prefs.fontScale)}px`;
+  // Viewport-aware base font size. Mobile devices oversample text
+  // relative to desktop at the same px, so the mobile tier values
+  // are 2px below their desktop counterparts. We listen for viewport
+  // changes via matchMedia so resizing the window (or rotating a
+  // tablet) re-applies the right tier without a reload.
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    // SSR / non-DOM environment — apply the desktop fallback once
+    // and return a no-op cleanup so callers can still treat the
+    // return value uniformly.
+    root.style.fontSize = `${fontScalePx(prefs.fontScale, false)}px`;
+    return () => {};
+  }
+  const mq = window.matchMedia(MOBILE_FONT_MQ);
+  function apply(): void {
+    root.style.fontSize = `${fontScalePx(prefs.fontScale, mq.matches)}px`;
+  }
+  apply();
+  mq.addEventListener("change", apply);
+  return () => mq.removeEventListener("change", apply);
 }
 
 /* ============================================================

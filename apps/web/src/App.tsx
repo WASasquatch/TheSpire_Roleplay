@@ -1076,7 +1076,13 @@ function Chat() {
   // bump of `themeVersion` (which is also what triggers the /me/profile
   // re-fetch, so any save in the editor surfaces immediately).
   useEffect(() => {
-    applyFontPrefs({ fontFamily: uiFontFamily, fontScale: uiFontScale });
+    // applyFontPrefs installs a viewport matchMedia listener so the
+    // mobile-vs-desktop font tier re-applies when the window resizes
+    // or a tablet rotates. The returned cleanup removes that listener
+    // when the prefs change (the next effect run installs a fresh
+    // one) or when the component unmounts.
+    const cleanup = applyFontPrefs({ fontFamily: uiFontFamily, fontScale: uiFontScale });
+    return cleanup;
   }, [uiFontFamily, uiFontScale]);
 
   /**

@@ -273,12 +273,15 @@ export function UserNameTag({
         //                    name; `overflow: hidden` was the actual
         //                    cause of clipped italic admin names.
         //
-        // `py-0.5` only — no horizontal padding: it pushed the
-        // username away from the surrounding "[" / ":" punctuation
-        // that wraps it in chat lines. The hover background still
-        // reads on hover thanks to the rounded background sitting
-        // tight against the text glyphs.
-        className={`rounded py-0.5 font-semibold hover:bg-keep-panel hover:underline${
+        // `py-0.5 pr-1.5` — small right padding so the surrounding
+        // "]" / ":" punctuation in chat lines isn't flush against the
+        // last glyph. The original design had no horizontal padding
+        // to keep the brackets tight, but the lack of breathing room
+        // looked jammed once styled names + italic slants came in.
+        // Left side stays flush because the rank-sigil / gap-1 from
+        // the outer flex wrapper already supplies a 4px gap between
+        // the icon slot and the name button.
+        className={`rounded py-0.5 pr-1.5 font-semibold hover:bg-keep-panel hover:underline${
           truncate ? " min-w-0 overflow-clip text-ellipsis whitespace-nowrap [overflow-clip-margin:0.5em]" : ""
         }${italic ? " italic" : ""}`}
         // Inline chatColor is preserved as a fallback for users with

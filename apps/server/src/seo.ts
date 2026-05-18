@@ -240,6 +240,22 @@ export async function renderSplashHtml(
     );
   }
 
+  // Surface the CSP nonce to runtime JS via a `<meta>` tag so client
+  // code that dynamically creates `<style>` / `<script>` elements
+  // (the name-style catalog injector + per-user CSS-var stamper)
+  // can stamp the nonce on them — otherwise the strict
+  // `style-src 'self' 'nonce-…'` CSP blocks every dynamic stylesheet
+  // and name-style classes simply don't apply (chat names render
+  // as plain text on prod even though local dev works). We splice
+  // this before the nonce-stamp pass below so the meta tag itself
+  // doesn't need a nonce (it isn't a script/style).
+  if (nonce) {
+    html = html.replace(
+      /<head([^>]*)>/i,
+      `<head$1>\n  <meta name="csp-nonce" content="${escapeHtmlAttr(nonce)}" />`,
+    );
+  }
+
   // Final pass: stamp every script/style with the nonce so the strict
   // CSP we ship in the response header doesn't reject them. Must run
   // AFTER the HEAD_EXTRA splice above so admin-injected scripts are

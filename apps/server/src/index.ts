@@ -271,7 +271,11 @@ async function main() {
     // URLs present NBSP as a regular space for readability; restore the
     // canonical DB form (NBSP) before lookup. No-op for names that don't
     // contain a space at all.
-    const profile = await lookupProfile(db, slugToUsername(name));
+    // Resolve viewer FIRST so metrics can bypass the owner's hide flags
+    // when they're viewing their own profile (the flags are meant to
+    // hide counts from OTHER users, not from the owner themselves).
+    const me = await getSessionUser(req, db);
+    const profile = await lookupProfile(db, slugToUsername(name), me?.id);
     if (!profile) {
       reply.code(404);
       return { error: "no profile" };
@@ -286,7 +290,8 @@ async function main() {
     //     (private == "logged-in members can view", per the spec). The NSFW
     //     warning splash is layered on top client-side via isNsfw flag.
     //   - Owner / admin: always see the full profile.
-    const me = await getSessionUser(req, db);
+    // `me` is resolved before the lookupProfile call above so the
+    // owner's hide flags can be bypassed in computeProfileMetrics.
     const restricted = !profile.profile.isPublic || profile.profile.isNsfw;
     if (restricted && !me) {
       // Stub keeps the display name (the caller already typed it, so no
@@ -854,7 +859,10 @@ async function main() {
       // route. Some clients (in-chat name clicks) hand us the canonical
       // NBSP form already; others (URL-derived calls) carry the slug
       // with a regular space. slugToUsername resolves both.
-      const profile = await lookupProfile(db, slugToUsername(payload.username));
+      // Pass the socket's authenticated userId so the owner viewing
+      // their own profile bypasses the hide-count redaction.
+      const viewerId = (socket.data as { userId?: string }).userId;
+      const profile = await lookupProfile(db, slugToUsername(payload.username), viewerId);
       if (!profile) ack({ ok: false, code: "NO_USER", message: "Not found." });
       else ack({ ok: true, profile });
     });

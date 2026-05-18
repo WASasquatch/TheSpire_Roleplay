@@ -571,8 +571,46 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   // fetch and silently hid the earning chips on the in-editor
   // preview.
   const myUserId = useChat((s) => s.me?.id ?? null);
+  // Real activity counts for the previewed identity. Fetched from
+  // `/profiles/:name` lazily on first preview open; cached per target
+  // so flipping the modal closed and back open doesn't refetch. Null
+  // entries here mean "haven't fetched yet"; the modal renders
+  // "private" placeholders for the brief moment before the fetch
+  // returns. Once it lands, the real counts replace them — including
+  // for the owner's own preview, because /profiles/:name bypasses
+  // the hide-flag redaction when viewer === owner.
+  const [previewMetrics, setPreviewMetrics] = useState<
+    Record<string, { chatMessages: number | null; forumTopics: number | null; forumReplies: number | null }>
+  >({});
+  const previewTargetKey = target.kind === "master" ? "master" : `c:${target.id}`;
+  useEffect(() => {
+    if (!previewing) return;
+    if (previewMetrics[previewTargetKey]) return;
+    const name = target.kind === "master" ? master?.username : characters.find((c) => c.id === target.id)?.name;
+    if (!name) return;
+    let cancelled = false;
+    fetch(`/profiles/${encodeURIComponent(name)}`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: unknown) => {
+        if (cancelled || !j || typeof j !== "object") return;
+        const view = j as { profile?: { metrics?: typeof previewMetrics[string] } };
+        const m = view.profile?.metrics;
+        if (!m) return;
+        setPreviewMetrics((prev) => ({ ...prev, [previewTargetKey]: m }));
+      })
+      .catch(() => { /* falls back to null placeholders */ });
+    return () => { cancelled = true; };
+  }, [previewing, previewTargetKey, target, master, characters, previewMetrics]);
   const previewProfile: ProfileView | null = useMemo(() => {
     const previewTheme = theme ?? DEFAULT_THEME;
+    // Metrics come from the server-side fetch above (cached per
+    // target). Until that lands, fall through to null placeholders
+    // so the modal renders "private" briefly rather than fake zeros.
+    const fetchedMetrics = previewMetrics[previewTargetKey] ?? {
+      chatMessages: null,
+      forumTopics: null,
+      forumReplies: null,
+    };
     if (target.kind === "master") {
       if (!master) return null;
       return {
@@ -592,15 +630,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           isPublic: isNsfw ? false : isPublic,
           isNsfw,
           createdAt: Date.now(),
-          // Preview is a local-only render of unsaved edits, so we
-          // don't query lifetime activity counters here — the real
-          // numbers land when the editor closes and the user opens
-          // their own profile from chat.
-          // Preview is a local render of unsaved edits — don't run the
-          // server-side count aggregation here. Null per field tells
-          // the ProfileModal to render "private" placeholders rather
-          // than fake "0" numbers that imply the user has never posted.
-          metrics: { chatMessages: null, forumTopics: null, forumReplies: null },
+          // Real lifetime activity counts pulled via /profiles/:name on
+          // first preview open. The server-side computeProfileMetrics
+          // bypasses the owner's hide flags for self-view, so the
+          // preview reflects what OTHER users would see while still
+          // showing the owner their own counts when their flags are
+          // off. (Earlier this was hardcoded to null, which always
+          // rendered "private" regardless of the owner's flags.)
+          metrics: fetchedMetrics,
         },
       };
     }
@@ -630,10 +667,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         isNsfw,
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        metrics: { chatMessages: 0, forumTopics: 0, forumReplies: 0 },
+        metrics: fetchedMetrics,
       },
     };
-  }, [target, master, myUserId, name, bioHtml, avatarUrl, gender, stats, theme, portraits, links, isPublic, isNsfw]);
+  }, [target, master, myUserId, name, bioHtml, avatarUrl, gender, stats, theme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey]);
 
   const targetOptions = useMemo(() => {
     return [
@@ -978,10 +1015,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
                       >
                         <option value="">Default (medium)</option>
-                        <option value="small">Small (14px)</option>
-                        <option value="medium">Medium (16px)</option>
-                        <option value="large">Large (18px)</option>
-                        <option value="xl">Extra large (20px)</option>
+                        <option value="small">Small (14px desktop / 12px mobile)</option>
+                        <option value="medium">Medium (16px desktop / 14px mobile)</option>
+                        <option value="large">Large (18px desktop / 16px mobile)</option>
+                        <option value="xl">Extra large (20px desktop / 18px mobile)</option>
                       </select>
                     </label>
                   </fieldset>

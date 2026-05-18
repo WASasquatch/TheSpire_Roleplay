@@ -108,6 +108,15 @@ async function computeProfileMetrics(
   db: import("../../db/index.js").Db,
   userId: string,
   characterId: string | null,
+  /**
+   * Authenticated viewer's user id, when available. Used to bypass
+   * the privacy hide flags for the owner viewing their own profile —
+   * otherwise a user who toggled nothing still saw "private" on their
+   * own counts (the flags applied unconditionally on the server).
+   * Anonymous viewers, admins, and any other user pass through the
+   * normal hide-flag redaction.
+   */
+  viewerId?: string,
 ): Promise<ProfileMetrics> {
   // Privacy flags live on the user row regardless of which character
   // is being profiled — they're per-account preferences, not per
@@ -122,9 +131,15 @@ async function computeProfileMetrics(
     .from(users)
     .where(eq(users.id, userId))
     .limit(1))[0];
-  const hideChat = u?.hideChatMessageCount ?? false;
-  const hideTopics = u?.hideForumTopicCount ?? false;
-  const hideReplies = u?.hideForumReplyCount ?? false;
+  // Owner self-view bypasses every hide flag — the owner is who SET
+  // the flag in the first place; redacting their own readout would
+  // give them no way to confirm what other users see vs hide their
+  // numbers from themselves. (Admin tools surface the actual counts
+  // through other channels regardless of this flag.)
+  const isSelfView = viewerId !== undefined && viewerId === userId;
+  const hideChat = isSelfView ? false : (u?.hideChatMessageCount ?? false);
+  const hideTopics = isSelfView ? false : (u?.hideForumTopicCount ?? false);
+  const hideReplies = isSelfView ? false : (u?.hideForumReplyCount ?? false);
   // Short-circuit each branch when its hide flag is set — saves the
   // COUNT(*) query and returns null directly. Useful both for the
   // tiny perf win and so a "private" metric can't accidentally leak
@@ -198,6 +213,10 @@ async function computeProfileMetrics(
 async function lookupProfile(
   db: import("../../db/index.js").Db,
   name: string,
+  /** Authenticated viewer id, when available. Threaded through to
+   *  metrics computation so the owner self-viewing sees their real
+   *  counts even when their hide flags are on. */
+  viewerId?: string,
 ): Promise<ProfileView | null> {
   /**
    * Build the set of name variants to try.
@@ -258,7 +277,7 @@ async function lookupProfile(
         isPublic: u.isPublic,
         isNsfw: u.isNsfw,
         createdAt: +u.createdAt,
-        metrics: await computeProfileMetrics(db, u.id, null),
+        metrics: await computeProfileMetrics(db, u.id, null, viewerId),
       },
     };
   }
@@ -299,7 +318,7 @@ async function lookupProfile(
       isNsfw: c.isNsfw,
       createdAt: +c.createdAt,
       updatedAt: +c.updatedAt,
-      metrics: await computeProfileMetrics(db, c.userId, c.id),
+      metrics: await computeProfileMetrics(db, c.userId, c.id, viewerId),
     },
   };
 }
@@ -313,6 +332,7 @@ async function lookupProfile(
  */
 async function lookupRandomProfile(
   db: import("../../db/index.js").Db,
+  viewerId?: string,
 ): Promise<ProfileView | null> {
   // Random discovery deliberately filters out non-public and NSFW profiles:
   // non-public means the owner explicitly opted out of the open index, and
@@ -489,7 +509,10 @@ export const whoisCommand: CommandHandler = {
       ctx.socket.emit("ui:hint", { kind: "open-profile", profile: view });
       return;
     }
-    const view = await lookupProfile(ctx.db, target);
+    // Pass the caller's own userId so /whois on yourself bypasses
+    // your own hide-count privacy flags — same self-view rule as
+    // the HTTP /profiles/:name endpoint.
+    const view = await lookupProfile(ctx.db, target, ctx.user.id);
     if (!view) {
       ctx.socket.emit("error:notice", {
         code: "NO_USER",

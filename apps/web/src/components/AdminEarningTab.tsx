@@ -1081,7 +1081,18 @@ function NameStylesSection() {
               onError={setErr}
             />
           ) : selected ? (
+            // `key={selected.key}` forces React to unmount the
+            // previous editor and mount a fresh one when the admin
+            // picks a different style from the sidebar. Without it
+            // the StyleEditor's `useState(initial.*)` initializers
+            // only run on first mount — clicking another row
+            // updated the `initial` prop but every form field
+            // (name, template, CSS, cost, enabled) stayed frozen
+            // on the originally-selected style, so the admin
+            // could only edit the first row they clicked until a
+            // full page refresh.
             <StyleEditor
+              key={selected.key}
               kind="edit"
               initial={selected}
               onCancel={() => setSelectedKey(null)}
@@ -1275,11 +1286,17 @@ function StyleEditor({
               the draft renders even though `previewKey` isn't in
               the live catalog. The preview CSS is injected into a
               dedicated `<style>` tag (above) so this class
-              resolution actually finds rules. */}
+              resolution actually finds rules.
+              `config={null}` lets each style paint in its own
+              catalog defaults (Embers → fire orange, Neon Sign →
+              neon pink, Aurora → tropical, etc.). The previous
+              hardcoded `{ color1: "#ff7a45", ... }` override
+              tinted EVERY preview orange regardless of which style
+              the admin was editing. */}
           <StyledName
             displayName="Username"
             overrideRow={previewRow}
-            config={{ color1: "#ff7a45", color2: "#ffb47a", glow: "rgba(255,170,80,0.6)" }}
+            config={null}
           />
         </div>
       </div>

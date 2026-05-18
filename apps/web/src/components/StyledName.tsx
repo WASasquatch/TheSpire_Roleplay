@@ -155,7 +155,13 @@ export function StyledName({ displayName, styleKey, config, baseColor, overrideR
   }, [styleRow, cssVars]);
 
   if (!styleRow) {
-    return <span style={baseColor ? { color: baseColor } : undefined}>{displayName}</span>;
+    // 0.2em right padding so the surrounding "]" / ":" punctuation in
+    // chat lines isn't flush against the last glyph. Matches the
+    // padding the baker applies on the styled-name path so plain and
+    // styled names share consistent breathing room.
+    const baseStyle: React.CSSProperties = { paddingRight: "0.2em" };
+    if (baseColor) baseStyle.color = baseColor;
+    return <span style={baseStyle}>{displayName}</span>;
   }
 
   const simple = parseSimpleTemplate(styleRow.template);
@@ -283,7 +289,16 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
   // `var(--user-color-1)`) still works wherever the cascade DOES
   // land. The inline-baked declarations below override the relevant
   // properties on top.
-  const out: Record<string, string> = { ...cssVars };
+  //
+  // `padding-right: 0.2em` on every styled name widens the inline
+  // box just enough that gradient-clip-text styles paint their
+  // gradient pixels under italic glyph overflow (the slant on the
+  // last letter of an italic admin name otherwise extends past the
+  // text-advance box, has no gradient to clip to, and renders
+  // transparent — looking like the slant was sheared off). Solid-
+  // color styles get the same padding too so the chat-line "]" / ":"
+  // punctuation isn't flush against the styled glyph.
+  const out: Record<string, string> = { ...cssVars, paddingRight: "0.2em" };
 
   // Gradient family — classic background-clip text + transparent
   // text-fill pattern. The `-webkit-text-fill-color: transparent`

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import DOMPurify from "dompurify";
 import type { AuditEntry, ReportEntry, Role, Theme, ThemeableTextSlot, ThreadCategory } from "@thekeep/shared";
+import { THEME_PRESETS } from "@thekeep/shared";
 import {
   DEFAULT_THEME,
   CUSTOM_CMD_CSS_MAX_LEN,
@@ -245,6 +246,14 @@ interface SettingsRow {
   newUserWelcomeHtml: string;
   /** Site-wide default theme style key. Users without an override inherit this. */
   defaultStyleKey: string;
+  /**
+   * Per-preset design map (`{ "Parchment": "medieval", "Twilight":
+   * "scifi", ... }`). Pins a default design to each named palette so
+   * users picking a preset get a coherent paired look without having
+   * to pick the design themselves. Resolution chain documented in
+   * App.tsx's apply effect.
+   */
+  themeDesignMap: Record<string, string>;
   updatedAt: number;
 }
 
@@ -539,6 +548,10 @@ function SettingsTab() {
   const [activityFeedsEnabled, setActivityFeedsEnabled] = useState(false);
   const [featuredWorldsEnabled, setFeaturedWorldsEnabled] = useState(false);
   const [defaultStyleKey, setDefaultStyleKey] = useState<string>("medieval");
+  // Per-preset design pinning. Keyed by THEME_PRESETS name. Empty
+  // entry on a preset means "fall through to defaultStyleKey for
+  // that palette." Edited in the Theme designs section below.
+  const [themeDesignMap, setThemeDesignMap] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -566,6 +579,7 @@ function SettingsTab() {
       setActivityFeedsEnabled(j.activityFeedsEnabled);
       setFeaturedWorldsEnabled(j.featuredWorldsEnabled);
       setDefaultStyleKey(j.defaultStyleKey || "medieval");
+      setThemeDesignMap(j.themeDesignMap ?? {});
     } catch (err) {
       setError(err instanceof Error ? err.message : "load failed");
     }
@@ -609,6 +623,7 @@ function SettingsTab() {
         activityFeedsEnabled,
         featuredWorldsEnabled,
         defaultStyleKey,
+        themeDesignMap,
       };
       // Send theme only when admin actually changed it from the loaded value.
       if (theme === null && data?.defaultThemeJson) body.defaultTheme = null;
@@ -644,6 +659,7 @@ function SettingsTab() {
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         defaultStyleKey: j.defaultStyleKey,
+        themeDesignMap: j.themeDesignMap ?? {},
       });
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
@@ -842,10 +858,11 @@ function SettingsTab() {
       <fieldset className="rounded border border-keep-rule p-3 text-xs">
         <legend className="px-1 uppercase tracking-widest text-keep-muted">Theme style</legend>
         <p className="mb-2 text-keep-muted">
-          The site-wide visual treatment (ornaments, borders, textures).
-          Orthogonal to the palette above — picking a style doesn't change
-          which colors are used, just how they're rendered. Users can
-          override this in their profile.
+          The fallback visual treatment (ornaments, borders, textures) for
+          palettes that don't have a design pinned below. Orthogonal to
+          the palette — picking a style doesn't change which colors are
+          used, just how they're rendered. Users can override this on
+          their master or character profile.
         </p>
         <StylePicker
           value={defaultStyleKey}
@@ -854,6 +871,51 @@ function SettingsTab() {
           // fall through to the launch flagship.
           onChange={(k) => setDefaultStyleKey(k ?? "medieval")}
         />
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Designs by theme</legend>
+        <p className="mb-2 text-keep-muted">
+          Pin a design to each named palette. When a user (or character)
+          picks one of these themes, they get the paired design unless
+          they've explicitly overridden it on their profile. "Use site
+          default" means that theme falls through to the Theme style
+          above. Custom palettes (anything not matching one of these
+          presets) always fall through.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {THEME_PRESETS.map((p) => (
+            <label key={p.name} className="flex items-center gap-2">
+              <span
+                aria-hidden
+                title={`Preview of ${p.name}'s palette`}
+                className="flex shrink-0 rounded border"
+                style={{ borderColor: p.theme.border }}
+              >
+                {(["panel", "action", "accent"] as const).map((slot) => (
+                  <span
+                    key={slot}
+                    className="inline-block h-4 w-4"
+                    style={{ backgroundColor: p.theme[slot] }}
+                  />
+                ))}
+              </span>
+              <span className="min-w-[6rem] truncate font-semibold">{p.name}</span>
+              <StylePicker
+                value={themeDesignMap[p.name] ?? null}
+                allowInherit
+                onChange={(k) => {
+                  setThemeDesignMap((prev) => {
+                    const next = { ...prev };
+                    if (k === null) delete next[p.name];
+                    else next[p.name] = k;
+                    return next;
+                  });
+                }}
+              />
+            </label>
+          ))}
+        </div>
       </fieldset>
 
       {error ? (
@@ -994,6 +1056,7 @@ function BrandingTab() {
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         defaultStyleKey: j.defaultStyleKey,
+        themeDesignMap: j.themeDesignMap ?? {},
       });
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
@@ -1100,6 +1163,7 @@ function BrandingTab() {
               activityFeedsEnabled: j.settings.activityFeedsEnabled,
               featuredWorldsEnabled: j.settings.featuredWorldsEnabled,
               defaultStyleKey: j.settings.defaultStyleKey,
+              themeDesignMap: j.settings.themeDesignMap ?? {},
             });
           }}
         />
@@ -1461,6 +1525,7 @@ function RulesTab() {
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         defaultStyleKey: j.defaultStyleKey,
+        themeDesignMap: j.themeDesignMap ?? {},
       });
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);

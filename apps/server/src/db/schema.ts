@@ -248,6 +248,15 @@ export const characters = sqliteTable(
     chatColor: text("chat_color"),
     /** Per-character UI theme - JSON-serialized Theme. Null = inherit master/default. */
     themeJson: text("theme_json"),
+    /**
+     * Per-character override for the theme STYLE axis ('medieval',
+     * 'modern', 'scifi'). Null = fall through the resolution chain:
+     * users.style_key → theme-pinned design (from
+     * site_settings.theme_design_map) → site_settings.default_style_key.
+     * Mirrors `themeJson` above — character can fully reskin the site
+     * when active, design and all.
+     */
+    styleKey: text("style_key"),
     /** Same semantics as users.is_public - public = anonymous can view this character's profile. */
     isPublic: integer("is_public", { mode: "boolean" }).notNull().default(true),
     /** Same semantics as users.is_nsfw - forces private + adds a viewer gate splash. */
@@ -869,6 +878,19 @@ export const siteSettings = sqliteTable("site_settings", {
    * seed 'medieval' as the launch flagship.
    */
   defaultStyleKey: text("default_style_key").notNull().default("medieval"),
+  /**
+   * JSON map of THEME PRESET NAME → design key (medieval/modern/scifi).
+   * Lets admins pin a design to each named palette so picking "Twilight"
+   * defaults to "scifi", "Parchment" to "medieval", etc. Resolution chain
+   * sits between user/character explicit overrides and the site default:
+   *   character.style_key > user.style_key > themeDesignMap[<preset>] >
+   *   default_style_key > "medieval".
+   * Null/missing = empty map (fall straight through to default_style_key).
+   * Stored as JSON text rather than a relational table because the
+   * preset list is fixed in code (THEME_PRESETS); admins only edit
+   * the mapping, not the presets themselves.
+   */
+  themeDesignMap: text("theme_design_map"),
   /**
    * Tracks the iteration of DEFAULT_WORLDS content the system worlds were
    * last seeded from. `seed_worlds.ts` exports a SEED_VERSION constant; on

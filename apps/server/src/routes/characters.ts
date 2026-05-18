@@ -82,6 +82,13 @@ const updateBody = z.object({
    * re-issue `/color` after every `/char switch`.
    */
   chatColor: hexColor.nullable().optional(),
+  /**
+   * Per-character theme STYLE override (medieval/modern/scifi). Null =
+   * inherit through the chain (master → theme-pinned design → site
+   * default). Same semantics as master's styleKey; bounded length to
+   * keep the column small, catalog validity is checked client-side.
+   */
+  styleKey: z.string().min(1).max(64).nullable().optional(),
   /** Public visibility - anonymous viewers can fetch this character. */
   isPublic: z.boolean().optional(),
   /** NSFW gate: forces non-public to anonymous + adds a viewer warning splash. */
@@ -230,6 +237,11 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
           // sets it; an absent key leaves the existing value alone. The
           // same shape the rest of this body uses.
           ...(body.chatColor !== undefined ? { chatColor: body.chatColor } : {}),
+          // Same partial-update shape as theme/chatColor: present null
+          // clears the override (character falls back through master →
+          // theme-pinned → site default); present string sets it; absent
+          // leaves it alone.
+          ...(body.styleKey !== undefined ? { styleKey: body.styleKey } : {}),
           ...(body.isPublic !== undefined || body.isNsfw !== undefined ? { isPublic, isNsfw } : {}),
           updatedAt: new Date(),
         })

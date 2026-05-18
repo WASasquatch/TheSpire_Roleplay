@@ -754,6 +754,17 @@ export async function registerAdminRoutes(
      * back to 'medieval' if the value is unknown.
      */
     defaultStyleKey: z.string().min(1).max(64).optional(),
+    /**
+     * Per-preset design map. Keys are theme preset names (Parchment,
+     * Twilight, …), values are design keys (medieval/modern/scifi).
+     * Bounded so admins can't bloat the JSON column: at most 64 keys,
+     * each key + value capped at 64 chars. Null/empty clears the map.
+     */
+    themeDesignMap: z
+      .record(z.string().min(1).max(64), z.string().min(1).max(64))
+      .refine((m) => Object.keys(m).length <= 64, { message: "too many preset entries" })
+      .nullable()
+      .optional(),
   });
 
   function settingsResponse(s: Awaited<ReturnType<typeof getSettings>>) {
@@ -788,6 +799,7 @@ export async function registerAdminRoutes(
       featuredWorldsEnabled: s.featuredWorldsEnabled,
       newUserWelcomeHtml: s.newUserWelcomeHtml,
       defaultStyleKey: s.defaultStyleKey,
+      themeDesignMap: s.themeDesignMap,
       updatedAt: s.updatedAt,
     };
   }
@@ -865,6 +877,7 @@ export async function registerAdminRoutes(
       patch.newUserWelcomeHtml = sanitizeBio(body.newUserWelcomeHtml);
     }
     if (body.defaultStyleKey !== undefined) patch.defaultStyleKey = body.defaultStyleKey;
+    if (body.themeDesignMap !== undefined) patch.themeDesignMap = body.themeDesignMap;
     const result = settingsResponse(await updateSettings(db, patch, sessionUser.id));
     await recordAudit(db, {
       actorUserId: sessionUser.id,

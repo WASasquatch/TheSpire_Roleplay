@@ -134,6 +134,15 @@ export interface SiteSettings {
   newUserWelcomeUpdatedAt: number | null;
   /** Site-wide default theme style. Users who haven't picked a per-user override inherit this. */
   defaultStyleKey: string;
+  /**
+   * Per-preset design map: `{ "Parchment": "medieval", "Twilight": "scifi", ... }`.
+   * When the active palette matches a named preset, this map provides the
+   * default design for it. Resolution chain: character > master >
+   * themeDesignMap[<matched preset>] > defaultStyleKey > "medieval".
+   * Empty object = no pinning (every theme falls straight through to
+   * defaultStyleKey).
+   */
+  themeDesignMap: Record<string, string>;
   /** Iteration of the DEFAULT_WORLDS seed last applied to system worlds. The boot seeder compares against SEED_VERSION in seed_worlds.ts and overwrites when this is behind. */
   worldsSeedVersion: number;
   /**
@@ -224,6 +233,13 @@ export interface SettingsPatch {
   /** Site-wide default theme style key. */
   defaultStyleKey?: string;
   /**
+   * Per-preset design map. Pass the full object to replace; the helper
+   * stringifies. Pass null/empty to clear (every theme falls back to
+   * `defaultStyleKey`). Keys outside the THEME_PRESETS catalog are
+   * stored verbatim — the renderer just ignores them.
+   */
+  themeDesignMap?: Record<string, string> | null;
+  /**
    * Earning system config patch. Pass the full EarningConfig object;
    * partial input is normalized via `normalizeEarningConfig` so missing
    * keys fall back to defaults. Null clears the override and reverts to
@@ -279,6 +295,12 @@ export async function updateSettings(
   if (patch.activityFeedsEnabled !== undefined) update.activityFeedsEnabled = patch.activityFeedsEnabled;
   if (patch.featuredWorldsEnabled !== undefined) update.featuredWorldsEnabled = patch.featuredWorldsEnabled;
   if (patch.defaultStyleKey !== undefined) update.defaultStyleKey = patch.defaultStyleKey;
+  if (patch.themeDesignMap !== undefined) {
+    update.themeDesignMap =
+      patch.themeDesignMap === null || Object.keys(patch.themeDesignMap).length === 0
+        ? null
+        : JSON.stringify(patch.themeDesignMap);
+  }
   if (patch.earningConfig !== undefined) {
     update.earningConfigJson =
       patch.earningConfig === null
@@ -345,10 +367,31 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     newUserWelcomeHash: hashWelcome(row.newUserWelcomeHtml),
     newUserWelcomeUpdatedAt: row.newUserWelcomeUpdatedAt ? +row.newUserWelcomeUpdatedAt : null,
     defaultStyleKey: row.defaultStyleKey,
+    themeDesignMap: parseThemeDesignMap(row.themeDesignMap),
     worldsSeedVersion: row.worldsSeedVersion,
     earningConfig: parseEarningConfig(row.earningConfigJson),
     updatedAt: +row.updatedAt,
   };
+}
+
+/**
+ * Tolerant parse for the per-preset design map column. Empty / missing /
+ * malformed → empty object so callers can read it unconditionally. Only
+ * accepts plain-string values to keep injection surface minimal.
+ */
+function parseThemeDesignMap(raw: string | null): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === "string" && v.length > 0) out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 /**

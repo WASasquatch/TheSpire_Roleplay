@@ -94,6 +94,13 @@ interface CharacterRow {
    * even when both belong to the same master account.
    */
   chatColor?: string | null;
+  /**
+   * Per-character theme style override (medieval/modern/scifi). Null =
+   * inherit through master → theme-pinned → site default. Lets each
+   * character carry its own design when active — pairs with the
+   * existing `themeJson` palette override.
+   */
+  styleKey?: string | null;
   isPublic?: boolean;
   isNsfw?: boolean;
 }
@@ -147,9 +154,12 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   /** When the form has a theme set; null means "use default / inherit". */
   const [theme, setTheme] = useState<Theme | null>(null);
   /**
-   * Per-user theme style override (master target only). Null/undefined
-   * means "follow site default". Character targets don't have their own
-   * style override — style is account-wide.
+   * Theme style override for the *current target* — master or character.
+   * Master: persisted to `users.style_key`; null = follow theme-pinned
+   * design then site default.
+   * Character: persisted to `characters.style_key`; null = inherit
+   * the chain (master → theme-pinned → site default).
+   * Re-keyed on every target switch in the load effect below.
    */
   const [userStyleKey, setUserStyleKey] = useState<string | null>(null);
   // Per-user UI font + size accessibility prefs (master target only).
@@ -321,6 +331,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           } else {
             setTheme(null);
           }
+          // Per-character design override. Null = inherit through
+          // master → theme-pinned → site default. Persists the user's
+          // pick in the Theme Style picker below.
+          setUserStyleKey(typeof c.styleKey === "string" ? c.styleKey : null);
           setIsPublic(c.isPublic ?? true);
           setIsNsfw(c.isNsfw ?? false);
           // Pull the gallery in parallel with the row fetch above? We do it
@@ -439,6 +453,12 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             avatarUrl: avatarUrl.trim() || null,
             theme,
             chatColor,
+            // Per-character design override. Null = inherit; non-null
+            // overrides the resolution chain when this character is
+            // active. The server's PUT handler accepts the same shape
+            // as `chatColor` (partial-update with null-clears-override
+            // semantics).
+            styleKey: userStyleKey,
             isPublic,
             isNsfw,
           }),
@@ -455,6 +475,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                   avatarUrl: avatarUrl.trim() || null,
                   themeJson: theme ? JSON.stringify(theme) : null,
                   chatColor,
+                  styleKey: userStyleKey,
                   isPublic: isNsfw ? false : isPublic,
                   isNsfw,
                 }
@@ -873,22 +894,19 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                     </div>
                   ) : null}
                 </fieldset>
-                {!isCharacter ? (
-                  <fieldset className="rounded border border-keep-rule p-3">
-                    <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Theme style</legend>
-                    <p className="mb-2 text-[10px] text-keep-muted">
-                      Visual treatment — ornaments, borders, textures. Orthogonal
-                      to the palette above; the same style works with any colors.
-                      Leave on "use site default" to follow whatever the admin
-                      has chosen site-wide.
-                    </p>
-                    <StylePicker
-                      value={userStyleKey}
-                      onChange={setUserStyleKey}
-                      allowInherit
-                    />
-                  </fieldset>
-                ) : null}
+                <fieldset className="rounded border border-keep-rule p-3">
+                  <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Theme style</legend>
+                  <p className="mb-2 text-[10px] text-keep-muted">
+                    {isCharacter
+                      ? "Visual treatment — ornaments, borders, textures — applied when this character is active. Leave on \"use default\" to inherit your master account, then the theme's pinned design, then the site default."
+                      : "Visual treatment — ornaments, borders, textures. Orthogonal to the palette above; the same style works with any colors. Leave on \"use default\" to follow the theme's pinned design (admin-configured per palette) and finally the site default."}
+                  </p>
+                  <StylePicker
+                    value={userStyleKey}
+                    onChange={setUserStyleKey}
+                    allowInherit
+                  />
+                </fieldset>
                 {!isCharacter ? (
                   <fieldset className="rounded border border-keep-rule p-3">
                     <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">

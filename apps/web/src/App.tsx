@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, WorldDetail } from "@thekeep/shared";
-import { DEFAULT_THEME, isAdminRole, normalizeTheme, VERSION } from "@thekeep/shared";
+import { DEFAULT_THEME, isAdminRole, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
 import { SplashLanding } from "./components/SplashLanding.js";
@@ -26,7 +26,7 @@ import { WorldEditorModal } from "./components/WorldEditorModal.js";
 import { WorldViewerModal } from "./components/WorldViewerModal.js";
 import { WorldsListModal } from "./components/WorldsListModal.js";
 import { WelcomeModal } from "./components/WelcomeModal.js";
-import { getSocket, disconnect as disconnectSocket, rememberTabCharacter } from "./lib/socket.js";
+import { getSocket, disconnect as disconnectSocket, loadTabCharacter, rememberTabCharacter, rememberTabRoom } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
 import { ActiveThemeContext, applyFontPrefs, applyTheme, themeStyle, type UiFontScale } from "./lib/theme.js";
@@ -778,6 +778,10 @@ function Chat() {
   // Per-user style override. `null` means "follow the site default";
   // applyStyle below resolves user > site > hardcoded fallback.
   const [userStyleKey, setUserStyleKey] = useState<string | null>(null);
+  // Per-character style override. Same shape as userStyleKey; loaded
+  // from the active character row in the character-theme effect
+  // below. Null = inherit the chain (master → theme-pinned → site).
+  const [characterStyleKey, setCharacterStyleKey] = useState<string | null>(null);
   /**
    * Admin-configured one-shot welcome modal. /me/profile returns this only
    * when the user hasn't acknowledged the current welcome's content hash;
@@ -872,12 +876,47 @@ function Chat() {
           // something else (presence:update, theme save) bumps
           // themeVersion and re-runs this effect.
           if (!profileSeededRef.current) {
-            setActiveCharacterId(u.activeCharacterId);
-            setActiveCharacterName(u.activeCharacterName ?? null);
-            // Initial seed — persist for handshake replay on reconnect.
-            // We only do this once per tab (gated by profileSeededRef),
-            // matching the seed-once policy for activeCharacterId itself.
-            rememberTabCharacter(u.activeCharacterId);
+            // Prefer this tab's sessionStorage cache over the DB default.
+            // The DB row (`users.activeCharacterId`) is account-global,
+            // so on a refresh the value may have been mutated by a
+            // sibling tab on another device — using it directly is what
+            // caused the phone-refresh-picks-up-desktop's-character bug.
+            // The cache survives reload (sessionStorage) but is per-tab.
+            // Three states from loadTabCharacter:
+            //   undefined → no cache; fall back to DB (new tab / first
+            //               load / private-mode failure)
+            //   null      → explicit OOC sentinel — honor it
+            //   string    → cached character id; use it. We still need
+            //               the name, which the DB-default name field
+            //               doesn't cover. The character-theme effect
+            //               below fetches `/characters/:id` and the
+            //               server-side socket handshake validates
+            //               ownership + falls back to OOC silently if
+            //               the id no longer resolves.
+            const cached = loadTabCharacter();
+            if (cached === undefined) {
+              setActiveCharacterId(u.activeCharacterId);
+              setActiveCharacterName(u.activeCharacterName ?? null);
+              rememberTabCharacter(u.activeCharacterId);
+            } else if (cached === null) {
+              setActiveCharacterId(null);
+              setActiveCharacterName(null);
+            } else if (cached === u.activeCharacterId) {
+              // Cache agrees with DB — same seed path as no-cache, but
+              // we can trust the name field that came back with the
+              // profile fetch instead of waiting on a /characters lookup.
+              setActiveCharacterId(u.activeCharacterId);
+              setActiveCharacterName(u.activeCharacterName ?? null);
+            } else {
+              // Cache disagrees with DB (the multi-device case). Apply
+              // the cached id immediately; the character-theme effect
+              // below will fetch the row and patch in the name once it
+              // arrives. Leaving the name null briefly is fine —
+              // nothing renders the active character name on first
+              // paint that would visibly flicker.
+              setActiveCharacterId(cached);
+              setActiveCharacterName(null);
+            }
             profileSeededRef.current = true;
           }
           if (u.notifyPref) setNotifyPref(u.notifyPref);
@@ -946,17 +985,28 @@ function Chat() {
     async function load() {
       if (!activeCharacterId) {
         setCharacterTheme(null);
+        setCharacterStyleKey(null);
         return;
       }
       try {
         const c = await fetch(`/characters/${activeCharacterId}`, { credentials: "include" });
         if (!c.ok) return;
-        const cr = (await c.json()) as { themeJson?: string | null };
+        const cr = (await c.json()) as { name?: string; themeJson?: string | null; styleKey?: string | null };
         let fetched: Theme | null = null;
         if (cr.themeJson) {
           try { fetched = normalizeTheme(JSON.parse(cr.themeJson)); } catch { /* none */ }
         }
-        if (!cancelled) setCharacterTheme(fetched);
+        if (!cancelled) {
+          setCharacterTheme(fetched);
+          // Same null-coalesce shape as the master styleKey above —
+          // null + undefined both mean "no override on this character".
+          setCharacterStyleKey(cr.styleKey ?? null);
+          // Sync the character name with the row we just loaded. The
+          // seed path may have left it null when the tab-cache id
+          // disagreed with the DB default; this fills it in. Idempotent
+          // when the seed already had the right name.
+          if (typeof cr.name === "string") setActiveCharacterName(cr.name);
+        }
       } catch { /* ignore */ }
     }
     load();
@@ -974,20 +1024,35 @@ function Chat() {
 
   // Apply whichever theme is active to the document. Sets CSS vars on <html>
   // so they override the :root defaults from styles.css.
-  // Read the site-wide default style off branding (push-updated by
-  // /site + admin saves). Used as the second tier in the user > site >
-  // hardcoded resolution.
+  // Read the site-wide design defaults off branding (push-updated by
+  // /site + admin saves). The map gives admins per-preset pinning;
+  // `defaultStyleKey` is the fallback when nothing matches.
   const siteStyleKey = useChat((s) => s.branding.defaultStyleKey);
+  const themeDesignMap = useChat((s) => s.branding.themeDesignMap);
   useEffect(() => {
     // Apply the palette first so the ornament generator can read the
-    // resulting CSS vars. Style resolution is user > site > hardcoded
-    // fallback — the user's per-user override (Profile.styleKey) wins
-    // when set; otherwise everyone gets the site default; if both are
-    // unknown the ornaments module falls back to 'medieval'.
+    // resulting CSS vars. Style resolution priority (highest wins):
+    //   1. Character override (characters.style_key) — set when active
+    //      character has its own pinned design.
+    //   2. Master override (users.style_key) — user picked a personal
+    //      design in their master profile.
+    //   3. Theme-pinned design — when the active palette matches a
+    //      named preset, look up its admin-configured pinned design
+    //      in themeDesignMap. Custom palettes (no preset match) skip
+    //      this tier and fall through to the site default.
+    //   4. Site default (site_settings.default_style_key).
+    //   5. Hardcoded fallback ('medieval').
     applyTheme(activeTheme);
-    const resolvedStyle = userStyleKey || siteStyleKey || DEFAULT_STYLE_KEY;
+    const presetName = matchThemePreset(activeTheme);
+    const pinnedForPreset = presetName ? themeDesignMap[presetName] : undefined;
+    const resolvedStyle =
+      characterStyleKey ||
+      userStyleKey ||
+      pinnedForPreset ||
+      siteStyleKey ||
+      DEFAULT_STYLE_KEY;
     applyStyle(activeTheme, resolvedStyle);
-  }, [activeTheme, userStyleKey, siteStyleKey]);
+  }, [activeTheme, characterStyleKey, userStyleKey, siteStyleKey, themeDesignMap]);
 
   // Per-user font/size accessibility. Independent of the palette effect
   // above because font preferences don't layer through character/room
@@ -1666,6 +1731,16 @@ function Chat() {
     setTopicCreateMode(false);
     setPoppedTopicId(null);
     setActiveForumCategoryId(undefined);
+  }, [currentRoomId]);
+
+  // Mirror the current room into this tab's sessionStorage so a
+  // reconnect (page reload, server restart, mobile suspend) can replay
+  // it via the handshake. Account-isolated: each tab keeps its own
+  // value, so a desktop tab in Tavern and a phone tab in Library both
+  // come back to where they were instead of racing for the single
+  // `users.lastRoomId` DB slot.
+  useEffect(() => {
+    if (currentRoomId) rememberTabRoom(currentRoomId);
   }, [currentRoomId]);
 
   // Lazy thread-category fetch. Triggered when the current room flips to

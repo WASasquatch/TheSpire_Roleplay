@@ -34,6 +34,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import DOMPurify from "dompurify";
 import { useEarning } from "../state/earning.js";
+import type { NameStyleCatalogRow } from "../lib/earning.js";
 import { useActiveTheme } from "../lib/theme.js";
 
 interface Props {
@@ -41,6 +42,14 @@ interface Props {
   styleKey?: string | null;
   config?: Record<string, unknown> | null;
   baseColor?: string | null | undefined;
+  /**
+   * Admin-editor escape hatch: when set, bypass the snapshot catalog
+   * lookup and render against this in-progress style row directly.
+   * Used by the Name-Styles preview pane so an unsaved draft renders
+   * even though its key isn't in the live catalog yet. Pair with
+   * `injectNameStylePreview` to make the row's CSS reachable.
+   */
+  overrideRow?: NameStyleCatalogRow | null;
 }
 
 /** Allowed inline tags inside a custom name-style template (fallback path). */
@@ -65,13 +74,16 @@ function nextInstanceId(): string {
   return `nst-${instanceCounter}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function StyledName({ displayName, styleKey, config, baseColor }: Props) {
+export function StyledName({ displayName, styleKey, config, baseColor, overrideRow }: Props) {
   const snapshot = useEarning((s) => s.snapshot);
   const themeBg = useActiveTheme().bg;
 
-  const styleRow = snapshot && styleKey
+  // `overrideRow` wins when set — admin preview pane passes the
+  // in-progress draft directly. Otherwise resolve from the live
+  // catalog via the styleKey lookup.
+  const styleRow = overrideRow ?? (snapshot && styleKey
     ? snapshot.catalog.nameStyles.find((s) => s.key === styleKey)
-    : null;
+    : null);
 
   // Stable per-instance class name. Used both to scope the injected
   // CSS rule and as a className on the styled element.
@@ -297,7 +309,11 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.backgroundClip = "text";
     out.WebkitTextFillColor = "transparent";
     out.WebkitTextStroke = `1px ${outline}`;
-    out.filter = `drop-shadow(0 0 4px ${glow})`;
+    // Halved glow (was 4px) — matches the softer drop-shadow widths in
+    // migration 0080. Keep the inline fallback and the .ns-pan
+    // catalog rule synchronized so user.config-driven glow colors
+    // render the same regardless of which path lands the CSS.
+    out.filter = `drop-shadow(0 0 2px ${glow})`;
   }
 
   // Pulse — solid color with breathing glow. The animation lives
@@ -308,16 +324,161 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.WebkitTextStroke = `1px ${outline}`;
   }
 
+  // Billboard — solid color + white outline + dark drop-shadows.
+  // Distinct from the gradient family in that there's no
+  // background-clip text trickery, so paint-order: stroke fill
+  // works (and is necessary) to put the outline BEHIND the fill.
+  // Default outline is white, falling back to whatever the user
+  // overrode via --user-outline.
+  if (c1 && className === "ns-billboard") {
+    out.color = c1;
+    // Default to a white outline for the marquee look; user-outline
+    // override comes through via the cssVars seed at the top.
+    const billboardOutline = cssVars["--user-outline"] ?? "rgba(255,255,255,0.95)";
+    out.WebkitTextStroke = `2px ${billboardOutline}`;
+    // paint-order works here because we're NOT using background-clip
+    // text (the gradient family's issue from migration 0072 doesn't
+    // apply). Stroke first, then fill on top — the white outline sits
+    // behind the colored letters instead of bleeding over the glyph
+    // edges.
+    (out as Record<string, string>).paintOrder = "stroke fill";
+    out.filter = "drop-shadow(2px 3px 3px rgba(0,0,0,0.85)) drop-shadow(0 0 6px rgba(0,0,0,0.5))";
+  }
+
+  // Stencil — outline only, transparent fill. Same paint-order story
+  // as billboard (safe since no clip-text). Outline defaults to white;
+  // user-outline overrides for colored stencils.
+  if (className === "ns-stencil") {
+    out.color = "transparent";
+    const stencilOutline = cssVars["--user-outline"] ?? "rgba(255,255,255,0.95)";
+    out.WebkitTextStroke = `2px ${stencilOutline}`;
+    out.filter = "drop-shadow(0 0 1px rgba(0,0,0,0.4))";
+  }
+
+  // Chrome — vertical metallic gradient. Same clip-text recipe as the
+  // horizontal gradient family but the gradient direction is 180deg
+  // (top→middle→bottom). Three stops: highlight at top + bottom,
+  // shadow in the middle — that "tube of metal lit from above" look.
+  if (c1 && c2 && className === "ns-chrome") {
+    out.backgroundImage = `linear-gradient(180deg, ${c1} 0%, ${c2} 45%, ${c2} 55%, ${c1} 100%)`;
+    out.WebkitBackgroundClip = "text";
+    out.backgroundClip = "text";
+    out.WebkitTextFillColor = "transparent";
+    out.WebkitTextStroke = `1px ${outline}`;
+  }
+
+  // Glassy — semi-translucent fill + thin white outline + soft inner
+  // glow. Solid-color path (cascade-safe), bakes the filter stack so a
+  // missed cascade still produces the frosted-glass look.
+  if (c1 && className === "ns-glassy") {
+    out.color = c1;
+    const glassyOutline = cssVars["--user-outline"] ?? "rgba(255,255,255,0.85)";
+    out.WebkitTextStroke = `1px ${glassyOutline}`;
+    out.filter = "drop-shadow(0 0 3px rgba(255,255,255,0.5)) drop-shadow(0 1px 2px rgba(0,0,0,0.35))";
+  }
+
+  // Comic Pop — solid + thick white outline + hard offset shadow.
+  // Same paint-order recipe as billboard but with a 0-blur shadow
+  // (`0` for the blur radius is what produces the hard cartoon shadow
+  // instead of a soft blur).
+  if (c1 && className === "ns-comic-pop") {
+    out.color = c1;
+    const comicOutline = cssVars["--user-outline"] ?? "rgba(255,255,255,0.95)";
+    out.WebkitTextStroke = `2px ${comicOutline}`;
+    (out as Record<string, string>).paintOrder = "stroke fill";
+    out.filter = "drop-shadow(3px 3px 0 rgba(0,0,0,0.85))";
+  }
+
+  // Neon Tube — bright fill with a same-color halo. The halo comes
+  // from text-shadow (not drop-shadow filter) so it hugs the glyph
+  // edges instead of the bounding box — that's what makes it read as
+  // "tube of light" rather than "object lit by a backlight".
+  if (c1 && className === "ns-neon-tube") {
+    out.color = c1;
+    out.textShadow = `0 0 3px ${c1}, 0 0 7px ${c1}`;
+    out.WebkitTextStroke = `0.5px ${outline}`;
+  }
+
+  // Marquee — same paint as comic-pop but the catalog rule owns the
+  // blink animation. Baker only needs the static color/outline/halo;
+  // animation rides the cascade since it's an @keyframes definition
+  // (no CSS-var dependency).
+  if (c1 && className === "ns-marquee") {
+    out.color = c1;
+    const marqueeOutline = cssVars["--user-outline"] ?? "rgba(255,255,255,0.9)";
+    out.WebkitTextStroke = `1px ${marqueeOutline}`;
+    out.filter = `drop-shadow(0 0 3px ${glow})`;
+  }
+
+  // Synthwave — 2-stop vertical gradient + cyan-glow drop. Pairs with
+  // the gradient family's clip-text but uses 180deg + a colored
+  // drop-shadow underneath instead of a horizontal sweep.
+  if (c1 && c2 && className === "ns-synthwave") {
+    out.backgroundImage = `linear-gradient(180deg, ${c1} 0%, ${c2} 100%)`;
+    out.WebkitBackgroundClip = "text";
+    out.backgroundClip = "text";
+    out.WebkitTextFillColor = "transparent";
+    const synthOutline = cssVars["--user-outline"] ?? "rgba(255,255,255,0.5)";
+    out.WebkitTextStroke = `1px ${synthOutline}`;
+    out.filter = `drop-shadow(0 2px 3px ${glow})`;
+  }
+
+  // Aurora Borealis — 3-stop tropical gradient. Animation handles
+  // the hue-rotation on the catalog rule; baker just sets the
+  // gradient mask + stroke so the static look is right when the
+  // animation isn't running (paused tabs, reduced-motion preference).
+  if (c1 && c2 && className === "ns-aurora-borealis") {
+    out.backgroundImage = `linear-gradient(90deg, ${c1} 0%, ${glow} 50%, ${c2} 100%)`;
+    out.WebkitBackgroundClip = "text";
+    out.backgroundClip = "text";
+    out.WebkitTextFillColor = "transparent";
+    out.WebkitTextStroke = `1px ${outline}`;
+  }
+
+  // Hearth Fire — vertical fire-palette gradient. The pan animation
+  // lives on the catalog rule (background-position keyframes); baker
+  // sets the static gradient + stroke + halo so the base look paints
+  // even when the cascade misses. `backgroundSize: 100% 250%` so the
+  // animated background-position cycle still has room to slide once
+  // the cascade does land.
+  if (c1 && c2 && className === "ns-hearth-fire") {
+    out.backgroundImage = `linear-gradient(0deg, ${c2} 0%, ${c1} 50%, ${glow} 100%)`;
+    out.backgroundSize = "100% 250%";
+    out.WebkitBackgroundClip = "text";
+    out.backgroundClip = "text";
+    out.WebkitTextFillColor = "transparent";
+    out.WebkitTextStroke = `0.5px ${outline}`;
+    out.filter = `drop-shadow(0 -2px 4px ${glow})`;
+  }
+
+  // Embers — same fire gradient base as Hearth Fire. The particle
+  // pseudos (::before / ::after) and their rise animation live in the
+  // catalog rule only — pseudo-element CSS can't be re-emitted via
+  // inline `style` on the host element, so this fallback covers only
+  // the gradient mask and halo. If the catalog CSS hasn't loaded the
+  // user will see a static fire-gradient name (no particles); once
+  // the cascade lands the embers start cycling.
+  if (c1 && c2 && className === "ns-embers") {
+    out.backgroundImage = `linear-gradient(0deg, ${c2} 0%, ${c1} 45%, ${glow} 100%)`;
+    out.backgroundSize = "100% 220%";
+    out.WebkitBackgroundClip = "text";
+    out.backgroundClip = "text";
+    out.WebkitTextFillColor = "transparent";
+    out.WebkitTextStroke = `0.5px ${outline}`;
+    out.filter = `drop-shadow(0 -2px 5px ${glow})`;
+  }
+
   // Shadow + glow filters re-baked with the glow color literal so
-  // they show even when the CSS-var cascade misses.
+  // they show even when the CSS-var cascade misses. Widths kept in
+  // lockstep with migration 0080's softened catalog values.
   if (className === "ns-gradient-shadow") {
     out.filter = "drop-shadow(2px 3px 2px rgba(0,0,0,0.6))";
   }
   if (className === "ns-gradient-glow") {
-    out.filter = `drop-shadow(0 0 4px ${glow}) drop-shadow(0 0 10px ${glow})`;
+    out.filter = `drop-shadow(0 0 2px ${glow}) drop-shadow(0 0 5px ${glow})`;
   }
   if (className === "ns-gradient-sg") {
-    out.filter = `drop-shadow(2px 3px 2px rgba(0,0,0,0.7)) drop-shadow(0 0 8px ${glow})`;
+    out.filter = `drop-shadow(2px 3px 2px rgba(0,0,0,0.7)) drop-shadow(0 0 4px ${glow})`;
   }
 
   return out as React.CSSProperties;

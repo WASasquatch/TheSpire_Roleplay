@@ -71,12 +71,62 @@ export function rememberTabCharacter(characterId: string | null | undefined): vo
   } catch { /* private-mode — drop silently; the reconnect path then falls back to the DB default */ }
 }
 
-function loadTabCharacter(): string | null | undefined {
+/**
+ * Read this tab's cached voicing identity. Exported so the initial
+ * /me/profile seed in App.tsx can prefer the per-tab cache over the
+ * account-global `users.activeCharacterId` (which a sibling tab on
+ * another device may have mutated). Three states match
+ * `rememberTabCharacter`:
+ *   undefined → no override; let the caller fall back to DB
+ *   null      → explicit OOC sentinel
+ *   string    → character id (caller must still validate ownership)
+ */
+export function loadTabCharacter(): string | null | undefined {
   try {
     const raw = window.sessionStorage.getItem(TAB_CHAR_KEY);
     if (raw === null) return undefined;
     if (raw === TAB_CHAR_OOC) return null;
     return raw;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Per-tab "which room is this tab parked in" cache. Same shape and
+ * rationale as TAB_CHAR_KEY: each tab has its own current room and a
+ * page refresh / server-restart reconnect must put the tab back where
+ * it was — not into whatever room a sibling on another device was
+ * last in (which is all `users.lastRoomId` can tell us).
+ *
+ * Values: a room id string, or `null` cleared (e.g. after Exit).
+ * `undefined` (key missing) means "no override; let the server pick".
+ */
+const TAB_ROOM_KEY = "tk_tab_room_id";
+
+/**
+ * Persist the room this tab is currently parked in. Called whenever
+ * the client knows the room changed — both /room moves and the initial
+ * `me:joined`. Pass `null` to clear (e.g. on Exit; transient
+ * disconnects deliberately leave the cache so the next reconnect can
+ * replay it). The server validates ownership / public-vs-private /
+ * ban state on the next handshake; a stale value degrades silently to
+ * the user's last-saved room or the canonical landing.
+ */
+export function rememberTabRoom(roomId: string | null | undefined): void {
+  try {
+    if (roomId === undefined || roomId === null) {
+      window.sessionStorage.removeItem(TAB_ROOM_KEY);
+    } else {
+      window.sessionStorage.setItem(TAB_ROOM_KEY, roomId);
+    }
+  } catch { /* private-mode — drop silently; the reconnect path falls back to users.lastRoomId */ }
+}
+
+function loadTabRoom(): string | undefined {
+  try {
+    const raw = window.sessionStorage.getItem(TAB_ROOM_KEY);
+    return raw === null ? undefined : raw;
   } catch {
     return undefined;
   }
@@ -132,9 +182,11 @@ export function getSocket(): Socket<ServerToClientEvents, ClientToServerEvents> 
       // the field altogether means "no override," matching the field's
       // `undefined` default on the server.
       const tabChar = loadTabCharacter();
-      const auth: { token: string; intent?: "login"; tabCharId?: string | null } = { token };
+      const tabRoom = loadTabRoom();
+      const auth: { token: string; intent?: "login"; tabCharId?: string | null; tabRoomId?: string } = { token };
       if (intent) auth.intent = intent;
       if (tabChar !== undefined) auth.tabCharId = tabChar;
+      if (tabRoom !== undefined) auth.tabRoomId = tabRoom;
       cb(auth);
     },
   });
@@ -163,11 +215,13 @@ export function disconnect(intentional = false): void {
   }
   socket = null;
   if (intentional) {
-    // Intentional disconnect = the Exit button. Clear the per-tab
-    // character cache so a follow-up login on the same tab doesn't
-    // resurrect the previous user's identity. Transient disconnects
-    // (network blip / mobile suspend) deliberately leave the cache in
-    // place — that IS the point of replaying it on the next handshake.
+    // Intentional disconnect = the Exit button. Clear both per-tab
+    // caches so a follow-up login on the same tab doesn't resurrect
+    // the previous user's identity / room placement. Transient
+    // disconnects (network blip / mobile suspend) deliberately leave
+    // the cache in place — that IS the point of replaying it on the
+    // next handshake.
     rememberTabCharacter(undefined);
+    rememberTabRoom(undefined);
   }
 }

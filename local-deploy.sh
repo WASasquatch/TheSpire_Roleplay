@@ -16,19 +16,22 @@
 #      `pnpm -r --parallel` (what `pnpm dev` aliases to at the root)
 #      handles the fan-out + signal propagation; we just sit on top.
 #
-#   3. Optional pre-flight migrate. New schema columns can roll into
-#      the repo without the local SQLite file picking them up; the
-#      next server boot then dies on a `no such column` error. The
-#      `--migrate` flag runs `pnpm db:push` first so the local DB
-#      catches up before we exec pnpm dev. Cheap when the schema is
-#      already current (drizzle-kit no-ops).
+#   3. Pre-flight migrate by default. New schema columns can roll
+#      into the repo without the local SQLite file picking them up;
+#      the next server boot then dies on a `no such column` error.
+#      `pnpm db:push` runs before `pnpm dev` so the local DB always
+#      catches up — cheap when already current (the apply script
+#      skips files recorded in `_migrations`). The legacy `--migrate`
+#      flag is now redundant but still accepted. `--no-migrate`
+#      skips the step for the rare case where you want to boot
+#      against a deliberately stale DB.
 #
 # Usage:
-#   ./local-deploy.sh                  # boot both server + web
-#   ./local-deploy.sh --migrate        # apply pending schema changes,
-#                                       # then boot
+#   ./local-deploy.sh                  # migrate (if needed) + boot
+#   ./local-deploy.sh --no-migrate     # boot without touching the DB
 #   ./local-deploy.sh --migrate-only   # apply migrations and exit
 #                                       # (handy after pulling main)
+#   ./local-deploy.sh --typecheck      # run repo-wide tsc, no boot
 #   bash local-deploy.sh               # same, explicit bash
 #
 # Ports (Vite picks `5173`, Fastify reads `PORT` from env, defaulting
@@ -41,10 +44,15 @@ set -euo pipefail
 # Resolve to repo root no matter where the script was invoked from.
 cd "$(dirname "$0")"
 
-MODE="dev"  # one of: dev | migrate-then-dev | migrate-only | typecheck
+# Default: apply pending migrations, then boot dev. `--no-migrate`
+# skips the migration step; `--migrate-only` exits after migrating;
+# `--typecheck` runs repo tsc instead of booting. `--migrate` is kept
+# as a no-op alias for the legacy explicit-opt-in workflow.
+MODE="migrate-then-dev"
 for arg in "$@"; do
   case "$arg" in
     --migrate)      MODE="migrate-then-dev" ;;
+    --no-migrate)   MODE="dev" ;;
     --migrate-only) MODE="migrate-only" ;;
     --typecheck)    MODE="typecheck" ;;
     -h|--help)

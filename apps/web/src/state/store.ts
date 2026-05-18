@@ -91,6 +91,15 @@ export interface SiteBranding {
    * back to 'medieval'.
    */
   defaultStyleKey: string;
+  /**
+   * Admin-configured per-preset design map. Keys are THEME_PRESETS names
+   * (Parchment, Twilight, …); values are design keys (medieval/modern/
+   * scifi). When the user's active palette matches a preset, this map
+   * supplies the default design for them. Resolution order is
+   * character.styleKey > master.styleKey > themeDesignMap[<preset>] >
+   * defaultStyleKey > "medieval". Empty object = no pinning.
+   */
+  themeDesignMap: Record<string, string>;
 }
 
 export const DEFAULT_BRANDING: SiteBranding = {
@@ -124,6 +133,10 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // key ('medieval', 'modern', 'scifi'); unknown keys fall back to this
   // value at render time.
   defaultStyleKey: "medieval",
+  // Empty by default — every theme falls straight through to
+  // defaultStyleKey. Admins seed pinned designs via the migration and
+  // can edit them in the admin settings UI.
+  themeDesignMap: {},
 };
 
 const BRANDING_CACHE_KEY = "tk:branding:v1";
@@ -188,10 +201,27 @@ export function loadCachedBranding(): SiteBranding {
       defaultStyleKey: typeof parsed.defaultStyleKey === "string" && parsed.defaultStyleKey.length > 0
         ? parsed.defaultStyleKey
         : DEFAULT_BRANDING.defaultStyleKey,
+      themeDesignMap: sanitizeThemeDesignMap(parsed.themeDesignMap),
     };
   } catch {
     return DEFAULT_BRANDING;
   }
+}
+
+/**
+ * Defensive coercion for `themeDesignMap` coming from the cache or the
+ * `/site` payload. Drops anything that isn't `Record<string, string>`,
+ * since the column is admin-editable and a malformed entry would crash
+ * the style resolver. Empty object is a valid value (meaning "no
+ * pinning — fall through to defaultStyleKey").
+ */
+export function sanitizeThemeDesignMap(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof k === "string" && typeof v === "string" && v.length > 0) out[k] = v;
+  }
+  return out;
 }
 
 export function saveCachedBranding(b: SiteBranding): void {

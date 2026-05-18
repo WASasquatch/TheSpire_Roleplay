@@ -53,7 +53,7 @@ import {
   type EarningConfig,
 } from "../lib/earning.js";
 import { StyledName } from "./StyledName.js";
-import { injectNameStyles } from "../lib/nameStyleInjector.js";
+import { injectNameStylePreview, clearNameStylePreview } from "../lib/nameStyleInjector.js";
 
 type SubTab = "awards" | "ranks" | "styles" | "cosmetics" | "grants";
 
@@ -1119,25 +1119,44 @@ function StyleEditor({
   const [enabled, setEnabled] = useState(initial.enabled);
   const [saving, setSaving] = useState(false);
 
-  // Live-inject the draft CSS so the preview component reflects
-  // unsaved edits. We use a sentinel key prefix ("__preview__") to
-  // avoid colliding with any real style in the catalog.
+  // Live-inject the draft CSS into a SEPARATE preview <style> tag so
+  // the live catalog tag isn't clobbered while the admin types.
+  // (Previously both wrote to the same tag, which wiped every
+  // catalog `.ns-*` rule the rest of the app depended on the moment
+  // the editor opened.) Rewriting `ns-<anything>` to `ns-<previewKey>`
+  // scopes the draft CSS to the preview wrapper class so it can't
+  // affect already-rendered names elsewhere on the page.
   const previewKey = `__preview__${initial.key || "new"}`;
-  useEffect(() => {
-    injectNameStyles([{
+  const previewTemplate = useMemo(
+    () => template.replace(/ns-[a-zA-Z0-9_-]+/g, `ns-${previewKey}`),
+    [template, previewKey],
+  );
+  const previewStyleCss = useMemo(
+    () => styleCss.replace(/ns-[a-zA-Z0-9_-]+/g, `ns-${previewKey}`),
+    [styleCss, previewKey],
+  );
+  const previewRow = useMemo(
+    () => ({
       key: previewKey,
       name,
       description,
-      // Substitute the wrapper class in the template + CSS so the
-      // preview's scoped class doesn't depend on the live key (this
-      // matters when the editor is for a new row with no key yet).
-      template: template.replace(/ns-[a-zA-Z0-9_-]+/g, `ns-${previewKey}`),
-      styleCss: styleCss.replace(/ns-[a-zA-Z0-9_-]+/g, `ns-${previewKey}`),
+      template: previewTemplate,
+      styleCss: previewStyleCss,
       cost: 0,
       isBuiltin: false,
       order: 0,
-    }]);
-  }, [template, styleCss, previewKey, name, description]);
+    }),
+    [previewKey, name, description, previewTemplate, previewStyleCss],
+  );
+  useEffect(() => {
+    injectNameStylePreview([previewRow]);
+  }, [previewRow]);
+  // Remove the preview tag on unmount — the inject helper is
+  // idempotent for keystroke updates, so we only need cleanup once
+  // when the editor goes away.
+  useEffect(() => {
+    return () => clearNameStylePreview();
+  }, []);
 
   async function save() {
     setSaving(true);
@@ -1252,9 +1271,14 @@ function StyleEditor({
       <div className="rounded border border-keep-rule/60 bg-keep-bg/60 p-3">
         <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Live preview</div>
         <div className="text-base">
+          {/* `overrideRow` bypasses the snapshot catalog lookup so
+              the draft renders even though `previewKey` isn't in
+              the live catalog. The preview CSS is injected into a
+              dedicated `<style>` tag (above) so this class
+              resolution actually finds rules. */}
           <StyledName
             displayName="Username"
-            styleKey={previewKey}
+            overrideRow={previewRow}
             config={{ color1: "#ff7a45", color2: "#ffb47a", glow: "rgba(255,170,80,0.6)" }}
           />
         </div>

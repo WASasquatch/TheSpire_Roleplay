@@ -361,6 +361,12 @@ async function main() {
       // without a per-user style override inherit this. Seeded default
       // is 'medieval'; the catalog also includes 'modern' and 'scifi'.
       defaultStyleKey: s.defaultStyleKey,
+      // Per-preset design map ({ "Parchment": "medieval", "Twilight":
+      // "scifi", … }). The client matches the active palette against
+      // THEME_PRESETS by name and uses this map to pick the default
+      // design for it. Empty object = no pinning (every theme falls
+      // through to `defaultStyleKey`).
+      themeDesignMap: s.themeDesignMap,
     };
   });
 
@@ -455,6 +461,7 @@ async function main() {
         sid?: unknown;
         intent?: unknown;
         tabCharId?: unknown;
+        tabRoomId?: unknown;
       } | undefined;
       const raw = typeof a?.token === "string" ? a.token : typeof a?.sid === "string" ? a.sid : "";
       const sid = raw.trim();
@@ -518,6 +525,16 @@ async function main() {
         tabCharId = null;
       }
       (socket.data as { tabCharId?: string | null }).tabCharId = tabCharId;
+      // Per-tab last-known room. Same rationale as tabCharId: each tab
+      // tracks its own room separately so a server restart / refresh
+      // puts it back where IT was, instead of inheriting whatever
+      // `users.lastRoomId` happens to hold (an account-global slot that
+      // multiple tabs on different devices race to write). Stored raw
+      // here — the connection handler validates existence /
+      // public-vs-private / ban state before joining.
+      if (typeof a?.tabRoomId === "string" && a.tabRoomId.length > 0) {
+        (socket.data as { tabRoomId?: string }).tabRoomId = a.tabRoomId;
+      }
       // Sync the in-memory user's activeCharacterId + displayName to
       // match the resolved tabCharId. Otherwise the user object the
       // socket carries until the next loadSessionUser still reflects
@@ -549,6 +566,49 @@ async function main() {
     // any sibling that's currently in a room: ties are unlikely (a single
     // user usually has one focused room) and harmless (siblings are by
     // definition all in the same room post-sync).
+    // Resolve a candidate room id to a join-able one, or null when it's
+    // gone / private-and-not-a-member / banned / archived. Shared between
+    // the per-tab cache (handshake `tabRoomId`) and the account-global
+    // `users.lastRoomId` fallback so both go through the same gating.
+    async function validateRoomForUser(candidateId: string | null): Promise<string | null> {
+      if (!candidateId) return null;
+      const room = (await db.select().from(rooms).where(eq(rooms.id, candidateId)).limit(1))[0];
+      if (!room || room.archivedAt) return null;
+      const ban = (await db
+        .select()
+        .from(bans)
+        .where(and(eq(bans.roomId, room.id), eq(bans.userId, user.id)))
+        .limit(1))[0];
+      if (ban && (!ban.until || +ban.until > Date.now())) return null;
+      if (room.type === "public") return room.id;
+      const member = (await db
+        .select()
+        .from(roomMembers)
+        .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, user.id)))
+        .limit(1))[0];
+      return member ? room.id : null;
+    }
+
+    // Room-placement priority on (re)connect, highest wins:
+    //
+    //   1. Sibling tab in this same browser — if there's another live
+    //      socket for this user, follow it. Multi-tab UX: opening a
+    //      second tab silently lands you next to the first one instead
+    //      of in the canonical landing while the original tab is
+    //      visibly in some other room.
+    //   2. This tab's per-tab cache (`socket.data.tabRoomId` from the
+    //      handshake) — replayed by the client from sessionStorage on
+    //      every reconnect. Survives server restarts, mobile suspend,
+    //      and page reloads. Account-isolated: a desktop tab in Tavern
+    //      and a phone tab in Library each keep their own value.
+    //   3. `users.lastRoomId` — account-global slot updated only on
+    //      "fully offline" disconnects. Useful for brand-new tabs on a
+    //      new device that have no sessionStorage to replay yet.
+    //   4. The canonical landing (The_Spire / system-flagged default).
+    //
+    // Each candidate runs through validateRoomForUser so a stale id
+    // (deleted room, since-archived, newly banned) silently degrades to
+    // the next tier instead of dead-ending the connect.
     let initialRoomId: string | null = null;
     const existingSockets = await io.fetchSockets();
     for (const s of existingSockets) {
@@ -561,42 +621,12 @@ async function main() {
       }
     }
     if (!initialRoomId) {
-      // No sibling tab to follow — try the user's last remembered room
-      // before falling back to the canonical landing. The remembered
-      // room must (a) still exist, (b) be either public or one the user
-      // is already a member of, and (c) not have an active ban against
-      // the user. Anything else and we drop them at the default landing
-      // so the connect path can't dead-end at a wall (forgot password,
-      // banned, etc.).
+      const tabRoomId = (socket.data as { tabRoomId?: string }).tabRoomId ?? null;
+      initialRoomId = await validateRoomForUser(tabRoomId);
+    }
+    if (!initialRoomId) {
       const userRow = (await db.select().from(users).where(eq(users.id, user.id)).limit(1))[0];
-      const lastRoomId = userRow?.lastRoomId ?? null;
-      if (lastRoomId) {
-        const lastRoom = (await db.select().from(rooms).where(eq(rooms.id, lastRoomId)).limit(1))[0];
-        // Skip archived rooms — the user's previous room got
-        // parked while they were offline, so it's no longer a valid
-        // landing target. Fall through to the canonical landing
-        // below instead of dead-ending here.
-        if (lastRoom && !lastRoom.archivedAt) {
-          const isBanned = (await db
-            .select()
-            .from(bans)
-            .where(and(eq(bans.roomId, lastRoom.id), eq(bans.userId, user.id)))
-            .limit(1))[0];
-          const banActive = !!isBanned && (!isBanned.until || +isBanned.until > Date.now());
-          if (!banActive) {
-            if (lastRoom.type === "public") {
-              initialRoomId = lastRoom.id;
-            } else {
-              const member = (await db
-                .select()
-                .from(roomMembers)
-                .where(and(eq(roomMembers.roomId, lastRoom.id), eq(roomMembers.userId, user.id)))
-                .limit(1))[0];
-              if (member) initialRoomId = lastRoom.id;
-            }
-          }
-        }
-      }
+      initialRoomId = await validateRoomForUser(userRow?.lastRoomId ?? null);
     }
     if (!initialRoomId) {
       const landing = await findCanonicalLanding(db);

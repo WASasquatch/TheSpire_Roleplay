@@ -129,6 +129,40 @@ export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
 ];
 
 /**
+ * Match a runtime palette to a named preset by exact slot-by-slot
+ * comparison. Returns the preset name (e.g. "Twilight") or null if the
+ * palette has been customized away from any seeded preset.
+ *
+ * Used by the style resolver: when the user's active palette equals a
+ * preset, the per-preset design map in admin settings pins a default
+ * design (medieval/modern/scifi) to it. Customized palettes fall
+ * through to the site-wide default style instead — there's no preset
+ * name to look up.
+ *
+ * Comparison is case-insensitive on hex values so `#FFAA00` and
+ * `#ffaa00` aren't treated as different palettes; everything else is
+ * a strict equal.
+ */
+export function matchThemePreset(theme: Theme): string | null {
+  const norm = (h: string) => h.toLowerCase();
+  for (const preset of THEME_PRESETS) {
+    if (
+      norm(preset.theme.bg) === norm(theme.bg) &&
+      norm(preset.theme.panel) === norm(theme.panel) &&
+      norm(preset.theme.border) === norm(theme.border) &&
+      norm(preset.theme.text) === norm(theme.text) &&
+      norm(preset.theme.muted) === norm(theme.muted) &&
+      norm(preset.theme.action) === norm(theme.action) &&
+      norm(preset.theme.accent) === norm(theme.accent) &&
+      norm(preset.theme.system) === norm(theme.system)
+    ) {
+      return preset.name;
+    }
+  }
+  return null;
+}
+
+/**
  * Theme color "slots" that a custom-command author can target instead
  * of a literal hex. Stored on a message as `theme:<slot>` and
  * resolved at render time to whatever the VIEWER's theme defines as

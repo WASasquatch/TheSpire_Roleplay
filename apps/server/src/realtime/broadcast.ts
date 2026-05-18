@@ -1302,11 +1302,12 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     : [];
   const charRankByChar = new Map(charEarningRows.map((r) => [r.characterId, { rankKey: r.rankKey, tier: r.tier }]));
 
-  // Active name style + per-user config for styled-name rendering.
-  // We also pull `inlineAvatarEnabled` off the same row so the
-  // cosmetic-toggle propagates in a single query — both fields live
-  // on user_active_cosmetics anyway.
-  const activeCosmeticsRows = userIds.length
+  // Active name style + inline-avatar toggle. Partitioned per
+  // identity (since migration 0085): characters carry their own
+  // active slots on `character_earning`; the master/OOC slot lives
+  // on `user_active_cosmetics`. The render loop below picks the
+  // right one based on whether the occupant is on a character.
+  const userActiveRows = userIds.length
     ? await db
         .select({
           userId: userActiveCosmetics.userId,
@@ -1316,13 +1317,36 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
         .from(userActiveCosmetics)
         .where(inArray(userActiveCosmetics.userId, userIds))
     : [];
-  const activeStyleByUser = new Map(
-    activeCosmeticsRows
+  const masterActiveStyleByUser = new Map(
+    userActiveRows
       .filter((r): r is { userId: string; activeNameStyleKey: string; inlineAvatarEnabled: boolean } => r.activeNameStyleKey !== null)
       .map((r) => [r.userId, r.activeNameStyleKey]),
   );
-  const inlineAvatarByUser = new Map(
-    activeCosmeticsRows.map((r) => [r.userId, !!r.inlineAvatarEnabled]),
+  const masterInlineAvatarByUser = new Map(
+    userActiveRows.map((r) => [r.userId, !!r.inlineAvatarEnabled]),
+  );
+  // Character-scoped active cosmetics. Pulled from the same
+  // `character_earning` rows already fetched above for rank/tier;
+  // we re-query just the cosmetic columns to keep the existing
+  // rank-fetch helper untouched. Empty when no characters are
+  // present in the room.
+  const charActiveRows = charIds.length
+    ? await db
+        .select({
+          characterId: characterEarning.characterId,
+          activeNameStyleKey: characterEarning.activeNameStyleKey,
+          inlineAvatarEnabled: characterEarning.inlineAvatarEnabled,
+        })
+        .from(characterEarning)
+        .where(inArray(characterEarning.characterId, charIds))
+    : [];
+  const charActiveStyleByChar = new Map(
+    charActiveRows
+      .filter((r): r is { characterId: string; activeNameStyleKey: string; inlineAvatarEnabled: boolean } => r.activeNameStyleKey !== null)
+      .map((r) => [r.characterId, r.activeNameStyleKey]),
+  );
+  const charInlineAvatarByChar = new Map(
+    charActiveRows.map((r) => [r.characterId, !!r.inlineAvatarEnabled]),
   );
   // Selected border rank — keyed by the SCOPE of the occupant
   // (character row's selectedBorderRankKey when attached, master row's
@@ -1344,11 +1368,26 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
         .where(inArray(characterEarning.characterId, charIds))
     : [];
   const charBorderByChar = new Map(charBorderRows.map((r) => [r.characterId, r.selectedBorderRankKey]));
-  const ownedStyleRows = activeStyleByUser.size > 0
+  // Pull owned-style configs for every user who has SOME active style
+  // (master or character). Ownership is still account-wide; the per-
+  // identity active key just selects which row's config to use. We
+  // OR the two key sets so a user with a style equipped on a
+  // character but not on master still gets the config pulled.
+  const usersWithAnyActiveStyle = new Set<string>([
+    ...masterActiveStyleByUser.keys(),
+    ...charActiveRows
+      .filter((r) => r.activeNameStyleKey !== null)
+      .map((r) => {
+        const c = charById.get(r.characterId);
+        return c ? c.userId : "";
+      })
+      .filter(Boolean),
+  ]);
+  const ownedStyleRows = usersWithAnyActiveStyle.size > 0
     ? await db
         .select({ userId: userOwnedNameStyles.userId, styleKey: userOwnedNameStyles.styleKey, configJson: userOwnedNameStyles.configJson })
         .from(userOwnedNameStyles)
-        .where(inArray(userOwnedNameStyles.userId, [...activeStyleByUser.keys()]))
+        .where(inArray(userOwnedNameStyles.userId, [...usersWithAnyActiveStyle]))
     : [];
   // Index by (userId, styleKey) so the render loop can do a single
   // map lookup on the user's active key.
@@ -1400,23 +1439,31 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     const poolRank = c
       ? (charRankByChar.get(c.id) ?? { rankKey: null, tier: null })
       : (userRankByUser.get(u.id) ?? { rankKey: null, tier: null });
-    // Active style is master-scoped (one equip choice per user, not
-    // per character) so we key on userId regardless of attached
-    // character. Falls through to null when the user has nothing
-    // equipped or never bought a style.
-    const activeStyleKey = activeStyleByUser.get(u.id) ?? null;
+    // Active style is per-identity since migration 0085: the
+    // character's `character_earning.active_name_style_key` when the
+    // occupant is on a character, the master's
+    // `user_active_cosmetics.active_name_style_key` when OOC. Owned
+    // styles + their config are still keyed by userId (account-wide
+    // ownership), so the config lookup uses the user id regardless
+    // of which scope supplied the style key.
+    const activeStyleKey = c
+      ? (charActiveStyleByChar.get(c.id) ?? null)
+      : (masterActiveStyleByUser.get(u.id) ?? null);
     const nameStyleConfig = activeStyleKey
       ? (ownedConfigByUserStyle.get(`${u.id}::${activeStyleKey}`) ?? null)
       : null;
     // Avatar + border + inline-avatar toggle. Avatar follows the
     // character / master fallback already used for chat-line
-    // snapshots in addMessage. Border picks the scope-appropriate
-    // earning row.
+    // snapshots in addMessage. Border + inline-avatar pick the
+    // scope-appropriate row (character_earning when attached,
+    // user_active_cosmetics when OOC).
     const occupantAvatarUrl = c?.avatarUrl ?? u.avatarUrl ?? null;
     const selectedBorderRankKey = c
       ? (charBorderByChar.get(c.id) ?? null)
       : (userBorderByUser.get(u.id) ?? null);
-    const inlineAvatarEnabled = inlineAvatarByUser.get(u.id) ?? false;
+    const inlineAvatarEnabled = c
+      ? (charInlineAvatarByChar.get(c.id) ?? false)
+      : (masterInlineAvatarByUser.get(u.id) ?? false);
     out.push({
       userId: u.id,
       displayName: c ? c.name : u.username,

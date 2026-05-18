@@ -21,7 +21,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
@@ -266,6 +266,22 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .from(userActiveCosmetics)
       .where(eq(userActiveCosmetics.userId, me.id))
       .limit(1))[0];
+    // Per-character active cosmetics. Pulled from the same
+    // character_earning rows the pool view already touches, but
+    // restricted to the two cosmetic columns added in migration
+    // 0085. Empty when the user has no characters or none with a
+    // character_earning row yet.
+    const charIds = charsOfMine.map((c) => c.id);
+    const characterCosmeticRows = charIds.length
+      ? await db
+          .select({
+            characterId: characterEarning.characterId,
+            activeNameStyleKey: characterEarning.activeNameStyleKey,
+            inlineAvatarEnabled: characterEarning.inlineAvatarEnabled,
+          })
+          .from(characterEarning)
+          .where(inArray(characterEarning.characterId, charIds))
+      : [];
     // Bundle every ENABLED name style on this response so the client
     // can inject the CSS + template lookup map once on app load
     // without a separate /earning/catalog fetch. Disabled rows are
@@ -326,8 +342,24 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         acquiredAt: +r.acquiredAt,
       })),
       activeCosmetics: {
+        // Master / OOC slot. Same shape as before — the existing
+        // dashboard reads these two fields directly for the master
+        // identity tab.
         inlineAvatarEnabled: !!activeCosmeticsRow?.inlineAvatarEnabled,
         activeNameStyleKey: activeCosmeticsRow?.activeNameStyleKey ?? null,
+        // Per-character slots, keyed by character id. Each entry
+        // mirrors the master shape. Characters without an earning
+        // row get null/false defaults so the client can read them
+        // unconditionally.
+        byCharacter: Object.fromEntries(
+          characterCosmeticRows.map((r) => [
+            r.characterId,
+            {
+              activeNameStyleKey: r.activeNameStyleKey,
+              inlineAvatarEnabled: !!r.inlineAvatarEnabled,
+            },
+          ]),
+        ),
       },
       notifications: unack,
     };
@@ -578,6 +610,20 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   }).strict();
   const equipStyleBody = z.object({
     styleKey: z.string().nullable(),
+    /**
+     * Per-identity equip target. Omit / pass null to equip on the
+     * master/OOC slot; pass a character id to equip on that character.
+     * The server validates ownership of the character before writing
+     * so a caller can't toggle someone else's identity. Style
+     * ownership stays account-wide for now, so the same `styleKey`
+     * works against any of the caller's identities once purchased.
+     */
+    characterId: z.string().nullable().optional(),
+  }).strict();
+  const equipInlineAvatarBody = z.object({
+    enabled: z.boolean(),
+    /** Same scoping rule as equipStyleBody — null/omitted = master. */
+    characterId: z.string().nullable().optional(),
   }).strict();
 
   app.post<{ Params: { key: string }; Body: unknown }>(
@@ -664,9 +710,10 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
 
     if (body.styleKey) {
-      // Validate ownership + enabled. We don't want to equip a style
-      // the admin has since disabled — surfaces a clean error rather
-      // than leaving a no-op active key on the row.
+      // Validate ownership + enabled. Ownership remains account-wide
+      // so the check stays keyed on userId; the equip slot below is
+      // what partitions per-identity. Disabled styles surface a
+      // clean 409 rather than leaving a no-op active key on the row.
       const owned = (await db
         .select()
         .from(userOwnedNameStyles)
@@ -681,22 +728,49 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       if (!style || !style.enabled) { reply.code(409); return { error: "style disabled" }; }
     }
 
-    // Lazy upsert the active-cosmetics row.
-    const existing = (await db
-      .select()
-      .from(userActiveCosmetics)
-      .where(eq(userActiveCosmetics.userId, me.id))
-      .limit(1))[0];
-    if (existing) {
-      await db.update(userActiveCosmetics).set({
-        activeNameStyleKey: body.styleKey,
-        updatedAt: new Date(),
-      }).where(eq(userActiveCosmetics.userId, me.id));
+    if (body.characterId) {
+      // Character scope — validate the caller actually owns the
+      // character before writing. The /char switch flow already
+      // enforces this, but the equip endpoint accepts a raw id from
+      // the request body so an attacker could otherwise flip
+      // cosmetics on a stranger's character.
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+        .from(characters)
+        .where(eq(characters.id, body.characterId))
+        .limit(1))[0];
+      if (!c || c.userId !== me.id || c.deletedAt) {
+        reply.code(403);
+        return { error: "not your character" };
+      }
+      // Lazy upsert the per-character earning row. The same row
+      // carries XP / currency / rank already; we just patch the
+      // active_name_style_key column.
+      await db
+        .insert(characterEarning)
+        .values({ characterId: c.id, activeNameStyleKey: body.styleKey })
+        .onConflictDoUpdate({
+          target: characterEarning.characterId,
+          set: { activeNameStyleKey: body.styleKey, updatedAt: new Date() },
+        });
     } else {
-      await db.insert(userActiveCosmetics).values({
-        userId: me.id,
-        activeNameStyleKey: body.styleKey,
-      });
+      // Master/OOC scope — lazy upsert on user_active_cosmetics.
+      const existing = (await db
+        .select()
+        .from(userActiveCosmetics)
+        .where(eq(userActiveCosmetics.userId, me.id))
+        .limit(1))[0];
+      if (existing) {
+        await db.update(userActiveCosmetics).set({
+          activeNameStyleKey: body.styleKey,
+          updatedAt: new Date(),
+        }).where(eq(userActiveCosmetics.userId, me.id));
+      } else {
+        await db.insert(userActiveCosmetics).values({
+          userId: me.id,
+          activeNameStyleKey: body.styleKey,
+        });
+      }
     }
     // Refresh occupant presence so every room the user is parked in
     // picks up the new style on the next render — without this the
@@ -732,6 +806,11 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
 
   const equipCosmeticBody = z.object({
     enabled: z.boolean(),
+    /** Same scoping rule as the name-style equip endpoint —
+     *  null/omitted writes the master/OOC slot on
+     *  user_active_cosmetics; a character id writes that
+     *  character's character_earning row. */
+    characterId: z.string().nullable().optional(),
   }).strict();
 
   /**
@@ -832,20 +911,39 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         reply.code(403);
         return { error: "purchase required" };
       }
-      const existing = (await db
-        .select()
-        .from(userActiveCosmetics)
-        .where(eq(userActiveCosmetics.userId, me.id))
-        .limit(1))[0];
-      if (existing) {
-        await db.update(userActiveCosmetics)
-          .set({ inlineAvatarEnabled: body.enabled, updatedAt: new Date() })
-          .where(eq(userActiveCosmetics.userId, me.id));
+      if (body.characterId) {
+        const c = (await db
+          .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters)
+          .where(eq(characters.id, body.characterId))
+          .limit(1))[0];
+        if (!c || c.userId !== me.id || c.deletedAt) {
+          reply.code(403);
+          return { error: "not your character" };
+        }
+        await db
+          .insert(characterEarning)
+          .values({ characterId: c.id, inlineAvatarEnabled: body.enabled })
+          .onConflictDoUpdate({
+            target: characterEarning.characterId,
+            set: { inlineAvatarEnabled: body.enabled, updatedAt: new Date() },
+          });
       } else {
-        await db.insert(userActiveCosmetics).values({
-          userId: me.id,
-          inlineAvatarEnabled: body.enabled,
-        });
+        const existing = (await db
+          .select()
+          .from(userActiveCosmetics)
+          .where(eq(userActiveCosmetics.userId, me.id))
+          .limit(1))[0];
+        if (existing) {
+          await db.update(userActiveCosmetics)
+            .set({ inlineAvatarEnabled: body.enabled, updatedAt: new Date() })
+            .where(eq(userActiveCosmetics.userId, me.id));
+        } else {
+          await db.insert(userActiveCosmetics).values({
+            userId: me.id,
+            inlineAvatarEnabled: body.enabled,
+          });
+        }
       }
       // Toggle changes whether the avatar tile renders next to the
       // user's name on every chat line — peers need a fresh occupant

@@ -58,9 +58,20 @@ export interface OwnedBorder {
   acquiredAt: number;
 }
 
-export interface ActiveCosmetics {
+export interface IdentityCosmetics {
   inlineAvatarEnabled: boolean;
   activeNameStyleKey: string | null;
+}
+
+export interface ActiveCosmetics extends IdentityCosmetics {
+  /**
+   * Per-character active cosmetics, keyed by character id. Each
+   * entry mirrors the master shape (`inlineAvatarEnabled` +
+   * `activeNameStyleKey`). The top-level fields above remain the
+   * master/OOC slot for backwards compatibility with existing
+   * consumers; characters read from this map indexed by their id.
+   */
+  byCharacter: Record<string, IdentityCosmetics>;
 }
 
 export interface RankUpRecord {
@@ -346,12 +357,18 @@ export async function purchaseCosmetic(key: string): Promise<void> {
   if (!r.ok) throw new Error(await readError(r));
 }
 
-export async function equipCosmetic(key: string, enabled: boolean): Promise<void> {
+export async function equipCosmetic(
+  key: string,
+  enabled: boolean,
+  /** Per-identity scope. Null/undefined targets master/OOC;
+   *  pass a character id to write that character's slot. */
+  characterId: string | null = null,
+): Promise<void> {
   const r = await fetch(`/earning/me/cosmetics/${encodeURIComponent(key)}/equip`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ enabled }),
+    body: JSON.stringify({ enabled, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -388,12 +405,30 @@ export async function patchNameStyleConfig(styleKey: string, config: Record<stri
   if (!r.ok) throw new Error(await readError(r));
 }
 
-export async function setActiveNameStyle(styleKey: string | null): Promise<void> {
+export async function setActiveNameStyle(
+  styleKey: string | null,
+  /** Per-identity scope. Null/undefined targets the master/OOC
+   *  slot; pass a character id to write that character's slot. */
+  characterId: string | null = null,
+): Promise<void> {
   const r = await fetch("/earning/me/active-name-style", {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ styleKey }),
+    body: JSON.stringify({ styleKey, characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+export async function setInlineAvatarEnabled(
+  enabled: boolean,
+  characterId: string | null = null,
+): Promise<void> {
+  const r = await fetch("/earning/me/cosmetics/inline_avatar/equip", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ enabled, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }

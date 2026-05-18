@@ -597,6 +597,13 @@ function StubTab({ title, phase }: { title: string; phase: string }) {
 
 function NameStylesTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {} }) {
   const me = useChat((s) => s.me);
+  // The tab's equip / unequip writes scope to the user's CURRENTLY
+  // ACTIVE identity (master/OOC when no character is selected;
+  // otherwise that character). Reading the active character id from
+  // the chat store keeps the dashboard in lockstep with whatever
+  // identity the user is voicing — switching characters via /char
+  // re-keys this tab to that character's owned/equipped state.
+  const activeCharacterId = useChat((s) => s.activeCharacterId);
   const refresh = useEarning((s) => s.refresh);
   const [tab, setTab] = useState<"owned" | "available">("owned");
   const [err, setErr] = useState<string | null>(null);
@@ -608,7 +615,12 @@ function NameStylesTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.ge
   );
   const owned = styles.filter((s) => ownedKeys.has(s.key));
   const available = styles.filter((s) => !ownedKeys.has(s.key));
-  const activeKey = snapshot.activeCosmetics.activeNameStyleKey;
+  // Active equipped style for the CURRENT identity (per-character or
+  // master). The /earning/me payload carries both: top-level fields
+  // are master, `byCharacter[id]` is the per-character map.
+  const activeKey = activeCharacterId
+    ? (snapshot.activeCosmetics.byCharacter?.[activeCharacterId]?.activeNameStyleKey ?? null)
+    : snapshot.activeCosmetics.activeNameStyleKey;
   const ownedConfigByKey = useMemo(() => {
     const out = new Map<string, Record<string, unknown> | null>();
     for (const o of snapshot.ownedStyles) {
@@ -639,7 +651,9 @@ function NameStylesTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.ge
     setBusyKey(key ?? "__unequip__");
     setErr(null);
     try {
-      await setActiveNameStyle(key);
+      // Scope the equip to the current identity. Server validates
+      // ownership of the character before writing the slot.
+      await setActiveNameStyle(key, activeCharacterId);
       await refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Equip failed");
@@ -1166,6 +1180,12 @@ function BorderCard({
 
 function CosmeticsTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {} }) {
   const refresh = useEarning((s) => s.refresh);
+  // Same per-identity story as the Name Styles tab: the toggle
+  // scopes to the user's currently-active character (or OOC/master
+  // when none is active). Inline-avatar purchase is still account-
+  // wide (one ownership ledger row covers all the user's
+  // identities); only the EQUIPPED toggle is per-identity.
+  const activeCharacterId = useChat((s) => s.activeCharacterId);
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -1191,8 +1211,17 @@ function CosmeticsTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.get
   // active state; a more rigorous check would look at the ledger,
   // but the server-side purchase endpoint sets enabled=true so the
   // flag suffices for the UI's buy vs equip gate.
-  const owns = snapshot.activeCosmetics.inlineAvatarEnabled;
-  const equipped = snapshot.activeCosmetics.inlineAvatarEnabled;
+  // Ownership stays account-wide — anyone of the user's identities
+  // having ever turned it on counts as "owned". Equip state is the
+  // PER-IDENTITY slot: the master fields when OOC, the character's
+  // byCharacter[id] entry when a character is active.
+  const masterEnabled = snapshot.activeCosmetics.inlineAvatarEnabled;
+  const perCharacterMap = snapshot.activeCosmetics.byCharacter ?? {};
+  const anyCharacterEnabled = Object.values(perCharacterMap).some((c) => c.inlineAvatarEnabled);
+  const owns = masterEnabled || anyCharacterEnabled;
+  const equipped = activeCharacterId
+    ? (perCharacterMap[activeCharacterId]?.inlineAvatarEnabled ?? false)
+    : masterEnabled;
 
   async function doBuy() {
     if (!window.confirm(`Buy "${inlineAvatarRow!.name}" for ${inlineAvatarRow!.cost} Currency?`)) return;
@@ -1211,7 +1240,9 @@ function CosmeticsTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.get
     setBusy(true);
     setErr(null);
     try {
-      await equipCosmetic("inline_avatar", next);
+      // Scope to the current identity — same partition as the
+      // name-style equip path. Server validates character ownership.
+      await equipCosmetic("inline_avatar", next, activeCharacterId);
       await refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Toggle failed");

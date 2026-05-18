@@ -1716,6 +1716,23 @@ export const characterEarning = sqliteTable("character_earning", {
   maxTierEverHeld: integer("max_tier_ever_held"),
   /** Per-character border equip choice (drawn from the owner's user_owned_borders set). */
   selectedBorderRankKey: text("selected_border_rank_key"),
+  /**
+   * Per-character equipped name-style key. Distinct from
+   * `user_active_cosmetics.active_name_style_key` (which now scopes
+   * to master/OOC only). When the user is voicing this character
+   * the renderer reads this column; when OOC, it reads the master
+   * row. Null = no style equipped on this character.
+   */
+  activeNameStyleKey: text("active_name_style_key"),
+  /**
+   * Per-character inline-avatar toggle. Same partition as
+   * activeNameStyleKey — character-active shows this character's
+   * inline avatar choice, OOC shows the master's. Default false so
+   * a new character starts with the avatar tile off.
+   */
+  inlineAvatarEnabled: integer("inline_avatar_enabled", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: ts("created_at"),
   updatedAt: ts("updated_at"),
 });

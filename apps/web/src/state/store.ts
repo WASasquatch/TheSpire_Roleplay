@@ -72,6 +72,15 @@ export interface SiteBranding {
    */
   defaultTheme: Theme;
   /**
+   * Raw JSON of `defaultTheme` from `site_settings.default_theme_json`, or
+   * null when the admin hasn't set one. The splash distinguishes
+   * "explicit admin default" (use it verbatim) from "no default at all"
+   * (free to honor system prefers-color-scheme + pick Parchment or
+   * Darkness automatically). Without this flag the splash can't tell
+   * a real admin pick from the built-in DEFAULT_THEME fallback.
+   */
+  defaultThemeJson: string | null;
+  /**
    * Master toggle for surfacing live community activity. When false the
    * splash hides its user/room counters (cold-start posture so the site
    * doesn't telegraph "dead community" to first visitors).
@@ -124,6 +133,9 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // arrives via /site on first paint.
   editGraceMs: 5 * 60 * 1000,
   defaultTheme: DEFAULT_THEME,
+  // Null = no admin override; splash is free to pick light/dark
+  // automatically based on system preference + the last-active cache.
+  defaultThemeJson: null,
   // Off by default. Admin flips it on once there are real users to surface.
   activityFeedsEnabled: false,
   // Off by default. Admin flips it on after deciding the seeded worlds are
@@ -192,6 +204,9 @@ export function loadCachedBranding(): SiteBranding {
       defaultTheme: parsed.defaultTheme && typeof parsed.defaultTheme === "object"
         ? { ...DEFAULT_BRANDING.defaultTheme, ...parsed.defaultTheme }
         : DEFAULT_BRANDING.defaultTheme,
+      defaultThemeJson: typeof parsed.defaultThemeJson === "string" || parsed.defaultThemeJson === null
+        ? parsed.defaultThemeJson
+        : DEFAULT_BRANDING.defaultThemeJson,
       activityFeedsEnabled: typeof parsed.activityFeedsEnabled === "boolean"
         ? parsed.activityFeedsEnabled
         : DEFAULT_BRANDING.activityFeedsEnabled,
@@ -229,6 +244,59 @@ export function saveCachedBranding(b: SiteBranding): void {
     if (typeof localStorage === "undefined") return;
     localStorage.setItem(BRANDING_CACHE_KEY, JSON.stringify(b));
   } catch { /* quota or privacy mode - silently skip */ }
+}
+
+/**
+ * Cache the user's most recently *resolved* active theme (palette
+ * after all character / master / branding fallbacks). The splash
+ * reads this on a fresh tab — before /auth/me has resolved — so a
+ * brief sign-out doesn't bounce a user who chose Darkness through a
+ * flash of the Parchment splash. localStorage (not sessionStorage)
+ * so the value survives a tab close + reopen: the user's *theme
+ * preference* is account-global, not tab-local (unlike character
+ * identity and current room, which use sessionStorage).
+ *
+ * Stored as the JSON-serialized Theme object so a custom palette
+ * survives too, not just preset names.
+ */
+// Bumped to v2 after the gated-write fix: v1 caches captured the
+// light DEFAULT_THEME fallback that the activeTheme effect emitted
+// while the splash was visible (me === null). Reading a v1 cache
+// would land the splash on the wrong palette even for users whose
+// real last-active theme was dark. Bumping the key makes existing
+// v1 entries inert so every client falls through to
+// prefers-color-scheme on the next splash visit; the cache will
+// re-populate cleanly the first time the user signs in.
+const LAST_ACTIVE_THEME_KEY = "tk:lastActiveTheme:v2";
+
+export function saveCachedActiveTheme(theme: Theme): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(LAST_ACTIVE_THEME_KEY, JSON.stringify(theme));
+  } catch { /* private-mode — splash will fall back to prefers-color-scheme */ }
+}
+
+export function loadCachedActiveTheme(): Theme | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(LAST_ACTIVE_THEME_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    // Use the same `normalizeTheme` shape-fill guard as the branding
+    // cache: a partial / corrupt entry shouldn't render with missing
+    // slots; the fallback fills in the default values.
+    return { ...DEFAULT_THEME, ...parsed } as Theme;
+  } catch {
+    return null;
+  }
+}
+
+export function clearCachedActiveTheme(): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.removeItem(LAST_ACTIVE_THEME_KEY);
+  } catch { /* swallow */ }
 }
 
 /**

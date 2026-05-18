@@ -327,6 +327,13 @@ async function main() {
       // endpoint, or by any remote https URL.
       logoUrl: s.logoUrl,
       defaultTheme: s.defaultTheme,
+      // Surface the raw JSON column so the splash can distinguish
+      // "admin set an explicit default" from "fell back to the
+      // built-in DEFAULT_THEME because nothing's configured". Null
+      // means no override → the splash is free to honor
+      // prefers-color-scheme and pick the Darkness preset for
+      // dark-mode systems / cached-dark visitors.
+      defaultThemeJson: s.defaultThemeJson,
       // Surface so the unauthenticated AuthGate can hide the Register tab.
       registrationOpen: s.registrationOpen,
       // Sanitized welcome message rendered above the splash login form.

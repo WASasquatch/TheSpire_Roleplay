@@ -200,6 +200,29 @@ async function buildCharacterPoolView(
 
 export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
   /**
+   * Re-broadcast occupant presence in every room the user has a live
+   * socket in. Called after any change that affects how the user's
+   * name renders to peers (name-style equip, border equip, inline-
+   * avatar toggle, name-style color config) — those cosmetics ride
+   * the occupant cache, not the message wire, so without a presence
+   * refresh other tabs / peers don't see the change until something
+   * else triggers a broadcast (a join, a /char switch). Mirrors the
+   * pattern in /me/profile (apps/server/src/routes/characters.ts:741).
+   */
+  async function rebroadcastPresenceForUser(userId: string): Promise<void> {
+    const sockets = await io.fetchSockets();
+    const rooms = new Set<string>();
+    for (const s of sockets) {
+      if ((s.data as { userId?: string }).userId !== userId) continue;
+      for (const r of s.rooms) if (r.startsWith("room:")) rooms.add(r.slice(5));
+    }
+    if (rooms.size === 0) return;
+    const { broadcastPresence } = await import("../realtime/broadcast.js");
+    for (const roomId of rooms) await broadcastPresence(io, db, roomId);
+  }
+
+
+  /**
    * Full earning snapshot for the caller. Drives the Earning
    * dashboard wallet + ledger sections + the catalog + own
    * notifications. Cacheable on the catalog slice (everyone sees the
@@ -449,6 +472,15 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     }
     if (Object.keys(update).length === 1) return { ok: true }; // only updatedAt — nothing to do
     await db.update(userEarning).set(update).where(eq(userEarning.userId, me.id));
+    // Border equip changes the bordered-avatar rendering on every line
+    // this user appears on, so peers need a fresh occupant snapshot to
+    // see it without a refresh. hideCurrencyCount / hideXpCount only
+    // affect the dashboard view (not occupants), so the broadcast is a
+    // no-op for those — cheap regardless since the function early-exits
+    // when the user has no live sockets.
+    if (body.selectedBorderRankKey !== undefined) {
+      await rebroadcastPresenceForUser(me.id);
+    }
     return { ok: true };
   });
 
@@ -616,6 +648,10 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         .update(userOwnedNameStyles)
         .set({ configJson: body.config ? JSON.stringify(body.config) : null })
         .where(and(eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, req.params.key)));
+      // Style config (colors / glow / outline) feeds straight into the
+      // occupant payload's `activeStyleConfig`, so a refresh here lands
+      // the tweak live without a peer-side reload.
+      await rebroadcastPresenceForUser(me.id);
       return { ok: true };
     },
   );
@@ -662,6 +698,10 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         activeNameStyleKey: body.styleKey,
       });
     }
+    // Refresh occupant presence so every room the user is parked in
+    // picks up the new style on the next render — without this the
+    // equip didn't take effect until peers refreshed.
+    await rebroadcastPresenceForUser(me.id);
     return { ok: true };
   });
 
@@ -768,6 +808,10 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           : { error: outcome.error };
       }
       await emitWalletUpdate(io, me.id, outcome.final, -outcome.cost, `purchase_${req.params.key}`);
+      // Inline-avatar purchase auto-enables the cosmetic in the grant
+      // step, so peers need a fresh occupant snapshot to see the new
+      // avatar tile appear on the user's chat lines without reload.
+      await rebroadcastPresenceForUser(me.id);
       return { ok: true };
     },
   );
@@ -803,6 +847,10 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           inlineAvatarEnabled: body.enabled,
         });
       }
+      // Toggle changes whether the avatar tile renders next to the
+      // user's name on every chat line — peers need a fresh occupant
+      // snapshot or the change waits until the next presence event.
+      await rebroadcastPresenceForUser(me.id);
       return { ok: true };
     },
   );
@@ -896,6 +944,13 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           : { error: outcome.error };
       }
       await emitWalletUpdate(io, me.id, outcome.final, -outcome.cost, `border_purchase_${rankKey}`);
+      // Border purchase auto-equips when the user has no border set
+      // yet (see the `grant` step above). Refresh occupants so peers
+      // see the new bordered avatar immediately. When a border was
+      // already equipped the broadcast is still cheap — no occupant
+      // shape changes — and the symmetry beats branching on the
+      // auto-equip path.
+      await rebroadcastPresenceForUser(me.id);
       return { ok: true };
     },
   );

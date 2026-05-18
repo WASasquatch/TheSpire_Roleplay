@@ -425,6 +425,12 @@ function RoomGroup({
                           inlineAvatar={o.inlineAvatarEnabled}
                           onIconClick={() => onIconClick(o.userId, o.displayName)}
                           onNameClick={() => onNameClick(o.userId, o.displayName)}
+                          // Rail rows are width-constrained (user-
+                          // draggable resize handle) and have to
+                          // ellipsize long names. Chat lines pass the
+                          // default (truncate=false) so italic + name-
+                          // style decorations there render fully.
+                          truncate
                         />
                       </div>
                       {chip ? (

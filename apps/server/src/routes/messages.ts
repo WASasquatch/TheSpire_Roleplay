@@ -77,6 +77,16 @@ function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMes
     ...(m.rankKey ? { rankKey: m.rankKey } : {}),
     ...(m.tier != null ? { tier: m.tier } : {}),
     ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
+    // Admin-only audit snapshot of who performed the delete. Mirrors
+    // the originalBody carve-out — site admins see who took the
+    // moderation action; mods and ordinary viewers don't. Falls back
+    // to undefined when the snapshot isn't present (pre-0084 deletes).
+    ...(viewerIsAdmin && m.deletedAt && m.deletedByUserId
+      ? { deletedByUserId: m.deletedByUserId }
+      : {}),
+    ...(viewerIsAdmin && m.deletedAt && m.deletedByDisplayName
+      ? { deletedByDisplayName: m.deletedByDisplayName }
+      : {}),
   };
 }
 
@@ -200,9 +210,22 @@ export async function registerMessageRoutes(
     }
 
     const deletedAt = new Date(now);
+    // Snapshot the actor's identity onto the row so the admin-audit
+    // render in chat can show who performed the delete (self vs
+    // admin/mod). We snapshot `username` (the underlying account)
+    // rather than the active character's displayName because
+    // moderation transparency is the goal — admins doing a delete
+    // should be identifiable as their account, not as whatever
+    // character they happened to be voicing at the time. Self-delete
+    // detection at render time compares by userId, so the snapshot
+    // name is presentation-only.
     await db
       .update(messages)
-      .set({ deletedAt })
+      .set({
+        deletedAt,
+        deletedByUserId: me.id,
+        deletedByDisplayName: me.username,
+      })
       .where(eq(messages.id, m.id));
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];

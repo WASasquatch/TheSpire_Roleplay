@@ -29,12 +29,12 @@ import { WelcomeModal } from "./components/WelcomeModal.js";
 import { getSocket, disconnect as disconnectSocket, loadTabCharacter, rememberTabCharacter, rememberTabRoom } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
-import { ActiveThemeContext, applyFontPrefs, applyTheme, themeStyle, type UiFontScale } from "./lib/theme.js";
+import { ActiveThemeContext, applyFontPrefs, applyTheme, resolveSplashTheme, splashBgUrl, themeStyle, type UiFontScale } from "./lib/theme.js";
 import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
 import { fire as fireNotification, permission as notifPermission, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
 import { playAlert, playPing, playTap, playWhisper } from "./lib/sound.js";
-import { useChat, type SiteBranding } from "./state/store.js";
+import { saveCachedActiveTheme, useChat, type SiteBranding } from "./state/store.js";
 import { useEarning } from "./state/earning.js";
 import { injectNameStyles } from "./lib/nameStyleInjector.js";
 
@@ -594,16 +594,17 @@ function PublicViewerShell({
   const siteName = branding.siteName || "The Spire";
   return (
     <div
-      style={themeStyle(branding.defaultTheme)}
+      style={themeStyle(resolveSplashTheme(branding))}
       className="relative min-h-screen w-full bg-keep-bg text-keep-text"
     >
       {/* Subtle backdrop image, same as the login splash, so the standalone
           page still feels like part of the site rather than a stripped
-          modal floating on a flat color. */}
+          modal floating on a flat color. Same dark/light swap as the
+          login splash via splashBgUrl (resolved palette decides). */}
       <div
         aria-hidden
         className="absolute inset-0 bg-cover bg-[position:-175px_center] opacity-40 md:bg-center"
-        style={{ backgroundImage: "url(/the_spire_bg.jpg)" }}
+        style={{ backgroundImage: `url(${splashBgUrl(resolveSplashTheme(branding))})` }}
       />
       <div aria-hidden className="absolute inset-0 bg-keep-bg/70" />
       <a
@@ -1043,6 +1044,21 @@ function Chat() {
     //   4. Site default (site_settings.default_style_key).
     //   5. Hardcoded fallback ('medieval').
     applyTheme(activeTheme);
+    // Cache the resolved active theme so a brief sign-out renders the
+    // splash in the user's most recent palette instead of bouncing
+    // through Parchment / Darkness defaults. See
+    // `loadCachedActiveTheme` in state/store.ts for the read side.
+    //
+    // Gated on `me` being signed in: while the splash is showing
+    // (me === null pre-auth-check, or after sign-out) `activeTheme`
+    // falls through to `branding.defaultTheme` — the light Spire
+    // Modern fallback. Writing THAT to the cache would clobber the
+    // user's actual last-active palette and bounce them into the
+    // light splash on the next visit even though their last real
+    // theme was dark. By only writing while authenticated, the
+    // cache only ever captures themes the user actually saw applied
+    // to their own chat session.
+    if (me) saveCachedActiveTheme(activeTheme);
     const presetName = matchThemePreset(activeTheme);
     const pinnedForPreset = presetName ? themeDesignMap[presetName] : undefined;
     const resolvedStyle =
@@ -1052,7 +1068,7 @@ function Chat() {
       siteStyleKey ||
       DEFAULT_STYLE_KEY;
     applyStyle(activeTheme, resolvedStyle);
-  }, [activeTheme, characterStyleKey, userStyleKey, siteStyleKey, themeDesignMap]);
+  }, [activeTheme, characterStyleKey, userStyleKey, siteStyleKey, themeDesignMap, me]);
 
   // Per-user font/size accessibility. Independent of the palette effect
   // above because font preferences don't layer through character/room

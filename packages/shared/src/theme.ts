@@ -126,7 +126,50 @@ export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
       system: "#7a5a1a",
     },
   },
+  {
+    // Default DARK companion to Parchment. Picked to read against the
+    // dark splash artwork (the_spire_bg_dark.jpg) — near-black bg/panel
+    // pulled from the artwork's deep blue-black sky, a dark sky-blue
+    // system slot taken from the moonlit highlight on the mountain
+    // ridge, a darker amber yellow accent matching the dragon glyphs
+    // on the parchment overlay, and a spire-energy cyan action color
+    // tying back to the magic circle's neon halo. The splash adds a
+    // matching pair of corner glows (cyan top-left, moon-white
+    // bottom-right) when this palette — or any palette whose bg
+    // luminance reads as "dark" — is active.
+    name: "Darkness",
+    theme: {
+      bg: "#0a0e1a",
+      panel: "#141828",
+      border: "#2a3548",
+      text: "#e8eaf2",
+      muted: "#7e8a9e",
+      action: "#3fa5a0",
+      accent: "#d4a83a",
+      system: "#5a8aa8",
+    },
+  },
 ];
+
+/**
+ * Return true when a palette's background reads as "dark" (relative
+ * luminance below 0.18 ≈ "the splash card needs the dark variant of
+ * its image"). Used by the splash + boot screens to decide which
+ * background asset to load and whether to layer the cyan/moon corner
+ * glows on top. Reuses the WCAG luminance math the contrast walker
+ * below already implements.
+ *
+ * 0.18 is empirical: Parchment's bg (#f4efe2) reads ~0.91, Ember's
+ * (#241612) reads ~0.013, Slate's (#f5f5f5) reads ~0.91, Darkness's
+ * (#0a0e1a) reads ~0.005. The threshold lands between Slate (light)
+ * and Twilight's bg #1c1b29 (~0.012, dark). Safe over a wide range
+ * of custom palettes.
+ */
+export function isDarkPalette(theme: Theme): boolean {
+  const rgb = parseHexColor(theme.bg);
+  if (!rgb) return false;
+  return relativeLuminance(rgb) < 0.18;
+}
 
 /**
  * Match a runtime palette to a named preset by exact slot-by-slot

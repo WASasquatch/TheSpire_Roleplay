@@ -56,6 +56,18 @@ export interface ChatMessage {
    */
   originalBody?: string | null;
   /**
+   * Audit snapshot of who performed the soft-delete. Same admin-only
+   * gating as `originalBody` — the server only emits these fields to
+   * `isAdminRole` viewers. Compare `deletedByUserId === userId` at
+   * render time to distinguish a self-delete (within the grace
+   * window) from a mod/admin moderation action. Both fields are
+   * absent when the message isn't deleted, or when the delete
+   * predates migration 0084 and was never snapshotted.
+   */
+  deletedByUserId?: string | null;
+  /** Display name snapshotted at delete time. See `deletedByUserId`. */
+  deletedByDisplayName?: string | null;
+  /**
    * Thread-category anchor for top-level messages in nested-mode rooms.
    * Null/absent = "Uncategorized" (the renderer's fallback bucket).
    * Replies inherit their parent's category implicitly — this field is

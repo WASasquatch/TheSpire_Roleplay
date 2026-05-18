@@ -451,6 +451,21 @@ export const messages = sqliteTable(
     /** Set when the author deletes the message inside the grace window (epoch ms). The row is retained so reply snippets and snapshots stay coherent; renderer shows "[message removed]". */
     deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
     /**
+     * Audit snapshot: the user id of whoever performed the delete.
+     * Null when the message isn't deleted, or when the delete predates
+     * migration 0084 (existing rows have no recorded actor). Compare
+     * against `userId` at render time to tell self-delete from
+     * mod/admin moderation.
+     */
+    deletedByUserId: text("deleted_by_user_id"),
+    /**
+     * Snapshot of the actor's display name at delete time. Mirrors
+     * the existing `displayName` snapshot pattern for the author —
+     * keeps the audit coherent if the actor later renames or has
+     * their account deleted.
+     */
+    deletedByDisplayName: text("deleted_by_display_name"),
+    /**
      * Set when the topic has been locked (author or moderator action).
      * Only meaningful for top-level topics in nested-mode rooms — the
      * server rejects new replies under a locked topic. Stored as a

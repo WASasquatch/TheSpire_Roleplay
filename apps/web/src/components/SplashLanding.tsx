@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
 import { VERSION } from "@thekeep/shared";
+import { isDarkPalette } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
-import { themeStyle } from "../lib/theme.js";
+import { resolveSplashTheme, splashBgUrl, themeStyle } from "../lib/theme.js";
 import { AffiliatesCarousel } from "./AffiliatesCarousel.js";
 import { FeaturedWorldsCarousel } from "./FeaturedWorldsCarousel.js";
 
@@ -76,22 +77,39 @@ export function SplashLanding({ onNavigate }: Props) {
     onNavigate(path);
   }
 
+  const splashTheme = resolveSplashTheme(branding);
+  const splashIsDark = isDarkPalette(splashTheme);
   return (
     <div
-      style={themeStyle(branding.defaultTheme)}
+      style={themeStyle(splashTheme)}
       className="relative min-h-screen w-full overflow-hidden bg-keep-bg text-keep-text"
     >
       {/* Background art — mirrors SplashShell so the visual identity stays
-          consistent between the landing and the auth pages. */}
+          consistent between the landing and the auth pages. Same dark-
+          mode swap (resolved palette → bg image variant + corner glows). */}
       <div
         aria-hidden
         className="absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
-        style={{ backgroundImage: "url(/the_spire_bg.jpg)" }}
+        style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
       />
       <div
         aria-hidden
         className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-keep-bg/30 md:to-keep-bg/70"
       />
+      {splashIsDark ? (
+        <>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -left-32 -top-32 h-[28rem] w-[28rem]"
+            style={{ background: "radial-gradient(circle, rgba(63,165,160,0.35) 0%, rgba(63,165,160,0.12) 35%, transparent 70%)" }}
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -bottom-32 -right-32 h-[32rem] w-[32rem]"
+            style={{ background: "radial-gradient(circle, rgba(220,230,255,0.22) 0%, rgba(220,230,255,0.08) 40%, transparent 75%)" }}
+          />
+        </>
+      ) : null}
 
       {/* Card. Wider than the AuthGate card (680px vs 560px) so the
           three-pillar grid below the hero has room to breathe. Same

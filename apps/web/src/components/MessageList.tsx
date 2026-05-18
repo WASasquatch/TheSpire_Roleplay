@@ -1406,6 +1406,15 @@ export function ForumPostBody({
   const [editBusy, setEditBusy] = useState(false);
 
   if (msg.deletedAt) {
+    // Mirror the chat-line variant's author + actor surfacing — see
+    // that branch (around line 2361) for the rationale on the three
+    // possible actor states.
+    const isSelfDelete = !!msg.deletedByUserId && msg.deletedByUserId === msg.userId;
+    const actorBlurb = msg.deletedByUserId
+      ? (isSelfDelete
+          ? "self-deleted"
+          : `deleted by ${msg.deletedByDisplayName ?? "unknown"}`)
+      : null;
     return (
       <div className="rounded border border-dashed border-keep-rule/40 px-2 py-1 text-xs italic text-keep-muted/70">
         [message removed]
@@ -1419,7 +1428,12 @@ export function ForumPostBody({
               className="mr-1 select-none text-[9px] uppercase not-italic tracking-widest text-keep-accent/70"
               title="Original body, visible to site admins only for audit"
             >
-              admin audit:
+              admin audit
+              <span className="ml-1 normal-case tracking-normal">
+                — {msg.displayName}
+                {actorBlurb ? ` · ${actorBlurb}` : ""}
+              </span>
+              :
             </span>
             <span className="whitespace-pre-wrap">{msg.originalBody}</span>
           </blockquote>
@@ -2359,6 +2373,20 @@ function Line({
   // Server strips the body server-side already; this just paints the gap so
   // the timeline doesn't shift when an in-grace delete fires.
   if (msg.deletedAt) {
+    // Compute the actor blurb for the admin audit. Three cases:
+    //   * Self-delete (deletedByUserId === userId): "self-deleted" — the
+    //     author hit delete within the grace window.
+    //   * Mod/admin action (different deletedByUserId): "deleted by Y".
+    //   * Pre-migration delete (no deletedByUserId snapshot): omit the
+    //     actor blurb entirely; just show "admin audit" so the older
+    //     deletes still surface their body without claiming an actor
+    //     we don't know.
+    const isSelfDelete = !!msg.deletedByUserId && msg.deletedByUserId === msg.userId;
+    const actorBlurb = msg.deletedByUserId
+      ? (isSelfDelete
+          ? "self-deleted"
+          : `deleted by ${msg.deletedByDisplayName ?? "unknown"}`)
+      : null;
     return (
       <div className="text-keep-muted/70">
         <span className="mr-2 select-none text-xs tabular-nums">{timeText}</span>
@@ -2375,7 +2403,18 @@ function Line({
               className="mr-1 select-none text-[9px] uppercase not-italic tracking-widest text-keep-accent/70"
               title="Original body, visible to site admins only for audit"
             >
-              admin audit:
+              admin audit
+              {/* Surface the author snapshotted on the row + the actor
+                  who performed the delete so admins don't have to
+                  cross-reference timestamps to figure out who hid what.
+                  Author is always present (snapshotted at send time);
+                  actor came in with migration 0084 and falls back
+                  cleanly for older rows. */}
+              <span className="ml-1 normal-case tracking-normal">
+                — {msg.displayName}
+                {actorBlurb ? ` · ${actorBlurb}` : ""}
+              </span>
+              :
             </span>
             <span className="whitespace-pre-wrap">{msg.originalBody}</span>
           </blockquote>

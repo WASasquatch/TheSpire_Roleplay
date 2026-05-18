@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import type { CSSProperties } from "react";
-import { DEFAULT_THEME, type Theme } from "@thekeep/shared";
+import { DEFAULT_THEME, isDarkPalette, THEME_PRESETS, type Theme } from "@thekeep/shared";
+import { loadCachedActiveTheme, type SiteBranding } from "../state/store.js";
 
 /**
  * Read access to the currently-active theme — the same value `applyTheme`
@@ -63,6 +64,51 @@ export function isDarkTheme(theme: Theme): boolean {
 const VAR_KEYS: ReadonlyArray<keyof Theme> = [
   "bg", "panel", "border", "text", "muted", "action", "accent", "system",
 ];
+
+/**
+ * Pick the splash's effective palette. Priority chain (highest wins):
+ *
+ *   1. User's last-active theme — cached in localStorage after
+ *      authentication. A brief sign-out shouldn't bounce a Darkness
+ *      user through a flash of Parchment splash.
+ *   2. System `prefers-color-scheme: dark` → built-in Darkness preset.
+ *   3. Fallback → built-in Parchment preset.
+ *
+ * Note we intentionally do NOT use `branding.defaultTheme` here. The
+ * admin default theme governs the authenticated chat fallback (for
+ * users without a personal theme); the splash is anonymous chrome
+ * that should auto-match the visitor's system preference so a
+ * dark-mode visitor doesn't land on a blinding light splash. Admins
+ * who want a uniformly themed brand will see their pick on the chat
+ * shell once a user signs in.
+ *
+ * Pure function (modulo `localStorage` + `window.matchMedia`); safe to
+ * call from inline `style={themeStyle(...)}` on each splash render.
+ *
+ * Accepts SiteBranding for backwards compatibility with callers, even
+ * though no field is currently read from it. Keeping the param so the
+ * signature stays stable if we re-introduce admin overrides later.
+ */
+export function resolveSplashTheme(_branding: SiteBranding): Theme {
+  const cached = loadCachedActiveTheme();
+  if (cached) return cached;
+  // matchMedia is undefined in SSR / non-DOM environments — defensive
+  // for tests; the splash only runs in a browser in practice.
+  const systemDark =
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const presetName = systemDark ? "Darkness" : "Parchment";
+  const preset = THEME_PRESETS.find((p) => p.name === presetName);
+  return preset ? preset.theme : DEFAULT_THEME;
+}
+
+/** Path for the splash background image, dark / light variant chosen
+ *  by the resolved splash palette. The dark variant is bundled at
+ *  /the_spire_bg_dark.jpg (added 2026-05). */
+export function splashBgUrl(theme: Theme): string {
+  return isDarkPalette(theme) ? "/the_spire_bg_dark.jpg" : "/the_spire_bg.jpg";
+}
 
 /**
  * Convert a Theme into the inline-style object that overrides CSS variables

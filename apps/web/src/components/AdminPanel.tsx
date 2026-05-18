@@ -660,6 +660,9 @@ function SettingsTab() {
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
+        // Null = admin hasn't set an explicit override → splash falls
+        // back to prefers-color-scheme + cached last-active theme.
+        defaultThemeJson: j.defaultThemeJson ?? null,
       });
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
@@ -1057,6 +1060,9 @@ function BrandingTab() {
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
+        // Null = admin hasn't set an explicit override → splash falls
+        // back to prefers-color-scheme + cached last-active theme.
+        defaultThemeJson: j.defaultThemeJson ?? null,
       });
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
@@ -1164,6 +1170,7 @@ function BrandingTab() {
               featuredWorldsEnabled: j.settings.featuredWorldsEnabled,
               defaultStyleKey: j.settings.defaultStyleKey,
               themeDesignMap: j.settings.themeDesignMap ?? {},
+              defaultThemeJson: j.settings.defaultThemeJson ?? null,
             });
           }}
         />
@@ -1526,6 +1533,9 @@ function RulesTab() {
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
+        // Null = admin hasn't set an explicit override → splash falls
+        // back to prefers-color-scheme + cached last-active theme.
+        defaultThemeJson: j.defaultThemeJson ?? null,
       });
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);

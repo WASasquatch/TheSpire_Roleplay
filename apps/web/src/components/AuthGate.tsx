@@ -4,7 +4,8 @@ import { VERSION } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { setSessionToken } from "../lib/http.js";
 import { markLoginIntent } from "../lib/socket.js";
-import { themeStyle } from "../lib/theme.js";
+import { resolveSplashTheme, splashBgUrl, themeStyle } from "../lib/theme.js";
+import { isDarkPalette } from "@thekeep/shared";
 import { AffiliatesCarousel } from "./AffiliatesCarousel.js";
 import { FeaturedWorldsCarousel } from "./FeaturedWorldsCarousel.js";
 
@@ -71,23 +72,27 @@ export function SplashShell({
   if (branding.logoColor) logoStyle.color = branding.logoColor;
   if (branding.logoFont) logoStyle.fontFamily = branding.logoFont;
 
+  const splashTheme = resolveSplashTheme(branding);
+  const splashIsDark = isDarkPalette(splashTheme);
   return (
-    // Inline `themeStyle(...)` scopes the site's default theme to the splash
-    // subtree. This isolates us from whatever CSS vars a previously-logged-in
-    // user left on documentElement - the splash should always render in the
-    // admin-configured palette (which the parchment bg image is paired with),
-    // not in a leftover Twilight or Forest theme.
+    // Inline `themeStyle(splashTheme)` scopes the splash to the
+    // resolved palette: admin's explicit default → user's last-active
+    // (cached) → system prefers-color-scheme → Parchment fallback.
+    // This decouples the splash from whatever CSS vars a previously-
+    // logged-in user left on documentElement, and lets a dark-mode
+    // user land on the Darkness palette automatically.
     <div
-      style={themeStyle(branding.defaultTheme)}
+      style={themeStyle(splashTheme)}
       className="relative min-h-screen w-full overflow-hidden bg-keep-bg text-keep-text"
     >
       {/*
         Background layer - absolute so the card sits above it without
         affecting its sizing. Cover keeps the spire fully visible on common
         16:9 / 16:10 viewports; the image's right edge fades to parchment
-        which blends into the modal seamlessly. A subtle parchment overlay
-        on the right boosts modal legibility on smaller / wider viewports
-        where the natural fade isn't quite enough.
+        (or to deep blue in the dark variant) which blends into the modal
+        seamlessly. A subtle background-color overlay on the right boosts
+        modal legibility on smaller / wider viewports where the natural
+        fade isn't quite enough.
       */}
       <div
         aria-hidden
@@ -99,11 +104,11 @@ export function SplashShell({
         // with mountains trailing below. On md+ the viewport is wide
         // enough that the natural cover-center works.
         className="absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
-        style={{ backgroundImage: "url(/the_spire_bg.jpg)" }}
+        style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
       />
       <div
         aria-hidden
-        // Right-side parchment veil so the desktop card sits on a calm
+        // Right-side veil so the desktop card sits on a calm
         // background even where the bg image itself has detail. On mobile
         // the card switches to a translucent glass treatment (see below)
         // and we WANT the artwork showing through, so the veil is much
@@ -111,6 +116,27 @@ export function SplashShell({
         // from competing with the card.
         className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-keep-bg/30 md:to-keep-bg/70"
       />
+      {/* Dark-mode corner glows. Cyan top-left echoes the spire star's
+          neon halo in the artwork; moon-white bottom-right echoes the
+          moonlit ridge highlight. Pure decorative overlays — pointer
+          events disabled so they never intercept clicks. Painted only
+          when the resolved splash palette reads as dark (Darkness
+          preset, Twilight, Ember, Ocean, etc.); the light artwork
+          doesn't need them. */}
+      {splashIsDark ? (
+        <>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -left-32 -top-32 h-[28rem] w-[28rem]"
+            style={{ background: "radial-gradient(circle, rgba(63,165,160,0.35) 0%, rgba(63,165,160,0.12) 35%, transparent 70%)" }}
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -bottom-32 -right-32 h-[32rem] w-[32rem]"
+            style={{ background: "radial-gradient(circle, rgba(220,230,255,0.22) 0%, rgba(220,230,255,0.08) 40%, transparent 75%)" }}
+          />
+        </>
+      ) : null}
 
       {/*
         Card position. On wide desktops (lg+) we visually center the

@@ -76,6 +76,19 @@ interface Props {
   avatarUrl?: string | null;
   selectedBorderRankKey?: string | null;
   inlineAvatar?: boolean;
+  /**
+   * Opt the inner name button into ellipsis truncation. Default off.
+   *
+   * Truncation requires `overflow: hidden` on the button, which clips
+   * any paint extending past the layout box — italic glyph slant on
+   * the last character, drop-shadow halos on name styles, ember
+   * pseudo-element particles, etc. Chat lines have plenty of room
+   * and don't need to truncate, so leaving this off lets all of that
+   * decoration render fully. The userlist rail (RoomsTree) opts in
+   * because narrow widths legitimately require ellipsis on long
+   * names.
+   */
+  truncate?: boolean;
 }
 
 /**
@@ -104,6 +117,7 @@ export function UserNameTag({
   avatarUrl,
   selectedBorderRankKey,
   inlineAvatar,
+  truncate = false,
 }: Props) {
   const g = genderGlyph(gender);
   // Resolve theme-slot tokens (e.g. `theme:system`) to a CSS color
@@ -237,21 +251,36 @@ export function UserNameTag({
           (italic ? `${displayName} - admin` : `whisper ${displayName}`) +
           (away && awayMessage ? ` (away: ${awayMessage})` : "")
         }
-        // `min-w-0 truncate` is what lets the displayName ellipsize
-        // inside a narrow rail (e.g. after the user drags the
-        // userlist resize handle to a tight width). `truncate` =
-        // `overflow:hidden; text-overflow:ellipsis; white-space:nowrap`,
-        // and `min-w-0` lets this flex child shrink below its
-        // content-size so the ellipsis actually has room to engage.
-        // Without these, long names previously broke onto a new line
-        // and threw the row layout off.
+        // Two render modes, gated by the `truncate` prop:
+        //
+        //   truncate=true  — narrow-rail use (userlist). The button
+        //                    ellipsizes with `…` when the name is
+        //                    longer than the available width. Adds
+        //                    `min-w-0` so the button can shrink below
+        //                    its content size as a flex child.
+        //                    `overflow-clip` + `overflow-clip-margin`
+        //                    let italic slant and small style halos
+        //                    paint outside the box even while
+        //                    truncation is enabled.
+        //
+        //   truncate=false — chat-line / forum-header default. No
+        //                    overflow rule at all so the button is
+        //                    the same size as its content and italic
+        //                    glyphs / name-style decorations render
+        //                    fully into the ambient inline flow. The
+        //                    chat line has plenty of horizontal room
+        //                    and would never need to truncate the
+        //                    name; `overflow: hidden` was the actual
+        //                    cause of clipped italic admin names.
         //
         // `py-0.5` only — no horizontal padding: it pushed the
         // username away from the surrounding "[" / ":" punctuation
         // that wraps it in chat lines. The hover background still
         // reads on hover thanks to the rounded background sitting
         // tight against the text glyphs.
-        className={`min-w-0 truncate rounded py-0.5 font-semibold hover:bg-keep-panel hover:underline${italic ? " italic" : ""}`}
+        className={`rounded py-0.5 font-semibold hover:bg-keep-panel hover:underline${
+          truncate ? " min-w-0 overflow-clip text-ellipsis whitespace-nowrap [overflow-clip-margin:0.5em]" : ""
+        }${italic ? " italic" : ""}`}
         // Inline chatColor is preserved as a fallback for users with
         // no equipped style — StyledName below paints over it when a
         // template's CSS sets `color` directly, but when the style

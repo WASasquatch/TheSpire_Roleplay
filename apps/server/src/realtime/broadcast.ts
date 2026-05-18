@@ -769,6 +769,15 @@ export async function sendRoomBacklogTo(
       // original body of a deleted message; everyone else gets the
       // bare placeholder.
       ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
+      // Admin-only snapshot of who performed the delete. See toWire in
+      // routes/messages.ts for the same shape — both paths must stay
+      // in sync or admins see audit info live but not in backlog.
+      ...(viewerIsAdmin && m.deletedAt && m.deletedByUserId
+        ? { deletedByUserId: m.deletedByUserId }
+        : {}),
+      ...(viewerIsAdmin && m.deletedAt && m.deletedByDisplayName
+        ? { deletedByDisplayName: m.deletedByDisplayName }
+        : {}),
     }));
   socket.emit("message:bulk", backlog);
 }

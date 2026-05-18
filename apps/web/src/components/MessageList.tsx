@@ -363,27 +363,51 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   // someone who's left renders without italics, which is fine (italics is
   // decorative, not load-bearing identification).
   const adminUserIds = new Set<string>();
-  // Earning — equipped name style + cosmetic state keyed by userId.
-  // Falls back to plain rendering for backlog from users who've left
-  // the room (matches the gender / admin-italics fallbacks above —
-  // styling is decorative, not load-bearing).
-  const styleByUser = new Map<string, { key: string; config: Record<string, unknown> | null }>();
-  const cosmeticsByUser = new Map<string, {
+  // Earning — equipped name style + cosmetic state keyed by the FULL
+  // identity tuple (userId, characterId). Each row in `occupants`
+  // represents ONE identity — a user has one occupant row for OOC/
+  // master and one per character they're currently voicing. Keying
+  // these maps by userId alone collapsed the rows down to "last
+  // wins", which is why a master's equipped Embers bled onto every
+  // character of the same user (and vice versa). Building a
+  // compound key keeps each identity's cosmetics separate, and the
+  // message-level lookup below uses the same `(userId,
+  // characterId)` tuple the message was authored under.
+  //
+  // Falls back to plain rendering for backlog from identities that
+  // have left the room (matches the gender / admin-italics
+  // fallbacks above — styling is decorative, not load-bearing).
+  function identityKey(userId: string, characterId: string | null | undefined): string {
+    return `${userId}::${characterId ?? ""}`;
+  }
+  const styleByIdentity = new Map<string, { key: string; config: Record<string, unknown> | null }>();
+  const cosmeticsByIdentity = new Map<string, {
     avatarUrl: string | null;
     selectedBorderRankKey: string | null;
     inlineAvatarEnabled: boolean;
   }>();
+  const genderByIdentity = new Map<string, Gender>();
   for (const o of occupants) {
-    genderByUser.set(o.userId, o.gender);
+    const k = identityKey(o.userId, o.characterId);
+    genderByIdentity.set(k, o.gender);
+    // Admin status IS account-wide (the user holds the role
+    // regardless of which character they're voicing), so this stays
+    // keyed by userId.
     if (isAdminRole(o.accountRole)) adminUserIds.add(o.userId);
     if (o.activeNameStyleKey) {
-      styleByUser.set(o.userId, { key: o.activeNameStyleKey, config: o.nameStyleConfig });
+      styleByIdentity.set(k, { key: o.activeNameStyleKey, config: o.nameStyleConfig });
     }
-    cosmeticsByUser.set(o.userId, {
+    cosmeticsByIdentity.set(k, {
       avatarUrl: o.avatarUrl,
       selectedBorderRankKey: o.selectedBorderRankKey,
       inlineAvatarEnabled: o.inlineAvatarEnabled,
     });
+    // Keep a fallback by userId only for the gender map so the
+    // existing default-keyed lookups elsewhere still resolve to
+    // something sane for chat lines that authored before the
+    // occupant joined — first-write-wins via the if-guard, so a
+    // character row doesn't clobber the OOC fallback.
+    if (!genderByUser.has(o.userId)) genderByUser.set(o.userId, o.gender);
   }
   // Fall back to an empty list when the caller doesn't supply selfNames
   // (e.g. pre-auth or older callers) — every mention then renders in the
@@ -393,12 +417,18 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   // Shared per-line prop bundle so the flat and nested branches can both
   // hand the same callbacks down without repeating themselves.
   function lineFor(m: ChatMessage) {
+    // Look the style / cosmetics up by the message's full identity
+    // tuple. Messages carry both userId and characterId snapshotted
+    // at send time (characterId is null when the user posted OOC).
+    // A miss here means the identity isn't in the current occupant
+    // list — falls through to plain rendering, same as gender.
+    const idKey = identityKey(m.userId, m.characterId);
     return (
       <Line
         msg={m}
-        gender={genderByUser.get(m.userId) ?? "undisclosed"}
-        nameStyle={styleByUser.get(m.userId) ?? null}
-        senderCosmetics={cosmeticsByUser.get(m.userId) ?? null}
+        gender={genderByIdentity.get(idKey) ?? genderByUser.get(m.userId) ?? "undisclosed"}
+        nameStyle={styleByIdentity.get(idKey) ?? null}
+        senderCosmetics={cosmeticsByIdentity.get(idKey) ?? null}
         isSenderAdmin={adminUserIds.has(m.userId)}
         isRecipientAdmin={!!m.toUserId && adminUserIds.has(m.toUserId)}
         isOwn={!!selfUserId && m.userId === selfUserId}
@@ -1388,11 +1418,15 @@ export function ForumPostBody({
   const themeBg = useActiveTheme().bg;
   const authorColor = resolveMessageColor(msg.color, themeBg);
   // Earning — equipped name style for this post's author, looked up
-  // in the current room's occupant cache. Backlog from authors no
-  // longer present renders unstyled; matches the chat-line policy.
+  // in the current room's occupant cache. The match keys on the
+  // full identity tuple (userId + characterId) so a forum post
+  // authored as a specific character doesn't bleed onto the OOC
+  // master's row (or vice versa) when both identities are in the
+  // occupant list. Backlog from authors no longer present renders
+  // unstyled; matches the chat-line policy.
   const authorStyle = useChat((s) => {
     const room = s.occupants[msg.roomId] ?? [];
-    const found = room.find((o) => o.userId === msg.userId);
+    const found = room.find((o) => o.userId === msg.userId && (o.characterId ?? null) === (msg.characterId ?? null));
     if (!found || !found.activeNameStyleKey) return null;
     return { key: found.activeNameStyleKey, config: found.nameStyleConfig };
   });

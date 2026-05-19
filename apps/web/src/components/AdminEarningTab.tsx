@@ -26,36 +26,45 @@ import { useEarning } from "../state/earning.js";
 import {
   adminGrantBorder,
   adminGrantCurrency,
+  adminGrantItem,
   adminGrantStyle,
   adminGrantXp,
   adminSetRank,
+  createAdminItem,
   createAdminNameStyle,
   createAdminRank,
+  deleteAdminItem,
   deleteAdminNameStyle,
   deleteAdminRank,
   deleteAdminTier,
   fetchAdminAwards,
   fetchAdminCosmetics,
+  fetchAdminItems,
   fetchAdminNameStyles,
   fetchAdminRanks,
   patchAdminCosmetic,
+  patchAdminItem,
   patchAdminNameStyle,
   patchAdminRank,
   patchAdminTier,
   putAdminAwards,
   uploadRankAsset,
+  ITEM_CATEGORIES,
+  ITEM_CATEGORY_LABELS,
   type AdminCosmeticRow,
+  type AdminItemRow,
   type AdminNameStyleRow,
   type AdminRankRow,
   type AdminTierRow,
   type AwardAmount,
+  type ItemCategory,
   type SourceEnableFlags,
   type EarningConfig,
 } from "../lib/earning.js";
 import { StyledName } from "./StyledName.js";
 import { injectNameStylePreview, clearNameStylePreview } from "../lib/nameStyleInjector.js";
 
-type SubTab = "awards" | "ranks" | "styles" | "cosmetics" | "grants";
+type SubTab = "awards" | "ranks" | "styles" | "cosmetics" | "items" | "grants";
 
 /** Single source of truth for the Earning sub-sections. Order here is
  *  used by both the desktop button strip and the mobile dropdown. The
@@ -66,6 +75,7 @@ const SUB_TABS: ReadonlyArray<{ id: SubTab; label: string; masterOnly?: boolean 
   { id: "ranks", label: "Ranks" },
   { id: "styles", label: "Name Styles" },
   { id: "cosmetics", label: "Cosmetics" },
+  { id: "items", label: "Items" },
   { id: "grants", label: "Test grants", masterOnly: true },
 ];
 
@@ -100,6 +110,7 @@ export function AdminEarningTab() {
       {subTab === "ranks" ? <RanksSection /> : null}
       {subTab === "styles" ? <NameStylesSection /> : null}
       {subTab === "cosmetics" ? <CosmeticsSection /> : null}
+      {subTab === "items" ? <ItemsSection /> : null}
       {subTab === "grants" && isMaster ? <TestGrantsSection /> : null}
     </div>
   );
@@ -1281,7 +1292,7 @@ function StyleEditor({
 
       <div className="rounded border border-keep-rule/60 bg-keep-bg/60 p-3">
         <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Live preview</div>
-        <div className="text-base">
+        <div className="text-2xl font-bold">
           {/* `overrideRow` bypasses the snapshot catalog lookup so
               the draft renders even though `previewKey` isn't in
               the live catalog. The preview CSS is injected into a
@@ -1289,10 +1300,16 @@ function StyleEditor({
               resolution actually finds rules.
               `config={null}` lets each style paint in its own
               catalog defaults (Embers → fire orange, Neon Sign →
-              neon pink, Aurora → tropical, etc.). The previous
-              hardcoded `{ color1: "#ff7a45", ... }` override
-              tinted EVERY preview orange regardless of which style
-              the admin was editing. */}
+              neon pink, Aurora → tropical, etc.).
+              `text-2xl font-bold` mirrors the EarningDashboard's
+              Available card preview sizing. At smaller/normal
+              weight the 1px black -webkit-text-stroke is a larger
+              proportion of each glyph's ink, so the dark outline
+              visually dominates the gradient fill and the preview
+              reads as black/dim. Matching the store's bigger/bolder
+              sizing lets the gradient win, and gives the admin a
+              like-for-like comparison with what users see in the
+              store. */}
           <StyledName
             displayName="Username"
             overrideRow={previewRow}
@@ -1462,6 +1479,779 @@ function CosmeticRow({
 }
 
 /* =========================================================
+ *  Items sub-tab — full CRUD on the items catalog.
+ *
+ *  Mirrors the Name Styles editor shape: sidebar list of items
+ *  + an editor pane on the right. The editor exposes identity
+ *  (key/name/plural/description), visuals (icon URL), economy
+ *  (price/stack limit), availability (enabled + forSale + sale
+ *  window), and per-command message tables for /give /throw /drop.
+ *
+ *  Built-in seed items (migration 0094) carry `isBuiltin=1` and are
+ *  delete-protected — admins can rewrite every field except the
+ *  key, but the row stays. Custom items are fully deletable; the
+ *  server cascades the FK on identity_inventory so deleting a
+ *  custom item drops every outstanding inventory stack of it.
+ * ========================================================= */
+
+function ItemsSection() {
+  const [rows, setRows] = useState<AdminItemRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  // null = browsing the catalog grid. Non-null = editing that key.
+  // `creating` is a separate flag so a brand-new-item editor doesn't
+  // collide with the selectedKey state machine.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  // Browse-mode filters. Category chip + text search keep the grid
+  // manageable as the catalog grows past 60+ items. State doesn't
+  // persist across mounts — admins re-filter per session.
+  const [filterCategory, setFilterCategory] = useState<ItemCategory | "all">("all");
+  const [query, setQuery] = useState("");
+
+  async function refresh() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const r = await fetchAdminItems();
+      setRows(r.items);
+      if (selectedKey && !r.items.some((s) => s.key === selectedKey)) {
+        setSelectedKey(null);
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to load items");
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { void refresh(); }, []);
+
+  const selected = useMemo(
+    () => rows.find((r) => r.key === selectedKey) ?? null,
+    [rows, selectedKey],
+  );
+
+  // Filtered grid contents. Pure derivation from rows + filter inputs;
+  // the underlying array stays sorted by `order` from the API.
+  const filteredRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (filterCategory !== "all" && r.category !== filterCategory) return false;
+      if (q.length > 0) {
+        const haystack = `${r.key} ${r.name} ${r.namePlural ?? ""} ${r.aliases.join(" ")}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [rows, filterCategory, query]);
+
+  if (loading) return <p className="text-sm text-keep-muted">Loading items…</p>;
+
+  // EDIT MODE — full-width editor with a back-to-catalog button.
+  // We swap the entire view rather than splitting because the editor
+  // already runs long (header + messages + sale window + commands)
+  // and a side-by-side split made it cramped on anything below
+  // ultrawide. Full-width also means the editor's two-column form
+  // (sm:grid-cols-2 / sm:grid-cols-3) actually has room to breathe.
+  if (creating || selected) {
+    return (
+      <div className="space-y-3">
+        <header className="flex flex-wrap items-baseline justify-between gap-2">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => { setCreating(false); setSelectedKey(null); }}
+              className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+              title="Back to the catalog grid"
+            >
+              ← Back
+            </button>
+            <h3 className="font-action text-base">
+              {creating ? "New item" : selected?.name}
+            </h3>
+          </div>
+        </header>
+        {err ? (
+          <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-sm text-keep-accent">{err}</div>
+        ) : null}
+        {creating ? (
+          <ItemEditor
+            kind="create"
+            initial={{
+              key: "",
+              name: "",
+              namePlural: null,
+              description: "",
+              iconUrl: null,
+              price: 0,
+              stackLimit: 99,
+              giveMessages: [],
+              throwMessages: [],
+              dropMessages: [],
+              aliases: [],
+              category: "misc",
+              enabled: true,
+              forSale: true,
+              saleStartsAt: null,
+              saleEndsAt: null,
+              order: 0,
+              isBuiltin: false,
+              owners: 0,
+            }}
+            onCancel={() => setCreating(false)}
+            onSaved={async (key) => {
+              setCreating(false);
+              await refresh();
+              setSelectedKey(key);
+            }}
+            onError={setErr}
+          />
+        ) : selected ? (
+          // `key={selected.key}` forces a fresh mount when the admin
+          // pivots from one card to another via the editor's
+          // jump-to-edit links — useState(initial.*) in the editor
+          // only runs on first mount, so without the key prop the
+          // form fields stay frozen on the originally-selected row.
+          <ItemEditor
+            key={selected.key}
+            kind="edit"
+            initial={selected}
+            onCancel={() => setSelectedKey(null)}
+            onSaved={async () => { await refresh(); }}
+            onError={setErr}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  // BROWSE MODE — header + filter + responsive card grid.
+  return (
+    <div className="space-y-3">
+      <header className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <h3 className="font-action text-base">Items</h3>
+          <p className="text-xs text-keep-muted">
+            Catalog of collectible items users buy with Currency, hand to each other via /give, or toss at each other via /throw and /drop. Every identity (OOC master + each character) keeps an independent inventory; nothing is shared across identities.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => { setCreating(true); setSelectedKey(null); }}
+          className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-sm text-keep-action hover:bg-keep-action/25"
+        >
+          + New item
+        </button>
+      </header>
+
+      {err ? (
+        <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-sm text-keep-accent">{err}</div>
+      ) : null}
+
+      {/* Filter row — category select + free-text search. Both narrow
+          the visible grid so the admin doesn't scroll an infinite list.
+          Empty categories are hidden from the picker so it doesn't
+          carry dead "Weapons (0)" rows. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={filterCategory}
+          onChange={(e) => setFilterCategory(e.target.value as ItemCategory | "all")}
+          aria-label="Filter by category"
+          className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+        >
+          <option value="all">All categories ({rows.length})</option>
+          {ITEM_CATEGORIES
+            .filter((c) => rows.some((r) => r.category === c))
+            .map((c) => (
+              <option key={c} value={c}>
+                {ITEM_CATEGORY_LABELS[c]} ({rows.filter((r) => r.category === c).length})
+              </option>
+            ))}
+        </select>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by name, key, or alias…"
+          className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+        />
+        <span className="text-xs text-keep-muted">
+          Showing {filteredRows.length} of {rows.length}
+        </span>
+      </div>
+
+      {/* Card grid. 2 cols mobile → 6 at xl so a wide admin viewport
+          shows many items per row. Each card is icon-first so the
+          admin scans visually instead of reading every name. */}
+      {filteredRows.length === 0 ? (
+        <p className="text-sm text-keep-muted">No items match the current filter.</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          {filteredRows.map((r) => (
+            <ItemCard
+              key={r.key}
+              row={r}
+              onClick={() => { setSelectedKey(r.key); setCreating(false); }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Icon-first card. Image at top, name + price + category chip + a
+ *  status chip for at-a-glance scanning. Clicking opens the full
+ *  editor. The fallback letter-tile mirrors the same renderer the
+ *  user-facing dashboard uses (apps/web ItemIcon-equivalent) so the
+ *  admin sees what the user would see for items without uploaded
+ *  artwork.
+ *
+ *  Card prioritizes visual scan over data density:
+ *    - Icon: 64px square, top
+ *    - Name: bold, line-clamp(1)
+ *    - Price + category as a single meta line
+ *    - One status chip MAX (the most relevant one), so cards stay
+ *      same-height in the grid. The full chip set is back in the
+ *      editor for power-user disambiguation. */
+function ItemCard({
+  row,
+  onClick,
+}: {
+  row: AdminItemRow;
+  onClick: () => void;
+}) {
+  const now = Date.now();
+  // Pick ONE status to surface on the card. Disabled wins over "not
+  // for sale" wins over the sale-window chips. Builtin is shown
+  // separately as a tiny corner badge to free up the status slot.
+  let status: { label: string; tone: "muted" | "warn" | "info" } | null = null;
+  if (!row.enabled) status = { label: "disabled", tone: "warn" };
+  else if (!row.forSale) status = { label: "not for sale", tone: "muted" };
+  else if (row.saleStartsAt && now < row.saleStartsAt) {
+    status = { label: `opens in ${formatDurationShort(row.saleStartsAt - now)}`, tone: "info" };
+  } else if (row.saleEndsAt && now >= row.saleEndsAt) {
+    status = { label: "sale ended", tone: "warn" };
+  } else if (row.saleEndsAt && now < row.saleEndsAt) {
+    status = { label: `ends in ${formatDurationShort(row.saleEndsAt - now)}`, tone: "info" };
+  }
+  const statusToneClass =
+    status?.tone === "warn" ? "border-keep-accent/40 bg-keep-accent/10 text-keep-accent" :
+    status?.tone === "info" ? "border-keep-action/40 bg-keep-action/10 text-keep-action" :
+    "border-keep-rule bg-keep-banner/40 text-keep-muted";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`${row.name} — ${row.description || "(no description)"}`}
+      className="group relative flex flex-col items-center gap-1 rounded border border-keep-rule bg-keep-bg/40 p-2 text-center text-xs hover:border-keep-action hover:bg-keep-banner"
+    >
+      {row.isBuiltin ? (
+        <span
+          className="absolute right-1 top-1 rounded border border-keep-rule/60 bg-keep-bg/80 px-1 text-[8px] uppercase tracking-widest text-keep-muted"
+          title="Seeded built-in. Delete-protected; every field still editable."
+        >
+          B
+        </span>
+      ) : null}
+      {row.iconUrl ? (
+        <img
+          src={row.iconUrl}
+          alt=""
+          width={64}
+          height={64}
+          loading="lazy"
+          className="rounded border border-keep-rule/40 bg-keep-bg object-contain"
+        />
+      ) : (
+        <div
+          className="grid h-16 w-16 place-items-center rounded border border-keep-rule/40 bg-keep-banner/40"
+          aria-hidden="true"
+        >
+          <span className="text-lg font-semibold text-keep-muted">
+            {row.name.slice(0, 1).toUpperCase()}
+          </span>
+        </div>
+      )}
+      <span className="line-clamp-1 w-full break-all font-semibold text-keep-text">
+        {row.name}
+      </span>
+      <span className="text-[10px] uppercase tracking-widest text-keep-muted">
+        {row.price.toLocaleString()} · {ITEM_CATEGORY_LABELS[row.category]}
+      </span>
+      {status ? (
+        <span className={`rounded border px-1.5 py-0 text-[9px] uppercase tracking-widest ${statusToneClass}`}>
+          {status.label}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+/** Human-readable short duration: "3h", "2d 4h", "12m". Used by the
+ *  sidebar's sale-window chips so the admin sees at a glance how
+ *  long until a sale opens / closes. */
+function formatDurationShort(ms: number): string {
+  if (ms < 0) ms = 0;
+  const totalMin = Math.floor(ms / 60000);
+  if (totalMin < 60) return `${totalMin}m`;
+  const hours = Math.floor(totalMin / 60);
+  if (hours < 24) {
+    const mins = totalMin % 60;
+    return mins ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours ? `${days}d ${remHours}h` : `${days}d`;
+}
+
+function ItemEditor({
+  kind,
+  initial,
+  onCancel,
+  onSaved,
+  onError,
+}: {
+  kind: "edit" | "create";
+  initial: AdminItemRow;
+  onCancel: () => void;
+  onSaved: (key: string) => void | Promise<void>;
+  onError: (msg: string) => void;
+}) {
+  const [key, setKey] = useState(initial.key);
+  const [name, setName] = useState(initial.name);
+  const [namePlural, setNamePlural] = useState(initial.namePlural ?? "");
+  const [description, setDescription] = useState(initial.description);
+  const [iconUrl, setIconUrl] = useState(initial.iconUrl ?? "");
+  const [price, setPrice] = useState(initial.price);
+  const [stackLimit, setStackLimit] = useState(initial.stackLimit);
+  const [enabled, setEnabled] = useState(initial.enabled);
+  const [forSale, setForSale] = useState(initial.forSale);
+  const [saleStartsAt, setSaleStartsAt] = useState<number | null>(initial.saleStartsAt);
+  const [saleEndsAt, setSaleEndsAt] = useState<number | null>(initial.saleEndsAt);
+  // Messages stored as newline-joined text in the textarea state for
+  // ergonomics; we split on save so an empty array means "command
+  // disabled for this item" without any extra toggle.
+  const [giveMessages, setGiveMessages] = useState(initial.giveMessages.join("\n"));
+  const [throwMessages, setThrowMessages] = useState(initial.throwMessages.join("\n"));
+  const [dropMessages, setDropMessages] = useState(initial.dropMessages.join("\n"));
+  // Aliases stored as a comma-separated string in the textarea — typed
+  // inline in one row rather than line-per-entry like messages, since
+  // alias lists are short and read more naturally as a single line.
+  const [aliasesText, setAliasesText] = useState(initial.aliases.join(", "));
+  const [category, setCategory] = useState<ItemCategory>(initial.category);
+  const [saving, setSaving] = useState(false);
+
+  function splitMessages(s: string): string[] {
+    return s.split("\n").map((l) => l.trim()).filter(Boolean);
+  }
+
+  /** Parse the aliases field — split by commas, trim whitespace, drop
+   *  empties + dupes (case-insensitive). Keeps storage tight and
+   *  avoids accidental "  drink ,  drink  " bloating the array. */
+  function splitAliases(s: string): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of s.split(",")) {
+      const v = raw.trim();
+      if (!v) continue;
+      const lower = v.toLowerCase();
+      if (seen.has(lower)) continue;
+      seen.add(lower);
+      out.push(v);
+    }
+    return out;
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      const payload = {
+        name,
+        namePlural: namePlural.trim() ? namePlural.trim() : null,
+        description,
+        iconUrl: iconUrl.trim() ? iconUrl.trim() : null,
+        price,
+        stackLimit,
+        giveMessages: splitMessages(giveMessages),
+        throwMessages: splitMessages(throwMessages),
+        dropMessages: splitMessages(dropMessages),
+        aliases: splitAliases(aliasesText),
+        category,
+        enabled,
+        forSale,
+        saleStartsAt,
+        saleEndsAt,
+      };
+      if (kind === "create") {
+        await createAdminItem({ key, ...payload });
+        await onSaved(key);
+      } else {
+        await patchAdminItem(initial.key, payload);
+        await onSaved(initial.key);
+      }
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove() {
+    if (!window.confirm(
+      initial.owners > 0
+        ? `Delete "${initial.name}"? ${initial.owners} identit${initial.owners === 1 ? "y owns" : "ies own"} it — every stack will be wiped.`
+        : `Delete "${initial.name}"?`,
+    )) return;
+    try {
+      await deleteAdminItem(initial.key);
+      onCancel();
+      await onSaved(initial.key);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Delete failed");
+    }
+  }
+
+  // Live "Available …" readout that summarizes the layered enabled /
+  // forSale / window switches into one human sentence. Mirrors the
+  // server-side `purchasable` computation so the admin sees exactly
+  // what users will see when the row saves.
+  const availabilitySummary = useMemo(() => {
+    if (!enabled) return "Hidden everywhere (enabled = off).";
+    if (!forSale) return "Exists, but not in the shop right now.";
+    const now = Date.now();
+    if (saleStartsAt && now < saleStartsAt) {
+      return `Sale starts ${new Date(saleStartsAt).toLocaleString()} (in ${formatDurationShort(saleStartsAt - now)}).`;
+    }
+    if (saleEndsAt && now >= saleEndsAt) {
+      return `Sale ended ${new Date(saleEndsAt).toLocaleString()}.`;
+    }
+    if (saleEndsAt) {
+      return `On sale until ${new Date(saleEndsAt).toLocaleString()} (in ${formatDurationShort(saleEndsAt - now)}).`;
+    }
+    if (saleStartsAt) {
+      return `On sale since ${new Date(saleStartsAt).toLocaleString()}. No end date.`;
+    }
+    return "On sale (no time limit).";
+  }, [enabled, forSale, saleStartsAt, saleEndsAt]);
+
+  return (
+    <div className="space-y-3 rounded border border-keep-rule bg-keep-bg/40 p-3">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="block text-xs">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Key</span>
+          <input
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            disabled={kind === "edit"}
+            pattern="[a-z][a-z0-9_]*"
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-sm disabled:opacity-50"
+          />
+        </label>
+        <label className="block text-xs">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Display name</span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+          />
+        </label>
+        <label className="block text-xs">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Plural (optional)</span>
+          <input
+            value={namePlural}
+            onChange={(e) => setNamePlural(e.target.value)}
+            placeholder={`${name}s`}
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+          />
+        </label>
+        <label className="block text-xs">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Icon URL</span>
+          <input
+            value={iconUrl}
+            onChange={(e) => setIconUrl(e.target.value)}
+            placeholder="/assets/items/cookie.png"
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+          />
+        </label>
+      </div>
+      <label className="block text-xs">
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Description</span>
+        <input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+        />
+      </label>
+      <label className="block text-xs">
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Aliases (comma-separated)</span>
+        <input
+          value={aliasesText}
+          onChange={(e) => setAliasesText(e.target.value)}
+          placeholder="e.g. knife, blade"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+        />
+        <span className="mt-0.5 block text-[10px] text-keep-muted">
+          Casual names users can type instead of the canonical name. Whitespace + case ignored, duplicates dropped.
+        </span>
+      </label>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <label className="block text-xs">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Price (Currency)</span>
+          <input
+            type="number"
+            min={0}
+            value={price}
+            onChange={(e) => setPrice(Number(e.target.value) || 0)}
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+          />
+        </label>
+        <label className="block text-xs">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Stack limit</span>
+          <input
+            type="number"
+            min={1}
+            value={stackLimit}
+            onChange={(e) => setStackLimit(Math.max(1, Number(e.target.value) || 1))}
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+          />
+        </label>
+        <label className="block text-xs">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Category</span>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value as ItemCategory)}
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+          >
+            {ITEM_CATEGORIES.map((c) => (
+              <option key={c} value={c}>{ITEM_CATEGORY_LABELS[c]}</option>
+            ))}
+          </select>
+          <span className="mt-0.5 block text-[10px] text-keep-muted">
+            Drives the shop bucket. <code>pet</code> routes to the 5-slot Pet Collection; everything else to the 10-slot Item Collection.
+          </span>
+        </label>
+      </div>
+
+      {/* Availability block — layered switches with a live summary. */}
+      <fieldset className="space-y-2 rounded border border-keep-rule/60 bg-keep-banner/20 p-2">
+        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">Availability</legend>
+        <div className="flex flex-wrap items-center gap-4">
+          <label className="flex items-center gap-1 text-xs">
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+            enabled (item exists at all)
+          </label>
+          <label className="flex items-center gap-1 text-xs">
+            <input type="checkbox" checked={forSale} onChange={(e) => setForSale(e.target.checked)} disabled={!enabled} />
+            for sale (shop visibility)
+          </label>
+        </div>
+        <SaleWindowControls
+          saleStartsAt={saleStartsAt}
+          saleEndsAt={saleEndsAt}
+          onChangeStart={setSaleStartsAt}
+          onChangeEnd={setSaleEndsAt}
+          disabled={!enabled || !forSale}
+        />
+        <p className="rounded border border-keep-rule/40 bg-keep-bg/40 p-2 text-[11px] text-keep-muted">
+          {availabilitySummary}
+        </p>
+      </fieldset>
+
+      {/* Per-command message tables. Empty array = command disabled. */}
+      <fieldset className="space-y-3 rounded border border-keep-rule/60 bg-keep-banner/20 p-2">
+        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">Command messages — one template per line. Placeholders: {"{sender}"} {"{target}"} {"{num}"} {"{item_name}"}. Leave blank to disable that command for this item.</legend>
+        <CommandMessageEditor label="/give" hint="Transfers the item to the target's inventory." value={giveMessages} onChange={setGiveMessages} />
+        <CommandMessageEditor label="/throw" hint="Consumes the item as a silly weapon — target gets nothing." value={throwMessages} onChange={setThrowMessages} />
+        <CommandMessageEditor label="/drop" hint="Consumes the item as a 'drop on someone' gag — target gets nothing." value={dropMessages} onChange={setDropMessages} />
+      </fieldset>
+
+      {initial.isBuiltin ? (
+        <p className="text-[10px] uppercase tracking-widest text-keep-muted">built-in (delete protected) · {initial.owners} owner{initial.owners === 1 ? "" : "s"}</p>
+      ) : (
+        <p className="text-[10px] uppercase tracking-widest text-keep-muted">{initial.owners} owner{initial.owners === 1 ? "" : "s"}</p>
+      )}
+
+      <div className="flex flex-wrap justify-end gap-2">
+        {kind === "edit" && !initial.isBuiltin ? (
+          <button
+            type="button"
+            onClick={() => void remove()}
+            className="rounded border border-keep-rule px-3 py-1 text-sm text-keep-muted hover:text-keep-accent"
+          >
+            Delete
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving || (kind === "create" && !key.match(/^[a-z][a-z0-9_]*$/)) || !name.trim()}
+          className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-sm text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+        >
+          {saving ? "Saving…" : kind === "create" ? "Create" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Per-command message textarea + a small hint line. Lives in its own
+ *  component so each command panel shares the same shape and the
+ *  outer editor can stay readable. */
+function CommandMessageEditor({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (s: string) => void;
+}) {
+  const lines = value.split("\n").map((l) => l.trim()).filter(Boolean);
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <code className="text-xs font-mono text-keep-action">{label}</code>
+        <span className="text-[11px] text-keep-muted">{hint}</span>
+        <span className="ml-auto text-[10px] uppercase tracking-widest text-keep-muted">
+          {lines.length === 0 ? "disabled" : `${lines.length} template${lines.length === 1 ? "" : "s"}`}
+        </span>
+      </div>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={3}
+        placeholder={`e.g. {sender} hands {target} {num} {item_name}.`}
+        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
+      />
+    </div>
+  );
+}
+
+/** Sale window scheduler. Two datetime-local inputs + a "Sell for
+ *  the next N hours/days" convenience widget that auto-fills the
+ *  window from now. Each input is independent — clearing one leaves
+ *  the other intact. */
+function SaleWindowControls({
+  saleStartsAt,
+  saleEndsAt,
+  onChangeStart,
+  onChangeEnd,
+  disabled,
+}: {
+  saleStartsAt: number | null;
+  saleEndsAt: number | null;
+  onChangeStart: (v: number | null) => void;
+  onChangeEnd: (v: number | null) => void;
+  disabled: boolean;
+}) {
+  const [quickN, setQuickN] = useState(7);
+  const [quickUnit, setQuickUnit] = useState<"hours" | "days">("days");
+
+  function applyQuick() {
+    const ms = quickUnit === "hours" ? quickN * 3600_000 : quickN * 86400_000;
+    const now = Date.now();
+    onChangeStart(now);
+    onChangeEnd(now + ms);
+  }
+
+  function clearWindow() {
+    onChangeStart(null);
+    onChangeEnd(null);
+  }
+
+  return (
+    <div className={`space-y-2 ${disabled ? "opacity-50 pointer-events-none" : ""}`}>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="block text-[11px]">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Sale starts at</span>
+          <DateTimeInput value={saleStartsAt} onChange={onChangeStart} />
+        </label>
+        <label className="block text-[11px]">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Sale ends at</span>
+          <DateTimeInput value={saleEndsAt} onChange={onChangeEnd} />
+        </label>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <span className="text-keep-muted">Sell for the next</span>
+        <input
+          type="number"
+          min={1}
+          value={quickN}
+          onChange={(e) => setQuickN(Math.max(1, Number(e.target.value) || 1))}
+          className="w-16 rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-right"
+        />
+        <select
+          value={quickUnit}
+          onChange={(e) => setQuickUnit(e.target.value as "hours" | "days")}
+          className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5"
+        >
+          <option value="hours">hours</option>
+          <option value="days">days</option>
+        </select>
+        <button
+          type="button"
+          onClick={applyQuick}
+          className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-keep-action hover:bg-keep-action/25"
+        >
+          Apply
+        </button>
+        <button
+          type="button"
+          onClick={clearWindow}
+          className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-keep-muted hover:text-keep-text"
+        >
+          Clear window
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Wrapper around `<input type="datetime-local">` that round-trips a
+ *  unix-ms number against the browser's local-time string format.
+ *  Empty input → null. */
+function DateTimeInput({
+  value,
+  onChange,
+}: {
+  value: number | null;
+  onChange: (v: number | null) => void;
+}) {
+  // Convert epoch ms to "YYYY-MM-DDTHH:MM" in the local timezone. The
+  // datetime-local input expects no timezone suffix; toISOString would
+  // give UTC and shift the displayed time off the admin's expectation.
+  function fmt(ms: number | null): string {
+    if (!ms) return "";
+    const d = new Date(ms);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  return (
+    <input
+      type="datetime-local"
+      value={fmt(value)}
+      onChange={(e) => {
+        if (!e.target.value) { onChange(null); return; }
+        const parsed = new Date(e.target.value).getTime();
+        onChange(Number.isFinite(parsed) ? parsed : null);
+      }}
+      className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+    />
+  );
+}
+
+/* =========================================================
  *  Test grants sub-tab — masteradmin-only
  *
  *  Direct grants for testing rank/border/style/cosmetic
@@ -1481,16 +2271,18 @@ function TestGrantsSection() {
   const [savedFlash, setSavedFlash] = useState<string | null>(null);
   const refreshEarning = useEarning((s) => s.refresh);
 
-  // Load the rank/style catalogs so the pickers populate from
+  // Load the rank/style/item catalogs so the pickers populate from
   // the live catalog rather than hardcoded lists. We piggyback on
-  // the two existing admin endpoints.
+  // the three existing admin endpoints.
   const [ranks, setRanks] = useState<AdminRankRow[]>([]);
   const [tiers, setTiers] = useState<AdminTierRow[]>([]);
   const [styles, setStyles] = useState<AdminNameStyleRow[]>([]);
+  const [itemsCatalog, setItemsCatalog] = useState<AdminItemRow[]>([]);
   useEffect(() => {
     void Promise.all([
       fetchAdminRanks().then((r) => { setRanks(r.ranks); setTiers(r.tiers); }),
       fetchAdminNameStyles().then((r) => setStyles(r.styles)),
+      fetchAdminItems().then((r) => setItemsCatalog(r.items)),
     ]).catch((e) => setErr(e instanceof Error ? e.message : "Failed to load catalogs"));
   }, []);
 
@@ -1592,6 +2384,76 @@ function TestGrantsSection() {
           onPick={(styleKey) => run(`Grant style ${styleKey}`, () => adminGrantStyle(target, styleKey))}
         />
       </SectionFrame>
+
+      <SectionFrame
+        title="Grant item"
+        description="Deposit (positive) or revoke (negative) units of an item into the target's OOC master inventory. Bypasses the shop's enabled / forSale / sale-window checks so admins can pre-seed testers with items that aren't yet on sale. Character-scoped grants live on the character's own inventory; this row only writes the OOC pool. Stack-cap enforced server-side; overflow returns a 409."
+      >
+        <GrantItemRow
+          items={itemsCatalog}
+          busy={busy}
+          onSubmit={(itemKey, quantity) =>
+            run(
+              `${quantity > 0 ? "Grant" : "Revoke"} ${Math.abs(quantity)} ${itemKey}`,
+              async () => { await adminGrantItem(target, itemKey, quantity); },
+            )
+          }
+        />
+      </SectionFrame>
+    </div>
+  );
+}
+
+/** Item grant picker — item + signed quantity. Same shape as the
+ *  other GrantPickerRow rows but with an extra numeric input. Empty
+ *  catalog renders a small explainer pointing the admin at the Items
+ *  sub-tab so they can seed at least one item first. */
+function GrantItemRow({
+  items,
+  busy,
+  onSubmit,
+}: {
+  items: AdminItemRow[];
+  busy: boolean;
+  onSubmit: (itemKey: string, quantity: number) => void;
+}) {
+  const [itemKey, setItemKey] = useState<string>("");
+  const [quantity, setQuantity] = useState<number>(1);
+  if (items.length === 0) {
+    return (
+      <p className="text-xs text-keep-muted">
+        No items in the catalog yet — create one in the Items sub-tab first.
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <select
+        value={itemKey}
+        onChange={(e) => setItemKey(e.target.value)}
+        className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+      >
+        <option value="">Pick an item…</option>
+        {items.map((i) => (
+          <option key={i.key} value={i.key}>
+            {i.name}{i.enabled ? "" : " (disabled)"}
+          </option>
+        ))}
+      </select>
+      <input
+        type="number"
+        value={quantity}
+        onChange={(e) => setQuantity(Number(e.target.value) || 0)}
+        className="w-20 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-right text-sm"
+      />
+      <button
+        type="button"
+        onClick={() => itemKey && quantity !== 0 && onSubmit(itemKey, quantity)}
+        disabled={busy || !itemKey || quantity === 0}
+        className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+      >
+        {quantity >= 0 ? "Grant" : "Revoke"}
+      </button>
     </div>
   );
 }

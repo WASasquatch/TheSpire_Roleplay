@@ -1,7 +1,7 @@
 /**
  * In-app sound effects.
  *
- * Four discrete sound files, each bound to a class of event:
+ * Six discrete sound files, each bound to a class of event:
  *   - ping    → inbound DM (any conversation). Cross-room 1:1.
  *   - whisper → inbound whisper directed at the viewer in a room.
  *     Distinct from DM so the two feel different even when both
@@ -10,6 +10,11 @@
  *     speaking just to you."
  *   - tap     → inbound chat / action in a room (excluding whispers)
  *   - alert   → admin announcement / system event
+ *   - throw   → the viewer was the target of someone's /throw. Pairs
+ *     with the body-shake reaction from chatEffects.ts. Whoosh +
+ *     impact texture.
+ *   - drop    → the viewer was the target of someone's /drop. Same
+ *     pairing with the body-shake; thud texture instead of impact.
  *
  * Per-user prefs live in the Zustand store (`soundPrefs`) and are
  * persisted server-side via /me/profile. A disabled event short-
@@ -29,13 +34,15 @@
  */
 import { useChat } from "../state/store.js";
 
-type SoundEvent = "ping" | "whisper" | "tap" | "alert";
+type SoundEvent = "ping" | "whisper" | "tap" | "alert" | "throw" | "drop";
 
 const SOUND_FILES: Record<SoundEvent, string> = {
   ping: "/audio/ping.mp3",
   whisper: "/audio/whisper.mp3",
   tap: "/audio/tap.mp3",
   alert: "/audio/alert.mp3",
+  throw: "/audio/throw.mp3",
+  drop: "/audio/drop.mp3",
 };
 
 const VOLUMES: Record<SoundEvent, number> = {
@@ -43,6 +50,12 @@ const VOLUMES: Record<SoundEvent, number> = {
   whisper: 0.5,
   tap: 0.5,
   alert: 0.7,
+  // Struck audio sits a hair above the ambient chat tier — being the
+  // target of /throw or /drop is a directed action, more attention-
+  // worthy than a passing room message, but still not user-summoning
+  // alert volume. 0.6 lands between tap (0.5) and alert (0.7).
+  throw: 0.6,
+  drop: 0.6,
 };
 
 /**
@@ -101,6 +114,13 @@ function isEnabled(event: SoundEvent): boolean {
   if (event === "ping") return prefs.dm;
   if (event === "whisper") return prefs.whisper;
   if (event === "tap") return prefs.chat;
+  // Struck sounds piggyback on the chat-events preference for now —
+  // users who've muted ambient chat sounds almost certainly want
+  // their action-strike sounds muted too. If a future user
+  // preference emerges for "muted chat, but I still want to hear
+  // when someone clocks me with a pie", add a dedicated `prefs.struck`
+  // toggle and re-route here.
+  if (event === "throw" || event === "drop") return prefs.chat;
   return prefs.alert;
 }
 
@@ -127,3 +147,5 @@ export function playPing(): void { play("ping"); }
 export function playWhisper(): void { play("whisper"); }
 export function playTap(): void { play("tap"); }
 export function playAlert(): void { play("alert"); }
+export function playThrowStrike(): void { play("throw"); }
+export function playDropStrike(): void { play("drop"); }

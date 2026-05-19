@@ -100,6 +100,28 @@ export interface ProfileLink {
  * original author still gets credit for "having posted" — the
  * post existed, the user typed it.
  */
+/**
+ * One pinned slot on a profile's Collection block. Surfaced in
+ * profile lookup responses so the client renders the showcase
+ * without a second round trip — every entry bundles the slot index
+ * (0..9), the catalog key, and the visible item fields (display
+ * name + description + icon URL). Slots not pinned by the identity
+ * are simply absent from the array — the renderer paints them as
+ * empty placeholders or collapses them per its layout.
+ *
+ * Item display values are snapshot from the live catalog at
+ * lookup time, so if an admin renames an item the profile reflects
+ * the new name on the next view (no stale denormalization).
+ */
+export interface ProfileCollectionEntry {
+  slot: number;
+  itemKey: string;
+  name: string;
+  namePlural: string | null;
+  description: string;
+  iconUrl: string | null;
+}
+
 export interface ProfileMetrics {
   /**
    * Chat-shaped lines in flat-mode rooms (`say` / `me` / `ooc` /
@@ -149,6 +171,32 @@ export interface CharacterProfile {
   updatedAt: number;
   /** Lifetime activity counters scoped to this character. */
   metrics: ProfileMetrics;
+  /**
+   * Pinned NON-PET items from this character's Collection (up to 10).
+   * Sparse — a character can pin slots 0, 3, 7 and leave the rest
+   * empty. Each pin is independent of every OTHER identity's
+   * Collection: this character's pins do not appear on the OOC
+   * profile or on any other character's profile.
+   */
+  collection: ProfileCollectionEntry[];
+  /**
+   * Pinned PET items from this character's Pet Collection (up to 5).
+   * Same partitioning model as `collection`, but a tighter cap and
+   * scoped to items with `category='pet'`. Renders as a separate
+   * "Pets" section on the profile, below the item collection.
+   */
+  petCollection: ProfileCollectionEntry[];
+  /**
+   * Master account username of the user who owns this character —
+   * surfaced ONLY when the viewer is a mod/admin/masteradmin. Lets
+   * moderation staff see "this character is voiced by user X"
+   * without having to skim the userlist for the correlation.
+   * Omitted entirely (field absent) for non-mod viewers; the
+   * server gates this on viewer role, so the field's presence is
+   * itself a privileged signal — never derive `kind: "character"`
+   * behavior from its absence on the client.
+   */
+  ownerUsername?: string;
 }
 
 /**
@@ -237,6 +285,17 @@ export interface MasterProfile {
   createdAt: number;
   /** Lifetime activity counters scoped to this master account (every character). */
   metrics: ProfileMetrics;
+  /**
+   * Pinned NON-PET items from this master account's Collection (up
+   * to 10). Independent from every character's Collection — items
+   * pinned on a character do not appear here, and vice versa.
+   */
+  collection: ProfileCollectionEntry[];
+  /**
+   * Pinned PET items from this master account's Pet Collection (up
+   * to 5). Same isolation rules as `collection`.
+   */
+  petCollection: ProfileCollectionEntry[];
 }
 
 /** What `/profile` returns: either the master, or the active character. */

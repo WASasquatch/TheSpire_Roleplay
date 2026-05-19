@@ -1,6 +1,5 @@
-import { and, eq, sql } from "drizzle-orm";
-import { isAdminRole } from "@thekeep/shared";
-import { roomInvites, roomMembers, rooms, users } from "../db/schema.js";
+import { eq, sql } from "drizzle-orm";
+import { roomInvites, rooms, users } from "../db/schema.js";
 import { addMessage } from "./broadcast.js";
 import type { CommandContext } from "../commands/types.js";
 
@@ -11,27 +10,15 @@ export async function invite(ctx: CommandContext, username: string): Promise<voi
     return;
   }
 
-  // Only owner/mod can invite
-  const membership = (await ctx.db
-    .select()
-    .from(roomMembers)
-    .where(
-      and(eq(roomMembers.roomId, ctx.roomId), eq(roomMembers.userId, ctx.user.id)),
-    )
-    .limit(1))[0];
-  const role = membership?.role;
-  if (
-    role !== "owner" &&
-    role !== "mod" &&
-    !isAdminRole(ctx.user.role) &&
-    room.ownerId !== ctx.user.id
-  ) {
-    ctx.socket.emit("error:notice", {
-      code: "PERM",
-      message: "Only the room owner or a mod can invite others.",
-    });
-    return;
-  }
+  // Anyone currently in the room can invite — owners and mods aren't
+  // always around when a friend needs to be pulled into a private
+  // session. The caller's presence in the room is already implicit
+  // via `ctx.roomId` (commands only dispatch against the socket's
+  // joined room), so we don't need a separate membership check. The
+  // social-fabric guard is: invitees receive a one-shot 24h invite
+  // they have to act on, room mods can /kick + /ban anyone abusing
+  // the channel, and self-invites are harmless no-ops (the target
+  // lookup matches the caller; the toast just goes back to them).
 
   const target = (await ctx.db
     .select()

@@ -35,6 +35,10 @@ import {
   characterOwnedNameStyles,
   characters,
   cosmetics,
+  identityCollection,
+  identityInventory,
+  identityPetCollection,
+  items,
   nameStyles,
   rankTiers,
   ranks,
@@ -323,6 +327,94 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .where(eq(nameStyles.enabled, true))
       .orderBy(asc(nameStyles.order));
 
+    // Items catalog. We ship ALL items (enabled or not) so the
+    // inventory view can still resolve display data for items the
+    // admin disabled after a user acquired them. The client filters
+    // the Shop view down to `purchasable=true`. Payload is small —
+    // typically <50 rows.
+    const itemRows = await db
+      .select()
+      .from(items)
+      .orderBy(asc(items.order));
+    const nowMs = Date.now();
+    const itemCatalog = itemRows.map((r) => shapeItemCatalogRow(r, nowMs));
+
+    // Per-identity inventory. Master rows scope='user', character
+    // rows scope='character'. Pulled in one query and partitioned
+    // client-side into master/byCharacter shapes mirroring the
+    // owned-styles / owned-borders payload structure.
+    const charIdSet = new Set(charsOfMine.map((c) => c.id));
+    const inventoryRows = await db
+      .select()
+      .from(identityInventory)
+      .where(sql`(${identityInventory.ownerScope} = 'user' AND ${identityInventory.ownerId} = ${me.id})
+        OR (${identityInventory.ownerScope} = 'character' AND ${identityInventory.ownerId} IN (${
+        // Empty IN () is invalid SQL — guard with a sentinel that
+        // can't match any real character id when the user has none.
+        charIdSet.size > 0
+          ? sql.join(Array.from(charIdSet).map((id) => sql`${id}`), sql`, `)
+          : sql`''`
+      }))`);
+    const inventoryMaster: { itemKey: string; quantity: number; acquiredAt: number }[] = [];
+    const inventoryByCharacter: Record<string, { itemKey: string; quantity: number; acquiredAt: number }[]> = {};
+    for (const row of inventoryRows) {
+      const shaped = { itemKey: row.itemKey, quantity: row.quantity, acquiredAt: +row.acquiredAt };
+      if (row.ownerScope === "user" && row.ownerId === me.id) {
+        inventoryMaster.push(shaped);
+      } else if (row.ownerScope === "character" && charIdSet.has(row.ownerId)) {
+        (inventoryByCharacter[row.ownerId] ??= []).push(shaped);
+      }
+    }
+
+    // Per-identity Collection — 10-slot pinned showcase keyed by
+    // (ownerScope, ownerId). Same partitioning as inventory; each
+    // identity's pins are independent. The client renders sparse
+    // slot maps directly, so we ship the rows as-is rather than
+    // normalizing to a length-10 array.
+    const collectionRows = await db
+      .select()
+      .from(identityCollection)
+      .where(sql`(${identityCollection.ownerScope} = 'user' AND ${identityCollection.ownerId} = ${me.id})
+        OR (${identityCollection.ownerScope} = 'character' AND ${identityCollection.ownerId} IN (${
+        charIdSet.size > 0
+          ? sql.join(Array.from(charIdSet).map((id) => sql`${id}`), sql`, `)
+          : sql`''`
+      }))`);
+    const collectionMaster: { slot: number; itemKey: string }[] = [];
+    const collectionByCharacter: Record<string, { slot: number; itemKey: string }[]> = {};
+    for (const row of collectionRows) {
+      const shaped = { slot: row.slot, itemKey: row.itemKey };
+      if (row.ownerScope === "user" && row.ownerId === me.id) {
+        collectionMaster.push(shaped);
+      } else if (row.ownerScope === "character" && charIdSet.has(row.ownerId)) {
+        (collectionByCharacter[row.ownerId] ??= []).push(shaped);
+      }
+    }
+
+    // Pet Collection — separate 5-slot table for items with
+    // category='pet'. Same partition structure; client renders these
+    // under a distinct "Pets" sub-view in the Items tab and as a
+    // distinct section on the profile.
+    const petCollectionRows = await db
+      .select()
+      .from(identityPetCollection)
+      .where(sql`(${identityPetCollection.ownerScope} = 'user' AND ${identityPetCollection.ownerId} = ${me.id})
+        OR (${identityPetCollection.ownerScope} = 'character' AND ${identityPetCollection.ownerId} IN (${
+        charIdSet.size > 0
+          ? sql.join(Array.from(charIdSet).map((id) => sql`${id}`), sql`, `)
+          : sql`''`
+      }))`);
+    const petCollectionMaster: { slot: number; itemKey: string }[] = [];
+    const petCollectionByCharacter: Record<string, { slot: number; itemKey: string }[]> = {};
+    for (const row of petCollectionRows) {
+      const shaped = { slot: row.slot, itemKey: row.itemKey };
+      if (row.ownerScope === "user" && row.ownerId === me.id) {
+        petCollectionMaster.push(shaped);
+      } else if (row.ownerScope === "character" && charIdSet.has(row.ownerId)) {
+        (petCollectionByCharacter[row.ownerId] ??= []).push(shaped);
+      }
+    }
+
     // Unacknowledged rank-up notifications power the chat ribbon.
     const unack = await listUnacknowledged(db, me.id);
 
@@ -357,6 +449,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           isBuiltin: !!r.isBuiltin,
           order: r.order,
         })),
+        items: itemCatalog,
       },
       // Master-only owned lists (unchanged shape for back-compat).
       ownedStyles: ownedStyleRows.map((r) => ({
@@ -380,6 +473,25 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         rankKey: r.rankKey,
         acquiredAt: +r.acquiredAt,
       })),
+      // Per-identity inventory. `inventory` is the master/OOC pool;
+      // `inventoryByCharacter[characterId]` is the character pool.
+      // Every identity is fully isolated — moving items across them
+      // requires `/give` between two of the user's own identities, the
+      // only legal cross-partition transfer.
+      inventory: inventoryMaster,
+      inventoryByCharacter,
+      // Per-identity Collection pins (10-slot showcase) — same
+      // partition rules as inventory. Slots are sparse; each entry
+      // carries `slot` (0..9) + `itemKey`. Items pinned here have
+      // category != 'pet'; pets live in `petCollection`.
+      collection: collectionMaster,
+      collectionByCharacter,
+      // Per-identity Pet Collection pins (5-slot showcase). Same
+      // partition rules. Only items with `category='pet'` are
+      // pinnable here — the PUT endpoint validates and rejects
+      // mismatches with a 403.
+      petCollection: petCollectionMaster,
+      petCollectionByCharacter,
       activeCosmetics: {
         // Master / OOC slot. Same shape as before — the existing
         // dashboard reads these two fields directly for the master
@@ -644,6 +756,12 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .select()
       .from(cosmetics)
       .where(eq(cosmetics.enabled, true));
+    const itemRows = await db
+      .select()
+      .from(items)
+      .where(eq(items.enabled, true))
+      .orderBy(asc(items.order));
+    const nowMs = Date.now();
     return {
       nameStyles: styleRows.map((r) => ({
         key: r.key,
@@ -662,6 +780,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         cost: r.cost,
         config: r.configJson ? safeParse(r.configJson) : null,
       })),
+      items: itemRows.map((r) => shapeItemCatalogRow(r, nowMs)),
     };
   });
 
@@ -1326,10 +1445,491 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       return { ok: true };
     },
   );
+
+  /* =========================================================
+   *  Items — shop purchase
+   *
+   *  POST /earning/me/items/:key/buy
+   *    Body: { quantity, characterId? }
+   *    Spends `price * quantity` Currency from the buying identity's
+   *    pool, upserts the matching `identity_inventory` row clamped to
+   *    `stack_limit`. Atomic via `runPurchaseTxn` so funds + grant +
+   *    ledger insert can't race.
+   *
+   *  Partitioning: `characterId` selects which identity buys. Null /
+   *  omitted = master/OOC (scope='user', ownerId=me.id). A character
+   *  id (after ownership check) = scope='character', ownerId=charId.
+   *  Currency and inventory both partition cleanly — buying as
+   *  Character A only debits A's pool and only stocks A's inventory.
+   * ========================================================= */
+
+  const buyItemBody = z.object({
+    quantity: z.number().int().min(1).max(999),
+    characterId: z.string().nullable().optional(),
+  }).strict();
+
+  app.post<{ Params: { key: string }; Body: unknown }>(
+    "/earning/me/items/:key/buy",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      let body: z.infer<typeof buyItemBody>;
+      try { body = buyItemBody.parse(req.body ?? {}); }
+      catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+
+      const characterId = body.characterId ?? null;
+      if (characterId) {
+        const c = (await db
+          .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters)
+          .where(eq(characters.id, characterId))
+          .limit(1))[0];
+        if (!c || c.userId !== me.id || c.deletedAt) {
+          reply.code(403);
+          return { error: "not your character" };
+        }
+      }
+
+      const ownerScope: "user" | "character" = characterId ? "character" : "user";
+      const ownerId = characterId ?? me.id;
+
+      const outcome = runPurchaseTxn(db, me.id, {
+        characterId,
+        validate: (tx) => {
+          const item = tx.select().from(items).where(eq(items.key, req.params.key)).limit(1).all()[0];
+          if (!item || !item.enabled) {
+            return { ok: false, status: 404, error: "item not found or disabled" };
+          }
+          if (!item.forSale) {
+            return { ok: false, status: 403, error: "not currently for sale" };
+          }
+          const nowMs = Date.now();
+          if (item.saleStartsAt && nowMs < +item.saleStartsAt) {
+            return { ok: false, status: 403, error: "sale hasn't started yet" };
+          }
+          if (item.saleEndsAt && nowMs >= +item.saleEndsAt) {
+            return { ok: false, status: 403, error: "sale has ended" };
+          }
+          // Stack-cap check against the buying identity's current
+          // holdings. Reject the whole transaction rather than
+          // partial-buying — the client should disable the Buy button
+          // when at cap, so a 409 here is a defensive backstop.
+          const existing = tx.select({ qty: identityInventory.quantity })
+            .from(identityInventory)
+            .where(and(
+              eq(identityInventory.ownerScope, ownerScope),
+              eq(identityInventory.ownerId, ownerId),
+              eq(identityInventory.itemKey, req.params.key),
+            )).limit(1).all()[0];
+          const have = existing?.qty ?? 0;
+          if (have + body.quantity > item.stackLimit) {
+            return {
+              ok: false,
+              status: 409,
+              error: `would exceed stack limit (${item.stackLimit})`,
+            };
+          }
+          return { ok: true, cost: item.price * body.quantity };
+        },
+        grant: (tx) => {
+          // Upsert: increment quantity if a row already exists for this
+          // (identity, itemKey) tuple; otherwise insert fresh.
+          const existing = tx.select({ qty: identityInventory.quantity })
+            .from(identityInventory)
+            .where(and(
+              eq(identityInventory.ownerScope, ownerScope),
+              eq(identityInventory.ownerId, ownerId),
+              eq(identityInventory.itemKey, req.params.key),
+            )).limit(1).all()[0];
+          if (existing) {
+            tx.update(identityInventory)
+              .set({ quantity: existing.qty + body.quantity, updatedAt: new Date() })
+              .where(and(
+                eq(identityInventory.ownerScope, ownerScope),
+                eq(identityInventory.ownerId, ownerId),
+                eq(identityInventory.itemKey, req.params.key),
+              ))
+              .run();
+          } else {
+            tx.insert(identityInventory).values({
+              ownerScope,
+              ownerId,
+              itemKey: req.params.key,
+              quantity: body.quantity,
+            }).run();
+          }
+        },
+        reason: `item_purchase_${req.params.key}`,
+        metadata: { kind: "item", itemKey: req.params.key, quantity: body.quantity },
+      });
+      if (!outcome.ok) {
+        reply.code(outcome.status);
+        return outcome.required !== undefined
+          ? { error: outcome.error, required: outcome.required, balance: outcome.balance }
+          : { error: outcome.error };
+      }
+      await emitWalletUpdate(
+        io,
+        me.id,
+        outcome.final,
+        -outcome.cost,
+        `item_purchase_${req.params.key}`,
+        characterId ? { scope: "character", ownerId: characterId } : { scope: "user" },
+      );
+      // Inventory live-update so an open dashboard's Items tab
+      // refreshes its inventory + shop "you own X/Y" line without
+      // the user reopening the modal.
+      const buyerSockets = await io.fetchSockets();
+      for (const s of buyerSockets) {
+        const uid = (s.data as { userId?: string }).userId;
+        if (uid !== me.id) continue;
+        s.emit("earning:inventory_changed", {
+          scope: characterId ? "character" : "user",
+          ownerId: characterId ?? me.id,
+          itemKey: req.params.key,
+          delta: body.quantity,
+          reason: "item_purchase",
+        });
+      }
+      return { ok: true, quantity: body.quantity };
+    },
+  );
+
+  /* =========================================================
+   *  Collection — per-identity 10-slot pinned showcase.
+   *
+   *  PUT /earning/me/collection
+   *    Body: { slots: Array<{ slot, itemKey | null }>, characterId? }
+   *    Writes each provided slot in a single transaction. Slots not
+   *    listed in the body are left untouched (the client sends only
+   *    changed slots for a diff-style save). Setting itemKey=null
+   *    clears the slot.
+   *
+   *  Partitioning: characterId null/omitted writes the OOC master's
+   *  Collection; a character id writes that character's Collection.
+   *  Validation: the pinned item must still be owned in the SAME
+   *  identity's inventory (a master pin needs the item in the
+   *  master inventory; a character pin needs it in the character's
+   *  inventory). Cross-identity pins are rejected.
+   * ========================================================= */
+
+  const setCollectionSlotEntry = z.object({
+    slot: z.number().int().min(0).max(9),
+    itemKey: z.string().min(1).max(64).nullable(),
+  }).strict();
+  const setCollectionBody = z.object({
+    slots: z.array(setCollectionSlotEntry).min(1).max(10),
+    characterId: z.string().nullable().optional(),
+  }).strict();
+
+  app.put<{ Body: unknown }>("/earning/me/collection", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let body: z.infer<typeof setCollectionBody>;
+    try { body = setCollectionBody.parse(req.body); }
+    catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+
+    // Reject duplicate slot indexes in the same request — the slot
+    // is part of the PK, so writing 2x slot=3 in one go would race
+    // with itself even inside a transaction.
+    const slotSet = new Set<number>();
+    for (const s of body.slots) {
+      if (slotSet.has(s.slot)) {
+        reply.code(400);
+        return { error: `duplicate slot ${s.slot} in payload` };
+      }
+      slotSet.add(s.slot);
+    }
+
+    const characterId = body.characterId ?? null;
+    if (characterId) {
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+        .from(characters)
+        .where(eq(characters.id, characterId))
+        .limit(1))[0];
+      if (!c || c.userId !== me.id || c.deletedAt) {
+        reply.code(403);
+        return { error: "not your character" };
+      }
+    }
+    const ownerScope: "user" | "character" = characterId ? "character" : "user";
+    const ownerId = characterId ?? me.id;
+
+    // Validate-and-apply in ONE transaction so a concurrent /give
+    // can't drain the inventory between the ownership check and the
+    // pin write. The validate phase reads `identity_inventory` for
+    // every non-null itemKey in the payload AND looks up the item's
+    // category to reject pets (those belong in the Pet Collection,
+    // not here). The transaction throws on either failure; the
+    // catch below maps the tagged error into a 403.
+    const itemKeysToCheck = body.slots
+      .map((s) => s.itemKey)
+      .filter((k): k is string => typeof k === "string");
+    try {
+      db.transaction((tx) => {
+        if (itemKeysToCheck.length > 0) {
+          const ownedRows = tx.select({ itemKey: identityInventory.itemKey })
+            .from(identityInventory)
+            .where(and(
+              eq(identityInventory.ownerScope, ownerScope),
+              eq(identityInventory.ownerId, ownerId),
+              inArray(identityInventory.itemKey, itemKeysToCheck),
+            ))
+            .all();
+          const owned = new Set(ownedRows.map((r) => r.itemKey));
+          for (const k of itemKeysToCheck) {
+            if (!owned.has(k)) {
+              // Throw with a tagged message so the catch can
+              // surface a 403 specifically for missing-inventory.
+              // SQLite transactions rollback on throw, leaving no
+              // partial pin writes behind.
+              throw new Error(`__pin_not_owned__:${k}`);
+            }
+          }
+          // Category guard — pets belong in identity_pet_collection,
+          // not here. Read the relevant category rows once and
+          // reject any pet keys before the writes start.
+          const catRows = tx.select({ key: items.key, category: items.category })
+            .from(items)
+            .where(inArray(items.key, itemKeysToCheck))
+            .all();
+          for (const r of catRows) {
+            if (r.category === "pet") {
+              throw new Error(`__pin_wrong_collection__:${r.key}`);
+            }
+          }
+        }
+        for (const s of body.slots) {
+          if (s.itemKey === null) {
+            tx.delete(identityCollection).where(and(
+              eq(identityCollection.ownerScope, ownerScope),
+              eq(identityCollection.ownerId, ownerId),
+              eq(identityCollection.slot, s.slot),
+            )).run();
+          } else {
+            // Upsert via delete-then-insert. SQLite's ON CONFLICT
+            // DO UPDATE works too, but this idiom matches the rest
+            // of the codebase's per-row writes.
+            tx.delete(identityCollection).where(and(
+              eq(identityCollection.ownerScope, ownerScope),
+              eq(identityCollection.ownerId, ownerId),
+              eq(identityCollection.slot, s.slot),
+            )).run();
+            tx.insert(identityCollection).values({
+              ownerScope,
+              ownerId,
+              slot: s.slot,
+              itemKey: s.itemKey,
+            }).run();
+          }
+        }
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.startsWith("__pin_not_owned__:")) {
+        reply.code(403);
+        return { error: `you don't hold item "${msg.slice("__pin_not_owned__:".length)}" on this identity` };
+      }
+      if (msg.startsWith("__pin_wrong_collection__:")) {
+        reply.code(403);
+        return { error: `"${msg.slice("__pin_wrong_collection__:".length)}" is a pet — pin it to your Pet Collection instead.` };
+      }
+      throw err;
+    }
+
+    return { ok: true };
+  });
+
+  /* =========================================================
+   *  Pet Collection — 5-slot pinned pet showcase
+   *
+   *  PUT /earning/me/pet-collection
+   *    Body: { slots: Array<{ slot, itemKey | null }>, characterId? }
+   *    Same wire shape + diff semantics as PUT /collection, but
+   *    targets identity_pet_collection (5 slots) and validates that
+   *    every pinned item has `category='pet'`. Non-pets get rejected
+   *    with the inverse error of the item-collection's pet guard.
+   * ========================================================= */
+
+  const setPetCollectionSlotEntry = z.object({
+    slot: z.number().int().min(0).max(4),
+    itemKey: z.string().min(1).max(64).nullable(),
+  }).strict();
+  const setPetCollectionBody = z.object({
+    slots: z.array(setPetCollectionSlotEntry).min(1).max(5),
+    characterId: z.string().nullable().optional(),
+  }).strict();
+
+  app.put<{ Body: unknown }>("/earning/me/pet-collection", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let body: z.infer<typeof setPetCollectionBody>;
+    try { body = setPetCollectionBody.parse(req.body); }
+    catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+
+    const slotSet = new Set<number>();
+    for (const s of body.slots) {
+      if (slotSet.has(s.slot)) {
+        reply.code(400);
+        return { error: `duplicate slot ${s.slot} in payload` };
+      }
+      slotSet.add(s.slot);
+    }
+
+    const characterId = body.characterId ?? null;
+    if (characterId) {
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+        .from(characters)
+        .where(eq(characters.id, characterId))
+        .limit(1))[0];
+      if (!c || c.userId !== me.id || c.deletedAt) {
+        reply.code(403);
+        return { error: "not your character" };
+      }
+    }
+    const ownerScope: "user" | "character" = characterId ? "character" : "user";
+    const ownerId = characterId ?? me.id;
+
+    const itemKeysToCheck = body.slots
+      .map((s) => s.itemKey)
+      .filter((k): k is string => typeof k === "string");
+
+    try {
+      db.transaction((tx) => {
+        if (itemKeysToCheck.length > 0) {
+          const ownedRows = tx.select({ itemKey: identityInventory.itemKey })
+            .from(identityInventory)
+            .where(and(
+              eq(identityInventory.ownerScope, ownerScope),
+              eq(identityInventory.ownerId, ownerId),
+              inArray(identityInventory.itemKey, itemKeysToCheck),
+            ))
+            .all();
+          const owned = new Set(ownedRows.map((r) => r.itemKey));
+          for (const k of itemKeysToCheck) {
+            if (!owned.has(k)) {
+              throw new Error(`__pin_not_owned__:${k}`);
+            }
+          }
+          // Inverse category guard — only pets allowed here.
+          const catRows = tx.select({ key: items.key, category: items.category })
+            .from(items)
+            .where(inArray(items.key, itemKeysToCheck))
+            .all();
+          for (const r of catRows) {
+            if (r.category !== "pet") {
+              throw new Error(`__pin_wrong_collection__:${r.key}`);
+            }
+          }
+        }
+        for (const s of body.slots) {
+          if (s.itemKey === null) {
+            tx.delete(identityPetCollection).where(and(
+              eq(identityPetCollection.ownerScope, ownerScope),
+              eq(identityPetCollection.ownerId, ownerId),
+              eq(identityPetCollection.slot, s.slot),
+            )).run();
+          } else {
+            tx.delete(identityPetCollection).where(and(
+              eq(identityPetCollection.ownerScope, ownerScope),
+              eq(identityPetCollection.ownerId, ownerId),
+              eq(identityPetCollection.slot, s.slot),
+            )).run();
+            tx.insert(identityPetCollection).values({
+              ownerScope,
+              ownerId,
+              slot: s.slot,
+              itemKey: s.itemKey,
+            }).run();
+          }
+        }
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.startsWith("__pin_not_owned__:")) {
+        reply.code(403);
+        return { error: `you don't hold item "${msg.slice("__pin_not_owned__:".length)}" on this identity` };
+      }
+      if (msg.startsWith("__pin_wrong_collection__:")) {
+        reply.code(403);
+        return { error: `"${msg.slice("__pin_wrong_collection__:".length)}" isn't a pet — pin it to your Item Collection instead.` };
+      }
+      throw err;
+    }
+
+    return { ok: true };
+  });
 }
 
 function safeParse(json: string): unknown {
   try { return JSON.parse(json); } catch { return null; }
+}
+
+/**
+ * Parse an item's per-command message JSON, returning an empty array
+ * on any failure (malformed JSON or non-array shape). Used by both
+ * the catalog payload (to advertise which commands an item supports)
+ * and by the command handlers (to pick a random template). A robust
+ * empty-array fallback ensures a single corrupt row can't break the
+ * whole catalog fetch.
+ */
+function parseItemMessages(json: string | null | undefined): string[] {
+  if (!json) return [];
+  try {
+    const v = JSON.parse(json);
+    if (!Array.isArray(v)) return [];
+    return v.filter((s): s is string => typeof s === "string" && s.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Reshape an `items` row for the `/earning/me` catalog payload.
+ * Computes the derived `purchasable` boolean from the layered
+ * enabled / forSale / sale-window switches so the client doesn't
+ * reimplement the rule. `availableCommands` lists which of
+ * give/throw/drop have non-empty message arrays — the dashboard +
+ * command help use it to show which commands work on the item.
+ */
+function shapeItemCatalogRow(row: typeof items.$inferSelect, nowMs: number) {
+  const give = parseItemMessages(row.giveMessagesJson);
+  const throwMsgs = parseItemMessages(row.throwMessagesJson);
+  const drop = parseItemMessages(row.dropMessagesJson);
+  const starts = row.saleStartsAt ? +row.saleStartsAt : null;
+  const ends = row.saleEndsAt ? +row.saleEndsAt : null;
+  const inWindow =
+    (starts === null || nowMs >= starts) &&
+    (ends === null || nowMs < ends);
+  return {
+    key: row.key,
+    name: row.name,
+    namePlural: row.namePlural,
+    description: row.description,
+    iconUrl: row.iconUrl,
+    price: row.price,
+    stackLimit: row.stackLimit,
+    enabled: !!row.enabled,
+    forSale: !!row.forSale,
+    saleStartsAt: starts,
+    saleEndsAt: ends,
+    order: row.order,
+    isBuiltin: !!row.isBuiltin,
+    /** Shop bucket. Drives the dashboard's category filter and the
+     *  pin-collection routing (pets → identity_pet_collection,
+     *  everything else → identity_collection). */
+    category: row.category,
+    /** Derived: enabled && forSale && now ∈ [saleStartsAt, saleEndsAt). */
+    purchasable: !!row.enabled && !!row.forSale && inWindow,
+    /** Which commands this item supports (non-empty templates). */
+    availableCommands: {
+      give: give.length > 0,
+      throw: throwMsgs.length > 0,
+      drop: drop.length > 0,
+    },
+  };
 }
 
 /**

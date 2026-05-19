@@ -22,6 +22,9 @@ import {
   characterEarning,
   characters,
   cosmetics,
+  identityCollection,
+  identityInventory,
+  items,
   nameStyles,
   rankTiers,
   ranks,
@@ -690,6 +693,225 @@ export function registerAdminEarningRoutes(
   );
 
   /* =========================================================
+   *  Items tab — full CRUD on the catalog + sale-window scheduler.
+   *
+   *  Built-in seed rows (migration 0094) carry isBuiltin=1 and are
+   *  protected from DELETE; every other field on them is editable so
+   *  admins can rewrite seeded names, descriptions, messages, prices
+   *  freely. New items created via POST default isBuiltin=0 and are
+   *  fully deletable.
+   *
+   *  Sale window semantics:
+   *    enabled        — master existence; 0 hides everywhere and
+   *                     rejects commands, but inventory rows persist
+   *    forSale        — independent of enabled; gates shop only
+   *    saleStartsAt   — optional lower bound (unix ms); null = unbound
+   *    saleEndsAt     — optional upper bound (unix ms); null = unbound
+   *  Server derives `purchasable = enabled && forSale && now ∈ window`
+   *  in the /earning/me payload so the client doesn't reimplement it.
+   *
+   *  Per-command message arrays (give / throw / drop) are validated as
+   *  JSON arrays of strings. Empty array = command disabled for that
+   *  item.
+   * ========================================================= */
+
+  /** JSON-array-of-strings — the server stores the stringified JSON so
+   *  the same column can be read back, but admins POST/PATCH a real
+   *  array and we validate + stringify on the server side. */
+  const messageTemplateArray = z.array(z.string().min(1).max(800)).max(50);
+
+  /** Aliases array — each entry capped at 40 chars (long enough for
+   *  multi-word natural-language synonyms like "gold piece"), 30
+   *  total max so an admin can't pad a row with hundreds of names
+   *  and balloon the json_each cost on lookup. */
+  const aliasesArray = z.array(z.string().min(1).max(40)).max(30);
+
+  /** Item category enum. Mirrors the seed-time set documented in
+   *  migration 0103. Adding a new category here is a code change
+   *  shared by client + server + migration; intentional friction so
+   *  category drift stays bounded. */
+  const itemCategory = z.enum([
+    "food", "drink", "joke", "tool", "weapon", "armor",
+    "magic", "treasure", "building", "gift", "pet", "misc",
+  ]);
+
+  const itemPatchBody = z.object({
+    name: z.string().min(1).max(80).optional(),
+    namePlural: z.string().min(1).max(80).nullable().optional(),
+    description: z.string().max(800).optional(),
+    iconUrl: z.string().max(1000).nullable().optional(),
+    price: z.number().int().min(0).max(1_000_000).optional(),
+    stackLimit: z.number().int().min(1).max(9999).optional(),
+    giveMessages: messageTemplateArray.optional(),
+    throwMessages: messageTemplateArray.optional(),
+    dropMessages: messageTemplateArray.optional(),
+    aliases: aliasesArray.optional(),
+    category: itemCategory.optional(),
+    enabled: z.boolean().optional(),
+    forSale: z.boolean().optional(),
+    saleStartsAt: z.number().int().nullable().optional(),
+    saleEndsAt: z.number().int().nullable().optional(),
+    order: z.number().int().optional(),
+  }).strict();
+
+  const itemCreateBody = z.object({
+    key: z.string().min(1).max(64).regex(/^[a-z][a-z0-9_]*$/),
+    name: z.string().min(1).max(80),
+    namePlural: z.string().min(1).max(80).nullable().optional(),
+    description: z.string().max(800).optional(),
+    iconUrl: z.string().max(1000).nullable().optional(),
+    price: z.number().int().min(0).max(1_000_000).optional(),
+    stackLimit: z.number().int().min(1).max(9999).optional(),
+    giveMessages: messageTemplateArray.optional(),
+    throwMessages: messageTemplateArray.optional(),
+    dropMessages: messageTemplateArray.optional(),
+    aliases: aliasesArray.optional(),
+    category: itemCategory.optional(),
+    enabled: z.boolean().optional(),
+    forSale: z.boolean().optional(),
+    saleStartsAt: z.number().int().nullable().optional(),
+    saleEndsAt: z.number().int().nullable().optional(),
+    order: z.number().int().optional(),
+  }).strict();
+
+  /**
+   * GET /admin/earning/items
+   * Returns every item row regardless of enabled / forSale, plus the
+   * per-item owner count (distinct identities holding ≥1 of the item)
+   * so the editor can warn before a destructive change.
+   */
+  app.get("/admin/earning/items", async () => {
+    const rows = await db.select().from(items).orderBy(asc(items.order));
+    const ownerRows = await db.all<{ itemKey: string; n: number }>(sql`
+      SELECT item_key AS itemKey, COUNT(*) AS n
+      FROM identity_inventory
+      WHERE quantity > 0
+      GROUP BY item_key
+    `);
+    const ownersByKey = new Map(ownerRows.map((r) => [r.itemKey, r.n]));
+    return {
+      items: rows.map((r) => ({
+        key: r.key,
+        name: r.name,
+        namePlural: r.namePlural,
+        description: r.description,
+        iconUrl: r.iconUrl,
+        price: r.price,
+        stackLimit: r.stackLimit,
+        giveMessages: (() => {
+          try { const v = JSON.parse(r.giveMessagesJson); return Array.isArray(v) ? v : []; } catch { return []; }
+        })(),
+        throwMessages: (() => {
+          try { const v = JSON.parse(r.throwMessagesJson); return Array.isArray(v) ? v : []; } catch { return []; }
+        })(),
+        dropMessages: (() => {
+          try { const v = JSON.parse(r.dropMessagesJson); return Array.isArray(v) ? v : []; } catch { return []; }
+        })(),
+        aliases: (() => {
+          try { const v = JSON.parse(r.aliasesJson); return Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : []; } catch { return []; }
+        })(),
+        category: r.category,
+        enabled: !!r.enabled,
+        forSale: !!r.forSale,
+        saleStartsAt: r.saleStartsAt ? +r.saleStartsAt : null,
+        saleEndsAt: r.saleEndsAt ? +r.saleEndsAt : null,
+        order: r.order,
+        isBuiltin: !!r.isBuiltin,
+        owners: ownersByKey.get(r.key) ?? 0,
+      })),
+    };
+  });
+
+  app.post<{ Body: unknown }>("/admin/earning/items", async (req, reply) => {
+    let body: z.infer<typeof itemCreateBody>;
+    try { body = itemCreateBody.parse(req.body); }
+    catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+    const dup = (await db.select().from(items).where(eq(items.key, body.key)).limit(1))[0];
+    if (dup) { reply.code(409); return { error: "item key already exists" }; }
+    // Default the order to "after the current max" so new rows render
+    // at the bottom of the editor list and the shop. Admin can reorder.
+    const maxOrderRow = (await db.select({ m: sql<number>`MAX("order")` }).from(items))[0];
+    const order = body.order ?? ((maxOrderRow?.m ?? 0) + 1);
+    await db.insert(items).values({
+      key: body.key,
+      name: body.name,
+      namePlural: body.namePlural ?? null,
+      description: body.description ?? "",
+      iconUrl: body.iconUrl ?? null,
+      price: body.price ?? 0,
+      stackLimit: body.stackLimit ?? 99,
+      giveMessagesJson: JSON.stringify(body.giveMessages ?? []),
+      throwMessagesJson: JSON.stringify(body.throwMessages ?? []),
+      dropMessagesJson: JSON.stringify(body.dropMessages ?? []),
+      aliasesJson: JSON.stringify(body.aliases ?? []),
+      category: body.category ?? "misc",
+      enabled: body.enabled ?? true,
+      forSale: body.forSale ?? true,
+      saleStartsAt: body.saleStartsAt != null ? new Date(body.saleStartsAt) : null,
+      saleEndsAt: body.saleEndsAt != null ? new Date(body.saleEndsAt) : null,
+      isBuiltin: false,
+      order,
+    });
+    return { ok: true, key: body.key };
+  });
+
+  app.patch<{ Params: { key: string }; Body: unknown }>(
+    "/admin/earning/items/:key",
+    async (req, reply) => {
+      let body: z.infer<typeof itemPatchBody>;
+      try { body = itemPatchBody.parse(req.body); }
+      catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+      const existing = (await db.select().from(items).where(eq(items.key, req.params.key)).limit(1))[0];
+      if (!existing) { reply.code(404); return { error: "item not found" }; }
+      const update: Partial<typeof items.$inferInsert> = { updatedAt: new Date() };
+      if (body.name !== undefined) update.name = body.name;
+      if (body.namePlural !== undefined) update.namePlural = body.namePlural;
+      if (body.description !== undefined) update.description = body.description;
+      if (body.iconUrl !== undefined) update.iconUrl = body.iconUrl;
+      if (body.price !== undefined) update.price = body.price;
+      if (body.stackLimit !== undefined) update.stackLimit = body.stackLimit;
+      if (body.giveMessages !== undefined) update.giveMessagesJson = JSON.stringify(body.giveMessages);
+      if (body.throwMessages !== undefined) update.throwMessagesJson = JSON.stringify(body.throwMessages);
+      if (body.dropMessages !== undefined) update.dropMessagesJson = JSON.stringify(body.dropMessages);
+      if (body.aliases !== undefined) update.aliasesJson = JSON.stringify(body.aliases);
+      if (body.category !== undefined) update.category = body.category;
+      if (body.enabled !== undefined) update.enabled = body.enabled;
+      if (body.forSale !== undefined) update.forSale = body.forSale;
+      if (body.saleStartsAt !== undefined) {
+        update.saleStartsAt = body.saleStartsAt != null ? new Date(body.saleStartsAt) : null;
+      }
+      if (body.saleEndsAt !== undefined) {
+        update.saleEndsAt = body.saleEndsAt != null ? new Date(body.saleEndsAt) : null;
+      }
+      if (body.order !== undefined) update.order = body.order;
+      await db.update(items).set(update).where(eq(items.key, req.params.key));
+      return { ok: true };
+    },
+  );
+
+  /**
+   * DELETE /admin/earning/items/:key
+   * Built-in items are delete-protected — admins should disable
+   * (enabled=0) or pull from sale (forSale=0) instead. Deleting a
+   * custom item cascades the FK on identity_inventory so all
+   * outstanding inventory rows for it are dropped. The admin UI
+   * surfaces the owner count for the confirm prompt.
+   */
+  app.delete<{ Params: { key: string } }>("/admin/earning/items/:key", async (req, reply) => {
+    const existing = (await db.select().from(items).where(eq(items.key, req.params.key)).limit(1))[0];
+    if (!existing) { reply.code(404); return { error: "item not found" }; }
+    if (existing.isBuiltin) {
+      reply.code(409);
+      return {
+        error: "built-in items cannot be deleted",
+        message: "Disable it instead — the seed row backs anyone who owns it.",
+      };
+    }
+    await db.delete(items).where(eq(items.key, req.params.key));
+    return { ok: true };
+  });
+
+  /* =========================================================
    *  Test grants — masteradmin-only direct grants for testing.
    *
    *  These bypass the normal earn / purchase paths so admins
@@ -750,6 +972,22 @@ export function registerAdminEarningRoutes(
   const grantStyleBody = z.object({
     username: z.string().min(1).max(80),
     styleKey: z.string().min(1).max(64),
+  }).strict();
+
+  const grantItemBody = z.object({
+    username: z.string().min(1).max(80),
+    /** Optional character scope. Omit / null deposits into the OOC
+     *  master's inventory; otherwise the character must belong to
+     *  the target user (NOT the admin). Server validates ownership
+     *  before granting. */
+    characterId: z.string().min(1).max(80).nullable().optional(),
+    itemKey: z.string().min(1).max(64),
+    /** Negative quantities are allowed — revoking from an inventory
+     *  shares the same endpoint. Clamped to 999 in either direction
+     *  so a slip of the keyboard can't wipe a huge stack. */
+    quantity: z.number().int().min(-999).max(999).refine((n) => n !== 0, {
+      message: "quantity must be non-zero",
+    }),
   }).strict();
 
   /**
@@ -961,6 +1199,147 @@ export function registerAdminEarningRoutes(
   });
 
   /**
+   * POST /admin/earning/grant-item
+   * Deposit (positive quantity) or revoke (negative) units of an
+   * item into / from a target identity's inventory. Bypasses the
+   * shop's enabled / forSale / sale-window checks so admins can seed
+   * testers' pockets with items that aren't yet on sale.
+   *
+   * Partitioning: characterId selects the identity. Omit / null =
+   * the target user's OOC master (scope='user'). A character id =
+   * that character's inventory; the character MUST belong to the
+   * target user (validated server-side; admins can't accidentally
+   * stuff items into a character of a different user).
+   *
+   * Negative quantities revoke up to (but not below) the current
+   * stack; "remove 999 cookies" from a 5-cookie stack leaves it at
+   * 0 (and deletes the row) rather than going negative. Positive
+   * quantities clamp at `stack_limit` and reject overflow with a
+   * 409 so the admin gets a clear error.
+   *
+   * Audit: writes an `admin_grant` (positive) or `admin_revoke`
+   * (negative) row to `earning_ledger` capturing the actor, target,
+   * scope, item, and delta. No currency moves — grants are free.
+   */
+  app.post<{ Body: unknown }>("/admin/earning/grant-item", async (req, reply) => {
+    const me = masterAdminGate(req, reply); if (!me) return;
+    let body: z.infer<typeof grantItemBody>;
+    try { body = grantItemBody.parse(req.body); }
+    catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+    const target = await resolveTargetUser(body.username);
+    if (!target) { reply.code(404); return { error: "user not found" }; }
+    const item = (await db.select().from(items).where(eq(items.key, body.itemKey)).limit(1))[0];
+    if (!item) { reply.code(404); return { error: "item not found" }; }
+
+    const characterId = body.characterId ?? null;
+    if (characterId) {
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+        .from(characters)
+        .where(eq(characters.id, characterId))
+        .limit(1))[0];
+      // Ownership against the TARGET, not the admin — the admin is
+      // depositing into another user's character pocket.
+      if (!c || c.userId !== target.id || c.deletedAt) {
+        reply.code(403);
+        return { error: "character does not belong to target user" };
+      }
+    }
+    const ownerScope: "user" | "character" = characterId ? "character" : "user";
+    const ownerId = characterId ?? target.id;
+
+    // Read current quantity (0 when no row yet).
+    const existing = (await db.select({ qty: identityInventory.quantity })
+      .from(identityInventory)
+      .where(and(
+        eq(identityInventory.ownerScope, ownerScope),
+        eq(identityInventory.ownerId, ownerId),
+        eq(identityInventory.itemKey, body.itemKey),
+      ))
+      .limit(1))[0];
+    const have = existing?.qty ?? 0;
+    const desired = have + body.quantity;
+
+    if (body.quantity > 0 && desired > item.stackLimit) {
+      reply.code(409);
+      return {
+        error: `would exceed stack limit (${item.stackLimit})`,
+        haveBefore: have,
+        stackLimit: item.stackLimit,
+      };
+    }
+
+    if (desired <= 0) {
+      // Net zero or revoke-through-zero: delete the row entirely so
+      // the inventory map doesn't carry phantom zero-quantity entries.
+      // Also prune any Collection pin on this identity that points at
+      // the now-removed item — the showcase shouldn't render an item
+      // the identity no longer holds.
+      if (existing) {
+        await db.delete(identityInventory).where(and(
+          eq(identityInventory.ownerScope, ownerScope),
+          eq(identityInventory.ownerId, ownerId),
+          eq(identityInventory.itemKey, body.itemKey),
+        ));
+        await db.delete(identityCollection).where(and(
+          eq(identityCollection.ownerScope, ownerScope),
+          eq(identityCollection.ownerId, ownerId),
+          eq(identityCollection.itemKey, body.itemKey),
+        ));
+      }
+    } else if (existing) {
+      await db.update(identityInventory)
+        .set({ quantity: desired, updatedAt: new Date() })
+        .where(and(
+          eq(identityInventory.ownerScope, ownerScope),
+          eq(identityInventory.ownerId, ownerId),
+          eq(identityInventory.itemKey, body.itemKey),
+        ));
+    } else {
+      await db.insert(identityInventory).values({
+        ownerScope,
+        ownerId,
+        itemKey: body.itemKey,
+        quantity: desired,
+      });
+    }
+
+    await db.insert(earningLedger).values({
+      id: nanoid(),
+      scope: ownerScope,
+      ownerId,
+      xpDelta: 0,
+      currencyDelta: 0,
+      reason: body.quantity >= 0 ? "admin_grant" : "admin_revoke",
+      metadataJson: JSON.stringify({
+        actor: me.id,
+        kind: "item",
+        itemKey: body.itemKey,
+        quantity: body.quantity,
+        priorQuantity: have,
+        characterId,
+      }),
+    });
+    // Inventory live-update so the recipient's dashboard refreshes
+    // its Items tab without a manual reopen. The admin grant
+    // bypasses every gate so the inventory delta might be the only
+    // signal the receiving user gets that something landed.
+    const recipientSockets = await io.fetchSockets();
+    for (const s of recipientSockets) {
+      const uid = (s.data as { userId?: string }).userId;
+      if (uid !== target.id) continue;
+      s.emit("earning:inventory_changed", {
+        scope: ownerScope,
+        ownerId,
+        itemKey: body.itemKey,
+        delta: body.quantity,
+        reason: "admin_grant",
+      });
+    }
+    return { ok: true, newQuantity: Math.max(0, desired) };
+  });
+
+  /**
    * POST /admin/earning/revoke-border
    * Remove ownership of a rank's border from the target user. If
    * that border was currently equipped, the equipped state clears
@@ -1059,10 +1438,44 @@ export function registerAdminEarningRoutes(
       .select({ rankKey: userOwnedBorders.rankKey })
       .from(userOwnedBorders)
       .where(eq(userOwnedBorders.userId, target.id));
+    // Per-identity inventory: master rows + per-character rows. The
+    // admin UI uses the master list to surface "what does this user
+    // currently hold on their OOC pool?" before granting; characters
+    // are returned in a keyed map so the grant tool can pivot to a
+    // specific character's pocket.
+    const targetCharRows = await db
+      .select({ id: characters.id, name: characters.name })
+      .from(characters)
+      .where(and(eq(characters.userId, target.id), sql`${characters.deletedAt} IS NULL`));
+    const targetCharIds = targetCharRows.map((c) => c.id);
+    const inventoryRows = await db
+      .select({
+        ownerScope: identityInventory.ownerScope,
+        ownerId: identityInventory.ownerId,
+        itemKey: identityInventory.itemKey,
+        quantity: identityInventory.quantity,
+      })
+      .from(identityInventory)
+      .where(sql`(${identityInventory.ownerScope} = 'user' AND ${identityInventory.ownerId} = ${target.id})
+        OR (${identityInventory.ownerScope} = 'character' AND ${identityInventory.ownerId} IN (${
+        targetCharIds.length > 0
+          ? sql.join(targetCharIds.map((id) => sql`${id}`), sql`, `)
+          : sql`''`
+      }))`);
+    const inventory: { itemKey: string; quantity: number }[] = [];
+    const inventoryByCharacter: Record<string, { itemKey: string; quantity: number }[]> = {};
+    for (const r of inventoryRows) {
+      const e = { itemKey: r.itemKey, quantity: r.quantity };
+      if (r.ownerScope === "user") inventory.push(e);
+      else (inventoryByCharacter[r.ownerId] ??= []).push(e);
+    }
     return {
       userId: target.id,
       ownedStyles: ownedStyles.map((s) => s.styleKey),
       ownedBorders: ownedBorders.map((b) => b.rankKey),
+      inventory,
+      inventoryByCharacter,
+      characters: targetCharRows,
     };
   });
 

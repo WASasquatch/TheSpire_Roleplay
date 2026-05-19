@@ -279,6 +279,77 @@ export interface ServerToClientEvents {
     toTier: number;
     newlyEligibleBorderKeys: string[];
   }) => void;
+  /**
+   * Earning — per-identity inventory delta. Fired to every socket of
+   * the affected user after an `/give` / `/throw` / `/drop` mutates
+   * `identity_inventory`, and also after `/buy` deposits a fresh
+   * stack. Lets the dashboard's Items tab refresh its inventory +
+   * shop-cap display without the user having to reopen the modal.
+   * No payload data is interpreted client-side beyond a trigger to
+   * re-fetch `/earning/me`; that single fetch carries the whole
+   * inventory map for every identity the user owns, so the client
+   * doesn't need to reconcile per-delta.
+   */
+  /**
+   * Chat-line side-effect. A general-purpose channel for short visual
+   * effects the server triggers on a target user's client — body
+   * shake when they're hit by `/throw` / `/drop`, etc. Any future
+   * target-based command can plug into the same event by adding a
+   * new `kind`; the client effect runner branches on `kind` and
+   * each branch owns its own animation.
+   *
+   * Scope: fired ONLY to sockets of the target user that are currently
+   * in the originating room. A user with chat open on a second tab in
+   * a different room doesn't see the effect on that tab — the effect
+   * is contextual to the scene it happened in.
+   *
+   * Effect kinds:
+   *   `struck` — the target was hit by `/throw` or `/drop`. The
+   *              runner shakes the document body (scaled up a hair
+   *              to keep the edges off-screen) and flashes a pale-red
+   *              overlay on the chat composer. Respects
+   *              `prefers-reduced-motion` (no-op when set).
+   */
+  "chat:effect": (payload: {
+    kind: "struck";
+    /** Sub-flavor of the struck effect. Determines which audio cue
+     *  the runner plays — `throw` (whoosh-impact) vs `drop` (thud).
+     *  Visual shake + composer flash are identical for either; only
+     *  the audio differs. Optional so older server builds without
+     *  the field still parse; the runner falls back to the generic
+     *  "tap" chat sound when omitted. */
+    variant?: "throw" | "drop";
+    /** Display name of whoever caused the effect, surfaced for
+     *  screen-reader text / future tooltips. Optional — the runner
+     *  doesn't require it to fire. */
+    sourceDisplayName?: string;
+    /** Free-form context the runner ignores today. Reserved for future
+     *  kinds that need extra metadata (item key, intensity, etc.). */
+    context?: Record<string, unknown>;
+  }) => void;
+  "earning:inventory_changed": (payload: {
+    /** Scope of the affected pool; included for future filtered
+     *  re-fetches but not currently inspected. */
+    scope: "user" | "character";
+    /** User id or character id depending on `scope`. */
+    ownerId: string;
+    /** Item key that changed — also informational for now. */
+    itemKey: string;
+    /** Net change in the affected stack. Positive = received,
+     *  negative = sent / consumed. The client doesn't apply this
+     *  optimistically; it just re-fetches for the new authoritative
+     *  state, which is simpler than reconciling local maps. */
+    delta: number;
+    /** Hint about which command produced the change, surfaced for
+     *  future UX (toasts, etc.). */
+    reason:
+      | "command_give"
+      | "command_throw"
+      | "command_drop"
+      | "command_give_received"
+      | "item_purchase"
+      | "admin_grant";
+  }) => void;
 }
 
 export type UiHint =

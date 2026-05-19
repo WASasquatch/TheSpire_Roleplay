@@ -1,9 +1,92 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { characterJournalEntries, characterPortraits, characters, messages, profileLinks, rooms, users } from "../../db/schema.js";
-import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileLink, ProfileMetrics, ProfileView } from "@thekeep/shared";
+import { characterJournalEntries, characterPortraits, characters, identityCollection, identityPetCollection, items, messages, profileLinks, rooms, users } from "../../db/schema.js";
+import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLink, ProfileMetrics, ProfileView } from "@thekeep/shared";
+import { roleRank } from "@thekeep/shared";
 import { parseUserThemeJson } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
 import type { CommandHandler } from "../types.js";
+
+/**
+ * Resolve whether the viewer has moderator-tier authority. Used to
+ * gate the mod-only `ownerUsername` field on character profiles — a
+ * site mod (or admin / masteradmin) sees who voices each character;
+ * regular users don't. Returns false for anonymous viewers and for
+ * users whose row vanished (shouldn't happen, but a safe default).
+ */
+async function viewerIsModerator(
+  db: import("../../db/index.js").Db,
+  viewerId: string | undefined,
+): Promise<boolean> {
+  if (!viewerId) return false;
+  const row = (await db
+    .select({ role: users.role })
+    .from(users)
+    .where(eq(users.id, viewerId))
+    .limit(1))[0];
+  if (!row) return false;
+  return roleRank(row.role) >= roleRank("mod");
+}
+
+/**
+ * Read the identity's Collection pins joined to the live items
+ * catalog. Each entry carries the visible item fields snapshot at
+ * lookup time so the client renders without a second round trip.
+ * Ordered by slot ascending so the renderer can paint left-to-right
+ * in slot order. Returns an empty array when nothing is pinned.
+ */
+async function listProfileCollection(
+  db: import("../../db/index.js").Db,
+  ownerScope: "user" | "character",
+  ownerId: string,
+): Promise<ProfileCollectionEntry[]> {
+  const rows = await db
+    .select({
+      slot: identityCollection.slot,
+      itemKey: identityCollection.itemKey,
+      name: items.name,
+      namePlural: items.namePlural,
+      description: items.description,
+      iconUrl: items.iconUrl,
+    })
+    .from(identityCollection)
+    .innerJoin(items, eq(items.key, identityCollection.itemKey))
+    .where(and(
+      eq(identityCollection.ownerScope, ownerScope),
+      eq(identityCollection.ownerId, ownerId),
+    ))
+    .orderBy(asc(identityCollection.slot));
+  return rows;
+}
+
+/**
+ * Twin of listProfileCollection but for the 5-slot Pet Collection.
+ * Joins identity_pet_collection against items the same way; the
+ * server's PUT /earning/me/pet-collection endpoint already enforces
+ * `items.category = 'pet'` at write time, so we don't re-check here.
+ */
+async function listProfilePetCollection(
+  db: import("../../db/index.js").Db,
+  ownerScope: "user" | "character",
+  ownerId: string,
+): Promise<ProfileCollectionEntry[]> {
+  const rows = await db
+    .select({
+      slot: identityPetCollection.slot,
+      itemKey: identityPetCollection.itemKey,
+      name: items.name,
+      namePlural: items.namePlural,
+      description: items.description,
+      iconUrl: items.iconUrl,
+    })
+    .from(identityPetCollection)
+    .innerJoin(items, eq(items.key, identityPetCollection.itemKey))
+    .where(and(
+      eq(identityPetCollection.ownerScope, ownerScope),
+      eq(identityPetCollection.ownerId, ownerId),
+    ))
+    .orderBy(asc(identityPetCollection.slot));
+  return rows;
+}
 
 /**
  * Fetch the additional portrait gallery for a character, ordered by the
@@ -278,6 +361,8 @@ async function lookupProfile(
         isNsfw: u.isNsfw,
         createdAt: +u.createdAt,
         metrics: await computeProfileMetrics(db, u.id, null, viewerId),
+        collection: await listProfileCollection(db, "user", u.id),
+        petCollection: await listProfilePetCollection(db, "user", u.id),
       },
     };
   }
@@ -300,6 +385,11 @@ async function lookupProfile(
   if (!owner || owner.disabledAt) return null;
 
   const theme = await parseUserThemeJson(db, c.themeJson ?? owner.themeJson);
+  // Mod-only OOC owner badge. The character row already exposes
+  // `userId` on the wire (so the master is technically discoverable
+  // by chained API calls), but mods on the modal need the friendly
+  // username inline — this query is the one that resolves it.
+  const showOwner = await viewerIsModerator(db, viewerId);
   return {
     kind: "character",
     profile: {
@@ -319,6 +409,9 @@ async function lookupProfile(
       createdAt: +c.createdAt,
       updatedAt: +c.updatedAt,
       metrics: await computeProfileMetrics(db, c.userId, c.id, viewerId),
+      collection: await listProfileCollection(db, "character", c.id),
+      petCollection: await listProfilePetCollection(db, "character", c.id),
+      ...(showOwner ? { ownerUsername: owner.username } : {}),
     },
   };
 }
@@ -385,12 +478,14 @@ async function lookupRandomProfile(
         isNsfw: u.isNsfw,
         createdAt: +u.createdAt,
         metrics: await computeProfileMetrics(db, u.id, null),
+        collection: await listProfileCollection(db, "user", u.id),
+        petCollection: await listProfilePetCollection(db, "user", u.id),
       },
     };
   }
 
   const row = (await db
-    .select({ char: characters, ownerThemeJson: users.themeJson })
+    .select({ char: characters, ownerThemeJson: users.themeJson, ownerUsername: users.username })
     .from(characters)
     .innerJoin(users, eq(users.id, characters.userId))
     .where(and(
@@ -404,6 +499,7 @@ async function lookupRandomProfile(
     .offset(idx - masterCount))[0];
   if (!row) return null;
   const c = row.char;
+  const showOwner = await viewerIsModerator(db, viewerId);
   return {
     kind: "character",
     profile: {
@@ -423,6 +519,9 @@ async function lookupRandomProfile(
       createdAt: +c.createdAt,
       updatedAt: +c.updatedAt,
       metrics: await computeProfileMetrics(db, c.userId, c.id),
+      collection: await listProfileCollection(db, "character", c.id),
+      petCollection: await listProfilePetCollection(db, "character", c.id),
+      ...(showOwner ? { ownerUsername: row.ownerUsername } : {}),
     },
   };
 }

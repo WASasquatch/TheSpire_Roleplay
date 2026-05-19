@@ -1866,6 +1866,181 @@ export const characterOwnedBorders = sqliteTable(
   }),
 );
 
+/* ---------- items ----------
+ * Admin-managed catalog of collectible items users buy with Currency,
+ * hold in their per-identity inventory, and exchange via /give, /throw,
+ * /drop. Every column except `key` is editable from the admin UI;
+ * built-in seed rows (migration 0094) are delete-protected via
+ * `isBuiltin = true`.
+ *
+ * Availability is a layered switch:
+ *   enabled       — master existence. 0 hides everywhere and rejects
+ *                   commands referencing the item, but EXISTING
+ *                   inventory rows persist so admins can revive an
+ *                   item without nuking inventories.
+ *   forSale       — independent of enabled; gates shop visibility
+ *                   only. enabled=1+forSale=0 keeps the item usable
+ *                   in commands while pulled from the store.
+ *   saleStartsAt  — optional lower bound (unix ms). Shop hides the
+ *                   item until this time.
+ *   saleEndsAt    — optional upper bound. Shop stops accepting
+ *                   purchases at/after this time.
+ *
+ * Per-command message tables are stored as JSON arrays. An empty
+ * array (or invalid JSON) disables that command for the item.
+ * Placeholders supported in any template: {sender} {target} {num}
+ * {item_name} {item_icon}.
+ */
+export const items = sqliteTable(
+  "items",
+  {
+    key: text("key").primaryKey(),
+    name: text("name").notNull(),
+    /** Plural display form. Falls back to `${name}s` when null. */
+    namePlural: text("name_plural"),
+    description: text("description").notNull().default(""),
+    /** Uploaded asset URL; null/empty renders a default placeholder tile. */
+    iconUrl: text("icon_url"),
+    /** Currency cost per unit. */
+    price: integer("price").notNull().default(0),
+    /** Max units one identity may hold. */
+    stackLimit: integer("stack_limit").notNull().default(99),
+    /** JSON array of /give templates. Empty array disables /give. */
+    giveMessagesJson: text("give_messages_json").notNull().default("[]"),
+    /** JSON array of /throw templates. Empty array disables /throw. */
+    throwMessagesJson: text("throw_messages_json").notNull().default("[]"),
+    /** JSON array of /drop templates. Empty array disables /drop. */
+    dropMessagesJson: text("drop_messages_json").notNull().default("[]"),
+    /**
+     * JSON array of casual-name aliases. `findItem` matches any
+     * lowercase string in this array against the user-typed item
+     * query, in addition to key / name / namePlural. Lets users
+     * type "drink" or "tankard" for `ale`, "knife" or "blade" for
+     * `dagger`, etc. Admins edit this from the Items sub-tab.
+     */
+    aliasesJson: text("aliases_json").notNull().default("[]"),
+    /**
+     * Shop / pin bucket. Drives the dashboard's shop category
+     * filter and the pin-collection routing: items with
+     * `category='pet'` can only be pinned to identity_pet_collection
+     * (5 slots), every other category routes to identity_collection
+     * (10 slots). The category set is intentionally small (food,
+     * drink, joke, tool, weapon, armor, magic, treasure, building,
+     * gift, pet, misc); `misc` is the safety default for any row
+     * that didn't get categorized.
+     */
+    category: text("category").notNull().default("misc"),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    /** Independent of enabled — gates only shop visibility. */
+    forSale: integer("for_sale", { mode: "boolean" }).notNull().default(true),
+    /** Optional lower bound on shop visibility (unix ms). */
+    saleStartsAt: integer("sale_starts_at", { mode: "timestamp_ms" }),
+    /** Optional upper bound on shop visibility (unix ms). */
+    saleEndsAt: integer("sale_ends_at", { mode: "timestamp_ms" }),
+    order: integer("order").notNull().default(0),
+    /** Seeded by migration 0094; admins can edit but not delete. */
+    isBuiltin: integer("is_builtin", { mode: "boolean" }).notNull().default(false),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    orderIdx: index("items_order_idx").on(t.order),
+    enabledForSaleIdx: index("items_enabled_for_sale_idx").on(t.enabled, t.forSale),
+    categoryIdx: index("items_category_idx").on(t.category),
+  }),
+);
+
+/* ---------- identity_inventory ----------
+ * Per-identity holdings of catalog items. Composite-keyed by
+ * (ownerScope, ownerId, itemKey) so OOC master and each character
+ * carry fully independent inventories — see migration 0095. Every
+ * read MUST scope by (ownerScope, ownerId); a query that omits them
+ * crosses the partition and is a bug.
+ *
+ * Rows are deleted when quantity drops to 0 instead of left at zero,
+ * so a `LEFT JOIN identity_inventory` always reflects the current
+ * stack without filtering on quantity.
+ */
+export const identityInventory = sqliteTable(
+  "identity_inventory",
+  {
+    /** "user" (OOC master) or "character" — selects which id table ownerId points at. */
+    ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
+    ownerId: text("owner_id").notNull(),
+    itemKey: text("item_key")
+      .notNull()
+      .references(() => items.key, { onDelete: "cascade" }),
+    quantity: integer("quantity").notNull().default(0),
+    acquiredAt: ts("acquired_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.ownerScope, t.ownerId, t.itemKey] }),
+    ownerIdx: index("identity_inventory_owner_idx").on(t.ownerScope, t.ownerId),
+    itemIdx: index("identity_inventory_item_idx").on(t.itemKey),
+  }),
+);
+
+/* ---------- identity_collection ----------
+ * Per-identity 10-slot pinned showcase of inventory items, rendered
+ * on the identity's public profile. Migration 0096. Same partition
+ * model as identity_inventory — every identity owns its own
+ * Collection; nothing mirrors across identities. Slots are sparse:
+ * a user can pin to 0, 3, and 7 and leave the rest empty. Reads
+ * MUST scope by (ownerScope, ownerId), same as inventory.
+ *
+ * Drizzle's `sqliteTable` doesn't model CHECK constraints directly,
+ * so the 0..9 slot range is enforced at the SQL layer (migration
+ * 0096) AND at the route validator. The composite PK below covers
+ * the uniqueness side.
+ */
+export const identityCollection = sqliteTable(
+  "identity_collection",
+  {
+    ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
+    ownerId: text("owner_id").notNull(),
+    /** 0..9 — enforced by SQL CHECK + the route validator. */
+    slot: integer("slot").notNull(),
+    itemKey: text("item_key")
+      .notNull()
+      .references(() => items.key, { onDelete: "cascade" }),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.ownerScope, t.ownerId, t.slot] }),
+    ownerIdx: index("identity_collection_owner_idx").on(t.ownerScope, t.ownerId),
+  }),
+);
+
+/* ---------- identity_pet_collection ----------
+ * Per-identity 5-slot pinned showcase of PET items (`items.category =
+ * 'pet'`). Twin of identity_collection but with a tighter cap (pets
+ * are higher-investment trophies, not common collectibles) and a
+ * category guard enforced at the route layer.
+ *
+ * Same partitioning rules as item collection — every identity owns
+ * its own pin set; OOC and each character are isolated. Slots are
+ * sparse (0..4) and the slot range is enforced both by the SQL
+ * CHECK constraint (migration 0105) and the route's zod validator.
+ */
+export const identityPetCollection = sqliteTable(
+  "identity_pet_collection",
+  {
+    ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
+    ownerId: text("owner_id").notNull(),
+    /** 0..4 — enforced by SQL CHECK + the route validator. */
+    slot: integer("slot").notNull(),
+    itemKey: text("item_key")
+      .notNull()
+      .references(() => items.key, { onDelete: "cascade" }),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.ownerScope, t.ownerId, t.slot] }),
+    ownerIdx: index("identity_pet_collection_owner_idx").on(t.ownerScope, t.ownerId),
+  }),
+);
+
 /* ---------- user_active_cosmetics ----------
  * One row per user holding the currently-equipped cosmetic state.
  * Created lazily on first equip.
@@ -1954,3 +2129,7 @@ export type DbCharacterOwnedBorder = typeof characterOwnedBorders.$inferSelect;
 export type DbCharacterOwnedNameStyle = typeof characterOwnedNameStyles.$inferSelect;
 export type DbUserActiveCosmetics = typeof userActiveCosmetics.$inferSelect;
 export type DbEarningNotification = typeof earningNotifications.$inferSelect;
+export type DbItem = typeof items.$inferSelect;
+export type DbIdentityInventory = typeof identityInventory.$inferSelect;
+export type DbIdentityCollection = typeof identityCollection.$inferSelect;
+export type DbIdentityPetCollection = typeof identityPetCollection.$inferSelect;

@@ -1,0 +1,24 @@
+-- Remove the `gold_coin` builtin item. It conflicted conceptually
+-- with the existing Currency system — every chat message awards
+-- Currency (the engine's gold), and shipping a separate "Gold Coin"
+-- *item* that you /give and /throw alongside the real currency
+-- read as confusing parallel mechanics.
+--
+-- Cascade behavior on this DELETE:
+--   identity_inventory.item_key       → ON DELETE CASCADE (any user
+--                                       holding gold_coin loses it)
+--   identity_collection.item_key       → ON DELETE CASCADE (any
+--                                       collection pin to gold_coin
+--                                       is dropped)
+--   identity_pet_collection.item_key   → ON DELETE CASCADE (not
+--                                       relevant — gold_coin was
+--                                       `category='treasure'`, not
+--                                       a pet, so it couldn't be
+--                                       pinned here; safe regardless)
+--
+-- The aliases this row carried (`coin`, `coins`, `gp`, `gold`,
+-- `piece`) go away too — those words now resolve to nothing, which
+-- is the intended state. Future admin-authored items can reclaim
+-- any of these aliases without collision.
+
+DELETE FROM `items` WHERE `key` = 'gold_coin';

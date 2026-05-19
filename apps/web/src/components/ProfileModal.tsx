@@ -227,6 +227,15 @@ function ProfileBody({
       .catch(() => { /* unranked / not-found / network — hide the chip */ });
     return () => { cancelled = true; };
   }, [profile.profile.userId]);
+  // Tap-to-zoom state for the Collection / Pets pin sections. Null
+  // when nothing is zoomed; an entry shape (same row the pin
+  // rendered) when a pin is clicked. Closes on click anywhere or
+  // Esc (handled inside CollectionPinZoom). Lives in ProfileBody
+  // because both pin sections are inside this scope.
+  const [zoomedPin, setZoomedPin] = useState<
+    | { itemKey: string; name: string; namePlural: string | null; description: string; iconUrl: string | null }
+    | null
+  >(null);
   return (
     <>
       {/* Hero band - always visible, themed with the owner's panel color. */}
@@ -338,6 +347,38 @@ function ProfileBody({
               <span className="mx-1">·</span>
               <CopyProfileLink name={name} />
             </div>
+            {/* Mod-only owner attribution. The server only ships
+                `ownerUsername` on character profiles when the viewer
+                has mod-tier authority (roleRank >= mod), so the field's
+                very presence is the gate — we just render it when set.
+                The MOD chip is a visual reminder that this is
+                privileged info (don't screen-share it carelessly);
+                the username is clickable to open the OOC master's
+                profile so the mod can pivot one click without
+                re-typing into /whois. */}
+            {profile.kind === "character" && profile.profile.ownerUsername ? (
+              <div className="mt-1 flex items-center gap-1.5 text-[11px] text-keep-muted">
+                <span
+                  className="rounded border border-keep-accent/40 bg-keep-accent/10 px-1 py-0 text-[9px] font-semibold uppercase tracking-widest text-keep-accent"
+                  title="Visible to moderators only."
+                >
+                  Mod
+                </span>
+                <span>Owned by</span>
+                {onOpenProfile ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenProfile(profile.profile.ownerUsername!)}
+                    className="font-semibold text-keep-action hover:underline"
+                    title={`Open ${profile.profile.ownerUsername}'s master profile`}
+                  >
+                    {profile.profile.ownerUsername}
+                  </button>
+                ) : (
+                  <span className="font-semibold text-keep-text">{profile.profile.ownerUsername}</span>
+                )}
+              </div>
+            ) : null}
             {/* Action row - renders when there's at least one action to
                 offer. Self-views (App suppresses whisper/ignore) still get
                 this row when there's a Switch / Disable action to take. */}
@@ -531,6 +572,57 @@ function ProfileBody({
                 )}
               </Section>
 
+              {/* Collection showcase — pinned items from the identity's
+                  10-slot Collection. Each identity (OOC + each
+                  character) has its own pin set; viewing this profile
+                  shows ONLY this identity's pins (a character profile
+                  never inherits the OOC's pins and vice versa).
+                  Sparse — a user can pin slots 0, 3, 7 and leave the
+                  rest empty; we collapse empty slots so the renderer
+                  shows only filled tiles. Section hidden entirely
+                  when nothing is pinned. */}
+              {profile.profile.collection.length > 0 ? (
+                <Section title="Collection">
+                  {/* Grid (not flex-wrap) so the 10 pinned tiles distribute
+                      across the row width instead of clumping at the left.
+                      Column counts ramp by viewport: 3-up on phones, 5-up
+                      on small/medium, 10-up on lg+ so the full collection
+                      becomes a single tidy row on desktop. */}
+                  <ul className="grid grid-cols-3 gap-3 sm:grid-cols-5 lg:grid-cols-10">
+                    {profile.profile.collection.map((c) => (
+                      <li key={c.slot} className="flex justify-center">
+                        <CollectionPin entry={c} variant="item" onClick={() => setZoomedPin(c)} />
+                      </li>
+                    ))}
+                  </ul>
+                </Section>
+              ) : null}
+
+              {/* Pet Collection — separate 5-slot showcase scoped to
+                  items with category='pet'. Same identity partitioning
+                  as the item collection above; rendered directly
+                  under it so visitors see the pin sets together. The
+                  section header reads "Pets" rather than "Pet
+                  Collection" — the modal already has "Collection"
+                  for items, so the simpler noun keeps the two
+                  sections visually distinct without verbose repetition. */}
+              {profile.profile.petCollection.length > 0 ? (
+                <Section title="Pets">
+                  {/* Grid so the up-to-5 pet tiles distribute across the
+                      row instead of clumping at the left. 2 cols on the
+                      tightest phones (taller tiles wrap to two rows), 3
+                      on small phones, then 5-up on md+ so the full
+                      showcase reads as one row on tablet/desktop. */}
+                  <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+                    {profile.profile.petCollection.map((c) => (
+                      <li key={c.slot} className="flex justify-center">
+                        <CollectionPin entry={c} variant="pet" onClick={() => setZoomedPin(c)} />
+                      </li>
+                    ))}
+                  </ul>
+                </Section>
+              ) : null}
+
               {/* Full-size avatar footer - the hero crops to a 96/112px square,
                   so we show the natural-resolution image down here for users
                   who want to see the whole portrait. Lives inside the
@@ -583,6 +675,14 @@ function ProfileBody({
             </>
           )}
         </div>
+      {/* Tap-to-zoom overlay. Mounted at the fragment's end so it's
+          a sibling of the scrolling body — fixed positioning + z:60
+          puts it above the profile card (z:50) regardless of where
+          it sits in the DOM. Closes on any click, Esc, or when the
+          parent modal unmounts. */}
+      {zoomedPin ? (
+        <CollectionPinZoom entry={zoomedPin} onClose={() => setZoomedPin(null)} />
+      ) : null}
     </>
   );
 }
@@ -706,6 +806,125 @@ function Avatar({ url, name }: { url: string | null; name: string }) {
  * action). Always opens in a new tab with `noopener noreferrer ugc` per the
  * rest of the codebase's external-link convention.
  */
+/**
+ * One Collection pin tile rendered on a profile. Shows the item's
+ * icon (or a letter-placeholder for items without an iconUrl) at
+ * 48px with the item name underneath. Hovering surfaces the item's
+ * description as a native tooltip so visitors can read the full
+ * blurb without the profile growing taller per pin. */
+function CollectionPin({
+  entry,
+  variant,
+  onClick,
+}: {
+  entry: { itemKey: string; name: string; namePlural: string | null; description: string; iconUrl: string | null };
+  /** "item" → 10-slot showcase (caps smaller at lg). "pet" → 5-slot
+   *  showcase (caps larger because there's only 5 tiles, so each gets
+   *  more real estate). */
+  variant: "item" | "pet";
+  onClick: () => void;
+}) {
+  // Two responsive icon-size ramps. Items cap at ~128px (lg); pets cap
+  // at ~256px (xl) because the showcase is 5 tiles instead of 10 so
+  // each tile has roughly twice the row width to spend. Both ramps
+  // start small on mobile so a thumb-friendly grid still fits on a
+  // 360px viewport. The icons are centered within the tile (which is
+  // grid-cell-sized via w-full), so they look proportional regardless
+  // of the cell width.
+  const iconCls = variant === "pet"
+    ? "h-20 w-20 sm:h-24 sm:w-24 md:h-32 md:w-32 lg:h-48 lg:w-48 xl:h-64 xl:w-64"
+    : "h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-32 lg:w-32";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full flex-col items-center gap-1 rounded border border-keep-rule/60 bg-keep-bg/40 p-2 text-center text-[11px] transition hover:border-keep-action hover:bg-keep-banner"
+      title={entry.description ? `${entry.name} — ${entry.description}` : entry.name}
+    >
+      {entry.iconUrl ? (
+        <img
+          src={entry.iconUrl}
+          alt=""
+          loading="lazy"
+          className={`rounded border border-keep-rule/40 bg-keep-bg object-contain ${iconCls}`}
+        />
+      ) : (
+        <div
+          className={`grid place-items-center rounded border border-keep-rule/40 bg-keep-banner/40 text-keep-muted ${iconCls}`}
+          aria-hidden="true"
+        >
+          <span className="text-2xl font-semibold sm:text-3xl md:text-4xl">{entry.name.slice(0, 1).toUpperCase()}</span>
+        </div>
+      )}
+      <span className="line-clamp-1 break-all font-semibold text-keep-text">{entry.name}</span>
+    </button>
+  );
+}
+
+/** Full-screen tap-to-zoom overlay for a collection pin. Renders a
+ *  large copy of the item icon over a dimmed backdrop with name +
+ *  description below; clicking anywhere or pressing Esc closes.
+ *  Positioned `fixed inset-0` at z:60 so it sits above the
+ *  ProfileModal shell (z:50) and any other overlay below it.
+ *
+ *  This is universal across devices, not strictly mobile-only — on
+ *  desktop it's a click-to-magnify; on mobile it's the "I tapped
+ *  this little icon, give me a bigger view" interaction. Title-
+ *  tooltips still surface the description on mouse hover for users
+ *  who prefer not to click. */
+function CollectionPinZoom({
+  entry,
+  onClose,
+}: {
+  entry: { itemKey: string; name: string; namePlural: string | null; description: string; iconUrl: string | null };
+  onClose: () => void;
+}) {
+  // Esc-to-close. document-level listener so the overlay doesn't
+  // need keyboard focus to receive the key.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${entry.name} — full view`}
+      onClick={onClose}
+      className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 bg-black/85 p-6 backdrop-blur-sm"
+    >
+      {entry.iconUrl ? (
+        <img
+          src={entry.iconUrl}
+          alt=""
+          className="max-h-[70vh] max-w-[90vw] rounded border border-white/20 bg-keep-bg object-contain"
+        />
+      ) : (
+        <div
+          className="grid h-64 w-64 max-h-[70vh] max-w-[90vw] place-items-center rounded border border-white/20 bg-keep-banner/40"
+          aria-hidden="true"
+        >
+          <span className="text-6xl font-semibold text-white/60">{entry.name.slice(0, 1).toUpperCase()}</span>
+        </div>
+      )}
+      <div className="max-w-md text-center text-white">
+        <h3 className="font-action text-2xl">{entry.name}</h3>
+        {entry.description ? (
+          <p className="mt-2 text-sm text-white/80">{entry.description}</p>
+        ) : null}
+        <p className="mt-3 text-[10px] uppercase tracking-widest text-white/50">
+          Tap anywhere or press Esc to close
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function LinkChip({ link }: { link: ProfileLink }) {
   const style: React.CSSProperties = {};
   if (link.borderColor) style.borderColor = link.borderColor;

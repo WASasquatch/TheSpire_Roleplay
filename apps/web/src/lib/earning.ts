@@ -97,10 +97,83 @@ export interface NameStyleCatalogRow {
   order: number;
 }
 
+/** Closed enum of item categories. Mirrors the server-side zod
+ *  enum + migration 0103's documented set. Use the union for prop
+ *  types; use `ITEM_CATEGORIES` for shop-tab iteration. */
+export type ItemCategory =
+  | "food" | "drink" | "joke" | "tool" | "weapon" | "armor"
+  | "magic" | "treasure" | "building" | "gift" | "pet" | "misc";
+
+/** Stable ordering for shop category chips. `misc` is last as the
+ *  fallback bucket; `pet` is intentionally LAST among the "real"
+ *  categories so casual visitors don't land on the pet bucket
+ *  before browsing common items. */
+export const ITEM_CATEGORIES: readonly ItemCategory[] = [
+  "food", "drink", "joke", "tool", "weapon", "armor",
+  "magic", "treasure", "building", "gift", "pet", "misc",
+] as const;
+
+/** Human-readable label for each category — used for shop-tab text. */
+export const ITEM_CATEGORY_LABELS: Record<ItemCategory, string> = {
+  food: "Food", drink: "Drinks", joke: "Joke", tool: "Tools",
+  weapon: "Weapons", armor: "Armor", magic: "Magic", treasure: "Treasure",
+  building: "Buildings", gift: "Gifts", pet: "Pets", misc: "Misc",
+};
+
+/**
+ * Public-facing item catalog row. `purchasable` is server-derived
+ * from `enabled && forSale && now ∈ [saleStartsAt, saleEndsAt)`. The
+ * raw fields are also exposed so the UI can render the reason
+ * something isn't purchasable (sale starts at X, sale ended at Y).
+ * `availableCommands` mirrors which of give/throw/drop have non-empty
+ * message arrays — the dashboard's command help uses it.
+ */
+export interface ItemCatalogRow {
+  key: string;
+  name: string;
+  namePlural: string | null;
+  description: string;
+  iconUrl: string | null;
+  price: number;
+  stackLimit: number;
+  enabled: boolean;
+  forSale: boolean;
+  saleStartsAt: number | null;
+  saleEndsAt: number | null;
+  order: number;
+  isBuiltin: boolean;
+  /** Shop bucket + pin-collection routing. */
+  category: ItemCategory;
+  purchasable: boolean;
+  availableCommands: { give: boolean; throw: boolean; drop: boolean };
+}
+
+export interface InventoryEntry {
+  itemKey: string;
+  quantity: number;
+  acquiredAt: number;
+}
+
+/**
+ * One pinned slot in an identity's Collection (Phase 3). Sparse —
+ * a slot index in 0..9 with the chosen item key. The Collection
+ * tab in the dashboard renders 10 slots and overlays the entries
+ * indexed by `slot`.
+ */
+export interface CollectionEntry {
+  slot: number;
+  itemKey: string;
+}
+
 export interface EarningMeResponse {
   master: PoolView;
   characters: PoolView[];
-  catalog: { ranks: RankRow[]; rankTiers: RankTierRow[]; nameStyles: NameStyleCatalogRow[] };
+  catalog: {
+    ranks: RankRow[];
+    rankTiers: RankTierRow[];
+    nameStyles: NameStyleCatalogRow[];
+    items: ItemCatalogRow[];
+  };
   /** Master/OOC's owned styles (since migration 0086). Characters
    *  carry their own owned lists in `ownedStylesByCharacter`. */
   ownedStyles: OwnedStyle[];
@@ -109,6 +182,24 @@ export interface EarningMeResponse {
    *  / missing key means the character hasn't bought anything yet. */
   ownedStylesByCharacter: Record<string, OwnedStyle[]>;
   ownedBordersByCharacter: Record<string, OwnedBorder[]>;
+  /** Master/OOC inventory — items owned on the OOC pool. Independent
+   *  of every character's inventory (`inventoryByCharacter`). */
+  inventory: InventoryEntry[];
+  /** Per-character inventory keyed by character id. Each entry is
+   *  fully isolated; nothing implicitly mirrors across identities. */
+  inventoryByCharacter: Record<string, InventoryEntry[]>;
+  /** Master/OOC Collection pins (Phase 3, 10-slot showcase). Sparse.
+   *  Independent of every character's Collection — pins do not
+   *  carry across identities. Items pinned here have category !=
+   *  'pet'; pets live in `petCollection`. */
+  collection: CollectionEntry[];
+  /** Per-character Collection pins keyed by character id. */
+  collectionByCharacter: Record<string, CollectionEntry[]>;
+  /** Master/OOC Pet Collection pins (5-slot showcase). Only items
+   *  with category='pet' are pinnable here — server enforces. */
+  petCollection: CollectionEntry[];
+  /** Per-character Pet Collection pins keyed by character id. */
+  petCollectionByCharacter: Record<string, CollectionEntry[]>;
   activeCosmetics: ActiveCosmetics;
   notifications: RankUpRecord[];
 }
@@ -162,6 +253,7 @@ export interface CatalogResponse {
     cost: number;
     config: unknown;
   }>;
+  items: ItemCatalogRow[];
 }
 
 /* ---------- EarningConfig (admin Awards tab) ---------- */
@@ -648,6 +740,193 @@ export async function putAdminAwards(config: EarningConfig): Promise<{ config: E
   return (await r.json()) as { config: EarningConfig };
 }
 
+/* ---------- Items — buy + admin CRUD + grants ---------- */
+
+/**
+ * Purchase `quantity` units of an item for the active identity.
+ * `characterId` null / omitted = buy on the OOC master pool;
+ * a character id buys on that character's pool. Server validates
+ * partition ownership and stack cap.
+ */
+export async function buyItem(
+  itemKey: string,
+  quantity: number,
+  characterId: string | null = null,
+): Promise<void> {
+  const r = await fetch(`/earning/me/items/${encodeURIComponent(itemKey)}/buy`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ quantity, characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+export interface AdminItemRow {
+  key: string;
+  name: string;
+  namePlural: string | null;
+  description: string;
+  iconUrl: string | null;
+  price: number;
+  stackLimit: number;
+  giveMessages: string[];
+  throwMessages: string[];
+  dropMessages: string[];
+  /** Casual-name aliases. Matched server-side in `findItem` so users
+   *  can type "drink" / "tankard" for ale, "knife" for dagger, etc.
+   *  Edited as comma-separated text in the admin UI. */
+  aliases: string[];
+  /** Shop bucket + pin-collection routing. */
+  category: ItemCategory;
+  enabled: boolean;
+  forSale: boolean;
+  saleStartsAt: number | null;
+  saleEndsAt: number | null;
+  order: number;
+  isBuiltin: boolean;
+  owners: number;
+}
+
+export async function fetchAdminItems(): Promise<{ items: AdminItemRow[] }> {
+  return jsonOrThrow(await fetch("/admin/earning/items", { credentials: "include" }));
+}
+
+export async function createAdminItem(body: {
+  key: string;
+  name: string;
+  namePlural?: string | null;
+  description?: string;
+  iconUrl?: string | null;
+  price?: number;
+  stackLimit?: number;
+  giveMessages?: string[];
+  throwMessages?: string[];
+  dropMessages?: string[];
+  aliases?: string[];
+  category?: ItemCategory;
+  enabled?: boolean;
+  forSale?: boolean;
+  saleStartsAt?: number | null;
+  saleEndsAt?: number | null;
+  order?: number;
+}): Promise<void> {
+  const r = await fetch("/admin/earning/items", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+export async function patchAdminItem(key: string, body: {
+  name?: string;
+  namePlural?: string | null;
+  description?: string;
+  iconUrl?: string | null;
+  price?: number;
+  stackLimit?: number;
+  giveMessages?: string[];
+  throwMessages?: string[];
+  dropMessages?: string[];
+  aliases?: string[];
+  category?: ItemCategory;
+  enabled?: boolean;
+  forSale?: boolean;
+  saleStartsAt?: number | null;
+  saleEndsAt?: number | null;
+  order?: number;
+}): Promise<void> {
+  const r = await fetch(`/admin/earning/items/${encodeURIComponent(key)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+export async function deleteAdminItem(key: string): Promise<void> {
+  const r = await fetch(`/admin/earning/items/${encodeURIComponent(key)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/**
+ * Masteradmin-only direct item grant. Positive quantity deposits,
+ * negative revokes. `characterId` null/omitted = the target user's
+ * OOC master inventory; otherwise the character must belong to the
+ * target user. Bypasses the shop's enabled / forSale / sale-window
+ * checks, so admins can pre-seed testers with items that aren't yet
+ * on sale.
+ */
+export async function adminGrantItem(
+  username: string,
+  itemKey: string,
+  quantity: number,
+  characterId: string | null = null,
+): Promise<{ ok: true; newQuantity: number }> {
+  const r = await fetch("/admin/earning/grant-item", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ username, itemKey, quantity, characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+  return (await r.json()) as { ok: true; newQuantity: number };
+}
+
+/**
+ * Persist a diff-style update to the active identity's Collection.
+ * The server treats each slot in `slots` independently — slots
+ * not listed are left untouched. Pass `itemKey: null` to clear a
+ * slot. Pinned items must still be held in the same identity's
+ * inventory; the server rejects cross-identity pins.
+ */
+export async function setCollectionSlots(
+  slots: Array<{ slot: number; itemKey: string | null }>,
+  characterId: string | null = null,
+): Promise<void> {
+  const r = await fetch("/earning/me/collection", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ slots, characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/**
+ * Twin of `setCollectionSlots` for the 5-slot Pet Collection. Pinned
+ * items must have `category='pet'`; the server rejects mismatches.
+ * `slot` is 0..4 here (vs 0..9 for the item collection).
+ */
+export async function setPetCollectionSlots(
+  slots: Array<{ slot: number; itemKey: string | null }>,
+  characterId: string | null = null,
+): Promise<void> {
+  const r = await fetch("/earning/me/pet-collection", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ slots, characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/**
+ * Render an item's display name with quantity-aware pluralization.
+ * Falls back to `${name}s` when the row has no explicit plural form,
+ * matching the server-side rule used by command rendering.
+ */
+export function formatItemName(item: { name: string; namePlural: string | null }, quantity: number): string {
+  if (quantity === 1) return item.name;
+  return item.namePlural ?? `${item.name}s`;
+}
+
 /**
  * Format a reason key from the ledger into something a human reads.
  * Used by the dashboard's ledger section + any other surface that
@@ -671,6 +950,7 @@ export function formatLedgerReason(reason: string): string {
     default:
       if (reason.startsWith("purchase_")) return `Purchase: ${reason.slice("purchase_".length)}`;
       if (reason.startsWith("border_purchase_")) return `Border purchase: ${reason.slice("border_purchase_".length)}`;
+      if (reason.startsWith("item_purchase_")) return `Item purchase: ${reason.slice("item_purchase_".length)}`;
       return reason;
   }
 }

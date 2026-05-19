@@ -40,9 +40,17 @@ async function resolveTarget(ctx: CommandContext, name: string) {
 }
 
 /**
- * /ignore <name>          - silence a user; their say/me/ooc/roll/whisper
- *                           lines stop reaching you in real time and are
- *                           filtered out of room backlog you fetch.
+ * /ignore <name>          - silence a user. If they're not already
+ *                           ignored, this adds them; if they ARE already
+ *                           ignored, /ignore toggles them back off (same
+ *                           effect as /unignore). The block persists on
+ *                           your OOC master account and is global across
+ *                           every character either side plays: ignoring
+ *                           "Kaal" silences that user whether they're
+ *                           speaking as Kaal, their OOC master, or any
+ *                           other character they own, and the ignore
+ *                           continues to apply when YOU swap characters
+ *                           too. Persists across sessions until cleared.
  * /ignore                 - list everyone you currently ignore.
  * /ignore clear           - clear your entire ignore list.
  *
@@ -54,9 +62,9 @@ export const ignoreCommand: CommandHandler = {
   name: "ignore",
   aliases: ["block", "mute-user"],
   usage: "/ignore [name|clear]",
-  description: "Hide messages from a specific user. Use /unignore to undo, or /ignore (no args) to list.",
+  description: "Toggle ignoring a user — runs again to undo. Persists on your account across all characters.",
   subcommands: [
-    { verb: "<name>", usage: "/ignore <name>", description: "Stop seeing messages from this user." },
+    { verb: "<name>", usage: "/ignore <name>", description: "Ignore (or, if already ignored, unignore) this user." },
     { verb: "clear", usage: "/ignore clear", description: "Clear your entire ignore list." },
   ],
   async run(ctx) {
@@ -87,12 +95,33 @@ export const ignoreCommand: CommandHandler = {
     if (!u) return notice(ctx, "NO_USER", `No user named "${target}".`);
     if (u.id === ctx.user.id) return notice(ctx, "IGNORE_SELF", "You can't ignore yourself.");
 
+    // Toggle semantics: /ignore on an already-ignored user removes the
+    // block (matches /unignore). This lets the user re-use the same
+    // command for both directions and matches the "click Ignore again
+    // to undo" affordance on the profile modal. Both sides of the
+    // ignores row key on the OOC master id (ctx.user.id is always the
+    // master; resolveTarget walks character→user) so the block is
+    // global across every character either side plays.
+    const existing = (await ctx.db
+      .select()
+      .from(ignores)
+      .where(and(eq(ignores.userId, ctx.user.id), eq(ignores.ignoredUserId, u.id)))
+      .limit(1))[0];
+
+    if (existing) {
+      await ctx.db
+        .delete(ignores)
+        .where(and(eq(ignores.userId, ctx.user.id), eq(ignores.ignoredUserId, u.id)));
+      notice(ctx, "UNIGNORED", `No longer ignoring ${u.username}.`);
+      return;
+    }
+
     await ctx.db
       .insert(ignores)
       .values({ userId: ctx.user.id, ignoredUserId: u.id })
       .onConflictDoNothing();
 
-    notice(ctx, "IGNORED", `Now ignoring ${u.username}. Use /unignore ${u.username} to undo.`);
+    notice(ctx, "IGNORED", `Now ignoring ${u.username}. Use /unignore ${u.username} (or /ignore ${u.username} again) to undo.`);
   },
 };
 

@@ -23,6 +23,10 @@ interface Props {
   onJumpToMessage: (roomId: string, messageId: string) => void;
   /** Open the unified Messages modal (DMs + friends + friend requests). */
   onOpenMessages: () => void;
+  /** Open the Earning dashboard (wallet, ranks, shop, collection, pets).
+   *  Optional so a future caller that doesn't surface earning can drop
+   *  the menu entry; the Account section just hides the row when omitted. */
+  onOpenEarning?: () => void;
 }
 
 /**
@@ -37,7 +41,7 @@ interface Props {
  * is a fixed-position slide-out), so the drawer here just expands upward
  * within that container - works the same as desktop.
  */
-export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, currentRoomId, onJumpToMessage, onOpenMessages }: Props) {
+export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, currentRoomId, onJumpToMessage, onOpenMessages, onOpenEarning }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
   const [refreshOpen, setRefreshOpen] = useState(false);
@@ -298,6 +302,13 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
 
             <SectionHeader title="Account" />
             <MenuItem label="Edit Profile" hint="Open your profile editor" onClick={() => fire("/profile")} />
+            {onOpenEarning ? (
+              <MenuItem
+                label="Your Earning"
+                hint="Wallet, ranks, shop, items, collection, pets"
+                onClick={() => { onOpenEarning(); setDrawerOpen(false); }}
+              />
+            ) : null}
             <MenuItem label="Bookmarks" hint="Your saved chat messages" onClick={() => fire("/bookmarks")} />
             <MenuItem label="Toggle Away" hint="Mark yourself away" onClick={() => fire("/away")} />
             <MenuItem label="Help / Commands" hint="Browse all commands" onClick={() => fire("/help")} />

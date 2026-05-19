@@ -57,6 +57,9 @@ interface Props {
   onJumpToMessage: (roomId: string, messageId: string) => void;
   /** Open the unified Messages modal (DMs + friends + friend requests). */
   onOpenMessages: () => void;
+  /** Open the Earning dashboard. Threaded straight through to ToolPanel
+   *  so the rail's Tools drawer can surface a one-click entry. */
+  onOpenEarning?: () => void;
   /**
    * Mobile drawer state. On md+ screens the rail is always visible regardless;
    * isOpen only controls the slide-in/out at sub-md widths.
@@ -99,6 +102,7 @@ export function RoomsTree({
   onWorldClick,
   onJumpToMessage,
   onOpenMessages,
+  onOpenEarning,
   isOpen,
   onClose,
   fontStep = 1,
@@ -264,6 +268,7 @@ export function RoomsTree({
         currentRoomId={currentRoomId}
         onJumpToMessage={onJumpToMessage}
         onOpenMessages={onOpenMessages}
+        {...(onOpenEarning ? { onOpenEarning } : {})}
       />
     </aside>
   );

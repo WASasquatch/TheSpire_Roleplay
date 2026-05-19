@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
+import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import { GENDER_OPTIONS, type Gender } from "../lib/gender.js";
 import {
@@ -184,6 +184,12 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   // enforces this too); the UI mirrors that by disabling the Public box.
   const [isPublic, setIsPublic] = useState<boolean>(true);
   const [isNsfw, setIsNsfw] = useState<boolean>(false);
+  // Live earning snapshot — the preview profile reads the user's
+  // current collection + pet collection pins from here so the
+  // preview matches the real profile 1:1. The dashboard already
+  // keeps this fresh via the `earning:inventory_changed` socket
+  // event, so no extra fetch needed.
+  const earningSnapshot = useEarning((s) => s.snapshot);
   /** Extra portraits beyond the primary avatarUrl (character targets only). */
   const [portraits, setPortraits] = useState<CharacterPortrait[]>([]);
   /** Owner-set external links rendered as styled chips on the profile. */
@@ -601,6 +607,45 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
       .catch(() => { /* falls back to null placeholders */ });
     return () => { cancelled = true; };
   }, [previewing, previewTargetKey, target, master, characters, previewMetrics]);
+  // Build live ProfileCollectionEntry arrays from the earning snapshot
+  // so the preview matches what visitors see on the real profile.
+  // Pure derivation — `snapshot.collection` etc. are sparse `{slot,
+  // itemKey}[]` arrays; we join against the catalog to surface
+  // name/icon/description. Master and character pins are kept
+  // separate so identity-switching the preview target swaps the
+  // pin sets correctly.
+  const previewCollections = useMemo(() => {
+    const empty = { items: [] as ProfileCollectionEntry[], pets: [] as ProfileCollectionEntry[] };
+    if (!earningSnapshot) return empty;
+    const catalog = earningSnapshot.catalog.items ?? [];
+    const byKey = new Map(catalog.map((c) => [c.key, c]));
+    const enrich = (pins: { slot: number; itemKey: string }[]): ProfileCollectionEntry[] =>
+      pins
+        .map((p) => {
+          const it = byKey.get(p.itemKey);
+          if (!it) return null;
+          return {
+            slot: p.slot,
+            itemKey: p.itemKey,
+            name: it.name,
+            namePlural: it.namePlural,
+            description: it.description,
+            iconUrl: it.iconUrl,
+          };
+        })
+        .filter((x): x is ProfileCollectionEntry => x !== null);
+    if (target.kind === "master") {
+      return {
+        items: enrich(earningSnapshot.collection ?? []),
+        pets: enrich(earningSnapshot.petCollection ?? []),
+      };
+    }
+    return {
+      items: enrich(earningSnapshot.collectionByCharacter?.[target.id] ?? []),
+      pets: enrich(earningSnapshot.petCollectionByCharacter?.[target.id] ?? []),
+    };
+  }, [earningSnapshot, target]);
+
   const previewProfile: ProfileView | null = useMemo(() => {
     const previewTheme = theme ?? DEFAULT_THEME;
     // Metrics come from the server-side fetch above (cached per
@@ -638,6 +683,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           // off. (Earlier this was hardcoded to null, which always
           // rendered "private" regardless of the owner's flags.)
           metrics: fetchedMetrics,
+          // Preview pins read live from the earning snapshot so the
+          // preview matches the real profile 1:1 — the editor still
+          // doesn't expose pin management (users curate from the
+          // Earning dashboard's Items > Collection / Pets tabs), but
+          // the preview at least surfaces what's currently pinned.
+          collection: previewCollections.items,
+          petCollection: previewCollections.pets,
         },
       };
     }
@@ -668,9 +720,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         createdAt: Date.now(),
         updatedAt: Date.now(),
         metrics: fetchedMetrics,
+        // Live pin counts from the snapshot — same parity goal as
+        // the master branch above. Switching the preview target to
+        // a character picks up that character's pin sets.
+        collection: previewCollections.items,
+        petCollection: previewCollections.pets,
       },
     };
-  }, [target, master, myUserId, name, bioHtml, avatarUrl, gender, stats, theme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey]);
+  }, [target, master, myUserId, name, bioHtml, avatarUrl, gender, stats, theme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey, previewCollections]);
 
   const targetOptions = useMemo(() => {
     return [

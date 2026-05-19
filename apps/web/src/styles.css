@@ -106,6 +106,113 @@
 }
 
 /* ============================================================
+ * STRUCK reaction — body shake + composer flash
+ * ============================================================
+ *
+ * Fired by `runStruckEffect()` (apps/web/src/lib/chatEffects.ts) when
+ * the server-side `chat:effect` event lands a `kind: "struck"` payload
+ * — i.e. someone /throw'd or /drop'd an item at this user. Two
+ * pieces:
+ *
+ *   1. `.keep-struck-shake` on <body> — a short translate-and-zoom
+ *      keyframe that buzzes the viewport like an "I got hit"
+ *      reaction. `transform-origin: 50% 50%` keeps the scale + shake
+ *      composed from the center so the document isn't lopsided.
+ *      `scale(1.0X)` ramps up alongside the translate amplitude
+ *      specifically to keep the edges off-screen — without the
+ *      scale, the translate offsets would reveal viewport edges
+ *      / outer page background and read as "the chat window is
+ *      sliding around inside the browser" instead of "the world
+ *      got struck."
+ *
+ *   2. `.keep-struck-flash` on `.keep-composer` — a pale-red overlay
+ *      pulse via the `::after` pseudo-element. `pointer-events: none`
+ *      lets the user keep typing through it (no input interruption),
+ *      and `z-index` sits above the composer surface so the tint
+ *      reads regardless of composer theme.
+ *
+ * Both classes auto-remove after ~500ms via the runner's setTimeout.
+ * Reentrancy: the runner force-reflows between remove and re-add so a
+ * second hit during the previous cycle restarts cleanly. Reduced-
+ * motion is respected at the runner level (no class added at all),
+ * not via @media — that way an admin can still test the animation
+ * locally with a CSS override if they want to verify the keyframes.
+ */
+.keep-struck-shake {
+  /* Linear timing keeps each leg of the buzz feeling abrupt rather
+   * than cushioned. `ease-out` here was the original mistake — it
+   * smoothed every transition into a slide, which read as the page
+   * gently swaying instead of being struck. 320ms is short enough to
+   * land as a single "hit" reaction, long enough to fit ~6 full L↔R
+   * oscillations without strobing. */
+  animation: keep-struck-shake 320ms linear;
+  transform-origin: 50% 50%;
+  /* `will-change` hints the compositor to promote the body to its
+   * own layer for the duration of the animation. Without it, large
+   * pages can drop the first 2-3 frames of the shake as the browser
+   * lifts the body's render layer mid-animation. */
+  will-change: transform;
+}
+@keyframes keep-struck-shake {
+  /* Tight L↔R chatter. Translate is primarily on X (±4px peak) with
+   * a ±1px Y noise to give the chatter texture without breaking the
+   * left-right read. Scale snaps up to 1.022 at the first frame —
+   * that ratio covers ±4px on viewports down to ~320px wide
+   * (4/320 ≈ 1.25%, scale margin = 2.2% → 0.95% buffer), so the body
+   * edges stay off-screen for the whole shake on mobile and desktop
+   * alike. Scale decays in lockstep with the translate amplitude so
+   * the zoom unwinds gracefully into the at-rest 100% frame. */
+  0%   { transform: translate(0,    0)   scale(1.000); }
+  4%   { transform: translate(-4px, 1px) scale(1.022); }
+  10%  { transform: translate( 4px,-1px) scale(1.022); }
+  16%  { transform: translate(-4px, 0)   scale(1.020); }
+  22%  { transform: translate( 4px, 1px) scale(1.020); }
+  30%  { transform: translate(-3px,-1px) scale(1.018); }
+  38%  { transform: translate( 3px, 0)   scale(1.016); }
+  46%  { transform: translate(-3px, 1px) scale(1.013); }
+  55%  { transform: translate( 2px, 0)   scale(1.010); }
+  65%  { transform: translate(-2px,-1px) scale(1.007); }
+  75%  { transform: translate( 1px, 0)   scale(1.004); }
+  85%  { transform: translate(-1px, 1px) scale(1.002); }
+  100% { transform: translate(0,    0)   scale(1.000); }
+}
+
+.keep-struck-flash {
+  /* Ensure positioning context for the ::after overlay. Most chat
+   * shells already set `position: relative` on the composer; this
+   * is defensive so a theme that doesn't still gets the flash. */
+  position: relative;
+}
+.keep-struck-flash::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 70, 70, 0.22);
+  pointer-events: none;
+  /* Float above the composer's own surface + texture but below any
+   * floating UI bits (action toolbars, dropdowns). The composer's
+   * usual stacking context is shallow so z-index: 2 is plenty. */
+  z-index: 2;
+  animation: keep-struck-flash 500ms ease-out forwards;
+}
+@keyframes keep-struck-flash {
+  0%   { opacity: 0; }
+  20%  { opacity: 1; }
+  60%  { opacity: 0.55; }
+  100% { opacity: 0; }
+}
+
+/* Accessibility: skip the shake/flash entirely for users who've
+ * asked the OS to reduce motion. We strip the class server-side via
+ * the runner already, but a defense-in-depth rule here means a
+ * stylesheet override / direct class add wouldn't bypass the
+ * preference. */
+@media (prefers-reduced-motion: reduce) {
+  .keep-struck-shake { animation: none; transform: none; }
+  .keep-struck-flash::after { animation: none; opacity: 0; }
+}
+
+/* ============================================================
  * SCROLLBAR — touch-first horizontal strips
  * ============================================================
  *
@@ -1015,6 +1122,31 @@
   position: relative;
   z-index: 5;
   flex-shrink: 0;
+}
+
+/* Composer stacking context — sits ABOVE the accent rail (z:5) so
+ * popups (CompleterPopup autocomplete, EarningStatsStrip's "+N" burst
+ * chips) and the composer's own neon top-edge ::after emission all
+ * paint above the rail. Without this, .keep-composer is at z:auto in
+ * the parent and the rail's z:5 wins — popups end up clipped behind
+ * the rail's horizontal band, which the user sees as suggestion lists
+ * disappearing into the divider.
+ *
+ * Each per-theme `.keep-composer` rule below ALSO sets `position:
+ * relative` + `isolation: isolate` for its texture pseudos. This
+ * base rule ensures the z-index applies regardless of theme — a new
+ * theme that forgets to repeat the z-index inherits the right
+ * stacking from here.
+ *
+ * Visual side-effect: the composer's ::after neon edge (36px tall
+ * above the composer's top edge) now paints OVER the rail where the
+ * two overlap. Acceptable — both elements share the accent palette,
+ * so they blend; and the design intent of the ::after is "the
+ * composer is lit", which reads cleaner when its glow isn't being
+ * sliced through by the rail. */
+.keep-composer {
+  position: relative;
+  z-index: 10;
 }
 /* Medieval — solid colored stripe, no glow. Reads as a printed
  * separator on a tome page. */

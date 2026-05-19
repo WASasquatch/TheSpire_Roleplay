@@ -36,6 +36,7 @@ import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
 import { playAlert, playPing, playTap, playWhisper } from "./lib/sound.js";
 import { saveCachedActiveTheme, useChat, type SiteBranding } from "./state/store.js";
 import { useEarning } from "./state/earning.js";
+import { runStruckEffect } from "./lib/chatEffects.js";
 import { injectNameStyles } from "./lib/nameStyleInjector.js";
 
 export function App() {
@@ -1655,6 +1656,29 @@ function Chat() {
     socket.on("earning:rankup", (payload) => {
       useEarning.getState().applyRankUp(payload);
     });
+    // Inventory delta — sender / receiver of /give /throw /drop +
+    // shop purchases + admin grants. Payload is informational only;
+    // we just re-fetch /earning/me so the dashboard's Items tab
+    // (inventory list + shop "you own X/Y" line) reflects the new
+    // authoritative state. Cheap when the dashboard isn't open —
+    // the store keeps a single snapshot regardless.
+    socket.on("earning:inventory_changed", () => {
+      void useEarning.getState().refresh();
+    });
+    // Chat-line side effect — currently only `kind: "struck"` fires
+    // (target of /throw /drop). The runner branches on kind, so
+    // adding a new effect kind is one line here + the runner. We
+    // never trigger the effect for the SENDER's own client — the
+    // server scopes the emit to the target's sockets only.
+    socket.on("chat:effect", (payload) => {
+      if (payload.kind === "struck") {
+        // `variant` selects which strike audio fires (throw / drop).
+        // Older server builds without the field land here with
+        // `variant: undefined`; the runner gracefully renders the
+        // visual reaction without a sound in that case.
+        runStruckEffect(payload.variant);
+      }
+    });
 
     return () => {
       socket.off("room:state");
@@ -1677,6 +1701,8 @@ function Chat() {
       socket.off("commands:updated");
       socket.off("earning:earned");
       socket.off("earning:rankup");
+      socket.off("earning:inventory_changed");
+      socket.off("chat:effect");
       socket.off("connect", onConnect);
     };
   }, [socket, setRoom, setOccupants, appendMessage, updateMessage, setMessages, setCurrentRoom, setNotice, setOpenProfile, openEditor, setRefreshIntervalSec, setMe, prependOwnForumTopic, queuePendingForumTopic, bumpTopicActivity, updateForumTopic, removeForumTopic]);
@@ -2393,6 +2419,7 @@ function Chat() {
           }}
           onJumpToMessage={jumpToMessage}
           onOpenMessages={() => { setMessagesOpen(true); setRailOpen(false); }}
+          onOpenEarning={() => { setEarningOpen(true); setRailOpen(false); }}
           isOpen={railOpen}
           onClose={() => setRailOpen(false)}
           fontStep={fontStep}

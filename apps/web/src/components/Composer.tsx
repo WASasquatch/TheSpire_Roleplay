@@ -13,6 +13,8 @@ import { CompleterPopup, type CompletionItem } from "./CompleterPopup.js";
 import { EarningStatsStrip } from "./EarningStatsStrip.js";
 import { SynonymPopup } from "./SynonymPopup.js";
 import { useChat } from "../state/store.js";
+import { useEarning } from "../state/earning.js";
+import type { InventoryEntry, ItemCatalogRow } from "../lib/earning.js";
 import { markMentionKnown } from "../state/mentions.js";
 
 interface Props {
@@ -125,6 +127,8 @@ function topicLabel(t: { title: string | null; body: string }): string {
   return `${body.slice(0, 60)}…`;
 }
 
+type TriggerKind = "/" | "@" | "whisper-target" | "!" | "item-target" | "item-key";
+
 interface Trigger {
   /**
    *   `/`              - leading slash command (only at message start)
@@ -135,10 +139,16 @@ interface Trigger {
    *                      `!` doesn't open the palette, since punctuation
    *                      shouldn't keep popping the picker for every
    *                      "Wow!" or "stop!")
+   *   `item-target`    - first positional arg of /give /throw /drop —
+   *                      suggest room occupants by displayName
+   *   `item-key`       - item-name slot of /give /throw /drop (after
+   *                      target + optional quantity) — suggest items
+   *                      from the user's CURRENT identity's inventory
    */
-  kind: "/" | "@" | "whisper-target" | "!";
+  kind: TriggerKind;
   /** Character offset where the trigger token starts (the `/` or `@` itself,
-   *  or for whisper-target, the first char of the username being typed). */
+   *  or for whisper-target / item-target / item-key, the first char of
+   *  the argument being typed). */
   tokenStart: number;
   /** Lower-cased query (everything after the trigger char up to the caret). */
   query: string;
@@ -154,6 +164,14 @@ interface Trigger {
 const WHISPER_CMDS = new Set([
   "whisper", "w", "wh", "to", "msg", "message", "pm",
 ]);
+
+/**
+ * Slash commands that take `<target> [num] <item>`. The composer's
+ * trigger detection drives two picker stages for each: occupants at
+ * the target slot, then the user's inventory at the item slot.
+ * Quantity (digits-only between the two) is the only slot without
+ * suggestions — the user just types a number. */
+const ITEM_CMDS = new Set(["give", "throw", "drop"]);
 
 /**
  * NBSP-aware "word char" check used to walk back to a token boundary.
@@ -208,6 +226,66 @@ function detectTrigger(text: string, caret: number): Trigger | null {
             query: argSoFar.toLowerCase(),
           };
         }
+      }
+      // /give /throw /drop pickers — two stages keyed off how many
+      // ASCII spaces appear before the caret inside the args portion.
+      //
+      //   stage 0 (no space yet):   typing the TARGET name → occupants
+      //   stage 1 (one space):      either the quantity or the item.
+      //                             If the slot is all digits it's a
+      //                             quantity (no popup); otherwise we
+      //                             treat it as the item name.
+      //   stage 2+ (≥2 spaces):     typing the item name. If the second
+      //                             token was numeric, item starts at
+      //                             space #2; otherwise the item runs
+      //                             from space #1 and may include
+      //                             internal spaces ("gold coin").
+      if (ITEM_CMDS.has(cmd)) {
+        const argStart = firstSpace + 1;
+        const argSoFar = text.slice(argStart, caret);
+        const sp1 = argSoFar.indexOf(" ");
+        if (sp1 === -1) {
+          // Target stage. Even an empty query is valid — the popup
+          // shows every occupant before the user types anything.
+          return {
+            kind: "item-target",
+            tokenStart: argStart,
+            query: argSoFar.toLowerCase(),
+          };
+        }
+        const restAfterTarget = argSoFar.slice(sp1 + 1);
+        const sp2 = restAfterTarget.indexOf(" ");
+        if (sp2 === -1) {
+          // Stage 1 — quantity OR item.
+          if (/^\d+$/.test(restAfterTarget)) {
+            // Mid-quantity: no popup. We don't want the inventory
+            // list flashing under the cursor while the user types
+            // a number; they'll hit space and we'll show items then.
+            return null;
+          }
+          return {
+            kind: "item-key",
+            tokenStart: argStart + sp1 + 1,
+            query: restAfterTarget.toLowerCase(),
+          };
+        }
+        // Stage 2+. Item name slot, potentially multi-word
+        // ("gold coin"). If a numeric quantity sits in slot 1, the
+        // item query starts AFTER the second space; otherwise it
+        // starts after the first.
+        const secondToken = restAfterTarget.slice(0, sp2);
+        const hasQuantity = /^\d+$/.test(secondToken);
+        const itemStart = hasQuantity
+          ? argStart + sp1 + 1 + sp2 + 1
+          : argStart + sp1 + 1;
+        const itemQuery = hasQuantity
+          ? restAfterTarget.slice(sp2 + 1)
+          : restAfterTarget;
+        return {
+          kind: "item-key",
+          tokenStart: itemStart,
+          query: itemQuery.toLowerCase(),
+        };
       }
     }
   }
@@ -315,6 +393,26 @@ export function Composer({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCharacterId, disableHistory]);
+
+  // Per-identity inventory + catalog for the `item-key` trigger
+  // popup. We pull straight from the live earning snapshot — it's
+  // already kept fresh by the `earning:inventory_changed` socket
+  // listener, so the picker reflects the current stack the moment a
+  // /buy / /give / /admin grant lands. Empty array when the snapshot
+  // hasn't loaded yet (popup just shows no items, no crash).
+  const earningSnapshot = useEarning((s) => s.snapshot);
+  const inventoryForActiveIdentity: InventoryEntry[] = useMemo(() => {
+    if (!earningSnapshot) return [];
+    if (activeCharacterId) {
+      return earningSnapshot.inventoryByCharacter?.[activeCharacterId] ?? [];
+    }
+    return earningSnapshot.inventory ?? [];
+  }, [earningSnapshot, activeCharacterId]);
+  const itemCatalogByKey = useMemo(() => {
+    const m = new Map<string, ItemCatalogRow>();
+    for (const c of earningSnapshot?.catalog.items ?? []) m.set(c.key, c);
+    return m;
+  }, [earningSnapshot]);
 
   // Thread-category picker state. Only meaningful for nested-mode rooms
   // with at least one category. `selectedCategoryId === null` ==
@@ -506,6 +604,68 @@ export function Composer({
       out.sort((a, b) => a.label.localeCompare(b.label));
       return out.slice(0, MAX_COMPLETIONS);
     }
+    // Item-target — first positional of /give /throw /drop. Occupant
+    // picker, identical filter to the whisper-target path but no
+    // server-backed lookup (the target MUST be in the room for the
+    // command to land server-side, so suggesting offline users would
+    // misdirect — they'd accept an offline name and hit
+    // "ITEM_CMD_NO_TARGET" when they pressed Enter).
+    //
+    // NBSP-substitute spaces in the inserted value the same way
+    // whisper-target does: args[0] is a single token, and the parser
+    // splits on regular spaces, so a multi-word displayName like
+    // "The Doctor" would tokenize as just "The" without NBSP. The
+    // server's matchOccupant normalizes NBSP↔space before comparing,
+    // so both forms round-trip.
+    if (trigger.kind === "item-target") {
+      const NBSP_ITEM = " ";
+      const out: CompletionItem[] = [];
+      if (occupants) {
+        for (const o of occupants) {
+          if (o.displayName.toLowerCase().startsWith(trigger.query)) {
+            out.push({
+              value: o.displayName.replace(/ /g, NBSP_ITEM),
+              label: o.displayName,
+              ...(o.away ? { sublabel: "away" } : {}),
+            });
+          }
+        }
+      }
+      out.sort((a, b) => a.label.localeCompare(b.label));
+      return out.slice(0, MAX_COMPLETIONS);
+    }
+    // Item-key — the item slot of /give /throw /drop. Source is the
+    // CURRENT identity's inventory (master if no character is active,
+    // otherwise the active character). Filter by prefix on the
+    // singular name AND the plural — typing "co" surfaces both
+    // "cookies" and any other co-prefixed item the user holds. Empty
+    // query lists everything the identity owns. Aliases are NOT
+    // surfaced as their own suggestions (they'd duplicate canonical
+    // names in the popup); they still match server-side on accept,
+    // so the typed-by-hand path keeps working.
+    if (trigger.kind === "item-key") {
+      const out: CompletionItem[] = [];
+      const earningInv = inventoryForActiveIdentity ?? [];
+      const catalogByKey = itemCatalogByKey;
+      for (const entry of earningInv) {
+        const row = catalogByKey.get(entry.itemKey);
+        if (!row) continue;
+        const lowerName = row.name.toLowerCase();
+        const lowerPlural = row.namePlural?.toLowerCase() ?? "";
+        if (
+          trigger.query.length > 0 &&
+          !lowerName.startsWith(trigger.query) &&
+          !lowerPlural.startsWith(trigger.query)
+        ) continue;
+        out.push({
+          value: row.name,
+          label: row.name,
+          sublabel: `× ${entry.quantity.toLocaleString()}${row.description ? ` — ${row.description}` : ""}`,
+        });
+      }
+      out.sort((a, b) => a.label.localeCompare(b.label));
+      return out.slice(0, MAX_COMPLETIONS);
+    }
     // @-mention OR whisper-target. Two sources, merged:
     //   1. Occupants of the current room (instant — fastest path for
     //      "who's here right now").
@@ -554,7 +714,7 @@ export function Composer({
       push(s.name, s.sublabel);
     }
     return out.slice(0, MAX_COMPLETIONS);
-  }, [trigger, commands, occupants, serverSuggestions]);
+  }, [trigger, commands, occupants, serverSuggestions, inventoryForActiveIdentity, itemCatalogByKey]);
 
   const [selectedIndex, setSelectedIndex] = useState(0);
   // The popup never steals Enter until the user has opted in by pressing

@@ -46,6 +46,7 @@ import {
   unmuteCommand,
 } from "./mod.js";
 import { currencyCommand, expCommand } from "./earning.js";
+import { dropCommand, giveCommand, throwCommand } from "./items.js";
 
 /** Registers all built-in commands. Must run before custom commands are loaded. */
 export function registerBuiltins(reg: CommandRegistry): void {
@@ -102,5 +103,9 @@ export function registerBuiltins(reg: CommandRegistry): void {
   // Earning
   reg.registerBuiltin(currencyCommand);
   reg.registerBuiltin(expCommand);
+  // Items — hand / throw / drop catalog items from your inventory.
+  reg.registerBuiltin(giveCommand);
+  reg.registerBuiltin(throwCommand);
+  reg.registerBuiltin(dropCommand);
   reg.registerBuiltin(makeHelpCommand(() => reg));
 }

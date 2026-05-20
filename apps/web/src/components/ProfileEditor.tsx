@@ -37,6 +37,22 @@ interface Props {
    * editor to see their theme change take effect.
    */
   onSaved?: () => void;
+  /**
+   * Admin-acting-on-another-user mode. When set, the editor:
+   *   - Forces `mode: "character"` and edits the supplied `characterId`
+   *     (master-account fields belong to the target user — out of scope
+   *     for this UI; that's what the admin Users tab edits).
+   *   - Skips the `/me/profile` + `/characters` initial fetches —
+   *     those return the CALLER's data, not the target user's. The
+   *     character itself loads through `/characters/:id`, which the
+   *     server allows for admins regardless of ownership.
+   *   - Hides the master/character dropdown + the +New / Switch / Delete
+   *     buttons — admin edits ONE character at a time; to touch a
+   *     different one, close and reopen from the admin Users row.
+   *   - Shows an "Editing as admin: …" banner so the admin knows
+   *     they're touching someone else's character.
+   */
+  adminContext?: { ownerUserId: string; ownerUsername: string };
 }
 
 type UiFontScale = "small" | "medium" | "large" | "xl";
@@ -141,11 +157,17 @@ const STAT_FIELDS: Array<{ key: keyof CharacterStats; label: string }> = [
  * `messages.displayName` is snapshotted at send time and renaming would leave
  * a fragmented history.
  */
-export function ProfileEditor({ mode: initialMode, characterId: initialCharId, onClose, onSaved }: Props) {
+export function ProfileEditor({ mode: initialMode, characterId: initialCharId, onClose, onSaved, adminContext }: Props) {
+  const isAdminEdit = !!adminContext;
   const [target, setTarget] = useState<Target>(
-    initialMode === "character" && initialCharId
+    // Admin mode locks the target to the supplied character — no
+    // master option (admin Users tab edits master fields), no
+    // dropdown to other characters (the admin opened THIS one).
+    isAdminEdit && initialCharId
       ? { kind: "character", id: initialCharId }
-      : { kind: "master" },
+      : initialMode === "character" && initialCharId
+        ? { kind: "character", id: initialCharId }
+        : { kind: "master" },
   );
   const [characters, setCharacters] = useState<CharacterRow[]>([]);
   const [master, setMaster] = useState<MasterData | null>(null);
@@ -270,8 +292,16 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   const [deleting, setDeleting] = useState(false);
   const [switching, setSwitching] = useState(false);
 
-  // Initial load: master + character list (we always need both for the dropdown).
+  // Initial load: master + character list (we always need both for the
+  // dropdown). Skipped in admin-edit mode — those endpoints return
+  // the CALLER's master + characters, which has nothing to do with
+  // the target user the admin is editing. The character itself
+  // loads via the target useEffect below (admin-allowed `/characters/:id`).
   useEffect(() => {
+    if (isAdminEdit) {
+      setLoadingList(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -293,7 +323,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [isAdminEdit]);
 
   // Re-populate the form whenever target changes (or its source data arrives).
   useEffect(() => {
@@ -886,51 +916,69 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-keep-rule bg-keep-banner px-4 py-2">
           <div className="flex min-w-0 items-center gap-2">
             <h2 className="shrink-0 font-action text-lg">Edit profile</h2>
-            <select
-              value={targetValue}
-              onChange={(e) => onSelectTarget(e.target.value)}
-              disabled={loadingList}
-              className="min-w-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm"
-            >
-              {loadingList ? (
-                <option>loading...</option>
-              ) : (
-                targetOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))
-              )}
-            </select>
-            <button
-              type="button"
-              onClick={() => setCreateOpen(true)}
-              disabled={loadingList}
-              title="Create a new character under your account"
-              className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner disabled:opacity-50"
-            >
-              + New
-            </button>
-            {isCharacter && master && master.activeCharacterId !== (target.kind === "character" ? target.id : null) ? (
-              <button
-                type="button"
-                onClick={switchToCharacter}
-                disabled={switching || loadingTarget}
-                title="Switch to this character - your chat name and theme update immediately."
-                className="keep-button shrink-0 rounded border border-keep-action/60 bg-keep-bg px-2 py-0.5 text-sm text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
+            {isAdminEdit ? (
+              // Admin-acting-on-other-user banner. Replaces the
+              // master/character switcher + side buttons (those are
+              // self-edit affordances — +New makes no sense on
+              // another user's account, Switch acts on the admin's
+              // own session, Delete is reserved to the admin Users
+              // tab). The label `name` (set by the load effect from
+              // the character row) appears here once it lands.
+              <span
+                className="shrink-0 rounded border border-keep-accent/60 bg-keep-accent/10 px-2 py-0.5 text-xs uppercase tracking-widest text-keep-accent"
+                title={`Editing as admin: ${name || "loading"} (owned by ${adminContext.ownerUsername})`}
               >
-                {switching ? "Switching..." : "Switch"}
-              </button>
-            ) : null}
-            {isCharacter ? (
-              <button
-                type="button"
-                onClick={deleteCharacter}
-                disabled={deleting || loadingTarget}
-                title="Delete this character. Past message history keeps the snapshotted name."
-                className="keep-button shrink-0 rounded border border-keep-accent/60 bg-keep-bg px-2 py-0.5 text-sm text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
-              >
-                {deleting ? "Deleting..." : "Delete"}
-              </button>
-            ) : null}
+                admin edit: {name || "…"} <span className="text-keep-muted normal-case">(owned by {adminContext.ownerUsername})</span>
+              </span>
+            ) : (
+              <>
+                <select
+                  value={targetValue}
+                  onChange={(e) => onSelectTarget(e.target.value)}
+                  disabled={loadingList}
+                  className="min-w-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm"
+                >
+                  {loadingList ? (
+                    <option>loading...</option>
+                  ) : (
+                    targetOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))
+                  )}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setCreateOpen(true)}
+                  disabled={loadingList}
+                  title="Create a new character under your account"
+                  className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner disabled:opacity-50"
+                >
+                  + New
+                </button>
+                {isCharacter && master && master.activeCharacterId !== (target.kind === "character" ? target.id : null) ? (
+                  <button
+                    type="button"
+                    onClick={switchToCharacter}
+                    disabled={switching || loadingTarget}
+                    title="Switch to this character - your chat name and theme update immediately."
+                    className="keep-button shrink-0 rounded border border-keep-action/60 bg-keep-bg px-2 py-0.5 text-sm text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
+                  >
+                    {switching ? "Switching..." : "Switch"}
+                  </button>
+                ) : null}
+                {isCharacter ? (
+                  <button
+                    type="button"
+                    onClick={deleteCharacter}
+                    disabled={deleting || loadingTarget}
+                    title="Delete this character. Past message history keeps the snapshotted name."
+                    className="keep-button shrink-0 rounded border border-keep-accent/60 bg-keep-bg px-2 py-0.5 text-sm text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
+                  >
+                    {deleting ? "Deleting..." : "Delete"}
+                  </button>
+                ) : null}
+              </>
+            )}
           </div>
           <CloseButton onClick={onClose} />
         </div>

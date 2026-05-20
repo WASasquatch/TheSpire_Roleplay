@@ -2611,6 +2611,13 @@ function Chat() {
         <ProfileEditor
           mode={editor.mode}
           characterId={editor.characterId}
+          // Optional admin-acting-on-other-user context. When set,
+          // ProfileEditor skips its `/me` + character-list fetches
+          // (those return the caller's own data) and edits the named
+          // character via the admin-allowed `/characters/:id`
+          // endpoints. Conditional spread is exactOptionalPropertyTypes-
+          // friendly — we don't pass `undefined` through.
+          {...(editor.adminContext ? { adminContext: editor.adminContext } : {})}
           onClose={() => {
             closeEditor();
             setThemeVersion((v) => v + 1);

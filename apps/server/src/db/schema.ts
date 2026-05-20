@@ -624,29 +624,6 @@ export const userPortraits = sqliteTable(
   }),
 );
 
-/* ---------- message_activity ----------
- * Append-only ledger of user-authored message creations. Decoupled
- * from the `messages` table so the splash's "messages in the last
- * 24h" stat reflects true posting activity instead of "messages
- * currently surviving" (the latter counts DOWN as retention sweeps
- * delete old rows — confusing for an activity beacon). System
- * messages (connect/disconnect, room descriptions) are NOT logged
- * here; only user-typed content (chat, action, whisper, /npc, /cmd,
- * forum posts) counts as activity. The janitor sweeps rows older
- * than 26h every hour, so the table holds at most ~26h of entries.
- * See migration 0118 for the full rationale.
- */
-export const messageActivity = sqliteTable(
-  "message_activity",
-  {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  },
-  (t) => ({
-    createdAtIdx: index("message_activity_created_at_idx").on(t.createdAt),
-  }),
-);
-
 /* ---------- bans ---------- */
 export const bans = sqliteTable(
   "bans",

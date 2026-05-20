@@ -4681,6 +4681,8 @@ function UserEditForm({
         </div>
       ) : null}
 
+      <AdminCharactersSection user={user} />
+
       {error ? <div className="mt-2 text-keep-accent">{error}</div> : null}
 
       <div className="mt-3 flex justify-end gap-2">
@@ -4713,6 +4715,51 @@ function UserEditForm({
         </div>
       ) : null}
     </form>
+  );
+}
+
+function AdminCharactersSection({ user }: { user: AdminUserRow }) {
+  const openEditor = useChat((s) => s.openEditor);
+  const live = user.characters.filter((c) => !c.deleted);
+  const deleted = user.characters.filter((c) => c.deleted);
+  if (live.length === 0 && deleted.length === 0) {
+    return (
+      <div className="mt-3 rounded border border-keep-rule/60 bg-keep-banner/30 p-2 text-[11px] text-keep-muted">
+        No characters on this account.
+      </div>
+    );
+  }
+  return (
+    <div className="mt-3 rounded border border-keep-rule/60 bg-keep-bg/40 p-2">
+      <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">
+        Characters
+      </div>
+      <ul className="space-y-1">
+        {live.map((c) => (
+          <li key={c.id} className="flex items-center justify-between gap-2 rounded border border-keep-rule/60 bg-keep-bg px-2 py-1">
+            <span className="truncate">{c.name}</span>
+            <button
+              type="button"
+              onClick={() => openEditor({
+                mode: "character",
+                characterId: c.id,
+                adminContext: { ownerUserId: user.userId, ownerUsername: user.username },
+              })}
+              className="keep-button shrink-0 rounded border border-keep-action/60 bg-keep-bg px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/10"
+              title={`Open ProfileEditor for ${c.name} in admin mode (edits use /characters/${c.id} with admin auth).`}
+            >
+              Edit
+            </button>
+          </li>
+        ))}
+        {deleted.map((c) => (
+          <li key={c.id} className="flex items-center justify-between gap-2 rounded border border-keep-rule/30 bg-keep-banner/20 px-2 py-1 text-keep-muted line-through">
+            <span className="truncate">{c.name}</span>
+            <span className="shrink-0 text-[10px] uppercase tracking-widest">deleted</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

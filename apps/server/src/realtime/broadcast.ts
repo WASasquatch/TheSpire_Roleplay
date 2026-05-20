@@ -17,7 +17,6 @@ import {
   characters,
   friends,
   ignores,
-  messageActivity,
   messages,
   roomInvites,
   roomMembers,
@@ -274,14 +273,6 @@ export async function addMessage(
     //     topics), and the parent topic gets a separate UPDATE below.
     lastActivityAt: payload.replyToId ? null : now,
   });
-  // Append-only activity ledger. Counted by /stats for the splash's
-  // "messages in the last 24h" beacon. Lives in its own table
-  // (`message_activity`) so the count is independent of retention
-  // sweeps — a message getting deleted later doesn't retroactively
-  // shrink the activity number. System messages (room descriptions,
-  // connect/disconnect) intentionally don't log here; only what a
-  // user typed counts as activity. See migration 0118.
-  await ctx.db.insert(messageActivity).values({ createdAt: now });
   // For replies, bump the parent topic's last_activity_at so the forum
   // pagination's DESC order surfaces this thread to the top on the
   // next refresh. We do this best-effort: if the parent has been

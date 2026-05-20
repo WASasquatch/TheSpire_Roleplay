@@ -1,0 +1,26 @@
+-- Drop the `message_activity` append-only ledger added in 0118.
+--
+-- The ledger was designed to keep the splash's "messages in the last
+-- 24h" beacon stable when retention sweeps deleted messages out of
+-- the 24h window. That problem doesn't apply on installs whose global
+-- retention is longer than 24h AND whose per-room expiry overrides
+-- (if any) are also longer than 24h — the messages stay in the
+-- `messages` table for the full beacon window and a direct
+-- `count(*) WHERE created_at >= now - 24h` reports the true volume.
+--
+-- The ledger ALSO had a real-world bug: it only recorded messages
+-- posted AFTER 0118 deployed, so installs that had been chatting for
+-- weeks saw a count of "15" instead of "hundreds" once the ledger
+-- migration shipped. Backfilling from `messages` would address that
+-- on its own, but at that point the ledger duplicates the messages
+-- table's index for installs that don't need the deletion-resilience
+-- in the first place.
+--
+-- The admin's Message Expiry panel (added alongside this work) makes
+-- it easy to spot and clear any aggressive per-room expiry that would
+-- chew into the 24h window — so the rare install that wanted ledger-
+-- backed accuracy can just bump per-room expiry up instead. If a
+-- future need re-introduces the ledger, do it with a boot-time
+-- backfill from `messages` so the count is correct on deploy day.
+
+DROP TABLE IF EXISTS `message_activity`;

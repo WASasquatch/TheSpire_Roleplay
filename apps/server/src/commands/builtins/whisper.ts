@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { ChatMessage } from "@thekeep/shared";
-import { ignores, messageActivity, messages, users } from "../../db/schema.js";
+import { ignores, messages, users } from "../../db/schema.js";
 import { pushTriggers } from "../../realtime/broadcast.js";
 import { stripFirstToken } from "../parser.js";
 import type { CommandContext, CommandHandler } from "../types.js";
@@ -127,10 +127,6 @@ export const whisperCommand: CommandHandler = {
       toDisplayName: targetDisplayName,
       color: senderColor,
     });
-    // Activity ledger: whispers count as user-typed content too,
-    // so they contribute to the splash's "messages in the last 24h"
-    // stat. See addMessage in realtime/broadcast.ts for the rationale.
-    await ctx.db.insert(messageActivity).values({ createdAt: now });
 
     const out: ChatMessage = {
       id,

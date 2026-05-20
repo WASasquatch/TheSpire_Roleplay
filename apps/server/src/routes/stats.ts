@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { gte, ne, sql } from "drizzle-orm";
+import { and, gte, ne, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import { messageActivity, messages, rooms, users } from "../db/schema.js";
+import { messages, rooms, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -70,21 +70,24 @@ export async function registerStatsRoutes(
       days.push({ day: key, count: dayMap.get(key) ?? 0 });
     }
 
-    // Rolling 24-hour message count. Reads from the append-only
-    // `message_activity` ledger (migration 0118) — NOT from the
-    // `messages` table — so the splash stat reflects true posting
-    // activity instead of "messages currently surviving retention."
-    // Querying `messages` here would count DOWN as the janitor's
-    // retention sweep deletes older rows, which is backwards from
-    // what an activity beacon should show. The ledger is sized to
-    // hold ~26h of entries (hourly janitor sweep at 26h cutoff —
-    // see `sweepMessageActivity` in seed.ts) so the 24h query
-    // always reads complete data.
+    // Rolling 24-hour message count for the splash beacon. Direct
+    // query against the `messages` table — accurate as long as the
+    // global retention window (and any per-room expiry overrides)
+    // stay longer than 24h, which is the default + the recommended
+    // floor surfaced in the admin's Message Expiry panel. Filter
+    // out `kind='system'` (connect/disconnect, room descriptions)
+    // so a reconnect-storm can't inflate the activity number;
+    // soft-deleted user messages (`deletedAt IS NOT NULL`) DO count
+    // — the message was posted in the window, the author later
+    // removed it; the activity still happened.
     const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
     const last24hRows = await db
       .select({ n: sql<number>`count(*)` })
-      .from(messageActivity)
-      .where(gte(messageActivity.createdAt, new Date(twentyFourHoursAgo)));
+      .from(messages)
+      .where(and(
+        gte(messages.createdAt, new Date(twentyFourHoursAgo)),
+        sql`${messages.kind} != 'system'`,
+      ));
     const messages24h = last24hRows[0]?.n ?? 0;
 
     return {

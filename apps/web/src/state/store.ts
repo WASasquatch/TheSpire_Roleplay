@@ -475,9 +475,31 @@ interface ChatState {
    * Editor target - null means closed.
    * mode "master" → edits the master account (no characterId).
    * mode "character" → edits the character with that id.
+   *
+   * `adminContext` opens the editor in admin-act-on-other-user mode:
+   * - Mounted from the admin Users tab (per-character Edit button).
+   * - Skips `/me/profile` + `/characters` fetches (those return the
+   *   CALLER's data, not the target user's).
+   * - Loads the named character via `GET /characters/:id` (admin
+   *   allowed), saves via `PUT /characters/:id` (admin allowed).
+   * - Hides the master/character switcher — admin edits ONE
+   *   character at a time. To edit a different one, close + reopen
+   *   from the admin user row.
+   * - Shows an "Editing as admin: X (owned by Y)" banner so the
+   *   admin knows what they're touching.
    */
-  editor: { mode: "master" | "character"; characterId: string | null } | null;
-  openEditor: (target: { mode: "master" | "character"; characterId: string | null }) => void;
+  editor:
+    | {
+        mode: "master" | "character";
+        characterId: string | null;
+        adminContext?: { ownerUserId: string; ownerUsername: string };
+      }
+    | null;
+  openEditor: (target: {
+    mode: "master" | "character";
+    characterId: string | null;
+    adminContext?: { ownerUserId: string; ownerUsername: string };
+  }) => void;
   closeEditor: () => void;
 
   /** Local UI font-size step (cycled by the Size button). */

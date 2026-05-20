@@ -226,8 +226,16 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
    *      user lands at the newest content.
    */
   const scrollState = useRef<{ height: number; top: number; firstId: string | null; lastId: string | null } | null>(null);
-  // Capture pre-commit geometry every render. Runs BEFORE the layout
-  // effect that decides how to react to the new buffer.
+  // Mirror `messages` into a ref so the live scroll listener below can
+  // read the current array without re-binding on every change (cheap,
+  // but binds dozens of times per second in active rooms). The
+  // listener closes over `messagesRef` once at attach time; reading
+  // `.current` gives it the up-to-date buffer.
+  const messagesRef = useRef(messages);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  // Capture pre-commit geometry every render. Runs after paint, AFTER
+  // any layout-effect adjustments fire, so this is the baseline the
+  // NEXT render's prepend / append decision compares against.
   useEffect(() => {
     const el = ref.current;
     if (!el) {
@@ -241,6 +249,31 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       lastId: messages[messages.length - 1]?.id ?? null,
     };
   });
+  // ALSO capture geometry on every live scroll event — without this,
+  // a user who scrolls UP without triggering a re-render leaves
+  // `scrollState.top` at the stale post-render position (e.g.
+  // pinned-to-bottom). When the scroll-to-load-older fetch then
+  // prepends and re-renders, the layout effect computes
+  // `el.scrollTop = prev.top + delta` against the STALE prev.top —
+  // landing the user past the new scrollHeight, which clamps to the
+  // bottom. That's the "scrolls back to the bottom every time more
+  // history loads" symptom. Live-event capture keeps prev.top
+  // accurate to wherever the user actually was when the fetch fired.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const capture = () => {
+      const msgs = messagesRef.current;
+      scrollState.current = {
+        height: el.scrollHeight,
+        top: el.scrollTop,
+        firstId: msgs[0]?.id ?? null,
+        lastId: msgs[msgs.length - 1]?.id ?? null,
+      };
+    };
+    el.addEventListener("scroll", capture, { passive: true });
+    return () => el.removeEventListener("scroll", capture);
+  }, []);
 
   // Apply scroll adjustment for the new buffer. useLayoutEffect (not
   // useEffect) so the position fix happens BEFORE the browser paints —

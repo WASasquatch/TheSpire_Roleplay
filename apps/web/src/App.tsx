@@ -1968,11 +1968,37 @@ function Chat() {
   }, [refreshIntervalSec, currentRoomId, socket]);
 
   /**
+   * Decide whether a userlist / chat-line click on `(userId, displayName)`
+   * targets THIS tab's currently-voicing identity. The naive
+   * `userId === me.id` check matches any identity that belongs to
+   * me — including OTHER characters of mine that aren't active in
+   * this tab — which produced a real bug: clicking the icon of
+   * Character B while voicing Character A in this tab opened the
+   * profile editor bound to A's session, so saves leaked Character
+   * B's intended edits onto Character A.
+   *
+   * The correct test is "same userId AND same display name as the
+   * SESSION's active identity," because each tab voices at most one
+   * identity at a time and its display name is unique within the
+   * session (per-character name uniqueness per owner + the OOC
+   * username slot are mutually exclusive in the userlist — you only
+   * see one identity per tab).
+   */
+  function isSelfActiveIdentity(userId: string, displayName: string): boolean {
+    if (!me || userId !== me.id) return false;
+    const myActiveDisplayName = activeCharacterName ?? me.username;
+    return displayName === myActiveDisplayName;
+  }
+
+  /**
    * Click on the gender icon - view someone's profile, or open the editor
-   * if it's me. (Slash-command equivalents: /whois <name> and /profile.)
+   * ONLY when the click targets this tab's currently-voicing identity.
+   * For any OTHER identity (including other characters you own that
+   * aren't active in this tab), open the read-only profile view.
+   * (Slash-command equivalents: /whois <name> and /profile.)
    */
   function onIconClick(userId: string, displayName: string) {
-    if (me && userId === me.id) {
+    if (isSelfActiveIdentity(userId, displayName)) {
       send("/profile");
       return;
     }
@@ -1985,15 +2011,18 @@ function Chat() {
   /**
    * Click on the name - PREPEND `/whisper <name> ` to whatever the user
    * is already drafting so they don't lose in-progress text. For your
-   * own name we fall back to the icon behavior (open editor) since
-   * whispering yourself is useless.
+   * own active identity we fall back to the icon behavior (open editor)
+   * since whispering yourself is useless. Clicking the name of one of
+   * your OTHER characters (not active in this tab) starts a whisper to
+   * them — same flow as any other identity — rather than misrouting to
+   * an editor session bound to the wrong character.
    *
    * Prepend instead of overwrite: clicking a name while composing a
    * message used to destroy the draft. Preserving the existing text
    * lets the user re-target a message they were already writing.
    */
   function onNameClick(userId: string, displayName: string) {
-    if (me && userId === me.id) {
+    if (isSelfActiveIdentity(userId, displayName)) {
       send("/profile");
       return;
     }

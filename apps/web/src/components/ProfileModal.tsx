@@ -915,7 +915,27 @@ function LinkChip({ link }: { link: ProfileLink }) {
  * so viewers can study individual portraits without leaving the modal.
  */
 function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; alt: string }) {
-  const [activeId, setActiveId] = useState<string | null>(null);
+  // Default to the first portrait expanded so visitors see at least
+  // one full-size image without having to click a thumbnail. Empty
+  // galleries default to null (no expanded view; the thumbnail
+  // strip below also renders empty, so only the section heading +
+  // empty-state hint is visible).
+  const [activeId, setActiveId] = useState<string | null>(() => portraits[0]?.id ?? null);
+  // If the portraits prop changes (live profile refetch after the
+  // owner edits the gallery, or switching between profiles within
+  // the same modal session) and the previously-active id is no
+  // longer in the list, snap back to the first available portrait.
+  // Keep the user's selection when it's still valid so a viewer
+  // who clicked into image #3 doesn't bounce back to #1 on a benign
+  // re-render.
+  useEffect(() => {
+    if (portraits.length === 0) {
+      if (activeId !== null) setActiveId(null);
+      return;
+    }
+    if (activeId !== null && portraits.some((p) => p.id === activeId)) return;
+    setActiveId(portraits[0]!.id);
+  }, [portraits, activeId]);
   // Per-portrait reveal state for owner-marked NSFW tiles. Resets on profile
   // re-open (the modal remounts), so a viewer who reveals here doesn't stay
   // revealed after closing and reopening the profile.

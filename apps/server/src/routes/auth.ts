@@ -348,7 +348,24 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     // the new version while the user's still-loaded tab reports the old
     // one. The 60s poll cadence is fast enough that a fresh deploy
     // surfaces a "please refresh" hint within a minute.
-    return { id: user.id, username: user.username, role: user.role, version: VERSION };
+    //
+    // `updateMessage` is the short release note `remote-deploy.sh
+    // --update-msg "..."` stages as the fly secret `UPDATE_MESSAGE`
+    // each deploy. Surfaced on the same stale-version banner so users
+    // see what changed before they hit Refresh. Empty/unset reads as
+    // null on the wire and the banner renders the version lines alone.
+    // Read on every request (not cached at boot) so a `flyctl secrets
+    // set UPDATE_MESSAGE=...` outside a deploy script propagates on
+    // the next poll without needing a restart.
+    const rawUpdateMsg = process.env.UPDATE_MESSAGE ?? "";
+    const updateMessage = rawUpdateMsg.trim().length > 0 ? rawUpdateMsg : null;
+    return {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      version: VERSION,
+      updateMessage,
+    };
   });
 }
 

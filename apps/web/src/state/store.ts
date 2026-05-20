@@ -358,7 +358,15 @@ interface ChatState {
    * fresh bundle and the comparison stops mismatching).
    */
   staleVersion: string | null;
-  setStaleVersion: (v: string | null) => void;
+  /**
+   * Optional admin-authored release note attached to the current deploy
+   * via `remote-deploy.sh --update-msg "..."`. Rendered alongside the
+   * version drift on `StaleVersionBanner` so users get a hint of what
+   * changed before they refresh. Null when the deploy didn't carry a
+   * note (or when no drift has been detected yet).
+   */
+  staleUpdateMessage: string | null;
+  setStaleVersion: (version: string | null, updateMessage?: string | null) => void;
 
   currentRoomId: string | null;
   setCurrentRoom: (id: string | null) => void;
@@ -609,7 +617,20 @@ export const useChat = create<ChatState>((set) => ({
   kickReason: null,
   setKickReason: (r) => set({ kickReason: r }),
   staleVersion: null,
-  setStaleVersion: (v) => set({ staleVersion: v }),
+  staleUpdateMessage: null,
+  setStaleVersion: (version, updateMessage) => set({
+    staleVersion: version,
+    // When the version itself is cleared (e.g. after a refresh tears
+    // the store down), drop any leftover release note too. When the
+    // caller omits the second arg, leave the existing note in place —
+    // not all callsites have the message handy, and we don't want a
+    // re-set of the same version to wipe an already-rendered note.
+    ...(version === null
+      ? { staleUpdateMessage: null }
+      : updateMessage !== undefined
+        ? { staleUpdateMessage: updateMessage }
+        : {}),
+  }),
   activeCharacterId: null,
   setActiveCharacterIdStore: (id) => set({ activeCharacterId: id }),
 

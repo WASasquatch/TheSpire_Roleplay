@@ -85,7 +85,7 @@ export function App() {
         // request bounces them back to the splash.
         if (r.status === 401) clearSessionToken();
         return r.ok
-          ? (r.json() as Promise<{ id: string; username: string; role: Role; version?: string }>)
+          ? (r.json() as Promise<{ id: string; username: string; role: Role; version?: string; updateMessage?: string | null }>)
           : null;
       })
       .then((j) => {
@@ -98,7 +98,7 @@ export function App() {
           // we surface that immediately rather than waiting up to 60s
           // for the backstop poll.
           if (j.version && j.version !== VERSION) {
-            useChat.getState().setStaleVersion(j.version);
+            useChat.getState().setStaleVersion(j.version, j.updateMessage ?? null);
           }
         }
         setAuthChecked(true);
@@ -153,9 +153,9 @@ export function App() {
     try {
       const r = await fetch("/auth/me");
       if (!r.ok) return;
-      const j = (await r.json()) as { version?: string };
+      const j = (await r.json()) as { version?: string; updateMessage?: string | null };
       if (j.version && j.version !== VERSION) {
-        useChat.getState().setStaleVersion(j.version);
+        useChat.getState().setStaleVersion(j.version, j.updateMessage ?? null);
       }
     } catch { /* network blip - ignore */ }
   }, []);
@@ -174,9 +174,9 @@ export function App() {
           setMe(null);
           return;
         }
-        const j = (await r.json()) as { version?: string };
+        const j = (await r.json()) as { version?: string; updateMessage?: string | null };
         if (j.version && j.version !== VERSION) {
-          useChat.getState().setStaleVersion(j.version);
+          useChat.getState().setStaleVersion(j.version, j.updateMessage ?? null);
         }
       } catch { /* network blip - ignore */ }
     }, 60_000);
@@ -2809,12 +2809,21 @@ function Toast({ notice, onDismiss }: { notice: { code: string; message: string 
  */
 function StaleVersionBanner() {
   const staleVersion = useChat((s) => s.staleVersion);
+  const staleUpdateMessage = useChat((s) => s.staleUpdateMessage);
   const siteName = useChat((s) => s.branding.siteName);
   if (!staleVersion) return null;
   return (
     <div className="flex flex-wrap items-center justify-center gap-2 border-b border-keep-action/40 bg-keep-action/15 px-3 py-1.5 text-xs text-keep-text">
       <span>
-        You're running <b>{siteName} {VERSION}</b>. The current version is <b>{staleVersion}</b>. Please refresh to update.
+        You're running <b>{siteName} {VERSION}</b>. The current version is <b>{staleVersion}</b>.
+        {/* Admin-authored release note from `remote-deploy.sh
+            --update-msg "..."`. Italicized + muted so it reads as
+            secondary context next to the version lines. Falls back
+            silently when the deploy didn't carry a note. */}
+        {staleUpdateMessage ? (
+          <> <em className="text-keep-muted">{staleUpdateMessage}</em></>
+        ) : null}
+        {" "}Please refresh to update.
       </span>
       <button
         type="button"

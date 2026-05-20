@@ -53,6 +53,7 @@ import {
   shopCommand,
 } from "./earning_ui.js";
 import { dropCommand, giveCommand, throwCommand } from "./items.js";
+import { itemCommand } from "./item_lookup.js";
 
 /** Registers all built-in commands. Must run before custom commands are loaded. */
 export function registerBuiltins(reg: CommandRegistry): void {
@@ -118,5 +119,8 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(giveCommand);
   reg.registerBuiltin(throwCommand);
   reg.registerBuiltin(dropCommand);
+  // /item <name> — open the full-screen item view from chat. Same
+  // zoom overlay as tapping a Collection / Pets pin on a profile.
+  reg.registerBuiltin(itemCommand);
   reg.registerBuiltin(makeHelpCommand(() => reg));
 }

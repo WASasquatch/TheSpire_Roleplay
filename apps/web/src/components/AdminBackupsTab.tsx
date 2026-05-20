@@ -153,8 +153,11 @@ export function AdminBackupsTab() {
         const entry = (await res.json()) as CreateResponse;
         // Immediately trigger a browser download of the just-created
         // artifact so the admin doesn't have to find it in the
-        // Snapshots list. They can still re-download later from there.
-        triggerDownload(entry.id);
+        // Snapshots list. Failures here (network / auth) surface as
+        // the same error banner the create errors do — the file is
+        // still on disk in /data/backups/ and the admin can retry
+        // from the Snapshots panel below.
+        await triggerDownload(entry.id);
         await refresh();
       } catch (e) {
         setError((e as Error).message);
@@ -713,7 +716,7 @@ function SnapshotGroup({
               <span className="shrink-0 text-keep-muted">{new Date(e.createdAt).toLocaleString()}</span>
               <button
                 type="button"
-                onClick={() => triggerDownload(e.id)}
+                onClick={() => { void triggerDownload(e.id); }}
                 className="rounded border border-keep-rule px-2 py-0.5 text-xs hover:bg-keep-banner"
               >
                 Download
@@ -737,16 +740,40 @@ function SnapshotGroup({
  *  Helpers
  * ============================================================ */
 
-function triggerDownload(id: string) {
-  // Use an anchor + click rather than `window.open` so the
-  // browser respects the Content-Disposition: attachment header
-  // (a fresh tab would render the JSON inline instead).
+async function triggerDownload(id: string): Promise<void> {
+  // CANNOT use a bare anchor `href` here. The server's auth model is
+  // `Authorization: Bearer <sid>` injected by the monkey-patched
+  // window.fetch in lib/http.ts; plain anchor navigations bypass
+  // fetch entirely so they carry no Authorization header and the
+  // admin gate 403s every download. We instead fetch the file
+  // through the patched fetch (which DOES carry the token),
+  // materialize the response as a blob, and trigger the download
+  // off a blob:// URL via an anchor with the `download` attribute
+  // so the browser still respects the filename + saves to disk
+  // instead of opening inline.
+  const res = await fetch(`/admin/backup/snapshots/${encodeURIComponent(id)}`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    let detail = `download failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body.error) detail = `${detail} — ${body.error}`;
+    } catch { /* response body wasn't JSON; the status alone is enough */ }
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = `/admin/backup/snapshots/${encodeURIComponent(id)}`;
+  a.href = url;
   a.download = id;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  // Give the browser a moment to actually start the download before
+  // we invalidate the object URL. Revoking too early can race the
+  // download and produce a zero-byte file on some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 function formatBytes(n: number): string {

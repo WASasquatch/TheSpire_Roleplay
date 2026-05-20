@@ -25,6 +25,17 @@ export const users = sqliteTable(
     /** master profile body (sanitized HTML) shown when /char clear */
     bioHtml: text("bio_html").notNull().default(""),
     avatarUrl: text("avatar_url"),
+    /**
+     * Owner opt-in to surface the avatar as the first tile in the
+     * portrait gallery on this profile. When true and avatarUrl is
+     * set, profile-lookup prepends a synthetic gallery entry
+     * (id="avatar") so viewers see the avatar alongside the rest of
+     * the gallery without the user having to duplicate the URL into
+     * a real user_portraits row (which would dangle a stale copy on
+     * the next avatar change). Default false; the editor's
+     * "Include in Gallery" checkbox in the Avatar section flips it.
+     */
+    includeAvatarInGallery: integer("include_avatar_in_gallery", { mode: "boolean" }).notNull().default(false),
     /** OOC gender - used for the icon next to the master username when no character is active. */
     gender: text("gender", {
       enum: ["male", "female", "nonbinary", "other", "undisclosed"],
@@ -244,6 +255,11 @@ export const characters = sqliteTable(
     /** structured stats serialized as JSON; see CharacterStats in @thekeep/shared */
     statsJson: text("stats_json").notNull().default("{}"),
     avatarUrl: text("avatar_url"),
+    /** Mirrors users.includeAvatarInGallery — per-character opt-in to
+     *  surface the avatar as the first tile in this character's
+     *  portrait gallery. See the comment on users.includeAvatarInGallery
+     *  for the rationale; the editor flag is the same checkbox. */
+    includeAvatarInGallery: integer("include_avatar_in_gallery", { mode: "boolean" }).notNull().default(false),
     /** Per-character chat color (hex, e.g. "#990000"). Null = inherit the master's color. */
     chatColor: text("chat_color"),
     /** Per-character UI theme - JSON-serialized Theme. Null = inherit master/default. */
@@ -561,6 +577,31 @@ export const characterPortraits = sqliteTable(
   },
   (t) => ({
     charIdx: index("character_portraits_char_idx").on(t.characterId, t.sortOrder),
+  }),
+);
+
+/* ---------- user (OOC / master) portraits ----------
+ * Parallel to character_portraits but keyed on userId. Powers the
+ * gallery on master profiles — same shape, same per-portrait NSFW
+ * gate, same sort_order semantics — so OOC profiles can show
+ * additional images alongside the hero avatar the way character
+ * profiles do.
+ */
+export const userPortraits = sqliteTable(
+  "user_portraits",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    label: text("label"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    nsfw: integer("nsfw", { mode: "boolean" }).notNull().default(false),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    userIdx: index("user_portraits_user_idx").on(t.userId, t.sortOrder),
   }),
 );
 

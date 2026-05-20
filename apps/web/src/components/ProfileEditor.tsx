@@ -45,6 +45,7 @@ interface MasterData {
   username: string;
   bioHtml: string;
   avatarUrl: string | null;
+  includeAvatarInGallery?: boolean;
   gender: Gender;
   chatColor: string | null;
   activeCharacterId: string | null;
@@ -85,6 +86,7 @@ interface CharacterRow {
   bioHtml: string;
   statsJson: string;
   avatarUrl: string | null;
+  includeAvatarInGallery?: boolean;
   themeJson: string | null;
   /**
    * Per-character chat color override. Null = inherit the master
@@ -148,6 +150,15 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   const [name, setName] = useState("");
   const [bioHtml, setBioHtml] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+  /**
+   * Per-identity "Include in Gallery" toggle next to the avatar URL
+   * field. Persisted as `includeAvatarInGallery` on the master /
+   * character row (migration 0114). The server prepends a synthetic
+   * gallery entry for the avatar URL when this is true so visitors
+   * see the avatar as the first tile in the gallery without the
+   * user having to copy the URL into a real portrait row.
+   */
+  const [includeAvatarInGallery, setIncludeAvatarInGallery] = useState(false);
   const [chatColor, setChatColor] = useState<string | null>(null);
   const [gender, setGender] = useState<Gender>("undisclosed");
   const [stats, setStats] = useState<CharacterStats>({});
@@ -222,12 +233,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
     | "journal";
   const [activeTab, setActiveTab] = useState<EditorTab>("description");
 
-  // Switching from a character → master target removes the Gallery and
-  // Journal tabs from the strip. If the user happened to be on one of
-  // those tabs at the moment of the switch, fall back to "profile" so
-  // the content pane doesn't go blank.
+  // Journal is character-only (the schema's character_journal_entries
+  // table is character-attached). If the user is on the Journal tab
+  // and switches to master, fall back to "profile" so the content
+  // pane doesn't go blank. Gallery is available on master too as of
+  // migration 0113, so no redirect for that tab anymore.
   useEffect(() => {
-    if (target.kind === "master" && (activeTab === "gallery" || activeTab === "journal")) {
+    if (target.kind === "master" && activeTab === "journal") {
       setActiveTab("profile");
     }
   }, [target.kind, activeTab]);
@@ -280,6 +292,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setName(master.username);
           setBioHtml(master.bioHtml ?? "");
           setAvatarUrl(master.avatarUrl ?? "");
+          setIncludeAvatarInGallery(!!master.includeAvatarInGallery);
           setChatColor(master.chatColor);
           setGender(master.gender ?? "undisclosed");
           setStats({});
@@ -301,7 +314,21 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setDisableThesaurus(master.disableThesaurus ?? false);
           setIsPublic(master.isPublic ?? true);
           setIsNsfw(master.isNsfw ?? false);
-          setPortraits([]); // master has no gallery; only characters do
+          // Master/OOC gallery — same wire shape as the character
+          // gallery below, just keyed on the user (user_portraits
+          // table, added in migration 0113). Failing the fetch is
+          // non-fatal; the editor's Gallery tab just shows empty.
+          try {
+            const pr = await fetch("/me/portraits", { credentials: "include" });
+            if (pr.ok) {
+              const pj = (await pr.json()) as { portraits: Array<{ id: string; url: string; label: string | null; nsfw?: boolean }> };
+              if (!cancelled) setPortraits(pj.portraits.map((p) => ({ id: p.id, url: p.url, label: p.label, nsfw: !!p.nsfw })));
+            } else {
+              if (!cancelled) setPortraits([]);
+            }
+          } catch {
+            if (!cancelled) setPortraits([]);
+          }
           // Master/OOC links live under /me/links (characterId IS NULL).
           try {
             const lr = await fetch("/me/links", { credentials: "include" });
@@ -321,6 +348,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setName(c.name);
           setBioHtml(c.bioHtml ?? "");
           setAvatarUrl(c.avatarUrl ?? "");
+          setIncludeAvatarInGallery(!!c.includeAvatarInGallery);
           // Per-character chat color. Null means "fall back to the
           // master account's color" — preserved as a distinct state
           // from "" so the picker can tell apart "no override set"
@@ -385,6 +413,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           body: JSON.stringify({
             bioHtml,
             avatarUrl: avatarUrl.trim() || null,
+            includeAvatarInGallery,
             gender,
             theme,
             styleKey: userStyleKey,
@@ -457,6 +486,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             bioHtml,
             stats,
             avatarUrl: avatarUrl.trim() || null,
+            includeAvatarInGallery,
             theme,
             chatColor,
             // Per-character design override. Null = inherit; non-null
@@ -685,13 +715,25 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
     };
     if (target.kind === "master") {
       if (!master) return null;
+      // Mirror the server's synthetic-portrait prepend so the
+      // "Include in Gallery" checkbox shows its effect immediately
+      // in the preview pane (without a save). When the toggle is
+      // off OR the avatar URL is empty OR the avatar already
+      // appears as a real portrait row, leave the list alone.
+      const trimmedAvatar = avatarUrl.trim();
+      const previewPortraits =
+        includeAvatarInGallery && trimmedAvatar &&
+        !portraits.some((p) => p.url === trimmedAvatar)
+          ? [{ id: "avatar", url: trimmedAvatar, label: null, nsfw: isNsfw }, ...portraits]
+          : portraits;
       return {
         kind: "master",
         profile: {
           userId: myUserId ?? "preview",
           username: master.username,
           bioHtml: bioHtml,
-          avatarUrl: avatarUrl.trim() || null,
+          avatarUrl: trimmedAvatar || null,
+          portraits: previewPortraits,
           gender,
           theme: previewTheme,
           // Titles are populated server-side from accepted relationships;
@@ -722,6 +764,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         },
       };
     }
+    // Same synthetic-portrait dance as the master branch above —
+    // the character preview also reflects the checkbox immediately.
+    const trimmedCharAvatar = avatarUrl.trim();
+    const previewCharPortraits =
+      includeAvatarInGallery && trimmedCharAvatar &&
+      !portraits.some((p) => p.url === trimmedCharAvatar)
+        ? [{ id: "avatar", url: trimmedCharAvatar, label: null, nsfw: isNsfw }, ...portraits]
+        : portraits;
     return {
       kind: "character",
       profile: {
@@ -732,8 +782,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         name,
         bioHtml,
         stats,
-        avatarUrl: avatarUrl.trim() || null,
-        portraits,
+        avatarUrl: trimmedCharAvatar || null,
+        portraits: previewCharPortraits,
         links,
         // Journal entries are managed inline in the editor (not via preview).
         // The preview ProfileModal shows the character preview as others
@@ -758,7 +808,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         nameStyleConfig: previewNameStyle.config,
       },
     };
-  }, [target, master, myUserId, name, bioHtml, avatarUrl, gender, stats, theme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey, previewCollections, previewNameStyle]);
+  }, [target, master, myUserId, name, bioHtml, avatarUrl, includeAvatarInGallery, gender, stats, theme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey, previewCollections, previewNameStyle]);
 
   const targetOptions = useMemo(() => {
     return [
@@ -850,7 +900,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             { id: "appearance",  label: "Appearance",  show: true },
             { id: "privacy",     label: "Privacy",     show: true },
             { id: "links",       label: "Links",       show: true },
-            { id: "gallery",     label: "Gallery",     show: isCharacter },
+            // Gallery is per-identity: characters use
+            // /characters/:id/portraits (character_portraits table),
+            // master uses /me/portraits (user_portraits, added in
+            // migration 0113). Both expose the same shape so the
+            // editor's PortraitGalleryEditor swaps endpoint URLs
+            // based on the active target.
+            { id: "gallery",     label: "Gallery",     show: true },
             { id: "journal",     label: "Journal",     show: isCharacter },
           ];
           const visible = tabs.filter((t) => t.show);
@@ -953,8 +1009,35 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                   value={avatarUrl}
                   onChange={setAvatarUrl}
                   placeholder="https://example.com/portrait.png"
-                  hint="Drives the userlist icon, the modal hero, and the full-size footer image."
+                  hint="Drives the userlist icon and the modal hero."
                 />
+                {/* "Include in Gallery" — when ticked, the server
+                    prepends a synthetic tile (the avatar) to the
+                    portrait gallery list, so visitors see the avatar
+                    alongside the other gallery images instead of only
+                    as the hero. Stored on the row (migration 0114);
+                    the synthetic entry resolves at lookup time so
+                    changing the avatar URL never leaves a stale
+                    duplicate in the gallery. */}
+                <label className="flex items-start gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 shrink-0"
+                    checked={includeAvatarInGallery}
+                    onChange={(e) => setIncludeAvatarInGallery(e.target.checked)}
+                    disabled={!avatarUrl.trim()}
+                  />
+                  <span className="min-w-0">
+                    <span className="block uppercase tracking-widest text-keep-muted">
+                      Include in Gallery
+                    </span>
+                    <span className="block text-[10px] text-keep-muted">
+                      Show this image as the first tile in your profile gallery
+                      alongside any other portraits you've added. Requires a
+                      Main Profile Image URL above.
+                    </span>
+                  </span>
+                </label>
                 {!isCharacter ? (
                   <label className="block text-xs">
                     <span className="mb-1 block uppercase tracking-widest text-keep-muted">Gender (OOC)</span>
@@ -1211,11 +1294,19 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
               </div>
             ) : null}
 
-            {/* GALLERY — portrait gallery (character only). */}
-            {activeTab === "gallery" && isCharacter && target.kind === "character" ? (
+            {/* GALLERY — portrait gallery, available for both
+                character and master/OOC profiles. Scope is picked
+                from the active target and threaded through to the
+                editor; the gallery component itself doesn't care
+                which endpoint backs it. */}
+            {activeTab === "gallery" ? (
               <div className="min-h-0 flex-1 overflow-y-auto p-4">
                 <PortraitGalleryEditor
-                  characterId={target.id}
+                  scope={
+                    target.kind === "character"
+                      ? { kind: "character", characterId: target.id }
+                      : { kind: "master" }
+                  }
                   portraits={portraits}
                   onChange={setPortraits}
                 />
@@ -1398,12 +1489,34 @@ function CreateCharacterModal({
  * Each mutation hits the server immediately so the gallery stays consistent
  * with what others see — no "save" button per portrait.
  */
+/**
+ * Gallery scope drives the REST endpoint shape:
+ *   { kind: "character", characterId } → /characters/:id/portraits
+ *   { kind: "master" }                 → /me/portraits
+ * Both shapes return + accept the same per-portrait body, so the
+ * component logic is identical apart from the URL builder.
+ */
+type GalleryScope =
+  | { kind: "character"; characterId: string }
+  | { kind: "master" };
+
+function portraitListUrl(scope: GalleryScope): string {
+  return scope.kind === "character"
+    ? `/characters/${scope.characterId}/portraits`
+    : `/me/portraits`;
+}
+function portraitItemUrl(scope: GalleryScope, id: string): string {
+  return scope.kind === "character"
+    ? `/characters/${scope.characterId}/portraits/${id}`
+    : `/me/portraits/${id}`;
+}
+
 function PortraitGalleryEditor({
-  characterId,
+  scope,
   portraits,
   onChange,
 }: {
-  characterId: string;
+  scope: GalleryScope;
   portraits: CharacterPortrait[];
   onChange: (next: CharacterPortrait[]) => void;
 }) {
@@ -1423,7 +1536,7 @@ function PortraitGalleryEditor({
     setErr(null);
     setBusy(true);
     try {
-      const res = await fetch(`/characters/${characterId}/portraits`, {
+      const res = await fetch(portraitListUrl(scope), {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1450,7 +1563,7 @@ function PortraitGalleryEditor({
   async function remove(id: string) {
     if (!window.confirm("Remove this portrait from the gallery?")) return;
     try {
-      const res = await fetch(`/characters/${characterId}/portraits/${id}`, {
+      const res = await fetch(portraitItemUrl(scope, id), {
         method: "DELETE",
         credentials: "include",
       });
@@ -1464,7 +1577,7 @@ function PortraitGalleryEditor({
   /** Toggle a portrait's NSFW flag in-place. */
   async function toggleNsfw(id: string, next: boolean) {
     try {
-      const res = await fetch(`/characters/${characterId}/portraits/${id}`, {
+      const res = await fetch(portraitItemUrl(scope, id), {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1481,7 +1594,7 @@ function PortraitGalleryEditor({
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
       <legend className="px-1 uppercase tracking-widest text-keep-muted">Gallery</legend>
       <p className="mb-2 text-[10px] text-keep-muted">
-        Extra portraits shown beneath the bio on this character's profile. The Main Profile Image above is the one rendered first (userlist, modal hero, full-size footer). Mark a tile NSFW to blur it for viewers (they can click to reveal).
+        Extra portraits shown beneath the bio on this profile. The Main Profile Image above is the one rendered first (userlist, modal hero). Mark a tile NSFW to blur it for viewers (they can click to reveal).
       </p>
       {portraits.length > 0 ? (
         <div className="mb-2 grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-2">

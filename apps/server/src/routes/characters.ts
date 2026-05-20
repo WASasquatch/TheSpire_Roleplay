@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import { characterPortraits, characters, users } from "../db/schema.js";
+import { characterPortraits, characters, userPortraits, users } from "../db/schema.js";
 import { bioHtmlForEdit, sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
 import { getSettings, parseOwnThemeJson, parseUserThemeJson } from "../settings.js";
@@ -71,6 +71,9 @@ const updateBody = z.object({
   bioHtml: z.string().max(BIO_HARD_CAP).optional(),
   stats: statsSchema.optional(),
   avatarUrl: httpUrl.nullable().optional(),
+  /** Per-character "show avatar at the head of the gallery" opt-in.
+   *  See users / characters schema for the synthetic-portrait rationale. */
+  includeAvatarInGallery: z.boolean().optional(),
   /** null = inherit master/default theme */
   theme: themeSchema.nullable().optional(),
   /**
@@ -98,6 +101,8 @@ const updateBody = z.object({
 const masterUpdateBody = z.object({
   bioHtml: z.string().max(BIO_HARD_CAP).optional(),
   avatarUrl: httpUrl.nullable().optional(),
+  /** OOC-side counterpart of the character flag; same semantics. */
+  includeAvatarInGallery: z.boolean().optional(),
   gender: z.enum(["male", "female", "nonbinary", "other", "undisclosed"]).optional(),
   /** null = revert to system default */
   theme: themeSchema.nullable().optional(),
@@ -229,6 +234,9 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
           ...(body.bioHtml !== undefined ? { bioHtml: sanitizeBio(body.bioHtml) } : {}),
           ...(body.stats !== undefined ? { statsJson: JSON.stringify(body.stats) } : {}),
           ...(body.avatarUrl !== undefined ? { avatarUrl: body.avatarUrl } : {}),
+          ...(body.includeAvatarInGallery !== undefined
+            ? { includeAvatarInGallery: body.includeAvatarInGallery }
+            : {}),
           ...(body.theme !== undefined
             ? { themeJson: body.theme === null ? null : JSON.stringify(body.theme) }
             : {}),
@@ -443,6 +451,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       // profiles go through /profiles/:name and keep the persisted HTML.
       bioHtml: bioHtmlForEdit(u.bioHtml),
       avatarUrl: u.avatarUrl,
+      includeAvatarInGallery: u.includeAvatarInGallery,
       gender: u.gender,
       chatColor: u.chatColor,
       awayMessage: u.awayMessage,
@@ -636,6 +645,114 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     },
   );
 
+  /* ===========================================================
+   *  Master / OOC portrait gallery (multi-portrait per user)
+   *
+   *  Mirrors the character-portraits routes above but keys on the
+   *  authenticated user instead of a character id. Same per-portrait
+   *  shape (url, label, nsfw, sortOrder), same validators
+   *  (createPortraitBody / updatePortraitBody), same cap. Lets a
+   *  user maintain a gallery on their OOC profile without
+   *  attaching the portraits to a character.
+   * =========================================================== */
+
+  /** List the caller's master gallery portraits. */
+  app.get("/me/portraits", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const list = await db
+      .select()
+      .from(userPortraits)
+      .where(eq(userPortraits.userId, me.id));
+    list.sort((a, b) => a.sortOrder - b.sortOrder || +a.createdAt - +b.createdAt);
+    return { portraits: list };
+  });
+
+  /** Add a new master gallery portrait. */
+  app.post<{ Body: unknown }>("/me/portraits", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+
+    let body;
+    try { body = createPortraitBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+
+    const countRows = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(userPortraits)
+      .where(eq(userPortraits.userId, me.id));
+    const count = countRows[0]?.n ?? 0;
+    if (count >= PORTRAIT_CAP_PER_CHARACTER) {
+      reply.code(429);
+      return { error: `Limit of ${PORTRAIT_CAP_PER_CHARACTER} extra portraits per profile.` };
+    }
+
+    const id = nanoid();
+    const sortOrder = count;
+    await db.insert(userPortraits).values({
+      id,
+      userId: me.id,
+      url: body.url,
+      label: body.label ?? null,
+      sortOrder,
+      nsfw: body.nsfw ?? false,
+    });
+    const row = (await db
+      .select()
+      .from(userPortraits)
+      .where(eq(userPortraits.id, id))
+      .limit(1))[0];
+    reply.code(201);
+    return row;
+  });
+
+  /** Update a master gallery portrait's label / order / nsfw flag. */
+  app.patch<{ Params: { portraitId: string }; Body: unknown }>(
+    "/me/portraits/:portraitId",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+
+      let body;
+      try { body = updatePortraitBody.parse(req.body); }
+      catch { reply.code(400); return { error: "invalid body" }; }
+
+      const p = (await db
+        .select()
+        .from(userPortraits)
+        .where(eq(userPortraits.id, req.params.portraitId))
+        .limit(1))[0];
+      if (!p || p.userId !== me.id) { reply.code(404); return { error: "not found" }; }
+
+      await db
+        .update(userPortraits)
+        .set({
+          ...(body.label !== undefined ? { label: body.label } : {}),
+          ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+          ...(body.nsfw !== undefined ? { nsfw: body.nsfw } : {}),
+        })
+        .where(eq(userPortraits.id, p.id));
+      return { ok: true };
+    },
+  );
+
+  /** Delete a master gallery portrait. */
+  app.delete<{ Params: { portraitId: string } }>(
+    "/me/portraits/:portraitId",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      const p = (await db
+        .select()
+        .from(userPortraits)
+        .where(eq(userPortraits.id, req.params.portraitId))
+        .limit(1))[0];
+      if (!p || p.userId !== me.id) { reply.code(404); return { error: "not found" }; }
+      await db.delete(userPortraits).where(eq(userPortraits.id, p.id));
+      return { ok: true };
+    },
+  );
+
   /**
    * Switch the caller's active character (or clear it with `characterId: null`).
    * Mirrors the server-side effects of `/char switch <name>`: writes the new
@@ -696,6 +813,9 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       .set({
         ...(body.bioHtml !== undefined ? { bioHtml: sanitizeBio(body.bioHtml) } : {}),
         ...(body.avatarUrl !== undefined ? { avatarUrl: body.avatarUrl } : {}),
+        ...(body.includeAvatarInGallery !== undefined
+          ? { includeAvatarInGallery: body.includeAvatarInGallery }
+          : {}),
         ...(body.gender !== undefined ? { gender: body.gender } : {}),
         ...(body.theme !== undefined
           ? { themeJson: body.theme === null ? null : JSON.stringify(body.theme) }

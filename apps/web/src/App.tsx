@@ -19,6 +19,7 @@ import { MessagesModal } from "./components/MessagesModal.js";
 import { RulesModal } from "./components/RulesModal.js";
 import { EarningDashboard } from "./components/EarningDashboard.js";
 import { EarningRibbon } from "./components/EarningRibbon.js";
+import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
 import { ThreadModal } from "./components/ThreadModal.js";
 import { UsersModal } from "./components/UsersModal.js";
 import { WorldCatalogModal } from "./components/WorldCatalogModal.js";
@@ -702,6 +703,13 @@ function Chat() {
     itemSubTab?: "inventory" | "shop" | "collection" | "pets";
   };
   const [earningOpen, setEarningOpen] = useState<EarningOpenSpec | null>(null);
+  /**
+   * Full-screen item-zoom view triggered by the `/item <name>` chat
+   * command. Mounts the same overlay that powers tap-to-zoom on
+   * profile Collection / Pet pins. State is null when closed; an
+   * `ItemZoomEntry` (server-resolved catalog row) when open.
+   */
+  const [openItem, setOpenItem] = useState<ItemZoomEntry | null>(null);
   const [helpOpen, setHelpOpen] = useState<{ filter?: string } | null>(null);
   const [usersOpen, setUsersOpen] = useState<{ query?: string } | null>(null);
   /**
@@ -1459,6 +1467,11 @@ function Chat() {
             ...(h.tab ? { tab: h.tab } : {}),
             ...(h.itemSubTab ? { itemSubTab: h.itemSubTab } : {}),
           });
+          break;
+        case "open-item":
+          // /item <name> resolved server-side; hint carries the
+          // full catalog row inline so no follow-up fetch is needed.
+          setOpenItem(h.item);
           break;
       }
     });
@@ -2591,6 +2604,9 @@ function Chat() {
           {...(earningOpen.tab ? { initialTab: earningOpen.tab } : {})}
           {...(earningOpen.itemSubTab ? { initialItemSubTab: earningOpen.itemSubTab } : {})}
         />
+      ) : null}
+      {openItem ? (
+        <ItemZoomView entry={openItem} onClose={() => setOpenItem(null)} />
       ) : null}
       {poppedTopic ? (
         <ThreadModal

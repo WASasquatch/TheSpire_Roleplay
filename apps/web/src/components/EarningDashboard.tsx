@@ -22,7 +22,7 @@ import {
   fetchEarningCatalog,
   fetchEarningLedger,
   formatItemName,
-  formatLedgerReason,
+  formatLedgerEntry,
   patchNameStyleConfig,
   patchEarningSettings,
   purchaseBorder,
@@ -146,7 +146,12 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab }: Pro
           ) : null}
 
           {snapshot && tab === "overview" ? <OverviewTab snapshot={snapshot} /> : null}
-          {snapshot && tab === "ledger" ? <LedgerTab characters={snapshot.characters.map((c) => ({ id: c.ownerId, name: c.displayName }))} /> : null}
+          {snapshot && tab === "ledger" ? (
+            <LedgerTab
+              characters={snapshot.characters.map((c) => ({ id: c.ownerId, name: c.displayName }))}
+              itemCatalog={snapshot.catalog.items}
+            />
+          ) : null}
           {snapshot && tab === "settings" ? <SettingsTab snapshot={snapshot} myId={me?.id ?? null} /> : null}
           {snapshot && tab === "styles" ? <NameStylesTab snapshot={snapshot} /> : null}
           {snapshot && tab === "borders" ? <BordersTab snapshot={snapshot} /> : null}
@@ -365,7 +370,23 @@ function PoolCard({ pool, snapshot, label }: { pool: PoolView; snapshot: ReturnT
  *  Section 3 — Activity ledger
  * ========================================================= */
 
-function LedgerTab({ characters }: { characters: Array<{ id: string; name: string }> }) {
+function LedgerTab({
+  characters,
+  itemCatalog,
+}: {
+  characters: Array<{ id: string; name: string }>;
+  /** Item rows from the live catalog snapshot. Indexed by key for
+   *  the metadata-aware ledger formatter so a "command_give_received"
+   *  entry renders as "Received 2 × Cookie from WAS" instead of the
+   *  bare opaque reason code. */
+  itemCatalog: ItemCatalogRow[];
+}) {
+  // Memoize the catalog index so formatLedgerEntry's per-row lookup
+  // is O(1) instead of an array.find() per render.
+  const itemByKey = useMemo(
+    () => new Map(itemCatalog.map((i) => [i.key, { name: i.name, namePlural: i.namePlural }])),
+    [itemCatalog],
+  );
   const [scope, setScope] = useState<{ kind: "user" } | { kind: "character"; id: string; name: string }>({ kind: "user" });
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [cursor, setCursor] = useState<number | null>(null);
@@ -454,7 +475,7 @@ function LedgerTab({ characters }: { characters: Array<{ id: string; name: strin
         {entries.map((e) => (
           <li key={e.id} className="flex flex-wrap items-baseline justify-between gap-2 px-3 py-2 text-sm">
             <div className="min-w-0 flex-1">
-              <div>{formatLedgerReason(e.reason)}</div>
+              <div>{formatLedgerEntry(e, itemByKey)}</div>
               <div className="text-[10px] uppercase tracking-widest text-keep-muted">
                 {new Date(e.createdAt).toLocaleString()}
               </div>

@@ -406,6 +406,24 @@ export type UiHint =
       kind: "open-earning";
       tab?: "overview" | "ledger" | "styles" | "borders" | "cosmetics" | "items" | "settings";
       itemSubTab?: "inventory" | "shop" | "collection" | "pets";
+    }
+  /**
+   * Open the full-screen item-zoom overlay (the same component that
+   * powers tap-to-zoom on profile Collection / Pet pins). Carries
+   * the resolved catalog row inline so the client doesn't need a
+   * separate roundtrip — the server already looked the item up by
+   * name / alias before emitting this hint. Used by the `/item
+   * <name>` builtin command.
+   */
+  | {
+      kind: "open-item";
+      item: {
+        itemKey: string;
+        name: string;
+        namePlural: string | null;
+        description: string;
+        iconUrl: string | null;
+      };
     };
 
 /** Wire shape served by GET /commands. The help modal renders this. */

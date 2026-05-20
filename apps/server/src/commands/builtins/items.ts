@@ -123,7 +123,7 @@ function parseItemCommandArgs(args: readonly string[]): {
  *  column simply doesn't contribute aliases to the match (json_each
  *  silently yields no rows on invalid JSON), which keeps the lookup
  *  robust against admin typos in the editor. */
-async function findItem(db: Db, query: string): Promise<typeof items.$inferSelect | null> {
+export async function findItem(db: Db, query: string): Promise<typeof items.$inferSelect | null> {
   const lower = query.toLowerCase();
   const row = (await db
     .select()

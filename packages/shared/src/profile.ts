@@ -284,6 +284,14 @@ export interface MasterProfile {
   username: string;
   bioHtml: string;
   avatarUrl: string | null;
+  /**
+   * Additional portrait gallery for the master / OOC profile. Same
+   * shape as CharacterProfile.portraits — sorted by the owner's
+   * chosen order. Renders as the "Gallery" section on the profile
+   * modal, below the bio. Empty array when the user hasn't added
+   * any extra portraits.
+   */
+  portraits: CharacterPortrait[];
   /** OOC gender, surfaced as the icon next to the username when no character is active. */
   gender: "male" | "female" | "nonbinary" | "other" | "undisclosed";
   /** Owner's chosen UI theme - applied to the profile modal when others view it. */

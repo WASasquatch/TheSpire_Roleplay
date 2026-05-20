@@ -1,5 +1,5 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { characterEarning, characterJournalEntries, characterOwnedNameStyles, characterPortraits, characters, identityCollection, identityPetCollection, items, messages, profileLinks, rooms, userActiveCosmetics, userOwnedNameStyles, users } from "../../db/schema.js";
+import { characterEarning, characterJournalEntries, characterOwnedNameStyles, characterPortraits, characters, identityCollection, identityPetCollection, items, messages, profileLinks, rooms, userActiveCosmetics, userOwnedNameStyles, userPortraits, users } from "../../db/schema.js";
 import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLink, ProfileMetrics, ProfileView } from "@thekeep/shared";
 import { roleRank } from "@thekeep/shared";
 import { parseUserThemeJson } from "../../settings.js";
@@ -153,6 +153,58 @@ async function listPortraits(
     .where(eq(characterPortraits.characterId, characterId))
     .orderBy(asc(characterPortraits.sortOrder), asc(characterPortraits.createdAt));
   return rows.map((r) => ({ id: r.id, url: r.url, label: r.label, nsfw: r.nsfw }));
+}
+
+/**
+ * Twin of listPortraits but for the master/OOC profile gallery
+ * (user_portraits table, added in migration 0113). Same wire shape
+ * — the client renders both kinds with the same PortraitGallery
+ * component, so the masters get gallery parity with characters
+ * without a parallel rendering path.
+ */
+async function listMasterPortraits(
+  db: import("../../db/index.js").Db,
+  userId: string,
+): Promise<CharacterPortrait[]> {
+  const rows = await db
+    .select()
+    .from(userPortraits)
+    .where(eq(userPortraits.userId, userId))
+    .orderBy(asc(userPortraits.sortOrder), asc(userPortraits.createdAt));
+  return rows.map((r) => ({ id: r.id, url: r.url, label: r.label, nsfw: r.nsfw }));
+}
+
+/**
+ * Prepend the avatar to the portrait list as a synthetic gallery
+ * entry when the owner ticked "Include in Gallery" on the avatar
+ * field. We don't store this as a real portrait row — that would
+ * dangle a stale copy of the URL whenever the user changes the
+ * avatar later. Instead we synthesize one at read time with a
+ * stable id ("avatar") so the renderer can deduplicate against
+ * the same URL appearing as a real portrait too (a paranoid user
+ * who added their avatar URL to the gallery manually + then
+ * ticked the box). NSFW carries forward from the surrounding
+ * profile — the synthetic tile inherits the profile-level NSFW
+ * flag the same way the hero portrait already does.
+ */
+function maybePrependAvatarPortrait(
+  portraits: CharacterPortrait[],
+  avatarUrl: string | null,
+  includeAvatarInGallery: boolean,
+  profileIsNsfw: boolean,
+): CharacterPortrait[] {
+  if (!includeAvatarInGallery || !avatarUrl) return portraits;
+  // Deduplicate: if the avatar URL already appears as a real
+  // portrait row, skip the synthetic one rather than render the
+  // same image twice.
+  if (portraits.some((p) => p.url === avatarUrl)) return portraits;
+  const synthetic: CharacterPortrait = {
+    id: "avatar",
+    url: avatarUrl,
+    label: null,
+    nsfw: profileIsNsfw,
+  };
+  return [synthetic, ...portraits];
 }
 
 /**
@@ -396,6 +448,12 @@ async function lookupProfile(
     .limit(1))[0];
   if (u && !u.disabledAt) {
     const ns = await getEquippedNameStyle(db, "user", u.id);
+    const portraits = maybePrependAvatarPortrait(
+      await listMasterPortraits(db, u.id),
+      u.avatarUrl,
+      u.includeAvatarInGallery,
+      u.isNsfw,
+    );
     return {
       kind: "master",
       profile: {
@@ -403,6 +461,7 @@ async function lookupProfile(
         username: u.username,
         bioHtml: u.bioHtml,
         avatarUrl: u.avatarUrl,
+        portraits,
         gender: u.gender,
         theme: await parseUserThemeJson(db, u.themeJson),
         titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
@@ -444,6 +503,12 @@ async function lookupProfile(
   // username inline — this query is the one that resolves it.
   const showOwner = await viewerIsModerator(db, viewerId);
   const ns = await getEquippedNameStyle(db, "character", c.id);
+  const charPortraits = maybePrependAvatarPortrait(
+    await listPortraits(db, c.id),
+    c.avatarUrl,
+    c.includeAvatarInGallery,
+    c.isNsfw,
+  );
   return {
     kind: "character",
     profile: {
@@ -453,7 +518,7 @@ async function lookupProfile(
       bioHtml: c.bioHtml,
       stats: parseStats(c.statsJson),
       avatarUrl: c.avatarUrl,
-      portraits: await listPortraits(db, c.id),
+      portraits: charPortraits,
       links: await listLinks(db, c.userId, c.id),
       journalEntries: await listPublicJournal(db, c.id),
       theme,
@@ -519,6 +584,12 @@ async function lookupRandomProfile(
       .offset(idx))[0];
     if (!u) return null;
     const ns = await getEquippedNameStyle(db, "user", u.id);
+    const portraits = maybePrependAvatarPortrait(
+      await listMasterPortraits(db, u.id),
+      u.avatarUrl,
+      u.includeAvatarInGallery,
+      u.isNsfw,
+    );
     return {
       kind: "master",
       profile: {
@@ -526,6 +597,7 @@ async function lookupRandomProfile(
         username: u.username,
         bioHtml: u.bioHtml,
         avatarUrl: u.avatarUrl,
+        portraits,
         gender: u.gender,
         theme: await parseUserThemeJson(db, u.themeJson),
         titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
@@ -560,6 +632,12 @@ async function lookupRandomProfile(
   const c = row.char;
   const showOwner = await viewerIsModerator(db, viewerId);
   const ns = await getEquippedNameStyle(db, "character", c.id);
+  const portraits = maybePrependAvatarPortrait(
+    await listPortraits(db, c.id),
+    c.avatarUrl,
+    c.includeAvatarInGallery,
+    c.isNsfw,
+  );
   return {
     kind: "character",
     profile: {
@@ -569,7 +647,7 @@ async function lookupRandomProfile(
       bioHtml: c.bioHtml,
       stats: parseStats(c.statsJson),
       avatarUrl: c.avatarUrl,
-      portraits: await listPortraits(db, c.id),
+      portraits,
       links: await listLinks(db, c.userId, c.id),
       journalEntries: await listPublicJournal(db, c.id),
       theme: await parseUserThemeJson(db, c.themeJson ?? row.ownerThemeJson),

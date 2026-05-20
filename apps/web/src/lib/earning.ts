@@ -954,3 +954,54 @@ export function formatLedgerReason(reason: string): string {
       return reason;
   }
 }
+
+/**
+ * Metadata-aware ledger label. Falls back to `formatLedgerReason`
+ * for entries whose reason has no expected metadata shape; for the
+ * item-command reasons it expands "command_give_received" into
+ * "Received 2 × Cookie from WAS" so the recipient can tell at a
+ * glance who gave them what (the bare reason string was opaque on
+ * its own, which led to "who gave me this cookie?" support
+ * questions). The metadata fields come from items.ts's INSERT
+ * payloads (`fromDisplayName`, `targetDisplayName`, `itemKey`,
+ * `quantity`).
+ */
+export function formatLedgerEntry(entry: LedgerEntry, itemCatalog?: ReadonlyMap<string, { name: string; namePlural: string | null }>): string {
+  const meta = (entry.metadata ?? {}) as {
+    itemKey?: string;
+    quantity?: number;
+    fromDisplayName?: string;
+    targetDisplayName?: string;
+  };
+  const qty = typeof meta.quantity === "number" ? meta.quantity : null;
+  const catRow = meta.itemKey ? itemCatalog?.get(meta.itemKey) : undefined;
+  // Prefer catalog display name; fall back to the raw slug so an
+  // item the admin renamed or deleted still surfaces something
+  // legible. Pluralization mirrors items.ts: namePlural if set,
+  // else "<name>s".
+  const itemLabel = catRow
+    ? (qty === 1 ? catRow.name : (catRow.namePlural ?? `${catRow.name}s`))
+    : meta.itemKey ?? "(unknown item)";
+  const qtyPrefix = qty != null ? `${qty} × ` : "";
+
+  switch (entry.reason) {
+    case "command_give":
+      return meta.targetDisplayName
+        ? `Gave ${qtyPrefix}${itemLabel} to ${meta.targetDisplayName}`
+        : `Gave ${qtyPrefix}${itemLabel}`;
+    case "command_give_received":
+      return meta.fromDisplayName
+        ? `Received ${qtyPrefix}${itemLabel} from ${meta.fromDisplayName}`
+        : `Received ${qtyPrefix}${itemLabel}`;
+    case "command_throw":
+      return meta.targetDisplayName
+        ? `Threw ${qtyPrefix}${itemLabel} at ${meta.targetDisplayName}`
+        : `Threw ${qtyPrefix}${itemLabel}`;
+    case "command_drop":
+      return meta.targetDisplayName
+        ? `Dropped ${qtyPrefix}${itemLabel} on ${meta.targetDisplayName}`
+        : `Dropped ${qtyPrefix}${itemLabel}`;
+    default:
+      return formatLedgerReason(entry.reason);
+  }
+}

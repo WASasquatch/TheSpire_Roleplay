@@ -9,6 +9,7 @@ import { genderGlyph } from "../lib/gender.js";
 import type { Gender } from "../lib/gender.js";
 import { profileShareUrl } from "../lib/profiles.js";
 import { fetchPublicEarning, type PublicEarningResponse } from "../lib/earning.js";
+import { ItemZoomView } from "./ItemZoomView.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { RankSigil } from "./RankSigil.js";
 import { StyledName } from "./StyledName.js";
@@ -661,19 +662,15 @@ function ProfileBody({
                 )}
               </Section>
 
-              {/* Additional portraits (character profiles only). Renders as a
-                  responsive grid so a character with multiple looks/forms
-                  shows them all without dominating the modal. Each tile is a
-                  click-to-zoom that swaps the large image inline.
-                  The empty state still renders the section heading + a hint
-                  pointing at the editor so the feature stays discoverable on
-                  fresh character profiles — earlier the whole section
-                  vanished when portraits.length === 0, which made it look
-                  like the gallery feature itself was missing rather than
-                  just unfilled. */}
-              {profile.kind === "character" ? (
-                <PortraitGallery portraits={profile.profile.portraits} alt={name} />
-              ) : null}
+              {/* Additional portraits gallery. Character profiles and
+                  master / OOC profiles both render this — the master
+                  gallery lives in user_portraits (added in migration
+                  0113), the character gallery in character_portraits;
+                  both ship the same wire shape so a single component
+                  handles both. The empty state still renders the
+                  section heading + a hint pointing at the editor so
+                  the feature stays discoverable on fresh profiles. */}
+              <PortraitGallery portraits={profile.profile.portraits} alt={name} />
 
               {/* Character journal (public entries only - private ones are
                   filtered server-side and only ever appear in the owner's
@@ -710,7 +707,7 @@ function ProfileBody({
           it sits in the DOM. Closes on any click, Esc, or when the
           parent modal unmounts. */}
       {zoomedPin ? (
-        <CollectionPinZoom entry={zoomedPin} onClose={() => setZoomedPin(null)} />
+        <ItemZoomView entry={zoomedPin} onClose={() => setZoomedPin(null)} />
       ) : null}
     </>
   );
@@ -888,69 +885,6 @@ function CollectionPin({
       )}
       <span className="line-clamp-1 break-all font-semibold text-keep-text">{entry.name}</span>
     </button>
-  );
-}
-
-/** Full-screen tap-to-zoom overlay for a collection pin. Renders a
- *  large copy of the item icon over a dimmed backdrop with name +
- *  description below; clicking anywhere or pressing Esc closes.
- *  Positioned `fixed inset-0` at z:60 so it sits above the
- *  ProfileModal shell (z:50) and any other overlay below it.
- *
- *  This is universal across devices, not strictly mobile-only — on
- *  desktop it's a click-to-magnify; on mobile it's the "I tapped
- *  this little icon, give me a bigger view" interaction. Title-
- *  tooltips still surface the description on mouse hover for users
- *  who prefer not to click. */
-function CollectionPinZoom({
-  entry,
-  onClose,
-}: {
-  entry: { itemKey: string; name: string; namePlural: string | null; description: string; iconUrl: string | null };
-  onClose: () => void;
-}) {
-  // Esc-to-close. document-level listener so the overlay doesn't
-  // need keyboard focus to receive the key.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`${entry.name} — full view`}
-      onClick={onClose}
-      className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 bg-black/85 p-6 backdrop-blur-sm"
-    >
-      {entry.iconUrl ? (
-        <img
-          src={entry.iconUrl}
-          alt=""
-          className="max-h-[70vh] max-w-[90vw] rounded border border-white/20 bg-keep-bg object-contain"
-        />
-      ) : (
-        <div
-          className="grid h-64 w-64 max-h-[70vh] max-w-[90vw] place-items-center rounded border border-white/20 bg-keep-banner/40"
-          aria-hidden="true"
-        >
-          <span className="text-6xl font-semibold text-white/60">{entry.name.slice(0, 1).toUpperCase()}</span>
-        </div>
-      )}
-      <div className="max-w-md text-center text-white">
-        <h3 className="font-action text-2xl">{entry.name}</h3>
-        {entry.description ? (
-          <p className="mt-2 text-sm text-white/80">{entry.description}</p>
-        ) : null}
-        <p className="mt-3 text-[10px] uppercase tracking-widest text-white/50">
-          Tap anywhere or press Esc to close
-        </p>
-      </div>
-    </div>
   );
 }
 

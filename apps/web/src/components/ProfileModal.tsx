@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import DOMPurify from "dompurify";
+import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import { isAdminRole } from "@thekeep/shared";
 import type { CharacterPortrait, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
@@ -553,10 +553,10 @@ function ProfileBody({
                     {statEntries.map(([k, v]) => (
                       <div
                         key={k}
-                        className="flex justify-between gap-3 border-b border-keep-rule/40 py-0.5"
+                        className="flex justify-between gap-3 border-b border-keep-rule/40 py-1"
                       >
-                        <dt className="text-xs uppercase tracking-widest text-keep-muted">{k}</dt>
-                        <dd className="truncate text-right">{v}</dd>
+                        <dt className="text-sm uppercase tracking-widest text-keep-text/80">{k}</dt>
+                        <dd className="truncate text-right text-sm">{v}</dd>
                       </div>
                     ))}
                   </dl>
@@ -601,7 +601,7 @@ function ProfileBody({
                         >
                           {isPrivate ? "private" : m.value!.toLocaleString()}
                         </dd>
-                        <dt className="text-[10px] uppercase tracking-widest text-keep-muted">
+                        <dt className="text-xs uppercase tracking-widest text-keep-text/80">
                           {m.label}
                         </dt>
                       </div>
@@ -683,12 +683,19 @@ function ProfileBody({
 
               <Section title="Bio">
                 {bio ? (
+                  // `USER_HTML_SCOPE_CLASS` is the anchor the server's
+                  // `<style>` selector prefix binds to. Without it,
+                  // writer-authored CSS like `.list-card { ... }`
+                  // (which the server stored as
+                  // `.user-html-scope .list-card { ... }`) wouldn't
+                  // match anything — the wrapper class is the
+                  // contract.
                   <div
-                    className="prose prose-sm max-w-none break-words"
-                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(bio) }}
+                    className={`prose prose-sm max-w-none break-words ${USER_HTML_SCOPE_CLASS}`}
+                    dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(bio) }}
                   />
                 ) : (
-                  <p className="italic text-keep-muted">
+                  <p className="text-sm italic text-keep-muted">
                     {name} hasn't written a bio yet.
                   </p>
                 )}
@@ -722,8 +729,8 @@ function ProfileBody({
                           </time>
                         </header>
                         <div
-                          className="prose prose-sm max-w-none break-words"
-                          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(e.bodyHtml) }}
+                          className={`prose prose-sm max-w-none break-words ${USER_HTML_SCOPE_CLASS}`}
+                          dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(e.bodyHtml) }}
                         />
                       </li>
                     ))}
@@ -1000,7 +1007,7 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
           entirely (which made it look like the feature itself was
           missing). */}
       {portraits.length === 0 ? (
-        <p className="text-center text-xs italic text-keep-muted">
+        <p className="text-center text-sm italic text-keep-muted">
           No additional portraits yet. Owners can add more via the profile editor's Gallery tab.
         </p>
       ) : null}
@@ -1032,7 +1039,7 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
             ) : null}
           </div>
           {active.label ? (
-            <span className="text-xs italic text-keep-muted">{active.label}</span>
+            <span className="text-sm italic text-keep-muted">{active.label}</span>
           ) : null}
         </div>
       ) : null}
@@ -1086,8 +1093,15 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="mb-4 last:mb-0">
-      <h3 className="mb-1.5 border-b border-keep-rule/60 pb-0.5 text-xs font-semibold uppercase tracking-widest text-keep-muted">
+    <section className="mb-5 last:mb-0">
+      {/* Header uses `text-keep-text` (not `text-keep-muted`) so it
+          inherits the profile owner's theme nudged for full 4.5:1
+          contrast — `muted` only nudges to 3:1, which at 12px uppercase
+          rendered as borderline-invisible on user-picked palettes that
+          sat close to bg. Bumped to `text-sm` (14px) for parity with
+          chat headers + so the labels read as section dividers, not
+          metadata. */}
+      <h3 className="mb-2 border-b border-keep-rule/60 pb-1 text-sm font-semibold uppercase tracking-widest text-keep-text">
         {title}
       </h3>
       {children}
@@ -1103,35 +1117,29 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * a glance which world this user identifies with most.
  */
 function WorldsSection({ userId, onOpenWorld }: { userId: string; onOpenWorld: ((slug: string) => void) | undefined }) {
-  // Tristate: `null` while loading, `"private"` when the server gated
-  // the response (anonymous viewer — see /users/:id/world-memberships),
-  // or the membership list when the viewer is authed and the user has
-  // any visible memberships. Empty memberships still render nothing so
-  // the section doesn't show an awkward "Worlds:" with no chips.
-  const [memberships, setMemberships] = useState<WorldMembership[] | "private" | null>(null);
+  // Membership list. Loading state is `null`; once the fetch lands
+  // it's an array (possibly empty — anonymous viewer looking at a
+  // user whose memberships are all in private worlds, or just a
+  // user with no world memberships at all). Empty array renders
+  // nothing so the section doesn't show an awkward "Worlds:" with
+  // no chips. The server now filters per-row: public/open worlds
+  // are always visible; private worlds are gated to owner/admin, so
+  // anonymous viewers still see the user's public memberships —
+  // matching the public-world surfacing that's already on the
+  // splash.
+  const [memberships, setMemberships] = useState<WorldMembership[] | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetch(`/users/${encodeURIComponent(userId)}/world-memberships`, { credentials: "include" })
-      .then((r) => (r.ok ? (r.json() as Promise<{ memberships?: WorldMembership[]; private?: true }>) : null))
+      .then((r) => (r.ok ? (r.json() as Promise<{ memberships?: WorldMembership[] }>) : null))
       .then((j) => {
         if (cancelled || !j) return;
-        if (j.private) setMemberships("private");
-        else if (j.memberships) setMemberships(j.memberships);
+        if (j.memberships) setMemberships(j.memberships);
       })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [userId]);
   if (memberships === null) return null;
-  if (memberships === "private") {
-    return (
-      <Section title="Worlds">
-        <p className="text-xs italic text-keep-muted">
-          Worlds are private. <a href="/login" className="text-keep-action hover:underline">Log in</a> or{" "}
-          <a href="/register" className="text-keep-action hover:underline">register</a> to view.
-        </p>
-      </Section>
-    );
-  }
   if (memberships.length === 0) return null;
   return (
     <Section title="Worlds">

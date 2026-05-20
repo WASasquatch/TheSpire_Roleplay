@@ -1048,17 +1048,21 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
    */
   app.get<{ Params: { userId: string } }>("/users/:userId/world-memberships", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    // Privacy: world memberships expose the owner's username via every
-    // joined world, which is how a determined anon viewer could otherwise
-    // walk from a character profile back to its master account. Gate the
-    // entire response on auth — anonymous viewers get a `{ private: true }`
-    // stub so the client can render a "log in to view" placeholder
-    // instead of an error. Logged-in viewers see the membership list
-    // (filtered to private-world visibility as before). HTTP 200 with a
-    // discriminating shape so fetch() doesn't treat it as an error.
-    if (!me) {
-      return { private: true as const };
-    }
+    // Visibility model — runs identically for anonymous and logged-in
+    // viewers, with the viewer's identity only affecting which PRIVATE
+    // worlds are unblanked:
+    //
+    //   public / open visibility → always shown (the splash already
+    //     features these by name; surfacing them on a profile leaks
+    //     nothing extra).
+    //   private visibility       → shown ONLY when the viewer is the
+    //     world's owner or a site admin. Anonymous viewers and
+    //     unrelated logged-in viewers never see private memberships.
+    //
+    // The previous implementation gated the ENTIRE response on auth
+    // ({ private: true } stub for anonymous), which over-hid public
+    // worlds the splash was already advertising. Now the gate is per
+    // row, scoped to the privacy of each world individually.
     const rows = await db
       .select({
         worldId: worldMembers.worldId,
@@ -1075,7 +1079,9 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       .orderBy(desc(worldMembers.isPrimary), asc(worldMembers.joinedAt));
     const filtered = rows.filter((r) => {
       if (r.visibility !== "private") return true;
-      // Private worlds: visible only if the viewer is the world's owner or admin.
+      // Private worlds: visible only if the viewer is the world's
+      // owner or a site admin. Anonymous viewers (me === null) and
+      // unrelated logged-in viewers fall through to false.
       return !!me && (isAdminRole(me.role) || r.ownerUserId === me.id);
     });
     const memberships: WorldMembership[] = await Promise.all(

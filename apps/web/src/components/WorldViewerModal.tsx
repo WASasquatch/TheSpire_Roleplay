@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import DOMPurify from "dompurify";
+import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import type { WorldDetail, WorldPage } from "@thekeep/shared";
 import { buildWorldTree, parseWorldFromUrl, syncWorldUrl, worldShareUrl, type WorldTreeNode } from "../lib/worlds.js";
 import { readError } from "../lib/http.js";
@@ -294,8 +294,8 @@ function PageView({ page, description }: { page: WorldPage | null; description: 
       <h3 className="mb-2 font-action text-xl">{page.title}</h3>
       {page.bodyHtml.trim() ? (
         <div
-          className="prose prose-sm max-w-none text-sm leading-relaxed [&_a]:text-keep-action [&_blockquote]:border-l-2 [&_blockquote]:border-keep-rule [&_blockquote]:pl-3 [&_h3]:font-action [&_h4]:font-action [&_h5]:font-action [&_h6]:font-action [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
-          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(page.bodyHtml) }}
+          className={`prose prose-sm max-w-none text-sm leading-relaxed [&_a]:text-keep-action [&_blockquote]:border-l-2 [&_blockquote]:border-keep-rule [&_blockquote]:pl-3 [&_h3]:font-action [&_h4]:font-action [&_h5]:font-action [&_h6]:font-action [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 ${USER_HTML_SCOPE_CLASS}`}
+          dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(page.bodyHtml) }}
         />
       ) : (
         <p className="italic text-keep-muted">This page is empty.</p>

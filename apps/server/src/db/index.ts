@@ -23,3 +23,27 @@ sqlite.pragma("synchronous = NORMAL");
 export const db = drizzle(sqlite, { schema });
 export { schema };
 export type Db = typeof db;
+
+/**
+ * The raw better-sqlite3 handle backing the drizzle wrapper. Routes
+ * should normally use `db` for type safety and FK-aware writes; this
+ * lower-level handle is exposed for the narrow set of operations that
+ * legitimately need full SQL flexibility:
+ *
+ *   - dynamic table/column SQL (PRAGMA table_info, dynamic INSERT
+ *     into a name chosen at runtime — used by the backup importer
+ *     for cross-install upserts against arbitrary schemas);
+ *   - `VACUUM INTO` for atomic full-DB snapshots;
+ *   - one-off admin tooling that doesn't fit the drizzle query
+ *     builder.
+ *
+ * Do NOT reach for this when a typed drizzle call would work —
+ * skipping the ORM forfeits the type safety the rest of the codebase
+ * relies on.
+ */
+export const sqliteHandle: Database.Database = sqlite;
+
+/** Resolved absolute path to the SQLite file on disk. Exposed so the
+ *  backup full-DB exporter can run `VACUUM INTO` against a sibling
+ *  path on the same volume. */
+export const sqlitePath: string = dbPath;

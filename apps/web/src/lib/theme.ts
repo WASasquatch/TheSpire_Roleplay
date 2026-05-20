@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 import type { CSSProperties } from "react";
-import { DEFAULT_THEME, isDarkPalette, THEME_PRESETS, type Theme } from "@thekeep/shared";
+import { DEFAULT_THEME, isDarkPalette, legibleThemePalette, THEME_PRESETS, type Theme } from "@thekeep/shared";
 import { loadCachedActiveTheme, type SiteBranding } from "../state/store.js";
 
 /**
@@ -116,14 +116,22 @@ export function splashBgUrl(theme: Theme): string {
  * subtree (e.g. profile modal showing the OWNER's theme).
  */
 export function themeStyle(theme: Theme): CSSProperties {
+  // Nudge text + muted toward legibility against bg so a profile-
+  // themed modal (or anywhere else this style wraps a subtree) never
+  // renders body copy invisibly against a similar-luminance background.
+  // Other slots are passed through verbatim. The hex stored in the DB
+  // doesn't change — only the rendered RGB triple shifts.
+  const legible = legibleThemePalette(theme);
   const out: Record<string, string> = {};
   for (const slot of VAR_KEYS) {
-    out[`--keep-${slot}`] = hexToRgbTriple(theme[slot]);
+    out[`--keep-${slot}`] = hexToRgbTriple(legible[slot]);
   }
   // Derived neon variants — same hue as the user's pick, but normalized
   // to full saturation + mid-dark luminance so glow/halo treatments in
   // styles like scifi read as a rich saturated neon instead of a
-  // washed-out near-white. See `buildNeon` for the recipe.
+  // washed-out near-white. See `buildNeon` for the recipe. Built from
+  // the ORIGINAL action/accent (not the legibility-nudged copy) since
+  // these are aesthetic accent splashes, not body text.
   out["--keep-action-neon"] = buildNeon(theme.action);
   out["--keep-accent-neon"] = buildNeon(theme.accent);
   out.colorScheme = isDarkTheme(theme) ? "dark" : "light";
@@ -144,8 +152,14 @@ export function themeStyle(theme: Theme): CSSProperties {
  */
 export function applyTheme(theme: Theme): void {
   const root = document.documentElement;
+  // Nudge text + muted for legibility against bg — same guarantee as
+  // themeStyle. A user who picks a theme with muted-on-muted contrast
+  // (or who later darkens their bg until the existing muted disappears
+  // into it) still gets readable body copy; the saved hex doesn't
+  // change, only the rendered RGB triple shifts.
+  const legible = legibleThemePalette(theme);
   for (const slot of VAR_KEYS) {
-    const base = theme[slot];
+    const base = legible[slot];
     root.style.setProperty(`--keep-${slot}`, hexToRgbTriple(base));
     const ramp = buildRamp(base);
     for (let i = 0; i < ramp.length; i++) {
@@ -158,7 +172,9 @@ export function applyTheme(theme: Theme): void {
   // mid-dark luminance — read as rich saturated neons regardless of
   // whether the user picked a washed-out pastel or a near-black accent.
   // Consumed by the scifi theme's tube-light rules; harmless on
-  // medieval/modern (they don't reference these vars).
+  // medieval/modern (they don't reference these vars). Built from the
+  // ORIGINAL action/accent (not the legibility-nudged copy) since the
+  // neon recipe normalizes saturation/luminance from scratch.
   root.style.setProperty("--keep-action-neon", buildNeon(theme.action));
   root.style.setProperty("--keep-accent-neon", buildNeon(theme.accent));
   root.style.colorScheme = isDarkTheme(theme) ? "dark" : "light";

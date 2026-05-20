@@ -703,7 +703,10 @@ export async function findCanonicalLanding(db: Db): Promise<typeof rooms.$inferS
  * handlers) and `RemoteSocket` (from `io.fetchSockets()`).
  */
 export async function sendRoomBacklogTo(
-  socket: { emit(event: "message:bulk", payload: ChatMessage[]): unknown },
+  socket: {
+    emit(event: "message:bulk", payload: ChatMessage[]): unknown;
+    emit(event: "room:history_meta", payload: { roomId: string; hasMore: boolean }): unknown;
+  },
   db: Db,
   roomId: string,
   viewerUserId: string,
@@ -724,12 +727,22 @@ export async function sendRoomBacklogTo(
     .where(eq(users.id, viewerUserId))
     .limit(1))[0];
   const viewerIsAdmin = !!viewerRow && isAdminRole(viewerRow.role);
-  const recent = await db
+  // Overfetch by 1 so we can detect "older messages exist" reliably
+  // without a separate COUNT query. The 51st row is dropped from the
+  // returned backlog (which the client renders as the top of its
+  // history); its mere existence flags hasMore=true. Without this,
+  // a viewer in a busy room can receive fewer than 50 visible
+  // messages after the ignored-user + whisper filters below, and the
+  // client would incorrectly conclude there's no older history left.
+  const BACKLOG_LIMIT = 50;
+  const recentPlusOne = await db
     .select()
     .from(messages)
     .where(eq(messages.roomId, roomId))
     .orderBy(desc(messages.createdAt))
-    .limit(50);
+    .limit(BACKLOG_LIMIT + 1);
+  const hasMoreOlder = recentPlusOne.length > BACKLOG_LIMIT;
+  const recent = hasMoreOlder ? recentPlusOne.slice(0, BACKLOG_LIMIT) : recentPlusOne;
   const backlog: ChatMessage[] = recent
     .filter((m) => !ignoredIds.has(m.userId))
     .filter((m) => {
@@ -781,6 +794,11 @@ export async function sendRoomBacklogTo(
         : {}),
     }));
   socket.emit("message:bulk", backlog);
+  // Authoritative "older messages exist" signal for the scroll-up
+  // paginator. Computed from the DB-level query length (51) so it
+  // ignores per-viewer filtering — the load-older endpoint will
+  // apply the same filter again when the user actually scrolls up.
+  socket.emit("room:history_meta", { roomId, hasMore: hasMoreOlder });
 }
 
 export async function joinRoom(

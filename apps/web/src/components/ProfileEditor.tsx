@@ -614,6 +614,33 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   // name/icon/description. Master and character pins are kept
   // separate so identity-switching the preview target swaps the
   // pin sets correctly.
+  // Derive the equipped name-style key + parsed config for the
+  // preview target's identity. Mirrors what the server's
+  // getEquippedNameStyle would return on a real /profiles/:name call,
+  // so the editor preview paints the username with the same style
+  // chat does. Master reads activeCosmetics + ownedStyles; a
+  // character reads activeCosmetics.byCharacter + ownedStylesByCharacter.
+  const previewNameStyle = useMemo(() => {
+    if (!earningSnapshot) return { key: null, config: null } as { key: string | null; config: Record<string, unknown> | null };
+    let key: string | null = null;
+    let owned: { styleKey: string; configJson: string | null }[] = [];
+    if (target.kind === "master") {
+      key = earningSnapshot.activeCosmetics.activeNameStyleKey ?? null;
+      owned = earningSnapshot.ownedStyles ?? [];
+    } else {
+      key = earningSnapshot.activeCosmetics.byCharacter?.[target.id]?.activeNameStyleKey ?? null;
+      owned = earningSnapshot.ownedStylesByCharacter?.[target.id] ?? [];
+    }
+    if (!key) return { key: null, config: null };
+    const row = owned.find((o) => o.styleKey === key);
+    let config: Record<string, unknown> | null = null;
+    if (row?.configJson) {
+      try { config = JSON.parse(row.configJson) as Record<string, unknown>; }
+      catch { config = null; }
+    }
+    return { key, config };
+  }, [earningSnapshot, target]);
+
   const previewCollections = useMemo(() => {
     const empty = { items: [] as ProfileCollectionEntry[], pets: [] as ProfileCollectionEntry[] };
     if (!earningSnapshot) return empty;
@@ -690,6 +717,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           // the preview at least surfaces what's currently pinned.
           collection: previewCollections.items,
           petCollection: previewCollections.pets,
+          nameStyleKey: previewNameStyle.key,
+          nameStyleConfig: previewNameStyle.config,
         },
       };
     }
@@ -725,9 +754,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         // a character picks up that character's pin sets.
         collection: previewCollections.items,
         petCollection: previewCollections.pets,
+        nameStyleKey: previewNameStyle.key,
+        nameStyleConfig: previewNameStyle.config,
       },
     };
-  }, [target, master, myUserId, name, bioHtml, avatarUrl, gender, stats, theme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey, previewCollections]);
+  }, [target, master, myUserId, name, bioHtml, avatarUrl, gender, stats, theme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey, previewCollections, previewNameStyle]);
 
   const targetOptions = useMemo(() => {
     return [
@@ -822,27 +853,54 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             { id: "gallery",     label: "Gallery",     show: isCharacter },
             { id: "journal",     label: "Journal",     show: isCharacter },
           ];
+          const visible = tabs.filter((t) => t.show);
           return (
             <div
-              className="flex shrink-0 flex-nowrap overflow-x-auto border-b border-keep-rule bg-keep-banner/40"
+              className="shrink-0 border-b border-keep-rule bg-keep-banner/40"
               role="tablist"
             >
-              {tabs.filter((t) => t.show).map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={activeTab === t.id}
-                  onClick={() => setActiveTab(t.id)}
-                  className={`shrink-0 whitespace-nowrap px-3 py-2 text-xs uppercase tracking-widest ${
-                    activeTab === t.id
-                      ? "border-b-2 border-keep-action text-keep-text"
-                      : "text-keep-muted hover:text-keep-text"
-                  }`}
+              {/* Mobile (<md): collapse the tab strip to a full-width
+                  dropdown. The horizontal-scroll strip pushed the last
+                  tab(s) off-screen on phones and made discovery
+                  hostile — Gallery/Journal frequently fell into the
+                  hidden overflow on character profiles. This pattern
+                  mirrors AdminPanel + EarningDashboard, so the whole
+                  app reads consistently on mobile. */}
+              <div className="px-2 py-1 md:hidden">
+                <select
+                  value={activeTab}
+                  onChange={(e) => setActiveTab(e.target.value as EditorTab)}
+                  aria-label="Profile editor section"
+                  className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs uppercase tracking-widest text-keep-text outline-none focus:border-keep-action"
                 >
-                  {t.label}
-                </button>
-              ))}
+                  {visible.map((t) => (
+                    <option key={t.id} value={t.id}>{t.label}</option>
+                  ))}
+                </select>
+              </div>
+              {/* Desktop (md+): the original horizontal strip. Hidden
+                  on mobile by the matching `md:hidden` on the dropdown
+                  above. `overflow-x-auto` is kept as a safety net for
+                  narrow desktop widths but should rarely engage with
+                  only 5-7 tabs at the typical desktop font size. */}
+              <div className="hidden flex-nowrap overflow-x-auto md:flex">
+                {visible.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === t.id}
+                    onClick={() => setActiveTab(t.id)}
+                    className={`shrink-0 whitespace-nowrap px-3 py-2 text-xs uppercase tracking-widest ${
+                      activeTab === t.id
+                        ? "border-b-2 border-keep-action text-keep-text"
+                        : "text-keep-muted hover:text-keep-text"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
             </div>
           );
         })()}

@@ -69,7 +69,20 @@ EXPOSE 8080
 # lifecycle reaches the Node process cleanly.
 ENTRYPOINT ["/sbin/tini", "--"]
 
-# Run migrations idempotently on every boot, then exec the server. apply-
-# migrations.mjs is fast on a fully-applied DB (one SELECT per file) so the
-# overhead is negligible.
-CMD ["sh", "-c", "mkdir -p /data && node apps/server/scripts/apply-migrations.mjs && exec pnpm --filter @thekeep/server run start"]
+# Boot sequence on every container start:
+#   1. Ensure /data exists (Fly volume mount).
+#   2. If the admin Backups tab staged a pending full-DB restore on
+#      the previous boot, atomically swap it into place BEFORE
+#      anything opens the SQLite file. The pending file lives next
+#      to the canonical DB on the same filesystem so the rename is
+#      atomic. The WAL/SHM sidecars of the OLD database are also
+#      removed in the same step — leaving them would let SQLite
+#      replay stale WAL pages onto the freshly-restored file and
+#      silently corrupt it. The restore is one-shot: after the
+#      rename, the marker file no longer exists, so a subsequent
+#      benign restart can't loop the swap.
+#   3. Run pending migrations against the (possibly just-restored)
+#      DB. apply-migrations.mjs is fast on a fully-applied DB (one
+#      SELECT per file) so the overhead is negligible.
+#   4. Exec the server.
+CMD ["sh", "-c", "mkdir -p /data && if [ -f /data/.thekeep-pending-restore.sqlite ]; then echo '[boot] applying pending full-DB restore'; rm -f /data/thekeep.sqlite /data/thekeep.sqlite-wal /data/thekeep.sqlite-shm; mv /data/.thekeep-pending-restore.sqlite /data/thekeep.sqlite; fi && node apps/server/scripts/apply-migrations.mjs && exec pnpm --filter @thekeep/server run start"]

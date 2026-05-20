@@ -30,6 +30,10 @@ export type AuditAction =
   | "custom_command_update"
   | "custom_command_delete"
   | "logo_upload"
+  // Backup / restore (admin Backups tab)
+  | "backup_create"
+  | "backup_import"
+  | "backup_delete"
   // Account management
   | "user_disable"
   | "user_enable"

@@ -30,6 +30,7 @@ import {
 import { getSettings, updateSettings } from "../settings.js";
 import { recordAudit } from "../audit.js";
 import { registerAdminEarningRoutes } from "./earning.js";
+import { registerAdminBackupRoutes } from "./backup.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -81,6 +82,15 @@ export async function registerAdminRoutes(
   // Ranks endpoints accept asset uploads under the shared
   // `uploads/ranks/` directory served by the static handler.
   registerAdminEarningRoutes(app, { db, io, uploadsRoot, getSessionUser });
+
+  // Backups — masteradmin-only. Mounts /admin/backup/* endpoints for
+  // creating, inspecting, importing, and managing full-DB and
+  // content snapshots on the persistent volume. The backup module
+  // owns its own gate (every handler calls masterAdminOnly internally
+  // because the destructive-restore paths warrant stricter access
+  // than the plain-`admin` preHandler check that gates everything
+  // under /admin/*).
+  registerAdminBackupRoutes(app, { db });
 
   // Helper for the destructive-route gate. Every endpoint behind this
   // (site settings PUT, branding upload, user disable / role mutations

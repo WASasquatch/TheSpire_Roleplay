@@ -17,6 +17,7 @@ import { readError } from "../lib/http.js";
 import { parseInline } from "../lib/markdown.js";
 import { listStyles } from "../lib/ornaments/index.js";
 import { AdminEarningTab } from "./AdminEarningTab.js";
+import { AdminBackupsTab } from "./AdminBackupsTab.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { useChat } from "../state/store.js";
@@ -29,7 +30,7 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "audit";
+type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "audit" | "backups";
 
 /** Single source of truth for tabs. Order here = order in both the
  *  desktop strip and the mobile dropdown. `masterOnly` tabs are gated
@@ -48,6 +49,10 @@ const TAB_ITEMS: ReadonlyArray<{ id: Tab; label: string; masterOnly?: boolean }>
   { id: "users", label: "Users" },
   { id: "reports", label: "Reports" },
   { id: "audit", label: "Audit" },
+  // Backups is masteradmin-only because the destructive Restore /
+  // Import paths can blow away the whole DB. Plain admins don't see
+  // the tab; the server also 403s every /admin/backup/* endpoint.
+  { id: "backups", label: "Backups", masterOnly: true },
 ];
 
 export function AdminPanel({ onClose, onLinksChanged }: Props) {
@@ -127,6 +132,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
           {tab === "users" ? <UsersTab /> : null}
           {tab === "reports" ? <ReportsTab /> : null}
           {tab === "audit" ? <AuditTab /> : null}
+          {tab === "backups" && isMaster ? <AdminBackupsTab /> : null}
         </div>
       </div>
     </Modal>
@@ -3103,7 +3109,12 @@ function TitleKindForm({
           required
         />
         <div className="text-[10px] text-keep-muted">
-          {"{target} is replaced with the other party's display name."}
+          <p>{"{target} is replaced with the other party's display name."}</p>
+          <p className="mt-0.5">
+            {"{gender:Male|Female|Neutral} picks based on the subject's gender — e.g."}
+            {' "{gender:Father|Mother|Parent} of {target}"'}
+            {" renders as Father / Mother / Parent depending on whose profile the chip is on."}
+          </p>
         </div>
       </label>
 
@@ -3114,7 +3125,7 @@ function TitleKindForm({
             type="text"
             value={formatB}
             onChange={(e) => setFormatB(e.target.value)}
-            placeholder="Apprentice of {target}"
+            placeholder="{gender:Son|Daughter|Child} of {target}"
             className="w-full rounded border border-keep-rule bg-keep-parchment px-2 py-1 font-mono"
             required
           />

@@ -118,6 +118,23 @@ export interface ClientToServerEvents {
 export interface ServerToClientEvents {
   "message:new": (msg: ChatMessage) => void;
   "message:bulk": (msgs: ChatMessage[]) => void;
+  /**
+   * Sent right after `message:bulk` on a fresh room join. Carries the
+   * authoritative `hasMore` for the room so the client's scroll-up
+   * paginator knows whether older pages exist BEYOND what the initial
+   * 50-row backlog returned.
+   *
+   * Why a separate event instead of inferring `hasMore` from the bulk
+   * length: the server's backlog query is `limit 50` then filtered for
+   * ignored users + whispers-not-for-this-viewer. A viewer in a busy
+   * room can legitimately receive 30-49 messages out of 50 queried
+   * (some filtered), and the older-than-50 history still exists in
+   * the DB. Computing `hasMore = msgs.length >= 50` on the client
+   * gave false negatives ("start of history") in exactly that case.
+   * The server overfetches by 1 (51 rows) and ships the truth here
+   * so the paginator stops only when there really is nothing older.
+   */
+  "room:history_meta": (payload: { roomId: string; hasMore: boolean }) => void;
   /** A message was edited or soft-deleted (within its grace window). The client replaces the row with this updated version. */
   "message:update": (msg: ChatMessage) => void;
   "room:state": (payload: { room: RoomSummary; occupants: RoomOccupant[] }) => void;
@@ -376,7 +393,20 @@ export type UiHint =
   /** Clear the local message buffer for the current room (no server effect). */
   | { kind: "clear-room-messages" }
   /** Open the user's bookmarks modal (manages saved chat messages). */
-  | { kind: "open-bookmarks" };
+  | { kind: "open-bookmarks" }
+  /**
+   * Open the Earnings dashboard. Optional `tab` lands the user on a
+   * specific section (Overview, Activity, Name Styles, Borders,
+   * Cosmetics, Items, Settings); optional `itemSubTab` only applies
+   * when `tab === "items"` and selects which Items sub-tab to show
+   * (Inventory, Shop, Collection, Pets). Used by the `/earnings`,
+   * `/shop`, `/collection`, and `/pets` builtin commands.
+   */
+  | {
+      kind: "open-earning";
+      tab?: "overview" | "ledger" | "styles" | "borders" | "cosmetics" | "items" | "settings";
+      itemSubTab?: "inventory" | "shop" | "collection" | "pets";
+    };
 
 /** Wire shape served by GET /commands. The help modal renders this. */
 export interface CommandDoc {

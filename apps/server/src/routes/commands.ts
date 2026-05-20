@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { asc, eq } from "drizzle-orm";
-import type { CommandDoc } from "@thekeep/shared";
+import type { CommandDoc, SubcommandDocWire } from "@thekeep/shared";
 import type { CommandRegistry } from "../commands/registry.js";
-import { customCommandAliases, customCommands } from "../db/schema.js";
+import { customCommandAliases, customCommands, titleKinds } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 
 /**
@@ -32,6 +32,45 @@ export async function registerCommandsRoutes(
       })),
       isCustom: false,
     }));
+
+    // Augment /request + /dissolve with one subcommand entry per
+    // enabled title kind. The static handler can only declare a
+    // generic `<kind> <user>` subcommand because the kinds catalog
+    // is admin-managed and lives in the DB; without this enrichment
+    // the help modal would just say "request a title" without
+    // telling the user which slugs exist. Here we read the live
+    // catalog and emit one row per kind, with a brief asymmetric /
+    // exclusive flag in the description so users can tell at a
+    // glance which kinds are reciprocal vs role-defining and which
+    // can only hold one accepted instance.
+    const kinds = await db
+      .select({
+        slug: titleKinds.slug,
+        label: titleKinds.label,
+        symmetric: titleKinds.symmetric,
+        exclusive: titleKinds.exclusive,
+      })
+      .from(titleKinds)
+      .where(eq(titleKinds.enabled, true))
+      .orderBy(asc(titleKinds.slug));
+    const kindSubsFor = (cmd: "request" | "dissolve"): SubcommandDocWire[] =>
+      kinds.map((k) => {
+        const flags: string[] = [];
+        if (!k.symmetric) flags.push("asymmetric");
+        if (k.exclusive) flags.push("exclusive — one accepted at a time");
+        const flagText = flags.length > 0 ? ` (${flags.join("; ")})` : "";
+        return {
+          verb: k.slug,
+          usage: `/${cmd} ${k.slug} <user-or-character>`,
+          description: `${k.label}${flagText}`,
+          aliases: [],
+        };
+      });
+    for (const doc of builtinDocs) {
+      if (doc.name === "request" || doc.name === "dissolve") {
+        doc.subcommands = [...doc.subcommands, ...kindSubsFor(doc.name)];
+      }
+    }
 
     // Custom commands aren't in the builtin list; pull from the DB so we
     // surface descriptions/aliases that admins authored.

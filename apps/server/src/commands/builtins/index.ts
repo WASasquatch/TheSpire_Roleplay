@@ -46,6 +46,12 @@ import {
   unmuteCommand,
 } from "./mod.js";
 import { currencyCommand, expCommand } from "./earning.js";
+import {
+  collectionCommand,
+  earningsCommand,
+  petsCommand,
+  shopCommand,
+} from "./earning_ui.js";
 import { dropCommand, giveCommand, throwCommand } from "./items.js";
 
 /** Registers all built-in commands. Must run before custom commands are loaded. */
@@ -103,6 +109,11 @@ export function registerBuiltins(reg: CommandRegistry): void {
   // Earning
   reg.registerBuiltin(currencyCommand);
   reg.registerBuiltin(expCommand);
+  // Earning UI shortcuts — open the dashboard at specific tabs.
+  reg.registerBuiltin(earningsCommand);
+  reg.registerBuiltin(shopCommand);
+  reg.registerBuiltin(collectionCommand);
+  reg.registerBuiltin(petsCommand);
   // Items — hand / throw / drop catalog items from your inventory.
   reg.registerBuiltin(giveCommand);
   reg.registerBuiltin(throwCommand);

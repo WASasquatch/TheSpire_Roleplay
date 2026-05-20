@@ -192,8 +192,50 @@ const HTML_OPEN_RE = /^<([a-zA-Z]+)>/;
 const FONT_OPEN_RE = /^<font\s+color\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))\s*>/i;
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}){1,2}$/;
 
+/** Self-closing `<icon src="..."/>` (or `<icon src="...">`) tag used to
+ *  embed a small inline image at text-line height. Server-emitted by the
+ *  `{icon}` placeholder substitution in item command templates; also
+ *  available to authors who want to splice a site icon into chat. The
+ *  URL gate (`ICON_URL_RE` below) is the safety contract: only same-
+ *  origin `/assets/...` paths and `http(s)://` absolute URLs reach
+ *  `<img src>`. `javascript:` / `data:` / `file:` schemes never match.
+ *  Attributes other than `src` are deliberately ignored — there's no
+ *  width/height knob; sizing is controlled by the renderer's CSS so
+ *  the icon stays consistent across every place this tag appears. */
+const ICON_OPEN_RE = /^<icon\s+src\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>/]+))\s*\/?\s*>/i;
+const ICON_URL_RE = /^(?:\/assets\/[^\s"'<>]+|https?:\/\/[^\s"'<>]+)$/i;
+
 function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
   if (text[i] !== "<") return null;
+
+  // <icon src="..."/> — inline item icon. Self-closing void element; no
+  // inner content, no closing tag. URL must point at a same-origin
+  // asset OR an http(s) absolute URL. Failing the URL gate falls
+  // through to the literal-text path so the user sees what they typed
+  // instead of a silent drop.
+  const iconOpen = ICON_OPEN_RE.exec(text.slice(i));
+  if (iconOpen) {
+    const raw = (iconOpen[1] ?? iconOpen[2] ?? iconOpen[3] ?? "").trim();
+    if (ICON_URL_RE.test(raw)) {
+      return {
+        end: i + iconOpen[0].length,
+        node: (
+          <img
+            src={raw}
+            alt=""
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            // 1.2em keeps the icon visually anchored to the surrounding
+            // text line — taller than cap-height, shorter than line-
+            // height — so it reads as inline punctuation rather than
+            // pushing the row taller. align-middle keeps it centered
+            // against the text baseline.
+            className="inline-block h-[1.2em] w-auto rounded-sm align-middle"
+          />
+        ),
+      };
+    }
+  }
 
   // <font color="..."> — special-cased first since the generic
   // HTML_OPEN_RE requires zero attributes and would otherwise miss it.

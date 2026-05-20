@@ -1,10 +1,60 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { characterJournalEntries, characterPortraits, characters, identityCollection, identityPetCollection, items, messages, profileLinks, rooms, users } from "../../db/schema.js";
+import { characterEarning, characterJournalEntries, characterOwnedNameStyles, characterPortraits, characters, identityCollection, identityPetCollection, items, messages, profileLinks, rooms, userActiveCosmetics, userOwnedNameStyles, users } from "../../db/schema.js";
 import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLink, ProfileMetrics, ProfileView } from "@thekeep/shared";
 import { roleRank } from "@thekeep/shared";
 import { parseUserThemeJson } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
 import type { CommandHandler } from "../types.js";
+
+/**
+ * Resolve the identity's equipped name-style key + per-user config so
+ * a profile view can paint the username with the user's chosen
+ * cosmetic — name styles are show-off cosmetics, not chat-only
+ * decoration. Master uses user_active_cosmetics + user_owned_name_styles;
+ * a character uses character_earning + character_owned_name_styles
+ * (per-identity store, migration 0086). Returns nulls when no style is
+ * equipped OR the user has the row but no per-user config snapshot.
+ */
+async function getEquippedNameStyle(
+  db: import("../../db/index.js").Db,
+  scope: "user" | "character",
+  ownerId: string,
+): Promise<{ key: string | null; config: Record<string, unknown> | null }> {
+  if (scope === "user") {
+    const active = (await db
+      .select({ key: userActiveCosmetics.activeNameStyleKey })
+      .from(userActiveCosmetics)
+      .where(eq(userActiveCosmetics.userId, ownerId))
+      .limit(1))[0];
+    const key = active?.key ?? null;
+    if (!key) return { key: null, config: null };
+    const owned = (await db
+      .select({ configJson: userOwnedNameStyles.configJson })
+      .from(userOwnedNameStyles)
+      .where(and(eq(userOwnedNameStyles.userId, ownerId), eq(userOwnedNameStyles.styleKey, key)))
+      .limit(1))[0];
+    return { key, config: parseNameStyleConfig(owned?.configJson ?? null) };
+  }
+  const active = (await db
+    .select({ key: characterEarning.activeNameStyleKey })
+    .from(characterEarning)
+    .where(eq(characterEarning.characterId, ownerId))
+    .limit(1))[0];
+  const key = active?.key ?? null;
+  if (!key) return { key: null, config: null };
+  const owned = (await db
+    .select({ configJson: characterOwnedNameStyles.configJson })
+    .from(characterOwnedNameStyles)
+    .where(and(eq(characterOwnedNameStyles.characterId, ownerId), eq(characterOwnedNameStyles.styleKey, key)))
+    .limit(1))[0];
+  return { key, config: parseNameStyleConfig(owned?.configJson ?? null) };
+}
+
+function parseNameStyleConfig(json: string | null): Record<string, unknown> | null {
+  if (!json) return null;
+  try { return JSON.parse(json) as Record<string, unknown>; }
+  catch { return null; }
+}
 
 /**
  * Resolve whether the viewer has moderator-tier authority. Used to
@@ -345,6 +395,7 @@ async function lookupProfile(
     .where(sql`lower(${users.username}) IN (${sql.join(variants.map((v) => sql`${v}`), sql`, `)})`)
     .limit(1))[0];
   if (u && !u.disabledAt) {
+    const ns = await getEquippedNameStyle(db, "user", u.id);
     return {
       kind: "master",
       profile: {
@@ -363,6 +414,8 @@ async function lookupProfile(
         metrics: await computeProfileMetrics(db, u.id, null, viewerId),
         collection: await listProfileCollection(db, "user", u.id),
         petCollection: await listProfilePetCollection(db, "user", u.id),
+        nameStyleKey: ns.key,
+        nameStyleConfig: ns.config,
       },
     };
   }
@@ -390,6 +443,7 @@ async function lookupProfile(
   // by chained API calls), but mods on the modal need the friendly
   // username inline — this query is the one that resolves it.
   const showOwner = await viewerIsModerator(db, viewerId);
+  const ns = await getEquippedNameStyle(db, "character", c.id);
   return {
     kind: "character",
     profile: {
@@ -411,6 +465,8 @@ async function lookupProfile(
       metrics: await computeProfileMetrics(db, c.userId, c.id, viewerId),
       collection: await listProfileCollection(db, "character", c.id),
       petCollection: await listProfilePetCollection(db, "character", c.id),
+      nameStyleKey: ns.key,
+      nameStyleConfig: ns.config,
       ...(showOwner ? { ownerUsername: owner.username } : {}),
     },
   };
@@ -462,6 +518,7 @@ async function lookupRandomProfile(
       .limit(1)
       .offset(idx))[0];
     if (!u) return null;
+    const ns = await getEquippedNameStyle(db, "user", u.id);
     return {
       kind: "master",
       profile: {
@@ -480,6 +537,8 @@ async function lookupRandomProfile(
         metrics: await computeProfileMetrics(db, u.id, null),
         collection: await listProfileCollection(db, "user", u.id),
         petCollection: await listProfilePetCollection(db, "user", u.id),
+        nameStyleKey: ns.key,
+        nameStyleConfig: ns.config,
       },
     };
   }
@@ -500,6 +559,7 @@ async function lookupRandomProfile(
   if (!row) return null;
   const c = row.char;
   const showOwner = await viewerIsModerator(db, viewerId);
+  const ns = await getEquippedNameStyle(db, "character", c.id);
   return {
     kind: "character",
     profile: {
@@ -521,6 +581,8 @@ async function lookupRandomProfile(
       metrics: await computeProfileMetrics(db, c.userId, c.id),
       collection: await listProfileCollection(db, "character", c.id),
       petCollection: await listProfilePetCollection(db, "character", c.id),
+      nameStyleKey: ns.key,
+      nameStyleConfig: ns.config,
       ...(showOwner ? { ownerUsername: row.ownerUsername } : {}),
     },
   };

@@ -289,11 +289,11 @@ const CONTRAST_TARGET = 4.5;
  * switches to a dark theme — the saved color stays untouched, only the
  * rendered value adapts to the current background.
  */
-export function legibleAgainstBg(color: string, bgHex: string): string {
+export function legibleAgainstBg(color: string, bgHex: string, targetContrast: number = CONTRAST_TARGET): string {
   const fg = parseHexColor(color);
   const bg = parseHexColor(bgHex);
   if (!fg || !bg) return color;
-  if (contrastRatio(fg, bg) >= CONTRAST_TARGET) return color;
+  if (contrastRatio(fg, bg) >= targetContrast) return color;
   const bgLum = relativeLuminance(bg);
   const goingLighter = bgLum < 0.5;
   const hsl = rgbToHsl(fg);
@@ -305,10 +305,38 @@ export function legibleAgainstBg(color: string, bgHex: string): string {
     l += step;
     if (l <= 5 || l >= 95) { l = goingLighter ? 95 : 5; }
     const candidate = hslToRgb({ h: hsl.h, s: hsl.s, l });
-    if (contrastRatio(candidate, bg) >= CONTRAST_TARGET) return rgbToHex(candidate);
+    if (contrastRatio(candidate, bg) >= targetContrast) return rgbToHex(candidate);
     if (l <= 5 || l >= 95) return rgbToHex(candidate);
   }
   return rgbToHex(hslToRgb({ h: hsl.h, s: hsl.s, l }));
+}
+
+/**
+ * Return a copy of the theme with `text` and `muted` slots nudged for
+ * readability against `bg` via {@link legibleAgainstBg}. `text` gets
+ * the full WCAG normal-text minimum (4.5:1); `muted` gets a softer
+ * 3:1 floor so it stays visually "muted" while still being readable.
+ *
+ * Applied at theme-application time (both `themeStyle` for scoped
+ * subtrees and `applyTheme` for the document root) so users browsing
+ * each other's profiles never land on a palette where the body text
+ * disappears into the background — a profile-themed modal that
+ * happens to ship muted-on-muted in its admin preset still surfaces
+ * the bio placeholder, the "Master account · joined …" meta line,
+ * and every other muted-text element. The hex stored in the DB is
+ * unchanged; only the rendered RGB triple shifts when needed.
+ *
+ * The other slots (panel/border/action/accent/system) are left
+ * untouched — those are either chrome surfaces with their own
+ * contrast story or accent splashes that should respect the user's
+ * literal pick.
+ */
+export function legibleThemePalette(theme: Theme): Theme {
+  return {
+    ...theme,
+    text: legibleAgainstBg(theme.text, theme.bg, 4.5),
+    muted: legibleAgainstBg(theme.muted, theme.bg, 3.0),
+  };
 }
 
 interface Rgb { r: number; g: number; b: number; }

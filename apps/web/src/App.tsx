@@ -688,7 +688,20 @@ function Chat() {
 
   const [adminOpen, setAdminOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [earningOpen, setEarningOpen] = useState(false);
+  /**
+   * EarningDashboard open state. Null = closed; an object = open at
+   * the specified tab + items sub-tab. Storing the open-spec instead
+   * of a boolean lets `ui:hint { kind: "open-earning", tab, itemSubTab }`
+   * deep-link straight into the Shop / Collection / Pets sub-tabs
+   * from the `/shop` / `/collection` / `/pets` builtin commands. An
+   * empty object opens on the default Overview tab — the same shape
+   * the "Your Earning" tools-panel entry uses.
+   */
+  type EarningOpenSpec = {
+    tab?: "overview" | "ledger" | "styles" | "borders" | "cosmetics" | "items" | "settings";
+    itemSubTab?: "inventory" | "shop" | "collection" | "pets";
+  };
+  const [earningOpen, setEarningOpen] = useState<EarningOpenSpec | null>(null);
   const [helpOpen, setHelpOpen] = useState<{ filter?: string } | null>(null);
   const [usersOpen, setUsersOpen] = useState<{ query?: string } | null>(null);
   /**
@@ -1322,12 +1335,27 @@ function Chat() {
       if (msgs.length) {
         const roomId = msgs[0]!.roomId;
         setMessages(roomId, msgs);
-        // Seed the scroll-up paginator. The server caps the backlog at
-        // 50 lines; a full page suggests there's older history to fetch
-        // when the user scrolls up. A short page means we already
-        // received the whole room's history.
-        useChat.getState().setRoomHistoryHasMore(roomId, msgs.length >= 50);
+        // Seed the paginator optimistically. The authoritative value
+        // lands a beat later via `room:history_meta` (sent by the
+        // server immediately after the bulk). Defaulting to TRUE
+        // here means the brief gap between the two events never
+        // shows a false "start of history" — at worst the user
+        // sees a "Scroll up for earlier messages" hint that the
+        // meta event then clears. Counting msgs.length >= 50 used
+        // to seed this and was unreliable: server-side filtering
+        // (ignores + whispers) regularly trimmed the visible count
+        // below 50 even when older history existed.
+        useChat.getState().setRoomHistoryHasMore(roomId, true);
       }
+    });
+    socket.on("room:history_meta", ({ roomId, hasMore }) => {
+      // Authoritative paginator state from the server's backlog
+      // query. Lands right after `message:bulk` on every room join
+      // (and again on relocate-to-room after kick/ban). When false,
+      // the MessageList renders "— start of history —"; when true,
+      // scrolling within 200px of the top triggers the load-older
+      // fetch and prepends another page.
+      useChat.getState().setRoomHistoryHasMore(roomId, hasMore);
     });
     socket.on("message:update", (msg: ChatMessage) => {
       updateMessage(msg);
@@ -1420,6 +1448,17 @@ function Chat() {
           break;
         case "open-bookmarks":
           setBookmarksOpen(true);
+          break;
+        case "open-earning":
+          // Build the open-spec from the hint. Empty object = open at
+          // the default Overview tab (the "Your Earning" tools-panel
+          // shape); a populated object deep-links into a specific
+          // tab + items sub-tab. The dashboard component reads the
+          // initial-tab props on mount.
+          setEarningOpen({
+            ...(h.tab ? { tab: h.tab } : {}),
+            ...(h.itemSubTab ? { itemSubTab: h.itemSubTab } : {}),
+          });
           break;
       }
     });
@@ -2184,14 +2223,14 @@ function Chat() {
       <Banner
         navLinksVersion={navLinksVersion}
         onOpenRules={() => setRulesOpen(true)}
-        onOpenEarning={() => setEarningOpen(true)}
+        onOpenEarning={() => setEarningOpen({})}
         {...(me && isAdminRole(me.role) ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
       <StaleVersionBanner />
       {/* Earning — persistent rank-up ribbon. Only renders when the
           user has unacknowledged rank-ups. Tucked under the version
           banner so deploy nags still take precedence. */}
-      <EarningRibbon onOpenEarning={() => setEarningOpen(true)} />
+      <EarningRibbon onOpenEarning={() => setEarningOpen({})} />
       {room?.linkedWorld ? (
         <button
           type="button"
@@ -2384,7 +2423,7 @@ function Chat() {
             }}
             onCancelTopicCreate={() => setTopicCreateMode(false)}
             onLeaveThread={() => setActiveTopicId(null)}
-            onOpenEarning={() => setEarningOpen(true)}
+            onOpenEarning={() => setEarningOpen({})}
           />
         </main>
         {/* Mobile-only backdrop when rail drawer is open */}
@@ -2419,7 +2458,7 @@ function Chat() {
           }}
           onJumpToMessage={jumpToMessage}
           onOpenMessages={() => { setMessagesOpen(true); setRailOpen(false); }}
-          onOpenEarning={() => { setEarningOpen(true); setRailOpen(false); }}
+          onOpenEarning={() => { setEarningOpen({}); setRailOpen(false); }}
           isOpen={railOpen}
           onClose={() => setRailOpen(false)}
           fontStep={fontStep}
@@ -2546,7 +2585,13 @@ function Chat() {
         />
       ) : null}
       {rulesOpen ? <RulesModal onClose={() => setRulesOpen(false)} /> : null}
-      {earningOpen ? <EarningDashboard onClose={() => setEarningOpen(false)} /> : null}
+      {earningOpen ? (
+        <EarningDashboard
+          onClose={() => setEarningOpen(null)}
+          {...(earningOpen.tab ? { initialTab: earningOpen.tab } : {})}
+          {...(earningOpen.itemSubTab ? { initialItemSubTab: earningOpen.itemSubTab } : {})}
+        />
+      ) : null}
       {poppedTopic ? (
         <ThreadModal
           topic={poppedTopic}

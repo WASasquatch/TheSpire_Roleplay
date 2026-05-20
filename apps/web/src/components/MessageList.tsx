@@ -615,6 +615,32 @@ function FlatMessageView({
     }
   }
 
+  // Auto-fill the viewport: if the current message buffer doesn't
+  // overflow the scroll container (a fresh room with fewer visible
+  // messages than the screen can hold — common on mobile after
+  // server-side ignore/whisper filtering trims the post-50-row
+  // backlog), the user CAN'T scroll, so the scrollTop-based trigger
+  // above never fires. Auto-load older pages here until either the
+  // content overflows OR the server says there's nothing older.
+  //
+  // Guards: only trigger after the buffer has been populated (`hasMore`
+  // becomes true), one load at a time (the loadOlder() guard handles
+  // that), and only after the layout has settled (rAF lets the DOM
+  // measure the freshly-prepended page before we re-check).
+  useEffect(() => {
+    if (!hasMore || loadingOlder || messages.length === 0) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const id = requestAnimationFrame(() => {
+      const e2 = scrollRef.current;
+      if (!e2) return;
+      if (e2.scrollHeight <= e2.clientHeight + FLAT_LOAD_OLDER_THRESHOLD_PX) {
+        void loadOlder();
+      }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [hasMore, loadingOlder, messages.length, loadOlder, scrollRef]);
+
   return (
     <div
       ref={scrollRef}
@@ -636,7 +662,17 @@ function FlatMessageView({
               Retry loading earlier messages
             </button>
           ) : (
-            <span>Scroll up for earlier messages</span>
+            // Clickable so a touch user whose viewport can't scroll
+            // (no overflow) still has a manual trigger. The
+            // auto-fill effect above usually handles this for them,
+            // but the button is a no-cost safety net.
+            <button
+              type="button"
+              onClick={() => { void loadOlder(); }}
+              className="rounded px-2 py-0.5 hover:text-keep-text"
+            >
+              Tap or scroll up for earlier messages
+            </button>
           )}
         </div>
       ) : messages.length > 0 ? (

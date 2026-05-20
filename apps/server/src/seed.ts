@@ -11,6 +11,7 @@ import { DEFAULT_WORLDS, WORLDS_SEED_VERSION } from "./seed_worlds.js";
 import type { Db } from "./db/index.js";
 import { runBackfillIfNeeded } from "./earning/backfill.js";
 import { schedulePresenceSweep } from "./earning/sweeps.js";
+import { pruneSnapshots } from "./backup/snapshots.js";
 
 /**
  * Default system rooms shipped on every fresh install. Each one is a
@@ -156,6 +157,12 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
   // newly-added DEFAULT_WORLDS entries on the next boot and leaves
   // everything else alone.
   await ensureDefaultWorlds(db);
+
+  // Force-reseed the `{icon}` placeholder on item-message templates
+  // when the deploy script (remote-deploy.sh) staged the flag. Always
+  // ungated by SKIP_DEFAULT_SEED — that flag governs the room-rename
+  // edge case; item-template policy is a separate concern.
+  await maybeReseedItemTemplates(db);
 }
 
 /**
@@ -267,6 +274,57 @@ async function ensureDefaultWorlds(db: Db): Promise<void> {
   if (shouldOverwrite) {
     await setWorldsSeedVersion(db, WORLDS_SEED_VERSION);
   }
+}
+
+/**
+ * Force-refresh the `{icon}` placeholder on every item's command
+ * message templates. Idempotent: the double-REPLACE first strips any
+ * existing `{icon} {item_name}` back to `{item_name}`, then re-inserts
+ * `{icon} {item_name}`. Running it twice produces the same final
+ * state, so booting the same image repeatedly is safe.
+ *
+ * Triggered by the `FORCE_ITEM_TEMPLATES_RESEED` env var, which
+ * `remote-deploy.sh` stages with a fresh timestamp on every deploy.
+ * Means: if an admin removed `{icon}` from a template via the live
+ * admin UI, the next remote-deploy.sh run puts it back. The rest of
+ * the template text (admin-edited flavor copy) is preserved — only
+ * the icon prefix is re-asserted.
+ *
+ * SCOPE: this function touches the `items` table ONLY, and only the
+ * three message-JSON columns on it. Name styles
+ * (`name_styles` / `user_owned_name_styles` /
+ * `character_owned_name_styles`), themes, rooms, worlds, custom
+ * commands, admin-edited site settings, and every other admin-
+ * customizable cosmetic are NEVER touched by this code path.
+ * Migration 0080+ name-style seeds run once via the `_migrations`
+ * table tracking in `apply-migrations.mjs`; once an installation has
+ * recorded them, admin edits to those styles persist across every
+ * future deploy. If you ever need to refresh name styles, do it via
+ * a NEW migration file (idempotent UPDATE) — not by extending this
+ * function's scope.
+ *
+ * Why a timestamp rather than a sticky `1`: the env var being newer
+ * than the last-applied value is what indicates "this boot came from
+ * a deploy" rather than an OOM auto-restart. We don't compare here
+ * (every boot just re-runs the idempotent sweep) — the timestamp is
+ * the deploy-side signal; the server-side execution is unconditional
+ * whenever the var is set. Cheap: a single UPDATE statement, no-op
+ * SQL when every template already has the prefix.
+ *
+ * Doesn't restore the rest of the canonical template text. Admins
+ * who renamed "hands" to "gives" keep their edit; only `{icon}`
+ * placement is enforced.
+ */
+async function maybeReseedItemTemplates(db: Db): Promise<void> {
+  const force = process.env.FORCE_ITEM_TEMPLATES_RESEED?.trim();
+  if (!force) return;
+  await db.run(sql`
+    UPDATE items SET
+      give_messages_json  = REPLACE(REPLACE(give_messages_json,  '{icon} {item_name}', '{item_name}'), '{item_name}', '{icon} {item_name}'),
+      throw_messages_json = REPLACE(REPLACE(throw_messages_json, '{icon} {item_name}', '{item_name}'), '{item_name}', '{icon} {item_name}'),
+      drop_messages_json  = REPLACE(REPLACE(drop_messages_json,  '{icon} {item_name}', '{item_name}'), '{item_name}', '{icon} {item_name}'),
+      updated_at = (unixepoch() * 1000)
+  `);
 }
 
 /**
@@ -423,13 +481,32 @@ export function startJanitor(
     }
   }
 
-  // Run all three immediately on startup so the first sweep doesn't have to wait.
+  /**
+   * Snapshot retention sweep. Each backup endpoint already prunes
+   * the bucket it just wrote into, but a separate periodic sweep
+   * catches buckets where the last write happened long ago (e.g.
+   * an install with no recent imports but lots of old manual
+   * snapshots). Cheap: synchronous fs stat + a handful of unlinks
+   * per call. No-op when the directory doesn't exist.
+   */
+  function sweepSnapshots() {
+    try {
+      const r = pruneSnapshots();
+      if (r.removed > 0) log.info(`[janitor] removed ${r.removed} aged backup snapshots`);
+    } catch (err) {
+      log.error({ err }, "[janitor] snapshot prune failed");
+    }
+  }
+
+  // Run all four immediately on startup so the first sweep doesn't have to wait.
   void sweepSessions();
   void sweepMessages();
   void sweepTrustPromotions();
+  sweepSnapshots();
   const sessionId = setInterval(() => void sweepSessions(), 60 * 1000);
   const messageId = setInterval(() => void sweepMessages(), 60 * 60 * 1000);
   const trustId = setInterval(() => void sweepTrustPromotions(), 60 * 60 * 1000);
+  const snapshotId = setInterval(() => sweepSnapshots(), 6 * 60 * 60 * 1000);
 
   // Earning — one-shot historical XP backfill + recurring presence sweep.
   //
@@ -453,6 +530,7 @@ export function startJanitor(
     clearInterval(sessionId);
     clearInterval(messageId);
     clearInterval(trustId);
+    clearInterval(snapshotId);
     if (cancelPresence) cancelPresence();
   };
 }

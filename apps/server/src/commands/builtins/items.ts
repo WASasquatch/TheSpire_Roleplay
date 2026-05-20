@@ -191,10 +191,16 @@ function pickTemplate(json: string): string | null {
 
 /** Substitute the supported placeholders in a template. Unrecognized
  *  `{xxx}` tokens pass through unchanged so admins can author
- *  literal braces in flavor text without escaping. `{item_icon}` is
- *  not supported in plain-text system messages (Phase 2) — we strip
- *  it to empty so admins who include it in templates don't get a
- *  visible "{item_icon}" leaking through. */
+ *  literal braces in flavor text without escaping.
+ *
+ *  Icon substitution: `{icon}` (canonical) and the legacy alias
+ *  `{item_icon}` both expand to a `<icon src="...">` inline tag that
+ *  the chat renderer turns into a 1.2em img. When the item has no
+ *  iconUrl set we collapse the placeholder to empty so the rendered
+ *  line doesn't end up with a literal `<icon src="">` tag. The URL is
+ *  passed straight through — the client parser owns the URL allow-
+ *  list (`/assets/...` or `http(s)://...`), so a malformed iconUrl
+ *  here fails closed there. */
 function renderTemplate(
   template: string,
   vars: {
@@ -202,14 +208,17 @@ function renderTemplate(
     target: string;
     num: number;
     itemName: string;
+    iconUrl: string | null;
   },
 ): string {
+  const iconTag = vars.iconUrl ? `<icon src="${vars.iconUrl}">` : "";
   return template
     .replace(/\{sender\}/g, vars.sender)
     .replace(/\{target\}/g, vars.target)
     .replace(/\{num\}/g, String(vars.num))
     .replace(/\{item_name\}/g, vars.itemName)
-    .replace(/\{item_icon\}/g, "");
+    .replace(/\{icon\}/g, iconTag)
+    .replace(/\{item_icon\}/g, iconTag);
 }
 
 /** Shared body for the three commands. The only thing that varies
@@ -510,6 +519,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
     target: target.displayName,
     num: quantity,
     itemName: itemNameRendered,
+    iconUrl: item.iconUrl,
   });
   await addSystemMessage(ctx.io, ctx.db, ctx.roomId, body);
 

@@ -108,12 +108,99 @@ function identitiesEqual(a: Identity, b: Identity): boolean {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Substitute `{target}` in a kind's format string with the other party's
- * display name. The catalog stores raw format strings; sanitizing for HTML
- * happens at render time on the client (titles are plain text).
+ * Canonical gender value used by the gender-aware title-template token.
+ * Mirrors the `users.gender` enum + the per-character gender stored in
+ * `characters.statsJson.gender`. "undisclosed" / "other" / "nonbinary"
+ * all fall through to the neutral variant of `{gender:M|F|N}`.
  */
-function renderFormat(format: string, otherDisplayName: string): string {
-  return format.replaceAll("{target}", otherDisplayName);
+type SubjectGender = "male" | "female" | "nonbinary" | "other" | "undisclosed";
+
+/**
+ * Substitute the templating tokens in a kind's format string.
+ *
+ *   {target}            → other party's display name (the person on
+ *                         the OPPOSITE side of the relationship from
+ *                         whose profile this chip is currently being
+ *                         rendered on).
+ *
+ *   {gender:M|F|N}      → gender-aware variant for the SUBJECT (whose
+ *                         profile this chip lives on). Three pipe-
+ *                         separated alternatives:
+ *                            M → "male"
+ *                            F → "female"
+ *                            N → "nonbinary" / "other" / "undisclosed"
+ *                         Lets a single asymmetric kind ship the
+ *                         entire matrix in two format strings — e.g.
+ *                         a "parent ↔ child" kind has
+ *                           formatA = "{gender:Father|Mother|Parent} of {target}"
+ *                           formatB = "{gender:Son|Daughter|Child} of {target}"
+ *                         and the right word lands on each profile
+ *                         based on whose chip it is.
+ *
+ * Unknown tokens (typos, malformed `{gender:…}` blocks) pass through
+ * as literal text so admin format mistakes are visible to the admin
+ * rather than silently dropped.
+ *
+ * The catalog stores raw format strings; sanitizing for HTML happens
+ * at render time on the client (titles are plain text).
+ */
+function renderFormat(
+  format: string,
+  otherDisplayName: string,
+  subjectGender: SubjectGender,
+): string {
+  // {gender:M|F|N} — parse three pipe-separated parts and pick by
+  // subject gender. The regex tolerates whitespace around the parts
+  // so admins can space them out for readability in the editor.
+  const withGender = format.replace(
+    /\{gender:([^|}]*)\|([^|}]*)\|([^}]*)\}/g,
+    (_match, male: string, female: string, neutral: string) => {
+      if (subjectGender === "male") return male.trim();
+      if (subjectGender === "female") return female.trim();
+      return neutral.trim();
+    },
+  );
+  return withGender.replaceAll("{target}", otherDisplayName);
+}
+
+/**
+ * Resolve the effective gender for a given identity, used as the
+ * SUBJECT of the gender-aware title token above. Mirrors the
+ * resolveGender helper in broadcast.ts (character stats.gender wins
+ * over the master OOC gender; missing/invalid falls back to OOC).
+ */
+async function resolveSubjectGender(db: Db, identity: Identity): Promise<SubjectGender> {
+  // Master profile — read user.gender directly.
+  if (identity.characterId === null) {
+    const u = (await db
+      .select({ gender: users.gender })
+      .from(users)
+      .where(eq(users.id, identity.userId))
+      .limit(1))[0];
+    return (u?.gender as SubjectGender | undefined) ?? "undisclosed";
+  }
+  // Character profile — character stats.gender wins; user.gender is the
+  // fallback when the character row doesn't set one.
+  const c = (await db
+    .select({ statsJson: characters.statsJson })
+    .from(characters)
+    .where(eq(characters.id, identity.characterId))
+    .limit(1))[0];
+  if (c?.statsJson) {
+    try {
+      const parsed = JSON.parse(c.statsJson) as { gender?: string };
+      const g = parsed.gender?.toLowerCase();
+      if (g === "male" || g === "female" || g === "nonbinary" || g === "other") {
+        return g;
+      }
+    } catch { /* fall through to user.gender */ }
+  }
+  const u = (await db
+    .select({ gender: users.gender })
+    .from(users)
+    .where(eq(users.id, identity.userId))
+    .limit(1))[0];
+  return (u?.gender as SubjectGender | undefined) ?? "undisclosed";
 }
 
 /* -------------------------------------------------------------------------- */
@@ -143,6 +230,10 @@ interface TitleRow {
  * own UI, the prompt event already carries the in-flight info.
  */
 export async function listTitlesForIdentity(db: Db, identity: Identity): Promise<ProfileTitle[]> {
+  // Resolve the subject's gender ONCE up front. Every chip on this
+  // profile renders against the same subject, so a per-row lookup
+  // would be wasteful (and would mean an extra round trip per title).
+  const subjectGender = await resolveSubjectGender(db, identity);
   // characterId IS NULL needs `IS` not `=` in SQL; drizzle's eq() generates
   // `=` which won't match NULL. We fall back to raw SQL for the nullable
   // half of the predicate.
@@ -254,7 +345,7 @@ export async function listTitlesForIdentity(db: Db, identity: Identity): Promise
     out.push({
       id: r.id,
       kindSlug: r.kindSlug,
-      text: renderFormat(format, displayName),
+      text: renderFormat(format, displayName, subjectGender),
       other: { userId: r.otherUserId, characterId: r.otherCharacterId, displayName },
     });
   }
@@ -438,8 +529,11 @@ export async function requestTitle(
   // Recipient sees: "[Married to <requester>] - Accept | Decline" - the
   // preview shows the recipient's *own* side (formatB) since that's what
   // would land on their profile. The requester's display name is the
-  // {target} substitution from the recipient's perspective.
-  const previewText = renderFormat(kind.formatB, requester.displayName);
+  // {target} substitution from the recipient's perspective; the
+  // {gender:M|F|N} token resolves against the RECIPIENT's gender
+  // because the preview is what would land on their profile.
+  const recipientGender = await resolveSubjectGender(db, target);
+  const previewText = renderFormat(kind.formatB, requester.displayName, recipientGender);
 
   return {
     ok: true,
@@ -507,10 +601,19 @@ export async function dissolveTitle(
 
   // The prompt goes to the side opposite the initiator. The preview shows
   // the title text from THAT side's profile (so they see what would be
-  // removed).
+  // removed) — which means the gender token resolves against the
+  // RECIPIENT's gender, not the initiator's.
   const recipientFormat = initiatorSide === "a" ? kind.formatB : kind.formatA;
-  const previewText = renderFormat(recipientFormat, initiator.displayName);
   const recipientUserId = initiatorSide === "a" ? row.bUserId : row.aUserId;
+  const recipientCharacterId = initiatorSide === "a" ? row.bCharacterId : row.aCharacterId;
+  const recipientGender = await resolveSubjectGender(db, {
+    userId: recipientUserId,
+    characterId: recipientCharacterId,
+    // displayName is only used for {target} substitution, which the
+    // recipient-side preview doesn't need (initiator is the target).
+    displayName: "",
+  });
+  const previewText = renderFormat(recipientFormat, initiator.displayName, recipientGender);
 
   return {
     ok: true,

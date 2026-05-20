@@ -11,6 +11,7 @@ import { profileShareUrl } from "../lib/profiles.js";
 import { fetchPublicEarning, type PublicEarningResponse } from "../lib/earning.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { RankSigil } from "./RankSigil.js";
+import { StyledName } from "./StyledName.js";
 
 interface Props {
   profile: ProfileView;
@@ -262,12 +263,30 @@ function ProfileBody({
             borderRankKey={earning?.selectedBorderRankKey ?? null}
           />
           <div className="min-w-0 flex-1">
-            {/* Name + XP + Currency row. `items-center` (not baseline)
-                so chips with image content (the coin pouch) line up
-                vertically with the username's visual midline. */}
+            {/* Name + gender glyph on the top line; XP + Currency
+                chips on their OWN row beneath the name on tight
+                viewports. The earlier layout had everything in a
+                single flex-wrap, which meant one chip could land on
+                the name line while the other wrapped to the next
+                row — visually unbalanced and prone to clipping the
+                name. Splitting into two siblings (with the chips in
+                their own flex container) keeps the chips together
+                regardless of viewport width while still wrapping
+                cleanly when the name is long. */}
             <div className="flex flex-wrap items-center gap-2">
+              {/* Name style cosmetics surface here too — a styled name
+                  is a show-off cosmetic, not just chat decoration, so
+                  the profile hero paints it the same way chat does.
+                  Falls back to plain text when no style is equipped.
+                  Wrapped in font-action so the hero's display font
+                  still applies to non-styled glyphs (the .ns-* style
+                  classes override face/weight as needed). */}
               <h2 className="font-action text-2xl tracking-wide" title={name}>
-                {name}
+                <StyledName
+                  displayName={name}
+                  styleKey={profile.profile.nameStyleKey}
+                  config={profile.profile.nameStyleConfig}
+                />
               </h2>
               <span
                 aria-hidden
@@ -277,33 +296,44 @@ function ProfileBody({
               >
                 {genderGlyph(gender).icon}
               </span>
-              {earning?.xp != null ? (
-                <span
-                  className="inline-flex h-8 items-center gap-1 rounded border border-keep-rule bg-keep-bg/60 px-2 text-sm uppercase tracking-widest text-keep-muted"
-                  title="Experience"
-                >
-                  <span className="font-semibold tabular-nums text-keep-text">{earning.xp.toLocaleString()}</span>
-                  <span>XP</span>
-                </span>
-              ) : null}
-              {earning?.currency != null ? (
-                <span
-                  className="inline-flex h-8 items-center gap-1 rounded border border-keep-rule bg-keep-bg/60 px-2 text-sm"
-                  title="Currency"
-                >
-                  <img
-                    src="/assets/earning/cache_pouch.png"
-                    alt=""
-                    aria-hidden
-                    className="select-none"
-                    style={{ width: "1.75rem", height: "1.75rem" }}
-                    draggable={false}
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                  />
-                  <span className="font-semibold tabular-nums text-keep-text">{earning.currency.toLocaleString()}</span>
-                </span>
-              ) : null}
             </div>
+            {/* Earning chips. Live on their own row below the name so
+                they never split across rows (XP on the name line,
+                Currency wrapped — the broken UX before this change).
+                When BOTH are present they sit side by side; when one
+                is absent the other takes the row alone. Hidden
+                entirely when neither is available (unranked / fresh
+                account). */}
+            {earning?.xp != null || earning?.currency != null ? (
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                {earning?.xp != null ? (
+                  <span
+                    className="inline-flex h-8 items-center gap-1 rounded border border-keep-rule bg-keep-bg/60 px-2 text-sm uppercase tracking-widest text-keep-muted"
+                    title="Experience"
+                  >
+                    <span className="font-semibold tabular-nums text-keep-text">{earning.xp.toLocaleString()}</span>
+                    <span>XP</span>
+                  </span>
+                ) : null}
+                {earning?.currency != null ? (
+                  <span
+                    className="inline-flex h-8 items-center gap-1 rounded border border-keep-rule bg-keep-bg/60 px-2 text-sm"
+                    title="Currency"
+                  >
+                    <img
+                      src="/assets/earning/cache_pouch.png"
+                      alt=""
+                      aria-hidden
+                      className="select-none"
+                      style={{ width: "1.75rem", height: "1.75rem" }}
+                      draggable={false}
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                    <span className="font-semibold tabular-nums text-keep-text">{earning.currency.toLocaleString()}</span>
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             {/* Mobile rank lockup — sigil at md (18px) with a smaller
                 title so it nests cleanly UNDER the name on tight
                 viewports. The desktop variant (lg+) lives in a
@@ -559,18 +589,13 @@ function ProfileBody({
                 </Section>
               ) : null}
 
-              <Section title="Bio">
-                {bio ? (
-                  <div
-                    className="prose prose-sm max-w-none break-words"
-                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(bio) }}
-                  />
-                ) : (
-                  <p className="italic text-keep-muted">
-                    {name} hasn't written a bio yet.
-                  </p>
-                )}
-              </Section>
+              {/* Collection + Pets sit ABOVE the bio because they read
+                  as the visual marquee of the profile — a glance-able
+                  showcase of what the identity owns, the way a pinned
+                  Tweet or a "now playing" widget tops a personal page.
+                  The bio is the long-form prose below it. Each section
+                  is hidden when empty so a fresh profile doesn't show
+                  empty rails. */}
 
               {/* Collection showcase — pinned items from the identity's
                   10-slot Collection. Each identity (OOC + each
@@ -623,26 +648,30 @@ function ProfileBody({
                 </Section>
               ) : null}
 
-              {/* Full-size avatar footer - the hero crops to a 96/112px square,
-                  so we show the natural-resolution image down here for users
-                  who want to see the whole portrait. Lives inside the
-                  scrolling body so it doesn't push the bio off-screen on
-                  short viewports. */}
-              {avatar ? (
-                <div className="mt-2 flex justify-center border-t border-keep-rule/60 pt-4">
-                  <img
-                    src={avatar}
-                    alt={`${name} - full portrait`}
-                    className="max-w-full rounded border border-keep-border"
+              <Section title="Bio">
+                {bio ? (
+                  <div
+                    className="prose prose-sm max-w-none break-words"
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(bio) }}
                   />
-                </div>
-              ) : null}
+                ) : (
+                  <p className="italic text-keep-muted">
+                    {name} hasn't written a bio yet.
+                  </p>
+                )}
+              </Section>
 
               {/* Additional portraits (character profiles only). Renders as a
                   responsive grid so a character with multiple looks/forms
                   shows them all without dominating the modal. Each tile is a
-                  click-to-zoom that swaps the large image inline. */}
-              {profile.kind === "character" && profile.profile.portraits.length > 0 ? (
+                  click-to-zoom that swaps the large image inline.
+                  The empty state still renders the section heading + a hint
+                  pointing at the editor so the feature stays discoverable on
+                  fresh character profiles — earlier the whole section
+                  vanished when portraits.length === 0, which made it look
+                  like the gallery feature itself was missing rather than
+                  just unfilled. */}
+              {profile.kind === "character" ? (
                 <PortraitGallery portraits={profile.profile.portraits} alt={name} />
               ) : null}
 
@@ -973,6 +1002,18 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
         Gallery
       </h3>
+      {/* Empty-state hint: render the section even when the gallery is
+          empty so the feature stays discoverable. Owners reading "No
+          additional portraits yet" know to look for the manage path
+          (profile editor → Gallery tab); visitors see a clean
+          "nothing here" message instead of the section vanishing
+          entirely (which made it look like the feature itself was
+          missing). */}
+      {portraits.length === 0 ? (
+        <p className="text-xs italic text-keep-muted">
+          No additional portraits yet. Owners can add more via the profile editor's Gallery tab.
+        </p>
+      ) : null}
       {active ? (
         <div className="mb-2 flex flex-col items-center gap-1">
           <div className="relative inline-block max-w-full">

@@ -49,19 +49,31 @@ import { CoinAmount } from "./CoinAmount.js";
 import { StyledName } from "./StyledName.js";
 import { CloseButton } from "./CloseButton.js";
 
+type DashboardTab = "overview" | "ledger" | "settings" | "styles" | "borders" | "cosmetics" | "items";
+type ItemsSubTab = "inventory" | "shop" | "collection" | "pets";
+
 interface Props {
   onClose: () => void;
+  /**
+   * Tab to land on when the dashboard opens. Used by the
+   * `/earnings` / `/shop` / `/collection` / `/pets` builtin commands
+   * (and any other future deep-link). Defaults to "overview".
+   */
+  initialTab?: DashboardTab;
+  /**
+   * Sub-tab within the Items tab to land on. Only meaningful when
+   * `initialTab === "items"`; the prop threads through to ItemsTab.
+   */
+  initialItemSubTab?: ItemsSubTab;
 }
 
-type DashboardTab = "overview" | "ledger" | "settings" | "styles" | "borders" | "cosmetics" | "items";
-
-export function EarningDashboard({ onClose }: Props) {
+export function EarningDashboard({ onClose, initialTab, initialItemSubTab }: Props) {
   const snapshot = useEarning((s) => s.snapshot);
   const loading = useEarning((s) => s.loading);
   const error = useEarning((s) => s.error);
   const refresh = useEarning((s) => s.refresh);
   const me = useChat((s) => s.me);
-  const [tab, setTab] = useState<DashboardTab>("overview");
+  const [tab, setTab] = useState<DashboardTab>(initialTab ?? "overview");
 
   // Re-fetch on mount so a freshly-opened dashboard reflects any
   // earnings that landed while the modal was closed (rank-up events
@@ -139,7 +151,12 @@ export function EarningDashboard({ onClose }: Props) {
           {snapshot && tab === "styles" ? <NameStylesTab snapshot={snapshot} /> : null}
           {snapshot && tab === "borders" ? <BordersTab snapshot={snapshot} /> : null}
           {snapshot && tab === "cosmetics" ? <CosmeticsTab snapshot={snapshot} /> : null}
-          {snapshot && tab === "items" ? <ItemsTab snapshot={snapshot} /> : null}
+          {snapshot && tab === "items" ? (
+            <ItemsTab
+              snapshot={snapshot}
+              {...(initialItemSubTab ? { initialSubTab: initialItemSubTab } : {})}
+            />
+          ) : null}
         </div>
       </div>
     </Modal>
@@ -1383,11 +1400,20 @@ function CosmeticsTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.get
  *                client-side; server enforces too.
  * ========================================================= */
 
-function ItemsTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {} }) {
+function ItemsTab({
+  snapshot,
+  initialSubTab,
+}: {
+  snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {};
+  /** Deep-link landing sub-tab — defaults to "inventory" when omitted.
+   *  Plumbed in from the `/shop` / `/collection` / `/pets` builtin
+   *  commands via EarningDashboard's prop. */
+  initialSubTab?: "inventory" | "shop" | "collection" | "pets";
+}) {
   const me = useChat((s) => s.me);
   const activeCharacterId = useChat((s) => s.activeCharacterId);
   const refresh = useEarning((s) => s.refresh);
-  const [tab, setTab] = useState<"inventory" | "shop" | "collection" | "pets">("inventory");
+  const [tab, setTab] = useState<"inventory" | "shop" | "collection" | "pets">(initialSubTab ?? "inventory");
   // Shop category chip — "all" shows everything, otherwise filter to
   // that bucket. Stored in component state so flipping chips doesn't
   // round-trip through the URL or persist between dashboard opens.

@@ -2061,7 +2061,7 @@ function ItemEditor({
 
       {/* Per-command message tables. Empty array = command disabled. */}
       <fieldset className="space-y-3 rounded border border-keep-rule/60 bg-keep-banner/20 p-2">
-        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">Command messages — one template per line. Placeholders: {"{sender}"} {"{target}"} {"{num}"} {"{item_name}"}. Leave blank to disable that command for this item.</legend>
+        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">Command messages — one template per line. Placeholders: {"{sender}"} {"{target}"} {"{num}"} {"{item_name}"} {"{icon}"} (inline image of this item's icon). Leave blank to disable that command for this item.</legend>
         <CommandMessageEditor label="/give" hint="Transfers the item to the target's inventory." value={giveMessages} onChange={setGiveMessages} />
         <CommandMessageEditor label="/throw" hint="Consumes the item as a silly weapon — target gets nothing." value={throwMessages} onChange={setThrowMessages} />
         <CommandMessageEditor label="/drop" hint="Consumes the item as a 'drop on someone' gag — target gets nothing." value={dropMessages} onChange={setDropMessages} />
@@ -2131,7 +2131,7 @@ function CommandMessageEditor({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         rows={3}
-        placeholder={`e.g. {sender} hands {target} {num} {item_name}.`}
+        placeholder={`e.g. {sender} hands {target} {num} {icon} {item_name}.`}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
       />
     </div>

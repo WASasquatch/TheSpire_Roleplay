@@ -187,6 +187,21 @@ export interface CharacterProfile {
    */
   petCollection: ProfileCollectionEntry[];
   /**
+   * Equipped name-style key for THIS identity. Drives the rendered
+   * username in the profile hero so a name style isn't just a chat
+   * cosmetic — it shows wherever the user's identity is on display.
+   * Each identity (master + each character) holds its own
+   * equipped style; switching characters paints a different
+   * profile name. Null when nothing is equipped (renders plain).
+   */
+  nameStyleKey: string | null;
+  /**
+   * Per-user config (color picks, glow strength, etc.) the style's
+   * CSS template reads. Shape varies per style. Null falls back to
+   * the style's default config.
+   */
+  nameStyleConfig: Record<string, unknown> | null;
+  /**
    * Master account username of the user who owns this character —
    * surfaced ONLY when the viewer is a mod/admin/masteradmin. Lets
    * moderation staff see "this character is voiced by user X"
@@ -296,6 +311,13 @@ export interface MasterProfile {
    * to 5). Same isolation rules as `collection`.
    */
   petCollection: ProfileCollectionEntry[];
+  /**
+   * Master/OOC equipped name-style key + config. Painted on the
+   * profile hero so the user's OOC cosmetic shows up beyond chat.
+   * Null when no style is equipped (renders plain).
+   */
+  nameStyleKey: string | null;
+  nameStyleConfig: Record<string, unknown> | null;
 }
 
 /** What `/profile` returns: either the master, or the active character. */

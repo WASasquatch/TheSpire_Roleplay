@@ -398,7 +398,6 @@ function RoomGroup({
                       // UserNameTag tooltip, so we don't compound the
                       // signals.
                       className={`flex items-center justify-between gap-2 px-3 py-1.5 pl-5 lg:py-0.5 ${o.idle ? "opacity-50" : ""}`}
-                      title={o.idle ? "Idle — tab closed or refreshed, may return." : undefined}
                     >
                       <div className="min-w-0 flex-1 truncate">
                         <UserNameTag
@@ -450,10 +449,16 @@ function RoomGroup({
                           // into the displayName prop — that would pick
                           // up the user's chat-color and name-style
                           // decoration, which we don't want on a system
-                          // marker. Rendered outside UserNameTag's flex
-                          // line, in muted color, mirroring how [away]
-                          // is rendered inside the tag itself.
-                          <span className="ml-1 text-keep-muted">(idle)</span>
+                          // marker. Classes match the `(ooc)` suffix
+                          // inside UserNameTag (10px, shrink-0, muted)
+                          // so the two read as a matched pair when
+                          // they're both present on a row.
+                          <span
+                            className="ml-1 shrink-0 text-[10px] text-keep-muted"
+                            title="Idle — tab closed or refreshed, may return"
+                          >
+                            (idle)
+                          </span>
                         ) : null}
                       </div>
                       {chip ? (

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, type CSSProperties, type ReactNode } from "react";
 
 interface ModalProps {
   onClose: () => void;
@@ -24,6 +24,16 @@ interface ModalProps {
    *     button is reachable on mobile without a backdrop margin.
    */
   variant?: "centered" | "mobile-fullscreen";
+  /**
+   * Inline-style escape hatch for the backdrop div (the click-to-close
+   * surface). Used by ProfileModal to paint the owner's chosen public-
+   * profile background image — the backdrop CSS gets merged onto the
+   * same div that owns the dismiss handler, so the override changes
+   * how the backdrop looks without breaking how it behaves (clicks
+   * still bubble to `onClose`). `zIndex` always wins over anything
+   * passed here so the stacking-order contract is preserved.
+   */
+  backdropStyle?: CSSProperties;
   children: ReactNode;
 }
 
@@ -81,6 +91,7 @@ export function Modal({
   closeOnEscape = true,
   zIndex = 40,
   variant = "centered",
+  backdropStyle,
   children,
 }: ModalProps) {
   useEffect(() => {
@@ -96,7 +107,11 @@ export function Modal({
     <div
       role="dialog"
       aria-modal="true"
-      style={{ zIndex }}
+      // Caller's backdropStyle first; zIndex applied last so it always
+      // wins. Inline styles (backgroundImage from ProfileModal's BG
+      // override) layer on top of the `bg-black/40` Tailwind class
+      // since CSS paints background-image over background-color.
+      style={{ ...backdropStyle, zIndex }}
       className={`fixed inset-0 bg-black/40 ${VARIANT_CLASS[variant]}`}
       onClick={closeOnBackdrop ? onClose : undefined}
     >

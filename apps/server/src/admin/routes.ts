@@ -355,6 +355,13 @@ export async function registerAdminRoutes(
         // vs "(set password)" - the hash itself is never exposed.
         hasPassword: r.passwordHash != null,
         memberCount: countByRoom.get(r.id) ?? 0,
+        // Per-room message-expiry override in minutes. NULL = inherit the
+        // global `messageRetentionMs` setting. The admin's Message
+        // Expiry panel renders this either as the room's explicit value
+        // or as "global (Xd)" when null. Forum/nested rooms are exempt
+        // from BOTH sweeps and surface as "never expires" — that's a
+        // render-time decision in the panel, not a server filter.
+        messageExpiryMinutes: r.messageExpiryMinutes,
       })),
     };
   });
@@ -447,6 +454,14 @@ export async function registerAdminRoutes(
     type: z.enum(["public", "private"]).optional(),
     /** Required if type changes to private and the room currently has no password. */
     password: z.string().min(1).max(100).nullable().optional(),
+    /**
+     * Per-room message expiry override in minutes. Null clears the
+     * override (room falls back to global `messageRetentionMs`).
+     * Bounded to 1..43200 (30 days) — same range the user-facing
+     * `/expiry` command accepts. Mirrors the column comment on
+     * `rooms.message_expiry_minutes`.
+     */
+    messageExpiryMinutes: z.number().int().min(1).max(43_200).nullable().optional(),
   });
 
   app.post<{ Body: unknown }>("/admin/rooms", async (req, reply) => {
@@ -533,6 +548,7 @@ export async function registerAdminRoutes(
     if (body.isSystem !== undefined) update.isSystem = body.isSystem;
     if (body.isDefault !== undefined) update.isDefault = body.isDefault;
     if (body.replyMode !== undefined) update.replyMode = body.replyMode;
+    if (body.messageExpiryMinutes !== undefined) update.messageExpiryMinutes = body.messageExpiryMinutes;
 
     // Single-default invariant: flagging this room as the default first
     // clears whichever room currently carries the flag. Skipped when the
@@ -585,6 +601,34 @@ export async function registerAdminRoutes(
     }
 
     return { ok: true };
+  });
+
+  /**
+   * Bulk-set the per-room message-expiry override across many rooms in
+   * one round-trip. Used by the admin's Message Expiry panel for batch
+   * tagging (e.g. "all OOC rooms get a 1h window"). Single transaction
+   * via Drizzle's update-with-IN — atomic from the client's POV: either
+   * every targeted row updates or none do.
+   *
+   * Forum/nested rooms accept the value but the sweep ignores them (the
+   * per-room sweep in seed.ts skips replyMode='nested' unconditionally).
+   * We don't filter them out here so admins can still set a "documented
+   * intent" value on a forum room without surprise.
+   */
+  const adminRoomBulkExpiryBody = z.object({
+    /** Room ids to apply the value to. Capped at 500 so a malformed UI doesn't blow the row limit. */
+    roomIds: z.array(z.string()).min(1).max(500),
+    /** Minutes (1..43200). Null clears the override on every selected room. */
+    minutes: z.number().int().min(1).max(43_200).nullable(),
+  });
+  app.patch<{ Body: unknown }>("/admin/rooms/expiry/bulk", async (req, reply) => {
+    const body = adminRoomBulkExpiryBody.parse(req.body);
+    const result = await db
+      .update(rooms)
+      .set({ messageExpiryMinutes: body.minutes })
+      .where(inArray(rooms.id, body.roomIds));
+    reply.code(200);
+    return { ok: true, updated: result.changes };
   });
 
   /**

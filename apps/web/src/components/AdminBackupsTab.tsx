@@ -508,12 +508,20 @@ function ContentPanel({
       return;
     }
     const totals = diff.entries.reduce(
-      (acc, e) => ({ add: acc.add + e.toAdd, upd: acc.upd + e.toUpdate }),
-      { add: 0, upd: 0 },
+      (acc, e) => ({
+        add: acc.add + e.toAdd,
+        wipe: acc.wipe + e.onlyOnTarget,
+      }),
+      { add: 0, wipe: 0 },
     );
+    // v2 import is a DESTRUCTIVE MIRROR RESTORE — every table in
+    // the document gets wiped on the target before the source rows
+    // are inserted. Spell that out in the confirm so the admin
+    // isn't surprised when their live users get replaced by the
+    // backup's snapshot.
     // eslint-disable-next-line no-alert
     if (!window.confirm(
-      `Applying this content backup will add ${totals.add} row(s) and update ${totals.upd} row(s) across ${diff.entries.length} tables. A pre-import safety snapshot will be saved. Continue?`,
+      `MIRROR RESTORE: this will DELETE ${totals.wipe.toLocaleString()} row(s) currently on this install and REPLACE them with ${totals.add.toLocaleString()} row(s) from the backup, across ${diff.entries.length} tables. A pre-import safety snapshot will be saved automatically so you can roll back if needed. Continue?`,
     )) return;
     onBusy("Importing content backup…");
     onError("");
@@ -554,9 +562,9 @@ function ContentPanel({
   return (
     <section className="rounded border border-keep-rule bg-keep-bg/40 p-3 space-y-3">
       <header className="flex items-baseline justify-between gap-2">
-        <h4 className="font-action text-sm">Content backup (cosmetics & config)</h4>
+        <h4 className="font-action text-sm">Content backup (JSON mirror)</h4>
         <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-          .json — items, name styles, ranks, border frames, custom commands, settings
+          .json — full data mirror: users, characters, rooms, messages, items, configuration
         </span>
       </header>
       <div className="flex flex-wrap items-center gap-2">
@@ -597,10 +605,8 @@ function ContentPanel({
             <thead>
               <tr className="border-b border-keep-rule/60 text-[10px] uppercase tracking-widest text-keep-muted">
                 <th className="py-1 pr-2">Table</th>
-                <th className="py-1 px-2 text-right">Add</th>
-                <th className="py-1 px-2 text-right">Update</th>
-                <th className="py-1 px-2 text-right">On target only</th>
-                <th className="py-1 pl-2 text-right">Unchanged</th>
+                <th className="py-1 px-2 text-right">From backup</th>
+                <th className="py-1 pl-2 text-right">Wipes from target</th>
               </tr>
             </thead>
             <tbody>
@@ -608,15 +614,13 @@ function ContentPanel({
                 <tr key={e.table} className="border-b border-keep-rule/30">
                   <td className="py-1 pr-2 font-mono">{e.table}</td>
                   <td className="py-1 px-2 text-right font-mono">{e.toAdd || ""}</td>
-                  <td className="py-1 px-2 text-right font-mono">{e.toUpdate || ""}</td>
-                  <td className="py-1 px-2 text-right font-mono text-keep-muted">{e.onlyOnTarget || ""}</td>
-                  <td className="py-1 pl-2 text-right font-mono text-keep-muted">{e.unchanged || ""}</td>
+                  <td className="py-1 pl-2 text-right font-mono text-keep-accent">{e.onlyOnTarget || ""}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           <p className="text-keep-muted">
-            "On target only" rows survive the import — nothing is deleted.
+            Content backup is a <b className="text-keep-text">mirror restore</b> — every table the document carries gets wiped on this install and replaced with the source rows. Tables not in the document are left untouched. A pre-import safety snapshot is saved automatically so you can roll back.
           </p>
           <div className="flex flex-wrap gap-2 pt-1">
             <button
@@ -625,7 +629,7 @@ function ContentPanel({
               disabled={busy || diff.missingMigrations.length > 0}
               className="rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-sm text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
             >
-              Import (applies upserts)
+              Import (mirror restore)
             </button>
             <button
               type="button"

@@ -2,7 +2,7 @@ import { and, eq, lt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import { messages, rooms, sessions, users, worldPages, worlds } from "./db/schema.js";
+import { messageActivity, messages, rooms, sessions, users, worldPages, worlds } from "./db/schema.js";
 import { hashPassword } from "./auth/passwords.js";
 import { ensureSiteSettings, getSettings, setWorldsSeedVersion } from "./settings.js";
 import { recordAudit } from "./audit.js";
@@ -482,6 +482,24 @@ export function startJanitor(
   }
 
   /**
+   * Append-only `message_activity` ledger trim. Rows older than 26h
+   * are deleted so the table stays bounded — the splash's 24h
+   * activity query only reads the last 24h, but we keep a 2h
+   * buffer past that so the query never races a sweep that's
+   * mid-delete. See migration 0118 for why the ledger exists in
+   * the first place.
+   */
+  async function sweepMessageActivity() {
+    try {
+      const cutoff = new Date(Date.now() - 26 * 60 * 60 * 1000);
+      const r = await db.delete(messageActivity).where(lt(messageActivity.createdAt, cutoff));
+      if (r.changes > 0) log.info(`[janitor] trimmed ${r.changes} message_activity rows older than 26h`);
+    } catch (err) {
+      log.error({ err }, "[janitor] message_activity sweep failed");
+    }
+  }
+
+  /**
    * Snapshot retention sweep. Each backup endpoint already prunes
    * the bucket it just wrote into, but a separate periodic sweep
    * catches buckets where the last write happened long ago (e.g.
@@ -498,13 +516,15 @@ export function startJanitor(
     }
   }
 
-  // Run all four immediately on startup so the first sweep doesn't have to wait.
+  // Run all five immediately on startup so the first sweep doesn't have to wait.
   void sweepSessions();
   void sweepMessages();
+  void sweepMessageActivity();
   void sweepTrustPromotions();
   sweepSnapshots();
   const sessionId = setInterval(() => void sweepSessions(), 60 * 1000);
   const messageId = setInterval(() => void sweepMessages(), 60 * 60 * 1000);
+  const messageActivityId = setInterval(() => void sweepMessageActivity(), 60 * 60 * 1000);
   const trustId = setInterval(() => void sweepTrustPromotions(), 60 * 60 * 1000);
   const snapshotId = setInterval(() => sweepSnapshots(), 6 * 60 * 60 * 1000);
 
@@ -529,6 +549,7 @@ export function startJanitor(
   return () => {
     clearInterval(sessionId);
     clearInterval(messageId);
+    clearInterval(messageActivityId);
     clearInterval(trustId);
     clearInterval(snapshotId);
     if (cancelPresence) cancelPresence();

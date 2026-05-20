@@ -111,8 +111,40 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
     && journal.length === 0
     && portraitCount === 0;
 
+  // Owner-configured public-profile background. When set, the Modal's
+  // backdrop (the area outside the card) paints this image with the
+  // chosen sizing strategy. The backdrop's own `onClick={onClose}`
+  // stays intact — clicking outside the card still dismisses the
+  // modal exactly like the default backdrop, so logged-in viewers
+  // landing on a profile from chat can still tap-out back to the
+  // shell. Backdrop also keeps its `bg-black/40` darken color, which
+  // CSS paints UNDER the inline backgroundImage; we don't double
+  // that up with a gradient so vivid BGs come through clean.
+  const profileBgUrl = profile.profile.publicProfileBgUrl?.trim() ?? "";
+  const profileBgMode = profile.profile.publicProfileBgMode ?? "cover";
+  const backdropStyle: React.CSSProperties | undefined = profileBgUrl
+    ? {
+        backgroundImage: `url("${profileBgUrl}")`,
+        backgroundSize:
+          profileBgMode === "stretch"
+            ? "100% 100%"
+            : profileBgMode === "tile"
+              ? "auto"
+              : profileBgMode, // "cover" | "contain" pass straight to CSS
+        backgroundRepeat: profileBgMode === "tile" ? "repeat" : "no-repeat",
+        backgroundPosition: "center",
+        backgroundAttachment: "fixed",
+      }
+    : undefined;
+
   return (
-    <Modal onClose={onClose} variant="mobile-fullscreen">
+    <Modal
+      onClose={onClose}
+      variant="mobile-fullscreen"
+      // Conditional spread, not `prop={maybeUndef}` — `exactOptionalPropertyTypes`
+      // in tsconfig rejects `undefined` as a value for optional props.
+      {...(backdropStyle ? { backdropStyle } : {})}
+    >
       <div
         // Inline-style override scopes the theme to this card only. The
         // explicit bg/color use rgb(var()) because the variables now hold
@@ -953,7 +985,11 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
 
   return (
     <div className="mt-4 border-t border-keep-rule/60 pt-3">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
+      {/* Centered header so the gallery section reads as a unified
+          centered block (header → active preview → thumbnails), all
+          horizontally aligned. Earlier this h3 was left-aligned, which
+          read as disconnected from the 70%-centered preview below. */}
+      <h3 className="mb-2 text-center text-xs font-semibold uppercase tracking-widest text-keep-muted">
         Gallery
       </h3>
       {/* Empty-state hint: render the section even when the gallery is
@@ -964,7 +1000,7 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
           entirely (which made it look like the feature itself was
           missing). */}
       {portraits.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">
+        <p className="text-center text-xs italic text-keep-muted">
           No additional portraits yet. Owners can add more via the profile editor's Gallery tab.
         </p>
       ) : null}
@@ -976,7 +1012,7 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
               below is the navigation surface — the centered preview
               is for "study one image at a time" without crowding the
               rest of the profile. */}
-          <div className="relative inline-block w-full max-w-[70%]">
+          <div className="relative block w-full max-w-[70%]">
             <img
               src={active.url}
               alt={active.label || `${alt} portrait`}
@@ -1000,14 +1036,14 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
           ) : null}
         </div>
       ) : null}
-      {/* Fixed-size tile tracks + `justify-center` so a small
-          gallery (one or two thumbs) sits centered under the
-          expanded preview instead of clinging to the left edge.
-          The earlier `minmax(88px, 1fr)` recipe stretched each
-          column to 1fr and parked a single tile in column 1,
-          which read as visually unbalanced when the row had
-          plenty of empty space to the right. */}
-      <div className="grid grid-cols-[repeat(auto-fill,88px)] justify-center gap-2">
+      {/* Match the active preview's 70% cap + centering so the
+          thumbnail strip reads as a unified continuation of the
+          preview above, not a full-width row that clings to the
+          modal edges. `auto-fit` (not auto-fill) collapses any
+          unused 88px tracks so `justify-center` actually centers
+          the populated tiles — `auto-fill` left phantom tracks on
+          the right and pushed the visible row to the left. */}
+      <div className="mx-auto grid max-w-[70%] grid-cols-[repeat(auto-fit,88px)] justify-center gap-2">
         {portraits.map((p) => {
           const tileCensored = p.nsfw && !revealed.has(p.id);
           return (

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import DOMPurify from "dompurify";
 import type { AuditEntry, ReportEntry, Role, Theme, ThemeableTextSlot, ThreadCategory } from "@thekeep/shared";
 import { THEME_PRESETS } from "@thekeep/shared";
@@ -55,6 +55,103 @@ const TAB_ITEMS: ReadonlyArray<{ id: Tab; label: string; masterOnly?: boolean }>
   { id: "backups", label: "Backups", masterOnly: true },
 ];
 
+/**
+ * Per-tab access to the AdminPanel modal shell. Tabs use `setFooter`
+ * to project save/cancel/status controls into the persistent modal
+ * footer, instead of rendering them inline at the bottom of the
+ * scrolling form (which previously made for an awkward gap at the
+ * bottom of the modal). `close` is the same callback the X button
+ * uses, exposed here so a tab's Cancel button can wire up to it
+ * without prop-drilling.
+ *
+ * `setFooter(null)` (or letting the tab unmount on tab-switch) drops
+ * back to the default footer — a lone Close button on the right.
+ */
+interface AdminShellAPI {
+  setFooter: (node: ReactNode | null) => void;
+  close: () => void;
+}
+const AdminShellContext = createContext<AdminShellAPI | null>(null);
+
+/**
+ * Hook for tabs to register footer content. Returns null when called
+ * outside the AdminPanel shell (tabs can render in isolation in
+ * tests / Storybook without crashing) — callers should defensive-
+ * check before using `setFooter` / `close`.
+ */
+export function useAdminShell(): AdminShellAPI | null {
+  return useContext(AdminShellContext);
+}
+
+/**
+ * Standard footer cluster for the three save-form tabs (Settings,
+ * Branding, Rules). They all share the same shape — status text on
+ * the left, Cancel + Save on the right — so the helper keeps the
+ * three tabs' useEffects from drifting apart visually.
+ *
+ * The Save button submits the tab's `<form id={formId}>` via the
+ * HTML5 `form` attribute. The form lives inside the body's scroll
+ * area; the button lives outside it, in the modal footer. Browser
+ * still routes the submit to the right form. No React plumbing
+ * (lift state up, render-prop, etc.) needed.
+ */
+export function AdminSaveFooter({
+  formId,
+  saving,
+  savedFlash,
+  lastUpdatedAt,
+  error,
+  saveLabel,
+}: {
+  formId: string;
+  saving: boolean;
+  savedFlash: boolean;
+  lastUpdatedAt: number | null;
+  error: string | null;
+  /** e.g. "Save settings". The button shows "Saving..." while saving. */
+  saveLabel: string;
+}): JSX.Element {
+  const shell = useAdminShell();
+  return (
+    <>
+      <span
+        className={`min-w-0 truncate text-xs ${
+          error
+            ? "text-keep-accent"
+            : savedFlash
+              ? "text-keep-system"
+              : "text-keep-muted"
+        }`}
+      >
+        {error
+          ? error
+          : savedFlash
+            ? "Saved."
+            : lastUpdatedAt
+              ? `Last updated ${new Date(lastUpdatedAt).toLocaleString()}`
+              : ""}
+      </span>
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={() => shell?.close()}
+          className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-xs hover:bg-keep-banner/60"
+        >
+          Cancel
+        </button>
+        <button
+          form={formId}
+          type="submit"
+          disabled={saving}
+          className="keep-button rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
+        >
+          {saving ? "Saving..." : saveLabel}
+        </button>
+      </div>
+    </>
+  );
+}
+
 export function AdminPanel({ onClose, onLinksChanged }: Props) {
   const [tab, setTab] = useState<Tab>("overview");
   // Master-admin gating for the destructive-control tabs. A plain
@@ -66,6 +163,20 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
   // `masterOnly*` references below are also used downstream by
   // UsersTab to hide email / disable / masteradmin-role controls.
   const isMaster = useChat((s) => isMasterAdminRole(s.me?.role ?? "user"));
+
+  // Per-tab footer slot. Tabs register save/status controls here via
+  // `useAdminShell().setFooter(...)` so the previously-empty area
+  // below the modal body does useful work. Resets to `null` (default
+  // Close-only footer) on tab switch via the tabs' useEffect cleanup.
+  const [footerNode, setFooterNode] = useState<ReactNode | null>(null);
+  // Memoize the shell API. setFooter from useState is reference-stable
+  // across renders, so the object identity only changes when `onClose`
+  // changes — which means tabs' useEffects don't re-fire on every
+  // render of AdminPanel.
+  const shellApi = useMemo<AdminShellAPI>(
+    () => ({ setFooter: setFooterNode, close: onClose }),
+    [onClose],
+  );
 
   return (
     <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
@@ -81,7 +192,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             tap. Desktop keeps the scrollable strip since there's room
             for it. Both pickers feed the same `setTab` setter and read
             from the shared TAB_ITEMS array so they can't drift apart. */}
-        <div className="border-b border-keep-rule bg-keep-banner">
+        <div className="shrink-0 border-b border-keep-rule bg-keep-banner">
           {/* Mobile: title + dropdown + close, single row, no scroll. */}
           <div className="flex items-center gap-2 px-2 py-2 md:hidden">
             <h2 className="shrink-0 font-action text-base">Admin</h2>
@@ -113,26 +224,49 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
           </div>
         </div>
 
-        {/* `overflow-x-auto` lets wide tables scroll horizontally within
-            the body instead of being clipped by the frame's
-            `overflow-hidden` — which previously hid table columns
-            entirely on mobile. */}
-        <div className="max-h-[78vh] overflow-y-auto overflow-x-auto p-3 sm:p-4">
-          {tab === "overview" ? <OverviewTab /> : null}
-          {/* Master-only render gates mirror the tab visibility above. */}
-          {tab === "settings" && isMaster ? <SettingsTab /> : null}
-          {tab === "branding" && isMaster ? <BrandingTab /> : null}
-          {tab === "rules" && isMaster ? <RulesTab /> : null}
-          {tab === "links" ? <LinksTab onLinksChanged={onLinksChanged} /> : null}
-          {tab === "affiliates" ? <AffiliatesTab /> : null}
-          {tab === "commands" ? <CommandsTab /> : null}
-          {tab === "titles" ? <TitleKindsTab /> : null}
-          {tab === "earning" ? <AdminEarningTab /> : null}
-          {tab === "rooms" ? <RoomsTab /> : null}
-          {tab === "users" ? <UsersTab /> : null}
-          {tab === "reports" ? <ReportsTab /> : null}
-          {tab === "audit" ? <AuditTab /> : null}
-          {tab === "backups" && isMaster ? <AdminBackupsTab /> : null}
+        {/* Body fills the space between header and footer. `flex-1
+            min-h-0` plus inner `overflow-y-auto` keeps the scroll
+            confined to this region so the footer below stays
+            pinned. `overflow-x-auto` lets wide tables scroll
+            horizontally within the body instead of being clipped by
+            the frame's `overflow-hidden`. */}
+        <AdminShellContext.Provider value={shellApi}>
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto p-3 sm:p-4">
+            {tab === "overview" ? <OverviewTab /> : null}
+            {/* Master-only render gates mirror the tab visibility above. */}
+            {tab === "settings" && isMaster ? <SettingsTab /> : null}
+            {tab === "branding" && isMaster ? <BrandingTab /> : null}
+            {tab === "rules" && isMaster ? <RulesTab /> : null}
+            {tab === "links" ? <LinksTab onLinksChanged={onLinksChanged} /> : null}
+            {tab === "affiliates" ? <AffiliatesTab /> : null}
+            {tab === "commands" ? <CommandsTab /> : null}
+            {tab === "titles" ? <TitleKindsTab /> : null}
+            {tab === "earning" ? <AdminEarningTab /> : null}
+            {tab === "rooms" ? <RoomsTab /> : null}
+            {tab === "users" ? <UsersTab /> : null}
+            {tab === "reports" ? <ReportsTab /> : null}
+            {tab === "audit" ? <AuditTab /> : null}
+            {tab === "backups" && isMaster ? <AdminBackupsTab /> : null}
+          </div>
+        </AdminShellContext.Provider>
+
+        {/* Persistent footer. Form tabs (Settings/Branding/Rules)
+            register save+status controls here via `setFooter`; other
+            tabs fall back to a lone Close button on the right so the
+            modal still has anchored chrome instead of dead space. */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-keep-rule bg-keep-banner px-3 py-2 sm:px-4">
+          {footerNode ?? (
+            <>
+              <span aria-hidden />
+              <button
+                type="button"
+                onClick={onClose}
+                className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-xs hover:bg-keep-banner/60"
+              >
+                Close
+              </button>
+            </>
+          )}
         </div>
       </div>
     </Modal>
@@ -691,12 +825,34 @@ function SettingsTab() {
     }
   }
 
+  // Project save controls into the modal footer so the previously-
+  // empty area below the body becomes anchored chrome. The footer
+  // renders our Save (which submits this form via the HTML5 `form`
+  // attribute → see the `id` on `<form>` below) + Cancel + status.
+  // Cleanup on unmount drops back to the default Close-only footer
+  // when the user switches tabs.
+  const shell = useAdminShell();
+  useEffect(() => {
+    if (!shell) return;
+    shell.setFooter(
+      <AdminSaveFooter
+        formId="admin-settings-form"
+        saving={saving}
+        savedFlash={savedFlash}
+        lastUpdatedAt={data?.updatedAt ?? null}
+        error={error}
+        saveLabel="Save settings"
+      />,
+    );
+    return () => shell.setFooter(null);
+  }, [shell, saving, savedFlash, error, data?.updatedAt]);
+
   if (!data) {
     return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
   }
 
   return (
-    <form onSubmit={save} className="space-y-4">
+    <form id="admin-settings-form" onSubmit={save} className="space-y-4">
       <p className="text-xs text-keep-muted">
         Sitewide configuration. Changes apply immediately for new sessions and the next hourly retention sweep.
       </p>
@@ -969,22 +1125,10 @@ function SettingsTab() {
         </div>
       </fieldset>
 
-      {error ? (
-        <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
-      ) : null}
-
-      <div className="flex items-center justify-between">
-        <span className={`text-xs ${savedFlash ? "text-keep-system" : "text-keep-muted"}`}>
-          {savedFlash ? "Saved." : `Last updated ${new Date(data.updatedAt).toLocaleString()}`}
-        </span>
-        <button
-          type="submit"
-          disabled={saving}
-          className="keep-button rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
-        >
-          {saving ? "Saving..." : "Save settings"}
-        </button>
-      </div>
+      {/* Save controls + status (incl. error) live in the modal
+          footer via `useAdminShell().setFooter(...)` near the top of
+          this component. No inline save row — keeps the form
+          scrolling area focused on field editing. */}
     </form>
   );
 }
@@ -1122,12 +1266,33 @@ function BrandingTab() {
     }
   }
 
+  // Project save controls into the modal footer. Same pattern as
+  // SettingsTab — the inline save row used to sit at the bottom of
+  // the scrolling form; now it's anchored in the persistent footer
+  // so it's always reachable and the modal's bottom chrome isn't
+  // empty space.
+  const shell = useAdminShell();
+  useEffect(() => {
+    if (!shell) return;
+    shell.setFooter(
+      <AdminSaveFooter
+        formId="admin-branding-form"
+        saving={saving}
+        savedFlash={savedFlash}
+        lastUpdatedAt={data?.updatedAt ?? null}
+        error={error}
+        saveLabel="Save branding"
+      />,
+    );
+    return () => shell.setFooter(null);
+  }, [shell, saving, savedFlash, error, data?.updatedAt]);
+
   if (!data || !draft) {
     return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
   }
 
   return (
-    <form onSubmit={save} className="space-y-4">
+    <form id="admin-branding-form" onSubmit={save} className="space-y-4">
       <p className="text-xs text-keep-muted">
         Public branding shown to every user (including the login screen).
         Changes apply immediately for everyone after save.
@@ -1358,22 +1523,9 @@ function BrandingTab() {
         </div>
       </fieldset>
 
-      {error ? (
-        <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
-      ) : null}
-
-      <div className="flex items-center justify-between">
-        <span className={`text-xs ${savedFlash ? "text-keep-system" : "text-keep-muted"}`}>
-          {savedFlash ? "Saved." : `Last updated ${new Date(data.updatedAt).toLocaleString()}`}
-        </span>
-        <button
-          type="submit"
-          disabled={saving}
-          className="keep-button rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
-        >
-          {saving ? "Saving..." : "Save branding"}
-        </button>
-      </div>
+      {/* Save controls + status (incl. error) live in the modal
+          footer via `useAdminShell().setFooter(...)` near the top of
+          this component. */}
     </form>
   );
 }
@@ -1597,12 +1749,30 @@ function RulesTab() {
     }
   }
 
+  // Project save controls into the modal footer. Same pattern as
+  // SettingsTab / BrandingTab — see those for the full rationale.
+  const shell = useAdminShell();
+  useEffect(() => {
+    if (!shell) return;
+    shell.setFooter(
+      <AdminSaveFooter
+        formId="admin-rules-form"
+        saving={saving}
+        savedFlash={savedFlash}
+        lastUpdatedAt={data?.updatedAt ?? null}
+        error={error}
+        saveLabel="Save rules"
+      />,
+    );
+    return () => shell.setFooter(null);
+  }, [shell, saving, savedFlash, error, data?.updatedAt]);
+
   if (!data) {
     return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
   }
 
   return (
-    <form onSubmit={save} className="space-y-4">
+    <form id="admin-rules-form" onSubmit={save} className="space-y-4">
       <p className="text-xs text-keep-muted">
         Rules and the privacy notice shown when users click the Rules button.
         Both fields accept the same HTML allow-list as profile bios - formatting
@@ -1731,22 +1901,9 @@ function RulesTab() {
         </p>
       </fieldset>
 
-      {error ? (
-        <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
-      ) : null}
-
-      <div className="flex items-center justify-between">
-        <span className={`text-xs ${savedFlash ? "text-keep-system" : "text-keep-muted"}`}>
-          {savedFlash ? "Saved." : `Last updated ${new Date(data.updatedAt).toLocaleString()}`}
-        </span>
-        <button
-          type="submit"
-          disabled={saving}
-          className="keep-button rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
-        >
-          {saving ? "Saving..." : "Save rules"}
-        </button>
-      </div>
+      {/* Save controls + status (incl. error) live in the modal
+          footer via `useAdminShell().setFooter(...)` near the top of
+          this component. */}
     </form>
   );
 }
@@ -2827,6 +2984,14 @@ interface AdminRoom {
   replyMode: "flat" | "nested";
   hasPassword: boolean;
   memberCount: number;
+  /**
+   * Per-room message-expiry override in minutes. Null = no override;
+   * the room inherits the global `messageRetentionMs` site setting.
+   * Forum/nested rooms (replyMode='nested') are exempt from the
+   * sweep entirely — their messages persist regardless of this
+   * value; the expiry panel renders them as "never expires (forum)".
+   */
+  messageExpiryMinutes: number | null;
 }
 
 interface RoomDraft {
@@ -3498,7 +3663,312 @@ function RoomsTab() {
           )}
         </div>
       ) : null}
+
+      {/* Message-expiry management. Sits below the main room table so
+          the existing edit surface (name/topic/type/etc.) stays
+          uncluttered while admins still get a dedicated view for the
+          sweep schedule. Each row shows the effective expiry — per-
+          room override or "global (Xd)" fallback — and exposes
+          inline + bulk controls. Forum/nested rooms are exempt from
+          the sweep so they surface as "never expires" read-only. */}
+      {!loading ? <RoomExpiryPanel rooms={rooms} onReload={reload} /> : null}
     </div>
+  );
+}
+
+/**
+ * Convert minutes to a short human label ("60m", "5h", "5d") for
+ * tabular display. Picks the largest unit that divides cleanly so
+ * 1440 reads as "1d" instead of "24h" or "1440m". Falls back to
+ * minutes when no clean division works.
+ */
+function formatMinutes(min: number): string {
+  if (min <= 0) return "0";
+  if (min % 1440 === 0) return `${min / 1440}d`;
+  if (min % 60 === 0) return `${min / 60}h`;
+  return `${min}m`;
+}
+
+/**
+ * Parse a duration like "60m", "5h", "5d", or a bare number (read
+ * as minutes). Returns null when the input is empty / unparseable
+ * so callers can fall through to a "clear" code path instead of
+ * sending garbage.
+ */
+function parseExpiryMinutes(raw: string): number | null {
+  const s = raw.trim().toLowerCase();
+  if (s === "") return null;
+  const m = /^(\d+)\s*([mhd]?)$/.exec(s);
+  if (!m) return null;
+  const n = parseInt(m[1]!, 10);
+  if (!Number.isFinite(n) || n < 1) return null;
+  const unit = m[2];
+  const minutes = unit === "h" ? n * 60 : unit === "d" ? n * 1440 : n;
+  if (minutes < 1 || minutes > 43_200) return null;
+  return minutes;
+}
+
+function RoomExpiryPanel({
+  rooms,
+  onReload,
+}: {
+  rooms: AdminRoom[];
+  onReload: () => Promise<void>;
+}) {
+  // Global retention from the branding store — already populated from
+  // /site on first paint, so no extra fetch here. Drives the "(global)"
+  // fallback label rendered for rooms whose per-room override is null.
+  const globalMs = useChat((s) => s.branding.messageRetentionMs);
+  const globalMinutes = globalMs > 0 ? Math.round(globalMs / 60_000) : 0;
+  const globalLabel = globalMs > 0 ? formatMinutes(globalMinutes) : "never";
+
+  // Per-row draft input. Lazy-initialized when the row is first edited
+  // so existing values stay rendered as their canonical label until
+  // the admin actually types into the input.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Bulk-select state — checkbox column. Forum rooms can be selected
+  // but the bulk-apply just no-ops on them server-side (the column
+  // updates but the sweep ignores forum rooms anyway).
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkDraft, setBulkDraft] = useState<string>("");
+  const [busy, setBusy] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+
+  function showFlash(msg: string) {
+    setFlash(msg);
+    window.setTimeout(() => setFlash(null), 2000);
+  }
+
+  async function savePerRoom(room: AdminRoom, raw: string) {
+    setError(null);
+    setBusy(true);
+    try {
+      const minutes = parseExpiryMinutes(raw);
+      if (raw.trim() !== "" && minutes === null) {
+        throw new Error("Expiry must be a duration like 60m, 5h, 5d (1m–30d).");
+      }
+      const r = await fetch(`/admin/rooms/${room.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageExpiryMinutes: minutes }),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      setDrafts((d) => {
+        const next = { ...d };
+        delete next[room.id];
+        return next;
+      });
+      await onReload();
+      showFlash(minutes === null ? `Cleared override on ${room.name}` : `${room.name}: expiry set to ${formatMinutes(minutes)}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clearPerRoom(room: AdminRoom) {
+    await savePerRoom(room, "");
+  }
+
+  async function applyBulk(action: "set" | "clear") {
+    setError(null);
+    setBusy(true);
+    try {
+      let minutes: number | null;
+      if (action === "clear") {
+        minutes = null;
+      } else {
+        minutes = parseExpiryMinutes(bulkDraft);
+        if (minutes === null) throw new Error("Enter a duration like 60m, 5h, 5d (1m–30d).");
+      }
+      const ids = [...selectedIds];
+      if (ids.length === 0) throw new Error("Select at least one room.");
+      const r = await fetch("/admin/rooms/expiry/bulk", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomIds: ids, minutes }),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      const j = (await r.json()) as { updated: number };
+      setSelectedIds(new Set());
+      setBulkDraft("");
+      await onReload();
+      showFlash(
+        minutes === null
+          ? `Cleared override on ${j.updated} room(s)`
+          : `Applied ${formatMinutes(minutes)} to ${j.updated} room(s)`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "bulk apply failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Selectable rooms = everything except forum/nested (server accepts
+  // the value but the sweep ignores them, so including them in bulk
+  // ops is confusing). "Select all" only checks selectable rows.
+  const selectableRooms = rooms.filter((r) => r.replyMode !== "nested");
+  const allSelected = selectableRooms.length > 0 && selectableRooms.every((r) => selectedIds.has(r.id));
+  function toggleAll() {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(selectableRooms.map((r) => r.id)));
+    }
+  }
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Message expiry</legend>
+      <p className="mb-2 text-keep-muted">
+        Global retention is <b className="text-keep-text">{globalLabel}</b> — every flat-chat room without an
+        override below inherits it live. Per-room overrides take precedence
+        when set; forum (nested) rooms keep messages forever regardless.
+        Change the global value in <span className="text-keep-text">Settings → Message retention</span>.
+      </p>
+
+      {selectedIds.size > 0 ? (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded border border-keep-action/40 bg-keep-action/10 p-2">
+          <span className="text-keep-text">
+            <b className="tabular-nums">{selectedIds.size}</b> room(s) selected
+          </span>
+          <span className="mx-1 text-keep-muted">·</span>
+          <input
+            type="text"
+            value={bulkDraft}
+            onChange={(e) => setBulkDraft(e.target.value)}
+            placeholder="60m, 5h, 5d"
+            className="w-28 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 font-mono"
+          />
+          <button
+            type="button"
+            onClick={() => void applyBulk("set")}
+            disabled={busy}
+            className="rounded border border-keep-action bg-keep-action/20 px-2 py-0.5 text-keep-action hover:bg-keep-action/30 disabled:opacity-50"
+          >
+            Apply
+          </button>
+          <button
+            type="button"
+            onClick={() => void applyBulk("clear")}
+            disabled={busy}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner disabled:opacity-50"
+            title="Clear the override on the selected rooms — they fall back to global retention."
+          >
+            Clear override
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="ml-auto rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+          >
+            Deselect all
+          </button>
+        </div>
+      ) : null}
+
+      {error ? <div className="mb-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-keep-accent">{error}</div> : null}
+      {flash ? <div className="mb-2 rounded border border-keep-system/40 bg-keep-system/10 p-2 text-keep-system">{flash}</div> : null}
+
+      <div className="-mx-1 overflow-x-auto px-1">
+        <table className="w-full min-w-[640px] text-xs">
+          <thead className="bg-keep-banner/50 text-keep-muted uppercase tracking-widest">
+            <tr>
+              <th className="px-2 py-1 w-8 text-center">
+                <input
+                  type="checkbox"
+                  aria-label="Select all flat-chat rooms"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                />
+              </th>
+              <th className="px-2 py-1 text-left">Room</th>
+              <th className="px-2 py-1 text-left">Mode</th>
+              <th className="px-2 py-1 text-left">Effective expiry</th>
+              <th className="px-2 py-1 text-left">Override</th>
+              <th className="px-2 py-1 text-right"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rooms.map((r) => {
+              const isForum = r.replyMode === "nested";
+              const draftValue = drafts[r.id] ?? (r.messageExpiryMinutes != null ? formatMinutes(r.messageExpiryMinutes) : "");
+              const dirty = (drafts[r.id] ?? null) !== null;
+              const effectiveLabel = isForum
+                ? "never (forum)"
+                : r.messageExpiryMinutes != null
+                  ? `${formatMinutes(r.messageExpiryMinutes)} (per-room)`
+                  : globalMs > 0
+                    ? `${globalLabel} (global)`
+                    : "never (global)";
+              return (
+                <tr key={r.id} className="border-t border-keep-rule">
+                  <td className="px-2 py-1 text-center">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(r.id)}
+                      disabled={isForum}
+                      aria-label={`Select ${r.name}`}
+                      onChange={(e) => {
+                        setSelectedIds((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(r.id);
+                          else next.delete(r.id);
+                          return next;
+                        });
+                      }}
+                    />
+                  </td>
+                  <td className="px-2 py-1 font-semibold">{r.name}</td>
+                  <td className="px-2 py-1 text-keep-muted">{isForum ? "forum" : "chat"}</td>
+                  <td className="px-2 py-1">
+                    <span className={isForum ? "text-keep-muted" : r.messageExpiryMinutes != null ? "text-keep-text" : "text-keep-muted"}>
+                      {effectiveLabel}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1">
+                    <input
+                      type="text"
+                      value={draftValue}
+                      placeholder={isForum ? "—" : "inherit"}
+                      disabled={isForum}
+                      onChange={(e) =>
+                        setDrafts((d) => ({ ...d, [r.id]: e.target.value }))
+                      }
+                      className="w-28 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 font-mono disabled:opacity-40"
+                    />
+                  </td>
+                  <td className="px-2 py-1 text-right">
+                    <button
+                      type="button"
+                      onClick={() => void savePerRoom(r, drafts[r.id] ?? "")}
+                      disabled={busy || isForum || !dirty}
+                      className="mr-1 rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-keep-action hover:bg-keep-action/20 disabled:opacity-40"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void clearPerRoom(r)}
+                      disabled={busy || isForum || r.messageExpiryMinutes == null}
+                      title={r.messageExpiryMinutes == null ? "No override to clear — already inheriting global." : "Clear override; room falls back to global retention."}
+                      className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner disabled:opacity-40"
+                    >
+                      Clear
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </fieldset>
   );
 }
 

@@ -475,6 +475,8 @@ async function lookupProfile(
         petCollection: await listProfilePetCollection(db, "user", u.id),
         nameStyleKey: ns.key,
         nameStyleConfig: ns.config,
+        publicProfileBgUrl: u.publicProfileBgUrl,
+        publicProfileBgMode: u.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       },
     };
   }
@@ -532,6 +534,8 @@ async function lookupProfile(
       petCollection: await listProfilePetCollection(db, "character", c.id),
       nameStyleKey: ns.key,
       nameStyleConfig: ns.config,
+      publicProfileBgUrl: c.publicProfileBgUrl,
+      publicProfileBgMode: c.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       ...(showOwner ? { ownerUsername: owner.username } : {}),
     },
   };
@@ -611,6 +615,8 @@ async function lookupRandomProfile(
         petCollection: await listProfilePetCollection(db, "user", u.id),
         nameStyleKey: ns.key,
         nameStyleConfig: ns.config,
+        publicProfileBgUrl: u.publicProfileBgUrl,
+        publicProfileBgMode: u.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       },
     };
   }
@@ -661,6 +667,8 @@ async function lookupRandomProfile(
       petCollection: await listProfilePetCollection(db, "character", c.id),
       nameStyleKey: ns.key,
       nameStyleConfig: ns.config,
+      publicProfileBgUrl: c.publicProfileBgUrl,
+      publicProfileBgMode: c.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       ...(showOwner ? { ownerUsername: row.ownerUsername } : {}),
     },
   };

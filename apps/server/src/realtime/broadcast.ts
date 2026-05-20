@@ -17,6 +17,7 @@ import {
   characters,
   friends,
   ignores,
+  messageActivity,
   messages,
   roomInvites,
   roomMembers,
@@ -273,6 +274,14 @@ export async function addMessage(
     //     topics), and the parent topic gets a separate UPDATE below.
     lastActivityAt: payload.replyToId ? null : now,
   });
+  // Append-only activity ledger. Counted by /stats for the splash's
+  // "messages in the last 24h" beacon. Lives in its own table
+  // (`message_activity`) so the count is independent of retention
+  // sweeps — a message getting deleted later doesn't retroactively
+  // shrink the activity number. System messages (room descriptions,
+  // connect/disconnect) intentionally don't log here; only what a
+  // user typed counts as activity. See migration 0118.
+  await ctx.db.insert(messageActivity).values({ createdAt: now });
   // For replies, bump the parent topic's last_activity_at so the forum
   // pagination's DESC order surfaces this thread to the top on the
   // next refresh. We do this best-effort: if the parent has been
@@ -1057,6 +1066,18 @@ export async function joinRoom(
   socket.join(`room:${roomId}`);
 
   socket.data.roomId = roomId;
+  // Persist as the account-global last-room slot on EVERY join, not
+  // just on the disconnect path. Mobile suspension can lose the per-
+  // tab sessionStorage cache (iOS reaping the tab from memory wipes
+  // it), and the disconnect-side write is only made on
+  // `fullyOffline=true` — so a stale sibling socket anywhere (a
+  // forgotten desktop tab, a second phone tab) would have caused the
+  // mobile disconnect to skip the lastRoomId write, leaving the DB
+  // pointing at whatever room the user logged in to days ago. Writing
+  // here is idempotent (UPDATE to the same value when unchanged) and
+  // cheap (one row, indexed PK). Mirrors the per-tab cache update the
+  // client already does via `rememberTabRoom` on `room:state`.
+  await db.update(users).set({ lastRoomId: roomId }).where(eq(users.id, user.id));
   await broadcastRoomState(io, db, roomId);
   await broadcastPresence(io, db, roomId);
 

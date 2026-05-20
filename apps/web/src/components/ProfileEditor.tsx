@@ -70,6 +70,10 @@ interface MasterData {
   role?: Role;
   isPublic?: boolean;
   isNsfw?: boolean;
+  /** Public-profile backdrop image URL. Null/empty = use default. */
+  publicProfileBgUrl?: string | null;
+  /** "cover" | "contain" | "tile" | "stretch" — display strategy for `publicProfileBgUrl`. */
+  publicProfileBgMode?: string | null;
   /** Admin-tunable input caps. Surfaced so each composer's counter matches the server's accept threshold. */
   limits?: {
     maxBioLength: number;
@@ -105,6 +109,10 @@ interface CharacterRow {
   styleKey?: string | null;
   isPublic?: boolean;
   isNsfw?: boolean;
+  /** Public-profile backdrop image URL. Null/empty = use default. */
+  publicProfileBgUrl?: string | null;
+  /** "cover" | "contain" | "tile" | "stretch" — display strategy for `publicProfileBgUrl`. */
+  publicProfileBgMode?: string | null;
 }
 
 type Target = { kind: "master" } | { kind: "character"; id: string };
@@ -195,6 +203,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   // enforces this too); the UI mirrors that by disabling the Public box.
   const [isPublic, setIsPublic] = useState<boolean>(true);
   const [isNsfw, setIsNsfw] = useState<boolean>(false);
+  // Public-profile backdrop image + display mode. Painted on the
+  // profile modal's backdrop (the area outside the modal card) for
+  // any viewer of /p/<this identity>. Null URL = no override (modal
+  // falls back to its default `bg-black/40` overlay). Mode is one of
+  // "cover" | "contain" | "tile" | "stretch" — mapped to the CSS
+  // `background-size` / `background-repeat` pair at render time.
+  const [publicProfileBgUrl, setPublicProfileBgUrl] = useState<string>("");
+  const [publicProfileBgMode, setPublicProfileBgMode] = useState<"cover" | "contain" | "tile" | "stretch">("cover");
   // Live earning snapshot — the preview profile reads the user's
   // current collection + pet collection pins from here so the
   // preview matches the real profile 1:1. The dashboard already
@@ -314,6 +330,12 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setDisableThesaurus(master.disableThesaurus ?? false);
           setIsPublic(master.isPublic ?? true);
           setIsNsfw(master.isNsfw ?? false);
+          setPublicProfileBgUrl(typeof master.publicProfileBgUrl === "string" ? master.publicProfileBgUrl : "");
+          setPublicProfileBgMode(
+            master.publicProfileBgMode === "contain" || master.publicProfileBgMode === "tile" || master.publicProfileBgMode === "stretch"
+              ? master.publicProfileBgMode
+              : "cover",
+          );
           // Master/OOC gallery — same wire shape as the character
           // gallery below, just keyed on the user (user_portraits
           // table, added in migration 0113). Failing the fetch is
@@ -371,6 +393,12 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setUserStyleKey(typeof c.styleKey === "string" ? c.styleKey : null);
           setIsPublic(c.isPublic ?? true);
           setIsNsfw(c.isNsfw ?? false);
+          setPublicProfileBgUrl(typeof c.publicProfileBgUrl === "string" ? c.publicProfileBgUrl : "");
+          setPublicProfileBgMode(
+            c.publicProfileBgMode === "contain" || c.publicProfileBgMode === "tile" || c.publicProfileBgMode === "stretch"
+              ? c.publicProfileBgMode
+              : "cover",
+          );
           // Pull the gallery in parallel with the row fetch above? We do it
           // sequentially here to keep the early-return-on-error simple; the
           // payload is small (under 12 rows in the worst case).
@@ -429,6 +457,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             chatColor,
             isPublic,
             isNsfw,
+            // Public-profile backdrop. Empty string normalizes to null
+            // (server treats "missing" and "explicit clear" the same).
+            // Mode always rides along — it's a NOT NULL column with a
+            // default, so sending it on every save keeps the row
+            // consistent even when the URL itself is cleared.
+            publicProfileBgUrl: publicProfileBgUrl.trim() === "" ? null : publicProfileBgUrl.trim(),
+            publicProfileBgMode,
           }),
         });
         if (!r.ok) throw new Error(await readError(r));
@@ -456,6 +491,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             // consistent with what the next /me/profile load would return.
             isPublic: isNsfw ? false : isPublic,
             isNsfw,
+            publicProfileBgUrl: publicProfileBgUrl.trim() === "" ? null : publicProfileBgUrl.trim(),
+            publicProfileBgMode,
           };
           if (theme) next.theme = theme;
           else delete next.theme;
@@ -497,6 +534,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             styleKey: userStyleKey,
             isPublic,
             isNsfw,
+            // Per-character public-profile backdrop. Empty string
+            // normalizes to null on the wire. Mode rides along on
+            // every save (NOT NULL column with a default).
+            publicProfileBgUrl: publicProfileBgUrl.trim() === "" ? null : publicProfileBgUrl.trim(),
+            publicProfileBgMode,
           }),
         });
         if (!r.ok) throw new Error(await readError(r));
@@ -514,6 +556,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                   styleKey: userStyleKey,
                   isPublic: isNsfw ? false : isPublic,
                   isNsfw,
+                  publicProfileBgUrl: publicProfileBgUrl.trim() === "" ? null : publicProfileBgUrl.trim(),
+                  publicProfileBgMode,
                 }
               : c,
           ),
@@ -761,6 +805,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           petCollection: previewCollections.pets,
           nameStyleKey: previewNameStyle.key,
           nameStyleConfig: previewNameStyle.config,
+          // Live BG so the preview's backdrop reflects the editor's
+          // controls without a save round-trip.
+          publicProfileBgUrl: publicProfileBgUrl.trim() === "" ? null : publicProfileBgUrl.trim(),
+          publicProfileBgMode,
         },
       };
     }
@@ -806,9 +854,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         petCollection: previewCollections.pets,
         nameStyleKey: previewNameStyle.key,
         nameStyleConfig: previewNameStyle.config,
+        publicProfileBgUrl: publicProfileBgUrl.trim() === "" ? null : publicProfileBgUrl.trim(),
+        publicProfileBgMode,
       },
     };
-  }, [target, master, myUserId, name, bioHtml, avatarUrl, includeAvatarInGallery, gender, stats, theme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey, previewCollections, previewNameStyle]);
+  }, [target, master, myUserId, name, bioHtml, avatarUrl, includeAvatarInGallery, gender, stats, theme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey, previewCollections, previewNameStyle, publicProfileBgUrl, publicProfileBgMode]);
 
   const targetOptions = useMemo(() => {
     return [
@@ -1141,6 +1191,74 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                     onChange={setUserStyleKey}
                     allowInherit
                   />
+                </fieldset>
+                {/* PUBLIC PROFILE BACKGROUND — image painted on the
+                    profile modal's backdrop (the area around the
+                    modal card) when others view /p/<this identity>.
+                    Per-identity: a character's BG is independent of
+                    the master's. Clicking the backdrop still closes
+                    the modal — the BG only changes how that area
+                    looks, not how it behaves. */}
+                <fieldset className="rounded border border-keep-rule p-3">
+                  <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Public profile background</legend>
+                  <p className="mb-2 text-[10px] text-keep-muted">
+                    {isCharacter
+                      ? "Image painted behind this character's profile modal for any viewer. Leave the URL empty to use the default backdrop. Per-character — each character can carry its own scene."
+                      : "Image painted behind your master / OOC profile modal for any viewer. Leave the URL empty to use the default backdrop."}
+                  </p>
+                  <label className="block text-xs">
+                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">Image URL</span>
+                    <input
+                      type="url"
+                      value={publicProfileBgUrl}
+                      onChange={(e) => setPublicProfileBgUrl(e.target.value)}
+                      placeholder="https://… (leave blank for default)"
+                      maxLength={1000}
+                      className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
+                    />
+                  </label>
+                  <label className="mt-3 block text-xs">
+                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">Display mode</span>
+                    <select
+                      value={publicProfileBgMode}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "cover" || v === "contain" || v === "tile" || v === "stretch") {
+                          setPublicProfileBgMode(v);
+                        }
+                      }}
+                      className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+                    >
+                      <option value="cover">Cover — fill viewport, crop to fit</option>
+                      <option value="contain">Contain — fit inside viewport, letterbox</option>
+                      <option value="tile">Tile — repeat across viewport</option>
+                      <option value="stretch">Stretch — fill exact dimensions</option>
+                    </select>
+                  </label>
+                  {publicProfileBgUrl.trim() !== "" ? (
+                    // Inline preview tile — shows the URL with the
+                    // chosen mode at a small fixed-aspect frame so the
+                    // user can verify the BG renders correctly before
+                    // saving. Same backgroundSize / backgroundRepeat
+                    // mapping ProfileModal uses at render time.
+                    <div className="mt-3">
+                      <span className="mb-1 block text-[10px] uppercase tracking-widest text-keep-muted">Preview</span>
+                      <div
+                        className="h-32 w-full rounded border border-keep-rule bg-keep-bg"
+                        style={{
+                          backgroundImage: `url("${publicProfileBgUrl.trim()}")`,
+                          backgroundSize:
+                            publicProfileBgMode === "stretch"
+                              ? "100% 100%"
+                              : publicProfileBgMode === "tile"
+                                ? "auto"
+                                : publicProfileBgMode,
+                          backgroundRepeat: publicProfileBgMode === "tile" ? "repeat" : "no-repeat",
+                          backgroundPosition: "center",
+                        }}
+                      />
+                    </div>
+                  ) : null}
                 </fieldset>
                 {!isCharacter ? (
                   <fieldset className="rounded border border-keep-rule p-3">

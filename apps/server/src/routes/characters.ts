@@ -97,6 +97,16 @@ const updateBody = z.object({
   isPublic: z.boolean().optional(),
   /** NSFW gate: forces non-public to anonymous + adds a viewer warning splash. */
   isNsfw: z.boolean().optional(),
+  /**
+   * Public-profile backdrop image URL. Same validator as avatarUrl —
+   * http(s), length-capped. Null clears the override (profile modal
+   * falls back to the default spire splash). Empty string also reads
+   * as "clear" — normalized to null on write so the column stays
+   * single-shaped.
+   */
+  publicProfileBgUrl: httpUrl.nullable().optional(),
+  /** Display mode for `publicProfileBgUrl`. See PublicProfileBgMode in @thekeep/shared. */
+  publicProfileBgMode: z.enum(["cover", "contain", "tile", "stretch"]).optional(),
 });
 
 const masterUpdateBody = z.object({
@@ -177,6 +187,9 @@ const masterUpdateBody = z.object({
   chatColor: hexColor.nullable().optional(),
   isPublic: z.boolean().optional(),
   isNsfw: z.boolean().optional(),
+  /** Master-profile public backdrop. Same shape as the character-level field. */
+  publicProfileBgUrl: httpUrl.nullable().optional(),
+  publicProfileBgMode: z.enum(["cover", "contain", "tile", "stretch"]).optional(),
 });
 
 const createPortraitBody = z.object({
@@ -257,6 +270,12 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
           // leaves it alone.
           ...(body.styleKey !== undefined ? { styleKey: body.styleKey } : {}),
           ...(body.isPublic !== undefined || body.isNsfw !== undefined ? { isPublic, isNsfw } : {}),
+          ...(body.publicProfileBgUrl !== undefined
+            ? { publicProfileBgUrl: body.publicProfileBgUrl }
+            : {}),
+          ...(body.publicProfileBgMode !== undefined
+            ? { publicProfileBgMode: body.publicProfileBgMode }
+            : {}),
           updatedAt: new Date(),
         })
         .where(eq(characters.id, c.id));
@@ -496,6 +515,12 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       role: u.role,
       isPublic: u.isPublic,
       isNsfw: u.isNsfw,
+      // Public-profile backdrop image + display mode. Editor reads
+      // these to seed its BG controls; viewer surfaces (the modal)
+      // read them from `/profiles/:name` instead. Null URL = no
+      // override, default mode "cover".
+      publicProfileBgUrl: u.publicProfileBgUrl,
+      publicProfileBgMode: u.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       welcome: wantsWelcome
         ? { html: settings.newUserWelcomeHtml, hash: settings.newUserWelcomeHash }
         : null,
@@ -851,6 +876,12 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         // absent leaves alone).
         ...(body.chatColor !== undefined ? { chatColor: body.chatColor } : {}),
         ...(body.isPublic !== undefined || body.isNsfw !== undefined ? { isPublic, isNsfw } : {}),
+        ...(body.publicProfileBgUrl !== undefined
+          ? { publicProfileBgUrl: body.publicProfileBgUrl }
+          : {}),
+        ...(body.publicProfileBgMode !== undefined
+          ? { publicProfileBgMode: body.publicProfileBgMode }
+          : {}),
       })
       .where(eq(users.id, me.id));
     if (

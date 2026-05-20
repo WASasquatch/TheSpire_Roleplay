@@ -1035,14 +1035,12 @@ async function main() {
           const fullyOffline = !(await userIsOnline(io, userId, socketId));
 
           if (fullyOffline) {
-            // Remember the room this socket was last in so the next
-            // connect can drop them back there. Captured from
-            // socket.data.roomId (set by joinRoom on every room move) —
-            // any one of the socket's rooms would do, but `data.roomId`
-            // is the authoritative "current" room. Only persisted on the
-            // fully-offline path so a tab-close that leaves a sibling
-            // socket alive doesn't clobber the lastRoomId the still-
-            // open tab is about to update via its own future disconnect.
+            // Defensive re-write of lastRoomId on full disconnect. The
+            // canonical path now writes lastRoomId on every joinRoom
+            // (see realtime/broadcast.ts), so by the time we get here
+            // the DB already holds the right value. We still write it
+            // again as a backstop in case a future joinRoom path skips
+            // the update — idempotent, costs one indexed UPDATE.
             const lastRoomId = (socket.data as { roomId?: string }).roomId ?? null;
             if (lastRoomId) {
               await db.update(users).set({ lastRoomId }).where(eq(users.id, userId));

@@ -229,6 +229,21 @@ export const users = sqliteTable(
      * depend on it in this codebase.
      */
     lastRoomId: text("last_room_id"),
+    /**
+     * Public-profile background image URL. When set, the profile modal
+     * paints this on its backdrop (the area outside the modal card) so
+     * visitors landing on /p/<username> see the owner's chosen image
+     * instead of the default spire splash. NULL = use default.
+     */
+    publicProfileBgUrl: text("public_profile_bg_url"),
+    /**
+     * CSS sizing strategy for `publicProfileBgUrl`. Stored as the
+     * literal mode key ("cover" | "contain" | "tile" | "stretch")
+     * that the client maps to `background-size`/`background-repeat`
+     * pairs. Default "cover" — most forgiving for typical landscape
+     * illustrations. See migration 0117 for the full table.
+     */
+    publicProfileBgMode: text("public_profile_bg_mode").notNull().default("cover"),
     createdAt: ts("created_at"),
     lastLoginAt: integer("last_login_at", { mode: "timestamp_ms" }),
     disabledAt: integer("disabled_at", { mode: "timestamp_ms" }),
@@ -277,6 +292,10 @@ export const characters = sqliteTable(
     isPublic: integer("is_public", { mode: "boolean" }).notNull().default(true),
     /** Same semantics as users.is_nsfw - forces private + adds a viewer gate splash. */
     isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
+    /** Mirrors users.publicProfileBgUrl — per-character public-profile backdrop image. NULL = use default. */
+    publicProfileBgUrl: text("public_profile_bg_url"),
+    /** Mirrors users.publicProfileBgMode — "cover" | "contain" | "tile" | "stretch". */
+    publicProfileBgMode: text("public_profile_bg_mode").notNull().default("cover"),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
     deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
@@ -602,6 +621,29 @@ export const userPortraits = sqliteTable(
   },
   (t) => ({
     userIdx: index("user_portraits_user_idx").on(t.userId, t.sortOrder),
+  }),
+);
+
+/* ---------- message_activity ----------
+ * Append-only ledger of user-authored message creations. Decoupled
+ * from the `messages` table so the splash's "messages in the last
+ * 24h" stat reflects true posting activity instead of "messages
+ * currently surviving" (the latter counts DOWN as retention sweeps
+ * delete old rows — confusing for an activity beacon). System
+ * messages (connect/disconnect, room descriptions) are NOT logged
+ * here; only user-typed content (chat, action, whisper, /npc, /cmd,
+ * forum posts) counts as activity. The janitor sweeps rows older
+ * than 26h every hour, so the table holds at most ~26h of entries.
+ * See migration 0118 for the full rationale.
+ */
+export const messageActivity = sqliteTable(
+  "message_activity",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => ({
+    createdAtIdx: index("message_activity_created_at_idx").on(t.createdAt),
   }),
 );
 

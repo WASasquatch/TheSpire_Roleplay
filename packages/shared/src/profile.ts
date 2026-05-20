@@ -202,6 +202,17 @@ export interface CharacterProfile {
    */
   nameStyleConfig: Record<string, unknown> | null;
   /**
+   * Public-profile background image URL + display mode. When the
+   * profile modal renders, its backdrop (the area outside the modal
+   * card) paints this image so visitors landing on /p/<character>
+   * see the owner's chosen image instead of the default spire
+   * splash. Null URL = no override (default backdrop). The mode
+   * picks the CSS sizing strategy — see PublicProfileBgMode for
+   * the table.
+   */
+  publicProfileBgUrl: string | null;
+  publicProfileBgMode: PublicProfileBgMode;
+  /**
    * Master account username of the user who owns this character —
    * surfaced ONLY when the viewer is a mod/admin/masteradmin. Lets
    * moderation staff see "this character is voiced by user X"
@@ -326,7 +337,27 @@ export interface MasterProfile {
    */
   nameStyleKey: string | null;
   nameStyleConfig: Record<string, unknown> | null;
+  /**
+   * Public-profile background image URL + display mode. Same
+   * semantics as `CharacterProfile.publicProfileBgUrl/Mode` — each
+   * identity (master + each character) holds its own backdrop, so a
+   * user can paint the OOC profile differently from each
+   * character's profile.
+   */
+  publicProfileBgUrl: string | null;
+  publicProfileBgMode: PublicProfileBgMode;
 }
+
+/**
+ * CSS sizing strategy for the public-profile backdrop image:
+ *   "cover"    — image fills viewport, cropped to fit (default)
+ *   "contain"  — image fits inside viewport, letterboxed
+ *   "tile"     — image repeats to fill viewport
+ *   "stretch"  — image stretched to exact viewport dimensions
+ * Stored as the literal key; the client maps to `background-size`
+ * + `background-repeat` pairs at render time.
+ */
+export type PublicProfileBgMode = "cover" | "contain" | "tile" | "stretch";
 
 /** What `/profile` returns: either the master, or the active character. */
 export type ProfileView =

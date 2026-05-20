@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { gte, ne, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import { messages, rooms, users } from "../db/schema.js";
+import { messageActivity, messages, rooms, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -70,15 +70,21 @@ export async function registerStatsRoutes(
       days.push({ day: key, count: dayMap.get(key) ?? 0 });
     }
 
-    // Rolling 24-hour message count. Separate from `messagesPerDay`
-    // (which is UTC-day bucketed) so the splash can show a stable
-    // "in the last 24h" number that doesn't reset at UTC midnight.
-    // Cheap — same `messages.createdAt` index already covers it.
+    // Rolling 24-hour message count. Reads from the append-only
+    // `message_activity` ledger (migration 0118) — NOT from the
+    // `messages` table — so the splash stat reflects true posting
+    // activity instead of "messages currently surviving retention."
+    // Querying `messages` here would count DOWN as the janitor's
+    // retention sweep deletes older rows, which is backwards from
+    // what an activity beacon should show. The ledger is sized to
+    // hold ~26h of entries (hourly janitor sweep at 26h cutoff —
+    // see `sweepMessageActivity` in seed.ts) so the 24h query
+    // always reads complete data.
     const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
     const last24hRows = await db
       .select({ n: sql<number>`count(*)` })
-      .from(messages)
-      .where(gte(messages.createdAt, new Date(twentyFourHoursAgo)));
+      .from(messageActivity)
+      .where(gte(messageActivity.createdAt, new Date(twentyFourHoursAgo)));
     const messages24h = last24hRows[0]?.n ?? 0;
 
     return {

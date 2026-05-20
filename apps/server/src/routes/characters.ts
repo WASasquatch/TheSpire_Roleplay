@@ -22,8 +22,9 @@ const activeCharacterBody = z.object({
   characterId: z.string().nullable(),
 }).strict();
 
-/** Per-character portrait gallery cap. Hard upper bound; admins might tune later. */
-const PORTRAIT_CAP_PER_CHARACTER = 12;
+/** Per-identity portrait gallery cap. Hard upper bound; admins might tune
+ *  later. Applies to both `/characters/:id/portraits` and `/me/portraits`. */
+const PORTRAIT_CAP_PER_CHARACTER = 20;
 // `createPortraitBody` / `updatePortraitBody` use the same `httpUrl`
 // validator the avatar field uses; both schemas are declared further down
 // the file once httpUrl is in scope.
@@ -184,6 +185,11 @@ const createPortraitBody = z.object({
   nsfw: z.boolean().optional(),
 }).strict();
 const updatePortraitBody = z.object({
+  /** Allow URL edits in place so the card-based editor can repair
+   *  typos without forcing a delete + re-add (which would invalidate
+   *  the row id and break any references). Same validator as the
+   *  POST body — http(s) only, length-capped. */
+  url: httpUrl.optional(),
   label: z.string().max(60).nullable().optional(),
   sortOrder: z.number().int().min(0).max(1000).optional(),
   nsfw: z.boolean().optional(),
@@ -614,6 +620,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       await db
         .update(characterPortraits)
         .set({
+          ...(body.url !== undefined ? { url: body.url } : {}),
           ...(body.label !== undefined ? { label: body.label } : {}),
           ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
           ...(body.nsfw !== undefined ? { nsfw: body.nsfw } : {}),
@@ -727,6 +734,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       await db
         .update(userPortraits)
         .set({
+          ...(body.url !== undefined ? { url: body.url } : {}),
           ...(body.label !== undefined ? { label: body.label } : {}),
           ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
           ...(body.nsfw !== undefined ? { nsfw: body.nsfw } : {}),

@@ -970,11 +970,17 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
       ) : null}
       {active ? (
         <div className="mb-2 flex flex-col items-center gap-1">
-          <div className="relative inline-block max-w-full">
+          {/* Expanded gallery preview is capped at 70% of the profile
+              width and centered, so a tall portrait doesn't dominate
+              the modal at every viewport size. The thumbnail strip
+              below is the navigation surface — the centered preview
+              is for "study one image at a time" without crowding the
+              rest of the profile. */}
+          <div className="relative inline-block w-full max-w-[70%]">
             <img
               src={active.url}
               alt={active.label || `${alt} portrait`}
-              className={`max-w-full rounded border border-keep-border transition ${
+              className={`mx-auto block max-w-full rounded border border-keep-border transition ${
                 activeIsCensored ? "blur-2xl scale-105" : ""
               }`}
             />
@@ -994,7 +1000,14 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
           ) : null}
         </div>
       ) : null}
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-2">
+      {/* Fixed-size tile tracks + `justify-center` so a small
+          gallery (one or two thumbs) sits centered under the
+          expanded preview instead of clinging to the left edge.
+          The earlier `minmax(88px, 1fr)` recipe stretched each
+          column to 1fr and parked a single tile in column 1,
+          which read as visually unbalanced when the row had
+          plenty of empty space to the right. */}
+      <div className="grid grid-cols-[repeat(auto-fill,88px)] justify-center gap-2">
         {portraits.map((p) => {
           const tileCensored = p.nsfw && !revealed.has(p.id);
           return (

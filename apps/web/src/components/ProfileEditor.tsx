@@ -1511,6 +1511,37 @@ function portraitItemUrl(scope: GalleryScope, id: string): string {
     : `/me/portraits/${id}`;
 }
 
+/** Cap mirrors the server's PORTRAIT_CAP_PER_CHARACTER (currently 20).
+ *  Bumped from 12 alongside the editor rewrite. The server still
+ *  enforces the limit on POST; the client just gates the
+ *  spawn-new-draft logic so the UI doesn't dangle an empty slot
+ *  past the cap. */
+const PORTRAIT_GALLERY_CAP = 20;
+
+/** Image-load lifecycle for the live-preview card. Tracked per URL
+ *  so cards sharing a URL share a single load attempt. */
+type ImgStatus = "loading" | "loaded" | "error";
+
+/**
+ * Card-based portrait gallery editor.
+ *
+ * Each saved portrait renders as a card with a live image preview,
+ * editable URL / label / NSFW fields, drag-and-drop reorder (with
+ * touch-friendly up/down arrow buttons as a fallback that works the
+ * same on every device), and a delete button. A trailing "new
+ * portrait" draft card sits at the end of the list so adding more is
+ * a single field-paste away — no separate "Add" mode toggle.
+ *
+ * Edits commit on blur: URL/label PATCH the existing row, or POST a
+ * new row when the draft slot is filled. NSFW toggles immediately.
+ * Reorders fire one PATCH per row whose sort_order changed (parallel
+ * via Promise.all) which is fine at the 20-card cap.
+ *
+ * Live image preview uses native `<img onLoad/onError>` so a broken
+ * URL or a server that blocks hotlinking (returns 4xx or an error
+ * image) surfaces a warning right there in the card instead of only
+ * showing the badness after save + reload.
+ */
 function PortraitGalleryEditor({
   scope,
   portraits,
@@ -1520,43 +1551,40 @@ function PortraitGalleryEditor({
   portraits: CharacterPortrait[];
   onChange: (next: CharacterPortrait[]) => void;
 }) {
-  const [adding, setAdding] = useState(false);
-  const [url, setUrl] = useState("");
-  const [label, setLabel] = useState("");
-  const [nsfw, setNsfw] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Draft slot — the trailing empty card. Captured here (not inside
+  // the card itself) so it survives if portraits prop refetches.
+  const [draftUrl, setDraftUrl] = useState("");
+  const [draftLabel, setDraftLabel] = useState("");
+  const [draftNsfw, setDraftNsfw] = useState(false);
+  // Card under active HTML5 drag, for drop-target affordance.
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
-  // Plain handler (not onSubmit) — see LinksEditor.add for why nesting a
-  // <form> inside the outer ProfileEditor <form> silently routes the
-  // submit to the wrong handler.
-  async function add() {
-    const u = url.trim();
-    if (!u) return;
-    setErr(null);
-    setBusy(true);
+  // Image-load state map keyed by URL so toggling a card's URL
+  // re-runs the preview check without sharing state with the
+  // previous URL. Cleared opportunistically as portraits change.
+  const [imgStatus, setImgStatus] = useState<Record<string, ImgStatus>>({});
+  function markImg(url: string, status: ImgStatus) {
+    setImgStatus((prev) => (prev[url] === status ? prev : { ...prev, [url]: status }));
+  }
+
+  async function saveField(
+    id: string,
+    field: "url" | "label" | "nsfw",
+    value: string | boolean | null,
+  ): Promise<void> {
     try {
-      const res = await fetch(portraitListUrl(scope), {
-        method: "POST",
+      const res = await fetch(portraitItemUrl(scope, id), {
+        method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: u,
-          ...(label.trim() ? { label: label.trim() } : {}),
-          ...(nsfw ? { nsfw: true } : {}),
-        }),
+        body: JSON.stringify({ [field]: value }),
       });
       if (!res.ok) throw new Error(await readError(res));
-      const row = (await res.json()) as { id: string; url: string; label: string | null; nsfw: boolean };
-      onChange([...portraits, { id: row.id, url: row.url, label: row.label, nsfw: !!row.nsfw }]);
-      setUrl("");
-      setLabel("");
-      setNsfw(false);
-      setAdding(false);
+      onChange(portraits.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+      setErr(null);
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "add failed");
-    } finally {
-      setBusy(false);
+      setErr(e2 instanceof Error ? e2.message : "save failed");
     }
   }
 
@@ -1574,120 +1602,400 @@ function PortraitGalleryEditor({
     }
   }
 
-  /** Toggle a portrait's NSFW flag in-place. */
-  async function toggleNsfw(id: string, next: boolean) {
+  /** Commit the draft slot's URL: POST a new portrait, clear the
+   *  draft inputs so the spawned card stops showing them, and let
+   *  the parent's portraits prop reflect the new row. Caller passes
+   *  the trimmed url so we don't re-compute it. */
+  async function commitDraft(u: string) {
+    if (!u || portraits.length >= PORTRAIT_GALLERY_CAP) return;
     try {
-      const res = await fetch(portraitItemUrl(scope, id), {
-        method: "PATCH",
+      const res = await fetch(portraitListUrl(scope), {
+        method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nsfw: next }),
+        body: JSON.stringify({
+          url: u,
+          ...(draftLabel.trim() ? { label: draftLabel.trim() } : {}),
+          ...(draftNsfw ? { nsfw: true } : {}),
+        }),
       });
       if (!res.ok) throw new Error(await readError(res));
-      onChange(portraits.map((p) => (p.id === id ? { ...p, nsfw: next } : p)));
+      const row = (await res.json()) as { id: string; url: string; label: string | null; nsfw: boolean };
+      onChange([...portraits, { id: row.id, url: row.url, label: row.label, nsfw: !!row.nsfw }]);
+      setDraftUrl("");
+      setDraftLabel("");
+      setDraftNsfw(false);
+      setErr(null);
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "toggle failed");
+      setErr(e2 instanceof Error ? e2.message : "add failed");
     }
   }
+
+  /** Move card at index `from` to index `to`. PATCHes every card
+   *  whose final index changed (set sort_order = new index). The
+   *  server orders by sort_order so a dense 0..N-1 assignment is
+   *  always the cheapest correct reshuffle. */
+  async function reorder(from: number, to: number) {
+    if (from === to || from < 0 || to < 0 || from >= portraits.length || to >= portraits.length) return;
+    const next = portraits.slice();
+    const [moved] = next.splice(from, 1);
+    if (!moved) return;
+    next.splice(to, 0, moved);
+    onChange(next);
+    // PATCH every card whose new index differs from its OLD position
+    // (i.e. its array position pre-reorder). Parallel because the
+    // cap is small. We DON'T have the old positions cleanly here;
+    // simplest correct approach: PATCH all of them. At cap=20 that's
+    // 20 small JSON requests. Fast enough; not worth optimizing.
+    try {
+      await Promise.all(
+        next.map((p, i) =>
+          fetch(portraitItemUrl(scope, p.id), {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sortOrder: i }),
+          }),
+        ),
+      );
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "reorder failed");
+    }
+  }
+
+  const showDraft = portraits.length < PORTRAIT_GALLERY_CAP;
 
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
       <legend className="px-1 uppercase tracking-widest text-keep-muted">Gallery</legend>
-      <p className="mb-2 text-[10px] text-keep-muted">
-        Extra portraits shown beneath the bio on this profile. The Main Profile Image above is the one rendered first (userlist, modal hero). Mark a tile NSFW to blur it for viewers (they can click to reveal).
+      <p className="mb-3 text-[10px] text-keep-muted">
+        Portraits shown on this profile below the pinned Collection and Bio. The Main Profile Image above drives the userlist icon and the modal hero; tick "Include in Gallery" on the Profile tab to also surface the avatar as the first tile here without duplicating its URL. Mark a card NSFW to blur it for viewers; drag the ⠿ handle or use the ↑ ↓ buttons to reorder. Up to {PORTRAIT_GALLERY_CAP} portraits.
       </p>
-      {portraits.length > 0 ? (
-        <div className="mb-2 grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-2">
-          {portraits.map((p) => (
-            <div key={p.id} className="relative">
-              <img
-                src={p.url}
-                alt={p.label ?? "portrait"}
-                className={`aspect-square w-full rounded border border-keep-border object-cover ${p.nsfw ? "blur-md scale-105" : ""}`}
-              />
-              <button
-                type="button"
-                onClick={() => toggleNsfw(p.id, !p.nsfw)}
-                title={p.nsfw ? "Marked NSFW (blurred for viewers) - click to unmark." : "Mark NSFW so viewers see this tile blurred until they reveal."}
-                aria-label="Toggle NSFW"
-                aria-pressed={p.nsfw}
-                className={`absolute bottom-0 left-0 rounded-bl rounded-tr border border-keep-rule px-1 text-[10px] ${
-                  p.nsfw ? "bg-keep-accent text-white" : "bg-keep-bg/80 text-keep-muted hover:bg-keep-banner"
-                }`}
-              >
-                NSFW
-              </button>
-              <button
-                type="button"
-                onClick={() => remove(p.id)}
-                title="Remove portrait"
-                aria-label="Remove portrait"
-                className="absolute right-0 top-0 rounded-bl rounded-tr border border-keep-rule bg-keep-bg/80 px-1 text-[10px] text-keep-accent hover:bg-keep-accent/10"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
+      {err ? (
+        <div className="mb-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-[11px] text-keep-accent">
+          {err}
         </div>
-      ) : (
-        <p className="mb-2 italic text-keep-muted">No extra portraits yet.</p>
-      )}
-      {adding ? (
-        <div className="space-y-1">
-          <input
-            type="text"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://example.com/portrait.png"
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }}
-            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+      ) : null}
+      <div className="space-y-2">
+        {portraits.map((p, idx) => (
+          <PortraitCard
+            key={p.id}
+            portrait={p}
+            index={idx}
+            total={portraits.length}
+            dragging={draggingId === p.id}
+            imgStatus={imgStatus[p.url] ?? "loading"}
+            onMarkImg={markImg}
+            onDragStart={() => setDraggingId(p.id)}
+            onDragEnd={() => setDraggingId(null)}
+            onDropOnto={(fromId) => {
+              const from = portraits.findIndex((q) => q.id === fromId);
+              const to = idx;
+              void reorder(from, to);
+            }}
+            onMoveUp={() => void reorder(idx, idx - 1)}
+            onMoveDown={() => void reorder(idx, idx + 1)}
+            onSaveUrl={(u) => void saveField(p.id, "url", u)}
+            onSaveLabel={(l) => void saveField(p.id, "label", l || null)}
+            onToggleNsfw={() => void saveField(p.id, "nsfw", !p.nsfw)}
+            onDelete={() => void remove(p.id)}
           />
-          <input
-            type="text"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="Label (optional - e.g. 'transformed')"
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }}
-            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+        ))}
+        {showDraft ? (
+          <DraftPortraitCard
+            url={draftUrl}
+            label={draftLabel}
+            nsfw={draftNsfw}
+            onUrlChange={setDraftUrl}
+            onLabelChange={setDraftLabel}
+            onNsfwToggle={() => setDraftNsfw((v) => !v)}
+            onCommit={() => void commitDraft(draftUrl.trim())}
+            imgStatus={draftUrl.trim() ? (imgStatus[draftUrl.trim()] ?? "loading") : null}
+            onMarkImg={markImg}
           />
-          <label className="flex items-center gap-1 text-[11px] text-keep-muted">
-            <input
-              type="checkbox"
-              checked={nsfw}
-              onChange={(e) => setNsfw(e.target.checked)}
-              className="h-3 w-3"
-            />
-            <span>Mark NSFW (viewers see this blurred until they reveal it)</span>
-          </label>
-          {err ? <div className="text-[10px] text-keep-accent">{err}</div> : null}
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => { setAdding(false); setUrl(""); setLabel(""); setNsfw(false); setErr(null); }}
-              className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => { void add(); }}
-              disabled={busy || !url.trim()}
-              className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
-            >
-              {busy ? "Adding..." : "Add"}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setAdding(true)}
-          className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
-        >
-          + Add portrait
-        </button>
-      )}
+        ) : (
+          <p className="text-[11px] italic text-keep-muted">
+            Gallery is full ({PORTRAIT_GALLERY_CAP} portraits). Remove one to add another.
+          </p>
+        )}
+      </div>
     </fieldset>
+  );
+}
+
+/** Single saved-portrait card with live preview + edit fields +
+ *  drag/reorder controls. Pure presentation — every mutation goes
+ *  through callbacks so the parent owns the transactional state. */
+function PortraitCard({
+  portrait,
+  index,
+  total,
+  dragging,
+  imgStatus,
+  onMarkImg,
+  onDragStart,
+  onDragEnd,
+  onDropOnto,
+  onMoveUp,
+  onMoveDown,
+  onSaveUrl,
+  onSaveLabel,
+  onToggleNsfw,
+  onDelete,
+}: {
+  portrait: CharacterPortrait;
+  index: number;
+  total: number;
+  dragging: boolean;
+  imgStatus: ImgStatus;
+  onMarkImg: (url: string, status: ImgStatus) => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDropOnto: (fromId: string) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onSaveUrl: (next: string) => void;
+  onSaveLabel: (next: string) => void;
+  onToggleNsfw: () => void;
+  onDelete: () => void;
+}) {
+  // Local edit buffers — values commit to the parent (and the
+  // server) on blur. This keeps every keystroke from PATCHing,
+  // which would be wasteful AND would race when the user is
+  // mid-edit and a refetch overwrites their buffer.
+  const [urlBuf, setUrlBuf] = useState(portrait.url);
+  const [labelBuf, setLabelBuf] = useState(portrait.label ?? "");
+  // Sync buffers if the prop changes (parent refetch after save).
+  useEffect(() => { setUrlBuf(portrait.url); }, [portrait.url]);
+  useEffect(() => { setLabelBuf(portrait.label ?? ""); }, [portrait.label]);
+  const [dropHover, setDropHover] = useState(false);
+
+  return (
+    <div
+      draggable
+      onDragStart={(e) => {
+        // Dragged payload IS the portrait id — drop targets read it
+        // to compute the from-index.
+        e.dataTransfer.setData("text/portrait-id", portrait.id);
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (!dropHover) setDropHover(true);
+      }}
+      onDragLeave={() => setDropHover(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDropHover(false);
+        const fromId = e.dataTransfer.getData("text/portrait-id");
+        if (fromId && fromId !== portrait.id) onDropOnto(fromId);
+      }}
+      className={`flex items-stretch gap-2 rounded border bg-keep-bg/30 p-2 transition ${
+        dragging ? "opacity-40" : ""
+      } ${dropHover ? "border-keep-action ring-1 ring-keep-action" : "border-keep-rule"}`}
+    >
+      {/* Live preview tile. Loading state shows the URL muted; error
+          shows a "won't load" warning so the user knows the
+          host probably blocks hotlinking. */}
+      <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded border border-keep-rule bg-keep-banner/40">
+        {imgStatus !== "error" ? (
+          <img
+            src={portrait.url}
+            alt={portrait.label ?? "portrait"}
+            referrerPolicy="no-referrer"
+            onLoad={() => onMarkImg(portrait.url, "loaded")}
+            onError={() => onMarkImg(portrait.url, "error")}
+            className={`h-full w-full object-cover ${portrait.nsfw ? "blur-md scale-105" : ""}`}
+          />
+        ) : (
+          <div className="grid h-full w-full place-items-center text-center text-[9px] uppercase tracking-widest text-keep-accent">
+            won't load
+          </div>
+        )}
+      </div>
+
+      {/* Editable fields stack to the right of the preview. */}
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex items-center gap-1">
+          <span
+            aria-hidden
+            className="cursor-grab select-none px-1 text-keep-muted active:cursor-grabbing"
+            title="Drag to reorder"
+          >
+            ⠿
+          </span>
+          <input
+            type="text"
+            value={urlBuf}
+            onChange={(e) => setUrlBuf(e.target.value)}
+            onBlur={() => {
+              const u = urlBuf.trim();
+              if (u && u !== portrait.url) onSaveUrl(u);
+              else if (!u) setUrlBuf(portrait.url); // empty = revert; deletion uses the ✕ button
+            }}
+            placeholder="https://example.com/portrait.png"
+            className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 font-mono text-[11px] outline-none focus:border-keep-action"
+          />
+          {/* Up / Down / Delete — universal so touch users have a
+              real reorder path even when HTML5 drag doesn't fire on
+              their device. */}
+          <button
+            type="button"
+            onClick={onMoveUp}
+            disabled={index === 0}
+            title="Move up"
+            aria-label="Move up"
+            className="rounded border border-keep-rule bg-keep-bg px-1 text-keep-muted hover:bg-keep-banner disabled:opacity-30"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            onClick={onMoveDown}
+            disabled={index >= total - 1}
+            title="Move down"
+            aria-label="Move down"
+            className="rounded border border-keep-rule bg-keep-bg px-1 text-keep-muted hover:bg-keep-banner disabled:opacity-30"
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Remove portrait"
+            aria-label="Remove portrait"
+            className="rounded border border-keep-rule bg-keep-bg px-1 text-keep-accent hover:bg-keep-accent/10"
+          >
+            ✕
+          </button>
+        </div>
+        <input
+          type="text"
+          value={labelBuf}
+          onChange={(e) => setLabelBuf(e.target.value)}
+          onBlur={() => {
+            const next = labelBuf.trim();
+            const cur = portrait.label ?? "";
+            if (next !== cur) onSaveLabel(next);
+          }}
+          placeholder="Label (optional — e.g. 'transformed')"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-0.5 outline-none focus:border-keep-action"
+        />
+        <label className="flex items-center gap-1 text-[11px] text-keep-muted">
+          <input
+            type="checkbox"
+            checked={portrait.nsfw}
+            onChange={onToggleNsfw}
+            className="h-3 w-3"
+          />
+          <span>NSFW (viewers see this blurred until they reveal)</span>
+        </label>
+        {imgStatus === "error" ? (
+          <p className="text-[10px] text-keep-accent">
+            This image won't load — either the URL is broken, the host blocks hotlinking, or it requires a referrer the browser strips. Try a direct CDN link.
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** Trailing draft card. Same visual layout as a saved card but
+ *  with no server id yet — committing the URL POSTs it and
+ *  promotes it to a real portrait. */
+function DraftPortraitCard({
+  url,
+  label,
+  nsfw,
+  onUrlChange,
+  onLabelChange,
+  onNsfwToggle,
+  onCommit,
+  imgStatus,
+  onMarkImg,
+}: {
+  url: string;
+  label: string;
+  nsfw: boolean;
+  onUrlChange: (next: string) => void;
+  onLabelChange: (next: string) => void;
+  onNsfwToggle: () => void;
+  onCommit: () => void;
+  imgStatus: ImgStatus | null;
+  onMarkImg: (url: string, status: ImgStatus) => void;
+}) {
+  const trimmed = url.trim();
+  // Commit-on-card-exit, not commit-on-url-blur: if we POST the
+  // moment URL loses focus, the draft card unmounts mid-typing
+  // when the user tabs to the label or NSFW. So we listen on the
+  // card wrapper and only commit when focus has actually left the
+  // entire card (relatedTarget is outside) — letting URL/Label/NSFW
+  // edits all happen inside the draft before promoting it.
+  return (
+    <div
+      onBlur={(e) => {
+        if (!trimmed) return;
+        const next = e.relatedTarget as Node | null;
+        if (next && e.currentTarget.contains(next)) return;
+        onCommit();
+      }}
+      className="flex items-stretch gap-2 rounded border border-dashed border-keep-rule bg-keep-bg/20 p-2"
+    >
+      <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded border border-keep-rule/60 bg-keep-banner/30">
+        {trimmed && imgStatus !== "error" ? (
+          <img
+            src={trimmed}
+            alt=""
+            referrerPolicy="no-referrer"
+            onLoad={() => onMarkImg(trimmed, "loaded")}
+            onError={() => onMarkImg(trimmed, "error")}
+            className={`h-full w-full object-cover ${nsfw ? "blur-md scale-105" : ""}`}
+          />
+        ) : trimmed && imgStatus === "error" ? (
+          <div className="grid h-full w-full place-items-center text-center text-[9px] uppercase tracking-widest text-keep-accent">
+            won't load
+          </div>
+        ) : (
+          <div className="grid h-full w-full place-items-center text-center text-[9px] uppercase tracking-widest text-keep-muted/60">
+            preview
+          </div>
+        )}
+      </div>
+      <div className="min-w-0 flex-1 space-y-1">
+        <input
+          type="text"
+          value={url}
+          onChange={(e) => onUrlChange(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (trimmed) onCommit(); } }}
+          placeholder="Paste an image URL to add a portrait…"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-0.5 font-mono text-[11px] outline-none focus:border-keep-action"
+        />
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => onLabelChange(e.target.value)}
+          placeholder="Label (optional)"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-0.5 outline-none focus:border-keep-action"
+        />
+        <label className="flex items-center gap-1 text-[11px] text-keep-muted">
+          <input
+            type="checkbox"
+            checked={nsfw}
+            onChange={onNsfwToggle}
+            className="h-3 w-3"
+          />
+          <span>NSFW</span>
+        </label>
+        {trimmed && imgStatus === "error" ? (
+          <p className="text-[10px] text-keep-accent">
+            Preview won't load. The portrait will still save, but viewers may not see it either — try a direct CDN link.
+          </p>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

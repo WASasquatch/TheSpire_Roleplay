@@ -57,6 +57,14 @@ export function parseOwnThemeJson(json: string | null): Theme | null {
 export interface SiteSettings {
   messageRetentionMs: number;
   sessionTtlMs: number;
+  /**
+   * Idle-ghost lifetime in ms. When a user's last socket disconnects,
+   * they linger in the userlist as a faded "(idle)" row for this long
+   * before being dropped for real. Within the window the disconnect is
+   * silent in chat and reconnects are silent too. See the disconnect
+   * handler in index.ts and the ghost registry in realtime/broadcast.ts.
+   */
+  idleGraceMs: number;
   /** Resolved theme - already falls back to DEFAULT_THEME when unset. */
   defaultTheme: Theme;
   /** Same data as raw row - for serializing to admin endpoints. */
@@ -182,6 +190,8 @@ export async function getSettings(db: Db): Promise<SiteSettings> {
 export interface SettingsPatch {
   messageRetentionMs?: number;
   sessionTtlMs?: number;
+  /** Idle-ghost lifetime in ms. See SiteSettings.idleGraceMs. */
+  idleGraceMs?: number;
   /** Pass null to clear the override; pass a Theme to set. Omit to leave as-is. */
   defaultTheme?: Theme | null;
   /** Public site name. Empty string falls back to "The Spire". */
@@ -260,6 +270,7 @@ export async function updateSettings(
   };
   if (patch.messageRetentionMs !== undefined) update.messageRetentionMs = patch.messageRetentionMs;
   if (patch.sessionTtlMs !== undefined) update.sessionTtlMs = patch.sessionTtlMs;
+  if (patch.idleGraceMs !== undefined) update.idleGraceMs = patch.idleGraceMs;
   if (patch.defaultTheme !== undefined) {
     update.defaultThemeJson = patch.defaultTheme === null ? null : JSON.stringify(patch.defaultTheme);
   }
@@ -335,6 +346,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
   return {
     messageRetentionMs: row.messageRetentionMs,
     sessionTtlMs: row.sessionTtlMs,
+    idleGraceMs: row.idleGraceMs,
     defaultTheme,
     defaultThemeJson: row.defaultThemeJson,
     siteName: row.siteName,

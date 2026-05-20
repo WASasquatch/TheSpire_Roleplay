@@ -44,6 +44,16 @@ export interface RoomOccupant {
   characterId: string | null;
   away: boolean;
   awayMessage: string | null;
+  /**
+   * True when this occupant is a ghost held over from a disconnected
+   * tab — their last socket dropped but they're inside the configured
+   * idle-grace window (see site_settings.idleGraceMs). The userlist
+   * renders idle rows faded out with an "(idle)" suffix so onlookers
+   * can tell they're not active. Distinct from `away`, which is a
+   * user-driven /away state with an optional message and applies even
+   * while live.
+   */
+  idle: boolean;
   /** Hex chat color (e.g. "#990000") if user has set one */
   chatColor: string | null;
   /** Resolved gender - character.stats.gender if active, else user.gender */

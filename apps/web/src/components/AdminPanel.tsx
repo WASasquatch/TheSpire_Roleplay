@@ -219,6 +219,7 @@ interface NavLinkInput {
 interface SettingsRow {
   messageRetentionMs: number;
   sessionTtlMs: number;
+  idleGraceMs: number;
   defaultThemeJson: string | null;
   defaultTheme: Theme;
   siteName: string;
@@ -536,6 +537,7 @@ function SettingsTab() {
   const [data, setData] = useState<SettingsRow | null>(null);
   const [retention, setRetention] = useState("");
   const [sessionTtl, setSessionTtl] = useState("");
+  const [idleGrace, setIdleGrace] = useState("");
   const [theme, setTheme] = useState<Theme | null>(null);
   const [maxChars, setMaxChars] = useState("");
   const [maxEmail, setMaxEmail] = useState("");
@@ -571,6 +573,7 @@ function SettingsTab() {
       setData(j);
       setRetention(formatMs(j.messageRetentionMs));
       setSessionTtl(formatMs(j.sessionTtlMs));
+      setIdleGrace(formatMs(j.idleGraceMs));
       setTheme(j.defaultThemeJson ? normalizeTheme(JSON.parse(j.defaultThemeJson)) : null);
       setMaxChars(String(j.maxCharactersPerUser));
       setMaxEmail(String(j.maxAccountsPerEmail));
@@ -599,9 +602,12 @@ function SettingsTab() {
     try {
       const retentionMs = parseDurationMs(retention);
       const ttlMs = parseDurationMs(sessionTtl);
+      const idleGraceMs = parseDurationMs(idleGrace);
       const editGraceMs = parseDurationMs(editGrace);
       if (retentionMs === null) throw new Error("retention must be a duration like 30d (or 0 for never)");
       if (ttlMs === null || ttlMs < 5 * 60 * 1000) throw new Error("session TTL must be at least 5m");
+      if (idleGraceMs === null || idleGraceMs < 30 * 1000) throw new Error("idle grace must be at least 30s");
+      if (idleGraceMs > 24 * 60 * 60 * 1000) throw new Error("idle grace must be 24h or less");
       if (editGraceMs === null) throw new Error("edit window must be a duration like 5m (or 0 to disable edits)");
       // Server caps at 7d; same here so the input error is friendlier
       // than an opaque 400 from the route.
@@ -616,6 +622,7 @@ function SettingsTab() {
       const body: Record<string, unknown> = {
         messageRetentionMs: retentionMs,
         sessionTtlMs: ttlMs,
+        idleGraceMs,
         maxCharactersPerUser: intOrThrow("Max characters/user", maxChars, 1, 1000),
         maxAccountsPerEmail: intOrThrow("Max accounts/email", maxEmail, 1, 50),
         maxRoomsPerOwner: intOrThrow("Max rooms/owner", maxRooms, 0, 1000),
@@ -717,6 +724,22 @@ function SettingsTab() {
           />
           <span className="text-keep-muted">
             How long a user can be idle before they get bounced back to the login splash. Sliding: any keypress, mousemove, message, or room switch resets the clock. Min 5m.
+          </span>
+        </div>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Idle ghost lifetime</legend>
+        <div className="flex items-baseline gap-2">
+          <input
+            type="text"
+            value={idleGrace}
+            onChange={(e) => setIdleGrace(e.target.value)}
+            placeholder="30m, 1h"
+            className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+          />
+          <span className="text-keep-muted">
+            When someone closes their tab or refreshes, they stay in the userlist faded out as "(idle)" for this long instead of vanishing. Inside the window, no connect/disconnect chat lines fire. The room they were in is also held open against archival. Min 30s, max 24h.
           </span>
         </div>
       </fieldset>

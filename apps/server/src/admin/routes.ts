@@ -666,6 +666,8 @@ export async function registerAdminRoutes(
     messageRetentionMs: z.number().int().min(0).max(10 * 365 * 24 * 60 * 60 * 1000).optional(),
     /** ms; min 5 minutes (don't lock users out instantly), max 10 years. */
     sessionTtlMs: z.number().int().min(5 * 60 * 1000).max(10 * 365 * 24 * 60 * 60 * 1000).optional(),
+    /** ms; min 30 seconds, max 24 hours. How long a disconnected user lingers in the userlist as "idle" before being dropped. */
+    idleGraceMs: z.number().int().min(30 * 1000).max(24 * 60 * 60 * 1000).optional(),
     /** Pass null to clear; pass a Theme to set. */
     defaultTheme: themeSchema.nullable().optional(),
     /** Public site name. Empty becomes "The Spire". */
@@ -781,6 +783,7 @@ export async function registerAdminRoutes(
     return {
       messageRetentionMs: s.messageRetentionMs,
       sessionTtlMs: s.sessionTtlMs,
+      idleGraceMs: s.idleGraceMs,
       defaultThemeJson: s.defaultThemeJson,
       defaultTheme: s.defaultTheme,
       siteName: s.siteName,
@@ -828,6 +831,7 @@ export async function registerAdminRoutes(
     const patch: Parameters<typeof updateSettings>[1] = {};
     if (body.messageRetentionMs !== undefined) patch.messageRetentionMs = body.messageRetentionMs;
     if (body.sessionTtlMs !== undefined) patch.sessionTtlMs = body.sessionTtlMs;
+    if (body.idleGraceMs !== undefined) patch.idleGraceMs = body.idleGraceMs;
     if (body.defaultTheme !== undefined) patch.defaultTheme = body.defaultTheme;
     if (body.siteName !== undefined) patch.siteName = body.siteName;
     if (body.siteUrl !== undefined) patch.siteUrl = body.siteUrl;

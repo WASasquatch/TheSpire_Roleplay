@@ -29,8 +29,10 @@ import {
   expireIfEmpty,
   findCanonicalLanding,
   joinRoom,
-  schedulePendingDisconnect,
+  registerIdleGhost,
+  setGhostSweepIo,
   userHasSocketInRoom,
+  userIdentityHasSocketInRoom,
   userIsOnline,
 } from "./realtime/broadcast.js";
 import { lookupProfile } from "./commands/builtins/profile.js";
@@ -400,6 +402,11 @@ async function main() {
   const io = new IoServer<ClientToServerEvents, ServerToClientEvents>(httpServer, {
     cors: { origin: WEB_ORIGIN, credentials: true },
   });
+  // Hand io to the ghost-sweep timer in broadcast.ts so its setTimeout
+  // closure can call back into expireIfEmpty + broadcastPresence when an
+  // idle ghost finally times out. We don't pass io through `registerIdleGhost`
+  // every call because the timer outlives the call that scheduled it.
+  setGhostSweepIo(io);
 
   // Routes that need io for socket-room introspection (currently-online
   // occupants per room, presence rebroadcast on character delete, etc.) -
@@ -981,9 +988,9 @@ async function main() {
       (socket.data as { exitIntent?: boolean }).exitIntent = true;
     });
 
-    // We use `disconnecting` (not `disconnect`) because by the time `disconnect`
-    // fires, socket.rooms is already empty - we'd miss the room ids we need to
-    // notify and check for auto-expiry.
+    // We use `disconnecting` (not `disconnect`) because by the time
+    // `disconnect` fires, socket.rooms is already empty - we'd miss the
+    // room ids we need to notify and check for auto-expiry.
     socket.on("disconnecting", () => {
       const roomIds = [...socket.rooms]
         .filter((r) => r.startsWith("room:"))
@@ -993,23 +1000,33 @@ async function main() {
       const userId = user.id;
       const displayName = user.displayName;
       const socketId = socket.id;
+      // Resolve the identity this socket was voicing. tabCharId is the
+      // per-socket override; when `undefined` (no /char issued on this
+      // tab) we fall back to the user-level activeCharacterId we hold on
+      // the SessionUser. Captured here, in the sync handler, so the
+      // deferred cleanup doesn't see a stale value if the user object
+      // mutates underneath us. `null` means OOC; a string is the active
+      // character id.
+      const tabCharRaw = (socket.data as { tabCharId?: string | null }).tabCharId;
+      const characterId: string | null = tabCharRaw !== undefined
+        ? tabCharRaw
+        : (user.activeCharacterId ?? null);
       // Snapshot the intentional-exit flag too. The Exit button emits
-      // `me:exit` immediately before disconnecting, which sets this
-      // on socket.data — the disconnect handler reads it to decide
-      // whether to fire the "X has disconnected." chat broadcast.
-      // Without an explicit exit, the disconnect stays silent (mobile
-      // suspend, tab close, network drop all look identical on the
-      // wire and shouldn't surface as chat messages). The userlist
-      // updates either way through `broadcastPresence`.
+      // `me:exit` immediately before disconnecting, which sets this on
+      // socket.data — the disconnect handler reads it to decide between
+      // (a) firing "X has disconnected." + immediate cleanup, vs.
+      // (b) ghosting the identity into the userlist as idle so a
+      // returning tab doesn't churn the rail or the chat log.
       const exitIntent = (socket.data as { exitIntent?: boolean }).exitIntent === true;
 
       // Defer the work so the socket actually finishes leaving its rooms first;
       // otherwise expireIfEmpty would still see this socket present.
       setTimeout(() => {
         (async () => {
-          // "Has this user gone offline entirely?" - drives the wording of
-          // the system message ("disconnected" vs "left"). When the user has
-          // another tab open elsewhere, only the per-room departure shows.
+          // "Has this user gone offline entirely?" - true only when no
+          // sibling sockets remain anywhere on the io server. Drives
+          // the lastRoomId persist (so the next cold connect lands them
+          // back where they were).
           const fullyOffline = !(await userIsOnline(io, userId, socketId));
 
           if (fullyOffline) {
@@ -1025,55 +1042,62 @@ async function main() {
             if (lastRoomId) {
               await db.update(users).set({ lastRoomId }).where(eq(users.id, userId));
             }
+          }
 
-            // Reconnect-grace path: don't announce or rebroadcast yet. If the
-            // user reconnects inside the grace window, joinRoom() consumes
-            // the pending entry and this whole block never fires - the chat
-            // log + userlist look like the blip never happened. Otherwise
-            // the timer fires after the grace window and the announcement
-            // goes out then.
-            //
-            // We re-resolve room state inside the deferred callback so that
-            // (a) expireIfEmpty sees the user truly gone, not just leaving,
-            // and (b) per-room "still there" checks reflect any racing
-            // reconnect that arrived in a different room.
-            schedulePendingDisconnect(userId, async () => {
-              for (const id of roomIds) {
-                const expired = await expireIfEmpty(io, db, id);
-                if (expired) continue;
-                const stillThere = await userHasSocketInRoom(io, userId, id);
-                if (!stillThere) {
-                  // "X has disconnected." fires ONLY when the user
-                  // clicked the Exit button — `exitIntent` is set by
-                  // the `me:exit` socket event the client emits right
-                  // before disconnecting. Without an explicit exit
-                  // (tab close, mobile suspend dropping the socket
-                  // past grace, network drop), the disconnect is
-                  // silent in chat. The userlist update below still
-                  // fires so other viewers see them vanish from the
-                  // rail — they just don't get a chat-log line about
-                  // it. Forum rooms also suppress regardless of
-                  // intent — the topic feed isn't a chat log.
-                  const r = (await db.select().from(rooms).where(eq(rooms.id, id)).limit(1))[0];
-                  if (exitIntent && r?.replyMode !== "nested") {
-                    await addSystemMessage(io, db, id, `${displayName} has disconnected.`);
-                  }
-                }
-                await broadcastPresence(io, db, id);
-              }
-            });
-          } else {
-            // Other tabs of this user are still alive: this is a tab close /
-            // room switch, not a session-level disconnect. The
-            // per-room "X left." chat broadcast is silenced entirely —
-            // a user with multiple tabs flipping between rooms or
-            // closing one of them doesn't deserve chat noise; the
-            // userlist re-broadcast below is the visible signal.
-            for (const id of roomIds) {
+          // Per-room decision. For each room the socket was in:
+          //   - exitIntent (Exit button): fire the "has disconnected"
+          //     line immediately (forum rooms suppress as before) and
+          //     run the usual expireIfEmpty + broadcastPresence. No
+          //     ghosting — the user explicitly left.
+          //   - non-exit (tab close, refresh, network drop): if this
+          //     identity has no other live socket in the room, register
+          //     an idle ghost. The userlist re-broadcast that follows
+          //     shows the row faded with "(idle)". The room is held
+          //     open via the ghost's expireIfEmpty short-circuit until
+          //     the idle window elapses with no return.
+          for (const id of roomIds) {
+            if (exitIntent) {
               const expired = await expireIfEmpty(io, db, id);
               if (expired) continue;
+              const stillThere = await userHasSocketInRoom(io, userId, id);
+              if (!stillThere) {
+                const r = (await db.select().from(rooms).where(eq(rooms.id, id)).limit(1))[0];
+                // Forum rooms suppress regardless of intent — the topic
+                // feed isn't a chat log.
+                if (r?.replyMode !== "nested") {
+                  await addSystemMessage(io, db, id, `${displayName} has disconnected.`);
+                }
+              }
               await broadcastPresence(io, db, id);
+              continue;
             }
+            // Non-intentional disconnect: ghost this identity if it
+            // has no other live socket in this room. Same-character
+            // sibling tab in the same room keeps the row live and we
+            // skip the ghost. Different-character sibling means the
+            // closed tab's identity still needs a ghost; the live
+            // sibling shows up as its own row.
+            const identityStillLive = await userIdentityHasSocketInRoom(
+              io,
+              userId,
+              characterId,
+              id,
+            );
+            if (!identityStillLive) {
+              await registerIdleGhost(db, {
+                userId,
+                characterId,
+                roomId: id,
+                displayName,
+              });
+            }
+            // Broadcast presence regardless — the userlist either
+            // gains the idle row (just ghosted) or rebroadcasts the
+            // unchanged state (sibling kept the identity live). Skip
+            // expireIfEmpty: a ghost is now holding the room, and
+            // even if the identity stayed live, a sibling socket is
+            // still present so the room isn't empty.
+            await broadcastPresence(io, db, id);
           }
         })().catch((err) => log.error({ err }, "disconnecting cleanup failed"));
       }, 0);

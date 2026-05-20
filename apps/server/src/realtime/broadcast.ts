@@ -511,36 +511,108 @@ function colorForKind(kind: MessageKind, color: string | null): string | null {
 }
 
 /**
- * Reconnect grace period for "has connected" / "has disconnected".
+ * Idle-ghost registry.
  *
  * Socket-level lifecycles don't map cleanly to user-level lifecycles. A user
  * sitting in a room can have their socket transiently drop and reconnect for
- * many reasons that have nothing to do with them logging in or out:
- * background-throttled tabs, brief network blips, server reload in dev, even
- * the socket.io heartbeat misfiring once. With no grace, every blip emits
- * "X has disconnected" + "X has connected" + a description re-broadcast,
- * which is misleading both to the affected user and to everyone else in the
- * room (it looks like they came and went, when actually they were here the
- * whole time).
+ * many reasons that have nothing to do with them logging in or out: tab
+ * close + reopen, page refresh, background-throttled tabs, brief network
+ * blips, server reload in dev, the socket.io heartbeat misfiring once. With
+ * no grace, every blip would yank them out of the userlist + fire
+ * "X has disconnected" / "X has connected" pairs — misleading both to the
+ * affected user and to onlookers (it looks like they came and went, when
+ * actually they were here the whole time).
  *
- * The mechanism: when a user's last socket disconnects, we don't announce it
- * immediately - we schedule the announcement (and the userlist re-broadcast)
- * for PRESENCE_GRACE_MS in the future. If the user reconnects inside that
- * window, joinRoom() consumes the pending entry, the timer is canceled, and
- * we skip the "has connected" message + the room description re-emit. The
- * net effect: a transient reconnect leaves no visible artifact in the chat
- * log or the userlist. A genuine disconnect (browser closed, user went away)
- * still surfaces - just delayed by the grace window.
+ * Instead, when a user's last socket disconnects without an explicit Exit
+ * click, we keep an "idle ghost" per (room, identity) tuple. `currentOccupants`
+ * merges ghosts into its output marked `idle: true` so the userlist still
+ * renders the row (faded with an "(idle)" suffix on the client). The
+ * disconnect is silent in chat. The ghost's room is held open against
+ * `expireIfEmpty` so a private single-user room doesn't archive while its
+ * only occupant is just refreshing.
  *
- * Map size is bounded by the number of users currently in their grace
- * window. Entries self-clear via the timer or via consumePendingDisconnect.
+ * Lifetime is per-user, configurable via `site_settings.idleGraceMs`
+ * (default 30 minutes). When the timer fires, the sweep clears every ghost
+ * the user holds, runs `expireIfEmpty` on the affected rooms, and emits a
+ * final `broadcastPresence` so the idle row finally disappears from every
+ * viewer's rail. No "X has disconnected." line — silent end-to-end (the
+ * opt-in announce happens at the immediate exit-click path, not here).
+ *
+ * On reconnect (or on the user choosing to log in elsewhere), the
+ * `consumePendingDisconnect` path clears ALL of the user's ghosts and
+ * rebroadcasts presence to each formerly-ghosted room so the idle row
+ * vanishes cleanly. The same call returns true, which `joinRoom` reads as
+ * "this is a reconnect — suppress the connected announcement."
+ *
+ * Why per-identity, not per-user: a user with two tabs voicing two
+ * different characters in the same room shows two userlist rows (one per
+ * identity). If only one tab closes, only that identity should ghost — the
+ * other stays live. Per-identity keys preserve that asymmetry.
+ *
+ * Why a single timer per user (not per ghost): a user closing three tabs
+ * across two rooms in quick succession should get one consolidated sweep
+ * at the end of the window, not three sweeps. Each ghost addition resets
+ * the user's timer to the configured grace.
+ *
+ * Memory is bounded by the number of identities currently in their idle
+ * window. Entries self-clear via the timer or via the consume path.
  */
-const PRESENCE_GRACE_MS = 20_000;
-type PendingDisconnect = { timer: NodeJS.Timeout };
-const pendingDisconnects = new Map<string, PendingDisconnect>();
+type IdleGhost = {
+  userId: string;
+  characterId: string | null;
+  roomId: string;
+  /** Captured at ghost-creation time so callers don't need to re-resolve. Display data on the wire is rebuilt fresh by `currentOccupants` from the live DB row, not from this snapshot. */
+  displayName: string;
+};
+function ghostKey(roomId: string, userId: string, characterId: string | null): string {
+  return `${roomId}::${userId}::${characterId ?? ""}`;
+}
+const idleGhostsByKey = new Map<string, IdleGhost>();
+const ghostKeysByUser = new Map<string, Set<string>>();
+const ghostTimerByUser = new Map<string, NodeJS.Timeout>();
+
+function trackGhost(g: IdleGhost): void {
+  const key = ghostKey(g.roomId, g.userId, g.characterId);
+  idleGhostsByKey.set(key, g);
+  let keys = ghostKeysByUser.get(g.userId);
+  if (!keys) {
+    keys = new Set();
+    ghostKeysByUser.set(g.userId, keys);
+  }
+  keys.add(key);
+}
 
 /**
- * Server-boot quiet window. The pendingDisconnects map above only survives
+ * True iff any ghost is currently held for the given room. Consulted by
+ * `expireIfEmpty` so a room with only ghost occupants doesn't get archived
+ * out from under them.
+ */
+export function hasIdleGhostsForRoom(roomId: string): boolean {
+  const prefix = `${roomId}::`;
+  for (const key of idleGhostsByKey.keys()) {
+    if (key.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+/**
+ * Return the ghost identities for the given room. Consumed by
+ * `currentOccupants` to merge ghosts into the live-socket presence before
+ * the per-row joins run.
+ */
+export function getIdleGhostsForRoom(roomId: string): Array<{ userId: string; characterId: string | null }> {
+  const prefix = `${roomId}::`;
+  const out: Array<{ userId: string; characterId: string | null }> = [];
+  for (const [key, g] of idleGhostsByKey) {
+    if (key.startsWith(prefix)) {
+      out.push({ userId: g.userId, characterId: g.characterId });
+    }
+  }
+  return out;
+}
+
+/**
+ * Server-boot quiet window. The idle-ghost registry above only survives
  * inside a single process lifetime - any restart (tsx-watch reload in dev,
  * a real Fly deploy in prod) wipes it. Without a boot-grace, every client
  * that reconnects after the restart shows up looking like a fresh connect
@@ -592,37 +664,117 @@ function markSeenDescription(userId: string, roomId: string): void {
 }
 
 /**
- * Cancel a pending disconnect for this user, if any. Returns true when one
- * was canceled - meaning this connect is a reconnect inside the grace window
- * and the caller should suppress the "has connected" announcement.
+ * Drop every ghost the user currently holds, cancel their sweep timer, and
+ * rebroadcast presence to each formerly-ghosted room so the idle row
+ * vanishes from every viewer's rail. Returns true when at least one ghost
+ * was cleared — `joinRoom` reads that as the reconnect signal and
+ * suppresses the "X has connected." announcement.
+ *
+ * Awaited inside `joinRoom` before its own broadcast for the room being
+ * joined. The double-broadcast for that one room is intentional and cheap:
+ * the consume path emits the without-the-user state, then the join path
+ * emits the with-the-user state. Net effect on the rail is the user
+ * "returning" from idle to live, which is what we want.
  */
-export function consumePendingDisconnect(userId: string): boolean {
-  const pd = pendingDisconnects.get(userId);
-  if (!pd) return false;
-  clearTimeout(pd.timer);
-  pendingDisconnects.delete(userId);
+export async function consumePendingDisconnect(io: Io, db: Db, userId: string): Promise<boolean> {
+  const keys = ghostKeysByUser.get(userId);
+  if (!keys || keys.size === 0) {
+    // Even with no ghosts, make sure any stray timer is cleared. Belt-and-
+    // suspenders — the timer is only ever set alongside ghost entries, so
+    // a leftover here would indicate a bookkeeping bug, but the cost of
+    // the extra clear is nil.
+    const t = ghostTimerByUser.get(userId);
+    if (t) {
+      clearTimeout(t);
+      ghostTimerByUser.delete(userId);
+    }
+    return false;
+  }
+  const timer = ghostTimerByUser.get(userId);
+  if (timer) {
+    clearTimeout(timer);
+    ghostTimerByUser.delete(userId);
+  }
+  const affectedRooms = new Set<string>();
+  for (const key of keys) {
+    const g = idleGhostsByKey.get(key);
+    if (g) affectedRooms.add(g.roomId);
+    idleGhostsByKey.delete(key);
+  }
+  ghostKeysByUser.delete(userId);
+  for (const roomId of affectedRooms) {
+    await broadcastPresence(io, db, roomId);
+  }
   return true;
 }
 
 /**
- * Defer the user's "has disconnected" work by PRESENCE_GRACE_MS. The caller
- * provides a `fire` function that emits the per-room system messages and
- * broadcasts presence. If the user reconnects in the meantime,
- * consumePendingDisconnect cancels the timer and `fire` never runs.
+ * Register a ghost for the given (room, identity) tuple and (re)arm the
+ * user's sweep timer at `idleGraceMs`. Called by the disconnect handler
+ * when a non-intentional disconnect leaves an identity with no live socket
+ * in a room. Each new ghost extends the user's timer — three tabs closing
+ * across two rooms get one consolidated sweep at the end, not three.
+ *
+ * The caller is responsible for the immediate `broadcastPresence` so the
+ * idle row appears in onlookers' rails right away. We don't do it here
+ * because the caller often has several rooms to ghost in one go and
+ * batching the broadcasts (one per room, after all ghosts are tracked)
+ * keeps `currentOccupants` from seeing partial state.
  */
-export function schedulePendingDisconnect(
-  userId: string,
-  fire: () => Promise<void> | void,
-): void {
-  // Replace any existing entry. With single-presence this rarely matters,
-  // but it's the safe behavior under racing disconnects.
-  const existing = pendingDisconnects.get(userId);
-  if (existing) clearTimeout(existing.timer);
+export async function registerIdleGhost(
+  db: Db,
+  ghost: IdleGhost,
+): Promise<void> {
+  trackGhost(ghost);
+  const { idleGraceMs } = await getSettings(db);
+  const existing = ghostTimerByUser.get(ghost.userId);
+  if (existing) clearTimeout(existing);
+  const userId = ghost.userId;
   const timer = setTimeout(() => {
-    pendingDisconnects.delete(userId);
-    Promise.resolve(fire()).catch(() => {});
-  }, PRESENCE_GRACE_MS);
-  pendingDisconnects.set(userId, { timer });
+    // Move this into a fire-and-forget async closure — setTimeout can't
+    // await directly, and uncaught rejections here would crash the
+    // process. The sweep runs the same per-room cleanup the old grace
+    // window did (expireIfEmpty + broadcastPresence) so a now-empty
+    // room finally archives and the rail finally drops the idle row.
+    (async () => {
+      const keys = ghostKeysByUser.get(userId);
+      ghostTimerByUser.delete(userId);
+      if (!keys) return;
+      const affectedRooms = new Set<string>();
+      for (const key of keys) {
+        const g = idleGhostsByKey.get(key);
+        if (g) affectedRooms.add(g.roomId);
+        idleGhostsByKey.delete(key);
+      }
+      ghostKeysByUser.delete(userId);
+      // Lazy-import io from the ghost record's callback context isn't
+      // possible — we need it here. The disconnect handler captures `io`
+      // at ghost-creation time via a closure (see index.ts).
+      // Instead we accept that this sweep needs io passed in. To keep
+      // the public API simple, we stash io on the first ghost call;
+      // re-stash on each call so an io rebind (unlikely) is honored.
+      const io = sweepIo;
+      if (!io) return;
+      for (const roomId of affectedRooms) {
+        try {
+          const expired = await expireIfEmpty(io, db, roomId);
+          if (!expired) await broadcastPresence(io, db, roomId);
+        } catch { /* swallow — sweep must not crash */ }
+      }
+    })().catch(() => {});
+  }, idleGraceMs);
+  ghostTimerByUser.set(userId, timer);
+}
+
+/**
+ * Module-local io handle for the ghost-sweep timer. Set the first time
+ * `setGhostSweepIo` is called (during boot wiring). The sweep timer
+ * captures io via this reference rather than via per-ghost closure so the
+ * `registerIdleGhost` signature stays small.
+ */
+let sweepIo: Io | null = null;
+export function setGhostSweepIo(io: Io): void {
+  sweepIo = io;
 }
 
 /** Server-authored system message (no associated user/character). */
@@ -875,10 +1027,14 @@ export async function joinRoom(
   const userWasOnlineBefore = await userIsOnline(io, user.id, socket.id);
   // Reconnect detection: if a "has disconnected" was scheduled for this user
   // and hasn't fired yet, this connect is a reconnect inside the grace window.
-  // Cancel the pending disconnect; further down we use this flag to suppress
-  // the "has connected" message + the room description re-emit so the chat
-  // log shows nothing happened.
-  const isReconnect = consumePendingDisconnect(user.id);
+  // Sweep any idle ghosts the user was holding. Returns true when at
+  // least one was cleared — we read that as "this is a reconnect inside
+  // the idle window" and use it further down to suppress the "X has
+  // connected." message + the room description re-emit. The same call
+  // also rebroadcasts presence to each formerly-ghosted room so onlookers
+  // see the idle row vanish (the current-room re-broadcast a few lines
+  // later overlays the live state on top of it for THIS room).
+  const isReconnect = await consumePendingDisconnect(io, db, user.id);
   const priorRooms = [...socket.rooms]
     .filter((r) => r.startsWith("room:") && r !== `room:${roomId}`)
     .map((r) => r.slice(5));
@@ -986,6 +1142,49 @@ export async function userHasSocketInRoom(
   for (const s of sockets) {
     if (excludeSocketId && s.id === excludeSocketId) continue;
     if ((s.data as { userId?: string }).userId === userId) return true;
+  }
+  return false;
+}
+
+/**
+ * True iff the user has at least one live socket voicing the given
+ * `characterId` in the given room. Used by the disconnect handler to
+ * decide whether the just-disconnected identity needs an idle ghost or
+ * whether a sibling tab is still carrying the same identity. `null`
+ * characterId means "OOC" (the user's master identity).
+ *
+ * Resolution mirrors `currentOccupants`: tabCharId === undefined falls
+ * back to the user's DB-default activeCharacterId — but we don't have
+ * the user row here, so the caller is responsible for resolving
+ * `undefined` to a concrete characterId before calling. (The disconnect
+ * handler does this via the SessionUser it holds.)
+ */
+export async function userIdentityHasSocketInRoom(
+  io: Io,
+  userId: string,
+  characterId: string | null,
+  roomId: string,
+): Promise<boolean> {
+  const sockets = await io.in(`room:${roomId}`).fetchSockets();
+  for (const s of sockets) {
+    if ((s.data as { userId?: string }).userId !== userId) continue;
+    const raw = (s.data as { tabCharId?: string | null }).tabCharId;
+    // `undefined` over the wire means "no per-tab override." For matching
+    // purposes we can't resolve it without the user row, so we conservatively
+    // treat it as a non-match against an explicit characterId. The
+    // disconnect handler that calls this always passes the resolved
+    // characterId; sibling sockets that haven't issued /char will read
+    // as `undefined` here. To avoid leaking that ambiguity, fall back
+    // to "any sibling socket of this user counts as the identity still
+    // being live for the master/OOC case" — same conservatism we used
+    // before per-tab routing existed. If you ever see a regression where
+    // an idle ghost lingers despite a sibling tab, this is the place
+    // to thread a userById lookup through.
+    if (raw === undefined) {
+      if (characterId === null) return true;
+      continue;
+    }
+    if (raw === characterId) return true;
   }
   return false;
 }
@@ -1150,6 +1349,13 @@ export async function expireIfEmpty(io: Io, db: Db, roomId: string): Promise<boo
   if (room.archivedAt) return false;
   const sockets = await io.in(`room:${roomId}`).fetchSockets();
   if (sockets.length > 0) return false;
+  // Idle ghosts hold a room open against archival the same way live
+  // sockets do — the user is conceptually "still here, just idle." If
+  // we archived now we'd race the ghost's eventual sweep (which calls
+  // back into expireIfEmpty) and a single-occupant private room would
+  // disappear on every tab close. The ghost-sweep timer drives the
+  // real archival call after `idleGraceMs` elapses with no return.
+  if (hasIdleGhostsForRoom(roomId)) return false;
   await db.update(rooms).set({ archivedAt: new Date() }).where(eq(rooms.id, roomId));
   // Archived rooms are filtered out of the tree, so the rail in every
   // open client just got stale. Caller skips broadcastPresence on the
@@ -1215,9 +1421,21 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     const tabRaw = (s.data as { tabCharId?: string | null }).tabCharId;
     raws.push({ userId: uid, tabCharId: tabRaw });
   }
-  if (!raws.length) return [];
+  // Merge idle ghosts: identities the user was voicing in this room when
+  // their last socket dropped, kept visible (faded + "(idle)") through the
+  // configured idle-grace window. A ghost is dropped from the merge as
+  // soon as a live socket carries the same (userId, characterId) tuple —
+  // the dedup pass below handles that automatically since live raws are
+  // processed first.
+  const ghosts = getIdleGhostsForRoom(roomId);
+  if (!raws.length && !ghosts.length) return [];
 
-  const userIds = [...new Set(raws.map((r) => r.userId))];
+  const userIds = [
+    ...new Set([
+      ...raws.map((r) => r.userId),
+      ...ghosts.map((g) => g.userId),
+    ]),
+  ];
   const userRows = await db
     .select()
     .from(users)
@@ -1225,6 +1443,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   const userById = new Map(userRows.map((u) => [u.id, u]));
 
   const resolvedIdentities: Array<{ userId: string; characterId: string | null }> = [];
+  const idleKeys = new Set<string>();
   const seen = new Set<string>();
   for (const r of raws) {
     const u = userById.get(r.userId);
@@ -1237,6 +1456,19 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     if (seen.has(key)) continue;
     seen.add(key);
     resolvedIdentities.push({ userId: r.userId, characterId });
+  }
+  // Ghost identities are explicit (characterId was resolved at
+  // ghost-creation), so we add them straight to `resolvedIdentities`
+  // after the live pass. Anything the dedup already saw via a live
+  // socket wins — a ghost only surfaces when the identity has no
+  // live presence.
+  for (const g of ghosts) {
+    if (!userById.has(g.userId)) continue;
+    const key = `${g.userId}::${g.characterId ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    resolvedIdentities.push({ userId: g.userId, characterId: g.characterId });
+    idleKeys.add(key);
   }
   if (!resolvedIdentities.length) return [];
   const charIds = [...new Set(resolvedIdentities.map((i) => i.characterId).filter((v): v is string => !!v))];
@@ -1511,6 +1743,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
       characterId: c?.id ?? null,
       away: u.awayMessage != null,
       awayMessage: u.awayMessage,
+      idle: idleKeys.has(`${u.id}::${id.characterId ?? ""}`),
       chatColor: effectiveColor,
       gender: resolveGender(u.gender, c?.statsJson),
       role: roleByUser.get(u.id) ?? "member",

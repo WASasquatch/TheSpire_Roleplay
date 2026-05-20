@@ -390,7 +390,15 @@ function RoomGroup({
                   return (
                     <li
                       key={`${o.userId}:${o.characterId ?? ""}`}
-                      className="flex items-center justify-between gap-2 px-3 py-1.5 pl-5 lg:py-0.5"
+                      // Idle ghosts (tab closed / refreshed within the
+                      // admin-configured grace window) dim to 50% so
+                      // they read as "still around but inactive." Live
+                      // and live+/away rows stay at full opacity — the
+                      // /away message is shown via the existing
+                      // UserNameTag tooltip, so we don't compound the
+                      // signals.
+                      className={`flex items-center justify-between gap-2 px-3 py-1.5 pl-5 lg:py-0.5 ${o.idle ? "opacity-50" : ""}`}
+                      title={o.idle ? "Idle — tab closed or refreshed, may return." : undefined}
                     >
                       <div className="min-w-0 flex-1 truncate">
                         <UserNameTag
@@ -437,6 +445,16 @@ function RoomGroup({
                           // style decorations there render fully.
                           truncate
                         />
+                        {o.idle ? (
+                          // Adjacent suffix instead of folding "(idle)"
+                          // into the displayName prop — that would pick
+                          // up the user's chat-color and name-style
+                          // decoration, which we don't want on a system
+                          // marker. Rendered outside UserNameTag's flex
+                          // line, in muted color, mirroring how [away]
+                          // is rendered inside the tag itself.
+                          <span className="ml-1 text-keep-muted">(idle)</span>
+                        ) : null}
                       </div>
                       {chip ? (
                         <span

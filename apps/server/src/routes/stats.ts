@@ -70,6 +70,17 @@ export async function registerStatsRoutes(
       days.push({ day: key, count: dayMap.get(key) ?? 0 });
     }
 
+    // Rolling 24-hour message count. Separate from `messagesPerDay`
+    // (which is UTC-day bucketed) so the splash can show a stable
+    // "in the last 24h" number that doesn't reset at UTC midnight.
+    // Cheap — same `messages.createdAt` index already covers it.
+    const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const last24hRows = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(messages)
+      .where(gte(messages.createdAt, new Date(twentyFourHoursAgo)));
+    const messages24h = last24hRows[0]?.n ?? 0;
+
     return {
       online: onlineUsers.size,
       totalRegistered,
@@ -79,6 +90,7 @@ export async function registerStatsRoutes(
         total: roomCounts.reduce((s, r) => s + r.n, 0),
       },
       messagesPerDay: days,
+      messages24h,
     };
   });
 }

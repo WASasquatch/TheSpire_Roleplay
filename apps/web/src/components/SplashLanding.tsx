@@ -26,6 +26,8 @@ interface SiteStats {
   online: number;
   totalRegistered?: number;
   rooms: { public: number; private: number; total: number };
+  /** Rolling 24-hour chat message count. Optional for forward-compat with older servers. */
+  messages24h?: number;
 }
 
 interface Props {
@@ -38,12 +40,14 @@ export function SplashLanding({ onNavigate }: Props) {
   const [stats, setStats] = useState<SiteStats | null>(null);
 
   // Match SplashShell's stats polling so the landing can show a live
-  // counter when admin has enabled the activity feed. The marketing
-  // copy reads better with a real number, but we still respect the
-  // cold-start admin toggle that hides counters when they'd telegraph
-  // "empty community."
+  // counter when admin has enabled either activity surface. Skipped
+  // entirely when BOTH toggles are off (cold-start posture). Either
+  // toggle being on is enough to start polling; the render path below
+  // decides which clauses actually surface.
+  const statsEnabled =
+    branding.activityFeedsEnabled || branding.splashMessages24hEnabled;
   useEffect(() => {
-    if (!branding.activityFeedsEnabled) {
+    if (!statsEnabled) {
       setStats(null);
       return;
     }
@@ -57,7 +61,7 @@ export function SplashLanding({ onNavigate }: Props) {
     load();
     const id = window.setInterval(load, 30_000);
     return () => { cancelled = true; window.clearInterval(id); };
-  }, [branding.activityFeedsEnabled]);
+  }, [statsEnabled]);
 
   const logoStyle: React.CSSProperties = {};
   if (branding.logoColor) logoStyle.color = branding.logoColor;
@@ -231,12 +235,37 @@ export function SplashLanding({ onNavigate }: Props) {
               </a>
             </div>
 
-            {/* OPTIONAL LIVE SIGNAL — only renders when admin has activity
-                feeds on AND the stats are populated. Same admin contract
-                as SplashShell so cold-start installs don't show empty
-                numbers. */}
+            {/* OPTIONAL LIVE SIGNALS — each clause is independently
+                gated by its own toggle. The writers/online line stays
+                in its existing inline-paragraph treatment because the
+                marketing copy reads conversationally. The 24h-message
+                count gets its own HERO block (big tabular number,
+                uppercase label beneath) because admins surfacing chat
+                volume want it to anchor the eye, not get lost in a
+                muted paragraph. When both are on the hero sits above
+                the conversational line so the headline reads first. */}
+            {branding.splashMessages24hEnabled && stats && typeof stats.messages24h === "number" ? (
+              <div className="mt-6 text-center">
+                <div
+                  className={`text-3xl font-bold tabular-nums leading-none sm:text-4xl ${
+                    stats.messages24h > 0 ? "text-keep-action" : "text-keep-text"
+                  }`}
+                >
+                  {stats.messages24h.toLocaleString()}
+                </div>
+                <div className="mt-1.5 text-[10px] uppercase tracking-[0.2em] text-keep-muted">
+                  {stats.messages24h === 1 ? "message" : "messages"} in the last 24h
+                </div>
+              </div>
+            ) : null}
             {branding.activityFeedsEnabled && stats ? (
-              <p className="mt-6 text-center text-xs text-keep-muted">
+              <p
+                className={`text-center text-xs text-keep-muted ${
+                  branding.splashMessages24hEnabled && typeof stats.messages24h === "number"
+                    ? "mt-3"
+                    : "mt-6"
+                }`}
+              >
                 {typeof stats.totalRegistered === "number" ? (
                   <>
                     <span className="font-semibold tabular-nums text-keep-text">

@@ -93,6 +93,15 @@ export interface SiteBranding {
    */
   featuredWorldsEnabled: boolean;
   /**
+   * Splash stat: surface the rolling 24h chat message count.
+   * Independent of `activityFeedsEnabled` — each toggle gates its own
+   * section of the splash stats row, so admins can show the message
+   * count alone (just chat volume), the online/room cluster alone,
+   * or both together. When both are on, the splash renders them in
+   * the same "·"-separated row so the cluster still reads as one beat.
+   */
+  splashMessages24hEnabled: boolean;
+  /**
    * Site-wide default theme style. Orthogonal to `defaultTheme` (palette).
    * Users without a per-user override (Profile.styleKey === null) inherit
    * this. Possible values come from the client-side style registry in
@@ -141,6 +150,10 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // Off by default. Admin flips it on after deciding the seeded worlds are
   // representative or after seeding the catalog with their own.
   featuredWorldsEnabled: false,
+  // Off by default. Admin opt-in once they're sure their 24h volume reads
+  // as healthy. Independent of `activityFeedsEnabled` — each toggle gates
+  // its own splash section.
+  splashMessages24hEnabled: false,
   // Flagship style. Site admins can change this to any registered style
   // key ('medieval', 'modern', 'scifi'); unknown keys fall back to this
   // value at render time.
@@ -213,6 +226,9 @@ export function loadCachedBranding(): SiteBranding {
       featuredWorldsEnabled: typeof parsed.featuredWorldsEnabled === "boolean"
         ? parsed.featuredWorldsEnabled
         : DEFAULT_BRANDING.featuredWorldsEnabled,
+      splashMessages24hEnabled: typeof parsed.splashMessages24hEnabled === "boolean"
+        ? parsed.splashMessages24hEnabled
+        : DEFAULT_BRANDING.splashMessages24hEnabled,
       defaultStyleKey: typeof parsed.defaultStyleKey === "string" && parsed.defaultStyleKey.length > 0
         ? parsed.defaultStyleKey
         : DEFAULT_BRANDING.defaultStyleKey,

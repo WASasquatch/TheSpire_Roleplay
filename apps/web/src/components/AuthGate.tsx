@@ -16,6 +16,8 @@ interface SiteStats {
   /** Total registered accounts (excluding the system sentinel). Optional for forward-compat with older servers. */
   totalRegistered?: number;
   rooms: { public: number; private: number; total: number };
+  /** Rolling 24-hour chat message count. Optional for forward-compat with older servers. */
+  messages24h?: number;
 }
 
 /**
@@ -45,12 +47,18 @@ export function SplashShell({
   const branding = useChat((s) => s.branding);
   const [stats, setStats] = useState<SiteStats | null>(null);
 
-  // Live stats so visitors see the chat is alive before they log in. /stats
-  // is unauthenticated; we refresh every 30s to track ebb and flow. Skipped
-  // entirely when the admin has disabled activity feeds (cold-start posture
-  // so empty counters don't telegraph "dead community" to first visitors).
+  // Live stats so visitors see the chat is alive before they log in.
+  // /stats is unauthenticated; we refresh every 30s to track ebb and
+  // flow. Skipped entirely when BOTH the activity-feed master toggle
+  // and the 24h-message sub-toggle are off — the splash has nothing
+  // to surface and the fetch would be wasted (cold-start posture so
+  // empty counters don't telegraph "dead community" to first visitors).
+  // Either toggle being on is enough to start polling; the render path
+  // decides which sections actually render based on each toggle.
+  const statsEnabled =
+    branding.activityFeedsEnabled || branding.splashMessages24hEnabled;
   useEffect(() => {
-    if (!branding.activityFeedsEnabled) {
+    if (!statsEnabled) {
       setStats(null);
       return;
     }
@@ -64,7 +72,7 @@ export function SplashShell({
     load();
     const id = window.setInterval(load, 30_000);
     return () => { cancelled = true; window.clearInterval(id); };
-  }, [branding.activityFeedsEnabled]);
+  }, [statsEnabled]);
 
   // Logo text styling mirrors the in-app banner so the brand stays
   // consistent. Both color and font fall back to the theme when unset.
@@ -230,10 +238,12 @@ export function SplashShell({
                 </div>
               </div>
 
-              {/* Live stats strip - omitted entirely when the admin toggle is
-                  off, so the splash sells the IDEA of the place rather than its
-                  (potentially empty) current activity. */}
-              {branding.activityFeedsEnabled ? <SplashStats stats={stats} /> : null}
+              {/* Live stats strip — omitted entirely when neither activity
+                  toggle is on, so the splash sells the IDEA of the place
+                  rather than its (potentially empty) current activity.
+                  Either toggle being on is enough to mount the strip;
+                  SplashStats itself picks which sections render. */}
+              {statsEnabled ? <SplashStats stats={stats} /> : null}
 
               {/* Retention + session TTL - admin-configured, surfaced so
                   visitors know what they're committing to before registering. */}
@@ -303,6 +313,17 @@ function SplashStats({ stats }: { stats: SiteStats | null }) {
   // Use the admin-configured site name in flavor copy so "the keep" (the
   // codename) doesn't leak through to users on a rebranded install.
   const siteName = useChat((s) => s.branding.siteName);
+  // Two independent toggles. `activityFeedsEnabled` gates the
+  // online/registered/room cluster (the original chip-row). The
+  // 24h-message toggle gates a separate HERO block — large number
+  // with an uppercase label below — because admins surfacing chat
+  // volume want it to anchor the eye, not get lost in a stat row.
+  // When both are on, the hero sits above the chip row so the
+  // headline reads first and the smaller numbers contextualize it.
+  // SplashShell gates the mount so at least one toggle is truthy
+  // by the time this renders.
+  const showActivity = useChat((s) => s.branding.activityFeedsEnabled);
+  const showMessages24h = useChat((s) => s.branding.splashMessages24hEnabled);
   if (!stats) {
     return (
       <div className="my-2 flex items-center justify-center gap-2 text-xs text-keep-muted">
@@ -316,33 +337,77 @@ function SplashStats({ stats }: { stats: SiteStats | null }) {
   // total matches the bold/tabular-nums styling of the other counts. Falls
   // back to the single-number Stat helper for older servers without the field.
   const onlineNoun = stats.online === 1 ? "user online" : "users online";
+  // Only surface the 24h count when (a) the admin opted in AND (b) the
+  // server populated the field (forward-compat with old servers that
+  // didn't ship `messages24h`). A zero value still renders — it's a
+  // real "no activity in the window" signal, not a missing-data case,
+  // and the admin already opted into seeing it.
+  const renderMessages24h =
+    showMessages24h && typeof stats.messages24h === "number";
   return (
-    <div className="my-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-keep-muted">
-      {typeof stats.totalRegistered === "number" ? (
-        <span className="inline-flex items-baseline gap-1">
-          <span
-            className={`text-base font-semibold tabular-nums ${
-              stats.online > 0 ? "text-keep-action" : "text-keep-text"
-            }`}
-          >
-            {stats.online}
-          </span>
-          <span>{onlineNoun} out of</span>
-          <span className="text-base font-semibold tabular-nums text-keep-text">
-            {stats.totalRegistered}
-          </span>
-        </span>
-      ) : (
-        <Stat label={onlineNoun} value={stats.online} emphasised={stats.online > 0} />
-      )}
-      <span aria-hidden className="text-keep-rule">·</span>
-      <Stat label={stats.rooms.public === 1 ? "public room" : "public rooms"} value={stats.rooms.public} />
-      {stats.rooms.private > 0 ? (
-        <>
-          <span aria-hidden className="text-keep-rule">·</span>
-          <Stat label={stats.rooms.private === 1 ? "private chamber" : "private chambers"} value={stats.rooms.private} />
-        </>
+    <div className="my-3">
+      {renderMessages24h ? (
+        <Messages24hHero count={stats.messages24h as number} />
       ) : null}
+      {showActivity ? (
+        <div
+          className={`flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-keep-muted ${
+            renderMessages24h ? "mt-3" : ""
+          }`}
+        >
+          {typeof stats.totalRegistered === "number" ? (
+            <span className="inline-flex items-baseline gap-1">
+              <span
+                className={`text-base font-semibold tabular-nums ${
+                  stats.online > 0 ? "text-keep-action" : "text-keep-text"
+                }`}
+              >
+                {stats.online}
+              </span>
+              <span>{onlineNoun} out of</span>
+              <span className="text-base font-semibold tabular-nums text-keep-text">
+                {stats.totalRegistered}
+              </span>
+            </span>
+          ) : (
+            <Stat label={onlineNoun} value={stats.online} emphasised={stats.online > 0} />
+          )}
+          <span aria-hidden className="text-keep-rule">·</span>
+          <Stat label={stats.rooms.public === 1 ? "public room" : "public rooms"} value={stats.rooms.public} />
+          {stats.rooms.private > 0 ? (
+            <>
+              <span aria-hidden className="text-keep-rule">·</span>
+              <Stat label={stats.rooms.private === 1 ? "private chamber" : "private chambers"} value={stats.rooms.private} />
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Hero treatment for the rolling 24h message count — the prominent
+ * splash stat the admin opted into via Settings → Activity feeds →
+ * Messages in last 24h. Centered, large tabular-nums number with a
+ * small uppercase label below; brand color when there's activity in
+ * the window, neutral text when the count is zero. Tasteful rather
+ * than loud — sized to anchor the eye without elbowing past the logo
+ * + title above it.
+ */
+function Messages24hHero({ count }: { count: number }) {
+  return (
+    <div className="text-center">
+      <div
+        className={`text-3xl font-bold tabular-nums leading-none sm:text-4xl ${
+          count > 0 ? "text-keep-action" : "text-keep-text"
+        }`}
+      >
+        {count.toLocaleString()}
+      </div>
+      <div className="mt-1.5 text-[10px] uppercase tracking-[0.2em] text-keep-muted">
+        {count === 1 ? "message" : "messages"} in the last 24h
+      </div>
     </div>
   );
 }

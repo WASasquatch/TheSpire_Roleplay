@@ -757,6 +757,8 @@ export async function registerAdminRoutes(
     activityFeedsEnabled: z.boolean().optional(),
     /** Splash page featured-worlds carousel toggle. */
     featuredWorldsEnabled: z.boolean().optional(),
+    /** Splash stat: rolling 24h chat message count. Independent toggle. */
+    splashMessages24hEnabled: z.boolean().optional(),
     /** Sanitized HTML for the post-login welcome modal. Empty string clears the welcome. Same 50KB cap as other rich-text settings. */
     newUserWelcomeHtml: z.string().max(50_000).optional(),
     /**
@@ -810,6 +812,7 @@ export async function registerAdminRoutes(
       customHeadHtml: s.customHeadHtml,
       activityFeedsEnabled: s.activityFeedsEnabled,
       featuredWorldsEnabled: s.featuredWorldsEnabled,
+      splashMessages24hEnabled: s.splashMessages24hEnabled,
       newUserWelcomeHtml: s.newUserWelcomeHtml,
       defaultStyleKey: s.defaultStyleKey,
       themeDesignMap: s.themeDesignMap,
@@ -882,6 +885,9 @@ export async function registerAdminRoutes(
     }
     if (body.featuredWorldsEnabled !== undefined) {
       patch.featuredWorldsEnabled = body.featuredWorldsEnabled;
+    }
+    if (body.splashMessages24hEnabled !== undefined) {
+      patch.splashMessages24hEnabled = body.splashMessages24hEnabled;
     }
     if (body.newUserWelcomeHtml !== undefined) {
       // Sanitize via the bio allow-list (same trust posture as welcomeHtml /

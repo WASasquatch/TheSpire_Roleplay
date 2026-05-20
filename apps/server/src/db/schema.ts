@@ -930,6 +930,16 @@ export const siteSettings = sqliteTable("site_settings", {
   activityFeedsEnabled: integer("activity_feeds_enabled", { mode: "boolean" }).notNull().default(false),
   /** Splash page renders a randomized carousel of up to 10 open worlds when enabled. Off by default so brand-new installs with a thin catalog don't show empty rotation. */
   featuredWorldsEnabled: integer("featured_worlds_enabled", { mode: "boolean" }).notNull().default(false),
+  /**
+   * Splash stat: surface the rolling 24h chat message count on the
+   * splash. Independent of `activityFeedsEnabled` — each toggle gates
+   * its own section of the splash stats row, so admins can show the
+   * message count alone (just chat volume), the online/room counters
+   * alone, or both together. When both are on, the splash renders
+   * them in the same "· N stat" row so the cluster still reads as
+   * one beat. Default off — see migration 0116 for the rationale.
+   */
+  splashMessages24hEnabled: integer("splash_messages_24h_enabled", { mode: "boolean" }).notNull().default(false),
   /** Sanitized HTML shown once to NEW users (registered after the welcome's last edit) until they dismiss it. Editing the text rotates a hash so the audience sees the new version on next load. */
   newUserWelcomeHtml: text("new_user_welcome_html").notNull().default(""),
   /** Timestamp of the most recent welcome-text edit. Null = never set. The audience filter is `users.created_at > new_user_welcome_updated_at`, so existing users at the time of the edit don't get retroactively spammed. */

@@ -249,6 +249,7 @@ interface SettingsRow {
   customHeadHtml: string;
   activityFeedsEnabled: boolean;
   featuredWorldsEnabled: boolean;
+  splashMessages24hEnabled: boolean;
   /** Sanitized HTML for the post-login welcome modal. "" = no welcome shown. */
   newUserWelcomeHtml: string;
   /** Site-wide default theme style key. Users without an override inherit this. */
@@ -555,6 +556,7 @@ function SettingsTab() {
   const [regOpen, setRegOpen] = useState(true);
   const [activityFeedsEnabled, setActivityFeedsEnabled] = useState(false);
   const [featuredWorldsEnabled, setFeaturedWorldsEnabled] = useState(false);
+  const [splashMessages24hEnabled, setSplashMessages24hEnabled] = useState(false);
   const [defaultStyleKey, setDefaultStyleKey] = useState<string>("medieval");
   // Per-preset design pinning. Keyed by THEME_PRESETS name. Empty
   // entry on a preset means "fall through to defaultStyleKey for
@@ -587,6 +589,7 @@ function SettingsTab() {
       setRegOpen(j.registrationOpen);
       setActivityFeedsEnabled(j.activityFeedsEnabled);
       setFeaturedWorldsEnabled(j.featuredWorldsEnabled);
+      setSplashMessages24hEnabled(j.splashMessages24hEnabled);
       setDefaultStyleKey(j.defaultStyleKey || "medieval");
       setThemeDesignMap(j.themeDesignMap ?? {});
     } catch (err) {
@@ -635,6 +638,7 @@ function SettingsTab() {
         registrationOpen: regOpen,
         activityFeedsEnabled,
         featuredWorldsEnabled,
+        splashMessages24hEnabled,
         defaultStyleKey,
         themeDesignMap,
       };
@@ -671,6 +675,7 @@ function SettingsTab() {
         defaultTheme: j.defaultTheme,
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
+        splashMessages24hEnabled: j.splashMessages24hEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
         // Null = admin hasn't set an explicit override → splash falls
@@ -852,6 +857,20 @@ function SettingsTab() {
             </div>
             <span className="mt-0.5 block text-[10px] text-keep-muted">
               When off, the splash hides the "X users online" / room counters so an empty community doesn't telegraph "dead site" to first visitors. Flip on once there's a real pulse to surface.
+            </span>
+          </label>
+          <label className="text-xs">
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Messages in last 24h</span>
+            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+              <input
+                type="checkbox"
+                checked={splashMessages24hEnabled}
+                onChange={(e) => setSplashMessages24hEnabled(e.target.checked)}
+              />
+              <span>{splashMessages24hEnabled ? "On - splash shows rolling 24h message count" : "Off - splash hides the 24h message stat"}</span>
+            </div>
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              Surfaces a rolling 24h chat-message count on the splash. Independent of Activity feeds — flip it on alone to show the message volume by itself, or pair with Activity feeds so it sits in the same row as the online/registered/room counters.
             </span>
           </label>
           <label className="text-xs">
@@ -1087,6 +1106,7 @@ function BrandingTab() {
         defaultTheme: j.defaultTheme,
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
+        splashMessages24hEnabled: j.splashMessages24hEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
         // Null = admin hasn't set an explicit override → splash falls
@@ -1197,6 +1217,7 @@ function BrandingTab() {
               defaultTheme: j.settings.defaultTheme,
               activityFeedsEnabled: j.settings.activityFeedsEnabled,
               featuredWorldsEnabled: j.settings.featuredWorldsEnabled,
+              splashMessages24hEnabled: j.settings.splashMessages24hEnabled,
               defaultStyleKey: j.settings.defaultStyleKey,
               themeDesignMap: j.settings.themeDesignMap ?? {},
               defaultThemeJson: j.settings.defaultThemeJson ?? null,
@@ -1560,6 +1581,7 @@ function RulesTab() {
         defaultTheme: j.defaultTheme,
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
+        splashMessages24hEnabled: j.splashMessages24hEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
         // Null = admin hasn't set an explicit override → splash falls

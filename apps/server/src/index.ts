@@ -371,6 +371,11 @@ async function main() {
       // Splash carousel toggle. When true the AuthGate fetches a
       // randomized slice of open worlds via /worlds/featured.
       featuredWorldsEnabled: s.featuredWorldsEnabled,
+      // Independent toggle for the rolling 24h chat message count
+      // on the splash. Not gated by activityFeedsEnabled — either
+      // can be on alone, and the splash renders only the sections
+      // whose toggle is on. When both are on they share one row.
+      splashMessages24hEnabled: s.splashMessages24hEnabled,
       // Default theme STYLE — orthogonal to defaultTheme above. Users
       // without a per-user style override inherit this. Seeded default
       // is 'medieval'; the catalog also includes 'modern' and 'scifi'.

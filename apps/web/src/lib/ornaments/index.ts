@@ -73,32 +73,60 @@ export function applyStyle(theme: Theme, styleKey: string | null): void {
   const root = document.documentElement;
   const generator = (styleKey && STYLES[styleKey]) || STYLES[DEFAULT_STYLE_KEY];
   if (!generator) {
-    // No styles registered — clear any leftover props and bail.
     clearOrnaments(root);
     return;
   }
-
-  const cacheKey = `${generator.key}::${JSON.stringify(theme)}`;
-  let ornaments = cache.get(cacheKey);
+  const ornaments = generateOrnaments(theme, generator);
   if (!ornaments) {
-    const palette = buildPaletteFromTheme(theme);
-    try {
-      ornaments = generator.generate(palette);
-    } catch (err) {
-      console.warn("[ornaments] generator failed", err);
-      clearOrnaments(root);
-      return;
-    }
-    cache.set(cacheKey, ornaments);
+    clearOrnaments(root);
+    return;
   }
-
-  // Set new props + clear any key the new style didn't define so a
-  // previous style's leftover URL doesn't survive across switches.
   for (const key of ALL_ORNAMENT_KEYS) {
     const v = ornaments[key];
     root.style.setProperty(`--orn-${key}`, v ?? "none");
   }
   root.setAttribute("data-theme-style", generator.key);
+}
+
+/**
+ * Same generator output as `applyStyle`, but returned as a CSSProperties
+ * map keyed by `--orn-*` custom property names so a caller can spread it
+ * onto an inline `style={...}` on a subtree element. Lets a profile /
+ * world modal carry its own ornament set (and matching
+ * `data-theme-style` attribute) without touching `:root`, so the
+ * surrounding chat shell keeps the viewer's design.
+ */
+export function buildOrnamentStyle(theme: Theme, styleKey: string | null): {
+  styleKey: string;
+  vars: Record<string, string>;
+} {
+  const generator = (styleKey && STYLES[styleKey]) || STYLES[DEFAULT_STYLE_KEY];
+  const resolvedKey = generator?.key ?? DEFAULT_STYLE_KEY;
+  const vars: Record<string, string> = {};
+  if (!generator) {
+    for (const key of ALL_ORNAMENT_KEYS) vars[`--orn-${key}`] = "none";
+    return { styleKey: resolvedKey, vars };
+  }
+  const ornaments = generateOrnaments(theme, generator);
+  for (const key of ALL_ORNAMENT_KEYS) {
+    vars[`--orn-${key}`] = ornaments?.[key] ?? "none";
+  }
+  return { styleKey: resolvedKey, vars };
+}
+
+function generateOrnaments(theme: Theme, generator: StyleGenerator): OrnamentSet | null {
+  const cacheKey = `${generator.key}::${JSON.stringify(theme)}`;
+  let ornaments = cache.get(cacheKey);
+  if (ornaments) return ornaments;
+  const palette = buildPaletteFromTheme(theme);
+  try {
+    ornaments = generator.generate(palette);
+  } catch (err) {
+    console.warn("[ornaments] generator failed", err);
+    return null;
+  }
+  cache.set(cacheKey, ornaments);
+  return ornaments;
 }
 
 function clearOrnaments(root: HTMLElement): void {

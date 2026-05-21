@@ -20,6 +20,7 @@ import { fetchEarningMe, patchEarningSettings } from "../lib/earning.js";
 import { useChat } from "../state/store.js";
 import { useEarning, lookupRankTier } from "../state/earning.js";
 import { StylePicker } from "./AdminPanel.js";
+import { DEFAULT_STYLE_KEY } from "../lib/ornaments/index.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
@@ -810,6 +811,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           portraits: previewPortraits,
           gender,
           theme: previewTheme,
+          styleKey: userStyleKey || DEFAULT_STYLE_KEY,
           // Titles are populated server-side from accepted relationships;
           // the editor preview shows the form's contents only.
           titles: [],
@@ -871,6 +873,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         // actual profile to verify.
         journalEntries: [],
         theme: previewTheme,
+        styleKey: userStyleKey || DEFAULT_STYLE_KEY,
         titles: [],
         isPublic: isNsfw ? false : isPublic,
         isNsfw,

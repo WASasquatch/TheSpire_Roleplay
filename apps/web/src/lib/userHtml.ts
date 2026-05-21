@@ -33,6 +33,35 @@
  */
 import DOMPurify from "dompurify";
 import { scopeAndNonceStyleBlocks } from "./cssScope.js";
+import { parseVideoEmbed } from "./markdown.js";
+
+/**
+ * Custom `<youtube>https://youtu.be/ID</youtube>` shortcut tag. Replaced
+ * with a sandboxed iframe pointed at `youtube-nocookie.com/embed/ID`
+ * BEFORE DOMPurify runs, so the writer doesn't have to paste raw
+ * iframe markup. URL is parsed via the same `parseVideoEmbed` chat /
+ * markdown uses, so any YouTube URL shape (watch, short, shorts, embed)
+ * is accepted; vimeo URLs are rejected — those would belong to a
+ * separate `<vimeo>` tag if we add one later.
+ *
+ * Inner text is the only thing read — attributes on the `<youtube>` tag
+ * are ignored. Invalid URLs (typos, non-YouTube hosts) drop the tag
+ * entirely rather than render a broken embed.
+ *
+ * The output iframe is wrapped in `<div class="user-yt-embed">` which
+ * styles.css sizes to 100% width on mobile and 50% on large viewports
+ * (16:9 aspect-ratio so the iframe stays the right shape at every size).
+ */
+function transformYoutubeTags(html: string): string {
+  if (!html.toLowerCase().includes("<youtube")) return html;
+  return html.replace(/<youtube\b[^>]*>([\s\S]*?)<\/youtube>/gi, (_match, body: string) => {
+    const url = body.trim();
+    if (!url) return "";
+    const embed = parseVideoEmbed(url);
+    if (!embed || embed.provider !== "youtube") return "";
+    return `<div class="user-yt-embed"><iframe src="${embed.src}" frameborder="0" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin" title="YouTube video"></iframe></div>`;
+  });
+}
 
 /**
  * CSS class every user-HTML render site wraps its container in. The
@@ -44,15 +73,17 @@ import { scopeAndNonceStyleBlocks } from "./cssScope.js";
 export const USER_HTML_SCOPE_CLASS = "user-html-scope";
 
 export function sanitizeUserHtml(html: string): string {
-  const purified = DOMPurify.sanitize(html, {
-    ADD_TAGS: ["style"],
-    FORBID_TAGS: ["script", "iframe", "object", "embed", "form", "input"],
+  const purified = DOMPurify.sanitize(transformYoutubeTags(html), {
+    // `iframe` is in ADD_TAGS so the `<youtube>` → iframe transform
+    // above survives. Arbitrary iframes are still gated by the strict
+    // CSP `frame-src` allowlist (`youtube-nocookie.com`, `vimeo.com`,
+    // self) — a pasted `<iframe src="http://evil">` parses fine but
+    // the browser refuses to load it, so the surface is the URL set
+    // CSP already trusts.
+    ADD_TAGS: ["style", "iframe"],
+    ADD_ATTR: ["allowfullscreen", "allow", "frameborder", "referrerpolicy", "loading"],
+    FORBID_TAGS: ["script", "object", "embed", "form", "input"],
     FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover", "onfocus", "onblur"],
-    // FORCE_BODY tells DOMPurify to wrap the input in <body>, so the
-    // HTML parser keeps a top-level `<style>` block as a body child
-    // instead of relocating it to <head> (the spec-default placement
-    // for `<style>` in a fragment). DOMPurify strips head content
-    // after parsing, which is what was silently eating user CSS.
     FORCE_BODY: true,
   });
   return scopeAndNonceStyleBlocks(purified, `.${USER_HTML_SCOPE_CLASS}`);

@@ -116,22 +116,23 @@ export function splashBgUrl(theme: Theme): string {
  * subtree (e.g. profile modal showing the OWNER's theme).
  */
 export function themeStyle(theme: Theme): CSSProperties {
-  // Nudge text + muted toward legibility against bg so a profile-
-  // themed modal (or anywhere else this style wraps a subtree) never
-  // renders body copy invisibly against a similar-luminance background.
-  // Other slots are passed through verbatim. The hex stored in the DB
-  // doesn't change — only the rendered RGB triple shifts.
   const legible = legibleThemePalette(theme);
   const out: Record<string, string> = {};
   for (const slot of VAR_KEYS) {
-    out[`--keep-${slot}`] = hexToRgbTriple(legible[slot]);
+    const base = legible[slot];
+    out[`--keep-${slot}`] = hexToRgbTriple(base);
+    // Emit the same 5-step ramp `applyTheme` writes at :root. Without
+    // these, a subtree that swaps in a different theme (a profile or
+    // world modal showing the owner's palette) inherits the viewer's
+    // ramps — so rules like `[data-theme-style="scifi"] body` that
+    // reference `--keep-bg-500` resolve to the wrong color and the
+    // owner's glass / neon effects don't read correctly.
+    const ramp = buildRamp(base);
+    for (let i = 0; i < ramp.length; i++) {
+      const step = (i + 1) * 100;
+      out[`--keep-${slot}-${step}`] = ramp[i]!;
+    }
   }
-  // Derived neon variants — same hue as the user's pick, but normalized
-  // to full saturation + mid-dark luminance so glow/halo treatments in
-  // styles like scifi read as a rich saturated neon instead of a
-  // washed-out near-white. See `buildNeon` for the recipe. Built from
-  // the ORIGINAL action/accent (not the legibility-nudged copy) since
-  // these are aesthetic accent splashes, not body text.
   out["--keep-action-neon"] = buildNeon(theme.action);
   out["--keep-accent-neon"] = buildNeon(theme.accent);
   out.colorScheme = isDarkTheme(theme) ? "dark" : "light";

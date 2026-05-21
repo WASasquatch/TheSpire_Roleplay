@@ -63,7 +63,14 @@ export interface PrivateProfileStub {
 /** Returns the username slice of /p/<username>, or null if the URL isn't a profile link. */
 export function parseProfileFromUrl(): string | null {
   if (typeof window === "undefined") return null;
-  const m = window.location.pathname.match(PROFILE_URL_RX);
+  // `window.location.pathname` keeps non-ASCII bytes percent-encoded
+  // (e.g. NBSP becomes `%C2%A0`). The regex below allows literal NBSP
+  // but not `%`, so an NBSP-containing username deep link like
+  // `/p/The%C2%A0Doctor` failed to match — the SPA never fetched the
+  // profile and the user just saw the splash. Decode first.
+  let path = window.location.pathname;
+  try { path = decodeURI(path); } catch { /* malformed encoding — fall back to raw */ }
+  const m = path.match(PROFILE_URL_RX);
   return m?.[1] ?? null;
 }
 

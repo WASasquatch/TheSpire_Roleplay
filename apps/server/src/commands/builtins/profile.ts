@@ -1,10 +1,35 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { characterEarning, characterJournalEntries, characterOwnedNameStyles, characterPortraits, characters, identityCollection, identityPetCollection, items, messages, profileLinks, rooms, userActiveCosmetics, userOwnedNameStyles, userPortraits, users } from "../../db/schema.js";
-import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLink, ProfileMetrics, ProfileView } from "@thekeep/shared";
-import { roleRank } from "@thekeep/shared";
-import { parseUserThemeJson } from "../../settings.js";
+import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLink, ProfileMetrics, ProfileView, Theme } from "@thekeep/shared";
+import { matchThemePreset, roleRank } from "@thekeep/shared";
+import { getSettings, parseUserThemeJson } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
 import type { CommandHandler } from "../types.js";
+
+/**
+ * Resolve the design style key (medieval / modern / scifi) a profile
+ * should render with. Mirrors the client-side chain in App.tsx so a
+ * viewer sees the owner's intended design even when their own active
+ * style differs. Highest priority wins:
+ *   1. character.styleKey
+ *   2. user.styleKey
+ *   3. themeDesignMap[<matched preset name>]
+ *   4. site.defaultStyleKey
+ *   5. "medieval" (hardcoded final fallback)
+ */
+async function resolveProfileStyleKey(
+  db: import("../../db/index.js").Db,
+  theme: Theme,
+  charStyleKey: string | null,
+  userStyleKey: string | null,
+): Promise<string> {
+  if (charStyleKey) return charStyleKey;
+  if (userStyleKey) return userStyleKey;
+  const settings = await getSettings(db);
+  const presetName = matchThemePreset(theme);
+  if (presetName && settings.themeDesignMap[presetName]) return settings.themeDesignMap[presetName]!;
+  return settings.defaultStyleKey || "medieval";
+}
 
 /**
  * Resolve the identity's equipped name-style key + per-user config so
@@ -454,6 +479,8 @@ async function lookupProfile(
       u.includeAvatarInGallery,
       u.isNsfw,
     );
+    const theme = await parseUserThemeJson(db, u.themeJson);
+    const styleKey = await resolveProfileStyleKey(db, theme, null, u.styleKey);
     return {
       kind: "master",
       profile: {
@@ -463,7 +490,8 @@ async function lookupProfile(
         avatarUrl: u.avatarUrl,
         portraits,
         gender: u.gender,
-        theme: await parseUserThemeJson(db, u.themeJson),
+        theme,
+        styleKey,
         titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
         links: await listLinks(db, u.id, null),
         role: u.role,
@@ -499,6 +527,7 @@ async function lookupProfile(
   if (!owner || owner.disabledAt) return null;
 
   const theme = await parseUserThemeJson(db, c.themeJson ?? owner.themeJson);
+  const styleKey = await resolveProfileStyleKey(db, theme, c.styleKey, owner.styleKey);
   // Mod-only OOC owner badge. The character row already exposes
   // `userId` on the wire (so the master is technically discoverable
   // by chained API calls), but mods on the modal need the friendly
@@ -524,6 +553,7 @@ async function lookupProfile(
       links: await listLinks(db, c.userId, c.id),
       journalEntries: await listPublicJournal(db, c.id),
       theme,
+      styleKey,
       titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
       isPublic: c.isPublic,
       isNsfw: c.isNsfw,
@@ -594,6 +624,8 @@ async function lookupRandomProfile(
       u.includeAvatarInGallery,
       u.isNsfw,
     );
+    const theme = await parseUserThemeJson(db, u.themeJson);
+    const styleKey = await resolveProfileStyleKey(db, theme, null, u.styleKey);
     return {
       kind: "master",
       profile: {
@@ -603,7 +635,8 @@ async function lookupRandomProfile(
         avatarUrl: u.avatarUrl,
         portraits,
         gender: u.gender,
-        theme: await parseUserThemeJson(db, u.themeJson),
+        theme,
+        styleKey,
         titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
         links: await listLinks(db, u.id, null),
         role: u.role,
@@ -622,7 +655,7 @@ async function lookupRandomProfile(
   }
 
   const row = (await db
-    .select({ char: characters, ownerThemeJson: users.themeJson, ownerUsername: users.username })
+    .select({ char: characters, ownerThemeJson: users.themeJson, ownerStyleKey: users.styleKey, ownerUsername: users.username })
     .from(characters)
     .innerJoin(users, eq(users.id, characters.userId))
     .where(and(
@@ -644,6 +677,8 @@ async function lookupRandomProfile(
     c.includeAvatarInGallery,
     c.isNsfw,
   );
+  const theme = await parseUserThemeJson(db, c.themeJson ?? row.ownerThemeJson);
+  const styleKey = await resolveProfileStyleKey(db, theme, c.styleKey, row.ownerStyleKey);
   return {
     kind: "character",
     profile: {
@@ -656,7 +691,8 @@ async function lookupRandomProfile(
       portraits,
       links: await listLinks(db, c.userId, c.id),
       journalEntries: await listPublicJournal(db, c.id),
-      theme: await parseUserThemeJson(db, c.themeJson ?? row.ownerThemeJson),
+      theme,
+      styleKey,
       titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
       isPublic: c.isPublic,
       isNsfw: c.isNsfw,

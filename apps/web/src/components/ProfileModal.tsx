@@ -3,6 +3,7 @@ import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import { isAdminRole } from "@thekeep/shared";
 import type { CharacterPortrait, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
+import { buildOrnamentStyle } from "../lib/ornaments/index.js";
 import { BorderedAvatar } from "./BorderedAvatar.js";
 import { CloseButton } from "./CloseButton.js";
 import { genderGlyph } from "../lib/gender.js";
@@ -78,6 +79,8 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   const bio = profile.profile.bioHtml.trim();
   const avatar = profile.profile.avatarUrl;
   const ownerTheme = profile.profile.theme;
+  const ownerStyleKey = profile.profile.styleKey;
+  const ownerOrnaments = buildOrnamentStyle(ownerTheme, ownerStyleKey);
   const createdAt = profile.profile.createdAt;
   const stats = isChar ? profile.profile.stats : null;
   const gender = resolveGender(profile);
@@ -157,7 +160,8 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
         // Desktop (md+): 75vw on widescreens with a ceiling so it doesn't
         // become absurd on ultra-wide monitors, capped at 85vh tall, with
         // the original border / rounded / shadow treatment.
-        style={themeStyle(ownerTheme)}
+        style={{ ...themeStyle(ownerTheme), ...ownerOrnaments.vars }}
+        data-theme-style={ownerOrnaments.styleKey}
         className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
         onClick={(e) => e.stopPropagation()}
       >

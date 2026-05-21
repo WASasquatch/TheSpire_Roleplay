@@ -916,7 +916,7 @@ const VIMEO_HASH_RE = /^[\w-]{4,}$/;
  * existing image toggle, so a paste of `youtu.be/...` doesn't auto-ping
  * YouTube on every chat render.
  */
-function parseVideoEmbed(url: string): VideoEmbed | null {
+export function parseVideoEmbed(url: string): VideoEmbed | null {
   let u: URL;
   try {
     u = new URL(url);

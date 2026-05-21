@@ -152,6 +152,15 @@ export interface CharacterProfile {
   journalEntries: CharacterJournalEntry[];
   /** Owner's chosen UI theme - applied to the profile modal when others view it. */
   theme: Theme;
+  /**
+   * Fully-resolved design style key (medieval / modern / scifi) for this
+   * profile. Server picks the highest-priority value among
+   * character.styleKey > user.styleKey > themeDesignMap[<theme preset>] >
+   * site.defaultStyleKey > "medieval", so the client can stamp
+   * `data-theme-style` on the modal directly without re-running the
+   * resolution chain.
+   */
+  styleKey: string;
   /** Mutual titles (marriages, partnerships, etc.) bound to this character. */
   titles: ProfileTitle[];
   /**
@@ -307,6 +316,8 @@ export interface MasterProfile {
   gender: "male" | "female" | "nonbinary" | "other" | "undisclosed";
   /** Owner's chosen UI theme - applied to the profile modal when others view it. */
   theme: Theme;
+  /** Resolved design style key — same semantics as `CharacterProfile.styleKey`. */
+  styleKey: string;
   /** Mutual titles bound to this master account (separate from any character titles). */
   titles: ProfileTitle[];
   /** Owner-set external links (other profiles, OOC docs, refs). */

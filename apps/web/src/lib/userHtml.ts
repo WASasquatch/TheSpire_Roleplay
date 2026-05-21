@@ -45,15 +45,15 @@ export const USER_HTML_SCOPE_CLASS = "user-html-scope";
 
 export function sanitizeUserHtml(html: string): string {
   const purified = DOMPurify.sanitize(html, {
-    // Add `<style>` to the allowed tag set. DOMPurify's CSS sanitizer
-    // applies to the contents (same value-shape rules as inline
-    // styles); the scope + nonce pass below runs after purification.
     ADD_TAGS: ["style"],
-    // Belt-and-suspenders: the server already strips these; restate
-    // here so a future DOMPurify default change can't quietly let
-    // them through.
     FORBID_TAGS: ["script", "iframe", "object", "embed", "form", "input"],
     FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover", "onfocus", "onblur"],
+    // FORCE_BODY tells DOMPurify to wrap the input in <body>, so the
+    // HTML parser keeps a top-level `<style>` block as a body child
+    // instead of relocating it to <head> (the spec-default placement
+    // for `<style>` in a fragment). DOMPurify strips head content
+    // after parsing, which is what was silently eating user CSS.
+    FORCE_BODY: true,
   });
   return scopeAndNonceStyleBlocks(purified, `.${USER_HTML_SCOPE_CLASS}`);
 }

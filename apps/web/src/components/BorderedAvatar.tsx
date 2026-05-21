@@ -53,8 +53,8 @@ type Size = BorderedAvatarSize;
  *  (forum body, earning catalog, profile hero) have layouts tuned
  *  to specific avatar diameters and shouldn't drift with font-size. */
 const AVATAR_SIZE: Record<Size, string> = {
-  xs: "clamp(36px, 2.5rem, 48px)", // chat-line inline — Discord-like prominence;
-                                   //   small font →36, medium →40, large →45, xl →48
+  xs: "clamp(31px, 2.125rem, 41px)", // chat-line inline — Discord-like prominence;
+                                     //   small font →31, medium →34, large →38, xl →41
   sm: "clamp(32px, 2.2rem, 40px)", // userlist row — one notch tighter than the
                                    //   chat-line but in the same visual class
   md: "32px", // forum post avatar

@@ -71,11 +71,14 @@ const AUTO_BR_RE = /<br\b[^>]*\bdata-auto-br\b[^>]*>/i;
 /**
  * Pre-pass: convert PARAGRAPH-break newlines to `<br>` for inputs that
  * look like plain text. Only runs of 2+ newlines emit `<br>`s — one
- * per extra newline past the first — so hitting Enter once is invisible
+ * per newline in the run — so hitting Enter once is invisible
  * (HTML collapses the lone newline to whitespace) and hitting Enter
- * twice gives one blank line. The earlier rule emitted a `<br>` for
- * every `\n`, which made a casual textarea wrap show up as a paragraph
- * break and ballooned bios with vertical air the writer never asked for.
+ * twice gives one blank line. Each `<br>` is a single line break in
+ * HTML; two stacked `<br>`s render as the blank line a writer who
+ * pressed Enter twice expects to see. The earlier rule emitted
+ * `run.length - 1` BRs, which gave a single line break for a double-
+ * Enter input — visually identical to a single Enter, so the writer's
+ * paragraph break disappeared on display.
  *
  * Skipped entirely when the input carries paragraph-level wrappers
  * (`<p>`, `<div>`, `<blockquote>`, `<pre>`) — those already define their
@@ -116,7 +119,7 @@ function nlToBrForPlainText(input: string): string {
     ),
     "",
   );
-  s = s.replace(/\n{2,}/g, (run) => AUTO_BR.repeat(run.length - 1) + "\n");
+  s = s.replace(/\n{2,}/g, (run) => AUTO_BR.repeat(run.length) + "\n");
   return restoreStyles(s, styleBlocks, STYLE_TOKEN);
 }
 
@@ -160,7 +163,7 @@ export function bioHtmlForEdit(html: string): string {
     ),
     (_m, brs: string) => {
       const count = (brs.match(/<br/gi) ?? []).length;
-      return "\n".repeat(count + 1);
+      return "\n".repeat(count);
     },
   );
 }

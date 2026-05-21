@@ -30,6 +30,8 @@ import {
   findCanonicalLanding,
   joinRoom,
   registerIdleGhost,
+  sendRoomBacklogTo,
+  sendRoomStateTo,
   setGhostSweepIo,
   userHasSocketInRoom,
   userIdentityHasSocketInRoom,
@@ -991,6 +993,22 @@ async function main() {
     // right after the emit).
     socket.on("me:exit", () => {
       (socket.data as { exitIntent?: boolean }).exitIntent = true;
+    });
+
+    // Client-driven re-sync. Fires when the Chat component mounts onto a
+    // socket that was already connected by an App-level effect (e.g.
+    // the deep-link standalone shell created the socket while the user
+    // viewed /p/<name>, then they dismissed and Chat mounted late) —
+    // the initial join broadcasts went out before Chat's listeners were
+    // attached, so the chat shell renders blank until we re-emit the
+    // current room's state and backlog to this socket.
+    socket.on("me:resync", async () => {
+      const currentRoomId = [...socket.rooms]
+        .filter((r) => r.startsWith("room:"))
+        .map((r) => r.slice(5))[0] ?? null;
+      if (!currentRoomId) return;
+      await sendRoomStateTo(socket, io, db, currentRoomId);
+      await sendRoomBacklogTo(socket, db, currentRoomId, user.id);
     });
 
     // We use `disconnecting` (not `disconnect`) because by the time

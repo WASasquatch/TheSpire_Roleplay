@@ -112,6 +112,16 @@ export interface ClientToServerEvents {
    * handler reads).
    */
   "me:exit": () => void;
+  /**
+   * Ask the server to re-emit `room:state` + `presence:update` +
+   * `message:bulk` + `room:history_meta` for whichever room this socket
+   * is currently in. Fired by the client when Chat mounts onto an
+   * already-connected socket — the case where the socket was created
+   * by an App-level effect during the deep-link standalone shell and
+   * the initial join broadcasts went out before Chat's listeners were
+   * attached. No-op when the socket isn't in any room.
+   */
+  "me:resync": () => void;
 }
 
 /** Events emitted by the server → client. */

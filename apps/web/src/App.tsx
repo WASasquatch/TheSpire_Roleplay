@@ -1559,6 +1559,15 @@ function Chat() {
         })
         .catch(() => {});
       bumpDmReseed();
+      // Resync room state + backlog. Required for the deep-link case:
+      // the socket may have been created (and joined a room) by an
+      // App-level effect while the user was in the standalone shell
+      // viewing /p/<name>. The initial `room:state` / `message:bulk`
+      // went out before Chat's listeners existed; without this resync
+      // Chat would render blank after dismissal. Cheap on the normal
+      // (no-deep-link) path — same socket emits the server already
+      // sent on join, just received again.
+      socket.emit("me:resync");
     }
     // socket.io-client fires `connect` on the initial handshake and
     // after every successful auto-reconnect, so this single handler

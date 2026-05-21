@@ -20,6 +20,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import DOMPurify from "dompurify";
 import { isMasterAdminRole } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
@@ -61,8 +62,6 @@ import {
   type SourceEnableFlags,
   type EarningConfig,
 } from "../lib/earning.js";
-import { StyledName } from "./StyledName.js";
-import { injectNameStylePreview, clearNameStylePreview } from "../lib/nameStyleInjector.js";
 
 type SubTab = "awards" | "ranks" | "styles" | "cosmetics" | "items" | "grants";
 
@@ -987,9 +986,11 @@ function fileToDataUrl(file: File): Promise<string> {
  *  Name Styles sub-tab
  *
  *  Live preview pane: while the admin edits HTML + CSS, the
- *  preview re-injects the draft CSS into the document head so
- *  the rendered <StyledName> shows the in-progress template.
- *  Built-in styles can be rewritten but not deleted.
+ *  preview renders inside a Shadow DOM (see NameStylePreview)
+ *  so the admin's exact classes + rules apply verbatim against
+ *  the typed-in template — no scope mangling, no leakage in or
+ *  out of the page's own styles. Built-in styles can be
+ *  rewritten but not deleted.
  * ========================================================= */
 
 function NameStylesSection() {
@@ -1119,6 +1120,114 @@ function NameStylesSection() {
   );
 }
 
+/**
+ * Tags / attributes mirrored from StyledName's production sanitizer.
+ * Keeping them in lockstep means what the admin sees in the preview is
+ * what users will see at runtime — same DOMPurify rules, same drops.
+ */
+const PREVIEW_SANITIZER_TAGS = ["span", "b", "i", "em", "strong", "u", "s", "small", "sub", "sup", "mark"];
+const PREVIEW_SANITIZER_ATTRS = ["class", "style", "data-*"];
+
+function escapePreviewHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Live preview for the Name-Styles editor. Renders the admin's
+ * *exact* HTML template + CSS inside a Shadow DOM so what they see is
+ * literally what'll save — no class-name rewriting, no scope mangling,
+ * no risk of the draft clobbering already-rendered names elsewhere on
+ * the page (the shadow boundary handles isolation in both directions).
+ *
+ * Why shadow DOM and not "inject the CSS into a scoped style tag":
+ *  - The previous approach rewrote `ns-<slug>` to `ns-<previewKey>` in
+ *    both the template and the CSS so the draft wouldn't collide with
+ *    catalog rules. That worked for single-element built-ins but quietly
+ *    collapsed BEM children (`ns-foo__bar` → `ns-foo`) — admins editing
+ *    multi-element templates saw the DOM render but with every nested
+ *    class flattened to the wrapper, so none of their `__element` CSS
+ *    rules matched and the preview painted as bare text. Fixing the
+ *    regex helped but kept introducing edge cases (BEM modifiers,
+ *    keyframes name collisions, custom-property names that contain `--`,
+ *    nested `@scope`/`@media`). Shadow DOM removes the whole class of
+ *    bug — the admin's classes apply to the admin's HTML, full stop.
+ *  - Style isolation goes both ways: the page's `keep-*` tokens and
+ *    tailwind utilities don't bleed into the preview, so admins
+ *    authoring against the host page can't accidentally rely on app
+ *    styles that won't exist at runtime.
+ *
+ * Inherited CSS (color, font-family, line-height) still flows through
+ * the host element into the shadow root — that's a property of the
+ * cascade, not a leak — so the preview text picks up the editor's
+ * typography for context.
+ */
+function NameStylePreview({
+  template,
+  styleCss,
+  displayName,
+}: {
+  template: string;
+  styleCss: string;
+  displayName: string;
+}) {
+  const hostRef = useRef<HTMLSpanElement | null>(null);
+  const shadowRef = useRef<ShadowRoot | null>(null);
+
+  // Attach the shadow root once on mount. attachShadow throws if called
+  // twice on the same host, so we stash the returned root and reuse it.
+  useEffect(() => {
+    if (!hostRef.current || shadowRef.current) return;
+    shadowRef.current = hostRef.current.attachShadow({ mode: "open" });
+  }, []);
+
+  // (Re)render the shadow content on every change. Clears then rebuilds
+  // — cheap for a single styled span, and avoids needing to diff the
+  // user's freeform HTML/CSS.
+  useEffect(() => {
+    const shadow = shadowRef.current;
+    if (!shadow) return;
+    while (shadow.firstChild) shadow.removeChild(shadow.firstChild);
+
+    // CSS goes into a proper <style> element so the CSP nonce can be
+    // stamped on it. Strict prod policies (`style-src 'self' 'nonce-…'`)
+    // would otherwise drop the inline stylesheet, leaving the preview
+    // unstyled even though the user's CSS is "there".
+    const styleEl = document.createElement("style");
+    const nonceMeta = document.head.querySelector('meta[name="csp-nonce"]') as HTMLMetaElement | null;
+    const nonce = nonceMeta?.content || "";
+    if (nonce) styleEl.setAttribute("nonce", nonce);
+    styleEl.textContent = styleCss;
+    shadow.appendChild(styleEl);
+
+    // HTML goes through the same DOMPurify config StyledName uses at
+    // runtime, so the admin sees what's actually going to survive
+    // sanitization (e.g. `title=` attrs and disallowed tags getting
+    // stripped). KEEP_CONTENT means stripped tags keep their inner
+    // text — matches production exactly.
+    const escaped = escapePreviewHtml(displayName);
+    const merged = template.replace(/\{username\}/g, escaped);
+    const clean = DOMPurify.sanitize(merged, {
+      ALLOWED_TAGS: PREVIEW_SANITIZER_TAGS,
+      ALLOWED_ATTR: PREVIEW_SANITIZER_ATTRS,
+      KEEP_CONTENT: true,
+    });
+    const wrapper = document.createElement("span");
+    wrapper.innerHTML = clean;
+    shadow.appendChild(wrapper);
+  }, [template, styleCss, displayName]);
+
+  // `inline-block` so the host establishes its own box; otherwise the
+  // shadow content (mostly inline spans) wouldn't reserve any height
+  // when the user's CSS uses transforms / absolute positioning on the
+  // template's children.
+  return <span ref={hostRef} className="inline-block" />;
+}
+
 function StyleEditor({
   kind,
   initial,
@@ -1141,44 +1250,10 @@ function StyleEditor({
   const [enabled, setEnabled] = useState(initial.enabled);
   const [saving, setSaving] = useState(false);
 
-  // Live-inject the draft CSS into a SEPARATE preview <style> tag so
-  // the live catalog tag isn't clobbered while the admin types.
-  // (Previously both wrote to the same tag, which wiped every
-  // catalog `.ns-*` rule the rest of the app depended on the moment
-  // the editor opened.) Rewriting `ns-<anything>` to `ns-<previewKey>`
-  // scopes the draft CSS to the preview wrapper class so it can't
-  // affect already-rendered names elsewhere on the page.
-  const previewKey = `__preview__${initial.key || "new"}`;
-  const previewTemplate = useMemo(
-    () => template.replace(/ns-[a-zA-Z0-9_-]+/g, `ns-${previewKey}`),
-    [template, previewKey],
-  );
-  const previewStyleCss = useMemo(
-    () => styleCss.replace(/ns-[a-zA-Z0-9_-]+/g, `ns-${previewKey}`),
-    [styleCss, previewKey],
-  );
-  const previewRow = useMemo(
-    () => ({
-      key: previewKey,
-      name,
-      description,
-      template: previewTemplate,
-      styleCss: previewStyleCss,
-      cost: 0,
-      isBuiltin: false,
-      order: 0,
-    }),
-    [previewKey, name, description, previewTemplate, previewStyleCss],
-  );
-  useEffect(() => {
-    injectNameStylePreview([previewRow]);
-  }, [previewRow]);
-  // Remove the preview tag on unmount — the inject helper is
-  // idempotent for keystroke updates, so we only need cleanup once
-  // when the editor goes away.
-  useEffect(() => {
-    return () => clearNameStylePreview();
-  }, []);
+  // Preview is rendered via NameStylePreview (Shadow DOM). No
+  // class-name rewriting, no page-level style injection — the admin's
+  // exact HTML + CSS apply inside an isolated shadow tree, so the
+  // preview literally matches what saving will produce.
 
   async function save() {
     setSaving(true);
@@ -1292,28 +1367,16 @@ function StyleEditor({
 
       <div className="rounded border border-keep-rule/60 bg-keep-bg/60 p-3">
         <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Live preview</div>
+        {/* `text-2xl font-bold` mirrors the EarningDashboard's
+            Available card preview sizing — at smaller weight the 1px
+            text-stroke a lot of styles use overwhelms the fill, so
+            matching the store's bigger sizing gives the admin a
+            like-for-like comparison with what users see when shopping. */}
         <div className="text-2xl font-bold">
-          {/* `overrideRow` bypasses the snapshot catalog lookup so
-              the draft renders even though `previewKey` isn't in
-              the live catalog. The preview CSS is injected into a
-              dedicated `<style>` tag (above) so this class
-              resolution actually finds rules.
-              `config={null}` lets each style paint in its own
-              catalog defaults (Embers → fire orange, Neon Sign →
-              neon pink, Aurora → tropical, etc.).
-              `text-2xl font-bold` mirrors the EarningDashboard's
-              Available card preview sizing. At smaller/normal
-              weight the 1px black -webkit-text-stroke is a larger
-              proportion of each glyph's ink, so the dark outline
-              visually dominates the gradient fill and the preview
-              reads as black/dim. Matching the store's bigger/bolder
-              sizing lets the gradient win, and gives the admin a
-              like-for-like comparison with what users see in the
-              store. */}
-          <StyledName
+          <NameStylePreview
+            template={template}
+            styleCss={styleCss}
             displayName="Username"
-            overrideRow={previewRow}
-            config={null}
           />
         </div>
       </div>

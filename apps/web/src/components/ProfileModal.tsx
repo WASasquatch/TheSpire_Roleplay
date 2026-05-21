@@ -1035,7 +1035,7 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
             <img
               src={active.url}
               alt={active.label || `${alt} portrait`}
-              className={`mx-auto block max-w-full rounded border border-keep-border transition ${
+              className={`mx-auto block max-w-full rounded transition ${
                 activeIsCensored ? "blur-2xl scale-105" : ""
               }`}
             />
@@ -1080,8 +1080,8 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
                 setActiveId((prev) => (prev === p.id ? null : p.id));
               }}
               title={p.nsfw ? `${p.label ?? "Portrait"} (NSFW — click to reveal)` : p.label ?? "Portrait"}
-              className={`relative aspect-square overflow-hidden rounded border ${
-                activeId === p.id ? "border-keep-action ring-2 ring-keep-action/40" : "border-keep-border hover:border-keep-action"
+              className={`relative aspect-square overflow-hidden rounded transition ${
+                activeId === p.id ? "ring-2 ring-keep-action" : "hover:ring-2 hover:ring-keep-action/50"
               }`}
             >
               <img

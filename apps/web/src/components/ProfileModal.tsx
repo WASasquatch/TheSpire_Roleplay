@@ -54,6 +54,13 @@ interface Props {
    *   - someone else's profile                         → omit (caller filters)
    */
   activeCharacterAction?: { label: string; onClick: () => void };
+  /**
+   * Stacking override for the modal backdrop. Defaults to the Modal
+   * baseline (40). Bumped above 50 when the profile is opened from
+   * inside the admin panel so it sits on top of the admin shell
+   * instead of being hidden underneath it.
+   */
+  zIndex?: number;
 }
 
 /**
@@ -73,7 +80,7 @@ interface Props {
  * Every section degrades gracefully: characters with nothing filled out
  * still get a clean modal that says "X hasn't filled out their profile yet."
  */
-export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore, onOpenProfile, onOpenWorld, activeCharacterAction, bypassNsfwGate }: Props) {
+export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore, onOpenProfile, onOpenWorld, activeCharacterAction, bypassNsfwGate, zIndex }: Props) {
   const isChar = profile.kind === "character";
   const name = isChar ? profile.profile.name : profile.profile.username;
   const bio = profile.profile.bioHtml.trim();
@@ -147,6 +154,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
       // Conditional spread, not `prop={maybeUndef}` — `exactOptionalPropertyTypes`
       // in tsconfig rejects `undefined` as a value for optional props.
       {...(backdropStyle ? { backdropStyle } : {})}
+      {...(zIndex !== undefined ? { zIndex } : {})}
     >
       <div
         // Inline-style override scopes the theme to this card only. The

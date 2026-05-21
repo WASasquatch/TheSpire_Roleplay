@@ -693,6 +693,15 @@ function NameStylesTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.ge
     }
     return out;
   }, [ownedStylesForIdentity]);
+  // Affordability gates against the pool the server will actually
+  // debit on Buy: the active character's pool when voicing a
+  // character, the master pool when on OOC. Previously this used
+  // `snapshot.master.currency` unconditionally — a user with 4000
+  // on master and 0 on the active character saw Buy enabled at 1000
+  // Currency, clicked, and got "insufficient funds" from the server.
+  const activeWallet = activeCharacterId
+    ? (snapshot.characters.find((c) => c.ownerId === activeCharacterId)?.currency ?? 0)
+    : snapshot.master.currency;
 
   async function buy(key: string, cost: number) {
     const who = activeCharacterId ? "this character" : "your master account";
@@ -813,7 +822,7 @@ function NameStylesTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.ge
                 style={s}
                 previewName={previewName}
                 busy={busyKey === s.key}
-                affordable={snapshot.master.currency >= s.cost}
+                affordable={activeWallet >= s.cost}
                 onBuy={() => void buy(s.key, s.cost)}
               />
             ))
@@ -1162,7 +1171,7 @@ function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getSt
                 rankName={rank!.name}
                 state="available"
                 busy={busyKey === tier.rankKey}
-                affordable={snapshot.master.currency >= (tier.borderCost ?? 0)}
+                affordable={(activeCharacterView?.currency ?? snapshot.master.currency) >= (tier.borderCost ?? 0)}
                 onAction={() => void buy(tier.rankKey)}
                 userDisplayName={snapshot.master.displayName}
                 userAvatarUrl={viewerAvatarUrl}
@@ -1312,22 +1321,27 @@ function CosmeticsTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.get
   const inlineAvatarRow = catalog?.cosmetics.find((c) => c.key === "inline_avatar");
   if (!inlineAvatarRow) return <p className="text-sm text-keep-muted">No cosmetics available right now.</p>;
 
-  // The user "owns" inline_avatar when they've ever toggled it on or
-  // we see the cosmetic active. We surface that here by checking
-  // active state; a more rigorous check would look at the ledger,
-  // but the server-side purchase endpoint sets enabled=true so the
-  // flag suffices for the UI's buy vs equip gate.
-  // Ownership stays account-wide — anyone of the user's identities
-  // having ever turned it on counts as "owned". Equip state is the
-  // PER-IDENTITY slot: the master fields when OOC, the character's
-  // byCharacter[id] entry when a character is active.
+  // Ownership is PER-IDENTITY: the server's purchase ledger writes a
+  // row scoped to (user|character, ownerId), so master buying a
+  // cosmetic does NOT make any character own it (and vice versa).
+  // The snapshot exposes the currently-enabled flag per identity; we
+  // use it as a proxy for ownership because the purchase endpoint
+  // auto-equips on first buy. If the user later disables, the proxy
+  // flips back to "Buy" — `doBuy` below catches the resulting
+  // "already owned" response and auto-equips instead, so the UX
+  // stays clean. Previously this combined master + every character's
+  // flag into a single "owns" — a master who bought it made every
+  // character show "Owned (off)" with an Equip toggle that failed
+  // server-side because the character's own ledger had no purchase.
   const masterEnabled = snapshot.activeCosmetics.inlineAvatarEnabled;
   const perCharacterMap = snapshot.activeCosmetics.byCharacter ?? {};
-  const anyCharacterEnabled = Object.values(perCharacterMap).some((c) => c.inlineAvatarEnabled);
-  const owns = masterEnabled || anyCharacterEnabled;
   const equipped = activeCharacterId
     ? (perCharacterMap[activeCharacterId]?.inlineAvatarEnabled ?? false)
     : masterEnabled;
+  const owns = equipped;
+  const activeWallet = activeCharacterId
+    ? (snapshot.characters.find((c) => c.ownerId === activeCharacterId)?.currency ?? 0)
+    : snapshot.master.currency;
 
   async function doBuy() {
     const who = activeCharacterId ? "this character" : "your master account";
@@ -1338,7 +1352,22 @@ function CosmeticsTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.get
       await purchaseCosmetic("inline_avatar", activeCharacterId);
       await refresh();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Purchase failed");
+      // Server says this identity already bought it (they disabled
+      // it, then clicked Buy again). Skip the cost prompt — flip
+      // the equip on for them and re-sync. The server's equip
+      // route enforces ownership, so a true never-purchased
+      // identity still hits the proper rejection.
+      const msg = e instanceof Error ? e.message : "Purchase failed";
+      if (/already owned/i.test(msg)) {
+        try {
+          await equipCosmetic("inline_avatar", true, activeCharacterId);
+          await refresh();
+        } catch (eq) {
+          setErr(eq instanceof Error ? eq.message : "Equip failed");
+        }
+      } else {
+        setErr(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -1377,8 +1406,8 @@ function CosmeticsTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.get
               <button
                 type="button"
                 onClick={() => void doBuy()}
-                disabled={busy || snapshot.master.currency < inlineAvatarRow.cost}
-                title={snapshot.master.currency >= inlineAvatarRow.cost ? "Buy + auto-equip" : "Not enough Currency"}
+                disabled={busy || activeWallet < inlineAvatarRow.cost}
+                title={activeWallet >= inlineAvatarRow.cost ? "Buy + auto-equip" : "Not enough Currency"}
                 className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
               >
                 {busy ? "Working…" : "Buy"}

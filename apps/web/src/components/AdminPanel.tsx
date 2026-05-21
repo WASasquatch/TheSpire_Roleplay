@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import DOMPurify from "dompurify";
-import type { AuditEntry, ReportEntry, Role, Theme, ThemeableTextSlot, ThreadCategory } from "@thekeep/shared";
+import type { AuditEntry, ProfileView, ReportEntry, Role, Theme, ThemeableTextSlot, ThreadCategory } from "@thekeep/shared";
 import { THEME_PRESETS } from "@thekeep/shared";
 import {
   DEFAULT_THEME,
@@ -19,6 +19,7 @@ import { listStyles } from "../lib/ornaments/index.js";
 import { AdminEarningTab } from "./AdminEarningTab.js";
 import { AdminBackupsTab } from "./AdminBackupsTab.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
+import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
@@ -4722,44 +4723,105 @@ function AdminCharactersSection({ user }: { user: AdminUserRow }) {
   const openEditor = useChat((s) => s.openEditor);
   const live = user.characters.filter((c) => !c.deleted);
   const deleted = user.characters.filter((c) => c.deleted);
-  if (live.length === 0 && deleted.length === 0) {
-    return (
-      <div className="mt-3 rounded border border-keep-rule/60 bg-keep-banner/30 p-2 text-[11px] text-keep-muted">
-        No characters on this account.
-      </div>
-    );
+  const [viewing, setViewing] = useState<ProfileView | null>(null);
+  const [viewError, setViewError] = useState<string | null>(null);
+  const [viewingName, setViewingName] = useState<string | null>(null);
+
+  async function openView(name: string) {
+    setViewError(null);
+    setViewingName(name);
+    try {
+      const r = await fetch(`/profiles/${encodeURIComponent(name)}`, { credentials: "include" });
+      if (!r.ok) {
+        setViewError(r.status === 404 ? "Profile not found." : `Couldn't load profile (HTTP ${r.status}).`);
+        setViewingName(null);
+        return;
+      }
+      const j = await r.json();
+      if (j && "private" in j) {
+        setViewError("Profile is restricted.");
+        setViewingName(null);
+        return;
+      }
+      setViewing(j as ProfileView);
+    } catch {
+      setViewError("Couldn't load profile.");
+      setViewingName(null);
+    }
   }
+
+  const editChar = (c: { id: string }) => openEditor({
+    mode: "character",
+    characterId: c.id,
+    adminContext: { ownerUserId: user.userId, ownerUsername: user.username },
+  });
+
   return (
-    <div className="mt-3 rounded border border-keep-rule/60 bg-keep-bg/40 p-2">
-      <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">
-        Characters
+    <>
+      <div className="mt-3 rounded border border-keep-rule/60 bg-keep-bg/40 p-2">
+        <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">
+          Profiles
+        </div>
+        <ul className="space-y-1">
+          <li className="flex items-center justify-between gap-2 rounded border border-keep-rule/60 bg-keep-bg px-2 py-1">
+            <span className="truncate">
+              <span className="mr-2 rounded bg-keep-action/15 px-1 text-[9px] uppercase tracking-widest text-keep-action">OOC</span>
+              {user.username}
+            </span>
+            <div className="flex shrink-0 gap-1">
+              <button
+                type="button"
+                onClick={() => openView(user.username)}
+                className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs hover:bg-keep-banner"
+              >
+                View
+              </button>
+            </div>
+          </li>
+          {live.map((c) => (
+            <li key={c.id} className="flex items-center justify-between gap-2 rounded border border-keep-rule/60 bg-keep-bg px-2 py-1">
+              <span className="truncate">{c.name}</span>
+              <div className="flex shrink-0 gap-1">
+                <button
+                  type="button"
+                  onClick={() => openView(c.name)}
+                  className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs hover:bg-keep-banner"
+                >
+                  View
+                </button>
+                <button
+                  type="button"
+                  onClick={() => editChar(c)}
+                  className="keep-button rounded border border-keep-action/60 bg-keep-bg px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/10"
+                >
+                  Edit
+                </button>
+              </div>
+            </li>
+          ))}
+          {deleted.map((c) => (
+            <li key={c.id} className="flex items-center justify-between gap-2 rounded border border-keep-rule/30 bg-keep-banner/20 px-2 py-1 text-keep-muted line-through">
+              <span className="truncate">{c.name}</span>
+              <span className="shrink-0 text-[10px] uppercase tracking-widest">deleted</span>
+            </li>
+          ))}
+        </ul>
+        {viewError ? (
+          <div className="mt-2 text-[11px] text-keep-accent">{viewError}</div>
+        ) : null}
+        {viewingName && !viewing && !viewError ? (
+          <div className="mt-2 text-[11px] text-keep-muted">Loading {viewingName}...</div>
+        ) : null}
       </div>
-      <ul className="space-y-1">
-        {live.map((c) => (
-          <li key={c.id} className="flex items-center justify-between gap-2 rounded border border-keep-rule/60 bg-keep-bg px-2 py-1">
-            <span className="truncate">{c.name}</span>
-            <button
-              type="button"
-              onClick={() => openEditor({
-                mode: "character",
-                characterId: c.id,
-                adminContext: { ownerUserId: user.userId, ownerUsername: user.username },
-              })}
-              className="keep-button shrink-0 rounded border border-keep-action/60 bg-keep-bg px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/10"
-              title={`Open ProfileEditor for ${c.name} in admin mode (edits use /characters/${c.id} with admin auth).`}
-            >
-              Edit
-            </button>
-          </li>
-        ))}
-        {deleted.map((c) => (
-          <li key={c.id} className="flex items-center justify-between gap-2 rounded border border-keep-rule/30 bg-keep-banner/20 px-2 py-1 text-keep-muted line-through">
-            <span className="truncate">{c.name}</span>
-            <span className="shrink-0 text-[10px] uppercase tracking-widest">deleted</span>
-          </li>
-        ))}
-      </ul>
-    </div>
+      {viewing ? (
+        <ProfileModal
+          profile={viewing}
+          onClose={() => { setViewing(null); setViewingName(null); }}
+          bypassNsfwGate={true}
+          zIndex={60}
+        />
+      ) : null}
+    </>
   );
 }
 

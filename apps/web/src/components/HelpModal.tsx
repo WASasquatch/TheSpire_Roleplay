@@ -196,20 +196,19 @@ const FORMATTING_ROWS: Array<{ syntax: string; example: string; note?: string }>
 ];
 
 /**
- * Categorized listing of every HTML construct the bio/world-page sanitizer
- * accepts. Mirrors the allow-list in apps/server/src/auth/html.ts —
- * keep them in sync when one changes. Anything outside this list is
- * dropped silently on save.
+ * Tag/feature highlights surfaced in the Profile / world HTML help
+ * section. Profiles accept almost any HTML now (only a short blocked
+ * list, see HTML_BLOCKED below), so this is a quick reference of the
+ * tags writers reach for most often, not an allow-list.
  */
-const HTML_TAG_GROUPS: Array<{ label: string; tags: string[]; note?: string }> = [
+const HTML_COMMON_TAGS: Array<{ label: string; tags: string[]; note?: string }> = [
   {
-    label: "Inline text",
-    tags: ["b", "i", "u", "em", "strong", "s", "mark", "small", "sub", "sup", "code", "kbd", "var", "samp", "abbr", "cite", "q"],
+    label: "Text",
+    tags: ["b", "i", "u", "em", "strong", "s", "mark", "small", "sub", "sup", "span", "br"],
   },
   {
-    label: "Block structure",
-    tags: ["p", "div", "br", "blockquote", "pre", "hr", "h3", "h4", "h5", "h6", "figure", "figcaption"],
-    note: "h1 and h2 are reserved for the site chrome (banner, modal titles); writer content tops out at h3.",
+    label: "Layout",
+    tags: ["p", "div", "section", "article", "header", "footer", "h3", "h4", "h5", "h6", "blockquote", "pre", "hr"],
   },
   {
     label: "Lists",
@@ -218,31 +217,43 @@ const HTML_TAG_GROUPS: Array<{ label: string; tags: string[]; note?: string }> =
   {
     label: "Tables",
     tags: ["table", "caption", "thead", "tbody", "tfoot", "tr", "th", "td"],
-    note: "th/td accept colspan, rowspan, scope, headers.",
   },
   {
-    label: "Disclosure (spoilers / NSFW gates)",
+    label: "Details / spoilers",
     tags: ["details", "summary"],
-    note: "<details open> ships a section pre-expanded.",
+    note: "<details open> starts expanded.",
   },
   {
-    label: "Links & media",
-    tags: ["a", "img", "span"],
-    note: "a href: http/https/mailto only. img src: http/https only. javascript: and data: schemes are blocked.",
+    label: "Links & images",
+    tags: ["a", "img", "figure", "figcaption"],
+    note: "Links open in a new tab. Image and link URLs must be http or https.",
   },
 ];
 
-const HTML_STYLE_PROPS: Array<{ prop: string; values: string }> = [
-  { prop: "color, background-color", values: "#abc, #aabbcc, rgb(…), rgba(…)" },
-  { prop: "font-weight", values: "normal, bold, lighter, bolder, 100 to 900 (step 100)" },
-  { prop: "font-style", values: "italic, normal, oblique" },
-  { prop: "font-family", values: "any name list up to 200 chars" },
-  { prop: "font-size", values: "1 to 72px, 0.5 to 4em, 50 to 400%, or named (small/large/etc.)" },
-  { prop: "line-height", values: "0.0 to 3.9, or 10 to 69px" },
-  { prop: "text-decoration", values: "underline, line-through, overline, none" },
-  { prop: "text-align", values: "left, right, center, justify" },
-  { prop: "list-style-type", values: "disc, circle, square, decimal, lower/upper-roman, lower/upper-alpha, none" },
-  { prop: "vertical-align", values: "baseline, top, middle, bottom, sub, super" },
+/** Short list of what's blocked so people don't waste time trying it. */
+const HTML_BLOCKED = [
+  "<script>",
+  "<iframe> (except the <youtube> shortcut below)",
+  "<form>, <input>, <button>",
+  "<object>, <embed>",
+  "Image URLs that aren't http/https",
+];
+
+/**
+ * Theme color variables a writer can use in their custom CSS. Each name
+ * resolves to the matching color from the *profile owner's* picked
+ * theme, so a bio styled with these keeps working when the writer
+ * switches palette. Mirrors `themeUserVars` in apps/web/src/lib/theme.ts.
+ */
+const THEME_VARS: Array<{ name: string; purpose: string }> = [
+  { name: "--theme-bg",     purpose: "page background" },
+  { name: "--theme-panel",  purpose: "card / surface color" },
+  { name: "--theme-border", purpose: "border color" },
+  { name: "--theme-text",   purpose: "main text color" },
+  { name: "--theme-muted",  purpose: "secondary text color" },
+  { name: "--theme-action", purpose: "link / button color" },
+  { name: "--theme-accent", purpose: "highlight / accent color" },
+  { name: "--theme-system", purpose: "system notice color" },
 ];
 
 function FormattingHelp() {
@@ -377,23 +388,36 @@ function FormattingHelp() {
           Profile / world HTML
         </h3>
         <p className="text-keep-muted">
-          On profiles and world pages, you can use a small set of HTML
-          tags to lay out your text. Plain typing works too. Anything
-          on the list below is fine to use; anything else is dropped
-          when you save. The list keeps things safe so nothing weird
-          can run on other people's screens.
+          Profiles and world pages are like little webpages. You can use
+          almost any HTML and CSS you like, including a{" "}
+          <code className="font-mono text-keep-action">&lt;style&gt;</code>{" "}
+          block at the top to theme the whole bio. Plain typing works
+          too. Hitting Enter twice gives you a blank line between
+          paragraphs.
         </p>
+        <p className="mt-2 text-keep-muted">
+          A few things stay blocked so nothing weird can run on other
+          people's screens:
+        </p>
+        <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[11px] text-keep-muted">
+          {HTML_BLOCKED.map((b) => (
+            <li key={b}><code className="font-mono text-keep-text">{b}</code></li>
+          ))}
+        </ul>
 
-        <div className="mt-2 overflow-hidden rounded border border-keep-border">
+        <h4 className="mt-3 font-action text-xs uppercase tracking-widest text-keep-muted">
+          Common tags
+        </h4>
+        <div className="mt-1 overflow-hidden rounded border border-keep-border">
           <table className="w-full text-[12px]">
             <thead className="bg-keep-panel/50 text-[10px] uppercase tracking-widest text-keep-muted">
               <tr>
                 <th className="w-1/4 px-2 py-1 text-left">Category</th>
-                <th className="px-2 py-1 text-left">Allowed tags</th>
+                <th className="px-2 py-1 text-left">Tags</th>
               </tr>
             </thead>
             <tbody>
-              {HTML_TAG_GROUPS.map((g) => (
+              {HTML_COMMON_TAGS.map((g) => (
                 <tr key={g.label} className="border-t border-keep-border align-top">
                   <td className="px-2 py-1.5 font-semibold text-keep-text">{g.label}</td>
                   <td className="px-2 py-1.5">
@@ -414,51 +438,103 @@ function FormattingHelp() {
           </table>
         </div>
 
-        <p className="mt-3 text-keep-muted">
-          You can also add a small bit of styling using a{" "}
-          <code className="font-mono text-keep-action">style</code> on
-          any tag. The properties you can change are listed below.
-          Links open in a new tab automatically.
+        <h4 className="mt-3 font-action text-xs uppercase tracking-widest text-keep-muted">
+          Custom CSS with &lt;style&gt;
+        </h4>
+        <p className="text-keep-muted">
+          Drop a <code className="font-mono text-keep-action">&lt;style&gt;</code>{" "}
+          block anywhere in the bio and write normal CSS. Your rules only
+          apply inside your own profile. You can use any selector,
+          @media queries, @keyframes animations, and so on. External
+          stylesheets (@import) are not loaded.
         </p>
 
         <h4 className="mt-3 font-action text-xs uppercase tracking-widest text-keep-muted">
-          Styling you can use
+          Theme colors
         </h4>
+        <p className="text-keep-muted">
+          Match your bio to whichever theme you picked by using these
+          color variables. They follow your theme automatically, so the
+          bio still looks right if you change the palette later.
+        </p>
         <div className="mt-1 overflow-hidden rounded border border-keep-border">
           <table className="w-full text-[12px]">
             <thead className="bg-keep-panel/50 text-[10px] uppercase tracking-widest text-keep-muted">
               <tr>
-                <th className="w-1/3 px-2 py-1 text-left">Property</th>
-                <th className="px-2 py-1 text-left">Allowed values</th>
+                <th className="w-1/3 px-2 py-1 text-left">Variable</th>
+                <th className="px-2 py-1 text-left">What it is</th>
               </tr>
             </thead>
             <tbody>
-              {HTML_STYLE_PROPS.map((s) => (
-                <tr key={s.prop} className="border-t border-keep-border align-top">
-                  <td className="px-2 py-1 font-mono text-keep-action">{s.prop}</td>
-                  <td className="px-2 py-1 text-keep-text">{s.values}</td>
+              {THEME_VARS.map((v) => (
+                <tr key={v.name} className="border-t border-keep-border align-top">
+                  <td className="px-2 py-1 font-mono text-keep-action">{v.name}</td>
+                  <td className="px-2 py-1 text-keep-text">{v.purpose}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        <p className="mt-2 text-[11px] text-keep-muted">
+          Use them straight as colors:{" "}
+          <code className="font-mono text-keep-action">color: var(--theme-accent)</code>.
+          For a faded version, every name above also has a{" "}
+          <code className="font-mono text-keep-text">-rgb</code> companion
+          you can drop into <code className="font-mono text-keep-action">rgb(...)</code>:{" "}
+          <code className="font-mono text-keep-action">background: rgb(var(--theme-accent-rgb) / 0.25)</code>.
+        </p>
+
+        <h4 className="mt-3 font-action text-xs uppercase tracking-widest text-keep-muted">
+          YouTube embeds
+        </h4>
+        <p className="text-keep-muted">
+          Wrap a YouTube URL in{" "}
+          <code className="font-mono text-keep-action">&lt;youtube&gt;...&lt;/youtube&gt;</code>{" "}
+          and it turns into a player. Works for{" "}
+          <code className="font-mono text-keep-text">youtube.com/watch</code>,{" "}
+          <code className="font-mono text-keep-text">youtu.be</code>,{" "}
+          <code className="font-mono text-keep-text">youtube.com/shorts</code>,
+          and embed URLs. The player fills the column on phones and
+          shrinks to half-width on desktop.
+        </p>
+        <pre className="mt-1 overflow-x-auto rounded border border-keep-rule/60 bg-keep-panel/30 p-2 font-mono text-[10px] leading-relaxed">{`<youtube>https://youtu.be/dQw4w9WgXcQ</youtube>`}</pre>
 
         <h4 className="mt-3 font-action text-xs uppercase tracking-widest text-keep-muted">
           Example bio snippet
         </h4>
-        <pre className="overflow-x-auto rounded border border-keep-rule/60 bg-keep-panel/30 p-2 font-mono text-[10px] leading-relaxed">{`<h3 style="color:#a83232">Character Name</h3>
-<p style="font-style:italic">"A short opening line."</p>
+        <pre className="overflow-x-auto rounded border border-keep-rule/60 bg-keep-panel/30 p-2 font-mono text-[10px] leading-relaxed">{`<style>
+  .card {
+    background: rgb(var(--theme-panel-rgb) / 0.6);
+    border: 1px solid var(--theme-border);
+    border-radius: 0.75rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  .card h3 {
+    color: var(--theme-accent);
+    margin: 0 0 0.5rem 0;
+  }
+</style>
 
-<h4>At a glance</h4>
-<table>
-  <tr><th>Age</th><td>32</td></tr>
-  <tr><th>Build</th><td>Tall, scarred</td></tr>
-</table>
+<div class="card">
+  <h3>Character Name</h3>
+  <p style="font-style:italic">"A short opening line."</p>
+</div>
+
+<div class="card">
+  <h3>At a glance</h3>
+  <table>
+    <tr><th>Age</th><td>32</td></tr>
+    <tr><th>Build</th><td>Tall, scarred</td></tr>
+  </table>
+</div>
 
 <details>
   <summary>Content warnings</summary>
   <p>Grief, violence (no on-screen without buy-in).</p>
-</details>`}</pre>
+</details>
+
+<youtube>https://youtu.be/dQw4w9WgXcQ</youtube>`}</pre>
         <p className="mt-1 text-[10px] text-keep-muted">
           The <b>Building a profile</b> guide on the Guides tab walks
           through the editor step by step with more examples.

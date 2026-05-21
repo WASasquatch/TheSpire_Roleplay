@@ -135,8 +135,39 @@ export function themeStyle(theme: Theme): CSSProperties {
   }
   out["--keep-action-neon"] = buildNeon(theme.action);
   out["--keep-accent-neon"] = buildNeon(theme.accent);
+  Object.assign(out, themeUserVars(theme, legible));
   out.colorScheme = isDarkTheme(theme) ? "dark" : "light";
   return out as CSSProperties;
+}
+
+/**
+ * User-facing `--theme-*` aliases. Same palette as the internal
+ * `--keep-*` slots, but emitted as ready-to-use `rgb(r g b)` strings
+ * — writers styling their profile bio with custom CSS can drop
+ * `color: var(--theme-accent)` straight into their stylesheet without
+ * having to wrap with `rgb()` themselves. The `*-rgb` companion vars
+ * hold the raw triple ("r g b") so the same writer can do
+ * `rgb(var(--theme-accent-rgb) / 0.5)` for alpha composition. Neon
+ * variants (the scifi glow derivations) are exposed too so theming
+ * matches whatever palette the owner picked.
+ *
+ * Names are stable user contract — any rename ripples through every
+ * user's saved CSS, so treat this list as additive only.
+ */
+function themeUserVars(theme: Theme, legible: Theme): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const slot of VAR_KEYS) {
+    const triple = hexToRgbTriple(legible[slot]);
+    out[`--theme-${slot}-rgb`] = triple;
+    out[`--theme-${slot}`] = `rgb(${triple.replace(/\s+/g, " ")})`;
+  }
+  const actionNeon = buildNeon(theme.action);
+  const accentNeon = buildNeon(theme.accent);
+  out["--theme-action-neon-rgb"] = actionNeon;
+  out["--theme-action-neon"] = `rgb(${actionNeon})`;
+  out["--theme-accent-neon-rgb"] = accentNeon;
+  out["--theme-accent-neon"] = `rgb(${accentNeon})`;
+  return out;
 }
 
 /**
@@ -178,6 +209,13 @@ export function applyTheme(theme: Theme): void {
   // neon recipe normalizes saturation/luminance from scratch.
   root.style.setProperty("--keep-action-neon", buildNeon(theme.action));
   root.style.setProperty("--keep-accent-neon", buildNeon(theme.accent));
+  // Mirror the user-facing `--theme-*` aliases that `themeStyle`
+  // emits on subtree elements, so any CSS — site chrome, admin
+  // surfaces, user-authored bios that escape their scope — can
+  // reference `var(--theme-accent)` from the document root.
+  for (const [k, v] of Object.entries(themeUserVars(theme, legible))) {
+    root.style.setProperty(k, v);
+  }
   root.style.colorScheme = isDarkTheme(theme) ? "dark" : "light";
   document.body.setAttribute("data-theme-bg", theme.bg);
 }

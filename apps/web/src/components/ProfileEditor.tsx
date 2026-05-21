@@ -909,7 +909,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   const targetValue = target.kind === "master" ? "master:" : `character:${target.id}`;
 
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
+    <Modal onClose={onClose} zIndex={isAdminEdit ? 60 : 50} variant="mobile-fullscreen">
       <form
         onSubmit={save}
         onClick={(e) => e.stopPropagation()}
@@ -1076,7 +1076,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                     {isCharacter ? "Character bio" : "OOC bio"}
                   </span>
                   <span className="text-keep-muted">
-                    HTML allowed: b, i, u, em, strong, a, img, br, p, ul/ol/li, blockquote, hr, h3-h6, span style=color
+                    Full HTML and CSS supported. See Help &rarr; Formatting for tags, theme colors, and the &lt;youtube&gt; shortcut.
                   </span>
                 </div>
                 <textarea

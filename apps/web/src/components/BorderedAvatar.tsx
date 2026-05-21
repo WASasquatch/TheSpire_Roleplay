@@ -69,16 +69,16 @@ const AVATAR_SIZE: Record<Size, string> = {
 /** Container scale: how much bigger the frame container is than the
  *  avatar. The avatar sits centered inside; the frame PNG fills the
  *  container. Tuned so the avatar's edge tucks JUST under the
- *  frame's inner ring (hides the avatar's own border line). The
- *  `useFrameContainer` gate in the component body only applies this
- *  scale when a real `borderUrl` is in play — users without a rank
- *  border keep `containerSize === avatarSize`, so a borderless chat
- *  line doesn't pay the extra 50% height. With borders, every tier
- *  uses the same 1.5× ratio so the frame's decorative ring nests
- *  around the avatar the same way at every render slot — chat line,
- *  userlist, forum body, profile hero. */
+ *  frame's inner ring (hides the avatar's own border line). `xs` is
+ *  pinned at 1 so the chat-line inline avatar never carries the
+ *  frame — the ornate ring throws off message-line spacing and
+ *  reads as visual noise next to the timestamp; that slot stays
+ *  plain regardless of which border the user equipped. Larger tiers
+ *  use the 1.5× ratio so the frame's decorative ring nests around
+ *  the avatar the same way at userlist, forum body, and profile
+ *  hero. */
 const CONTAINER_SCALE: Record<Size, number> = {
-  xs: 1.5,
+  xs: 1,
   sm: 1.5,
   md: 1.5,
   lg: 1.5,
@@ -121,13 +121,21 @@ export function BorderedAvatar({
   // sizing. Showcase tiers are static pixel strings so calc() just
   // multiplies them straight.
   const containerSize = useFrameContainer ? `calc(${avatarSize} * ${containerScale})` : avatarSize;
+  // Userlist row alignment: reserve the same horizontal footprint
+  // for `sm` (userlist) whether or not the user has a border, so
+  // names line up cleanly when the list mixes border owners with
+  // borderless members. Height stays at the avatar size so
+  // borderless rows don't gain vertical air they didn't ask for.
+  const containerWidth = (size === "sm" && !useFrameContainer)
+    ? `calc(${avatarSize} * ${CONTAINER_SCALE.sm})`
+    : containerSize;
   const [errored, setErrored] = useState(false);
   const showAvatar = !!avatarUrl && !errored;
 
   const wrapper = (
     <span
       className={`relative inline-block shrink-0 ${className ?? ""}`}
-      style={{ width: containerSize, height: containerSize }}
+      style={{ width: containerWidth, height: containerSize }}
     >
       {/* Avatar layer — always centered in the container. When the
           container is sized to the frame (useFrameContainer), the
@@ -164,8 +172,11 @@ export function BorderedAvatar({
       {/* Frame overlay — paints on TOP of the avatar. PNG transparency
           in the center lets the portrait show through; the opaque
           decorative band frames the visible avatar. `pointer-events:
-          none` so the frame can't intercept clicks on the avatar. */}
-      {borderUrl ? (
+          none` so the frame can't intercept clicks on the avatar.
+          Skipped when the container is at 1× scale (xs / chat-line
+          inline) — without the extra container room the frame band
+          would crush onto the portrait and read as a tight ring. */}
+      {borderUrl && useFrameContainer ? (
         <img
           src={borderUrl}
           alt=""

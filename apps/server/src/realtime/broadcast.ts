@@ -241,6 +241,45 @@ export async function addMessage(
       console.error("[earning] rank snapshot lookup failed", { err });
     }
   }
+  // Inline-avatar + border snapshot. Without this the chat renderer
+  // has to read the live occupant row to decide whether to paint the
+  // inline avatar — meaning the avatar vanishes for backlog from
+  // authors who later logged out. Scoped the same way `avatarSnapshot`
+  // above is: prefer the active character's row, else the master's.
+  let inlineAvatarEnabledSnapshot = false;
+  let selectedBorderRankKeySnapshot: string | null = null;
+  try {
+    if (ctx.user.activeCharacterId) {
+      const ce = (await ctx.db
+        .select({
+          inlineAvatarEnabled: characterEarning.inlineAvatarEnabled,
+          selectedBorderRankKey: characterEarning.selectedBorderRankKey,
+        })
+        .from(characterEarning)
+        .where(eq(characterEarning.characterId, ctx.user.activeCharacterId))
+        .limit(1))[0];
+      if (ce) {
+        inlineAvatarEnabledSnapshot = !!ce.inlineAvatarEnabled;
+        selectedBorderRankKeySnapshot = ce.selectedBorderRankKey;
+      }
+    } else {
+      const uac = (await ctx.db
+        .select({ inlineAvatarEnabled: userActiveCosmetics.inlineAvatarEnabled })
+        .from(userActiveCosmetics)
+        .where(eq(userActiveCosmetics.userId, ctx.user.id))
+        .limit(1))[0];
+      if (uac) inlineAvatarEnabledSnapshot = !!uac.inlineAvatarEnabled;
+      const ue = (await ctx.db
+        .select({ selectedBorderRankKey: userEarning.selectedBorderRankKey })
+        .from(userEarning)
+        .where(eq(userEarning.userId, ctx.user.id))
+        .limit(1))[0];
+      if (ue) selectedBorderRankKeySnapshot = ue.selectedBorderRankKey;
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[cosmetics] inline-avatar snapshot lookup failed", { err });
+  }
   await ctx.db.insert(messages).values({
     id,
     roomId: ctx.roomId,
@@ -265,6 +304,8 @@ export async function addMessage(
     cmdCss: payload.kind === "cmd" ? (payload.cmdCss ?? null) : null,
     rankKey: rankKeySnapshot,
     tier: tierSnapshot,
+    senderInlineAvatarEnabled: inlineAvatarEnabledSnapshot,
+    senderSelectedBorderRankKey: selectedBorderRankKeySnapshot,
     // last_activity_at on insert:
     //   - top-level row (topic, or any flat-chat message): its own
     //     createdAt — for forum topics this seeds the ordering before
@@ -315,6 +356,8 @@ export async function addMessage(
     // light for unranked authors.
     ...(rankKeySnapshot ? { rankKey: rankKeySnapshot } : {}),
     ...(tierSnapshot != null ? { tier: tierSnapshot } : {}),
+    ...(inlineAvatarEnabledSnapshot ? { senderInlineAvatarEnabled: true } : {}),
+    ...(selectedBorderRankKeySnapshot ? { senderSelectedBorderRankKey: selectedBorderRankKeySnapshot } : {}),
   };
   await emitFiltered(ctx.io, ctx.db, ctx.roomId, ctx.user.id, out);
 
@@ -930,6 +973,8 @@ export async function sendRoomBacklogTo(
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
       ...(m.rankKey ? { rankKey: m.rankKey } : {}),
       ...(m.tier != null ? { tier: m.tier } : {}),
+      ...(m.senderInlineAvatarEnabled ? { senderInlineAvatarEnabled: true } : {}),
+      ...(m.senderSelectedBorderRankKey ? { senderSelectedBorderRankKey: m.senderSelectedBorderRankKey } : {}),
       // Admin-only audit field. Mirrors the per-socket gating in the
       // delete route + the history endpoints: site admins receive the
       // original body of a deleted message; everyone else gets the

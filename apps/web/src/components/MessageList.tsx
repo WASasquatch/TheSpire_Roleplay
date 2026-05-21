@@ -2388,19 +2388,23 @@ function Line({
       {timeText}
     </span>
   );
-  // Phase 4 inline avatar — round 16px portrait that sits between
-  // the timestamp and the styled name when the author has the
-  // `inline_avatar` cosmetic enabled. Border ring (if any) wraps it
-  // using the author's currently-selected border. Backlog from a
-  // sender no longer in the room rendering without this is fine —
-  // the lookup just returns null and the line collapses to the
-  // standard layout.
-  const inlineAvatar = (senderCosmetics?.inlineAvatarEnabled && (senderCosmetics.avatarUrl || msg.avatarUrl))
+  // Inline avatar — round portrait between the timestamp and the
+  // styled name. The author's "should this show?" + border picks
+  // come from the LIVE occupant row when the sender is still in
+  // the room; otherwise from the per-message snapshot the server
+  // froze at send time (migration 0120). Without the snapshot
+  // fallback, backlog from senders who have since logged out
+  // rendered without their inline avatar even though the message
+  // already carried the avatarUrl snapshot.
+  const inlineEnabled = senderCosmetics?.inlineAvatarEnabled ?? !!msg.senderInlineAvatarEnabled;
+  const inlineAvatarUrl = senderCosmetics?.avatarUrl ?? msg.avatarUrl ?? null;
+  const inlineBorderKey = senderCosmetics?.selectedBorderRankKey ?? msg.senderSelectedBorderRankKey ?? null;
+  const inlineAvatar = (inlineEnabled && inlineAvatarUrl)
     ? (
       <BorderedAvatar
-        avatarUrl={senderCosmetics.avatarUrl ?? msg.avatarUrl ?? null}
+        avatarUrl={inlineAvatarUrl}
         name={msg.displayName}
-        borderRankKey={senderCosmetics.selectedBorderRankKey}
+        borderRankKey={inlineBorderKey}
         size="xs"
         onClick={() => onIconClick(msg.userId, msg.displayName)}
         title={`view ${msg.displayName}'s profile`}

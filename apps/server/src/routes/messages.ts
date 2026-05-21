@@ -76,6 +76,8 @@ function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMes
     ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
     ...(m.rankKey ? { rankKey: m.rankKey } : {}),
     ...(m.tier != null ? { tier: m.tier } : {}),
+    ...(m.senderInlineAvatarEnabled ? { senderInlineAvatarEnabled: true } : {}),
+    ...(m.senderSelectedBorderRankKey ? { senderSelectedBorderRankKey: m.senderSelectedBorderRankKey } : {}),
     ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
     // Admin-only audit snapshot of who performed the delete. Mirrors
     // the originalBody carve-out — site admins see who took the

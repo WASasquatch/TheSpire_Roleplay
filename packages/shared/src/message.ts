@@ -136,6 +136,20 @@ export interface ChatMessage {
   rankKey?: string | null;
   /** Rank-tier snapshot. 1..N where 1 is the lowest enabled tier. Null when rankKey is null. */
   tier?: number | null;
+  /**
+   * Snapshot of whether the author had the inline-avatar cosmetic
+   * enabled at send time. The chat renderer falls back to this when
+   * the author isn't in the room anymore (no live occupant row), so
+   * backlog inline avatars survive the sender logging out.
+   * Absent on rows that predate the snapshot; treated as false.
+   */
+  senderInlineAvatarEnabled?: boolean;
+  /**
+   * Snapshot of the author's equipped border-rank key at send time.
+   * Paired with `senderInlineAvatarEnabled` so the backlog inline
+   * avatar still shows the right frame for offline senders.
+   */
+  senderSelectedBorderRankKey?: string | null;
 }
 
 /**

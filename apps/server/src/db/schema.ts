@@ -540,6 +540,23 @@ export const messages = sqliteTable(
      */
     rankKey: text("rank_key"),
     tier: integer("tier"),
+    /**
+     * Snapshot of whether the author had the inline-avatar cosmetic
+     * enabled at send time. Without this snapshot the chat renderer
+     * has to rely on the LIVE occupant row, so backlog from authors
+     * who have logged out renders without their inline avatar even
+     * though the avatarUrl snapshot above is present. Mirrors the
+     * rankKey / tier snapshot posture — a later toggle (or the
+     * author logging out) doesn't rewrite history.
+     */
+    senderInlineAvatarEnabled: integer("sender_inline_avatar_enabled", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Snapshot of the author's equipped border-rank key at send time.
+     * Paired with `senderInlineAvatarEnabled` so a backlog message's
+     * inline avatar still shows the correct frame even when the
+     * sender is offline (or has since switched borders).
+     */
+    senderSelectedBorderRankKey: text("sender_selected_border_rank_key"),
     createdAt: ts("created_at"),
   },
   (t) => ({

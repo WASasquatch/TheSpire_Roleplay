@@ -149,7 +149,63 @@ export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
       system: "#5a8aa8",
     },
   },
+  {
+    // Glass Light — pairs with the "glass" design style. The visual
+    // language is translucent frosted panels over the user's chosen
+    // backdrop (or the light Spire artwork as fallback), so the
+    // PALETTE here is restrained: near-white bg/panel so the frost
+    // reads as pale crystal, soft cool border for inset bevels, deep
+    // navy text for legibility through 50–60% transparency. Action +
+    // accent stay vivid because they ride the panel's frost tint at
+    // 0.6 alpha — desaturated picks would disappear into the glass.
+    name: "Glass Light",
+    theme: {
+      bg: "#f7f8fb",
+      panel: "#ffffff",
+      border: "#c8d0dc",
+      text: "#1a1f2e",
+      muted: "#6a7286",
+      action: "#2a72d1",
+      accent: "#d147a3",
+      system: "#b07e22",
+    },
+  },
+  {
+    // Glass Dark — the dark companion to Glass Light. Deep cool
+    // navy/blue-gray surfaces over the dark Spire backdrop, with
+    // saturated sky-blue + pink accents that punch through the
+    // frosted darkening overlay. Reads as a high-end OS / settings
+    // panel rather than a chatroom — professional, not playful.
+    name: "Glass Dark",
+    theme: {
+      bg: "#0e1422",
+      panel: "#1a2236",
+      border: "#3a4760",
+      text: "#e9eef7",
+      muted: "#8e98ad",
+      action: "#6cb0ff",
+      accent: "#ff7ad1",
+      system: "#ffc764",
+    },
+  },
 ];
+
+/**
+ * Built-in pairings: when a user lands on a named preset and neither
+ * they nor the admin's `themeDesignMap` have pinned a design, the
+ * resolver falls through to this map before the site default. Lets
+ * presets ship with a sensible "design intent" so the operator doesn't
+ * have to wire `themeDesignMap` for every shipped preset.
+ *
+ * Only includes pairings that are strongly bound to the preset's
+ * visual identity — Glass Light/Dark exist specifically to dress the
+ * glass design. The medieval/modern/scifi-friendly presets (Parchment,
+ * Twilight, etc.) stay unmapped so the admin or user picks what fits.
+ */
+export const DEFAULT_PRESET_DESIGNS: Readonly<Record<string, string>> = {
+  "Glass Light": "glass",
+  "Glass Dark": "glass",
+};
 
 /**
  * Return true when a palette's background reads as "dark" (relative

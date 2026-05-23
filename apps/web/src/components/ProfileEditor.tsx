@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
-import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
+import { DEFAULT_THEME, isDarkPalette, normalizeTheme } from "@thekeep/shared";
+import { applyStyle } from "../lib/ornaments/index.js";
+import { applyTheme } from "../lib/theme.js";
 import { GENDER_OPTIONS, type Gender } from "../lib/gender.js";
 import {
   isSupported as notifyIsSupported,
@@ -907,6 +909,59 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
 
   const isCharacter = target.kind === "character";
   const targetValue = target.kind === "master" ? "master:" : `character:${target.id}`;
+
+  // Live preview — push the editor's pending palette + style + bg
+  // URL onto <html> so the chat behind the editor reflects every
+  // dropdown change instantly. Without this, the user has to click
+  // Save (and sometimes re-open the modal) to verify their pick
+  // landed. On close, the parent bumps themeVersion which triggers
+  // App.tsx to re-fetch persisted state and re-apply, naturally
+  // restoring the saved theme if the user cancelled.
+  useEffect(() => {
+    const previewTheme = theme ?? DEFAULT_THEME;
+    applyTheme(previewTheme);
+    applyStyle(previewTheme, userStyleKey);
+    const root = document.documentElement;
+    if (userStyleKey === "glass") {
+      const trimmed = publicProfileBgUrl.trim();
+      const url = trimmed || (isDarkPalette(previewTheme) ? "/the_spire_bg_dark.jpg" : "/the_spire_bg.jpg");
+      const size = trimmed
+        ? (publicProfileBgMode === "stretch" ? "100% 100%" : publicProfileBgMode)
+        : "cover";
+      const repeat = trimmed && publicProfileBgMode === "tile" ? "repeat" : "no-repeat";
+      // Publish as CSS vars only — the actual paint happens on
+      // `.keep-bg-overlay` (inside the chat shell) so the image
+      // never leaks past the shell when a devtools / extension UI
+      // shifts the document.
+      root.style.setProperty("--keep-shell-bg-url", `url("${url}")`);
+      root.style.setProperty("--keep-shell-bg-size", size);
+      root.style.setProperty("--keep-shell-bg-repeat", repeat);
+      // Luminance-aware glass tints — mirror App.tsx so the live
+      // preview matches post-save. White overlays on light themes;
+      // palette-color overlays on dark themes.
+      const isDark = isDarkPalette(previewTheme);
+      root.style.setProperty("--keep-glass-panel-tint", isDark
+        ? "rgb(var(--keep-panel) / 0.45)"
+        : "rgb(255 255 255 / 0.82)");
+      root.style.setProperty("--keep-glass-bg-tint", isDark
+        ? "rgb(var(--keep-bg) / 0.45)"
+        : "rgb(255 255 255 / 0.85)");
+      root.style.setProperty("--keep-glass-tool-tint", isDark
+        ? "rgb(var(--keep-panel) / 0.15)"
+        : "rgb(255 255 255 / 0.65)");
+      root.style.setProperty("--keep-glass-chat-tint", isDark
+        ? "rgb(var(--keep-bg) / 0.75)"
+        : "rgb(255 255 255 / 0.85)");
+    } else {
+      root.style.removeProperty("--keep-shell-bg-url");
+      root.style.removeProperty("--keep-shell-bg-size");
+      root.style.removeProperty("--keep-shell-bg-repeat");
+      root.style.removeProperty("--keep-glass-panel-tint");
+      root.style.removeProperty("--keep-glass-bg-tint");
+      root.style.removeProperty("--keep-glass-tool-tint");
+      root.style.removeProperty("--keep-glass-chat-tint");
+    }
+  }, [theme, userStyleKey, publicProfileBgUrl, publicProfileBgMode]);
 
   return (
     <Modal onClose={onClose} zIndex={isAdminEdit ? 60 : 50} variant="mobile-fullscreen">

@@ -122,6 +122,7 @@ export async function registerAdminRoutes(
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
     const since24h = new Date(now - dayMs);
+    const since5d = new Date(now - 5 * dayMs);
     const since7d = new Date(now - 7 * dayMs);
     const since30d = new Date(now - 30 * dayMs);
 
@@ -148,6 +149,23 @@ export async function registerAdminRoutes(
       .select({ n: sql<number>`count(*)` })
       .from(users)
       .where(and(notSystem, gte(users.createdAt, since30d)));
+
+    // Recent registrations — the actual rows, newest first, for the
+    // dashboard breakdown. Capped at 50 so an absurd signup spike doesn't
+    // bloat the overview payload; admins drop into the Users tab for the
+    // full list anyway.
+    const recentRegRows = await db
+      .select({
+        id: users.id,
+        username: users.username,
+        role: users.role,
+        createdAt: users.createdAt,
+        lastLoginAt: users.lastLoginAt,
+      })
+      .from(users)
+      .where(and(notSystem, gte(users.createdAt, since5d)))
+      .orderBy(desc(users.createdAt))
+      .limit(50);
 
     // DAU/WAU/MAU derived from sessions.createdAt — every login mints a row,
     // so distinct user IDs in each window approximate active-user counts.
@@ -297,6 +315,13 @@ export async function registerAdminRoutes(
         dau: dauRow?.n ?? 0,
         wau: wauRow?.n ?? 0,
         mau: mauRow?.n ?? 0,
+        recentRegistrations: recentRegRows.map((u) => ({
+          userId: u.id,
+          username: u.username,
+          role: u.role,
+          createdAt: +u.createdAt,
+          lastLoginAt: u.lastLoginAt ? +u.lastLoginAt : null,
+        })),
       },
       rooms: {
         public: roomsByType.public ?? 0,

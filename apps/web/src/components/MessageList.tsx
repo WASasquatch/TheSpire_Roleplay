@@ -902,7 +902,7 @@ function ForumView({
       // breakpoint is `lg` to match the rest of the chat shell — the
       // rail stays in drawer mode until `lg` so the chat needs the
       // full viewport gutter-free at every `< lg` width.
-      className="min-h-0 flex-1 overflow-y-auto py-2 leading-relaxed lg:px-4"
+      className="keep-chat-feed min-h-0 flex-1 overflow-y-auto py-2 leading-relaxed lg:px-4"
       style={{ fontSize: FONT_EM[fontStep] }}
     >
       {sections.map((s) => {
@@ -2874,14 +2874,23 @@ function Line({
     : { className: "" };
 
   if (isReply) {
+    // The accent left border lives in the chat panel's left gutter so
+    // the reply's timestamp + body still align column-for-column with
+    // surrounding non-reply messages. `hoverRow` brings `-mx-4 px-4`
+    // (edge-to-edge hover); we keep its left padding intact (`pl-4`)
+    // so content starts at the same column as a plain message — the
+    // older `pl-2` value undershot it and pulled the whole reply
+    // block ~6px to the left. The quote line gets a small extra
+    // indent so it visually sits with the body rather than encroaching
+    // on the timestamp column above it.
     return (
       <div
         data-message-id={msg.id}
         tabIndex={rowFocusProps.tabIndex}
         onClick={rowFocusProps.onClick}
-        className={`group relative my-0.5 border-l-2 border-keep-action/50 pl-2 transition-colors duration-700 ${rowFocusProps.className} ${hoverRow} ${whisperRest}`}
+        className={`group relative my-0.5 border-l-2 border-keep-action/50 pl-4 transition-colors duration-700 ${rowFocusProps.className} ${hoverRow} ${whisperRest}`}
       >
-        {quote}
+        <div className="pl-12">{quote}</div>
         {lineEl}
         {controls}
       </div>

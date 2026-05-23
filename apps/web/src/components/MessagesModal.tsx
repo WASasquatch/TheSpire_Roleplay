@@ -385,24 +385,40 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
     for (const c of Object.values(dmConversations)) m.set(c.otherUserId, c);
     return m;
   }, [dmConversations]);
-  const friendRows = friends.map((f) => ({
-    kind: "friend" as const,
-    userId: f.userId,
-    username: f.username,
-    // The friend's pinned character id on this friendship — drives
-    // both the @handle display (character name when set) and the
-    // `targetCharacterId` we seed onto a brand-new DM thread so the
-    // first message lands in the right per-identity inbox.
-    characterId: f.characterId,
-    displayName: f.displayName,
-    handle: f.handle,
-    avatarUrl: f.avatarUrl,
-    online: f.online,
-    conv: convByOther.get(f.userId) ?? null,
-  }));
+  // Conversations with unread messages float to the top of whichever
+  // section they appear in (Friends OR Recents), with the
+  // most-recently-active unread first. Within each "tier" (unread vs.
+  // read) we then sort by lastMessageAt desc so threads the user just
+  // touched stay near the top; friend rows with no conversation yet
+  // fall to the bottom in original (server) order. The unread tier is
+  // also visually highlighted on the row itself — see UserRow.
+  function dmRowOrder<R extends { conv: DirectConversationSummary | null }>(a: R, b: R): number {
+    const au = (a.conv?.unreadCount ?? 0) > 0 ? 1 : 0;
+    const bu = (b.conv?.unreadCount ?? 0) > 0 ? 1 : 0;
+    if (au !== bu) return bu - au; // unread tier first
+    const at = a.conv?.lastMessageAt ?? 0;
+    const bt = b.conv?.lastMessageAt ?? 0;
+    return bt - at; // newer activity first; 0 (no conv yet) sinks last
+  }
+  const friendRows = friends
+    .map((f) => ({
+      kind: "friend" as const,
+      userId: f.userId,
+      username: f.username,
+      // The friend's pinned character id on this friendship — drives
+      // both the @handle display (character name when set) and the
+      // `targetCharacterId` we seed onto a brand-new DM thread so the
+      // first message lands in the right per-identity inbox.
+      characterId: f.characterId,
+      displayName: f.displayName,
+      handle: f.handle,
+      avatarUrl: f.avatarUrl,
+      online: f.online,
+      conv: convByOther.get(f.userId) ?? null,
+    }))
+    .sort(dmRowOrder);
   const nonFriendConvRows = useMemo(() => Object.values(dmConversations)
     .filter((c) => !friendIds.has(c.otherUserId))
-    .sort((a, b) => b.lastMessageAt - a.lastMessageAt)
     .map((c) => ({
       kind: "conv" as const,
       userId: c.otherUserId,
@@ -416,7 +432,8 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
       avatarUrl: c.otherAvatarUrl,
       online: c.otherOnline,
       conv: c,
-    })),
+    }))
+    .sort(dmRowOrder),
   [dmConversations, friendIds]);
 
   function selectUser(userId: string) {
@@ -958,27 +975,44 @@ function UserRow({
   onSelect: () => void;
   onRemove?: () => void;
 }) {
+  const unread = (row.conv?.unreadCount ?? 0) > 0;
+  // Three visual states, applied in priority order: selection wins
+  // (the user is already looking at this thread, so the unread halo
+  // would be noise), then unread (action-tinted border + softly
+  // glowing bg so the row reads as a "demands attention" cue at a
+  // glance), then the resting border. The unread tint is the same
+  // action color used for the badge so the two read as a matched pair.
+  const rowClass = active
+    ? "border-keep-action bg-keep-action/10"
+    : unread
+      ? "border-keep-action/70 bg-keep-action/10 shadow-[0_0_0_1px_rgba(0,0,0,0)] hover:bg-keep-action/15"
+      : "border-keep-rule/60 bg-keep-bg hover:border-keep-action hover:bg-keep-banner/40";
   return (
-    <li
-      className={
-        "flex items-center gap-2 rounded border p-1.5 " +
-        (active
-          ? "border-keep-action bg-keep-action/10"
-          : "border-keep-rule/60 bg-keep-bg hover:border-keep-action hover:bg-keep-banner/40")
-      }
-    >
+    <li className={"flex items-center gap-2 rounded border p-1.5 " + rowClass}>
       <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-2 text-left">
         <Avatar url={row.avatarUrl} name={row.displayName} size={32} online={row.online} />
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-2">
-            <span className="truncate text-sm font-semibold text-keep-text">{row.displayName}</span>
-            {row.conv && row.conv.unreadCount > 0 ? (
+            <span
+              className={
+                "truncate text-sm text-keep-text " +
+                (unread ? "font-bold" : "font-semibold")
+              }
+            >
+              {row.displayName}
+            </span>
+            {unread ? (
               <span className="shrink-0 rounded-full bg-keep-action px-1.5 py-0 text-[10px] font-semibold text-keep-bg">
-                {row.conv.unreadCount > 99 ? "99+" : row.conv.unreadCount}
+                {row.conv!.unreadCount > 99 ? "99+" : row.conv!.unreadCount}
               </span>
             ) : null}
           </span>
-          <span className="block truncate text-[10px] text-keep-muted">
+          <span
+            className={
+              "block truncate text-[10px] " +
+              (unread ? "font-semibold text-keep-text" : "text-keep-muted")
+            }
+          >
             {row.conv?.lastMessagePreview ?? `@${row.handle}`}
           </span>
         </span>
@@ -1560,28 +1594,44 @@ function DmRow({ msg, isMine }: { msg: DirectMessage; isMine: boolean }) {
     if (t.closest("a, button")) return;
     setShowTime((v) => !v);
   }
-  // Layout: the row is a full-width flex container; the inner bubble is
-  // content-sized but capped at 85% of the row. Without the flex
-  // wrapper, the bubble's `max-w-[85%]` resolves against the inline-
-  // block's own shrink-to-fit width — which collapses to a single
-  // character per line on short messages ("Hey there" rendered as
-  // "Hey\nthere"). justify-end / justify-start places the bubble.
+  // Layout: outer column aligns the message to the appropriate side.
+  // Inside, a horizontal flex pairs the sender's snapshotted avatar
+  // with the bubble. The wrapper carries the width cap (was on the
+  // bubble before): mobile keeps a roomy ~90% so the alignment cue
+  // still reads, desktop caps at 30vw + the avatar/gap allowance so
+  // the bubble itself still lands ~30vw wide without the avatar
+  // squeezing into it.
+  //
+  // `flex-row-reverse` on mine puts my avatar on the right of my
+  // bubble, mirroring the existing right-alignment. Avatar uses the
+  // snapshotted url so a later /char switch doesn't rewrite past
+  // attribution (server-side snapshot in resolveSenderSnapshot is now
+  // character-only — no master-avatar fallback — so this can't leak
+  // the OOC owner anymore).
   return (
     <li className={"flex flex-col " + (isMine ? "items-end" : "items-start")}>
       <div
-        onClick={toggleTime}
         className={
-          "max-w-[85%] cursor-pointer rounded-lg px-2 py-1 " +
-          (isMine ? "bg-keep-action/15 text-keep-text" : "bg-keep-banner/70 text-keep-text")
+          "flex items-end gap-1.5 max-w-[90%] md:max-w-[calc(30vw+2.25rem)] " +
+          (isMine ? "flex-row-reverse" : "flex-row")
         }
       >
-        {!isMine ? (
-          <div className="mb-0.5 text-[10px] font-semibold text-keep-muted">{msg.displayName}</div>
-        ) : null}
-        <div className="whitespace-pre-wrap break-words text-sm leading-snug">
-          {parseInline(msg.body)}
+        <Avatar url={msg.avatarUrl} name={msg.displayName} size={28} />
+        <div
+          onClick={toggleTime}
+          className={
+            "min-w-0 cursor-pointer rounded-lg px-2 py-1 " +
+            (isMine ? "bg-keep-action/15 text-keep-text" : "bg-keep-banner/70 text-keep-text")
+          }
+        >
+          {!isMine ? (
+            <div className="mb-0.5 text-[10px] font-semibold text-keep-muted">{msg.displayName}</div>
+          ) : null}
+          <div className="whitespace-pre-wrap break-words text-sm leading-snug">
+            {parseInline(msg.body)}
+          </div>
+          {msg.editedAt ? <span className="text-[9px] italic text-keep-muted">(edited)</span> : null}
         </div>
-        {msg.editedAt ? <span className="text-[9px] italic text-keep-muted">(edited)</span> : null}
       </div>
       {showTime ? (
         <span className="mt-0.5 px-2 text-[10px] text-keep-muted">

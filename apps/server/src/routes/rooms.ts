@@ -249,10 +249,14 @@ export async function registerRoomsRoutes(
       return { error: "not your whisper" };
     }
 
-    const whisperFilter = or(
-      sql`${messages.kind} != 'whisper'`,
-      eq(messages.userId, me.id),
-      eq(messages.toUserId, me.id),
+    // Cross-room whisper overlay — see the union in
+    // sendRoomBacklogTo / GET /rooms/:id/messages for the rationale.
+    const roomOrPartyWhisper = or(
+      and(sql`${messages.kind} != 'whisper'`, eq(messages.roomId, room.id)),
+      and(
+        sql`${messages.kind} = 'whisper'`,
+        or(eq(messages.userId, me.id), eq(messages.toUserId, me.id)),
+      ),
     );
 
     // Pull `before` rows with createdAt <= target (inclusive of target via
@@ -261,9 +265,8 @@ export async function registerRoomsRoutes(
       .select()
       .from(messages)
       .where(and(
-        eq(messages.roomId, room.id),
+        roomOrPartyWhisper,
         sql`${messages.createdAt} <= ${target.createdAt}`,
-        whisperFilter,
       ))
       .orderBy(desc(messages.createdAt))
       .limit(before + 1); // +1 to include the target itself
@@ -271,9 +274,8 @@ export async function registerRoomsRoutes(
       .select()
       .from(messages)
       .where(and(
-        eq(messages.roomId, room.id),
+        roomOrPartyWhisper,
         gt(messages.createdAt, target.createdAt),
-        whisperFilter,
       ))
       .orderBy(asc(messages.createdAt))
       .limit(after);
@@ -282,7 +284,7 @@ export async function registerRoomsRoutes(
 
     const wire: ChatMessage[] = window.map((m) => ({
       id: m.id,
-      roomId: m.roomId,
+      roomId: m.kind === "whisper" ? room.id : m.roomId,
       userId: m.userId,
       characterId: m.characterId,
       displayName: m.displayName,
@@ -365,10 +367,16 @@ export async function registerRoomsRoutes(
         .from(ignores)
         .where(eq(ignores.userId, me.id))).map((r) => r.ignoredUserId),
     );
-    const whisperFilter = or(
-      sql`${messages.kind} != 'whisper'`,
-      eq(messages.userId, me.id),
-      eq(messages.toUserId, me.id),
+    // Whispers overlay across rooms — see the matching union in
+    // sendRoomBacklogTo. Non-whisper rows are scoped to THIS room;
+    // whisper rows the caller is a party to are pulled regardless of
+    // their original room.
+    const roomOrPartyWhisper = or(
+      and(sql`${messages.kind} != 'whisper'`, eq(messages.roomId, room.id)),
+      and(
+        sql`${messages.kind} = 'whisper'`,
+        or(eq(messages.userId, me.id), eq(messages.toUserId, me.id)),
+      ),
     );
 
     // Overfetch by one to detect hasMore without a separate count.
@@ -376,9 +384,8 @@ export async function registerRoomsRoutes(
       .select()
       .from(messages)
       .where(and(
-        eq(messages.roomId, room.id),
+        roomOrPartyWhisper,
         lt(messages.createdAt, new Date(before)),
-        whisperFilter,
       ))
       .orderBy(desc(messages.createdAt))
       .limit(limit + 1);
@@ -390,7 +397,9 @@ export async function registerRoomsRoutes(
     window.reverse();
     const wire: ChatMessage[] = window.map((m) => ({
       id: m.id,
-      roomId: m.roomId,
+      // Whispers from other rooms get re-keyed to the requested room so
+      // the client appends them to that room's buffer.
+      roomId: m.kind === "whisper" ? room.id : m.roomId,
       userId: m.userId,
       characterId: m.characterId,
       displayName: m.displayName,

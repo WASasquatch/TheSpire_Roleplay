@@ -1,0 +1,4 @@
+-- 0127_games_admin_features.sql
+-- Reserved no-op. Adventure-game feature was removed before merge; slot kept
+-- to prevent migration number reuse. apply-migrations.mjs records it as applied
+-- with zero statements run.

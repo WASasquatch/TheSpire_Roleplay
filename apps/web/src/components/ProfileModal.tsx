@@ -282,31 +282,60 @@ function ProfileBody({
     | { itemKey: string; name: string; namePlural: string | null; description: string; iconUrl: string | null }
     | null
   >(null);
+  // Mobile vs desktop both render this header, with two diverging
+  // treatments triggered by the `sm:` breakpoint (640px):
+  //   - mobile (<640px): tighter padding, smaller avatar (`lg`=64px
+  //     portrait / 96px frame), inline meta line (no XP/currency
+  //     chips), and the Message/Whisper/Ignore action set lives in a
+  //     full-width segmented bar BELOW the avatar/content row so the
+  //     primary actions are thumb-reachable and the buttons line up
+  //     edge-to-edge with the band.
+  //   - desktop (≥640px): original layout preserved — XL avatar,
+  //     XP/Currency as the prominent chip pair, action buttons inline
+  //     beneath the meta.
+  const hasActions = !!(onWhisper || onMessage || onIgnore || activeCharacterAction);
   return (
     <>
-      {/* Hero band - always visible, themed with the owner's panel color. */}
+      {/* Hero band - always visible, themed with the owner's panel color.
+          Outer flex-col so the mobile action bar can sit underneath
+          the avatar/content row without breaking the desktop flex-row. */}
+        <div className="flex shrink-0 flex-col border-b border-keep-rule bg-keep-panel">
         {/* `items-center` on the hero so the rank/name/account stack
             sits at the avatar's vertical midline. The avatar (xl =
             124px + frame container) is taller than the three text
             rows; with `items-start` the text floated at the top and
-            left a tall empty gutter under it. `min-h` matches the
-            framed avatar's footprint so the band always reserves the
-            full portrait height even when the user has no border
-            equipped (no jumpy resize when the border lands). */}
-        <div className="flex shrink-0 items-center gap-4 border-b border-keep-rule bg-keep-panel px-5 py-4">
+            left a tall empty gutter under it. Mobile drops to `lg`
+            avatar (96px frame) so the hero doesn't eat half the
+            viewport. */}
+        <div className="flex items-center gap-3 px-3 py-3 sm:gap-4 sm:px-5 sm:py-4">
           {/* Profile hero portrait uses BorderedAvatar so the user's
               equipped rank border frames the avatar exactly the way
               it does in chat / forum / Earning catalog. `xl` slot
               gives a 124px portrait inside a 186px frame container.
               The frame only renders when the user has both reached
               tier IV AND equipped that rank's border via the Earning
-              dashboard. */}
-          <BorderedAvatar
-            avatarUrl={avatar}
-            name={name}
-            size="xl"
-            borderRankKey={earning?.selectedBorderRankKey ?? null}
-          />
+              dashboard. Dual-render so mobile gets a tighter `lg`
+              footprint (64px / 96px framed) and desktop keeps the
+              full showcase size — BorderedAvatar's size is fixed at
+              render time so a single instance can't responsively
+              swap. The cached image bytes are reused across both
+              renders. */}
+          <div className="sm:hidden">
+            <BorderedAvatar
+              avatarUrl={avatar}
+              name={name}
+              size="lg"
+              borderRankKey={earning?.selectedBorderRankKey ?? null}
+            />
+          </div>
+          <div className="hidden sm:block">
+            <BorderedAvatar
+              avatarUrl={avatar}
+              name={name}
+              size="xl"
+              borderRankKey={earning?.selectedBorderRankKey ?? null}
+            />
+          </div>
           <div className="min-w-0 flex-1">
             {/* Name + gender glyph on the top line; XP + Currency
                 chips on their OWN row beneath the name on tight
@@ -326,7 +355,7 @@ function ProfileBody({
                   Wrapped in font-action so the hero's display font
                   still applies to non-styled glyphs (the .ns-* style
                   classes override face/weight as needed). */}
-              <h2 className="font-action text-2xl tracking-wide" title={name}>
+              <h2 className="font-action text-xl tracking-wide sm:text-2xl" title={name}>
                 <StyledName
                   displayName={name}
                   styleKey={profile.profile.nameStyleKey}
@@ -335,22 +364,20 @@ function ProfileBody({
               </h2>
               <span
                 aria-hidden
-                className="text-lg leading-none"
+                className="text-base leading-none sm:text-lg"
                 title={genderGlyph(gender).title}
                 style={{ color: genderGlyph(gender).color }}
               >
                 {genderGlyph(gender).icon}
               </span>
             </div>
-            {/* Earning chips. Live on their own row below the name so
-                they never split across rows (XP on the name line,
-                Currency wrapped — the broken UX before this change).
-                When BOTH are present they sit side by side; when one
-                is absent the other takes the row alone. Hidden
-                entirely when neither is available (unranked / fresh
-                account). */}
+            {/* Earning chips (desktop). Live on their own row below the
+                name so they never split across rows (XP on the name
+                line, Currency wrapped — the broken UX before this
+                change). Hidden on mobile in favor of an inline meta
+                line that wraps everything together. */}
             {earning?.xp != null || earning?.currency != null ? (
-              <div className="mt-1 flex flex-wrap items-center gap-2">
+              <div className="mt-1 hidden flex-wrap items-center gap-2 sm:flex">
                 {earning?.xp != null ? (
                   <span
                     className="inline-flex h-8 items-center gap-1 rounded border border-keep-rule bg-keep-bg/60 px-2 text-sm uppercase tracking-widest text-keep-muted"
@@ -379,26 +406,58 @@ function ProfileBody({
                 ) : null}
               </div>
             ) : null}
-            {/* Mobile rank lockup — sigil at md (18px) with a smaller
-                title so it nests cleanly UNDER the name on tight
-                viewports. The desktop variant (lg+) lives in a
-                separate column off to the right of the hero and is
-                hidden here. `mb-0` keeps it from pushing the account
-                meta down. */}
+            {/* Mobile rank lockup — uses the gem variant (same icon
+                set chat lines + the userlist render) so the rank
+                reads as the compact "identity tag" it does
+                everywhere else on the site. The tier chevron (used
+                on desktop's xl lockup) is too detailed for the
+                tight inline footprint here. `mb-0` keeps it from
+                pushing the meta line down; hidden at lg+ where the
+                desktop column-right lockup takes over. */}
             {earning?.rankKey && earning.tier != null ? (
-              <div className="mb-0 mt-1 flex items-center gap-2 lg:hidden">
-                <RankSigil rankKey={earning.rankKey} tier={earning.tier} size="md" />
-                <span className="font-action text-xs uppercase tracking-widest text-keep-text">
+              <div className="mb-0 mt-1 flex items-center gap-1.5 lg:hidden">
+                <RankSigil rankKey={earning.rankKey} tier={earning.tier} size="md" variant="gem" />
+                <span className="font-action text-[11px] uppercase tracking-widest text-keep-text sm:text-xs">
                   {earning.rankName ?? earning.rankKey}
                   {earning.tierLabel ? <span className="ml-1 text-keep-muted">{earning.tierLabel}</span> : null}
                 </span>
               </div>
             ) : null}
-            <div className="mt-0.5 text-xs uppercase tracking-widest text-keep-muted">
+            {/* Meta line. Mobile inlines XP/currency alongside account
+                kind, role, joined date, and the /p/slug copy chip so
+                everything fits one wrapping block at `text-[11px]`.
+                Desktop keeps the original `text-xs` cadence with
+                XP/currency as their own chips above this row. */}
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] uppercase tracking-widest text-keep-muted sm:text-xs">
+              {/* XP + currency inline (mobile only — desktop has the
+                  chip pair above). Hidden when the user hasn't earned
+                  anything yet so the meta line doesn't lead with a
+                  zero. */}
+              {earning?.xp != null ? (
+                <span className="sm:hidden">
+                  <span className="font-semibold tabular-nums normal-case tracking-normal text-keep-text">{earning.xp.toLocaleString()}</span> XP
+                </span>
+              ) : null}
+              {earning?.currency != null ? (
+                <span className="inline-flex items-center gap-1 sm:hidden">
+                  <img
+                    src="/assets/earning/cache_pouch.png"
+                    alt=""
+                    aria-hidden
+                    className="h-3.5 w-3.5 shrink-0 select-none"
+                    draggable={false}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                  <span className="font-semibold tabular-nums normal-case tracking-normal text-keep-text">{earning.currency.toLocaleString()}</span>
+                </span>
+              ) : null}
+              {(earning?.xp != null || earning?.currency != null) ? (
+                <span className="sm:hidden" aria-hidden>·</span>
+              ) : null}
               {profile.kind === "character" ? (
-                "Character"
+                <span>Character</span>
               ) : (
-                <>
+                <span>
                   Master account
                   {/* Account-level role marker - only meaningful on the master
                       profile (characters are owned by a master that already
@@ -411,15 +470,15 @@ function ProfileBody({
                   ) : profile.profile.role === "trusted" ? (
                     <span className="ml-1 italic text-keep-system" title="Trusted account - elevated rate limits earned through participation.">· Trusted</span>
                   ) : null}
-                </>
+                </span>
               )}
               {createdAt ? (
                 <>
-                  {" · "}
-                  joined {new Date(createdAt).toLocaleDateString()}
+                  <span aria-hidden>·</span>
+                  <span>joined {new Date(createdAt).toLocaleDateString()}</span>
                 </>
               ) : null}
-              <span className="mx-1">·</span>
+              <span aria-hidden>·</span>
               <CopyProfileLink name={name} />
             </div>
             {/* Mod-only owner attribution. The server only ships
@@ -454,11 +513,13 @@ function ProfileBody({
                 )}
               </div>
             ) : null}
-            {/* Action row - renders when there's at least one action to
-                offer. Self-views (App suppresses whisper/ignore) still get
-                this row when there's a Switch / Disable action to take. */}
-            {onWhisper || onMessage || onIgnore || activeCharacterAction ? (
-              <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
+            {/* Action row — desktop only. Mobile moves the same
+                actions into the full-width segmented bar that sits
+                below the avatar/content row (see further down). Self-
+                views (App suppresses whisper/ignore) still surface
+                this when there's a Switch / Disable action to take. */}
+            {hasActions ? (
+              <div className="mt-3 hidden flex-wrap gap-1.5 text-xs sm:flex">
                 {activeCharacterAction ? (
                   <button
                     type="button"
@@ -522,6 +583,61 @@ function ProfileBody({
               the avatar's midline without dragging the close button
               with it. */}
           <CloseButton onClick={onClose} className="ml-2 self-start" />
+        </div>
+        {/* Mobile action bar — full-width segmented row pinned to the
+            bottom of the hero band on phones. Each visible button
+            takes an equal share via `flex-1`, separator borders sit
+            between them, and the row carries a top border so it reads
+            as the footer of the band. Hidden on `sm+` where the
+            inline action row inside the content column takes over.
+            Skipped entirely when there are no actions to offer (e.g.
+            a self-view with no Switch action). */}
+        {hasActions ? (
+          <div className="flex border-t border-keep-rule text-sm sm:hidden">
+            {activeCharacterAction ? (
+              <button
+                type="button"
+                onClick={activeCharacterAction.onClick}
+                title="Change your active identity - chat name and theme update immediately."
+                className="keep-button flex-1 border-r border-keep-rule px-2 py-2.5 text-keep-action hover:bg-keep-action/10"
+              >
+                {activeCharacterAction.label}
+              </button>
+            ) : null}
+            {onMessage ? (
+              <button
+                type="button"
+                onClick={() => onMessage(profile.profile.userId, name, avatar)}
+                title="Open a direct message thread with this user."
+                className="flex-1 border-r border-keep-rule px-2 py-2.5 text-keep-action hover:bg-keep-action/10"
+              >
+                💬 Message
+              </button>
+            ) : null}
+            {onWhisper ? (
+              <button
+                type="button"
+                onClick={() => onWhisper(name)}
+                className="flex-1 border-r border-keep-rule px-2 py-2.5 text-keep-text hover:bg-keep-panel"
+              >
+                Whisper
+              </button>
+            ) : null}
+            {onIgnore ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`Ignore ${name}? You won't see their messages until you /unignore.`)) {
+                    onIgnore(name);
+                  }
+                }}
+                className="flex-1 px-2 py-2.5 text-keep-accent hover:bg-keep-accent/10"
+              >
+                Ignore
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         </div>
 
         {/* Body - scrolls independently of the hero */}

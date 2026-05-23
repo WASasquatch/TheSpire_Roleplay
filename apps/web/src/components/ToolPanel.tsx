@@ -153,7 +153,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   }, [drawerOpen]);
 
   return (
-    <div className="relative shrink-0 border-t border-keep-rule bg-keep-banner/60 px-2 py-2">
+    <div className="keep-tool-panel relative shrink-0 border-t border-keep-rule bg-keep-banner/60 px-2 py-2">
       {drawerOpen ? (
         <>
           {/* Backdrop. Fixed-viewport so a click anywhere outside closes the

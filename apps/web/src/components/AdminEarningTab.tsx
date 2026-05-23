@@ -24,6 +24,7 @@ import DOMPurify from "dompurify";
 import { isMasterAdminRole } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
+import { applyNameStylePlaceholders } from "../lib/nameStyleTemplate.js";
 import {
   adminGrantBorder,
   adminGrantCurrency,
@@ -1128,15 +1129,6 @@ function NameStylesSection() {
 const PREVIEW_SANITIZER_TAGS = ["span", "b", "i", "em", "strong", "u", "s", "small", "sub", "sup", "mark"];
 const PREVIEW_SANITIZER_ATTRS = ["class", "style", "data-*"];
 
-function escapePreviewHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 /**
  * Live preview for the Name-Styles editor. Renders the admin's
  * *exact* HTML template + CSS inside a Shadow DOM so what they see is
@@ -1208,9 +1200,10 @@ function NameStylePreview({
     // runtime, so the admin sees what's actually going to survive
     // sanitization (e.g. `title=` attrs and disallowed tags getting
     // stripped). KEEP_CONTENT means stripped tags keep their inner
-    // text — matches production exactly.
-    const escaped = escapePreviewHtml(displayName);
-    const merged = template.replace(/\{username\}/g, escaped);
+    // text — matches production exactly. Placeholder substitution
+    // (`{username}` + `{username-span}`) routes through the shared
+    // helper so the preview can't drift from the runtime render.
+    const merged = applyNameStylePlaceholders(template, displayName);
     const clean = DOMPurify.sanitize(merged, {
       ALLOWED_TAGS: PREVIEW_SANITIZER_TAGS,
       ALLOWED_ATTR: PREVIEW_SANITIZER_ATTRS,
@@ -1329,13 +1322,24 @@ function StyleEditor({
         />
       </label>
       <label className="block text-xs">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">HTML template (must include <code>{"{username}"}</code>)</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">
+          HTML template (include <code>{"{username}"}</code> or <code>{"{username-span}"}</code>)
+        </span>
         <textarea
           value={template}
           onChange={(e) => setTemplate(e.target.value)}
           rows={3}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-sm"
         />
+        <span className="mt-1 block text-[10px] normal-case tracking-normal text-keep-muted">
+          <code>{"{username}"}</code> drops the name as one text run.
+          {" "}
+          <code>{"{username-span}"}</code> wraps each character in its own
+          <code>&lt;span data-i="N"&gt;</code> so per-character CSS works —
+          target via <code>{"span[data-i=\"0\"]"}</code> or
+          <code>:nth-child()</code> for alternating colors, per-letter
+          animations, etc.
+        </span>
       </label>
       <label className="block text-xs">
         <span className="mb-1 block uppercase tracking-widest text-keep-muted">CSS (scoped to your wrapper class)</span>

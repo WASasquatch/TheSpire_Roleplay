@@ -35,6 +35,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import DOMPurify from "dompurify";
 import { useEarning } from "../state/earning.js";
 import type { NameStyleCatalogRow } from "../lib/earning.js";
+import { applyNameStylePlaceholders } from "../lib/nameStyleTemplate.js";
 import { useActiveTheme } from "../lib/theme.js";
 
 interface Props {
@@ -179,9 +180,10 @@ export function StyledName({ displayName, styleKey, config, baseColor, overrideR
 
   // Custom-template fallback. The instance class is added as a
   // wrapping span; the inner element inherits the vars via the
-  // cascade.
-  const escapedName = escapeHtml(displayName);
-  const merged = styleRow.template.replace(/\{username\}/g, escapedName);
+  // cascade. Placeholder substitution (`{username}`, `{username-span}`)
+  // lives in lib/nameStyleTemplate so the admin preview renders the
+  // same expansion users see at runtime.
+  const merged = applyNameStylePlaceholders(styleRow.template, displayName);
   const clean = DOMPurify.sanitize(merged, {
     ALLOWED_TAGS: SANITIZER_TAGS,
     ALLOWED_ATTR: SANITIZER_ATTRS,
@@ -235,15 +237,6 @@ function kebab(camel: string): string {
 
 function looksLikeColor(v: string): boolean {
   return /^#?[0-9a-fA-F]{3,8}$/.test(v) || /^(rgb|hsl|color)/i.test(v);
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 /** Strip characters that would break out of a CSS declaration value. */

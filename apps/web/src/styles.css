@@ -1374,3 +1374,365 @@
   border: 0;
   border-radius: 0.375rem;
 }
+
+/* ============================================================
+ *  GLASS — Frosted translucent panels over a backdrop image
+ *
+ *  Visual recipe:
+ *    1. Body shows the user's chosen backdrop (publicProfileBgUrl)
+ *       or the Spire artwork as fallback, sized "cover" so the
+ *       artwork stays composed across viewport sizes. App.tsx sets
+ *       `--keep-shell-bg-url/size/repeat` per-session.
+ *    2. A darkening rectangle (light or dark variant depending on
+ *       palette luminance) sits over the backdrop so chat text is
+ *       always legible against any image the user picks.
+ *    3. The bg-overlay ornament (faint palette-color radial blooms)
+ *       layers between the darken pass and the panels — palette
+ *       presence without overwhelming the artwork.
+ *    4. Every chrome surface (.keep-frame, .keep-panel, .keep-app-
+ *       banner, .keep-composer, .keep-button, inputs) uses backdrop
+ *       blur + a low-alpha panel fill + a soft inset frost bevel
+ *       (white top highlight, black bottom shadow) + an outer
+ *       ambient shadow.
+ * ============================================================ */
+
+/* Backdrop image painted on `.keep-bg-overlay` — a fixed
+ * full-viewport div INSIDE the chat shell. Painting on <html> or
+ * <body> leaked the image past the shell whenever a browser
+ * extension (color picker, devtools panel) shifted the document:
+ * the strip above the shell exposed html's image to the world. By
+ * scoping the paint to a child of the chat shell, the image moves
+ * with the shell. Anything above the shell sees only html's flat
+ * bg-color (theme `--keep-bg`), which reads as a thin dark border
+ * rather than a leaked nebula.
+ *
+ * `.keep-bg-overlay` already exists in App.tsx as the ornament-tint
+ * layer (used by medieval / scifi). For glass we overwrite its bg
+ * recipe to paint the user's chosen image + a faint palette tint
+ * via the `--orn-bg-overlay` ornament (set by glass.ts). */
+html[data-theme-style="glass"] body {
+  isolation: isolate;
+}
+html[data-theme-style="glass"] .keep-bg-overlay {
+  background-color: rgb(var(--keep-bg));
+  background-image:
+    var(--orn-bg-overlay, none),
+    var(--keep-shell-bg-url, url("/the_spire_bg.jpg"));
+  background-size:
+    cover,
+    var(--keep-shell-bg-size, cover);
+  background-repeat:
+    no-repeat,
+    var(--keep-shell-bg-repeat, no-repeat);
+  background-position: center, center;
+  background-attachment: fixed, fixed;
+  opacity: 1;
+}
+/* Darkening pass — fixed-positioned full-viewport rectangle over
+ * the html bg image. Sits above the image but below all chat-shell
+ * content, so the artwork stays visible but every chrome layer
+ * over it has improved contrast. ~25% alpha — light enough that
+ * the image is still legible as an image, dark enough to lift
+ * chat text off it. Palette-aware: uses the palette's bg color so
+ * dark themes darken with their own dark color (preserves hue
+ * memory) and light themes "darken" with their own light color
+ * (more of a soft veil than a true darken). */
+html[data-theme-style="glass"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-color: rgb(var(--keep-bg) / 0.25);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Frost the chat shell's panel-class utilities. The chat layout's
+ * main containers don't paint their own bg, but message rows,
+ * sidebars, toolpanel, dropdowns, etc. use `bg-keep-banner`,
+ * `bg-keep-bg`, `bg-keep-panel`, `bg-keep-parchment` (with various
+ * opacity modifiers). Glass mode lifts every panel-shape that uses
+ * one of those onto a frosted glass tile — backdrop-filter blur so
+ * the bg image reads as milky glass behind, palette-tinted fill at
+ * low alpha so the panel still has color memory.
+ *
+ * Substring attribute selectors so `bg-keep-banner` matches both
+ * the un-modified utility and Tailwind's `bg-keep-banner/40`,
+ * `bg-keep-banner/60`, etc. opacity-modifier classes (which compile
+ * to separate `.bg-keep-banner\/40` selectors). The blur is the
+ * shared frost recipe; if a specific element wants extra glass
+ * detail (inset bevel, outer shadow) it can layer that on top via
+ * its own rule (see `.keep-frame`, `.keep-app-banner`, etc. below). */
+html[data-theme-style="glass"] [class*="bg-keep-bg"],
+html[data-theme-style="glass"] [class*="bg-keep-banner"],
+html[data-theme-style="glass"] [class*="bg-keep-panel"],
+html[data-theme-style="glass"] [class*="bg-keep-parchment"] {
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+}
+/* Solid (un-modified) utility variants need their alpha dropped so
+ * the bg image shows through. Tailwind's opacity-modifier variants
+ * (`/40`, `/60`, etc.) already render translucent; only the bare
+ * class is opaque.
+ *
+ * Tint is luminance-aware: `--keep-glass-panel-tint` /
+ * `--keep-glass-bg-tint` are set by App.tsx (and ProfileEditor's
+ * live preview) to a high-alpha WHITE on light themes and a
+ * low-alpha palette-color on dark themes. Using the raw palette
+ * color uniformly produced a "too dark / dark glass" look on light
+ * themes because the heavy backdrop-filter blur averages bright
+ * and dark backdrop pixels into a midtone gray. */
+html[data-theme-style="glass"] .bg-keep-bg {
+  background-color: var(--keep-glass-bg-tint, rgb(var(--keep-bg) / 0.45)) !important;
+}
+html[data-theme-style="glass"] .bg-keep-banner {
+  background-color: var(--keep-glass-panel-tint, rgb(var(--keep-panel) / 0.45)) !important;
+}
+html[data-theme-style="glass"] .bg-keep-panel {
+  background-color: var(--keep-glass-panel-tint, rgb(var(--keep-panel) / 0.45)) !important;
+}
+html[data-theme-style="glass"] .bg-keep-parchment {
+  background-color: var(--keep-glass-panel-tint, rgb(var(--keep-panel) / 0.45)) !important;
+}
+
+/* Room banner / list item highlights — Tailwind's `bg-keep-banner/40`
+ * variant. The 40% palette alpha is too sheer in glass mode (the
+ * room rows blend into the chrome below), so bump it to 0.9 panel
+ * alpha. Works for both light + dark themes: light gets near-opaque
+ * white, dark gets near-opaque panel-color — both clearly readable
+ * over the backdrop. */
+html[data-theme-style="glass"] .bg-keep-banner\/40 {
+  background-color: rgb(var(--keep-panel) / 0.9) !important;
+}
+
+/* Chat area darkening — a translucent veil over JUST the `<main>`
+ * element (chat feed + composer column). The backdrop image stays
+ * visible behind the rooms sidebar / banner / tools, but the chat
+ * itself rides on top of a heavy darken pass so long-form reading
+ * is comfortable against any backdrop. Uses the palette's own `bg`
+ * slot — automatically dark on dark themes (rgba over near-black)
+ * and light on light themes (veil over near-white) — so there's no
+ * second light/dark switch to maintain. */
+html[data-theme-style="glass"] main {
+  background-color: var(--keep-glass-chat-tint, rgb(var(--keep-bg) / 0.75));
+}
+
+/* Tools panel layered-alpha fix. The right rail is structured as
+ * <aside bg-keep-banner/30> > ToolPanel <div .keep-tool-panel
+ * bg-keep-banner/60>. Without intervention the two translucent
+ * layers stack to ~70% effective alpha, reading as solid. The
+ * explicit `.keep-tool-panel` class lets us target the inner
+ * container reliably (Tailwind's escaped opacity-modifier class
+ * selectors like `.bg-keep-banner\/60` work but are fragile across
+ * tooling) and drop its alpha so the aside's frost shows through. */
+html[data-theme-style="glass"] .keep-tool-panel {
+  background-color: var(--keep-glass-tool-tint, rgb(var(--keep-panel) / 0.15)) !important;
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+}
+
+/* Accent rails — the 3px palette-color strips above the chat content
+ * and above the composer. In glass mode they sit over the backdrop
+ * image; without a tint they'd disappear into the frost. Paint them
+ * with the palette accent at 0.75 alpha so the bar reads as a
+ * clear accent-color divider over the artwork, plus the blur so the
+ * image still shows through faintly behind the color. */
+html[data-theme-style="glass"] .keep-accent-rail {
+  background-color: rgb(var(--keep-accent) / 0.75) !important;
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+}
+
+/* Frames / panels — the workhorse glass surface. Inset frost bevel
+ * = a 1px white top-left highlight (light catching the chamfered
+ * edge) plus a 1px dark bottom-right (depth recess). Outer shadow
+ * is a triple stack: a tight contact shadow under the panel + a
+ * mid-range ambient bloom + a wide soft halo so the panel feels
+ * lifted off the backdrop rather than pasted on.
+ *
+ * `backdrop-filter: blur(24px) saturate(1.4)` is the frost itself —
+ * higher than scifi's 16px because we want the backdrop to read as
+ * milky frost, not a clearly-visible image behind tinted glass. */
+[data-theme-style="glass"] .keep-frame,
+[data-theme-style="glass"] .keep-panel {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--keep-glass-panel-tint, rgb(var(--keep-panel) / 0.42));
+  background-image: linear-gradient(
+    155deg,
+    rgb(255 255 255 / 0.08) 0%,
+    rgb(255 255 255 / 0) 45%,
+    rgb(0 0 0 / 0.04) 100%
+  );
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid rgb(var(--keep-border) / 0.45);
+  border-radius: 14px;
+  box-shadow:
+    /* Inset frost bevel — top-left highlight, bottom-right shadow */
+    inset 1px 1px 0 rgb(255 255 255 / 0.18),
+    inset -1px -1px 0 rgb(0 0 0 / 0.10),
+    inset 0 0 40px rgb(255 255 255 / 0.03),
+    /* Outer ambient shadow stack */
+    0 1px 2px rgb(0 0 0 / 0.18),
+    0 6px 14px -4px rgb(0 0 0 / 0.25),
+    0 20px 40px -12px rgb(0 0 0 / 0.32);
+}
+
+/* Buttons — small glass tiles. Lighter blur (the tile is smaller, a
+ * heavier blur produces obvious blur-edge artefacts at this size).
+ * Inset top highlight gives the chamfer cue; hover lifts the
+ * surface slightly via a brighter highlight + accent-tinted halo. */
+[data-theme-style="glass"] .keep-button:not([disabled]) {
+  background-color: rgb(var(--keep-panel) / 0.55);
+  background-image: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.08) 0%,
+    rgb(255 255 255 / 0) 100%
+  );
+  color: rgb(var(--keep-text));
+  border: 1px solid rgb(var(--keep-border) / 0.55);
+  border-radius: 8px;
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  box-shadow:
+    inset 1px 1px 0 rgb(255 255 255 / 0.22),
+    inset -1px -1px 0 rgb(0 0 0 / 0.08),
+    0 1px 2px rgb(0 0 0 / 0.18),
+    0 4px 10px -3px rgb(0 0 0 / 0.20);
+  transition: background-color 160ms ease, box-shadow 160ms ease,
+              border-color 160ms ease, transform 80ms ease;
+}
+[data-theme-style="glass"] .keep-button:not([disabled]):hover {
+  background-color: rgb(var(--keep-panel) / 0.72);
+  border-color: rgb(var(--keep-action) / 0.5);
+  box-shadow:
+    inset 1px 1px 0 rgb(255 255 255 / 0.28),
+    inset -1px -1px 0 rgb(0 0 0 / 0.08),
+    0 0 0 1px rgb(var(--keep-action) / 0.18),
+    0 2px 4px rgb(0 0 0 / 0.22),
+    0 8px 18px -4px rgb(var(--keep-action) / 0.22);
+}
+[data-theme-style="glass"] .keep-button:not([disabled]):active {
+  background-color: rgb(var(--keep-action) / 0.18);
+  transform: translateY(0.5px);
+  box-shadow:
+    inset 1px 1px 2px rgb(0 0 0 / 0.18),
+    inset -1px -1px 0 rgb(255 255 255 / 0.10);
+}
+
+/* Inputs — recessed glass pits. The top inset shadow does the
+ * "hole" cue (light shouldn't pool inside the input the way it
+ * does on a raised button). Focus lights the rim in the action
+ * color, no neon — we want professional, not gaming. */
+[data-theme-style="glass"] input,
+[data-theme-style="glass"] textarea,
+[data-theme-style="glass"] select {
+  background-color: rgb(var(--keep-bg) / 0.55);
+  color: rgb(var(--keep-text));
+  border: 1px solid rgb(var(--keep-border) / 0.55);
+  border-radius: 6px;
+  backdrop-filter: blur(10px) saturate(1.2);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  box-shadow:
+    inset 0 1px 2px rgb(0 0 0 / 0.18),
+    inset 1px 0 0 rgb(0 0 0 / 0.05);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+[data-theme-style="glass"] input:focus,
+[data-theme-style="glass"] textarea:focus,
+[data-theme-style="glass"] select:focus {
+  outline: none;
+  background-color: rgb(var(--keep-bg) / 0.72);
+  border-color: rgb(var(--keep-action) / 0.65);
+  box-shadow:
+    inset 0 1px 2px rgb(0 0 0 / 0.18),
+    0 0 0 3px rgb(var(--keep-action) / 0.18);
+}
+
+/* Top banner — deeper blur so the chat shell reads as floating
+ * above a slightly more obscured strip. Soft 1px hairline below
+ * the banner picks up the action color, faint, professional. */
+[data-theme-style="glass"] .keep-app-banner {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--keep-glass-panel-tint, rgb(var(--keep-panel) / 0.48)) !important;
+  background-image: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.06) 0%,
+    rgb(255 255 255 / 0) 50%,
+    rgb(0 0 0 / 0.05) 100%
+  );
+  backdrop-filter: blur(32px) saturate(1.5);
+  -webkit-backdrop-filter: blur(32px) saturate(1.5);
+  border-bottom: 1px solid rgb(var(--keep-border) / 0.45) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    0 1px 0 rgb(0 0 0 / 0.10),
+    0 8px 24px -8px rgb(0 0 0 / 0.32) !important;
+}
+
+/* Composer (chat input area) — same family as panels, slightly
+ * lower opacity so the chat above bleeds visual weight downward.
+ * Frost bevel on top so it reads as docked at the bottom edge of
+ * the chat shell. */
+[data-theme-style="glass"] .keep-composer {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--keep-glass-panel-tint, rgb(var(--keep-panel) / 0.40)) !important;
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  border-top: 1px solid rgb(var(--keep-border) / 0.45) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.14),
+    0 -1px 0 rgb(0 0 0 / 0.08),
+    0 -8px 24px -8px rgb(0 0 0 / 0.22) !important;
+}
+
+/* Section headers — soft palette-tinted strip. Background uses the
+ * accent at 8% over the panel at 35%, so the divider color reads as
+ * the secondary palette tone (the user's accent) without screaming
+ * for attention. Avoids the neon-rail look scifi uses. */
+[data-theme-style="glass"] .keep-section-header {
+  background-color: rgb(var(--keep-panel) / 0.55) !important;
+  background-image: linear-gradient(
+    90deg,
+    rgb(var(--keep-accent) / 0.10) 0%,
+    rgb(var(--keep-accent) / 0.03) 60%,
+    rgb(var(--keep-accent) / 0) 100%
+  ) !important;
+  color: rgb(var(--keep-text)) !important;
+  border-top: 1px solid rgb(var(--keep-border) / 0.40) !important;
+  border-bottom: 1px solid rgb(var(--keep-border) / 0.40) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.10),
+    inset 0 -1px 0 rgb(0 0 0 / 0.06);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+}
+
+/* List rows — transparent, no per-row glass (too many stacked
+ * backdrop-filter layers tank perf and visually muddy). Hover +
+ * active states tint with the palette colors at low alpha. */
+[data-theme-style="glass"] .keep-row {
+  background-color: transparent;
+  border-bottom: 1px solid rgb(var(--keep-border) / 0.18);
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+[data-theme-style="glass"] .keep-row:hover {
+  background-color: rgb(var(--keep-action) / 0.08);
+  box-shadow: inset 3px 0 0 rgb(var(--keep-action) / 0.50);
+}
+[data-theme-style="glass"] .keep-row[data-active="true"] {
+  background-color: rgb(var(--keep-action) / 0.14);
+  box-shadow:
+    inset 3px 0 0 rgb(var(--keep-action) / 0.80),
+    inset 0 0 24px -8px rgb(var(--keep-action) / 0.18);
+}
+
+/* Headers — let palette text show through, no uppercase tracking
+ * (we want a refined look, not a UI label feel). */
+[data-theme-style="glass"] h1,
+[data-theme-style="glass"] h2,
+[data-theme-style="glass"] h3 {
+  color: rgb(var(--keep-text));
+}

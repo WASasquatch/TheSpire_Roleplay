@@ -399,7 +399,16 @@ function RoomGroup({
                       // signals.
                       className={`flex items-center justify-between gap-2 px-3 py-1.5 pl-5 lg:py-0.5 ${o.idle ? "opacity-50" : ""}`}
                     >
-                      <div className="min-w-0 flex-1 truncate">
+                      {/* Scale the username + its em-sized icons down
+                          a touch relative to the rail's font-size so
+                          more of long names fits before the truncate
+                          kicks in. Driven off the parent's font-size
+                          (which the Tools font-step setting controls)
+                          so the relationship holds at every step. The
+                          rank gem at `md` = 1.6em scales with this
+                          too, keeping the icon proportional to the
+                          name rather than dwarfing it. */}
+                      <div className="min-w-0 flex-1 truncate text-[0.85em]">
                         <UserNameTag
                           displayName={o.displayName}
                           gender={o.gender}

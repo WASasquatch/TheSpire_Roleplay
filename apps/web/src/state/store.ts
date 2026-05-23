@@ -698,13 +698,38 @@ export const useChat = create<ChatState>((set) => ({
 
   updateMessage: (msg) =>
     set((s) => {
+      // Fast path: the update's roomId matches the bucket we cached it
+      // in. True for every non-whisper message and for whispers between
+      // people in the same room.
       const list = s.messagesByRoom[msg.roomId];
-      if (!list) return {};
-      const idx = list.findIndex((m) => m.id === msg.id);
-      if (idx < 0) return {};
-      const next = list.slice();
-      next[idx] = msg;
-      return { messagesByRoom: { ...s.messagesByRoom, [msg.roomId]: next } };
+      if (list) {
+        const idx = list.findIndex((m) => m.id === msg.id);
+        if (idx >= 0) {
+          const next = list.slice();
+          next[idx] = { ...msg, roomId: msg.roomId };
+          return { messagesByRoom: { ...s.messagesByRoom, [msg.roomId]: next } };
+        }
+      }
+      // Slow path: cross-room whisper overlay. The server broadcasts the
+      // update keyed to the sender's room, but the recipient cached the
+      // message under whichever room they were viewing when it arrived.
+      // Scan every bucket so the edit/delete lands regardless of which
+      // view holds the row. Bucket roomId on the cached copy is
+      // preserved — only the body / editedAt / deletedAt etc. change.
+      let touched = false;
+      const nextByRoom: Record<string, ChatMessage[]> = {};
+      for (const rid of Object.keys(s.messagesByRoom)) {
+        const buf = s.messagesByRoom[rid];
+        if (!buf) continue;
+        const idx = buf.findIndex((m) => m.id === msg.id);
+        if (idx < 0) { nextByRoom[rid] = buf; continue; }
+        const next = buf.slice();
+        next[idx] = { ...msg, roomId: rid };
+        nextByRoom[rid] = next;
+        touched = true;
+      }
+      if (!touched) return {};
+      return { messagesByRoom: nextByRoom };
     }),
 
   setMessages: (roomId, msgs) =>

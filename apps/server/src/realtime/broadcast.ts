@@ -930,24 +930,34 @@ export async function sendRoomBacklogTo(
   // messages after the ignored-user + whisper filters below, and the
   // client would incorrectly conclude there's no older history left.
   const BACKLOG_LIMIT = 50;
+  // Whispers are cross-room from the viewer's POV: a whisper the viewer
+  // is a party to overlays into ANY room they scroll back, at its
+  // original timestamp. So the WHERE here unions "non-whisper rows from
+  // this room" with "whisper rows the viewer is a party to from
+  // anywhere." The wire roomId is rewritten below so the client buckets
+  // them under the room being loaded.
   const recentPlusOne = await db
     .select()
     .from(messages)
-    .where(eq(messages.roomId, roomId))
+    .where(or(
+      and(sql`${messages.kind} != 'whisper'`, eq(messages.roomId, roomId)),
+      and(
+        sql`${messages.kind} = 'whisper'`,
+        or(eq(messages.userId, viewerUserId), eq(messages.toUserId, viewerUserId)),
+      ),
+    ))
     .orderBy(desc(messages.createdAt))
     .limit(BACKLOG_LIMIT + 1);
   const hasMoreOlder = recentPlusOne.length > BACKLOG_LIMIT;
   const recent = hasMoreOlder ? recentPlusOne.slice(0, BACKLOG_LIMIT) : recentPlusOne;
   const backlog: ChatMessage[] = recent
     .filter((m) => !ignoredIds.has(m.userId))
-    .filter((m) => {
-      if (m.kind !== "whisper") return true;
-      return m.userId === viewerUserId || m.toUserId === viewerUserId;
-    })
     .reverse()
     .map((m) => ({
       id: m.id,
-      roomId: m.roomId,
+      // Rewrite whisper roomId to the room being loaded so the client
+      // appends to the right bucket. Non-whispers already match.
+      roomId: m.kind === "whisper" ? roomId : m.roomId,
       userId: m.userId,
       characterId: m.characterId,
       displayName: m.displayName,

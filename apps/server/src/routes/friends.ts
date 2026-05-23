@@ -155,7 +155,12 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
       const c = o.characterId ? charById.get(o.characterId) : null;
       const usingChar = !!(c && !c.deletedAt);
       const displayName = usingChar ? c!.name : (u?.username ?? "(unknown)");
-      const avatarUrl = usingChar ? (c!.avatarUrl ?? u?.avatarUrl ?? null) : (u?.avatarUrl ?? null);
+      // Character-pinned rows must NOT fall back to the master's
+      // avatar — that fallback leaks the OOC owner's portrait into
+      // the friends rail for any character whose own avatar slot is
+      // empty. Null falls through to the initials placeholder
+      // client-side, which is the privacy-correct rendering.
+      const avatarUrl = usingChar ? (c!.avatarUrl ?? null) : (u?.avatarUrl ?? null);
       return {
         userId: o.userId,
         username: u?.username ?? "(unknown)",
@@ -348,11 +353,14 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     const entries: FriendRequestEntry[] = rows.map((r) => {
       const u = userById.get(r.frienderUserId);
       const c = r.frienderCharacterId ? charById.get(r.frienderCharacterId) : null;
+      const usingChar = !!(c && !c.deletedAt);
       return {
         userId: r.frienderUserId,
         username: u?.username ?? "(unknown)",
-        displayName: c?.name ?? u?.username ?? "(unknown)",
-        avatarUrl: c?.avatarUrl ?? u?.avatarUrl ?? null,
+        displayName: usingChar ? c!.name : (u?.username ?? "(unknown)"),
+        // Same privacy contract as /me/friends: never fall back to the
+        // master's avatar when the request was sent FROM a character.
+        avatarUrl: usingChar ? (c!.avatarUrl ?? null) : (u?.avatarUrl ?? null),
         // Surface the exact friender identity so accept/decline can
         // identify the row unambiguously — a master and a character
         // can share a name, and `resolveIdentityByName` resolves

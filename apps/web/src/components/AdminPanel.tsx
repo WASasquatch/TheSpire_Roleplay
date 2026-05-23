@@ -451,6 +451,14 @@ interface OverviewDayPoint {
   count: number;
 }
 
+interface AdminOverviewRecentReg {
+  userId: string;
+  username: string;
+  role: Role;
+  createdAt: number;
+  lastLoginAt: number | null;
+}
+
 interface AdminOverview {
   online: number;
   users: {
@@ -460,6 +468,7 @@ interface AdminOverview {
     dau: number;
     wau: number;
     mau: number;
+    recentRegistrations: AdminOverviewRecentReg[];
   };
   rooms: { public: number; private: number; total: number };
   messages: { last24h: number; last7d: number; last30d: number };
@@ -566,6 +575,8 @@ function OverviewTab() {
         </OverviewCard>
       </div>
 
+      <RecentRegistrationsPanel rows={data.users.recentRegistrations} />
+
       <fieldset className="rounded border border-keep-rule p-3">
         <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">This week</legend>
         <div className="space-y-2">
@@ -587,6 +598,88 @@ function OverviewCard({ title, hint, children }: { title: string; hint?: string;
     <fieldset className="rounded border border-keep-rule p-3" title={hint}>
       <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">{title}</legend>
       <div className="space-y-2">{children}</div>
+    </fieldset>
+  );
+}
+
+/**
+ * Per-day buckets of the last 5 days of registrations. Newest day first,
+ * empty days included so the panel always shows the rolling window
+ * (an empty day is a useful signal too). Grouped by date in the
+ * viewer's local time zone — registration timestamps are absolute, but
+ * "did anyone sign up yesterday" reads in local time.
+ */
+function RecentRegistrationsPanel({ rows }: { rows: AdminOverviewRecentReg[] }) {
+  const dayKeys: { key: string; label: string; date: Date }[] = [];
+  const now = new Date();
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    d.setHours(0, 0, 0, 0);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const label = i === 0 ? "Today" : i === 1 ? "Yesterday" : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    dayKeys.push({ key, label, date: d });
+  }
+  const buckets = new Map<string, AdminOverviewRecentReg[]>();
+  for (const { key } of dayKeys) buckets.set(key, []);
+  for (const u of rows) {
+    const d = new Date(u.createdAt);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (buckets.has(key)) buckets.get(key)!.push(u);
+  }
+  const total = rows.length;
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-3">
+      <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
+        Recent registrations · last 5 days · {total} {total === 1 ? "account" : "accounts"}
+      </legend>
+      {total === 0 ? (
+        <p className="text-xs text-keep-muted">No new accounts in the last 5 days.</p>
+      ) : (
+        <div className="space-y-2">
+          {dayKeys.map(({ key, label }) => {
+            const dayRows = buckets.get(key) ?? [];
+            return (
+              <div key={key}>
+                <div className="flex items-baseline gap-2 text-[10px] uppercase tracking-widest text-keep-muted">
+                  <span className="font-semibold text-keep-text/80">{label}</span>
+                  <span className="tabular-nums">{dayRows.length} {dayRows.length === 1 ? "signup" : "signups"}</span>
+                </div>
+                {dayRows.length === 0 ? (
+                  <div className="text-xs text-keep-muted/60 italic">—</div>
+                ) : (
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {dayRows.map((u) => {
+                      const time = new Date(u.createdAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+                      const neverLoggedIn = u.lastLoginAt == null;
+                      const roleTag = u.role !== "user" ? u.role : null;
+                      return (
+                        <span
+                          key={u.userId}
+                          className="inline-flex items-center gap-1 rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-xs"
+                          title={`Registered ${new Date(u.createdAt).toLocaleString()}${u.lastLoginAt ? `\nLast login: ${new Date(u.lastLoginAt).toLocaleString()}` : "\nHasn't logged in since"}`}
+                        >
+                          <span className="font-semibold">{u.username}</span>
+                          {roleTag ? (
+                            <span className="rounded bg-keep-accent/20 px-1 text-[9px] uppercase tracking-widest text-keep-accent">
+                              {roleTag === "masteradmin" ? "master" : roleTag}
+                            </span>
+                          ) : null}
+                          {neverLoggedIn ? (
+                            <span className="text-[10px] text-keep-muted">· never logged in</span>
+                          ) : null}
+                          <span className="text-[10px] text-keep-muted/70 tabular-nums">· {time}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </fieldset>
   );
 }
@@ -4380,12 +4473,28 @@ interface AdminUserRow {
   characters: Array<{ id: string; name: string; deleted: boolean }>;
 }
 
+type UserSortKey = "username" | "role" | "state" | "chars" | "registered" | "lastSeen";
+type UserSortDir = "asc" | "desc";
+type RoleFilter = "any" | "user" | "trusted" | "mod" | "admin" | "masteradmin";
+type StateFilter = "any" | "online" | "offline" | "disabled" | "away";
+type RegisteredFilter = "any" | "24h" | "5d" | "7d" | "30d";
+type LoginFilter = "any" | "never" | "active";
+
 function UsersTab() {
   const [rows, setRows] = useState<AdminUserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<AdminUserRow | null>(null);
+  // Default sort lands on newest signups so admins see fresh accounts
+  // first — supports the moderation workflow of "who joined since I last
+  // looked." Alphabetical is one click away on the header.
+  const [sortKey, setSortKey] = useState<UserSortKey>("registered");
+  const [sortDir, setSortDir] = useState<UserSortDir>("desc");
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>("any");
+  const [stateFilter, setStateFilter] = useState<StateFilter>("any");
+  const [registeredFilter, setRegisteredFilter] = useState<RegisteredFilter>("any");
+  const [loginFilter, setLoginFilter] = useState<LoginFilter>("any");
   // Mirror of the panel-level master-admin check. Threaded through to
   // the edit form so it can lock the master-only fields (email,
   // disabled, masteradmin role promotion) and to the row action cell
@@ -4443,6 +4552,75 @@ function UsersTab() {
     }
   }
 
+  // Client-side filter + sort. The list is capped at MAX_LIMIT=200 on
+  // the server, well within "scan in memory" range. Faceted filters
+  // here so admins can slice by role/state/window without round-tripping.
+  const filteredSorted = useMemo(() => {
+    const now = Date.now();
+    const dayMs = 86_400_000;
+    const sinceMap: Record<RegisteredFilter, number | null> = {
+      any: null,
+      "24h": now - dayMs,
+      "5d": now - 5 * dayMs,
+      "7d": now - 7 * dayMs,
+      "30d": now - 30 * dayMs,
+    };
+    const sinceCutoff = sinceMap[registeredFilter];
+
+    const filtered = rows.filter((u) => {
+      if (roleFilter !== "any" && u.role !== roleFilter) return false;
+      if (stateFilter === "online" && !u.online) return false;
+      if (stateFilter === "offline" && (u.online || u.disabled)) return false;
+      if (stateFilter === "disabled" && !u.disabled) return false;
+      if (stateFilter === "away" && !u.away) return false;
+      if (sinceCutoff != null && u.createdAt < sinceCutoff) return false;
+      if (loginFilter === "never" && u.lastLoginAt != null) return false;
+      if (loginFilter === "active" && u.lastLoginAt == null) return false;
+      return true;
+    });
+
+    // Stable role ordering for sort: most-privileged on top in ascending.
+    const roleOrder: Record<string, number> = { masteradmin: 0, admin: 1, mod: 2, trusted: 3, user: 4 };
+    const stateRank = (u: AdminUserRow) => u.disabled ? 3 : u.online ? 0 : u.away ? 1 : 2;
+
+    const sorted = filtered.slice().sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === "username") cmp = a.username.localeCompare(b.username);
+      else if (sortKey === "role") cmp = (roleOrder[a.role] ?? 99) - (roleOrder[b.role] ?? 99);
+      else if (sortKey === "state") cmp = stateRank(a) - stateRank(b);
+      else if (sortKey === "chars") {
+        const ac = a.characters.filter((c) => !c.deleted).length;
+        const bc = b.characters.filter((c) => !c.deleted).length;
+        cmp = ac - bc;
+      }
+      else if (sortKey === "registered") cmp = a.createdAt - b.createdAt;
+      else if (sortKey === "lastSeen") cmp = (a.lastLoginAt ?? 0) - (b.lastLoginAt ?? 0);
+      if (cmp === 0) cmp = a.username.localeCompare(b.username);
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+
+    return sorted;
+  }, [rows, roleFilter, stateFilter, registeredFilter, loginFilter, sortKey, sortDir]);
+
+  const toggleSort = (key: UserSortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      // Date columns default to newest-first; categorical default ascending.
+      setSortDir(key === "registered" || key === "lastSeen" || key === "chars" ? "desc" : "asc");
+    }
+  };
+  const sortIndicator = (key: UserSortKey) => sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : "";
+
+  const clearFilters = () => {
+    setRoleFilter("any");
+    setStateFilter("any");
+    setRegisteredFilter("any");
+    setLoginFilter("any");
+  };
+  const filterActive = roleFilter !== "any" || stateFilter !== "any" || registeredFilter !== "any" || loginFilter !== "any";
+
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -4461,32 +4639,102 @@ function UsersTab() {
         />
       </div>
 
+      <div className="flex flex-wrap items-end gap-2 rounded border border-keep-rule/60 bg-keep-bg/30 p-2 text-xs">
+        <label className="flex flex-col gap-0.5">
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">Role</span>
+          <select
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+          >
+            <option value="any">any</option>
+            <option value="user">user</option>
+            <option value="trusted">trusted</option>
+            <option value="mod">mod</option>
+            <option value="admin">admin</option>
+            <option value="masteradmin">master</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-0.5">
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">State</span>
+          <select
+            value={stateFilter}
+            onChange={(e) => setStateFilter(e.target.value as StateFilter)}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+          >
+            <option value="any">any</option>
+            <option value="online">online</option>
+            <option value="offline">offline</option>
+            <option value="away">away</option>
+            <option value="disabled">disabled</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-0.5">
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">Registered</span>
+          <select
+            value={registeredFilter}
+            onChange={(e) => setRegisteredFilter(e.target.value as RegisteredFilter)}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+          >
+            <option value="any">any time</option>
+            <option value="24h">last 24h</option>
+            <option value="5d">last 5 days</option>
+            <option value="7d">last 7 days</option>
+            <option value="30d">last 30 days</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-0.5">
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">Login</span>
+          <select
+            value={loginFilter}
+            onChange={(e) => setLoginFilter(e.target.value as LoginFilter)}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+            title="Never = registered but no login session ever; active = has at least one login."
+          >
+            <option value="any">any</option>
+            <option value="never">never logged in</option>
+            <option value="active">has logged in</option>
+          </select>
+        </label>
+        {filterActive ? (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="rounded border border-keep-rule px-2 py-1 hover:bg-keep-banner/40"
+          >Clear filters</button>
+        ) : null}
+        <span className="ml-auto text-keep-muted">
+          {loading ? "loading…" : `${filteredSorted.length} of ${rows.length}`}
+        </span>
+      </div>
+
       {error ? (
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
       ) : null}
 
       {loading ? (
         <div className="text-keep-muted text-xs">loading...</div>
-      ) : rows.length === 0 ? (
+      ) : filteredSorted.length === 0 ? (
         <div className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">
-          No users match.
+          {rows.length === 0 ? "No users match." : "No users match the current filters."}
         </div>
       ) : (
         <div className="-mx-1 overflow-x-auto px-1">
-        <table className="w-full min-w-[640px] text-xs">
+        <table className="w-full min-w-[720px] text-xs">
           <thead className="bg-keep-banner/50 text-keep-muted uppercase tracking-widest">
             <tr>
-              <th className="px-2 py-1 text-left">Username</th>
+              <th className="cursor-pointer px-2 py-1 text-left hover:text-keep-text" onClick={() => toggleSort("username")}>Username{sortIndicator("username")}</th>
               <th className="px-2 py-1 text-left">Email</th>
-              <th className="px-2 py-1">Role</th>
-              <th className="px-2 py-1">State</th>
-              <th className="px-2 py-1">Chars</th>
-              <th className="px-2 py-1">Last seen</th>
+              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("role")}>Role{sortIndicator("role")}</th>
+              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("state")}>State{sortIndicator("state")}</th>
+              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("chars")}>Chars{sortIndicator("chars")}</th>
+              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("registered")}>Registered{sortIndicator("registered")}</th>
+              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("lastSeen")}>Last seen{sortIndicator("lastSeen")}</th>
               <th className="px-2 py-1"></th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((u) => (
+            {filteredSorted.map((u) => (
               <tr key={u.userId} className="border-t border-keep-rule">
                 <td className="px-2 py-1 font-semibold">{u.username}</td>
                 <td className="px-2 py-1 font-mono">{u.email}</td>
@@ -4516,8 +4764,11 @@ function UsersTab() {
                 <td className="px-2 py-1 text-center tabular-nums" title={u.characters.map((c) => c.name).join(", ")}>
                   {u.characters.filter((c) => !c.deleted).length}
                 </td>
-                <td className="px-2 py-1 text-center tabular-nums">
-                  {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : "-"}
+                <td className="px-2 py-1 text-center tabular-nums" title={new Date(u.createdAt).toLocaleString()}>
+                  {new Date(u.createdAt).toLocaleDateString()}
+                </td>
+                <td className="px-2 py-1 text-center tabular-nums" title={u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : "Never logged in"}>
+                  {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : <span className="text-keep-muted/70 italic">never</span>}
                 </td>
                 <td className="px-2 py-1 text-right">
                   <button

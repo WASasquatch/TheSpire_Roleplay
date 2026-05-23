@@ -18,6 +18,7 @@
 
 import type { Theme } from "@thekeep/shared";
 import { buildRamp, rgbTripleToHex } from "../theme.js";
+import { glass } from "./styles/glass.js";
 import { medieval } from "./styles/medieval.js";
 import { modern } from "./styles/modern.js";
 import { scifi } from "./styles/scifi.js";
@@ -30,7 +31,7 @@ const ALL_ORNAMENT_KEYS: ReadonlyArray<OrnamentKey> = [
 ];
 
 /**
- * Registry of available styles. Three families — each a complete design
+ * Registry of available styles. Four families — each a complete design
  * language, not just a texture variant:
  *
  *   medieval — flat warm surfaces, soft inset shadows, parchment palette
@@ -38,9 +39,14 @@ const ALL_ORNAMENT_KEYS: ReadonlyArray<OrnamentKey> = [
  *   modern   — soft two-tone gradients, rounded corners, light shadows.
  *   scifi    — glass + multi-color radial bokeh, neon glow on focus,
  *              sharp corners, action-color edges.
+ *   glass    — frosted translucent panels over the user's backdrop
+ *              image (or the Spire artwork as fallback). Soft inset
+ *              frost bevel, outer ambient shadow, palette-tinted
+ *              gradients. Pairs with the Glass Light / Glass Dark
+ *              presets but works with any palette.
  *
  * The 9-substyle catalog (medieval-parchment / sandstone / wood, etc.)
- * was collapsed to these three: with textures removed the sub-variants
+ * was collapsed to these styles: with textures removed the sub-variants
  * looked identical and only diluted the design language. Insertion order
  * drives picker order.
  */
@@ -48,6 +54,7 @@ export const STYLES: Record<string, StyleGenerator> = {
   [medieval.key]: medieval,
   [modern.key]: modern,
   [scifi.key]: scifi,
+  [glass.key]: glass,
 };
 
 /** Default style id used when a user/site hasn't picked one yet. */

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, WorldDetail } from "@thekeep/shared";
-import { DEFAULT_THEME, isAdminRole, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
+import { DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isAdminRole, isDarkPalette, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
 import { SplashLanding } from "./components/SplashLanding.js";
@@ -805,6 +805,17 @@ function Chat() {
   // from the active character row in the character-theme effect
   // below. Null = inherit the chain (master → theme-pinned → site).
   const [characterStyleKey, setCharacterStyleKey] = useState<string | null>(null);
+  // Per-user / per-character public-profile backdrop image. Used as
+  // the chat-shell backdrop when the resolved style is "glass" — the
+  // glass design reveals whatever image the user picked for their
+  // public profile, falling back to the Spire artwork. Mirrored from
+  // the same `publicProfileBgUrl/Mode` columns that drive the profile
+  // modal backdrop (no separate schema for the chat shell).
+  type BgMode = "cover" | "contain" | "tile" | "stretch";
+  const [userBgUrl, setUserBgUrl] = useState<string | null>(null);
+  const [userBgMode, setUserBgMode] = useState<BgMode>("cover");
+  const [characterBgUrl, setCharacterBgUrl] = useState<string | null>(null);
+  const [characterBgMode, setCharacterBgMode] = useState<BgMode>("cover");
   /**
    * Admin-configured one-shot welcome modal. /me/profile returns this only
    * when the user hasn't acknowledged the current welcome's content hash;
@@ -875,6 +886,8 @@ function Chat() {
           soundWhisperEnabled?: boolean;
           disableInputHistory?: boolean;
           disableThesaurus?: boolean;
+          publicProfileBgUrl?: string | null;
+          publicProfileBgMode?: "cover" | "contain" | "tile" | "stretch";
           welcome?: { html: string; hash: string } | null;
           limits?: {
             maxBioLength?: number;
@@ -978,6 +991,12 @@ function Chat() {
             });
           }
           setUserStyleKey(typeof u.styleKey === "string" ? u.styleKey : null);
+          setUserBgUrl(typeof u.publicProfileBgUrl === "string" && u.publicProfileBgUrl.trim() !== "" ? u.publicProfileBgUrl.trim() : null);
+          setUserBgMode(
+            u.publicProfileBgMode === "contain" || u.publicProfileBgMode === "tile" || u.publicProfileBgMode === "stretch"
+              ? u.publicProfileBgMode
+              : "cover",
+          );
           setUiFontFamily(typeof u.uiFontFamily === "string" ? u.uiFontFamily : null);
           setUiFontScale(
             u.uiFontScale === "small" || u.uiFontScale === "medium" ||
@@ -1009,12 +1028,20 @@ function Chat() {
       if (!activeCharacterId) {
         setCharacterTheme(null);
         setCharacterStyleKey(null);
+        setCharacterBgUrl(null);
+        setCharacterBgMode("cover");
         return;
       }
       try {
         const c = await fetch(`/characters/${activeCharacterId}`, { credentials: "include" });
         if (!c.ok) return;
-        const cr = (await c.json()) as { name?: string; themeJson?: string | null; styleKey?: string | null };
+        const cr = (await c.json()) as {
+          name?: string;
+          themeJson?: string | null;
+          styleKey?: string | null;
+          publicProfileBgUrl?: string | null;
+          publicProfileBgMode?: string | null;
+        };
         let fetched: Theme | null = null;
         if (cr.themeJson) {
           try { fetched = normalizeTheme(JSON.parse(cr.themeJson)); } catch { /* none */ }
@@ -1024,6 +1051,12 @@ function Chat() {
           // Same null-coalesce shape as the master styleKey above —
           // null + undefined both mean "no override on this character".
           setCharacterStyleKey(cr.styleKey ?? null);
+          setCharacterBgUrl(typeof cr.publicProfileBgUrl === "string" && cr.publicProfileBgUrl.trim() !== "" ? cr.publicProfileBgUrl.trim() : null);
+          setCharacterBgMode(
+            cr.publicProfileBgMode === "contain" || cr.publicProfileBgMode === "tile" || cr.publicProfileBgMode === "stretch"
+              ? cr.publicProfileBgMode
+              : "cover",
+          );
           // Sync the character name with the row we just loaded. The
           // seed path may have left it null when the tab-cache id
           // disagreed with the DB default; this fills it in. Idempotent
@@ -1083,14 +1116,79 @@ function Chat() {
     if (me) saveCachedActiveTheme(activeTheme);
     const presetName = matchThemePreset(activeTheme);
     const pinnedForPreset = presetName ? themeDesignMap[presetName] : undefined;
+    // Built-in preset→design pairings (Glass Light/Dark → glass).
+    // Falls between admin override (themeDesignMap) and the site-wide
+    // default so shipped presets carry their design intent without
+    // requiring an admin to wire the map for every preset.
+    const builtinForPreset = presetName ? DEFAULT_PRESET_DESIGNS[presetName] : undefined;
     const resolvedStyle =
       characterStyleKey ||
       userStyleKey ||
       pinnedForPreset ||
+      builtinForPreset ||
       siteStyleKey ||
       DEFAULT_STYLE_KEY;
     applyStyle(activeTheme, resolvedStyle);
-  }, [activeTheme, characterStyleKey, userStyleKey, siteStyleKey, themeDesignMap, me]);
+
+    // Glass shell-bg URL — character > master > Spire artwork
+    // (light or dark variant by palette luminance). Published as
+    // CSS vars on `<html>`; the actual paint happens via a CSS rule
+    // on `.keep-bg-overlay` (a fixed full-viewport div INSIDE the
+    // chat shell). Painting on the html element directly leaked the
+    // image past the chat shell whenever a browser extension /
+    // devtools UI shifted the document — the strip above the shell
+    // exposed html's image. Painting inside the shell means any
+    // shift takes the image with it; the gap shows only the theme
+    // bg-color, not the artwork.
+    const root = document.documentElement;
+    if (resolvedStyle === "glass") {
+      const personalUrl = characterBgUrl ?? userBgUrl;
+      const personalMode = (characterBgUrl ? characterBgMode : userBgMode);
+      const url = personalUrl ?? (isDarkPalette(activeTheme) ? "/the_spire_bg_dark.jpg" : "/the_spire_bg.jpg");
+      const size = personalUrl
+        ? (personalMode === "stretch" ? "100% 100%" : personalMode)
+        : "cover";
+      const repeat = personalUrl && personalMode === "tile" ? "repeat" : "no-repeat";
+      root.style.setProperty("--keep-shell-bg-url", `url("${url}")`);
+      root.style.setProperty("--keep-shell-bg-size", size);
+      root.style.setProperty("--keep-shell-bg-repeat", repeat);
+      // Luminance-aware glass overlay tints. On dark themes the
+      // panels should darken the backdrop (deep panel color at low
+      // alpha); on light themes they should LIGHTEN it (high-alpha
+      // white). Using the palette's own panel/bg at the same alpha
+      // both ways produces a uniformly-gray look on light themes
+      // because the heavy backdrop-filter blur averages bright +
+      // dark backdrop pixels into a midtone — the user reports this
+      // as "too dark for light mode."
+      // Light themes get aggressive white-overlay alpha because the
+      // backdrop image's dark regions (corners of a typical nebula
+      // / landscape) bleed through at low alpha and read as dark
+      // panels. Bumping to 0.80-0.85 keeps the artwork visible
+      // through the frost while ensuring chrome reads clearly as
+      // light glass, not "frosted dark gray."
+      const isDark = isDarkPalette(activeTheme);
+      root.style.setProperty("--keep-glass-panel-tint", isDark
+        ? "rgb(var(--keep-panel) / 0.45)"
+        : "rgb(255 255 255 / 0.82)");
+      root.style.setProperty("--keep-glass-bg-tint", isDark
+        ? "rgb(var(--keep-bg) / 0.45)"
+        : "rgb(255 255 255 / 0.85)");
+      root.style.setProperty("--keep-glass-tool-tint", isDark
+        ? "rgb(var(--keep-panel) / 0.15)"
+        : "rgb(255 255 255 / 0.65)");
+      root.style.setProperty("--keep-glass-chat-tint", isDark
+        ? "rgb(var(--keep-bg) / 0.75)"
+        : "rgb(255 255 255 / 0.85)");
+    } else {
+      root.style.removeProperty("--keep-shell-bg-url");
+      root.style.removeProperty("--keep-shell-bg-size");
+      root.style.removeProperty("--keep-shell-bg-repeat");
+      root.style.removeProperty("--keep-glass-panel-tint");
+      root.style.removeProperty("--keep-glass-bg-tint");
+      root.style.removeProperty("--keep-glass-tool-tint");
+      root.style.removeProperty("--keep-glass-chat-tint");
+    }
+  }, [activeTheme, characterStyleKey, userStyleKey, siteStyleKey, themeDesignMap, me, characterBgUrl, characterBgMode, userBgUrl, userBgMode]);
 
   // Per-user font/size accessibility. Independent of the palette effect
   // above because font preferences don't layer through character/room

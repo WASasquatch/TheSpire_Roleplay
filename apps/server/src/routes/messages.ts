@@ -174,6 +174,24 @@ export async function registerMessageRoutes(
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
     io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    // Cross-room whisper overlay: the recipient may be viewing the
+    // whisper from another room (their bucket holds it under a
+    // different roomId). Fan the update out to their sockets too so
+    // the live edit lands wherever they're looking. Skips if recipient
+    // is already in the sender's room — the room broadcast above
+    // already covered them, and the client's updateMessage is
+    // idempotent on duplicate updates anyway.
+    if (updated.kind === "whisper" && updated.toUserId) {
+      const toId = updated.toUserId;
+      const wire = toWire(updated);
+      const sockets = await io.fetchSockets();
+      for (const s of sockets) {
+        const uid = (s.data as { userId?: string }).userId;
+        if (uid !== toId) continue;
+        if ((s.data as { roomId?: string }).roomId === m.roomId) continue;
+        s.emit("message:update", wire);
+      }
+    }
     return { ok: true };
   });
 
@@ -268,6 +286,29 @@ export async function registerMessageRoutes(
       const uid = (s.data as { userId?: string }).userId ?? "";
       const role = roles.get(uid) ?? "user";
       s.emit("message:update", isAdminRole(role as Role) ? adminWire : plainWire);
+    }
+    // Cross-room whisper overlay: fan the delete out to the recipient
+    // even when they're viewing from another room. Same shape as the
+    // edit path; recipient role determines admin vs plain wire (it
+    // matters for the originalBody audit field, though admins viewing
+    // their own whispers from outside the sender's room is rare).
+    if (updated.kind === "whisper" && updated.toUserId) {
+      const toId = updated.toUserId;
+      const allSockets = await io.fetchSockets();
+      const recipientSockets = allSockets.filter((s) => {
+        const uid = (s.data as { userId?: string }).userId;
+        if (uid !== toId) return false;
+        return (s.data as { roomId?: string }).roomId !== m.roomId;
+      });
+      if (recipientSockets.length > 0) {
+        const recipRole = (await db
+          .select({ role: users.role })
+          .from(users)
+          .where(eq(users.id, toId))
+          .limit(1))[0]?.role ?? "user";
+        const wire = isAdminRole(recipRole as Role) ? adminWire : plainWire;
+        for (const s of recipientSockets) s.emit("message:update", wire);
+      }
     }
     return { ok: true };
   });

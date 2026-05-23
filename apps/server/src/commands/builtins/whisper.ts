@@ -153,22 +153,22 @@ export const whisperCommand: CommandHandler = {
       .limit(1))[0];
 
     // One pass over all sockets: emit to every socket belonging to either
-    // the sender OR the recipient. Previously the sender path only hit
-    // `ctx.socket` (the one tab that ran the command), so a user with
-    // the chat open on their phone and a tab on their desktop would
-    // miss the whisper on whichever surface didn't issue the send.
-    // Whispers feel like DMs to the user — they should appear on every
-    // device they're signed in on, both sides. The client dedupes by id
-    // so the duplicate (when sender == recipient, which can't happen
-    // here because /whisper rejects self-whisper above) wouldn't cause
-    // a double-render anyway.
+    // the sender OR the recipient. Each socket gets the message stamped
+    // with whichever room THAT tab is currently viewing, so the line
+    // lands in the chat view the user is looking at rather than a bucket
+    // for the sender's room (which the recipient may not be in at all).
+    // The DB row keeps the sender's room as its canonical home; this
+    // per-socket rewrite is purely for live rendering. Scrollback in
+    // every room overlays party-to-me whispers via sendRoomBacklogTo /
+    // GET /rooms/:id/messages.
     const sockets = await ctx.io.fetchSockets();
     for (const s of sockets) {
       const uid = (s.data as { userId?: string }).userId;
+      const tabRoom = (s.data as { roomId?: string }).roomId ?? ctx.roomId;
       if (uid === ctx.user.id) {
-        s.emit("message:new", out);
+        s.emit("message:new", { ...out, roomId: tabRoom });
       } else if (!blocked && uid === target.id) {
-        s.emit("message:new", out);
+        s.emit("message:new", { ...out, roomId: tabRoom });
       }
     }
     if (blocked) return;

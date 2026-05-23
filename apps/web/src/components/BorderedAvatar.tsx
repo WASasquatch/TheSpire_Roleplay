@@ -195,9 +195,11 @@ export function BorderedAvatar({
         onClick={(e) => onClick(e)}
         title={title}
         // Strip the default button chrome so the avatar reads as the
-        // affordance, not a chip. `focus:ring` keeps keyboard nav
-        // accessible.
-        className="inline-block rounded-full bg-transparent p-0 focus:outline-none focus:ring-2 focus:ring-keep-action"
+        // affordance, not a chip. `focus-visible:` keeps keyboard nav
+        // accessible without painting a ring after a mouse click —
+        // the browser only fires focus-visible when focus arrives via
+        // keyboard, never via pointer.
+        className="inline-block rounded-full bg-transparent p-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-keep-action"
       >
         {wrapper}
       </button>

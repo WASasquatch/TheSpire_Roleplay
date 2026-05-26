@@ -3100,7 +3100,19 @@ aside.margin-note {
 .bookshelf-book[data-pulled="true"] .pages,
 .bookshelf-book[data-pulled="true"] .top-edge {
   opacity: 1;
-  transition: opacity 200ms ease 100ms;
+  /* Pull-OUT direction: no delay. Cover face lights up at the same
+   * instant the rotation starts, so the eye catches the art and
+   * title the moment the rotating book begins to reveal them
+   * (rather than after the first ~30% of the rotation, which is
+   * what a 100ms delay produced). The cover face is rotated behind
+   * the spine in 3D space, so until the rotation visibly moves it
+   * around there's nothing to see — making opacity full from frame
+   * 1 doesn't show a floating dim cover, it just primes the reveal.
+   * Pull-IN direction (the rule above with `transition: opacity
+   * 220ms ease 1000ms`) keeps its 1000ms delay so the cover stays
+   * lit during the put-away rotation and only fades AFTER the
+   * book is back on the shelf — symmetric with this entry path. */
+  transition: opacity 200ms ease 0ms;
 }
 
 /* SPINE — visible when shelved. The spine pulls from the per-book
@@ -3469,15 +3481,19 @@ aside.margin-note {
   min-height: 140px;
 }
 
-/* Responsive shrinks. The shelf's pulled-out book uses `translateZ`
- * to fly forward; on a viewport narrower than the shelf's full
- * shelved width the books would otherwise overflow horizontally
- * AND the pulled book's perspective projection would draw off the
- * viewport edge. Solve both by shrinking the per-book CSS vars
- * (`--w`, `--h`, `--d`) and clipping `.bookshelf-stage` so the
- * back-wall vignette + any z-projected residue can't escape
- * sideways. */
-.bookshelf-stage { overflow-x: clip; }
+/* Responsive shrinks for the bookshelf. The shelved row fits the
+ * splash card via the per-book `--w / --h / --d` shrinks in the
+ * mobile breakpoints below — the grid-column fix at the splash
+ * layout level (SplashLanding.tsx, `minmax(min(450px, 100%), 1fr)`)
+ * keeps the bookshelf section inside the card so a separate stage-
+ * level horizontal clip isn't needed. DO NOT add `overflow-x: clip`
+ * here — the pulled-out book uses `translateZ` + `rotateY` to swing
+ * forward into the viewer's space, and a stage-level clip chops
+ * that projection off mid-animation. The book is supposed to bleed
+ * VISUALLY past the stage's flat bounds; that's the whole point of
+ * the perspective. Page-level horizontal scroll is prevented by
+ * `overflow-hidden` higher up the tree (SplashLanding's outer
+ * container). */
 
 @media (max-width: 900px) {
   .bookshelf-shelf { height: 360px; }

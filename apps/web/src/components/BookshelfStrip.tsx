@@ -249,12 +249,14 @@ export function BookshelfStrip({ onNavigate }: Props) {
             <Bookend side="left" />
             {slots.map((slot, i) => {
               if (slot.kind === "placeholder") {
+                const placeholderId = `placeholder-${i}`;
                 return (
                   <PlaceholderBook
                     key={`p-${i}`}
                     lean={LEAN_PATTERN[i % LEAN_PATTERN.length]!}
                     index={i}
-                    onRegister={() => onNavigate("/register")}
+                    isPulled={pulledId === placeholderId}
+                    onTap={() => handleBookTap(placeholderId, () => onNavigate("/register"))}
                   />
                 );
               }
@@ -385,7 +387,12 @@ function StoryBook({
   );
 }
 
-function PlaceholderBook({ lean, index, onRegister }: BookProps & { onRegister: () => void }) {
+function PlaceholderBook({
+  lean,
+  index,
+  isPulled,
+  onTap,
+}: BookProps & { isPulled: boolean; onTap: () => void }) {
   // Mirrors StoryBook's structure exactly — same markup, same classes,
   // same chip slot. Only the text + click handler differ. Title is
   // intentionally short ("Your Story") so it lays out like a real
@@ -408,11 +415,18 @@ function PlaceholderBook({ lean, index, onRegister }: BookProps & { onRegister: 
   return (
     <button
       type="button"
-      onClick={onRegister}
+      onClick={onTap}
+      // Placeholders follow the same touch-state pull-out as
+      // StoryBook so mobile users get a consistent two-tap rhythm
+      // across the whole shelf: first tap pulls the book forward,
+      // second tap on the same book navigates (to /register here).
+      // On desktop the hover-capable check short-circuits straight
+      // to navigation — same as StoryBook.
+      data-pulled={isPulled ? "true" : undefined}
       className={`bookshelf-book ${lean}`}
       style={styleVars}
       tabIndex={0}
-      aria-label="Write your story — sign in or register"
+      aria-label={`Write your story — sign in or register${isPulled ? " (tap again to register)" : ""}`}
     >
       <span className="float-wrap">
         <span className="book-3d">

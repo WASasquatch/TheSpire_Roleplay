@@ -14,6 +14,7 @@ import { SynonymPopup } from "./SynonymPopup.js";
 import { UsernameAutocomplete } from "./UsernameAutocomplete.js";
 import { CloseButton } from "./CloseButton.js";
 import { ReactionBar } from "./ReactionBar.js";
+import { handlePlainTextCopy } from "../lib/chatCopy.js";
 
 interface Props {
   onClose: () => void;
@@ -1624,7 +1625,17 @@ function ThreadPane({
         )}
       </div>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-sm">
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-sm"
+        // Plain-text-only clipboard for any selection copied out of
+        // the DM thread — same posture as the chat feed (see
+        // lib/chatCopy.ts). Strips name-style CSS, link
+        // decoration, bold / italic, etc. so a copied DM line
+        // pastes as the prose the user meant to quote, not as a
+        // visually re-rendered chat snippet.
+        onCopy={handlePlainTextCopy}
+      >
         {hasMore ? (
           <div className="mb-1 text-center text-[10px] italic text-keep-muted">Older history available.</div>
         ) : null}

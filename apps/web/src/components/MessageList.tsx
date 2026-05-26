@@ -9,6 +9,7 @@ import type { Gender } from "../lib/gender.js";
 import { parseInline, renderForumBody, solitaryEmoticonToken } from "../lib/markdown.js";
 import { EmoticonSprite } from "./EmoticonSprite.js";
 import { useEmoticons } from "../state/emoticons.js";
+import { handlePlainTextCopy } from "../lib/chatCopy.js";
 import { splitMentions } from "../lib/mentions.js";
 import { extractMentions } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
@@ -907,6 +908,12 @@ function ForumView({
       // full viewport gutter-free at every `< lg` width.
       className="keep-chat-feed min-h-0 flex-1 overflow-y-auto py-2 leading-relaxed lg:px-4"
       style={{ fontSize: FONT_EM[fontStep] }}
+      // Flatten any selection copied out of the chat feed to plain
+      // text — no avatar markup, no name-style CSS, no bold /
+      // italic / link decoration. See lib/chatCopy.ts for the
+      // rationale; covers chat AND forum rendering since this scroll
+      // container hosts both.
+      onCopy={handlePlainTextCopy}
     >
       {sections.map((s) => {
         const bucket = buckets[s.key];
@@ -2467,7 +2474,13 @@ function Line({
         size="xs"
         onClick={() => onIconClick(msg.userId, msg.displayName)}
         title={`view ${msg.displayName}'s profile`}
-        className="mr-1 align-middle"
+        // `select-none` excludes the avatar from the text selection
+        // so the chat-feed onCopy handler doesn't fold the image's
+        // alt text (usually the username) into the clipboard output
+        // — without this the sender's name would land twice on
+        // every paste (once from the alt, once from the visible
+        // name tag). Click + hover behavior is unaffected.
+        className="mr-1 select-none align-middle"
       />
     )
     : null;

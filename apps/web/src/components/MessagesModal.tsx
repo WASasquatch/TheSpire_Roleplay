@@ -27,6 +27,14 @@ interface Props {
    */
   initialOtherUserId?: string | null;
   /**
+   * Optional pre-selected character id pinned to the same target.
+   * Required to distinguish a master/OOC thread from each of that
+   * master's character threads — without it, opening DM from
+   * a character profile would surface the OOC conversation and leak
+   * the character-to-master link.
+   */
+  initialOtherCharacterId?: string | null;
+  /**
    * Open another user's profile by display name. Threaded from
    * App.tsx so clicking a name / avatar in a DM bubble OR the
    * thread header opens the profile modal — same flow chat uses on
@@ -116,7 +124,7 @@ const PAGE_SIZE = 50;
  * conversation slides the thread pane in (with a Back chevron in
  * its header). Desktop shows both side-by-side.
  */
-export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenProfile }: Props) {
+export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialOtherCharacterId, onOpenProfile }: Props) {
   const me = useChat((s) => s.me);
   const dmConversations = useChat((s) => s.dmConversations);
   const setDmConversations = useChat((s) => s.setDmConversations);
@@ -136,7 +144,19 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
   const [friends, setFriends] = useState<FriendListEntry[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(initialOtherUserId ?? null);
+  /**
+   * Selected DM target — identified by BOTH userId and the pinned
+   * character id, because one master account can host multiple
+   * concurrent threads (OOC plus one per character). Matching only on
+   * userId conflates them and (a) highlights every row owned by that
+   * master when you click any one of them and (b) opens the wrong
+   * (usually master-OOC) thread for a character-pinned row, leaking
+   * the character→master link. The composite identity is what makes
+   * the rows behave as fully independent contacts.
+   */
+  const [selectedTarget, setSelectedTarget] = useState<{ userId: string; characterId: string | null } | null>(
+    initialOtherUserId ? { userId: initialOtherUserId, characterId: initialOtherCharacterId ?? null } : null,
+  );
   const [refreshKey, setRefreshKey] = useState(0);
   // Mobile pane switch — only one of "list" or "thread" is visible at <md.
   // Pre-pick "thread" when the modal opens with a user selected so the
@@ -356,7 +376,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
     // Drop any selected conversation; the new identity might not be
     // a participant on it. (Re-selecting after refresh shows the new
     // inbox's most recent conversation via auto-open.)
-    setSelectedUserId(null);
+    setSelectedTarget(null);
     autoOpenAttempted.current = false;
   }, [inboxFilterCharId]);
 
@@ -394,19 +414,19 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
   const autoOpenAttempted = useRef(false);
   useEffect(() => {
     if (autoOpenAttempted.current) return;
-    if (selectedUserId !== null) return;
+    if (selectedTarget !== null) return;
     const convs = Object.values(dmConversations);
     if (convs.length === 0) return;
     autoOpenAttempted.current = true;
     const mostRecent = convs.reduce((best, c) =>
       c.lastMessageAt > best.lastMessageAt ? c : best,
     );
-    setSelectedUserId(mostRecent.otherUserId);
+    setSelectedTarget({ userId: mostRecent.otherUserId, characterId: mostRecent.otherCharacterId });
     // Don't flip mobile to "thread" — on phones the user explicitly
     // tapped Messages and probably wants the inbox view first. Desktop
     // shows both panes anyway, so the auto-selection just highlights
     // the row and seeds the right pane.
-  }, [dmConversations, selectedUserId]);
+  }, [dmConversations, selectedTarget]);
 
   /**
    * Compose the unified list shown in the left pane. Order:
@@ -415,10 +435,26 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
    * Conversation metadata (last preview, unread, online) is folded
    * onto matching friend rows so the user sees one entry per person.
    */
-  const friendIds = useMemo(() => new Set(friends.map((f) => f.userId)), [friends]);
+  /**
+   * Composite identity key for a (userId, characterId) pair. Empty
+   * string represents the OOC/master side so it's distinguishable from
+   * a character id "0" or similar. Used as the lookup key for the
+   * conversation map and the selection-active comparison.
+   */
+  function identityKey(userId: string, characterId: string | null): string {
+    return `${userId}:${characterId ?? ""}`;
+  }
+  // Friend rows are partitioned per (userId, characterId) on the
+  // friend's side, so the dedupe set has to be too — otherwise a
+  // friendship pinned to a character and a separate friendship with
+  // the same user's OOC handle would collide.
+  const friendKeys = useMemo(
+    () => new Set(friends.map((f) => identityKey(f.userId, f.characterId))),
+    [friends],
+  );
   const convByOther = useMemo(() => {
     const m = new Map<string, DirectConversationSummary>();
-    for (const c of Object.values(dmConversations)) m.set(c.otherUserId, c);
+    for (const c of Object.values(dmConversations)) m.set(identityKey(c.otherUserId, c.otherCharacterId), c);
     return m;
   }, [dmConversations]);
   // Conversations with unread messages float to the top of whichever
@@ -450,11 +486,11 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
       handle: f.handle,
       avatarUrl: f.avatarUrl,
       online: f.online,
-      conv: convByOther.get(f.userId) ?? null,
+      conv: convByOther.get(identityKey(f.userId, f.characterId)) ?? null,
     }))
     .sort(dmRowOrder);
   const nonFriendConvRows = useMemo(() => Object.values(dmConversations)
-    .filter((c) => !friendIds.has(c.otherUserId))
+    .filter((c) => !friendKeys.has(identityKey(c.otherUserId, c.otherCharacterId)))
     .map((c) => ({
       kind: "conv" as const,
       userId: c.otherUserId,
@@ -470,10 +506,10 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
       conv: c,
     }))
     .sort(dmRowOrder),
-  [dmConversations, friendIds]);
+  [dmConversations, friendKeys]);
 
-  function selectUser(userId: string) {
-    setSelectedUserId(userId);
+  function selectUser(userId: string, characterId: string | null) {
+    setSelectedTarget({ userId, characterId });
     setMobileView("thread");
   }
 
@@ -491,16 +527,19 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
    * keep claiming to view a conversation it's no longer showing.
    */
   useEffect(() => {
-    setOpenDmOtherUser(selectedUserId);
-    if (selectedUserId !== null) {
+    setOpenDmOtherUser(selectedTarget?.userId ?? null, selectedTarget?.characterId ?? null);
+    if (selectedTarget !== null) {
       const conv = Object.values(useChat.getState().dmConversations)
-        .find((c) => c.otherUserId === selectedUserId);
+        .find((c) =>
+          c.otherUserId === selectedTarget.userId
+          && c.otherCharacterId === selectedTarget.characterId,
+        );
       if (conv && conv.unreadCount > 0) {
         upsertDmConversation({ ...conv, unreadCount: 0 });
       }
     }
     return () => { setOpenDmOtherUser(null); };
-  }, [selectedUserId, setOpenDmOtherUser, upsertDmConversation]);
+  }, [selectedTarget, setOpenDmOtherUser, upsertDmConversation]);
 
   // Accept/decline route through identity-keyed endpoints, NOT the
   // `/accept <name>` / `/decline <name>` slash commands. Reason:
@@ -684,7 +723,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
         });
         setComposeDraft("");
         setComposeStatus(null);
-        selectUser(userId);
+        selectUser(userId, isCharacter ? (j.profile.id ?? null) : null);
       })
       .catch((err) => setComposeStatus({
         kind: "error",
@@ -740,7 +779,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
             type="button"
             role="tab"
             aria-selected={mobileView === "thread"}
-            disabled={!selectedUserId}
+            disabled={!selectedTarget}
             onClick={() => setMobileView("thread")}
             className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-widest disabled:opacity-40 ${
               mobileView === "thread"
@@ -802,7 +841,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
                             view. */}
                         <button
                           type="button"
-                          onClick={() => selectUser(r.userId)}
+                          onClick={() => selectUser(r.userId, r.frienderCharacterId)}
                           className="flex min-w-0 flex-1 items-center gap-2 text-left"
                         >
                           <Avatar url={r.avatarUrl} name={r.displayName} size={32} />
@@ -846,10 +885,13 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
                   <ul className="space-y-1">
                     {friendRows.map((row) => (
                       <UserRow
-                        key={row.userId}
+                        key={identityKey(row.userId, row.characterId)}
                         row={row}
-                        active={selectedUserId === row.userId}
-                        onSelect={() => selectUser(row.userId)}
+                        active={
+                          selectedTarget?.userId === row.userId
+                          && selectedTarget?.characterId === row.characterId
+                        }
+                        onSelect={() => selectUser(row.userId, row.characterId)}
                         onRemove={() => removeFriend({
                           userId: row.userId,
                           username: row.username,
@@ -874,10 +916,13 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
                   <ul className="space-y-1">
                     {nonFriendConvRows.map((row) => (
                       <UserRow
-                        key={row.userId}
+                        key={identityKey(row.userId, row.characterId)}
                         row={row}
-                        active={selectedUserId === row.userId}
-                        onSelect={() => selectUser(row.userId)}
+                        active={
+                          selectedTarget?.userId === row.userId
+                          && selectedTarget?.characterId === row.characterId
+                        }
+                        onSelect={() => selectUser(row.userId, row.characterId)}
                       />
                     ))}
                   </ul>
@@ -1032,8 +1077,8 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
               (mobileView === "thread" ? "flex-1" : "hidden md:flex md:flex-1")
             }
           >
-            {selectedUserId ? (() => {
-              // Resolve the friend/conv row for the selected user so we
+            {selectedTarget ? (() => {
+              // Resolve the friend/conv row for the selected target so we
               // can hand the pinned otherCharacterId down even when no
               // DirectConversation exists yet. Without this seed, the
               // first DM with a character-friend would create the
@@ -1047,10 +1092,14 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
               // `/profiles/:name`. This keeps the right-pane header
               // populated (name + avatar) BEFORE the first message
               // creates a conversation row.
+              const matchesTarget = (r: { userId: string; characterId: string | null }) =>
+                r.userId === selectedTarget.userId && r.characterId === selectedTarget.characterId;
               const selectedRow =
-                friendRows.find((r) => r.userId === selectedUserId)
-                  ?? nonFriendConvRows.find((r) => r.userId === selectedUserId)
-                  ?? (composeFallback && composeFallback.userId === selectedUserId
+                friendRows.find(matchesTarget)
+                  ?? nonFriendConvRows.find(matchesTarget)
+                  ?? (composeFallback
+                      && composeFallback.userId === selectedTarget.userId
+                      && composeFallback.characterId === selectedTarget.characterId
                       ? {
                           userId: composeFallback.userId,
                           characterId: composeFallback.characterId,
@@ -1061,9 +1110,9 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenPr
                       : null);
               return (
                 <ThreadPane
-                  otherUserId={selectedUserId}
+                  otherUserId={selectedTarget.userId}
+                  otherCharacterId={selectedTarget.characterId}
                   fallback={selectedRow}
-                  initialOtherCharacterId={selectedRow?.characterId ?? null}
                   onBack={() => setMobileView("list")}
                   appendDmMessage={appendDmMessage}
                   setDmMessages={setDmMessages}
@@ -1363,8 +1412,8 @@ function CharacterSwitcher({
 
 function ThreadPane({
   otherUserId,
+  otherCharacterId,
   fallback,
-  initialOtherCharacterId,
   onBack,
   appendDmMessage,
   setDmMessages,
@@ -1374,8 +1423,16 @@ function ThreadPane({
   onOpenProfile,
 }: {
   otherUserId: string;
+  /**
+   * The character id pinned to this thread on the OTHER party's side
+   * — null for an OOC/master thread. Required (paired with userId) to
+   * pick out the right conversation when the master account hosts
+   * multiple concurrent threads (OOC plus one per character). Matching
+   * on userId alone would surface the wrong thread and leak the
+   * character→master link.
+   */
+  otherCharacterId: string | null;
   fallback: { displayName: string; avatarUrl: string | null; online: boolean } | null;
-  initialOtherCharacterId: string | null;
   onBack: () => void;
   appendDmMessage: (msg: DirectMessage) => void;
   setDmMessages: (conversationId: string, msgs: DirectMessage[]) => void;
@@ -1388,10 +1445,16 @@ function ThreadPane({
   onOpenProfile?: (displayName: string) => void;
 }) {
   // Resolve conversation reactively — server creates the row on first
-  // send, so it may be absent until then. NO_DM_MESSAGES is a stable
-  // sentinel to prevent the Zustand selector loop bug.
+  // send, so it may be absent until then. Matching on BOTH userId AND
+  // the pinned character id is what keeps a master's OOC thread, their
+  // Char A thread and their Char B thread separate — otherwise the
+  // first one returned by `find` wins and the rest are invisible.
+  // NO_DM_MESSAGES is a stable sentinel to prevent the Zustand selector
+  // loop bug.
   const conversation = useChat(
-    (s) => Object.values(s.dmConversations).find((c) => c.otherUserId === otherUserId) ?? null,
+    (s) => Object.values(s.dmConversations).find(
+      (c) => c.otherUserId === otherUserId && c.otherCharacterId === otherCharacterId,
+    ) ?? null,
   );
   // Admin-configured DM length cap — server is the source of truth,
   // this mirrors it so the input's maxLength matches what the send
@@ -1405,10 +1468,11 @@ function ThreadPane({
   // Target identity pinned to THIS thread. Existing conversations
   // carry an authoritative `otherCharacterId` from the server (the
   // pinned side of the row); fresh threads with no conversation yet
-  // fall back to the friend/conv row's pinned character so the first
-  // send creates the conversation against the right identity — not
-  // the OOC side, which was the partition-leak the user reported.
-  const targetCharacterId = conversation?.otherCharacterId ?? initialOtherCharacterId;
+  // fall back to the prop, which the parent seeds from the friend/conv
+  // row's pinned character so the first send creates the conversation
+  // against the right identity — not the OOC side, which was the
+  // partition-leak the user reported.
+  const targetCharacterId = conversation?.otherCharacterId ?? otherCharacterId;
   const messages = useChat((s) =>
     conversation ? (s.dmMessagesByConv[conversation.id] ?? NO_DM_MESSAGES) : NO_DM_MESSAGES,
   );
@@ -1522,7 +1586,7 @@ function ThreadPane({
         // refetches NOW that the server-side read marker is
         // committed. Without this, the inbox-counts refetch
         // triggered by the optimistic `unreadCount: 0` on
-        // selectedUserId change races ahead of the DB write and
+        // selection change races ahead of the DB write and
         // comes back stale — the conversation row badge clears
         // but the chip pip stays.
         useChat.getState().bumpInboxCountsVersion();

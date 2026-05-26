@@ -549,8 +549,16 @@ interface ChatState {
    * id because the conversation row may not exist server-side until
    * the first message is sent — letting the panel mount with just an
    * otherUserId removes the "first-DM bootstrapping" footgun.
+   *
+   * The companion `openDmOtherCharacterId` is the *pinned* character
+   * id on that thread; together they identify the conversation
+   * uniquely. A master account with three characters can have four
+   * concurrent threads (OOC + each character), so matching only on
+   * userId would conflate them — that's the per-identity partition
+   * leak the privacy model is built around.
    */
   openDmOtherUserId: string | null;
+  openDmOtherCharacterId: string | null;
   /**
    * Pending friend requests received by the current user. Source of truth
    * is `/me/friend-requests`; the store mirror powers the in-chat prompt
@@ -617,7 +625,7 @@ interface ChatState {
   setDmMessages: (conversationId: string, msgs: DirectMessage[]) => void;
   appendDmMessage: (msg: DirectMessage) => void;
   updateDmMessage: (msg: DirectMessage) => void;
-  setOpenDmOtherUser: (otherUserId: string | null) => void;
+  setOpenDmOtherUser: (otherUserId: string | null, otherCharacterId?: string | null) => void;
   setDmsEnabled: (enabled: boolean) => void;
   bumpDmReseed: () => void;
 
@@ -1044,6 +1052,7 @@ export const useChat = create<ChatState>((set) => ({
   dmMessagesByConv: {},
   dmConversations: {},
   openDmOtherUserId: null,
+  openDmOtherCharacterId: null,
   pendingFriendRequests: [],
   setPendingFriendRequests: (list) => set({ pendingFriendRequests: list }),
   removePendingFriendRequest: (userId) =>
@@ -1091,7 +1100,10 @@ export const useChat = create<ChatState>((set) => ({
       dmMessagesByConv: { ...s.dmMessagesByConv, [msg.conversationId]: next },
     };
   }),
-  setOpenDmOtherUser: (otherUserId) => set({ openDmOtherUserId: otherUserId }),
+  setOpenDmOtherUser: (otherUserId, otherCharacterId = null) => set({
+    openDmOtherUserId: otherUserId,
+    openDmOtherCharacterId: otherUserId === null ? null : otherCharacterId,
+  }),
   setDmsEnabled: (enabled) => set({ dmsEnabled: enabled }),
   bumpDmReseed: () => set((s) => ({ dmReseedTick: s.dmReseedTick + 1 })),
 

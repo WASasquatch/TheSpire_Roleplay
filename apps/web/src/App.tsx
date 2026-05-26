@@ -809,6 +809,7 @@ function Chat() {
   const setDmConversations = useChat((s) => s.setDmConversations);
   const upsertDmConversation = useChat((s) => s.upsertDmConversation);
   const openDmOtherUserId = useChat((s) => s.openDmOtherUserId);
+  const openDmOtherCharacterId = useChat((s) => s.openDmOtherCharacterId);
   const setOpenDmOtherUser = useChat((s) => s.setOpenDmOtherUser);
   const bumpDmReseed = useChat((s) => s.bumpDmReseed);
   const setCurrentRoom = useChat((s) => s.setCurrentRoom);
@@ -1947,7 +1948,14 @@ function Chat() {
         const meIdInner = state.me?.id ?? "";
         const otherUserId = known.otherUserId;
         const isSelf = message.senderId === meIdInner;
-        const viewing = state.openDmOtherUserId === otherUserId;
+        // Match the open thread on BOTH userId AND the pinned character
+        // id. Without the character match, a `dm:new` for one of a
+        // master's character threads is silently treated as read while
+        // the user is staring at that master's OOC thread (or any other
+        // character thread), and the unread badge never advances on the
+        // off-screen conversation.
+        const viewing = state.openDmOtherUserId === otherUserId
+          && state.openDmOtherCharacterId === known.otherCharacterId;
         if (viewing && !isSelf) {
           // Mark read on the server so the next /me/dms refetch
           // returns unreadCount=0 too. Carries the active character
@@ -2420,12 +2428,15 @@ function Chat() {
   /**
    * Open the unified Messages modal with a specific user pre-selected.
    * Routed from ProfileModal's "💬 Message" button and any other
-   * "send a DM to this person" entry points. The modal handles
-   * conversation lookup internally — we just open it and set the
-   * target via the store so it picks the right row.
+   * "send a DM to this person" entry points. `otherCharacterId` pins
+   * the target to the right per-identity thread — null routes to the
+   * master/OOC conversation; a character id opens the thread for that
+   * character. Without the character id the modal would surface
+   * whichever (userId, _) conversation happened to land first in the
+   * store, leaking the character→master link.
    */
-  function openDmWithUser(otherUserId: string) {
-    setOpenDmOtherUser(otherUserId);
+  function openDmWithUser(otherUserId: string, otherCharacterId: string | null) {
+    setOpenDmOtherUser(otherUserId, otherCharacterId);
     setMessagesOpen(true);
     // Best-effort cache warm so the modal's first paint is correct.
     fetch(withIdentityQuery("/me/dms", useChat.getState().activeCharacterId), { credentials: "include" })
@@ -2914,14 +2925,21 @@ function Chat() {
                   // had a draft going when they opened the profile.
                   setComposerText((cur) => `/whisper ${name} ${cur ?? ""}`);
                 },
-                // Open the DM floating panel. The conversation is
-                // looked up by `otherUserId` server-side; if no
-                // conversation exists yet the panel renders in
-                // "Send a message to start" mode and the first
-                // POST creates the conversation.
+                // Open the unified Messages modal pinned to the right
+                // per-identity thread: when the profile in view is a
+                // character we hand its id to the messenger so the
+                // character's conversation opens (not the master/OOC
+                // one), preserving the privacy partition between a
+                // user's identities. If no conversation exists yet the
+                // panel renders in "Send a message to start" mode and
+                // the first POST creates the conversation pinned to
+                // that same identity.
                 onMessage: (userId: string) => {
+                  const targetCharId = openProfile.kind === "character"
+                    ? (openProfile.profile.id ?? null)
+                    : null;
                   setOpenProfile(null);
-                  openDmWithUser(userId);
+                  openDmWithUser(userId, targetCharId);
                 },
                 onIgnore: (name: string) => {
                   setOpenProfile(null);
@@ -3087,6 +3105,7 @@ function Chat() {
           onClose={() => { setMessagesOpen(false); setOpenDmOtherUser(null); }}
           onCommand={(text) => send(text)}
           initialOtherUserId={openDmOtherUserId}
+          initialOtherCharacterId={openDmOtherCharacterId}
           // Open the profile modal when the DM header / bubble name is
           // clicked. Same socket-backed fetch chat's avatar-tile click
           // uses, so character vs master profile selection follows the

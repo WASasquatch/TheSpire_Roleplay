@@ -681,14 +681,26 @@ function StoryCardTile({
       <button
         type="button"
         onClick={onOpen}
-        className="relative block aspect-[3/2] w-full overflow-hidden bg-keep-bg/60 text-left"
+        // 2:3 portrait frame — the standard book-cover aspect.
+        // Combined with `object-contain` below, portrait uploads
+        // (which is the genre norm) fill the frame perfectly, AND
+        // landscape uploads letterbox cleanly against the bg-keep-bg
+        // tint instead of being center-cropped. Previously the
+        // 3:2 landscape frame + object-cover chopped portrait
+        // covers in half.
+        className="relative block aspect-[2/3] w-full overflow-hidden bg-keep-bg/60 text-left"
         title={lockedForAnon ? "Rated NC-17 — log in or register to read" : undefined}
       >
         {card.coverImageUrl ? (
           <img
             src={card.coverImageUrl}
             alt={card.title}
-            className={`h-full w-full object-cover transition group-hover:scale-[1.02] ${lockedForAnon ? "blur-sm" : ""}`}
+            // `object-contain` (not `object-cover`) — never crop
+            // user-uploaded cover art. Aspect mismatch with the 2:3
+            // frame shows the bg-keep-bg tint as letterboxing,
+            // which reads as intentional framing rather than as
+            // truncation.
+            className={`h-full w-full object-contain transition group-hover:scale-[1.02] ${lockedForAnon ? "blur-sm" : ""}`}
             loading="lazy"
             referrerPolicy="no-referrer"
           />

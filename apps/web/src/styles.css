@@ -2086,6 +2086,68 @@ aside.margin-note {
 }
 
 /* ============================================================
+ * Auto-scheme reader — solid theme-bg surface for legibility
+ * ============================================================
+ *
+ * The reader is a dedicated reading surface — comfort > visual
+ * harmony with the surrounding chrome. The "auto" scheme (the
+ * default) inherits the active theme's palette, but the
+ * designs layered on `.keep-frame` / `.keep-panel` paint
+ * translucency, backdrop-filters, and texture overlays
+ * (scifi cyber tint + cyber-texture PNG, glass theme's
+ * backdrop blur, future designs) underneath every panel.
+ * Stacking those under the reader-shell's old dark overlay
+ * produced an effective rendered background that the
+ * legibility check on `--keep-text` couldn't account for,
+ * leaving prose dim on dark themes and washed-out on light
+ * ones.
+ *
+ * Fix: when no manual scheme is selected (light/sepia/dark
+ * provide their own paper-feel surfaces), force the reader
+ * shell + its inner panels to a solid `--keep-bg` and strip
+ * backdrop-filter + the per-design `::before` texture
+ * overlays. The legibility-nudged `--keep-text` then has a
+ * stable, predictable background to contrast against
+ * regardless of which design is active.
+ *
+ * The outer .keep-frame's chrome (neon border, glass bevel)
+ * is unaffected — these rules only target the inner reader
+ * surfaces.
+ */
+.reader-shell:not([data-reader-scheme]) {
+  background-color: rgb(var(--keep-bg));
+  background-image: none;
+  color: rgb(var(--keep-text));
+}
+.reader-shell:not([data-reader-scheme]) .reader-sidebar,
+.reader-shell:not([data-reader-scheme]) .reader-main > .keep-panel,
+.reader-shell:not([data-reader-scheme]) .reader-main > div.keep-panel {
+  background-color: rgb(var(--keep-bg));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color: rgb(var(--keep-text));
+}
+.reader-shell:not([data-reader-scheme]) .reader-sidebar::before,
+.reader-shell:not([data-reader-scheme]) .reader-main > .keep-panel::before,
+.reader-shell:not([data-reader-scheme]) .reader-main > div.keep-panel::before {
+  display: none;
+}
+/* Story author bodyHtml is sanitized HTML that may carry inline
+ * `style="color: …"` from the rich-text editor. Authors writing
+ * on one theme don't know what their readers' themes will look
+ * like, so honor `currentColor` (which resolves to the reader's
+ * legibility-checked `--keep-text`) by stripping any inherited
+ * color override on the prose body. Inline-styled spans the
+ * author explicitly painted (a colored character-name span,
+ * etc.) still keep their color since `color:` on a child wins
+ * over `unset` on the parent; what's prevented is a stray
+ * top-level color on the body element making the whole prose
+ * dim. */
+.reader-shell:not([data-reader-scheme]) .prose-reader {
+  color: rgb(var(--keep-text));
+}
+
+/* ============================================================
  * Themed notice bars — top-of-app notification strips
  * ============================================================
  *
@@ -3283,6 +3345,27 @@ aside.margin-note {
   border: 1px solid var(--shelf-brass-soft);
   border-radius: 999px;
   font-weight: 600;
+}
+/* Anonymous NC-17 lock badge — small overlay anchored to the
+ * top-right of the cover face. Hints that opening the book will
+ * route through the login prompt before the user clicks. Only
+ * rendered when viewer is anonymous AND rating is NC-17 (see
+ * BookshelfStrip.tsx `lockedForAnon`). */
+.bookshelf-book .cover-lock {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  line-height: 1;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--shelf-brass-soft);
+  border-radius: 999px;
+  pointer-events: none;
 }
 
 /* HOVER — pull book forward, rotate so cover swings into view */

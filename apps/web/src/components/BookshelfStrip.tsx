@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { StoryCard } from "@thekeep/shared";
 import { ratingRequiresAuth, STORY_RATING_INFO } from "@thekeep/shared";
+import { useChat } from "../state/store.js";
 
 interface Props {
   onNavigate: (path: string) => void;
@@ -233,6 +234,13 @@ function StoryBook({ card, lean, index, onOpen }: BookProps & { card: StoryCard;
   const driftDur = 5 + ((strHash(card.id + ":d") % 30) / 10); // 5.0 .. 7.9s
   const driftDelay = -((strHash(card.id + ":x") % 30) / 10); // -0.0 .. -2.9s
   const ratingInfo = STORY_RATING_INFO[card.rating];
+  // Anonymous viewers see NC-17 books in the bookshelf (the splash
+  // endpoint surfaces every rating now), but tapping one reroutes
+  // through the login prompt because the body is gated. Paint a
+  // lock badge on the cover so the gate is visible BEFORE the click
+  // instead of being a surprise redirect.
+  const me = useChat((s) => s.me);
+  const lockedForAnon = !me && ratingRequiresAuth(card.rating);
   const styleVars = {
     ...bookColorVars(palette),
     "--drift-dur": `${driftDur}s`,
@@ -272,6 +280,15 @@ function StoryBook({ card, lean, index, onOpen }: BookProps & { card: StoryCard;
                 <span className="cover-author">{author}</span>
                 <span className="cover-rating" title={ratingInfo.short}>{card.rating}</span>
               </span>
+              {lockedForAnon ? (
+                <span
+                  className="cover-lock"
+                  aria-hidden
+                  title="Log in or register to read"
+                >
+                  🔒
+                </span>
+              ) : null}
             </span>
           </span>
           <span className="face pages" />

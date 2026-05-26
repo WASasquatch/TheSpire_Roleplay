@@ -97,7 +97,7 @@ export function StoryEditorModal({ storyId: initialId, onClose, onDeleted, onBac
 
   if (!storyId) {
     return (
-      <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
+      <Modal onClose={onClose} zIndex={60} variant="mobile-fullscreen">
         <div
           className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg text-keep-text`}
           onClick={(e) => e.stopPropagation()}

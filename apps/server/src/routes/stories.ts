@@ -856,10 +856,19 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     };
   }
 
-  /* ---------- Splash catalog (anonymous-safe, SFW only) ---------- */
+  /* ---------- Splash bookshelf (anonymous-safe) ----------
+   *
+   * Picks every public, non-draft, non-abandoned story regardless
+   * of rating — including NC-17. The splash bookshelf renderer
+   * paints the lock overlay + "Log in or register to read" hint
+   * on NC-17 entries (same pattern as the catalog card tile), and
+   * the body-open route returns the login-required private-stub
+   * for NC-17 to anonymous viewers. The shelf is honest about what
+   * exists; the access gate is at body-open time, not on the
+   * cover thumbnail.
+   */
   app.get<{ Querystring: { limit?: string } }>("/stories/splash", async (req) => {
     const limit = Math.min(24, Math.max(1, parseInt(req.query.limit ?? "12", 10) || 12));
-    const sfwList = SFW_RATINGS as readonly string[];
     const rows = await db
       .select()
       .from(stories)
@@ -867,11 +876,6 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
         eq(stories.visibility, "public"),
         ne(stories.status, "draft"),
         ne(stories.status, "abandoned"),
-        or(
-          eq(stories.rating, sfwList[0]!),
-          eq(stories.rating, sfwList[1]!),
-          eq(stories.rating, sfwList[2]!),
-        ),
       ))
       .orderBy(desc(stories.publishedAt), desc(stories.updatedAt))
       .limit(limit);
@@ -930,15 +934,14 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     //   - Signed-in viewers see EVERYTHING. The mature-content gate
     //     for signed-in users happens at the body-open / reader
     //     step (splash warning before display), not at catalog
-    //     listing time — hiding R / NC-17 from the catalog was
-    //     making authors unable to find their own published work
-    //     and giving signed-in readers a confusing "where's that
-    //     story I saw yesterday" experience.
-    //   - Anonymous viewers see UP TO R. NC-17 is hidden from the
-    //     anonymous catalog entirely (no chip, no cover thumbnail)
-    //     — the existing body-open route still returns the
-    //     private-stub for NC-17 if someone somehow lands on a URL,
-    //     so this is just removing the listing-side leak.
+    //     listing time.
+    //   - Anonymous viewers ALSO see every rating, including NC-17,
+    //     in the listing — the card-tile renderer paints a
+    //     lock overlay + "Log in or register to read" hint on
+    //     NC-17 entries, and the body-open route returns the
+    //     login-required private-stub for NC-17 to anonymous.
+    //     So the catalog is a catalog (honest about what exists);
+    //     the access gate is the body, not the chip + thumbnail.
     // `users.storyCwBlocklist` is still honored as a personal
     // opt-OUT for signed-in readers who explicitly chose to hide
     // certain content warnings (configurable in profile settings);
@@ -954,15 +957,6 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
         const needle = `%,${cw.toLowerCase()},%`;
         conds.push(sql`(',' || lower(${stories.contentWarnings}) || ',') NOT LIKE ${needle}`);
       }
-    } else {
-      // Anonymous: cap at R. NC-17 cards are stripped from the
-      // listing entirely (cards never reach unauthenticated
-      // viewers; the body-open route would still 401-stub them
-      // even if a URL were guessed).
-      const allowed = PUBLIC_READABLE_RATINGS as readonly string[];
-      conds.push(or(
-        ...allowed.map((r) => eq(stories.rating, r)),
-      )!);
     }
 
     if (q.q && q.q.trim()) {

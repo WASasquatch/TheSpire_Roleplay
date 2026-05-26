@@ -681,14 +681,22 @@ function StoryCardTile({
       <button
         type="button"
         onClick={onOpen}
-        // 2:3 portrait frame — the standard book-cover aspect.
-        // Combined with `object-contain` below, portrait uploads
-        // (which is the genre norm) fill the frame perfectly, AND
-        // landscape uploads letterbox cleanly against the bg-keep-bg
-        // tint instead of being center-cropped. Previously the
-        // 3:2 landscape frame + object-cover chopped portrait
-        // covers in half.
-        className="relative block aspect-[2/3] w-full overflow-hidden bg-keep-bg/60 text-left"
+        // 3:2 landscape FRAME paired with `object-contain` (below):
+        //   - Portrait cover uploads (book-cover standard) display
+        //     as portrait inside the landscape frame, letterboxed
+        //     left/right against the bg-keep-bg tint. The image
+        //     STILL READS as portrait at its natural aspect — the
+        //     frame just doesn't grow to match.
+        //   - Landscape covers fit the frame nearly edge to edge
+        //     with a small top/bottom letterbox if the aspect
+        //     doesn't quite match.
+        // A previous attempt used a 2:3 portrait frame, but when
+        // the grid drops to one or two columns the cell width is
+        // wide, and 2:3 made the cover ~1.5× column-width tall —
+        // the card's title + meta fell off the bottom of the
+        // modal and forced scrolling per card. 3:2 keeps the card
+        // compact and the title visible.
+        className="relative block aspect-[3/2] w-full overflow-hidden bg-keep-bg/60 text-left"
         title={lockedForAnon ? "Rated NC-17 — log in or register to read" : undefined}
       >
         {card.coverImageUrl ? (
@@ -696,8 +704,8 @@ function StoryCardTile({
             src={card.coverImageUrl}
             alt={card.title}
             // `object-contain` (not `object-cover`) — never crop
-            // user-uploaded cover art. Aspect mismatch with the 2:3
-            // frame shows the bg-keep-bg tint as letterboxing,
+            // user-uploaded cover art. Aspect mismatch with the
+            // landscape frame letterboxes against bg-keep-bg,
             // which reads as intentional framing rather than as
             // truncation.
             className={`h-full w-full object-contain transition group-hover:scale-[1.02] ${lockedForAnon ? "blur-sm" : ""}`}

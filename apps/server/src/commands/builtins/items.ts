@@ -655,6 +655,18 @@ export const giveCommand: CommandHandler = {
   usage: "/give <name> [num] <item>",
   description:
     "Hand `num` units of an item to another user in the room. The item leaves your inventory and lands in theirs (whichever identity they're currently voicing). Quantity defaults to 1. Item can be the slug (cookie) or display name (cookies). Each identity (OOC + each character) has its own inventory — `/give` is the only legal way to move items across the partition.",
+  subcommands: [
+    {
+      verb: "<name> <item>",
+      usage: "/give Alice cookie",
+      description: "Give one of the named item to a user. Item can be its slug, display name, plural, or any admin-set alias.",
+    },
+    {
+      verb: "<name> <num> <item>",
+      usage: "/give Alice 3 cookie",
+      description: "Give a specific quantity. Caps at what your active identity actually owns.",
+    },
+  ],
   async run(ctx) {
     await handleItemCommand(ctx, "give");
   },
@@ -664,7 +676,19 @@ export const throwCommand: CommandHandler = {
   name: "throw",
   usage: "/throw <name> [num] <item>",
   description:
-    "Consume an item to toss it at someone in the room — flavor only, target gets nothing. Quantity defaults to 1. Item can be the slug or display name. Each item ships its own random `/throw` lines; if an item has none, /throw isn't allowed on it.",
+    "Consume an item to toss it at someone in the room — flavor only, target gets nothing. Quantity defaults to 1. Item can be the slug or display name. Each item ships its own random `/throw` lines; if an item has none, /throw isn't allowed on it. Subject to a 4-second per-sender cooldown.",
+  subcommands: [
+    {
+      verb: "<name> <item>",
+      usage: "/throw Alice pie",
+      description: "Throw one of the named item at a user. Consumed from your inventory; target gets nothing.",
+    },
+    {
+      verb: "<name> <num> <item>",
+      usage: "/throw Alice 3 pie",
+      description: "Throw a specific quantity. Caps at what your active identity actually owns.",
+    },
+  ],
   async run(ctx) {
     await handleItemCommand(ctx, "throw");
   },
@@ -674,7 +698,19 @@ export const dropCommand: CommandHandler = {
   name: "drop",
   usage: "/drop <name> [num] <item>",
   description:
-    "Consume an item to drop it on someone in the room — flavor only, target gets nothing. Same shape as /throw with different flavor text. Quantity defaults to 1. Each item ships its own random `/drop` lines; if an item has none, /drop isn't allowed on it.",
+    "Consume an item to drop it on someone in the room — flavor only, target gets nothing. Same shape as /throw with different flavor text. Quantity defaults to 1. Each item ships its own random `/drop` lines; if an item has none, /drop isn't allowed on it. Subject to a 4-second per-sender cooldown.",
+  subcommands: [
+    {
+      verb: "<name> <item>",
+      usage: "/drop Alice rose",
+      description: "Drop one of the named item on a user. Consumed from your inventory; target gets nothing.",
+    },
+    {
+      verb: "<name> <num> <item>",
+      usage: "/drop Alice 3 rose",
+      description: "Drop a specific quantity. Caps at what your active identity actually owns.",
+    },
+  ],
   async run(ctx) {
     await handleItemCommand(ctx, "drop");
   },

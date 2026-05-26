@@ -973,4 +973,230 @@ foot of the mountains. Speaks little. Watches everything.</p>
       </>
     ),
   },
+
+  {
+    id: "items",
+    title: "Items, shop, pets & collections",
+    body: (
+      <>
+        <P>
+          Currency from earning is spent on <b>items</b> in the Shop — cookies, plushies, tools,
+          pets, and whatever else the admin team has put on the shelves. Items live in a
+          per-identity inventory: your master account and each of your characters each keep their
+          own.
+        </P>
+
+        <Heading>Browsing & buying</Heading>
+        <Bullets>
+          <li>
+            <K>/shop</K> — opens the Shop tab inside the Earnings panel. Same as Earnings ▸
+            Items ▸ Shop.
+          </li>
+          <li>
+            <K>/item &lt;name&gt;</K> — pop the full-screen item card for any catalog item.
+            Matches the slug ("cookie"), display name, plural, or any admin-set alias.
+          </li>
+        </Bullets>
+
+        <Heading>Using items in chat</Heading>
+        <Bullets>
+          <li>
+            <K>/give &lt;name&gt; [num] &lt;item&gt;</K> — hand items to another user in the
+            room. They land in the recipient's currently-active identity. Quantity defaults to 1.
+            This is the only way to move items between two of your own identities — just give to
+            yourself.
+          </li>
+          <li>
+            <K>/throw &lt;name&gt; [num] &lt;item&gt;</K> — toss an item at someone. Flavor only:
+            the item is consumed from your inventory; the target gets nothing. Each item ships
+            its own random throw lines (set by admins); items without throw lines refuse the
+            action.
+          </li>
+          <li>
+            <K>/drop &lt;name&gt; [num] &lt;item&gt;</K> — same shape as throw, different flavor.
+            Both share a 4-second per-sender cooldown so the room doesn't flicker.
+          </li>
+        </Bullets>
+
+        <Heading>Pinning to your profile</Heading>
+        <P>
+          You can pin favorites so other players see them on your profile.
+        </P>
+        <Bullets>
+          <li>
+            <K>/collection</K> — opens your 10-slot Collection showcase. Pin any item.
+          </li>
+          <li>
+            <K>/pets</K> — opens your 5-slot Pets showcase. Pets only.
+          </li>
+        </Bullets>
+        <P>
+          Both pin sets are per-identity — your character's Collection is separate from your
+          master's. Tap a pinned item on someone's profile to open its card (same as
+          <K>/item &lt;name&gt;</K>).
+        </P>
+
+        <Tip>
+          Quantities on <K>/give</K>, <K>/throw</K>, <K>/drop</K> are optional and default to
+          one. If your active identity doesn't own the item (or doesn't own enough), the action
+          fails quietly without consuming anything.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "scriptorium",
+    title: "Scriptorium: long-form fiction",
+    body: (
+      <>
+        <P>
+          The Scriptorium is the long-form writing surface — short stories, serialized novels,
+          fanfiction. Stories sit outside the chat: they have chapters, an optional codex,
+          collaborators, reviews, applause, and a subscriber list.
+        </P>
+
+        <Heading>Authoring</Heading>
+        <Bullets>
+          <li>
+            <K>/write</K> — opens the editor on your most recently-edited draft.
+          </li>
+          <li>
+            <K>/write new</K> — launches the New Story wizard. Pick a title, genre, rating, and
+            visibility.
+          </li>
+          <li>
+            <K>/write &lt;slug&gt;</K> — edits one of your stories by URL slug.
+          </li>
+        </Bullets>
+        <P>
+          Each chapter has its own publish state (draft / published / abandoned) with autosaved
+          version history. If a collaborator is already in a chapter, a soft lock surfaces "Alice
+          is editing — open read-only?" so you don't overwrite each other.
+        </P>
+
+        <Heading>Visibility & ratings</Heading>
+        <Bullets>
+          <li>
+            <b>Private</b> — only you and invited collaborators can see it.
+          </li>
+          <li>
+            <b>Unlisted</b> — anyone with the URL can read it. Not in catalogs.
+          </li>
+          <li>
+            <b>Public</b> — listed in the Story Catalog and on the splash bookshelf, readable
+            per the rating gate.
+          </li>
+        </Bullets>
+        <P>
+          Ratings (G / PG / PG-13 / R / NC-17) gate ANONYMOUS readers: G through R are publicly
+          readable; NC-17 cards show in the catalog with a lock badge and require a logged-in
+          account to open. Signed-in readers see everything; per-user content-warning blocklists
+          (Profile ▸ Privacy ▸ Scriptorium) hide stories tagged with warnings you've opted out
+          of.
+        </P>
+
+        <Heading>Reading</Heading>
+        <Bullets>
+          <li>
+            <K>/scriptorium</K> — opens the catalog. Tabs: <b>Find Stories</b> (everything),
+            <b> My Stories</b> (your drafts + published), <b>Reading</b> (resumes where you left
+            off), <b>Following</b> (your subscriptions).
+          </li>
+          <li>
+            <K>/story &lt;slug&gt;</K> — open a story in the reader.
+          </li>
+          <li>
+            <K>/story &lt;slug&gt; chapter &lt;N&gt;</K> — jump to a specific chapter.
+          </li>
+        </Bullets>
+        <P>
+          The reader offers <b>book mode</b> (paginated columns, page-flip nav) and{" "}
+          <b>pageless mode</b> (single scroll, resume where you left off). Typography controls
+          (font, size, line height, column width) and color schemes (light / sepia / dark / auto)
+          live in the reader's toolbar.
+        </P>
+
+        <Heading>Reader engagement</Heading>
+        <Bullets>
+          <li>
+            <b>Reviews + applause</b> — one review per (reader, story) with 1–5 stars and an
+            optional prose body. 60-second edit grace mirrors chat. Reviews support replies.
+            Applause is one-tap, one per reader.
+          </li>
+          <li>
+            <b>Subscribe</b> — follow a story so new-chapter publishes drop you an in-app
+            notification.
+          </li>
+          <li>
+            <b>Codex</b> — authors can publish a per-story bible (characters, places, plot points)
+            that lives alongside the story. Useful for tracking continuity without putting it in
+            the prose.
+          </li>
+        </Bullets>
+
+        <Tip>
+          Collaborators (Profile ▸ Story Editor ▸ Collaborators) get role-based access:
+          <b> reader</b> (beta access only), <b>commenter</b>, or <b>co-author</b>. The story
+          owner is implicit and always has full rights.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "emoticons",
+    title: "Emoticons & reactions",
+    body: (
+      <>
+        <P>
+          The Spire ships sticker-sheet emoticons that work two ways: as inline sprites in your
+          messages, and as reactions on someone else's message, DM, or forum post.
+        </P>
+
+        <Heading>Inline emoticons</Heading>
+        <P>
+          Click the smiley in the formatting toolbar above the composer. The picker opens; pick a
+          cell from any sheet and it lands at your caret as a token like <K>:happy:0:</K>. When
+          your message renders, the token becomes the sprite.
+        </P>
+        <P>
+          A message that's <i>just</i> a single emoticon (no other words) renders at sticker
+          size — 84px — instead of the inline 24px sprite. Messenger / Discord / Telegram style.
+        </P>
+
+        <Heading>Reactions</Heading>
+        <Bullets>
+          <li>
+            <b>Where</b> — chat messages, DMs, and forum posts all accept reactions.
+          </li>
+          <li>
+            <b>How</b> — the <K>+ 😊</K> trigger lives in the floating right-side message-tool
+            row (next to Edit on chat lines, in the action toolbar on forum posts). It surfaces
+            on hover (desktop) or row tap (mobile), so empty chat rows aren't littered with
+            buttons.
+          </li>
+          <li>
+            <b>Chips</b> — each unique reaction groups into a round chip showing the sprite + a
+            count. Tap a chip to add or remove your own reaction.
+          </li>
+          <li>
+            <b>Tooltip</b> — hover any chip to see a larger preview of the sprite and a prose
+            list of who reacted ("Alice and Bob reacted with happy", "Alice, Bob, and 3 others
+            reacted with happy").
+          </li>
+          <li>
+            <b>Caps</b> — 4 visible chips on mobile, 10 on desktop. Past that, a <b>+N more</b>
+            {" "}button opens the full reactor list grouped by emoticon.
+          </li>
+        </Bullets>
+
+        <Tip>
+          Emoticon tokens (<K>:slug:idx:</K>) don't trigger the <K>:</K> /me action shortcut, so
+          a message that starts with an emoticon sends as a normal chat line — no italic action
+          framing.
+        </Tip>
+      </>
+    ),
+  },
 ];

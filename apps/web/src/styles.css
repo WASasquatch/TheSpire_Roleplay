@@ -3058,7 +3058,8 @@ aside.margin-note {
 .bookshelf-book.lean-r .book-3d { transform: rotateZ(0.8deg); }
 
 .bookshelf-book:hover .float-wrap,
-.bookshelf-book:focus-visible .float-wrap {
+.bookshelf-book:focus-visible .float-wrap,
+.bookshelf-book[data-pulled="true"] .float-wrap {
   animation: bookshelf-drift var(--drift-dur, 6s) ease-in-out infinite;
   animation-delay: var(--drift-delay, 0s);
 }
@@ -3093,7 +3094,11 @@ aside.margin-note {
 .bookshelf-book:focus-visible .cover,
 .bookshelf-book:focus-visible .back,
 .bookshelf-book:focus-visible .pages,
-.bookshelf-book:focus-visible .top-edge {
+.bookshelf-book:focus-visible .top-edge,
+.bookshelf-book[data-pulled="true"] .cover,
+.bookshelf-book[data-pulled="true"] .back,
+.bookshelf-book[data-pulled="true"] .pages,
+.bookshelf-book[data-pulled="true"] .top-edge {
   opacity: 1;
   transition: opacity 200ms ease 100ms;
 }
@@ -3257,8 +3262,16 @@ aside.margin-note {
   pointer-events: none;
 }
 .bookshelf-book .cover-art {
+  /* Portrait slot (2:3 book-cover aspect) so portrait uploads —
+   * the genre standard for cover art — fill the cover-art area
+   * naturally. Paired with `object-fit: contain` on the img so
+   * landscape uploads letterbox top/bottom instead of being
+   * center-cropped, and portrait uploads at any aspect taller
+   * than 2:3 letterbox left/right rather than getting their tops
+   * and bottoms shaved off. Square was the previous default and
+   * cropped both portrait and landscape covers awkwardly. */
   width: 78%;
-  aspect-ratio: 1;
+  aspect-ratio: 2 / 3;
   margin-top: 4px;
   display: flex;
   align-items: center;
@@ -3269,7 +3282,7 @@ aside.margin-note {
 .bookshelf-book .cover-art img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
 }
 .bookshelf-book .cover-art svg {
@@ -3368,22 +3381,37 @@ aside.margin-note {
   pointer-events: none;
 }
 
-/* HOVER — pull book forward, rotate so cover swings into view */
+/* HOVER + PULL — pull book forward, rotate so cover swings into
+ * view. Three triggers:
+ *   :hover                  — desktop mouse / trackpad
+ *   :focus-visible          — keyboard tab navigation
+ *   [data-pulled="true"]    — touch devices via the
+ *                              first-tap-pulls / second-tap-opens
+ *                              state machine in BookshelfStrip.tsx.
+ *                              Without it, mobile users couldn't
+ *                              preview a book's cover (no hover on
+ *                              touch); their only experience was a
+ *                              spine they tapped that immediately
+ *                              navigated. */
 .bookshelf-book:hover,
-.bookshelf-book:focus-visible {
+.bookshelf-book:focus-visible,
+.bookshelf-book[data-pulled="true"] {
   z-index: 50;
   outline: none;
 }
 .bookshelf-book:hover .book-3d,
-.bookshelf-book:focus-visible .book-3d {
+.bookshelf-book:focus-visible .book-3d,
+.bookshelf-book[data-pulled="true"] .book-3d {
   transform: translateZ(320px) translateY(-8px) translateX(calc(var(--w) * -0.5)) rotateY(-78deg);
 }
 .bookshelf-book:hover .spine-title,
-.bookshelf-book:focus-visible .spine-title {
+.bookshelf-book:focus-visible .spine-title,
+.bookshelf-book[data-pulled="true"] .spine-title {
   opacity: 0;
 }
 .bookshelf-book:hover .cover-content,
-.bookshelf-book:focus-visible .cover-content {
+.bookshelf-book:focus-visible .cover-content,
+.bookshelf-book[data-pulled="true"] .cover-content {
   opacity: 1;
 }
 
@@ -3400,7 +3428,8 @@ aside.margin-note {
   z-index: -1;
 }
 .bookshelf-book:hover .book-shadow,
-.bookshelf-book:focus-visible .book-shadow {
+.bookshelf-book:focus-visible .book-shadow,
+.bookshelf-book[data-pulled="true"] .book-shadow {
   width: calc(var(--d) * 0.9);
   height: 24px;
   bottom: -16px;
@@ -3440,7 +3469,16 @@ aside.margin-note {
   min-height: 140px;
 }
 
-/* Responsive shrinks. Mirrors the MVP's two breakpoints. */
+/* Responsive shrinks. The shelf's pulled-out book uses `translateZ`
+ * to fly forward; on a viewport narrower than the shelf's full
+ * shelved width the books would otherwise overflow horizontally
+ * AND the pulled book's perspective projection would draw off the
+ * viewport edge. Solve both by shrinking the per-book CSS vars
+ * (`--w`, `--h`, `--d`) and clipping `.bookshelf-stage` so the
+ * back-wall vignette + any z-projected residue can't escape
+ * sideways. */
+.bookshelf-stage { overflow-x: clip; }
+
 @media (max-width: 900px) {
   .bookshelf-shelf { height: 360px; }
   .bookshelf-book {
@@ -3449,7 +3487,8 @@ aside.margin-note {
     --w: 42px;
   }
   .bookshelf-book:hover .book-3d,
-  .bookshelf-book:focus-visible .book-3d {
+  .bookshelf-book:focus-visible .book-3d,
+  .bookshelf-book[data-pulled="true"] .book-3d {
     transform: translateZ(260px) translateY(-6px) translateX(calc(var(--w) * -0.5)) rotateY(-78deg);
   }
   .bookshelf-book .spine-title { font-size: 10.5px; letter-spacing: 0.2em; width: var(--h); }
@@ -3465,7 +3504,8 @@ aside.margin-note {
     --w: 34px;
   }
   .bookshelf-book:hover .book-3d,
-  .bookshelf-book:focus-visible .book-3d {
+  .bookshelf-book:focus-visible .book-3d,
+  .bookshelf-book[data-pulled="true"] .book-3d {
     transform: translateZ(190px) translateY(-4px) translateX(calc(var(--w) * -0.5)) rotateY(-75deg);
   }
   .bookshelf-book .spine-title { font-size: 9px; letter-spacing: 0.16em; width: var(--h); }
@@ -3479,6 +3519,24 @@ aside.margin-note {
   .bookshelf-title { font-size: 1.1rem; letter-spacing: 0.22em; }
   .bookshelf-subtitle { font-size: 0.75rem; }
 }
+/* Ultra-narrow viewports (older phones, foldables in cover mode,
+ * 320–380px). 8 books × 34px + 2 bookends × 30px + 9 gaps × 2px =
+ * 350px — already overflows a 320px viewport. Shrink the books
+ * further and tighten the bookend so the row fits cleanly. */
+@media (max-width: 380px) {
+  .bookshelf-shelf { height: 270px; }
+  .bookshelf-book {
+    --h: 200px;
+    --d: 110px;
+    --w: 26px;
+  }
+  .bookshelf-book:hover .book-3d,
+  .bookshelf-book:focus-visible .book-3d,
+  .bookshelf-book[data-pulled="true"] .book-3d {
+    transform: translateZ(160px) translateY(-3px) translateX(calc(var(--w) * -0.5)) rotateY(-75deg);
+  }
+  .bookshelf-bookend { width: 24px; height: 210px; flex: 0 0 24px; }
+}
 
 @keyframes bookshelf-shelve {
   0%   { opacity: 0; transform: translateY(40px); }
@@ -3489,7 +3547,8 @@ aside.margin-note {
   .bookshelf-book .book-3d { transition-duration: 250ms !important; }
   .bookshelf-book .book-shadow { transition-duration: 250ms !important; }
   .bookshelf-book:hover .float-wrap,
-  .bookshelf-book:focus-visible .float-wrap { animation: none; }
+  .bookshelf-book:focus-visible .float-wrap,
+  .bookshelf-book[data-pulled="true"] .float-wrap { animation: none; }
 }
 
 /* ============================================================
@@ -3743,6 +3802,15 @@ aside.margin-note {
   line-height: 1.55;
   color: var(--scroll-text);
   text-shadow: none;
+  /* Long unbroken runs (URLs, no-space tags, dashed phrases like
+   * "IC-and-OOC-strictly-separate") otherwise push past the
+   * parchment's right edge on narrow viewports — `.scroll-content`
+   * has `overflow: hidden` so the bleed silently clips. Word-break +
+   * hyphens lets the browser wrap mid-token when no whitespace
+   * opportunity is available. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
 }
 /* Drop cap — uses native `initial-letter` on browsers that
  * support it (Safari and Chrome 110+) for perfect baseline
@@ -3808,13 +3876,25 @@ aside.margin-note {
 .scroll-quill svg { width: 100%; height: 100%; display: block; }
 
 /* Mobile: full-width scroll still works since it's already 100%
- * of container. Just tighten typography. */
+ * of container. Tighten typography AND tighten content padding so
+ * the inner column has more horizontal room before bleeding past
+ * the parchment art. */
 @media (max-width: 640px) {
   .scroll-stage { height: 600px; }
-  .scroll-content { padding: 0.85rem 2rem 0.75rem; }
-  .scroll-feature-cap { font-size: 24px; padding-top: 1px; }
-  .scroll-feature-title { font-size: 12.5px; }
-  .scroll-feature-body { font-size: 11.5px; }
+  .scroll-content { padding: 0.85rem 1.25rem 0.75rem; }
+  .scroll-feature-cap { font-size: 20px; padding-top: 1px; }
+  .scroll-feature-title { font-size: 12px; }
+  .scroll-feature-body { font-size: 11px; line-height: 1.5; }
+}
+/* Ultra-narrow (older phones, foldables in cover mode). One more
+ * step down keeps the cap from eating most of the body line and
+ * keeps the description fitting in two-to-three lines instead of
+ * overflowing the scroll. */
+@media (max-width: 380px) {
+  .scroll-content { padding: 0.75rem 0.9rem 0.65rem; }
+  .scroll-feature-cap { font-size: 17px; }
+  .scroll-feature-title { font-size: 11px; }
+  .scroll-feature-body { font-size: 10.5px; line-height: 1.45; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4112,6 +4192,13 @@ aside.margin-note {
 }
 
 @media (max-width: 640px) {
+  /* `.orb-section` keeps its own panel chrome but its content
+   * (stage + arrows + halo bleed) must fit inside the viewport so
+   * the carousel doesn't push past the splash card and induce
+   * horizontal scroll. `overflow-x: clip` lets the canvas-painted
+   * aura still bleed visually past the orb-wrap edge inside the
+   * section bounds without spilling sideways onto the page. */
+  .orb-section { overflow-x: clip; }
   .orb-stage { height: 380px; } /* 290 wrap + 25% canvas overflow + padding */
   .orb-wrap { width: 290px; height: 290px; }
   .orb-arrow { width: 32px; height: 32px; }
@@ -4121,4 +4208,18 @@ aside.margin-note {
   .orb-title { font-size: 22px; }
   .orb-desc { font-size: 11px; max-width: 185px; }
   .orb-content { padding: 0 35px; }
+}
+/* Ultra-narrow viewports (older phones, foldables in cover mode,
+ * 320–380px). The 290px wrap + 125% canvas overflow = 363px
+ * effective width, which exceeds a 320px viewport. Shrink the wrap
+ * to fit AND switch arrow positioning from `%` to pixel values so
+ * the buttons don't fall off the visible area. */
+@media (max-width: 380px) {
+  .orb-stage { height: 320px; }
+  .orb-wrap { width: 240px; height: 240px; }
+  .orb-arrow-left { left: 4px; }
+  .orb-arrow-right { right: 4px; }
+  .orb-title { font-size: 19px; }
+  .orb-desc { font-size: 10.5px; max-width: 165px; }
+  .orb-content { padding: 0 22px; }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { StoryCard } from "@thekeep/shared";
 import { ratingRequiresAuth, STORY_RATING_INFO } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
@@ -128,6 +128,24 @@ interface Slot {
 
 export function BookshelfStrip({ onNavigate }: Props) {
   const [items, setItems] = useState<StoryCard[] | null>(null);
+  // Touch-device pull-out state. On desktop (hover-capable pointer)
+  // the CSS `:hover` rules handle the cover-reveal and a click goes
+  // straight to the story. On touch devices there's no hover, so
+  // the user needs a way to PREVIEW a cover before committing to a
+  // navigation — first tap pulls the book; second tap on the same
+  // book opens it; tap elsewhere puts it back. `pulledId` is the
+  // book currently flying forward (null when none).
+  const [pulledId, setPulledId] = useState<string | null>(null);
+  // `hoverCapableRef` decides which path a tap takes. We cache the
+  // matchMedia result on first mount and don't update it on the
+  // fly — a desktop user dragging the window to a touchscreen mid-
+  // session is extraordinarily rare and a stale value just means
+  // the wrong tap path for one session.
+  const hoverCapableRef = useRef<boolean>(true);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    hoverCapableRef.current = window.matchMedia("(hover: hover)").matches;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -137,6 +155,47 @@ export function BookshelfStrip({ onNavigate }: Props) {
       .catch(() => { if (!cancelled) setItems([]); });
     return () => { cancelled = true; };
   }, []);
+
+  // Tap-outside dismissal. When a book is pulled and the user taps
+  // anywhere that isn't the pulled book itself (another book, the
+  // shelf wood, off the shelf entirely), put the book back. Listens
+  // on the capture phase so a tap on a SIBLING book triggers
+  // dismissal BEFORE that sibling's own `onTap` handler runs to
+  // pull it forward — net effect of tap-on-other-book is "swap
+  // which one is pulled" rather than "two pulled at once for a
+  // frame."
+  useEffect(() => {
+    if (pulledId === null) return;
+    function dismiss(e: Event) {
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      if (t.closest('.bookshelf-book[data-pulled="true"]')) return;
+      setPulledId(null);
+    }
+    window.addEventListener("mousedown", dismiss, true);
+    window.addEventListener("touchstart", dismiss, true);
+    return () => {
+      window.removeEventListener("mousedown", dismiss, true);
+      window.removeEventListener("touchstart", dismiss, true);
+    };
+  }, [pulledId]);
+
+  // Centralized two-tap dispatch. Desktop bypasses the pull state
+  // (the CSS hover already previews the cover; a click should
+  // commit). Touch users go through the state machine.
+  function handleBookTap(id: string, openFn: () => void) {
+    if (hoverCapableRef.current) {
+      setPulledId(null);
+      openFn();
+      return;
+    }
+    if (pulledId === id) {
+      setPulledId(null);
+      openFn();
+      return;
+    }
+    setPulledId(id);
+  }
 
   // Pad with placeholders so the shelf always feels full. We don't
   // want a single lonely volume sitting on a wide plank.
@@ -194,7 +253,8 @@ export function BookshelfStrip({ onNavigate }: Props) {
                   card={slot.card!}
                   lean={LEAN_PATTERN[i % LEAN_PATTERN.length]!}
                   index={i}
-                  onOpen={() => openStory(slot.card!)}
+                  isPulled={pulledId === slot.card!.id}
+                  onTap={() => handleBookTap(slot.card!.id, () => openStory(slot.card!))}
                 />
               );
             })}
@@ -216,7 +276,7 @@ function BookshelfHeader({ onBrowse }: { onBrowse: () => void }) {
         <span className="line" />
       </div>
       <h3 className="bookshelf-title font-action">From the Scriptorium</h3>
-      <p className="bookshelf-subtitle">— hover a volume to draw it from the shelf —</p>
+      <p className="bookshelf-subtitle">— hover or tap a volume to draw it from the shelf —</p>
       <button type="button" onClick={onBrowse} className="bookshelf-browse">
         Browse the catalog →
       </button>
@@ -229,7 +289,13 @@ interface BookProps {
   index: number;
 }
 
-function StoryBook({ card, lean, index, onOpen }: BookProps & { card: StoryCard; onOpen: () => void }) {
+function StoryBook({
+  card,
+  lean,
+  index,
+  isPulled,
+  onTap,
+}: BookProps & { card: StoryCard; isPulled: boolean; onTap: () => void }) {
   const palette = SPINE_PALETTE[strHash(card.id) % SPINE_PALETTE.length]!;
   const driftDur = 5 + ((strHash(card.id + ":d") % 30) / 10); // 5.0 .. 7.9s
   const driftDelay = -((strHash(card.id + ":x") % 30) / 10); // -0.0 .. -2.9s
@@ -251,11 +317,16 @@ function StoryBook({ card, lean, index, onOpen }: BookProps & { card: StoryCard;
   return (
     <button
       type="button"
-      onClick={onOpen}
+      onClick={onTap}
+      // `data-pulled` is what the CSS reads to fire the pull-out
+      // transform on touch devices (no `:hover` available). On
+      // desktop the existing `:hover` / `:focus-visible` paths still
+      // win and this attr stays undefined.
+      data-pulled={isPulled ? "true" : undefined}
       className={`bookshelf-book ${lean}`}
       style={styleVars}
       tabIndex={0}
-      aria-label={`${card.title} by ${author} — ${ratingInfo.short}`}
+      aria-label={`${card.title} by ${author} — ${ratingInfo.short}${isPulled ? " (tap again to open)" : ""}`}
     >
       <span className="float-wrap">
         <span className="book-3d">

@@ -111,7 +111,14 @@ export function SplashShell({
         // difference - the spire sits roughly centered in the viewport
         // with mountains trailing below. On md+ the viewport is wide
         // enough that the natural cover-center works.
-        className="absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
+        //
+        // `fixed inset-0` (not `absolute`): the parent expands to fit
+        // the SpireScroll + any below-the-fold content, so absolute-
+        // positioned cover would scale the 2.65:1 panoramic art up to
+        // span the full page height and crop everything but a thin
+        // center band — the "zoomed in" look. Fixed pins the layer to
+        // the viewport so cover sizes against the visible window.
+        className="fixed inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
         style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
       />
       <div
@@ -162,7 +169,7 @@ export function SplashShell({
         viewport; this max(...) replaces that without losing the
         intentional "card centered in the right third" desktop feel.
       */}
-      <div className="relative flex min-h-screen items-center justify-center lg:block">
+      <div className="relative flex min-h-screen items-center justify-center">
         <div
           // Mobile vs desktop card treatment:
           //   - <lg (default): glass / frosted treatment. The card is
@@ -170,11 +177,10 @@ export function SplashShell({
           //     so the spire artwork shows through softly without
           //     distracting from the form. Lighter border + ring give it
           //     a subtle "pane of glass" edge.
-          //   - lg+ (wide desktop): the card sits anchored to the right
-          //     where the bg already fades to parchment, so we go
-          //     opaque-ish (95%) for maximum legibility and only a hint
-          //     of blur. The artwork stays visible to the *left* of the
-          //     card; we don't need it showing through the card itself.
+          //   - lg+ (wide desktop): centered card (no longer
+          //     right-anchored) so the login / register page sits at
+          //     the same focal point as the splash. The card grows to
+          //     a comfortable max but never wider than the viewport.
           // The outer container is `overflow-hidden` (so the bg image
           // can't bleed outside the viewport when the artwork is taller
           // than the available space). That clips anything growing past
@@ -185,12 +191,11 @@ export function SplashShell({
           // screens.
           className="
             mx-4 my-8
-            w-[min(560px,92vw)]
+            w-[min(720px,92vw)]
             max-lg:landscape:w-[min(900px,96vw)] max-lg:landscape:mx-2 max-lg:landscape:my-2
             max-h-[calc(100vh-4rem)] overflow-y-auto
             max-lg:landscape:max-h-[calc(100vh-1rem)]
-            lg:absolute lg:top-1/2 lg:right-[max(2rem,calc(25%-17.5rem))] lg:my-0 lg:mx-0 lg:-translate-y-1/2
-            lg:max-h-[calc(100vh-2rem)]
+            lg:my-6 lg:max-h-[calc(100vh-3rem)]
             rounded-md border
             bg-keep-bg/55 backdrop-blur-xl border-keep-border/60
             ring-1 ring-keep-bg/40 ring-inset
@@ -213,6 +218,16 @@ export function SplashShell({
             <div className="max-lg:landscape:min-w-0">
               {/* Header - site name, theme-tinted */}
               <div className="mb-3 text-center max-lg:landscape:mb-1">
+                {/* Brass-diamond rule above the wordmark — matches
+                    the splash + bookshelf chrome so the antique
+                    library motif carries through the sign-in
+                    journey. Hidden on landscape phones where every
+                    pixel of vertical space matters. */}
+                <div className="mx-auto mb-3 flex w-[min(280px,80%)] items-center gap-3 opacity-80 max-lg:landscape:hidden" aria-hidden>
+                  <span className="h-px flex-1" style={{ background: "linear-gradient(90deg, transparent, rgb(var(--keep-accent) / 0.55), transparent)" }} />
+                  <span className="block h-[7px] w-[7px] rotate-45" style={{ background: "rgb(var(--keep-accent))", boxShadow: "0 0 10px rgb(var(--keep-accent) / 0.55)" }} />
+                  <span className="h-px flex-1" style={{ background: "linear-gradient(90deg, transparent, rgb(var(--keep-accent) / 0.55), transparent)" }} />
+                </div>
                 <h1
                   style={logoStyle}
                   className="font-action text-3xl tracking-wide text-keep-text sm:text-4xl max-lg:landscape:text-2xl"
@@ -256,7 +271,7 @@ export function SplashShell({
                   hard rule. */}
               {branding.welcomeHtml.trim() ? (
                 <div
-                  className="prose prose-sm mb-5 mt-4 max-w-none border-y border-keep-rule/50 py-3 text-keep-text/90 max-lg:landscape:mb-0 max-lg:landscape:mt-2 max-lg:landscape:border-t-0 max-lg:landscape:pt-2"
+                  className="prose prose-xl mb-5 mt-4 max-w-none border-y border-keep-rule/50 py-3 text-keep-text/90 max-lg:landscape:mb-0 max-lg:landscape:mt-2 max-lg:landscape:border-t-0 max-lg:landscape:pt-2"
                   dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(branding.welcomeHtml) }}
                 />
               ) : (

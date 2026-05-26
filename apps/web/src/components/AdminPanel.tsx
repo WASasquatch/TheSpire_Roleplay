@@ -18,6 +18,8 @@ import { parseInline } from "../lib/markdown.js";
 import { listStyles } from "../lib/ornaments/index.js";
 import { AdminEarningTab } from "./AdminEarningTab.js";
 import { AdminBackupsTab } from "./AdminBackupsTab.js";
+import { AdminScriptoriumTab } from "./AdminScriptoriumTab.js";
+import { AdminEmoticonsTab } from "./AdminEmoticonsTab.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
@@ -31,7 +33,7 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "audit" | "backups";
+type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "scriptorium" | "emoticons" | "audit" | "backups";
 
 /** Single source of truth for tabs. Order here = order in both the
  *  desktop strip and the mobile dropdown. `masterOnly` tabs are gated
@@ -49,6 +51,8 @@ const TAB_ITEMS: ReadonlyArray<{ id: Tab; label: string; masterOnly?: boolean }>
   { id: "rooms", label: "Rooms" },
   { id: "users", label: "Users" },
   { id: "reports", label: "Reports" },
+  { id: "scriptorium", label: "Scriptorium" },
+  { id: "emoticons", label: "Emoticons" },
   { id: "audit", label: "Audit" },
   // Backups is masteradmin-only because the destructive Restore /
   // Import paths can blow away the whole DB. Plain admins don't see
@@ -246,6 +250,8 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             {tab === "rooms" ? <RoomsTab /> : null}
             {tab === "users" ? <UsersTab /> : null}
             {tab === "reports" ? <ReportsTab /> : null}
+            {tab === "scriptorium" ? <AdminScriptoriumTab /> : null}
+            {tab === "emoticons" ? <AdminEmoticonsTab /> : null}
             {tab === "audit" ? <AuditTab /> : null}
             {tab === "backups" && isMaster ? <AdminBackupsTab /> : null}
           </div>

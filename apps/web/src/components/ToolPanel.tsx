@@ -186,6 +186,10 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
             <MenuItem label="My Worlds" hint="Manage your worlds + pages" onClick={() => fire("/worlds")} />
             <MenuItem label="World Catalog" hint="Browse open worlds" onClick={() => fire("/world catalog")} />
 
+            <SectionHeader title="Writing" />
+            <MenuItem label="My Stories" hint="Drafts + published — open the editor" onClick={() => fire("/scriptorium my")} />
+            <MenuItem label="Scriptorium" hint="Browse the library — read and write" onClick={() => fire("/scriptorium")} />
+
             <SectionHeader title="Roleplay" />
             <MenuItem
               label="Set Mood"

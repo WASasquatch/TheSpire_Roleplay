@@ -9,6 +9,7 @@ import { Composer } from "./components/Composer.js";
 import { HelpModal } from "./components/HelpModal.js";
 import { MessageList } from "./components/MessageList.js";
 import { MutualPrompts } from "./components/MutualPrompts.js";
+import { StoryInvitePrompts } from "./components/StoryInvitePrompts.js";
 import { FriendRequestPrompts } from "./components/FriendRequestPrompts.js";
 import { BookmarksModal } from "./components/BookmarksModal.js";
 import { ProfileEditor } from "./components/ProfileEditor.js";
@@ -26,6 +27,9 @@ import { WorldCatalogModal } from "./components/WorldCatalogModal.js";
 import { WorldEditorModal } from "./components/WorldEditorModal.js";
 import { WorldViewerModal } from "./components/WorldViewerModal.js";
 import { WorldsListModal } from "./components/WorldsListModal.js";
+import { StoryCatalogModal } from "./components/StoryCatalogModal.js";
+import { StoryEditorModal } from "./components/StoryEditorModal.js";
+import { StoryReaderModal } from "./components/StoryReaderModal.js";
 import { WelcomeModal } from "./components/WelcomeModal.js";
 import { getSocket, disconnect as disconnectSocket, loadTabCharacter, rememberTabCharacter, rememberTabRoom } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
@@ -36,6 +40,8 @@ import { fire as fireNotification, permission as notifPermission, shouldNotify, 
 import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
 import { playAlert, playPing, playTap, playWhisper } from "./lib/sound.js";
 import { saveCachedActiveTheme, useChat, type SiteBranding } from "./state/store.js";
+import { fetchEmoticonCatalog, useEmoticons } from "./state/emoticons.js";
+import { parseScriptoriumFromUrl, storyPermalink } from "./lib/scriptoriumUrl.js";
 import { useEarning } from "./state/earning.js";
 import { runStruckEffect } from "./lib/chatEffects.js";
 import { injectNameStyles } from "./lib/nameStyleInjector.js";
@@ -62,6 +68,16 @@ export function App() {
       .catch(() => {});
     return () => { cancelled = true; };
   }, [setBranding]);
+
+  // Prime the emoticon catalog once at boot. Public endpoint; safe
+  // for anonymous splash visitors too (they won't render reactions
+  // but a future-clicked link could carry them straight into chat
+  // where the picker needs the sheets cached). Subsequent admin
+  // edits push `emoticons:updated` over the socket, which the
+  // listener below re-fetches.
+  useEffect(() => {
+    void fetchEmoticonCatalog();
+  }, []);
 
   // Sync the tab title and the logo font CSS variable with the configured
   // branding. Both are global to the document; the banner reads the var.
@@ -563,6 +579,42 @@ function UnauthRouter(props: {
   // which URL slot they happen to be on.
   const hasDeepLinkHint = !!(props.pendingProfileHint || props.pendingWorldHint);
 
+  // Scriptorium public surfaces — render the catalog / reader inside
+  // the standalone PublicViewerShell so anonymous visitors can browse
+  // and read up to R-rated stories without an account. NC-17 cards
+  // surface in the catalog but the reader returns a login-prompt
+  // stub when an unauthenticated viewer opens one.
+  if (!hasDeepLinkHint) {
+    const route = parseScriptoriumFromUrl();
+    if (route?.kind === "catalog") {
+      return (
+        <PublicViewerShell isAuthenticated={false}>
+          <StoryCatalogModal
+            onClose={() => navigate("/")}
+            onOpenStory={(_storyId, card) => {
+              // Anonymous catalog: prefer the canonical permalink so
+              // the URL is shareable and stays bookmarkable.
+              if (card) navigate(storyPermalink(card.author.masterUsername, card.slug));
+            }}
+            onOpenEditor={() => navigate("/login")}
+          />
+        </PublicViewerShell>
+      );
+    }
+    if (route?.kind === "story") {
+      return (
+        <PublicViewerShell isAuthenticated={false}>
+          <AnonymousStoryReader
+            handle={route.handle}
+            slug={route.slug}
+            onClose={() => navigate("/scriptorium")}
+            onNavigate={navigate}
+          />
+        </PublicViewerShell>
+      );
+    }
+  }
+
   if (!hasDeepLinkHint && path === "/") {
     return <SplashLanding onNavigate={navigate} />;
   }
@@ -574,6 +626,106 @@ function UnauthRouter(props: {
       onNavigate={navigate}
       {...(props.pendingProfileHint ? { pendingProfileHint: props.pendingProfileHint } : {})}
       {...(props.pendingWorldHint ? { pendingWorldHint: props.pendingWorldHint } : {})}
+    />
+  );
+}
+
+/**
+ * Anonymous-side reader wrapper. Resolves `@handle/slug` to a story
+ * id via the canonical /stories/@h/s endpoint, then mounts the reader
+ * with that id. NC-17 stories return a `private: true` stub from the
+ * server — we surface a "log in to read this story" card instead of
+ * crashing the modal.
+ */
+function AnonymousStoryReader({
+  handle,
+  slug,
+  onClose,
+  onNavigate,
+}: {
+  handle: string;
+  slug: string;
+  onClose: () => void;
+  onNavigate: (path: string) => void;
+}) {
+  const [resolved, setResolved] = useState<
+    | { kind: "loading" }
+    | { kind: "ok"; storyId: string }
+    | { kind: "stub"; title: string }
+    | { kind: "notfound" }
+  >({ kind: "loading" });
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/stories/@${encodeURIComponent(handle)}/${encodeURIComponent(slug)}`)
+      .then(async (r) => {
+        if (!r.ok) {
+          if (r.status === 404) return { kind: "notfound" as const };
+          throw new Error("load failed");
+        }
+        const j = await r.json();
+        if (j && j.private === true) {
+          return { kind: "stub" as const, title: typeof j.title === "string" ? j.title : slug };
+        }
+        const id = j?.story?.id;
+        if (typeof id !== "string") return { kind: "notfound" as const };
+        return { kind: "ok" as const, storyId: id };
+      })
+      .then((res) => { if (!cancelled) setResolved(res); })
+      .catch(() => { if (!cancelled) setResolved({ kind: "notfound" }); });
+    return () => { cancelled = true; };
+  }, [handle, slug]);
+
+  if (resolved.kind === "loading") {
+    return <p className="p-8 italic text-keep-muted">Loading story...</p>;
+  }
+  if (resolved.kind === "notfound") {
+    return (
+      <div className="mx-auto max-w-sm p-8 text-center">
+        <p className="font-action text-lg text-keep-text">Story not found</p>
+        <p className="mt-2 text-sm text-keep-muted">
+          This story doesn't exist or has been removed.
+        </p>
+        <button
+          type="button"
+          onClick={() => onNavigate("/scriptorium")}
+          className="mt-4 rounded border border-keep-action bg-keep-action/15 px-3 py-1.5 text-xs uppercase tracking-widest text-keep-action"
+        >
+          Back to Scriptorium
+        </button>
+      </div>
+    );
+  }
+  if (resolved.kind === "stub") {
+    return (
+      <div className="mx-auto max-w-sm p-8 text-center">
+        <p className="font-action text-lg text-keep-text">{resolved.title}</p>
+        <p className="mt-2 text-sm text-keep-muted">
+          This story is rated NC-17 (explicit content). You'll need to log in or register to read it.
+        </p>
+        <div className="mt-4 flex items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => onNavigate(`/login?story=${encodeURIComponent(slug)}`)}
+            className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg"
+          >
+            Log in
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate(`/register?story=${encodeURIComponent(slug)}`)}
+            className="rounded border border-keep-action bg-keep-action/15 px-3 py-1.5 text-xs uppercase tracking-widest text-keep-action"
+          >
+            Register
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <StoryReaderModal
+      storyId={resolved.storyId}
+      onClose={onClose}
+      onBack={() => onNavigate("/scriptorium")}
     />
   );
 }
@@ -734,6 +886,16 @@ function Chat() {
   // normalizes the URL to the canonical slug after the world detail loads.
   const [worldViewerId, setWorldViewerId] = useState<string | null>(() => parseWorldFromUrl());
   const [worldCatalogOpen, setWorldCatalogOpen] = useState(false);
+  // Scriptorium catalog state. Object → open; null → closed. The
+  // optional `tab` lets `/scriptorium my` etc. land on a specific tab.
+  const [scriptoriumOpen, setScriptoriumOpen] = useState<{ tab?: "find" | "my" | "reading" | "following" } | null>(null);
+  // Story editor state. Discriminated by presence: null → closed;
+  // { storyId: null } → New Story wizard; { storyId: "xyz" } → edit
+  // existing story. Avoids the empty-string sentinel pattern.
+  const [storyEditor, setStoryEditor] = useState<{ storyId: string | null } | null>(null);
+  // Story reader state. Object → open; null → closed. `chapterIndex`
+  // optional so `/story <slug> chapter <N>` can land on a specific page.
+  const [storyReader, setStoryReader] = useState<{ storyId: string; chapterIndex?: number } | null>(null);
   const [navLinksVersion, setNavLinksVersion] = useState(0);
   const [composerText, setComposerText] = useState("");
   // Per-room cached thread categories. Populated lazily for nested rooms
@@ -1372,6 +1534,18 @@ function Chat() {
     // could change the rooms tree the user sees. Debounced because a
     // flurry of presence updates (mass reconnect, restart) would
     // otherwise hammer /rooms.
+    // Scriptorium prose chip — `@world:slug` mention in chapter HTML
+     // was clicked. The chip dispatches a CustomEvent so the chapter
+     // body can stay decoupled from the App-level modal state.
+    function onWorldChip(e: Event) {
+      const detail = (e as CustomEvent<{ slug: string }>).detail;
+      if (!detail?.slug) return;
+      // setWorldViewerId accepts either an id or a slug — the viewer
+      // resolves it via the worlds route.
+      setWorldViewerId(detail.slug);
+    }
+    window.addEventListener("scriptorium:open-world-by-slug", onWorldChip);
+
     let treeDebounceId: number | null = null;
     socket.on("rooms:tree-changed", () => {
       if (treeDebounceId != null) window.clearTimeout(treeDebounceId);
@@ -1379,6 +1553,29 @@ function Chat() {
         setRoomsTreeVersion((v) => v + 1);
         treeDebounceId = null;
       }, 400);
+    });
+
+    /**
+     * Scriptorium — a story you follow just published a new chapter.
+     * Surfaces as a one-line system message in the user's current room
+     * (mirrors the friend-online pattern). Quiet by design: no toast,
+     * no sound — the project's no-daily-grind ethos extends to
+     * passive author/reader interactions.
+     */
+    socket.on("story:chapter-published", (ev) => {
+      const rid = useChat.getState().currentRoomId;
+      if (!rid) return;
+      appendMessage({
+        id: `story-pub-${ev.chapterId}-${Date.now()}`,
+        roomId: rid,
+        userId: "system",
+        characterId: null,
+        displayName: "system",
+        kind: "system",
+        body: `✦ ${ev.authorDisplayName} published "${ev.chapterTitle}" of ${ev.storyTitle}.`,
+        color: null,
+        createdAt: Date.now(),
+      });
     });
     socket.on("message:new", (msg: ChatMessage) => {
       // Append to the chat backlog regardless of mode — replies and
@@ -1541,6 +1738,18 @@ function Chat() {
           break;
         case "open-world":
           setWorldViewerId(h.worldId);
+          break;
+        case "open-scriptorium":
+          setScriptoriumOpen(h.tab ? { tab: h.tab } : {});
+          break;
+        case "open-story-editor":
+          setStoryEditor({ storyId: h.storyId });
+          break;
+        case "open-story":
+          setStoryReader({
+            storyId: h.storyId,
+            ...(typeof h.chapterIndex === "number" ? { chapterIndex: h.chapterIndex } : {}),
+          });
           break;
         case "clear-room-messages": {
           // Read fresh state - the ui:hint handler is registered once and
@@ -1764,10 +1973,41 @@ function Chat() {
     socket.on("dm:update", ({ message }) => {
       updateDmMessage(message);
     });
-    socket.on("dm:read", () => {
-      // Phase 4 doesn't render a "seen" indicator yet (Phase 4+
-      // aesthetic question per plan.md); listener is wired so the
-      // event is consumed instead of warning in the console.
+    socket.on("dm:read", ({ conversationId, readerUserId }) => {
+      // Two distinct meanings depending on who the reader is:
+      //   - readerUserId === me  → echo of OUR OWN read action on
+      //     another tab. Clear the local conv's unreadCount and
+      //     bump `inboxCountsVersion` so MessagesModal's chip pip
+      //     refetches `/me/inbox-counts`. Without this, marking a
+      //     thread read on tab A leaves the pip lit on tab B until
+      //     the next manual refresh.
+      //   - readerUserId !== me  → the OTHER party advanced their
+      //     seen marker (Phase 4+ "seen" indicator); we just
+      //     consume the event here so the listener doesn't warn.
+      const state = useChat.getState();
+      const myId = state.me?.id ?? null;
+      if (myId && readerUserId === myId) {
+        const conv = Object.values(state.dmConversations).find((c) => c.id === conversationId);
+        if (conv && conv.unreadCount > 0) {
+          state.upsertDmConversation({ ...conv, unreadCount: 0 });
+        }
+        state.bumpInboxCountsVersion();
+      }
+    });
+    // Emoticon reactions — merge the delta into the cached
+    // reactions store. Chat + DM rendering both pull from the same
+    // map keyed by (targetKind, targetId), so a single listener
+    // covers both surfaces.
+    socket.on("reaction:update", (event) => {
+      const viewerId = useChat.getState().me?.id ?? null;
+      useEmoticons.getState().applyReactionEvent(event, viewerId);
+    });
+    // Admin replaced / added / deleted an emoticon sheet — refetch
+    // the catalog. Cheap (one round trip, no auth required), and
+    // refetching beats trying to incrementally apply a partial
+    // payload the server didn't ship.
+    socket.on("emoticons:updated", () => {
+      void fetchEmoticonCatalog();
     });
     // Friend-state changed somewhere (new request landed, an existing
     // request was accepted/declined, or a friendship ended). Surface
@@ -1788,6 +2028,14 @@ function Chat() {
           if (j && Array.isArray(j.requests)) useChat.getState().setPendingFriendRequests(j.requests);
         })
         .catch(() => {});
+      // Bump the friends-version counter so MessagesModal's
+      // refreshLists effect re-fires (it keys on this). Covers
+      // every echo cause — accept by the other party, decline
+      // echo, unfriend echo, new request — so the modal's local
+      // friends + conversations + pending-inbox state stays in
+      // lockstep with whatever just changed server-side, even
+      // when the user wasn't the one who initiated the action.
+      useChat.getState().bumpFriendsVersion();
       // Soft notice in the banner so the user gets a glance signal
       // even when the chat prompt is offscreen (e.g. they're deep in
       // the forum view). Phrasing keeps it neutral — the actual
@@ -1862,7 +2110,10 @@ function Chat() {
       socket.off("earning:rankup");
       socket.off("earning:inventory_changed");
       socket.off("chat:effect");
+      socket.off("reaction:update");
+      socket.off("emoticons:updated");
       socket.off("connect", onConnect);
+      window.removeEventListener("scriptorium:open-world-by-slug", onWorldChip);
     };
   }, [socket, setRoom, setOccupants, appendMessage, updateMessage, setMessages, setCurrentRoom, setNotice, setOpenProfile, openEditor, setRefreshIntervalSec, setMe, prependOwnForumTopic, queuePendingForumTopic, bumpTopicActivity, updateForumTopic, removeForumTopic]);
 
@@ -1983,12 +2234,32 @@ function Chat() {
    * lets a user navigate away and back into the same room without
    * re-fetching everything (they'll just keep what's loaded).
    */
+  // Narrow the dep on rooms to JUST the reply-mode of the current
+  // room. Putting the whole `rooms` record in the deps caused the
+  // forum-topics fetch to be cancelled on every `room:state` event
+  // (presence change, /char, etc.) — `rooms` is a new object
+  // reference per zustand `set()`, so any unrelated room mutation
+  // would tear down the in-flight topics fetch via the effect
+  // cleanup, leaving every bucket stuck in "Loading topics…".
+  const currentReplyMode = rooms[currentRoomId ?? ""]?.replyMode ?? null;
+  // Same posture for threadCategoriesByRoom — only the current room's
+  // list matters for THIS effect, and only its presence/absence at
+  // that. We still need to react when categories arrive for the first
+  // time, but not when an unrelated room's category list mutates.
+  // Mirror the categories into a ref so the effect can read the
+  // current value without subscribing to the whole record (which
+  // would re-cancel the in-flight fetches on every unrelated update,
+  // the same hazard `rooms` had).
+  const currentCategoriesLoaded = !!threadCategoriesByRoom[currentRoomId ?? ""];
+  const categoriesRef = useRef(threadCategoriesByRoom);
+  categoriesRef.current = threadCategoriesByRoom;
+
   useEffect(() => {
     if (!currentRoomId) return;
-    const r = rooms[currentRoomId];
-    if (!r || r.replyMode !== "nested") return;
-    const cats = threadCategoriesByRoom[currentRoomId];
-    if (!cats) return; // wait for categories to load first
+    if (currentReplyMode !== "nested") return;
+    if (!currentCategoriesLoaded) return; // wait for categories to load first
+    const cats = categoriesRef.current[currentRoomId];
+    if (!cats) return;
 
     // Read forumTopicsByRoom via getState() instead of putting it in
     // this effect's deps. If it were a dep, the effect's own call to
@@ -2028,7 +2299,7 @@ function Chat() {
         });
     }
     return () => { cancelled = true; };
-  }, [currentRoomId, rooms, threadCategoriesByRoom, setForumTopicsLoading, setForumTopicsPage]);
+  }, [currentRoomId, currentReplyMode, currentCategoriesLoaded, setForumTopicsLoading, setForumTopicsPage]);
 
   /**
    * "Load older topics" handler for the forum view. Fetches the next
@@ -2373,6 +2644,7 @@ function Chat() {
         navLinksVersion={navLinksVersion}
         onOpenRules={() => setRulesOpen(true)}
         onOpenEarning={() => setEarningOpen({})}
+        onOpenScriptorium={() => setScriptoriumOpen({})}
         {...(me && isAdminRole(me.role) ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
       <StaleVersionBanner />
@@ -2384,7 +2656,7 @@ function Chat() {
         <button
           type="button"
           onClick={() => setWorldViewerId(room.linkedWorld!.id)}
-          className="flex w-full items-center justify-center gap-2 border-b border-keep-rule bg-keep-action/10 px-4 py-1 text-xs text-keep-action hover:bg-keep-action/20"
+          className="keep-notice keep-notice-accent flex w-full items-center justify-center gap-2 px-4 py-1 text-xs text-keep-action hover:brightness-110"
           title="Open this room's linked world"
         >
           <span className="uppercase tracking-widest">World</span>
@@ -2393,12 +2665,12 @@ function Chat() {
         </button>
       ) : null}
       {room?.topic ? (
-        <div className="border-b border-keep-rule bg-keep-banner/40 px-4 py-1 text-center text-sm italic text-keep-muted">
+        <div className="keep-notice px-4 py-1 text-center text-sm italic text-keep-muted">
           {room.topic}
         </div>
       ) : null}
       {room?.messageExpiryMinutes && room.messageExpiryMinutes > 0 ? (
-        <div className="border-b border-keep-rule/60 bg-keep-banner/20 px-4 py-0.5 text-center text-[10px] uppercase tracking-widest text-keep-muted">
+        <div className="keep-notice px-4 py-0.5 text-center text-[10px] uppercase tracking-widest text-keep-muted">
           Messages auto-expire after {formatExpiry(room.messageExpiryMinutes)}
         </div>
       ) : null}
@@ -2529,6 +2801,13 @@ function Chat() {
             }}
           />
           <MutualPrompts
+            socket={socket}
+            onError={(n) => setNotice(n)}
+          />
+          {/* Scriptorium collaborator invites — Accept | Decline cards
+              mirroring MutualPrompts. The persistent counterpart lives
+              on the catalog's My Stories tab. */}
+          <StoryInvitePrompts
             socket={socket}
             onError={(n) => setNotice(n)}
           />
@@ -2808,6 +3087,16 @@ function Chat() {
           onClose={() => { setMessagesOpen(false); setOpenDmOtherUser(null); }}
           onCommand={(text) => send(text)}
           initialOtherUserId={openDmOtherUserId}
+          // Open the profile modal when the DM header / bubble name is
+          // clicked. Same socket-backed fetch chat's avatar-tile click
+          // uses, so character vs master profile selection follows the
+          // same rules everywhere.
+          onOpenProfile={(displayName) => {
+            socket.emit("profile:fetch", { username: displayName }, (res) => {
+              if (res.ok) setOpenProfile(res.profile);
+              else setNotice({ code: res.code, message: res.message });
+            });
+          }}
         />
       ) : null}
       {bookmarksOpen ? (
@@ -2866,6 +3155,49 @@ function Chat() {
             setWorldCatalogOpen(false);
             setWorldViewerId(worldId);
           }}
+        />
+      ) : null}
+      {scriptoriumOpen ? (
+        <StoryCatalogModal
+          {...(scriptoriumOpen.tab ? { initialTab: scriptoriumOpen.tab } : {})}
+          onClose={() => setScriptoriumOpen(null)}
+          onOpenStory={(storyId) => {
+            // Keep the catalog mounted underneath so closing the reader
+            // returns the user to where they were browsing. The reader
+            // modal stacks on top (later in JSX → higher z-stack at
+            // equal z-index). Reader's onBack closes it without touching
+            // the catalog state.
+            setStoryReader({ storyId });
+          }}
+          onOpenEditor={(storyId) => {
+            // Same stacking pattern as onOpenStory.
+            setStoryEditor({ storyId });
+          }}
+        />
+      ) : null}
+      {storyEditor ? (
+        <StoryEditorModal
+          storyId={storyEditor.storyId}
+          onClose={() => setStoryEditor(null)}
+          onDeleted={() => setStoryEditor(null)}
+          {...(scriptoriumOpen ? { onBack: () => setStoryEditor(null) } : {})}
+        />
+      ) : null}
+      {storyReader ? (
+        <StoryReaderModal
+          storyId={storyReader.storyId}
+          {...(typeof storyReader.chapterIndex === "number" ? { initialChapterIndex: storyReader.chapterIndex } : {})}
+          onClose={() => setStoryReader(null)}
+          {...(scriptoriumOpen ? { onBack: () => setStoryReader(null) } : {})}
+          {...(me ? {
+            onEdit: () => {
+              // The reader gates the Edit button server-side
+              // (viewerCanEdit). Open the editor stacked on top of the
+              // reader; closing the editor returns to the reader, and
+              // closing the reader returns to the catalog (if open).
+              setStoryEditor({ storyId: storyReader.storyId });
+            },
+          } : {})}
         />
       ) : null}
       {/* One-shot welcome / announcement modal. Server decides when to send
@@ -2927,7 +3259,7 @@ function StaleVersionBanner() {
   const siteName = useChat((s) => s.branding.siteName);
   if (!staleVersion) return null;
   return (
-    <div className="flex flex-wrap items-center justify-center gap-2 border-b border-keep-action/40 bg-keep-action/15 px-3 py-1.5 text-xs text-keep-text">
+    <div className="keep-notice keep-notice-accent flex flex-wrap items-center justify-center gap-2 px-3 py-1.5 text-xs">
       <span>
         You're running <b>{siteName} {VERSION}</b>. The current version is <b>{staleVersion}</b>.
         {/* Admin-authored release note from `remote-deploy.sh
@@ -2942,7 +3274,7 @@ function StaleVersionBanner() {
       <button
         type="button"
         onClick={() => window.location.reload()}
-        className="rounded border border-keep-action bg-keep-action/20 px-2 py-0.5 text-xs font-semibold text-keep-action hover:bg-keep-action/30"
+        className="keep-button rounded border border-keep-action bg-keep-action/20 px-2 py-0.5 text-xs font-semibold text-keep-action hover:bg-keep-action/30"
       >
         Refresh
       </button>

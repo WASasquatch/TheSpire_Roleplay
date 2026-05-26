@@ -10,6 +10,29 @@ import { characterIdFromQuery, eqIdentity, ownsCharacter, type Identity } from "
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
+/**
+ * Result of `/me/friend-resolve?name=X` — every identity (master and
+ * character) that the name could refer to. Lets the friend-add UI
+ * disambiguate before sending an actual request. Empty array when
+ * nothing matches.
+ *
+ * Multiple character matches are possible: two players can each name
+ * a character "Jagger." The UI shows each with the owner's master
+ * username as a disambiguator (e.g. "Jagger (E D Erin)").
+ */
+export interface FriendResolveMatch {
+  kind: "master" | "character";
+  userId: string;
+  /** Character id when kind === 'character'; null for master matches. */
+  characterId: string | null;
+  /** What to display in the picker — character name or master username. */
+  displayName: string;
+  /** The master username — used as the disambiguator tag on character
+   *  rows ("Jagger (E D Erin)") and as the primary text for master rows. */
+  masterUsername: string;
+  avatarUrl: string | null;
+}
+
 export interface FriendListEntry {
   userId: string;
   username: string;
@@ -85,6 +108,86 @@ export interface FriendRequestEntry {
  *     list scan + Set lookup, so the per-row cost is constant.
  */
 export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
+  /* ---------- /me/friend-resolve — disambiguation -----------
+   *
+   * Given a free-text `name`, return every identity it could refer
+   * to: at most one master (usernames are unique) plus zero-or-more
+   * characters (multiple players can name a character the same
+   * thing). The friend-add UI consumes this BEFORE firing a request
+   * so the user can pick exactly which identity they meant.
+   *
+   * Self-matches are excluded so the picker never offers "friend
+   * yourself" rows. Disabled / soft-deleted rows are excluded.
+   *
+   * The existing POST /me/friend-requests still accepts a bare
+   * `username` for backward compatibility (the slash-command path
+   * uses that), but now ALSO accepts an explicit
+   * `targetCharacterId` to pin the request to a specific character
+   * without going through the name-resolution lookup that
+   * master-prefers-over-character.
+   */
+  app.get<{ Querystring: { name?: string } }>("/me/friend-resolve", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const name = (req.query.name ?? "").trim();
+    if (!name) return { matches: [] as FriendResolveMatch[] };
+    const lower = name.toLowerCase();
+
+    const matches: FriendResolveMatch[] = [];
+
+    // Master match. Username uniqueness means at most one.
+    const masterRow = (await db
+      .select()
+      .from(users)
+      .where(and(
+        sql`lower(${users.username}) = ${lower}`,
+        isNull(users.disabledAt),
+      ))
+      .limit(1))[0];
+    if (masterRow && masterRow.id !== me.id) {
+      matches.push({
+        kind: "master",
+        userId: masterRow.id,
+        characterId: null,
+        displayName: masterRow.username,
+        masterUsername: masterRow.username,
+        avatarUrl: masterRow.avatarUrl ?? null,
+      });
+    }
+
+    // Character matches. Pull all live characters with this name,
+    // joined to their owners for the disambiguator label. Caller's
+    // own characters are excluded — friending yourself is silly.
+    const charRows = await db
+      .select({
+        id: characters.id,
+        name: characters.name,
+        avatarUrl: characters.avatarUrl,
+        userId: characters.userId,
+        ownerUsername: users.username,
+      })
+      .from(characters)
+      .innerJoin(users, eq(users.id, characters.userId))
+      .where(and(
+        sql`lower(${characters.name}) = ${lower}`,
+        isNull(characters.deletedAt),
+        isNull(users.disabledAt),
+      ));
+    for (const c of charRows) {
+      if (c.userId === me.id) continue;
+      matches.push({
+        kind: "character",
+        userId: c.userId,
+        characterId: c.id,
+        displayName: c.name,
+        masterUsername: c.ownerUsername,
+        avatarUrl: c.avatarUrl ?? null,
+      });
+    }
+
+    return { matches };
+  });
+
   app.get<{ Querystring: { characterId?: string } }>("/me/friends", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
@@ -201,11 +304,9 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
    *   400 { error: "self" }               — friending yourself is silly
    *   400 { error: "username required" }  — body empty
    */
-  app.post<{ Body: { username?: string; characterId?: string } }>("/me/friend-requests", async (req, reply) => {
+  app.post<{ Body: { username?: string; characterId?: string; targetUserId?: string; targetCharacterId?: string | null } }>("/me/friend-requests", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
-    const username = (req.body?.username ?? "").trim();
-    if (!username) { reply.code(400); return { error: "username required" }; }
     // Friender identity: my active character (or master if absent).
     const myCharId = characterIdFromQuery(req.body?.characterId);
     if (myCharId && !(await ownsCharacter(db, me.id, myCharId))) {
@@ -213,28 +314,59 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     }
     const meIdentity: Identity = { userId: me.id, characterId: myCharId };
 
-    // Target identity: try master username first, then character name.
-    // Either resolution gives us a (userId, characterId|null) pair to
-    // pin the friendship to.
+    // Target identity resolution. Two paths:
+    //
+    //   1. EXPLICIT: caller passed `targetUserId` (and optionally
+    //      `targetCharacterId`). Used by the disambiguation picker
+    //      that calls /me/friend-resolve first and then commits to
+    //      a specific identity. Validates the target exists +
+    //      character (if any) belongs to that user.
+    //   2. NAME-BASED: caller passed `username`. Backward-compatible
+    //      path for the slash command and legacy clients. Tries
+    //      master-first, then character-by-name. Ambiguous (same
+    //      name as both a master and a character) silently picks
+    //      the master — the new disambiguation flow exists precisely
+    //      because this resolution order isn't always what the user
+    //      meant.
     let targetIdentity: Identity | null = null;
-    let targetDisplay: string = username;
-    const masterRow = (await db
-      .select()
-      .from(users)
-      .where(sql`lower(${users.username}) = ${username.toLowerCase()}`)
-      .limit(1))[0];
-    if (masterRow && !masterRow.disabledAt) {
-      targetIdentity = { userId: masterRow.id, characterId: null };
-      targetDisplay = masterRow.username;
-    } else {
-      const charRow = (await db
-        .select()
-        .from(characters)
-        .where(sql`lower(${characters.name}) = ${username.toLowerCase()}`)
-        .limit(1))[0];
-      if (charRow && !charRow.deletedAt) {
-        targetIdentity = { userId: charRow.userId, characterId: charRow.id };
+    let targetDisplay: string = "";
+    if (typeof req.body?.targetUserId === "string" && req.body.targetUserId.trim()) {
+      const targetUserId = req.body.targetUserId.trim();
+      const targetCharacterId = req.body.targetCharacterId ?? null;
+      const userRow = (await db.select().from(users).where(eq(users.id, targetUserId)).limit(1))[0];
+      if (!userRow || userRow.disabledAt) { reply.code(404); return { error: "no_user" }; }
+      if (targetCharacterId) {
+        const charRow = (await db.select().from(characters).where(eq(characters.id, targetCharacterId)).limit(1))[0];
+        if (!charRow || charRow.userId !== userRow.id || charRow.deletedAt) {
+          reply.code(404); return { error: "no_target_character" };
+        }
+        targetIdentity = { userId: userRow.id, characterId: charRow.id };
         targetDisplay = charRow.name;
+      } else {
+        targetIdentity = { userId: userRow.id, characterId: null };
+        targetDisplay = userRow.username;
+      }
+    } else {
+      const username = (req.body?.username ?? "").trim();
+      if (!username) { reply.code(400); return { error: "username required" }; }
+      const masterRow = (await db
+        .select()
+        .from(users)
+        .where(sql`lower(${users.username}) = ${username.toLowerCase()}`)
+        .limit(1))[0];
+      if (masterRow && !masterRow.disabledAt) {
+        targetIdentity = { userId: masterRow.id, characterId: null };
+        targetDisplay = masterRow.username;
+      } else {
+        const charRow = (await db
+          .select()
+          .from(characters)
+          .where(sql`lower(${characters.name}) = ${username.toLowerCase()}`)
+          .limit(1))[0];
+        if (charRow && !charRow.deletedAt) {
+          targetIdentity = { userId: charRow.userId, characterId: charRow.id };
+          targetDisplay = charRow.name;
+        }
       }
     }
     if (!targetIdentity) { reply.code(404); return { error: "no_user" }; }
@@ -451,6 +583,31 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
           frienderUsername: me.username,
           frienderDisplayName: me.username,
         });
+      }
+      // Echo to the acceptor's own sockets too. The client's listener
+      // bumps `friendsVersion` on every `friend:request` event, which
+      // is what triggers MessagesModal to refetch its friends list.
+      // Without this echo, accepting via the in-chat
+      // FriendRequestPrompts banner (or while the inbox modal is on
+      // another viewer's tab) left the acceptor's friends list stale
+      // — the only refresh path was the local `refreshKey` bump
+      // inside MessagesModal's own `acceptRequest`, which doesn't fire
+      // for the banner path or for sibling tabs. Payload identifies
+      // the original SENDER (now a friend) so the soft notice reads
+      // sensibly.
+      const frienderRow = (
+        await db.select().from(users).where(eq(users.id, frienderIdentity.userId)).limit(1)
+      )[0];
+      if (frienderRow) {
+        for (const s of sockets) {
+          const uid = (s.data as { userId?: string }).userId;
+          if (uid !== me.id) continue;
+          s.emit("friend:request", {
+            frienderUserId: frienderIdentity.userId,
+            frienderUsername: frienderRow.username,
+            frienderDisplayName: frienderRow.username,
+          });
+        }
       }
       return { ok: true };
     },

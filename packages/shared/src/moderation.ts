@@ -43,7 +43,15 @@ export type AuditAction =
   | "title_dissolve_admin"
   // Reports
   | "report_resolve"
-  | "report_dismiss";
+  | "report_dismiss"
+  // Scriptorium moderation (Phase 10)
+  | "story_force_rate"
+  | "story_admin_hide"
+  | "story_admin_delete"
+  // Emoticon catalog management
+  | "emoticon_sheet_create"
+  | "emoticon_sheet_update"
+  | "emoticon_sheet_delete";
 
 export interface AuditEntry {
   id: string;

@@ -55,10 +55,12 @@ import { registerCharacterRoutes } from "./routes/characters.js";
 import { registerAffiliateRoutes } from "./routes/affiliates.js";
 import { registerBookmarkRoutes } from "./routes/bookmarks.js";
 import { registerDirectMessageRoutes } from "./routes/directMessages.js";
+import { registerEmoticonRoutes } from "./routes/emoticons.js";
 import { registerFriendsRoutes } from "./routes/friends.js";
 import { registerJournalRoutes } from "./routes/journal.js";
 import { registerLinkRoutes } from "./routes/links.js";
 import { registerWorldRoutes } from "./routes/worlds.js";
+import { registerStoryRoutes } from "./routes/stories.js";
 import { registerMessageRoutes } from "./routes/messages.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerPushRoutes } from "./routes/push.js";
@@ -424,8 +426,10 @@ async function main() {
   await registerAffiliateRoutes(baseApp, db);
   await registerBookmarkRoutes(baseApp, db);
   await registerWorldRoutes(baseApp, db, io);
+  await registerStoryRoutes(baseApp, db, io);
   await registerFriendsRoutes(baseApp, db, io);
   await registerDirectMessageRoutes(baseApp, db, io);
+  await registerEmoticonRoutes(baseApp, db, io, uploadsRoot);
   await registerMessageRoutes(baseApp, db, io);
   await registerReportRoutes(baseApp, db);
   await registerPushRoutes(baseApp, db);
@@ -617,38 +621,46 @@ async function main() {
 
     // Room-placement priority on (re)connect, highest wins:
     //
-    //   1. Sibling tab in this same browser — if there's another live
-    //      socket for this user, follow it. Multi-tab UX: opening a
-    //      second tab silently lands you next to the first one instead
-    //      of in the canonical landing while the original tab is
-    //      visibly in some other room.
-    //   2. This tab's per-tab cache (`socket.data.tabRoomId` from the
+    //   1. This tab's per-tab cache (`socket.data.tabRoomId` from the
     //      handshake) — replayed by the client from sessionStorage on
     //      every reconnect. Survives server restarts, mobile suspend,
     //      and page reloads. Account-isolated: a desktop tab in Tavern
     //      and a phone tab in Library each keep their own value.
-    //   3. `users.lastRoomId` — account-global slot updated only on
-    //      "fully offline" disconnects. Useful for brand-new tabs on a
-    //      new device that have no sessionStorage to replay yet.
+    //      MUST run before the sibling-follow check below — otherwise a
+    //      mass reconnect (server restart, network blip on a desktop
+    //      with several tabs open) collapses every tab onto whichever
+    //      one's handshake landed first, because that one had no
+    //      siblings yet and the rest followed it. This tab's own
+    //      remembered room is always the correct answer when it has
+    //      one; sibling-follow is only meaningful for a tab that has
+    //      no memory of its own.
+    //   2. Sibling tab in this same browser — if there's another live
+    //      socket for this user AND this tab had no remembered room,
+    //      follow the sibling. Multi-tab UX: opening a brand-new tab
+    //      silently lands you next to your existing tab instead of in
+    //      the canonical landing.
+    //   3. `users.lastRoomId` — account-global slot updated on every
+    //      join. Useful for brand-new tabs on a new device that have
+    //      no sessionStorage to replay yet AND no live siblings.
     //   4. The canonical landing (The_Spire / system-flagged default).
     //
     // Each candidate runs through validateRoomForUser so a stale id
     // (deleted room, since-archived, newly banned) silently degrades to
     // the next tier instead of dead-ending the connect.
     let initialRoomId: string | null = null;
-    const existingSockets = await io.fetchSockets();
-    for (const s of existingSockets) {
-      if (s.id === socket.id) continue;
-      if ((s.data as { userId?: string }).userId !== user.id) continue;
-      const sib = [...s.rooms].find((r) => r.startsWith("room:"));
-      if (sib) {
-        initialRoomId = sib.slice(5);
-        break;
-      }
-    }
+    const tabRoomId = (socket.data as { tabRoomId?: string }).tabRoomId ?? null;
+    initialRoomId = await validateRoomForUser(tabRoomId);
     if (!initialRoomId) {
-      const tabRoomId = (socket.data as { tabRoomId?: string }).tabRoomId ?? null;
-      initialRoomId = await validateRoomForUser(tabRoomId);
+      const existingSockets = await io.fetchSockets();
+      for (const s of existingSockets) {
+        if (s.id === socket.id) continue;
+        if ((s.data as { userId?: string }).userId !== user.id) continue;
+        const sib = [...s.rooms].find((r) => r.startsWith("room:"));
+        if (sib) {
+          initialRoomId = sib.slice(5);
+          break;
+        }
+      }
     }
     if (!initialRoomId) {
       const userRow = (await db.select().from(users).where(eq(users.id, user.id)).limit(1))[0];
@@ -1155,7 +1167,7 @@ async function main() {
   });
   app.get("/sitemap.xml", publicLimit, async (req, reply) => {
     reply.type("application/xml; charset=utf-8");
-    return renderSitemapXml(originFromRequest(req));
+    return await renderSitemapXml(db, originFromRequest(req));
   });
 
   if (IS_PROD) {
@@ -1204,10 +1216,14 @@ async function main() {
         return [
           "default-src 'self'",
           `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
-          `style-src 'self' 'nonce-${nonce}'`,
+          // Google Fonts CSS sheet is loaded via <link rel=stylesheet>
+          // for the font-picker preview surface; the stylesheet body
+          // itself references fonts.gstatic.com (covered in font-src).
+          `style-src 'self' 'nonce-${nonce}' https://fonts.googleapis.com`,
           "style-src-attr 'unsafe-inline'",
           "img-src 'self' data: https:",
-          "font-src 'self' data:",
+          // Google Fonts woff2 files live on fonts.gstatic.com.
+          "font-src 'self' data: https://fonts.gstatic.com",
           "connect-src 'self'",
           "media-src 'self'",
           "worker-src 'self'",
@@ -1271,6 +1287,13 @@ async function main() {
       app.get("/w/:slug", publicLimit, serveSplash);
       app.get("/login", publicLimit, serveSplash);
       app.get("/register", publicLimit, serveSplash);
+      // Scriptorium — public catalog of SFW stories + canonical story
+      // permalinks. `/scriptorium` opens the catalog modal; the
+      // `@handle/slug` form is the shareable per-story URL. The catalog
+      // endpoint already enforces SFW-only for anonymous viewers, so the
+      // page is safe to render to unauthenticated visitors.
+      app.get("/scriptorium", publicLimit, serveSplash);
+      app.get("/scriptorium/@:handle/:slug", publicLimit, serveSplash);
 
       await app.register(fastifyStatic, {
         root: webDistPath,

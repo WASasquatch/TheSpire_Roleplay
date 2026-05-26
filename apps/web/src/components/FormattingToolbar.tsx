@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import { EmoticonPickerButton } from "./EmoticonPickerButton.js";
 
 /**
  * Compact bar of formatting buttons that sits above a chat / DM input.
@@ -23,11 +24,18 @@ export function FormattingToolbar({
   onChange,
   /** Optional override of the disabled state for the whole row. */
   disabled,
+  /** When set, renders a right-aligned `length / max` counter on the
+   *  toolbar so the user can see how close they are to the cap. The
+   *  caller is also responsible for blocking submit when over the
+   *  cap (this component is presentational only — it doesn't gate
+   *  the input). */
+  maxLength,
 }: {
   inputRef: RefObject<HTMLInputElement | HTMLTextAreaElement | null>;
   value: string;
   onChange: (next: string) => void;
   disabled?: boolean;
+  maxLength?: number;
 }) {
   /**
    * Core mutation: wrap whatever's selected (or insert at the caret
@@ -111,6 +119,25 @@ export function FormattingToolbar({
    * No selection → snap to the current line. Matches the room-chat
    * composer's Quote button.
    */
+  /**
+   * Insert a literal string at the caret position (replacing any
+   * current selection). Used for inline emoticon tokens — no
+   * wrapping, just paste-and-advance-the-caret.
+   */
+  function insertAtCursor(literal: string) {
+    const el = inputRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? value.length;
+    const next = value.slice(0, start) + literal + value.slice(end);
+    onChange(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + literal.length;
+      el.setSelectionRange(pos, pos);
+    });
+  }
+
   function prefixLines(prefix: string) {
     const el = inputRef.current;
     if (!el) return;
@@ -164,7 +191,44 @@ export function FormattingToolbar({
       <FmtBtn label="Image — ![alt](url)" onClick={insertImage} disabled={disabled}>
         🖼
       </FmtBtn>
+      <span aria-hidden className="mx-1 h-3 w-px bg-keep-rule/60" />
+      {/* Inline emoticon: opens the picker anchored to the button;
+       *  on pick, inserts the `:slug:idx:` token at the caret so the
+       *  rendered message body shows the sprite inline. */}
+      <EmoticonPickerButton
+        disabled={disabled}
+        onPick={(slug, idx) => insertAtCursor(`:${slug}:${idx}:`)}
+      />
+      {maxLength !== undefined ? (
+        <CharCount length={value.trimEnd().length} max={maxLength} />
+      ) : null}
     </div>
+  );
+}
+
+/** Right-aligned character counter rendered at the end of the
+ *  formatting row. Three-tier tint mirrors the chat Composer's
+ *  ComposerCharCount: muted at rest, amber past 80% of cap, accent
+ *  + bold when over the cap. Presentational only — submit gating
+ *  is the caller's responsibility. */
+function CharCount({ length, max }: { length: number; max: number }) {
+  const over = length > max;
+  const near = !over && length > max * 0.8;
+  const tint = over
+    ? "text-keep-accent font-semibold"
+    : near
+      ? "text-amber-500"
+      : "text-keep-muted";
+  return (
+    <span
+      aria-live="polite"
+      aria-label={`Character count: ${length} of ${max}`}
+      title={`${length} / ${max} characters`}
+      className={`ml-auto select-none whitespace-nowrap text-[11px] tabular-nums ${tint}`}
+    >
+      {length} / {max}
+      <span className="ml-1 hidden lg:inline">Chars</span>
+    </span>
   );
 }
 

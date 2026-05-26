@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { characterEarning, characterJournalEntries, characterOwnedNameStyles, characterPortraits, characters, identityCollection, identityPetCollection, items, messages, profileLinks, rooms, userActiveCosmetics, userOwnedNameStyles, userPortraits, users } from "../../db/schema.js";
+import { characterEarning, characterJournalEntries, characterOwnedNameStyles, characterPortraits, characters, identityCollection, identityPetCollection, items, messages, profileLinks, rooms, stories, userActiveCosmetics, userOwnedNameStyles, userPortraits, users } from "../../db/schema.js";
 import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLink, ProfileMetrics, ProfileView, Theme } from "@thekeep/shared";
-import { matchThemePreset, roleRank } from "@thekeep/shared";
+import { matchThemePreset, resolveScriptoriumAuthorTier, roleRank } from "@thekeep/shared";
 import { getSettings, parseUserThemeJson } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
 import type { CommandHandler } from "../types.js";
@@ -416,6 +416,32 @@ async function computeProfileMetrics(
 }
 
 /**
+ * Resolve a master account's Scriptorium author tier. Counts the
+ * user's PUBLISHED stories (publishedAt non-null) and maps to a
+ * passive tier via the shared `resolveScriptoriumAuthorTier` helper.
+ * Returns null for accounts that haven't published anything yet.
+ *
+ * Called from both the master + character profile builders — character
+ * profiles inherit the same badge as their owner's master profile.
+ */
+async function computeScriptoriumAuthorBadge(
+  db: import("../../db/index.js").Db,
+  userId: string,
+): Promise<import("@thekeep/shared").ScriptoriumAuthorBadge | null> {
+  const row = (await db
+    .select({ n: sql<number>`count(*)` })
+    .from(stories)
+    .where(and(
+      eq(stories.authorUserId, userId),
+      sql`${stories.publishedAt} IS NOT NULL`,
+    )))[0];
+  const publishedStories = Number(row?.n ?? 0);
+  const tier = resolveScriptoriumAuthorTier(publishedStories);
+  if (!tier) return null;
+  return { tier, publishedStories };
+}
+
+/**
  * Resolve a name (master username OR character name) to a ProfileView.
  * Used by both /whois and the HTTP profile endpoint, plus the click-to-view
  * flow on the userlist.
@@ -499,6 +525,7 @@ async function lookupProfile(
         isNsfw: u.isNsfw,
         createdAt: +u.createdAt,
         metrics: await computeProfileMetrics(db, u.id, null, viewerId),
+        scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, u.id),
         collection: await listProfileCollection(db, "user", u.id),
         petCollection: await listProfilePetCollection(db, "user", u.id),
         nameStyleKey: ns.key,
@@ -560,6 +587,7 @@ async function lookupProfile(
       createdAt: +c.createdAt,
       updatedAt: +c.updatedAt,
       metrics: await computeProfileMetrics(db, c.userId, c.id, viewerId),
+      scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, c.userId),
       collection: await listProfileCollection(db, "character", c.id),
       petCollection: await listProfilePetCollection(db, "character", c.id),
       nameStyleKey: ns.key,
@@ -644,6 +672,7 @@ async function lookupRandomProfile(
         isNsfw: u.isNsfw,
         createdAt: +u.createdAt,
         metrics: await computeProfileMetrics(db, u.id, null),
+        scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, u.id),
         collection: await listProfileCollection(db, "user", u.id),
         petCollection: await listProfilePetCollection(db, "user", u.id),
         nameStyleKey: ns.key,
@@ -699,6 +728,7 @@ async function lookupRandomProfile(
       createdAt: +c.createdAt,
       updatedAt: +c.updatedAt,
       metrics: await computeProfileMetrics(db, c.userId, c.id),
+      scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, c.userId),
       collection: await listProfileCollection(db, "character", c.id),
       petCollection: await listProfilePetCollection(db, "character", c.id),
       nameStyleKey: ns.key,

@@ -510,11 +510,14 @@ export function registerAdminEarningRoutes(
    *  user might still have equipped.
    * ========================================================= */
 
+  // CSS cap is generous (64KB) because animated styles can require
+  // many keyframe blocks, per-letter timing offsets, and theme-scoped
+  // overrides. Template stays modest — it's HTML scaffolding, not CSS.
   const styleBody = z.object({
     name: z.string().min(1).max(80).optional(),
     description: z.string().max(500).optional(),
     template: z.string().min(1).max(4000).optional(),
-    styleCss: z.string().max(8000).optional(),
+    styleCss: z.string().max(64000).optional(),
     cost: z.number().int().min(0).max(1_000_000).optional(),
     enabled: z.boolean().optional(),
     order: z.number().int().optional(),
@@ -525,7 +528,7 @@ export function registerAdminEarningRoutes(
     name: z.string().min(1).max(80),
     description: z.string().max(500).optional(),
     template: z.string().min(1).max(4000),
-    styleCss: z.string().max(8000).optional(),
+    styleCss: z.string().max(64000).optional(),
     cost: z.number().int().min(0).max(1_000_000).optional(),
     enabled: z.boolean().optional(),
     order: z.number().int().optional(),

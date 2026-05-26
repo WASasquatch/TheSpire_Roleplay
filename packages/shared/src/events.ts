@@ -126,6 +126,25 @@ export interface ClientToServerEvents {
 
 /** Events emitted by the server → client. */
 export interface ServerToClientEvents {
+  /**
+   * Scriptorium — a chapter the receiver is subscribed to has been
+   * published. The client surfaces a quiet one-line system message in
+   * the user's current room and (when the follower opted into push)
+   * the server independently fires a web-push notification.
+   *
+   * Payload is structured (rather than a pre-formatted string) so the
+   * client can render the link to the story / chapter and choose its
+   * own copy / sound effect.
+   */
+  "story:chapter-published": (payload: import("./story.js").StoryChapterPublishedEvent) => void;
+  /**
+   * Scriptorium — the recipient has been invited to collaborate on a
+   * story. Surfaces as an Accept | Decline card above the chat
+   * composer, same UX shape as the mutual-titles `mutual:prompt`
+   * flow. Multiple tabs/devices all see the prompt; whichever one
+   * acts first wins.
+   */
+  "story:invite": (payload: import("./story.js").StoryCollaboratorInvite) => void;
   "message:new": (msg: ChatMessage) => void;
   "message:bulk": (msgs: ChatMessage[]) => void;
   /**
@@ -161,6 +180,21 @@ export interface ServerToClientEvents {
    * `/rooms` and re-renders from the response.
    */
   "rooms:tree-changed": () => void;
+  /**
+   * Emoticon reaction was added or removed on a chat message, DM, or
+   * forum post. Clients merge the delta into the cached reaction
+   * summary for that target — no full refetch. The server scopes the
+   * broadcast to the right audience: chat reactions go to the room,
+   * DM reactions to the two participants' sockets.
+   */
+  "reaction:update": (payload: import("./emoticon.js").ReactionEvent) => void;
+  /**
+   * The admin updated the emoticon catalog — new sheet uploaded,
+   * labels edited, sheet deleted, etc. Clients refetch
+   * `GET /emoticons` and re-prime the picker. No payload — the
+   * refetch handles the delta and is small.
+   */
+  "emoticons:updated": () => void;
   /** Server-driven UI hints - open the character editor, prompt for password, etc. */
   "ui:hint": (hint: UiHint) => void;
   /** Soft errors surfaced to the user (bad command, not in room, etc.). */
@@ -398,6 +432,17 @@ export type UiHint =
   | { kind: "open-worlds-list" }
   /** Open the World Catalog modal (browse open worlds). */
   | { kind: "open-world-catalog" }
+  /**
+   * Open the Scriptorium catalog. Tabs:
+   *   - "find" (default): browse public stories
+   *   - "my":     the caller's own stories (editor entry point)
+   *   - "reading": stories the reader has positions in
+   */
+  | { kind: "open-scriptorium"; tab?: "find" | "my" | "reading" | "following" }
+  /** Open the story reader modal for a given story. */
+  | { kind: "open-story"; storyId: string; chapterIndex?: number }
+  /** Open the story editor. `storyId === null` opens the New Story wizard. */
+  | { kind: "open-story-editor"; storyId: string | null }
   /** Open the searchable users directory. Optional `query` pre-fills the search box. */
   | { kind: "open-users"; query?: string }
   /** Clear the local message buffer for the current room (no server effect). */

@@ -60,7 +60,7 @@ export function EarningRibbon({ onOpenEarning }: Props) {
       <button
         type="button"
         onClick={() => setCollapsed(false)}
-        className="flex w-full items-center justify-center gap-2 border-b border-keep-rule bg-keep-action/10 px-4 py-1 text-xs uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
+        className="keep-notice keep-notice-accent flex w-full items-center justify-center gap-2 px-4 py-1 text-xs uppercase tracking-widest text-keep-action hover:brightness-110"
         title="Show earning notification"
       >
         <span>★</span>
@@ -70,7 +70,7 @@ export function EarningRibbon({ onOpenEarning }: Props) {
   }
 
   return (
-    <div className="flex w-full items-start gap-3 border-b border-keep-rule bg-keep-action/10 px-4 py-2 text-sm text-keep-text">
+    <div className="keep-notice keep-notice-accent flex w-full items-start gap-3 px-4 py-2 text-sm">
       <span className="mt-0.5 text-keep-action">★</span>
       <div className="min-w-0 flex-1">
         <div>

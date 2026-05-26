@@ -22,6 +22,13 @@ export interface DirectMessage {
   editedAt: number | null;
   deletedAt: number | null;
   createdAt: number;
+  /**
+   * Emoticon-reaction summary for this DM, embedded inline so the
+   * client can render the ReactionBar without a per-row fetch.
+   * Absent on rows with zero reactions; absent on backlog payloads
+   * predating the feature.
+   */
+  reactions?: import("./emoticon.js").ReactionEntry[];
 }
 
 /**

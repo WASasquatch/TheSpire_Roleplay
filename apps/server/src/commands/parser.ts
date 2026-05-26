@@ -76,6 +76,18 @@ export function parseInput(raw: string): ParsedInput {
     if (text.startsWith("::")) {
       return { command: null, argsText: text.slice(1), args: [] };
     }
+    // Inline emoticon tokens (`:slug:idx:`) collide with the `:`
+    // action shortcut — without this guard, sending an emoticon by
+    // itself (or as the very first thing in a message) gets parsed
+    // as `/me slug:idx:` and renders as an italic third-person
+    // action instead of a sprite. Keep the regex in lockstep with
+    // the renderer's matcher in apps/web/src/lib/markdown.tsx
+    // parseInline (`:[a-z][a-z0-9_-]*:\d+:`). When the input
+    // starts with a valid token, fall through as plain text so the
+    // markdown layer can convert it to the sprite.
+    if (/^:[a-z][a-z0-9_-]*:\d+:/.test(text)) {
+      return { command: null, argsText: text, args: [] };
+    }
     const body = text.slice(1);
     return { command: "me", argsText: body, args: tokenize(body) };
   }

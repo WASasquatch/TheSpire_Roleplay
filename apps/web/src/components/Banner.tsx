@@ -4,6 +4,7 @@ import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
 import { disconnect } from "../lib/socket.js";
 import { clearSessionToken } from "../lib/http.js";
+import { useStoryInviteCount } from "../lib/storyInvites.js";
 
 interface NavLinkRow {
   id: string;
@@ -21,6 +22,10 @@ interface Props {
   onOpenRules: () => void;
   /** Opens the Earning dashboard modal. */
   onOpenEarning: () => void;
+  /** Opens the Scriptorium catalog. Signed-in only — anonymous splash
+   *  visitors can browse via FeaturedStoriesStrip + the `/stories/...`
+   *  shareable links instead. */
+  onOpenScriptorium: () => void;
 }
 
 /**
@@ -34,7 +39,7 @@ interface Props {
  * the active theme's panel color / text color / font-action stack when not
  * overridden, so a fresh install still looks coherent.
  */
-export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning }: Props) {
+export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium }: Props) {
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
   const branding = useChat((s) => s.branding);
@@ -43,6 +48,11 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   // store directly so it stays live with `earning:rankup` socket
   // events without prop drilling.
   const earningHasNew = useEarning((s) => s.unackRankUps.length > 0);
+  // Pending Scriptorium invite count — surfaces a small dot on the
+  // Scriptorium nav entry so the recipient sees it without opening
+  // the catalog. The hook itself always runs (Rules of Hooks); the
+  // value is only surfaced in the UI when signed in.
+  const storyInviteCount = useStoryInviteCount();
   const [links, setLinks] = useState<NavLinkRow[]>([]);
   // Mobile-only dropdown state. The desktop inline nav is always
   // rendered; this just toggles a hamburger panel that mirrors the
@@ -93,6 +103,15 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
     // flag the disconnect stays silent (mobile suspend, tab close,
     // network drop all look identical otherwise).
     disconnect(true);
+    // Land on the splash, not the login form. UnauthRouter renders
+    // SplashLanding only when pathname is "/"; after a login from
+    // /login (or /register) the URL stays there, so without this the
+    // exit would drop the user back onto the auth form they came in
+    // through. Use replaceState so the back button doesn't return to
+    // the now-logged-out app shell.
+    if (window.location.pathname !== "/") {
+      window.history.replaceState(null, "", "/");
+    }
     setMe(null);
   }
 
@@ -117,6 +136,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   function fireRules() { onOpenRules(); setMenuOpen(false); }
   function fireAdmin() { if (onOpenAdmin) onOpenAdmin(); setMenuOpen(false); }
   function fireEarning() { onOpenEarning(); setMenuOpen(false); }
+  function fireScriptorium() { onOpenScriptorium(); setMenuOpen(false); }
   function fireLogout() { setMenuOpen(false); void logout(); }
 
   return (
@@ -184,6 +204,25 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                   to the top-right of the label so it's discoverable
                   without competing with the link text. */}
               {earningHasNew ? (
+                <span
+                  aria-hidden
+                  className="absolute -top-0.5 -right-1 inline-block h-1.5 w-1.5 rounded-full bg-keep-action"
+                />
+              ) : null}
+            </button>
+            <span className="text-keep-rule">|</span>
+            <button
+              type="button"
+              onClick={onOpenScriptorium}
+              className="relative uppercase tracking-widest text-keep-muted hover:text-keep-text"
+              title={
+                storyInviteCount > 0
+                  ? `${storyInviteCount} pending collaboration ${storyInviteCount === 1 ? "invite" : "invites"} — open the Scriptorium to act on ${storyInviteCount === 1 ? "it" : "them"}`
+                  : "The Scriptorium — long-form fiction by the people who live here"
+              }
+            >
+              Scriptorium
+              {storyInviteCount > 0 ? (
                 <span
                   aria-hidden
                   className="absolute -top-0.5 -right-1 inline-block h-1.5 w-1.5 rounded-full bg-keep-action"
@@ -278,16 +317,28 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                 above. The shared <nav> already gives them a rounded outer
                 container; individual items have no border-radius. */}
             {me ? (
-              <button
-                type="button"
-                onClick={fireEarning}
-                className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
-              >
-                <span>Earning</span>
-                {earningHasNew ? (
-                  <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-keep-action" />
-                ) : null}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={fireEarning}
+                  className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
+                >
+                  <span>Earning</span>
+                  {earningHasNew ? (
+                    <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-keep-action" />
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  onClick={fireScriptorium}
+                  className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
+                >
+                  <span>Scriptorium</span>
+                  {storyInviteCount > 0 ? (
+                    <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-keep-action" />
+                  ) : null}
+                </button>
+              </>
             ) : null}
             <button
               type="button"

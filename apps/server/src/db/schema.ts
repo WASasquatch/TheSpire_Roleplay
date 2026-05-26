@@ -133,6 +133,22 @@ export const users = sqliteTable(
       .notNull()
       .default(false),
     /**
+     * Scriptorium catalog preferences (migration 0142).
+     *
+     *   storyShowNsfw  — opt-in for R / NC-17 cards in the catalog.
+     *     Anonymous viewers never see these regardless; this gates
+     *     them for signed-in viewers. Default off — readers opt in.
+     *
+     *   storyCwBlocklist — comma-separated content warnings the user
+     *     always wants filtered OUT of the catalog. Cards tagged with
+     *     ANY blocklisted warning are hidden entirely (not just blurred).
+     *     Same shape as worlds.contentWarnings and stories.contentWarnings.
+     */
+    storyShowNsfw: integer("story_show_nsfw", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    storyCwBlocklist: text("story_cw_blocklist").notNull().default(""),
+    /**
      * Userlist display preference. When true AND the user has a
      * resolved rank, the rooms-tree row renders the rank sigil in
      * place of the gender glyph (saves horizontal space and makes
@@ -1341,6 +1357,415 @@ export const worldMembers = sqliteTable(
   }),
 );
 
+/* =========================================================
+ *  Scriptorium — long-form fiction (migration 0139)
+ *
+ *  Stories are authored by identities (master account OR character)
+ *  and inherit the same privacy posture as the rest of the app:
+ *  visibility tiers gate who sees a story; the rating tier
+ *  additionally gates anonymous splash viewers.
+ * ========================================================= */
+
+/**
+ * Top-level story row. Catalog cards on the splash + in-app list read
+ * directly from here; the editor + reader hydrate chapters from
+ * `story_chapters` on demand. Counters (totalWords, totalChapters,
+ * readerCount, etc.) are maintained on publish / read events.
+ */
+export const stories = sqliteTable(
+  "stories",
+  {
+    id: id(),
+    authorUserId: text("author_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Null = published under the master identity. */
+    authorCharacterId: text("author_character_id").references(() => characters.id, { onDelete: "set null" }),
+    slug: text("slug").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    synopsisHtml: text("synopsis_html").notNull().default(""),
+    coverImageUrl: text("cover_image_url"),
+    themeJson: text("theme_json"),
+    genre: text("genre").notNull().default("other"),
+    rating: text("rating").notNull().default("PG"),
+    status: text("status").notNull().default("draft"),
+    visibility: text("visibility").notNull().default("private"),
+    tags: text("tags").notNull().default(""),
+    contentWarnings: text("content_warnings").notNull().default(""),
+    linkedWorldId: text("linked_world_id").references(() => worlds.id, { onDelete: "set null" }),
+    allowReviews: integer("allow_reviews").notNull().default(0),
+    allowApplause: integer("allow_applause").notNull().default(1),
+    totalWords: integer("total_words").notNull().default(0),
+    totalChapters: integer("total_chapters").notNull().default(0),
+    readerCount: integer("reader_count").notNull().default(0),
+    applauseCount: integer("applause_count").notNull().default(0),
+    reviewCount: integer("review_count").notNull().default(0),
+    avgRatingX100: integer("avg_rating_x100"),
+    publishedAt: integer("published_at", { mode: "timestamp_ms" }),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    authorSlugUq: uniqueIndex("stories_author_slug_uq").on(t.authorUserId, sql`lower(${t.slug})`),
+    catalogIdx: index("stories_catalog_idx").on(t.visibility, t.rating, t.status, t.updatedAt),
+    linkedWorldIdx: index("stories_linked_world_idx").on(t.linkedWorldId),
+    authorIdx: index("stories_author_idx").on(t.authorUserId, t.updatedAt),
+  }),
+);
+
+/**
+ * Ordered chapters inside a story. Chapter 1 is sort_order = 0. A
+ * one-shot is a story with a single chapter.
+ */
+export const storyChapters = sqliteTable(
+  "story_chapters",
+  {
+    id: id(),
+    storyId: text("story_id")
+      .notNull()
+      .references(() => stories.id, { onDelete: "cascade" }),
+    sortOrder: integer("sort_order").notNull().default(0),
+    title: text("title").notNull().default(""),
+    bodyHtml: text("body_html").notNull().default(""),
+    authorNotesHtml: text("author_notes_html").notNull().default(""),
+    contentWarnings: text("content_warnings").notNull().default(""),
+    wordCount: integer("word_count").notNull().default(0),
+    status: text("status").notNull().default("draft"),
+    publishedAt: integer("published_at", { mode: "timestamp_ms" }),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    orderIdx: index("story_chapters_order_idx").on(t.storyId, t.sortOrder),
+    publishedIdx: index("story_chapters_published_idx").on(t.storyId, t.status, t.publishedAt),
+  }),
+);
+
+/**
+ * Immutable per-chapter version snapshots. Autosave frames are pruned
+ * past a per-chapter cap (default 20, enforced in the route layer);
+ * publish frames are kept indefinitely.
+ */
+export const storyChapterVersions = sqliteTable(
+  "story_chapter_versions",
+  {
+    id: id(),
+    chapterId: text("chapter_id")
+      .notNull()
+      .references(() => storyChapters.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    bodyHtml: text("body_html").notNull().default(""),
+    authorNotesHtml: text("author_notes_html").notNull().default(""),
+    reason: text("reason").notNull().default("autosave"),
+    savedByUserId: text("saved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    savedAt: ts("saved_at"),
+  },
+  (t) => ({
+    chapterVersionUq: uniqueIndex("story_chapter_versions_chapter_version_uq").on(t.chapterId, t.version),
+    chapterIdx: index("story_chapter_versions_chapter_idx").on(t.chapterId, t.savedAt),
+  }),
+);
+
+/**
+ * Per-reader "continue reading" pointer. Author cannot see WHICH
+ * readers have a row — only the aggregate readerCount. Admins cannot
+ * pull individual positions either.
+ */
+export const storyReadingPositions = sqliteTable(
+  "story_reading_positions",
+  {
+    storyId: text("story_id")
+      .notNull()
+      .references(() => stories.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    lastChapterId: text("last_chapter_id").references(() => storyChapters.id, { onDelete: "set null" }),
+    lastAnchorId: text("last_anchor_id"),
+    /** Integer 0..1000 (percent * 10) so we can sort without floats. */
+    percentThrough: integer("percent_through").notNull().default(0),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.storyId, t.userId] }),
+    userIdx: index("story_reading_positions_user_idx").on(t.userId, t.updatedAt),
+  }),
+);
+
+/* ---------- Scriptorium reviews + replies + applause (migration 0140) ---------- */
+
+/**
+ * Top-level review. One per (story, reviewer identity). Mirror of the
+ * "identity = master + character" tuple: a player and one of their
+ * characters each get their own review slot.
+ *
+ * `pinnedByAuthor` floats the review to the top of the story's review
+ * list; `hiddenByAuthor` removes it from public view (the reviewer
+ * still sees it on their own surface — same shape as `/ignore`).
+ * `editGraceExpiresAt` is a 60-second window mirroring chat + DM grace.
+ */
+export const storyReviews = sqliteTable(
+  "story_reviews",
+  {
+    id: id(),
+    storyId: text("story_id")
+      .notNull()
+      .references(() => stories.id, { onDelete: "cascade" }),
+    reviewerUserId: text("reviewer_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reviewerCharacterId: text("reviewer_character_id").references(() => characters.id, { onDelete: "set null" }),
+    rating: integer("rating").notNull(),
+    bodyHtml: text("body_html").notNull().default(""),
+    pinnedByAuthor: integer("pinned_by_author").notNull().default(0),
+    hiddenByAuthor: integer("hidden_by_author").notNull().default(0),
+    editGraceExpiresAt: integer("edit_grace_expires_at", { mode: "timestamp_ms" }),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    // Identity-tuple uniqueness — partial index expression in the
+    // migration (drizzle's typed builder doesn't expose the COALESCE
+    // form directly).
+    storyIdx: index("story_reviews_story_idx").on(t.storyId, t.createdAt),
+    reviewerIdx: index("story_reviews_reviewer_idx").on(t.reviewerUserId, t.createdAt),
+  }),
+);
+
+/** Threaded one level under a review. Plain sanitized HTML. */
+export const storyReviewReplies = sqliteTable(
+  "story_review_replies",
+  {
+    id: id(),
+    reviewId: text("review_id")
+      .notNull()
+      .references(() => storyReviews.id, { onDelete: "cascade" }),
+    replyerUserId: text("replyer_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    replyerCharacterId: text("replyer_character_id").references(() => characters.id, { onDelete: "set null" }),
+    bodyHtml: text("body_html").notNull().default(""),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    reviewIdx: index("story_review_replies_review_idx").on(t.reviewId, t.createdAt),
+  }),
+);
+
+/**
+ * Applause — idempotent boolean per (reader, target). Target is either
+ * the whole story (chapterId null) or a specific chapter. Author
+ * cannot see WHO applauded; only the rollup count on the story row.
+ */
+export const storyApplause = sqliteTable(
+  "story_applause",
+  {
+    storyId: text("story_id")
+      .notNull()
+      .references(() => stories.id, { onDelete: "cascade" }),
+    chapterId: text("chapter_id").references(() => storyChapters.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    applaudedAt: ts("applauded_at"),
+  },
+  (t) => ({
+    // Uniqueness is enforced by a COALESCE-expression unique index in
+    // the migration — SQLite forbids expressions in PK/UNIQUE
+    // constraints, so this is a UNIQUE INDEX rather than a composite
+    // PK. Rowid is the implicit primary key.
+    uq: uniqueIndex("story_applause_uq").on(
+      t.storyId,
+      sql`coalesce(${t.chapterId}, '')`,
+      t.userId,
+    ),
+    storyIdx: index("story_applause_story_idx").on(t.storyId),
+  }),
+);
+
+/* ---------- Scriptorium subscriptions (Phase 7) ---------- */
+
+/**
+ * Per-reader story subscription. On chapter publish, every row here is
+ * notified (in-app via socket; optional web-push when pushEnabled).
+ * Author cannot see WHO is subscribed — only the rollup count.
+ */
+export const storySubscriptions = sqliteTable(
+  "story_subscriptions",
+  {
+    storyId: text("story_id")
+      .notNull()
+      .references(() => stories.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    pushEnabled: integer("push_enabled").notNull().default(0),
+    subscribedAt: ts("subscribed_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.storyId, t.userId] }),
+    userIdx: index("story_subscriptions_user_idx").on(t.userId, t.subscribedAt),
+    storyIdx: index("story_subscriptions_story_idx").on(t.storyId),
+  }),
+);
+
+/* ---------- Scriptorium chapter locks (Phase 5, soft-lock) ---------- */
+
+/**
+ * Advisory editing lock on a single chapter. Acquired when a
+ * collaborator opens the chapter editor; refreshed by client
+ * heartbeat. Lease is 5 minutes since `lastRefreshAt`; the server
+ * treats expired rows as available (lazy GC on the next acquire).
+ *
+ * "Force edit" simply bypasses the lock — the save still goes through
+ * and divergence surfaces in the version history (each save is its
+ * own row keyed by `savedByUserId`).
+ */
+export const storyChapterLocks = sqliteTable(
+  "story_chapter_locks",
+  {
+    chapterId: text("chapter_id")
+      .primaryKey()
+      .references(() => storyChapters.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    acquiredAt: ts("acquired_at"),
+    lastRefreshAt: ts("last_refresh_at"),
+  },
+  (t) => ({
+    userIdx: index("story_chapter_locks_user_idx").on(t.userId),
+  }),
+);
+
+/* ---------- Scriptorium collaborators (Phase 5) ---------- */
+
+/**
+ * Per-story collaborators. The owner (`stories.authorUserId`) is
+ * implicit and never has a row here. Three added roles:
+ *
+ *   reader    — read drafts only (beta readers)
+ *   editor    — edit existing chapters + manage codex
+ *   co_author — edit + add chapters, publish; cannot manage
+ *               collaborators or delete the story
+ *
+ * `acceptedAt` null = pending invite (recipient hasn't decided);
+ * non-null = active. Declining deletes the row server-side, so the
+ * "rejected" state never persists.
+ */
+export const storyCollaborators = sqliteTable(
+  "story_collaborators",
+  {
+    storyId: text("story_id")
+      .notNull()
+      .references(() => stories.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    invitedByUserId: text("invited_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    invitedAt: ts("invited_at"),
+    acceptedAt: integer("accepted_at", { mode: "timestamp_ms" }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.storyId, t.userId] }),
+    userIdx: index("story_collaborators_user_idx").on(t.userId, t.invitedAt),
+    storyIdx: index("story_collaborators_story_idx").on(t.storyId, t.acceptedAt),
+  }),
+);
+
+/* ---------- Scriptorium codex (Phase 8) ---------- */
+
+/**
+ * Per-story continuity bible. Three discriminated kinds — characters,
+ * locations, plot points — share one table with a `kind` column. Each
+ * entity has a per-(story, kind) unique slug so a character and a
+ * location can share a name without colliding.
+ *
+ * `isPublic` opt-in surfaces an entity in the reader's "Cast & places"
+ * appendix on the story landing page. Private by default — plot
+ * outlines especially shouldn't leak by default.
+ */
+export const storyEntities = sqliteTable(
+  "story_entities",
+  {
+    id: id(),
+    storyId: text("story_id")
+      .notNull()
+      .references(() => stories.id, { onDelete: "cascade" }),
+    /** "character" | "location" | "plot" — enforced at the Zod layer. */
+    kind: text("kind").notNull(),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    summary: text("summary").notNull().default(""),
+    bodyHtml: text("body_html").notNull().default(""),
+    /** Free-form kv map. Renderer / editor decide what to surface per kind. */
+    statsJson: text("stats_json").notNull().default("{}"),
+    imageUrl: text("image_url"),
+    isPublic: integer("is_public").notNull().default(0),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    storyKindSlugUq: uniqueIndex("story_entities_story_kind_slug_uq").on(
+      t.storyId,
+      t.kind,
+      sql`lower(${t.slug})`,
+    ),
+    orderIdx: index("story_entities_order_idx").on(t.storyId, t.kind, t.sortOrder),
+  }),
+);
+
+/* ---------- Scriptorium reports (Phase 10) ---------- */
+
+/**
+ * User-filed report against a story, chapter, review, or review reply.
+ * One unified table with a `targetKind` discriminator keeps the admin
+ * queue surface uniform.
+ *
+ * The `snapshotJson` captures title / body / metadata at report time
+ * so the queue stays useful even if the author later deletes the
+ * reported content — mirror of the `bodySnapshot` pattern on the DM
+ * reports column of `reports` above.
+ *
+ * One report per (reporter, target). Second click silently no-ops.
+ */
+export const storyReports = sqliteTable(
+  "story_reports",
+  {
+    id: id(),
+    targetKind: text("target_kind").notNull(),
+    targetId: text("target_id").notNull(),
+    storyId: text("story_id")
+      .notNull()
+      .references(() => stories.id, { onDelete: "cascade" }),
+    reporterUserId: text("reporter_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reason: text("reason"),
+    snapshotJson: text("snapshot_json").notNull().default("{}"),
+    status: text("status", { enum: ["open", "reviewed", "dismissed"] })
+      .notNull()
+      .default("open"),
+    resolvedById: text("resolved_by_id").references(() => users.id, { onDelete: "set null" }),
+    resolvedAt: integer("resolved_at", { mode: "timestamp_ms" }),
+    resolutionNote: text("resolution_note"),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    reporterTargetUq: uniqueIndex("story_reports_reporter_target_uq").on(
+      t.reporterUserId,
+      t.targetKind,
+      t.targetId,
+    ),
+    statusIdx: index("story_reports_status_idx").on(t.status, t.createdAt),
+    storyIdx: index("story_reports_story_idx").on(t.storyId),
+  }),
+);
+
 /* ---------- audit log (Phase 3) ---------- */
 /**
  * Append-only log of admin/mod actions. Stores enough metadata to reconstruct
@@ -2185,6 +2610,88 @@ export const earningNotifications = sqliteTable(
     userUnreadIdx: index("earning_notifications_user_unread_idx").on(t.userId, t.acknowledgedAt),
   }),
 );
+
+/* =====================================================================
+ *  Emoticon reactions
+ * =====================================================================
+ *
+ * Discord-style sticker reactions. Sheets are 4×4 sprite-sheet images
+ * uploaded by admins (or seeded at boot for the defaults). Each cell
+ * carries a label; cells with an empty / "empty" label are hidden from
+ * the picker but still occupy their grid slot so admins can fill them
+ * in later without renumbering existing reactions.
+ *
+ * Polymorphic target: a reaction attaches to a chat message, a DM, or
+ * (reserved) a forum post. SQLite can't enforce a discriminated FK so
+ * the app validates the target; cleanup triggers in migration 0146
+ * cascade orphan reactions when the source row is deleted.
+ */
+export const emoticonSheets = sqliteTable(
+  "emoticon_sheets",
+  {
+    id: id(),
+    /** Stable client-facing identifier (URL-safe, unique). The picker
+     *  uses it instead of the opaque row id. */
+    slug: text("slug").notNull().unique(),
+    name: text("name").notNull(),
+    /** Relative URL to the sprite-sheet image. Defaults point at
+     *  /assets/emoticons/<file>.png (bundled); uploads point at
+     *  /uploads/emoticons/<id>.png. */
+    imageUrl: text("image_url").notNull(),
+    /** JSON array of EXACTLY 16 labels (4×4 row-major). Empty string
+     *  or the literal "empty" hides the cell from the picker. */
+    cells: text("cells")
+      .notNull()
+      .default('["","","","","","","","","","","","","","","",""]'),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdByUserId: text("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+);
+
+export const messageReactions = sqliteTable(
+  "message_reactions",
+  {
+    id: id(),
+    /** 'chat_message' → messages.id ; 'dm' → direct_messages.id ;
+     *  'forum_post' reserved for when the forum lands. */
+    targetKind: text("target_kind", {
+      enum: ["chat_message", "dm", "forum_post"],
+    }).notNull(),
+    targetId: text("target_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Identity snapshot at reaction time. Null = master handle. */
+    characterId: text("character_id").references(() => characters.id, {
+      onDelete: "set null",
+    }),
+    /** Display name snapshot — survives renames the same way
+     *  messages.displayName does. */
+    displayName: text("display_name").notNull(),
+    sheetId: text("sheet_id")
+      .notNull()
+      .references(() => emoticonSheets.id, { onDelete: "cascade" }),
+    /** 0..15 row-major. */
+    cellIndex: integer("cell_index").notNull(),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    /** Discord rule: one user, one (sheet, cell), one target. */
+    uniq: uniqueIndex("message_reactions_uniq")
+      .on(t.targetKind, t.targetId, t.userId, t.sheetId, t.cellIndex),
+    /** Hot read path: render the ReactionBar for visible rows. */
+    targetIdx: index("message_reactions_target_idx").on(t.targetKind, t.targetId),
+    /** Defense-in-depth: user reaction history lookups. */
+    userIdx: index("message_reactions_user_idx").on(t.userId),
+  }),
+);
+
+export type DbEmoticonSheet = typeof emoticonSheets.$inferSelect;
+export type DbMessageReaction = typeof messageReactions.$inferSelect;
 
 export type DbUser = typeof users.$inferSelect;
 export type DbCharacter = typeof characters.$inferSelect;

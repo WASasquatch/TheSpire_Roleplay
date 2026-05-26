@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import { isAdminRole, isMasterAdminRole, type ClientToServerEvents, type ServerToClientEvents } from "@thekeep/shared";
 import { characters, messages, userEarning, users } from "../db/schema.js";
@@ -10,6 +10,16 @@ import type { Db } from "../db/index.js";
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
 const MAX_LIMIT = 200;
+/**
+ * Ceiling on the in-memory sort path. Modes like "online" + "messages"
+ * (and any query carrying a `?rank=` filter) need the FULL matched set
+ * loaded to sort correctly, so we can't push pagination into SQL for
+ * them. To prevent the route from OOMing on a directory of tens of
+ * thousands of users, we refuse the request past this cap and ask the
+ * caller to narrow with `?q=` first. The cap is generous enough that
+ * realistic populations + a search-as-you-type UI never trip it.
+ */
+const MAX_INMEMORY_SORT_USERS = 5000;
 
 /**
  * Public-facing user directory endpoint. Authenticated users only - we don't
@@ -47,9 +57,17 @@ export async function registerUsersRoutes(
     })();
 
     // Match search query against master username OR any of the user's
-    // character names. Disabled accounts (disabledAt set) and the system
-    // sentinel are excluded.
+    // character names. Disabled accounts (disabledAt set) and the
+    // system sentinel are excluded. `q` is LIKE-escaped so a literal
+    // `_` or `%` in the search term doesn't widen the match.
+    const escapedQ = q.replace(/[%_]/g, (c) => `\\${c}`);
     let matchedUserIds: string[];
+    // When set, the no-search path pushed LIMIT/OFFSET into SQL and
+    // matchedUserIds already represents the page in SQL-sorted order.
+    // The hydration steps still run on this smaller set, but the
+    // bottom-of-route in-memory `.sort()` + `.slice()` is bypassed so
+    // we don't re-paginate or re-sort.
+    let sqlPaginated: { total: number; order: string[] } | null = null;
     if (q) {
       const byMaster = await db
         .select({ id: users.id })
@@ -57,25 +75,64 @@ export async function registerUsersRoutes(
         .where(and(
           isNull(users.disabledAt),
           sql`${users.username} != 'system'`,
-          sql`lower(${users.username}) LIKE ${"%" + q + "%"}`,
+          sql`lower(${users.username}) LIKE ${"%" + escapedQ + "%"} ESCAPE '\\'`,
         ));
       const byChar = await db
         .select({ userId: characters.userId })
         .from(characters)
         .where(and(
           isNull(characters.deletedAt),
-          sql`lower(${characters.name}) LIKE ${"%" + q + "%"}`,
+          sql`lower(${characters.name}) LIKE ${"%" + escapedQ + "%"} ESCAPE '\\'`,
         ));
       matchedUserIds = [...new Set([
         ...byMaster.map((r) => r.id),
         ...byChar.map((r) => r.userId),
       ])];
     } else {
-      const allMasters = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(and(isNull(users.disabledAt), sql`${users.username} != 'system'`));
-      matchedUserIds = allMasters.map((r) => r.id);
+      // No search query. Two regimes:
+      //  - Modes that REQUIRE the full match set in memory
+      //    (online/messages sort hydrate runtime data not in the
+      //    users table; rank filter intersects with a separate
+      //    table). Capped at MAX_INMEMORY_SORT_USERS to bound memory.
+      //  - Pure-SQL-sortable modes ("name" / "joined" with no rank
+      //    filter): push LIMIT/OFFSET into the SQL query so the
+      //    page is the size driver, not the directory population.
+      const baseWhere = and(isNull(users.disabledAt), sql`${users.username} != 'system'`);
+      if (rankFilter || sortMode === "online" || sortMode === "messages") {
+        const allMasters = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(baseWhere)
+          .limit(MAX_INMEMORY_SORT_USERS + 1);
+        if (allMasters.length > MAX_INMEMORY_SORT_USERS) {
+          reply.code(413);
+          return {
+            error: `directory has more than ${MAX_INMEMORY_SORT_USERS} users — narrow with ?q= or use ?sort=name/joined`,
+          };
+        }
+        matchedUserIds = allMasters.map((r) => r.id);
+      } else {
+        const orderBy = sortMode === "joined"
+          ? sql`${users.createdAt} desc`
+          : sql`lower(${users.username})`;
+        const pageRows = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(baseWhere)
+          .orderBy(orderBy)
+          .limit(limit)
+          .offset(offset);
+        const totalRow = (await db
+          .select({ n: sql<number>`count(*)` })
+          .from(users)
+          .where(baseWhere))[0];
+        // matchedUserIds is now the PAGE (already SQL-sorted +
+        // limited). The hydration code below uses the same array;
+        // the in-memory `.sort()` + `.slice()` at the bottom of the
+        // route is bypassed via the `sqlPaginated` flag.
+        matchedUserIds = pageRows.map((r) => r.id);
+        sqlPaginated = { total: totalRow?.n ?? 0, order: matchedUserIds };
+      }
     }
 
     // Online lookup happens up-front so the alphabetical-online sort
@@ -113,7 +170,14 @@ export async function registerUsersRoutes(
       matchedUserIds = matchedUserIds.filter((uid) => rankByUser.get(uid)?.rankKey === rankFilter);
     }
     const total = matchedUserIds.length;
-    if (matchedUserIds.length === 0) return { users: [], total: 0, offset, limit };
+    if (matchedUserIds.length === 0) {
+      return {
+        users: [],
+        total: sqlPaginated ? sqlPaginated.total : 0,
+        offset,
+        limit,
+      };
+    }
 
     // Lifetime message count per user — single GROUP BY for the
     // matched set. Same kind set the profile `chatMessages` counter
@@ -198,45 +262,56 @@ export async function registerUsersRoutes(
       replies: u.hideForumReplyCount,
     }]));
 
-    const sorted = userRows.sort((a, b) => {
-      switch (sortMode) {
-        case "messages": {
-          // Highest message count first. Privacy-hidden users sort as
-          // 0 so they don't accidentally float to the top — opting
-          // into privacy means accepting demoted directory ordering.
-          // Ties break alphabetically so the list stays stable for
-          // users at the same level.
-          const aFlags = hideFlagsByUser.get(a.id);
-          const bFlags = hideFlagsByUser.get(b.id);
-          const aN = aFlags ? (effectiveCount(a.id, aFlags.chat, aFlags.topics, aFlags.replies) ?? 0) : 0;
-          const bN = bFlags ? (effectiveCount(b.id, bFlags.chat, bFlags.topics, bFlags.replies) ?? 0) : 0;
-          if (aN !== bN) return bN - aN;
-          return a.username.localeCompare(b.username);
-        }
-        case "joined": {
-          // Newest accounts first. Useful for spotting fresh members
-          // to welcome / vouch for.
-          return +b.createdAt - +a.createdAt;
-        }
-        case "name": {
-          // Pure alphabetical, ignoring online status. Easier to scan
-          // when you're looking for a specific user and you don't
-          // know whether they're online.
-          return a.username.localeCompare(b.username);
-        }
-        case "online":
-        default: {
-          // Historic default — online users first, then offline,
-          // alphabetical within each band.
-          const aOn = onlineUserIds.has(a.id) ? 0 : 1;
-          const bOn = onlineUserIds.has(b.id) ? 0 : 1;
-          if (aOn !== bOn) return aOn - bOn;
-          return a.username.localeCompare(b.username);
-        }
-      }
-    });
+    // When the no-search SQL-paginated path was used, `userRows` is
+    // ALREADY the right page in the right order — restore that order
+    // (the IN() fetch above doesn't preserve it) and skip the
+    // in-memory sort + slice entirely. The `total` returned to the
+    // client is the SELECT COUNT(*) we ran during pagination.
+    const sorted = sqlPaginated
+      ? (() => {
+          const ix = new Map(sqlPaginated.order.map((id, i) => [id, i]));
+          return [...userRows].sort((a, b) => (ix.get(a.id) ?? 0) - (ix.get(b.id) ?? 0));
+        })()
+      : userRows.sort((a, b) => {
+          switch (sortMode) {
+            case "messages": {
+              // Highest message count first. Privacy-hidden users sort as
+              // 0 so they don't accidentally float to the top — opting
+              // into privacy means accepting demoted directory ordering.
+              // Ties break alphabetically so the list stays stable for
+              // users at the same level.
+              const aFlags = hideFlagsByUser.get(a.id);
+              const bFlags = hideFlagsByUser.get(b.id);
+              const aN = aFlags ? (effectiveCount(a.id, aFlags.chat, aFlags.topics, aFlags.replies) ?? 0) : 0;
+              const bN = bFlags ? (effectiveCount(b.id, bFlags.chat, bFlags.topics, bFlags.replies) ?? 0) : 0;
+              if (aN !== bN) return bN - aN;
+              return a.username.localeCompare(b.username);
+            }
+            case "joined": {
+              // Newest accounts first. Useful for spotting fresh members
+              // to welcome / vouch for.
+              return +b.createdAt - +a.createdAt;
+            }
+            case "name": {
+              // Pure alphabetical, ignoring online status. Easier to scan
+              // when you're looking for a specific user and you don't
+              // know whether they're online.
+              return a.username.localeCompare(b.username);
+            }
+            case "online":
+            default: {
+              // Historic default — online users first, then offline,
+              // alphabetical within each band.
+              const aOn = onlineUserIds.has(a.id) ? 0 : 1;
+              const bOn = onlineUserIds.has(b.id) ? 0 : 1;
+              if (aOn !== bOn) return aOn - bOn;
+              return a.username.localeCompare(b.username);
+            }
+          }
+        });
 
-    const page = sorted.slice(offset, offset + limit).map((u) => {
+    const pageRows = sqlPaginated ? sorted : sorted.slice(offset, offset + limit);
+    const page = pageRows.map((u) => {
       const rank = rankByUser.get(u.id) ?? null;
       return {
         userId: u.id,
@@ -270,7 +345,12 @@ export async function registerUsersRoutes(
       };
     });
 
-    return { users: page, total, offset, limit };
+    return {
+      users: page,
+      total: sqlPaginated ? sqlPaginated.total : total,
+      offset,
+      limit,
+    };
   });
 
   /** Admin: same shape as /users plus email/role/disabled state. */
@@ -283,12 +363,29 @@ export async function registerUsersRoutes(
     const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit ?? "100", 10) || 100));
 
     // Admin search includes email + disabled accounts (for moderation review).
-    const where = q
-      ? or(
-          sql`lower(${users.username}) LIKE ${"%" + q + "%"}`,
-          sql`lower(${users.email}) LIKE ${"%" + q + "%"}`,
-        )
-      : undefined;
+    // `q` is escaped for SQL LIKE wildcards so an admin pasting a literal
+    // `_` doesn't match every row of the user table.
+    const escapedQ = q.replace(/[%_]/g, (c) => `\\${c}`);
+    const whereExpr = and(
+      sql`${users.username} != 'system'`,
+      q
+        ? or(
+            sql`lower(${users.username}) LIKE ${"%" + escapedQ + "%"} ESCAPE '\\'`,
+            sql`lower(${users.email}) LIKE ${"%" + escapedQ + "%"} ESCAPE '\\'`,
+          )
+        : undefined,
+    );
+
+    // Total count + page in two queries — was: SELECT all, sort in
+    // memory, slice. That pattern returned every non-system user on
+    // every admin-panel open; at 10× current population it would ship
+    // multi-MB and stall the event loop on the .sort() pass.
+    const totalRow = (await db
+      .select({ n: sql<number>`count(*)` })
+      .from(users)
+      .where(whereExpr))[0];
+    const total = totalRow?.n ?? 0;
+
     const all = await db
       .select({
         id: users.id,
@@ -305,14 +402,17 @@ export async function registerUsersRoutes(
         disabledAt: users.disabledAt,
       })
       .from(users)
-      .where(where ? and(sql`${users.username} != 'system'`, where) : sql`${users.username} != 'system'`);
+      .where(whereExpr)
+      .orderBy(sql`lower(${users.username})`)
+      .limit(limit)
+      .offset(offset);
 
     const ids = all.map((u) => u.id);
     const charRows = ids.length
       ? await db
           .select({ id: characters.id, userId: characters.userId, name: characters.name, deletedAt: characters.deletedAt })
           .from(characters)
-          .where(sql`${characters.userId} IN (${sql.join(ids.map((u) => sql`${u}`), sql`, `)})`)
+          .where(inArray(characters.userId, ids))
           .orderBy(asc(characters.name))
       : [];
     const charsByUser = new Map<string, typeof charRows>();
@@ -329,8 +429,7 @@ export async function registerUsersRoutes(
       if (uid) onlineUserIds.add(uid);
     }
 
-    const sorted = all.sort((a, b) => a.username.localeCompare(b.username));
-    const page = sorted.slice(offset, offset + limit).map((u) => ({
+    const page = all.map((u) => ({
       userId: u.id,
       username: u.username,
       email: u.email,
@@ -353,7 +452,7 @@ export async function registerUsersRoutes(
       })),
     }));
 
-    return { users: page, total: all.length, offset, limit };
+    return { users: page, total, offset, limit };
   });
 
   /**

@@ -6,10 +6,13 @@ import { RankSigil } from "./RankSigil.js";
 import { StyledName } from "./StyledName.js";
 import { UserNameTag } from "./UserNameTag.js";
 import type { Gender } from "../lib/gender.js";
-import { parseInline, renderForumBody } from "../lib/markdown.js";
+import { parseInline, renderForumBody, solitaryEmoticonToken } from "../lib/markdown.js";
+import { EmoticonSprite } from "./EmoticonSprite.js";
+import { useEmoticons } from "../state/emoticons.js";
 import { splitMentions } from "../lib/mentions.js";
 import { extractMentions } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
+import { ReactionAddButton, ReactionBar } from "./ReactionBar.js";
 import { useMentionsCache, requestMentionResolve } from "../state/mentions.js";
 import { readError } from "../lib/http.js";
 
@@ -1512,12 +1515,30 @@ export function ForumPostBody({
   // master's row (or vice versa) when both identities are in the
   // occupant list. Backlog from authors no longer present renders
   // unstyled; matches the chat-line policy.
-  const authorStyle = useChat((s) => {
+  // Split into two scalar selectors instead of returning `{ key, config }`
+  // — zustand's default Object.is comparator treats a freshly-constructed
+  // object as "changed" on every render, which triggers an infinite
+  // re-render loop (React #185) when the user has an active name style.
+  // Two scalar selectors are individually comparable (string === string,
+  // and the config object is the SAME reference inside the occupant row
+  // so its identity is stable across selector calls).
+  const authorStyleKey = useChat((s) => {
     const room = s.occupants[msg.roomId] ?? [];
     const found = room.find((o) => o.userId === msg.userId && (o.characterId ?? null) === (msg.characterId ?? null));
-    if (!found || !found.activeNameStyleKey) return null;
-    return { key: found.activeNameStyleKey, config: found.nameStyleConfig };
+    return found?.activeNameStyleKey ?? null;
   });
+  const authorStyleConfig = useChat((s) => {
+    const room = s.occupants[msg.roomId] ?? [];
+    const found = room.find((o) => o.userId === msg.userId && (o.characterId ?? null) === (msg.characterId ?? null));
+    return found?.nameStyleConfig ?? null;
+  });
+  const authorStyle = authorStyleKey
+    ? { key: authorStyleKey, config: authorStyleConfig }
+    : null;
+  // Reactor identity for any reactions placed via the bar below.
+  // Live subscription so a /char switch updates which identity is
+  // attributed to a new reaction without remounting the post.
+  const viewerActiveCharacterIdForForum = useChat((s) => s.activeCharacterId);
 
   // Inline editor state — when editing, the body region is replaced
   // with a textarea + Save/Cancel. Hoisted here (not in PostToolbar) so
@@ -1609,7 +1630,7 @@ export function ForumPostBody({
   return (
     <div
       data-message-id={msg.id}
-      className="flex gap-2 rounded transition-colors duration-700"
+      className="group flex gap-2 rounded transition-colors duration-700"
     >
       {showAuthorHeader ? (
         <ForumAvatar
@@ -1750,6 +1771,25 @@ export function ForumPostBody({
             {editedBadge}
           </div>
         )}
+        {/* Reaction CHIPS — same `chat_message` target kind as flat
+            chat (forum posts ARE chat messages: say / me / ooc).
+            Chips sit ABOVE the action toolbar (just under the message
+            body) so reactions read as content rather than chrome.
+            The "+ react" trigger is mounted INSIDE the action toolbar
+            below via `extraActions` — keeps the toolbar row as a
+            single tidy bar of post actions instead of stranding the
+            add button on its own row beneath the message. */}
+        {REPLYABLE_KINDS.has(msg.kind) && !msg.deletedAt ? (
+          <div className="mt-1">
+            <ReactionBar
+              targetKind="chat_message"
+              targetId={msg.id}
+              {...(msg.reactions ? { initialEntries: msg.reactions } : {})}
+              asCharacterId={viewerActiveCharacterIdForForum}
+              hideAddButton
+            />
+          </div>
+        ) : null}
         {!editing ? (
           <PostToolbar
             msg={msg}
@@ -1773,6 +1813,18 @@ export function ForumPostBody({
             {...(onQuotePost ? { onQuotePost } : {})}
             {...(onReply ? { onReply } : {})}
             onEdit={() => { setDraft(msg.body); setEditing(true); }}
+            extraActions={
+              REPLYABLE_KINDS.has(msg.kind) && !msg.deletedAt ? (
+                <ReactionAddButton
+                  targetKind="chat_message"
+                  targetId={msg.id}
+                  asCharacterId={viewerActiveCharacterIdForForum}
+                  className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 normal-case hover:bg-keep-banner hover:text-keep-text"
+                  title="Add reaction"
+                  label={<><span aria-hidden>+ 😊</span> <span className="text-[10px] uppercase tracking-widest">React</span></>}
+                />
+              ) : null
+            }
           />
         ) : null}
       </div>
@@ -1814,6 +1866,7 @@ function PostToolbar({
   onEdit,
   onQuotePost,
   onReply,
+  extraActions,
 }: {
   msg: ChatMessage;
   isOwn: boolean;
@@ -1837,6 +1890,11 @@ function PostToolbar({
    * "start replying to this thread" affordance.
    */
   onReply?: () => void;
+  /** Extra actions appended to the right of the standard buttons.
+   *  Forum posts mount the "add reaction" trigger here so it lives
+   *  inline with Reply/Quote/Bookmark instead of as a separate row
+   *  below them. */
+  extraActions?: React.ReactNode;
 }) {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [lockBusy, setLockBusy] = useState(false);
@@ -1938,7 +1996,7 @@ function PostToolbar({
     onQuotePost(quote);
   }
 
-  if (!showEdit && !showDelete && !showBookmark && !showReport && !showLock && !showPin && !showQuote && !showReply) return null;
+  if (!showEdit && !showDelete && !showBookmark && !showReport && !showLock && !showPin && !showQuote && !showReply && !extraActions) return null;
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-keep-rule/30 pt-1 text-[10px] uppercase tracking-widest text-keep-muted">
@@ -2019,6 +2077,7 @@ function PostToolbar({
       ) : null}
       {showBookmark ? <InlineBookmark msg={msg} /> : null}
       {showReport ? <InlineReport msg={msg} /> : null}
+      {extraActions}
       {actionError ? <span className="normal-case tracking-normal text-keep-accent">{actionError}</span> : null}
     </div>
   );
@@ -2573,6 +2632,20 @@ function Line({
   // disappear against the current background.
   const themeBg = useActiveTheme().bg;
   const bodyColor = resolveMessageColor(msg.color, themeBg);
+  // Sticker promotion: if the whole body is a single emoticon token,
+  // we render it at 84px (Messenger / Discord / Telegram lone-emoji
+  // size) below in the "say" kind switch. Hook-call must live at the
+  // component top level (not inside the switch) — Rules of Hooks.
+  // Resolved here once for ALL kinds so the lookup obeys hook order
+  // even when this message renders as `me`/`ooc`/`whisper` etc. and
+  // doesn't end up taking the sticker path.
+  const sticker = solitaryEmoticonToken(msg.body);
+  const stickerSheet = useEmoticons((s) =>
+    sticker ? s.sheets.find((sh) => sh.slug === sticker.slug) : undefined,
+  );
+  const stickerOk = !!(sticker && stickerSheet
+    && sticker.cellIndex >= 0
+    && sticker.cellIndex < stickerSheet.cells.length);
 
   // Edit/delete controls only apply to the author's own chat-shaped
   // lines and only inside the admin-configured grace window. The
@@ -2580,6 +2653,10 @@ function Line({
   // hint, and reading the window from the store means an admin tweak
   // takes effect on the next render without a reload.
   const editGraceMs = useChat((s) => s.branding.editGraceMs);
+  // Live subscription to the viewer's active character so reactions
+  // placed via this line attribute to the right identity. Switching
+  // characters mid-session updates this without a remount.
+  const viewerActiveCharacterId = useChat((s) => s.activeCharacterId);
   const ageMs = Date.now() - msg.createdAt;
   const showOwnControls = isOwn && ageMs < editGraceMs && REPLYABLE_KINDS.has(msg.kind);
   // Moderation affordances. Mods get Delete (hide a post); admins
@@ -2606,6 +2683,50 @@ function Line({
     >
       (edited)
     </span>
+  ) : null;
+
+  // Reactions — same kind set as replies (say / me / ooc). System +
+  // command + whisper kinds skip the bar entirely: whispers are
+  // private threads where reactions don't make sense, and system /
+  // cmd lines are chrome, not user content. Soft-deleted messages
+  // render read-only (cached reactions still visible, no new ones).
+  //
+  // `hideAddButton` because the chat feed lifts the "+ react"
+  // trigger out of the inline bar and into the floating right-side
+  // controls row (next to Edit) — see `chatReactButton` below.
+  // Mirrors the forum-post pattern at line 1814 where the
+  // add-reaction trigger sits in the post action toolbar.
+  const reactionBar = REPLYABLE_KINDS.has(msg.kind) ? (
+    <div className="pl-12">
+      <ReactionBar
+        targetKind="chat_message"
+        targetId={msg.id}
+        {...(msg.reactions ? { initialEntries: msg.reactions } : {})}
+        asCharacterId={viewerActiveCharacterId}
+        {...(msg.deletedAt ? { readOnly: true } : {})}
+        hideAddButton
+      />
+    </div>
+  ) : null;
+  // Standalone "+ react" trigger that sits in the floating controls
+  // row next to Edit. Suppressed on soft-deleted lines. Styled to
+  // match the edit/delete/bookmark buttons rather than the round
+  // reaction-chip pill so the right-side toolbar reads as one
+  // cohesive set. `md:invisible md:group-hover:visible
+  // md:group-focus-within:visible` matches the
+  // ReportButton/ModControls/BookmarkButton reveal pattern on
+  // desktop — without it, the React button would sit visible under
+  // every message and clutter the feed.
+  const reactAvailable = REPLYABLE_KINDS.has(msg.kind) && !msg.deletedAt;
+  const chatReactButton = reactAvailable ? (
+    <ReactionAddButton
+      targetKind="chat_message"
+      targetId={msg.id}
+      asCharacterId={viewerActiveCharacterId}
+      title="Add reaction"
+      label={<span aria-hidden>+ 😊</span>}
+      className="flex h-5 items-center rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action md:invisible md:group-hover:visible md:group-focus-within:visible"
+    />
   ) : null;
 
   let lineEl: ReactNode;
@@ -2762,7 +2883,15 @@ function Line({
     default:
       lineEl = (
         <div>
-          {time}{inlineAvatar}[{tag}] <span className="whitespace-pre-wrap" style={bodyColor ? { color: bodyColor } : undefined}>{renderedBody}</span>{editedBadge}
+          {time}{inlineAvatar}[{tag}]{" "}
+          {stickerOk && sticker ? (
+            <span className="inline-emoticon-sticker">
+              <EmoticonSprite sheetSlug={sticker.slug} cellIndex={sticker.cellIndex} size={84} />
+            </span>
+          ) : (
+            <span className="whitespace-pre-wrap" style={bodyColor ? { color: bodyColor } : undefined}>{renderedBody}</span>
+          )}
+          {editedBadge}
         </div>
       );
       break;
@@ -2817,16 +2946,25 @@ function Line({
   //     once to surface the controls, tap a different row (or the
   //     composer) to dismiss.
   //
-  //   Desktop (md+): the wrapper collapses via `md:contents` so each
-  //     button's own `md:absolute md:right-* md:top-0
-  //     md:invisible md:group-hover:visible` classes restore the
-  //     original hover-revealed behavior. We additionally honor
-  //     `group-focus-within` on desktop so a tab-navigating user can
-  //     reveal the controls without a mouse.
+  //   Desktop (md+): the wrapper goes `absolute right-3 top-0 flex
+  //     gap-1` and lays its children out right-aligned via flex
+  //     order — bookmark, react, edit/delete, mod, report. Each
+  //     button keeps its own `md:invisible md:group-hover:visible
+  //     md:group-focus-within:visible` so the hover/focus-reveal
+  //     behavior survives per-button (BookmarkButton + ReportButton
+  //     + ModControls + chatReactButton all hide until interaction;
+  //     OwnControls stays always-visible for the author's own
+  //     edit/delete row). Adding a new control means appending it
+  //     to the JSX with the standard visibility modifiers — no
+  //     pixel-offset bookkeeping.
   // Mods can act directly — surfacing a Report button next to their own
   // moderation controls would be redundant (and confusing).
   const effectiveShowReport = showReport && !showOwnControls && !showModControls;
-  const hasControls = showBookmark || showOwnControls || showModControls || effectiveShowReport;
+  // `reactAvailable` (defined above) counts as a control for the
+  // purposes of mounting the wrapper + the tap-to-focus affordance,
+  // so other people's messages still surface the React button on
+  // hover/tap even when no other control would apply.
+  const hasControls = showBookmark || showOwnControls || showModControls || effectiveShowReport || reactAvailable;
   // On mobile we normally keep the controls hidden until the row gains
   // focus-within (a tap) so the timeline stays uncluttered. The author's
   // own edit/delete row is the exception: hiding it behind a tap was
@@ -2835,12 +2973,30 @@ function Line({
   // visible on the row without an extra interaction. Other people's
   // messages keep the tap-to-reveal behavior — mod actions stay
   // tap-to-reveal too so a moderator's timeline isn't a wall of buttons.
+  //
+  // Desktop (md+): the wrapper itself goes `absolute right-3 top-0
+  // flex gap-1` so its children stack right-aligned via flex order —
+  // bookmark, react, edit/delete, etc. Previously the wrapper used
+  // `md:contents` and EACH child set its own `md:absolute md:right-X`
+  // offset, which only worked because there were a fixed number of
+  // controls at hardcoded positions. The flex wrapper makes the
+  // ordering data-driven and lets new controls (like the React
+  // trigger) slot in without juggling pixel offsets. Children keep
+  // their `md:invisible md:group-hover:visible` modifiers to retain
+  // the hover/focus-reveal behavior for buttons that should stay
+  // hidden until the user shows interest in the row.
   const controlsClass = showOwnControls
-    ? "flex justify-end gap-1 mt-0.5 md:contents"
-    : "hidden group-focus-within:flex justify-end gap-1 mt-0.5 md:contents";
+    ? "flex justify-end gap-1 mt-0.5 md:absolute md:right-3 md:top-0 md:mt-0 md:flex md:items-center md:gap-1"
+    : "hidden group-focus-within:flex justify-end gap-1 mt-0.5 md:flex md:absolute md:right-3 md:top-0 md:mt-0 md:items-center md:gap-1";
   const controls = hasControls ? (
     <div className={controlsClass}>
       {showBookmark ? <BookmarkButton msg={msg} /> : null}
+      {/* React lives immediately LEFT of Edit so the author-facing
+          and reader-facing actions sit side by side. On other
+          people's messages OwnControls is absent and React just
+          floats next to Bookmark — fine, still left of any
+          ModControls/Report that might follow. */}
+      {chatReactButton}
       {showOwnControls ? <OwnControls msg={msg} /> : null}
       {showModControls ? (
         <ModControls msg={msg} canEdit={showAdminEdit} canDelete={showModDelete} />
@@ -2893,6 +3049,7 @@ function Line({
         <div className="pl-12">{quote}</div>
         {lineEl}
         {controls}
+        {reactionBar}
       </div>
     );
   }
@@ -2905,6 +3062,7 @@ function Line({
     >
       {lineEl}
       {controls}
+      {reactionBar}
     </div>
   );
 }
@@ -2950,7 +3108,7 @@ function ReportButton({ msg }: { msg: ChatMessage }) {
   }
 
   return (
-    <span className="inline-flex md:absolute md:right-3 md:top-0 md:invisible md:group-hover:visible">
+    <span className="inline-flex md:invisible md:group-hover:visible md:group-focus-within:visible">
       <button
         type="button"
         onClick={file}
@@ -3101,7 +3259,7 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
     // three-button row reads as one set. Edit is neutral; delete is
     // accent-tinted as the danger-coded option so a fast click can't
     // confuse the two.
-    <span className="inline-flex gap-1 md:absolute md:right-3 md:top-0">
+    <span className="inline-flex gap-1">
       <button
         type="button"
         onClick={() => { setDraft(msg.body); setEditing(true); }}
@@ -3248,7 +3406,7 @@ function ModControls({ msg, canEdit, canDelete }: { msg: ChatMessage; canEdit: b
     // pattern ReportButton / BookmarkButton use for cross-author
     // affordances. Mobile follows the parent wrapper's
     // `hidden group-focus-within:flex` — tap a row to reveal.
-    <span className="inline-flex gap-1 md:absolute md:right-3 md:top-0 md:invisible md:group-hover:visible md:group-focus-within:visible">
+    <span className="inline-flex gap-1 md:invisible md:group-hover:visible md:group-focus-within:visible">
       {canEdit ? (
         <button
           type="button"
@@ -3370,7 +3528,7 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
   }
 
   return (
-    <span className="relative inline-flex md:absolute md:right-[5.75rem] md:top-0 md:invisible md:group-hover:visible">
+    <span className="relative inline-flex md:invisible md:group-hover:visible md:group-focus-within:visible">
       <button
         type="button"
         onClick={openPopover}

@@ -2,7 +2,7 @@ import { and, eq, lt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import { messages, rooms, sessions, users, worldPages, worlds } from "./db/schema.js";
+import { emoticonSheets, messages, rooms, sessions, users, worldPages, worlds } from "./db/schema.js";
 import { hashPassword } from "./auth/passwords.js";
 import { ensureSiteSettings, getSettings, setWorldsSeedVersion } from "./settings.js";
 import { recordAudit } from "./audit.js";
@@ -158,6 +158,12 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
   // everything else alone.
   await ensureDefaultWorlds(db);
 
+  // Default emoticon sheets. Always-on, ungated by SKIP_DEFAULT_SEED:
+  // sheets key on slug so re-running the seed is a no-op once they're
+  // installed. Admins can replace the image or re-label cells freely
+  // afterwards; the seeder doesn't try to "fix" their edits.
+  await ensureDefaultEmoticonSheets(db);
+
   // Force-reseed the `{icon}` placeholder on item-message templates
   // when the deploy script (remote-deploy.sh) staged the flag. Always
   // ungated by SKIP_DEFAULT_SEED — that flag governs the room-rename
@@ -273,6 +279,66 @@ async function ensureDefaultWorlds(db: Db): Promise<void> {
 
   if (shouldOverwrite) {
     await setWorldsSeedVersion(db, WORLDS_SEED_VERSION);
+  }
+}
+
+/**
+ * Default emoticon sheets. The sticker sheets shipped under
+ * `apps/web/public/assets/emoticons/` are registered as DB rows so
+ * the picker can list them like any admin-uploaded sheet. The image
+ * URLs point at the bundled assets path; admins can later replace a
+ * sheet's image via the admin route (which re-points the URL at
+ * /uploads/emoticons/...) without disturbing existing reactions.
+ *
+ * Keyed on slug so re-running is a no-op once installed — admin edits
+ * to name / labels / image are preserved on subsequent boots.
+ *
+ * `sortOrder` is explicit per row (not derived from array index)
+ * because the picker orders by `sortOrder asc, createdAt asc`. The
+ * `female/male/kaal` trio shipped first and landed at 0/1/2. When the
+ * `basic-*` sheets were added later, they were given NEGATIVE
+ * sortOrders so they land at the front of the drawer without
+ * requiring an UPDATE of the pre-existing rows (admins may have
+ * already customized them, and the seed is deliberately
+ * insert-if-missing only).
+ *
+ * Default cell grid per the project spec:
+ *   row 1: happy, laughing, angry, sad
+ *   row 2: crying, surprised, embarrassed, smug
+ *   row 3: sleepy, lovestruck, confused, determined
+ *   row 4: empty, empty, empty, empty
+ */
+const DEFAULT_EMOTICON_CELLS: string[] = [
+  "happy", "laughing", "angry", "sad",
+  "crying", "surprised", "embarrassed", "smug",
+  "sleepy", "lovestruck", "confused", "determined",
+  "", "", "", "",
+];
+const DEFAULT_EMOTICON_SHEETS: Array<{ slug: string; name: string; imageUrl: string; sortOrder: number }> = [
+  { slug: "basic-female-default", name: "Basic Female", imageUrl: "/assets/emoticons/basic_female_emoticon_sheet.png", sortOrder: -2 },
+  { slug: "basic-male-default",   name: "Basic Male",   imageUrl: "/assets/emoticons/basic_male_emoticon_sheet.png",   sortOrder: -1 },
+  { slug: "female-default",       name: "Female",       imageUrl: "/assets/emoticons/female_emoticon_sheet.png",       sortOrder: 0 },
+  { slug: "male-default",         name: "Male",         imageUrl: "/assets/emoticons/male_emoticon_sheet.png",         sortOrder: 1 },
+  { slug: "kaal-default",         name: "Kaal",         imageUrl: "/assets/emoticons/kaal_emoticon_sheet.png",         sortOrder: 2 },
+];
+
+async function ensureDefaultEmoticonSheets(db: Db): Promise<void> {
+  for (const def of DEFAULT_EMOTICON_SHEETS) {
+    const existing = (await db
+      .select({ id: emoticonSheets.id })
+      .from(emoticonSheets)
+      .where(eq(emoticonSheets.slug, def.slug))
+      .limit(1))[0];
+    if (existing) continue;
+    await db.insert(emoticonSheets).values({
+      id: nanoid(),
+      slug: def.slug,
+      name: def.name,
+      imageUrl: def.imageUrl,
+      cells: JSON.stringify(DEFAULT_EMOTICON_CELLS),
+      sortOrder: def.sortOrder,
+      createdByUserId: null,
+    });
   }
 }
 

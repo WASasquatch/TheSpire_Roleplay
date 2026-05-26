@@ -28,6 +28,7 @@ import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { CloseButton } from "./CloseButton.js";
 import { DisplayPrivacyRow } from "./DisplayPrivacyRow.js";
+import { ScriptoriumPrivacyRow } from "./ScriptoriumPrivacyRow.js";
 
 interface Props {
   /** Initial selection. The user can switch via the dropdown. */
@@ -830,6 +831,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           // off. (Earlier this was hardcoded to null, which always
           // rendered "private" regardless of the owner's flags.)
           metrics: fetchedMetrics,
+          // Editor's preview doesn't fetch the Scriptorium author tier
+          // (it'd be a separate /me/profile field we'd need to wire);
+          // surface null so the modal renders without a badge in the
+          // preview. The real profile view shows the real badge.
+          scriptoriumAuthor: null,
           // Preview pins read live from the earning snapshot so the
           // preview matches the real profile 1:1 — the editor still
           // doesn't expose pin management (users curate from the
@@ -882,6 +888,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         createdAt: Date.now(),
         updatedAt: Date.now(),
         metrics: fetchedMetrics,
+        // Editor's preview doesn't fetch the Scriptorium author tier —
+        // same null fallback as the master branch above. The actual
+        // profile view (lookupProfile path) populates the real badge.
+        scriptoriumAuthor: null,
         // Live pin counts from the snapshot — same parity goal as
         // the master branch above. Switching the preview target to
         // a character picks up that character's pin sets.
@@ -1503,6 +1513,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                     sections and "checked it, expected it, didn't see
                     a Save button" was a sharp paper-cut earlier. */}
                 {!isCharacter ? <DisplayPrivacyRow /> : null}
+                {/* Scriptorium catalog prefs: NSFW opt-in + per-user
+                    CW blocklist. Master-only — characters don't have
+                    their own catalog filters (the master account is
+                    the reader identity, not the per-character mask). */}
+                {!isCharacter ? <ScriptoriumPrivacyRow /> : null}
               </div>
             ) : null}
 

@@ -1,7 +1,9 @@
 import { resolve } from "node:path";
 import { randomBytes } from "node:crypto";
+import { and, desc, eq, ne, or } from "drizzle-orm";
 import type { FastifyRequest } from "fastify";
 import type { Db } from "./db/index.js";
+import { stories, users } from "./db/schema.js";
 import { getSettings } from "./settings.js";
 
 /**
@@ -277,15 +279,14 @@ export function renderRobotsTxt(origin: string): string {
   ].join("\n");
 }
 
-/** Sitemap.xml. Exposes the three public entrance URLs: the marketing
- *  splash at `/`, the login form at `/login`, and the registration form
- *  at `/register`. Everything past auth is walled and intentionally
- *  omitted. Priorities reflect intent: `/` is the canonical entrance,
- *  `/register` is the conversion target, `/login` is the returning-user
- *  destination. */
-export function renderSitemapXml(origin: string): string {
+/** Sitemap.xml. Exposes the three public entrance URLs (`/`, `/login`,
+ *  `/register`) plus every published SFW public story (`G`, `PG`,
+ *  `PG-13`). Stories rated R / NC-17 are intentionally omitted so
+ *  crawlers and unauthenticated browsers never receive a list of
+ *  mature URLs. Everything past auth is walled. */
+export async function renderSitemapXml(db: Db, origin: string): Promise<string> {
   const today = new Date().toISOString().slice(0, 10);
-  return [
+  const lines: string[] = [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`,
     `  <url>`,
@@ -306,9 +307,48 @@ export function renderSitemapXml(origin: string): string {
     `    <changefreq>monthly</changefreq>`,
     `    <priority>0.6</priority>`,
     `  </url>`,
-    `</urlset>`,
-    "",
-  ].join("\n");
+  ];
+
+  // Public + SFW (G/PG/PG-13) published stories. Cap at 1000 entries —
+  // generous for a single-instance app. Stories rated R or NC-17 are
+  // NEVER listed regardless of catalog visibility.
+  try {
+    const rows = await db
+      .select({
+        slug: stories.slug,
+        updatedAt: stories.updatedAt,
+        handle: users.username,
+      })
+      .from(stories)
+      .innerJoin(users, eq(users.id, stories.authorUserId))
+      .where(and(
+        eq(stories.visibility, "public"),
+        ne(stories.status, "draft"),
+        ne(stories.status, "abandoned"),
+        or(
+          eq(stories.rating, "G"),
+          eq(stories.rating, "PG"),
+          eq(stories.rating, "PG-13"),
+        ),
+      ))
+      .orderBy(desc(stories.updatedAt))
+      .limit(1000);
+    for (const r of rows) {
+      const day = new Date(+r.updatedAt).toISOString().slice(0, 10);
+      const loc = `${origin}/stories/@${encodeURIComponent(r.handle.toLowerCase())}/${encodeURIComponent(r.slug)}`;
+      lines.push(
+        `  <url>`,
+        `    <loc>${loc}</loc>`,
+        `    <lastmod>${day}</lastmod>`,
+        `    <changefreq>weekly</changefreq>`,
+        `    <priority>0.5</priority>`,
+        `  </url>`,
+      );
+    }
+  } catch { /* swallow — the sitemap still serves the entrance URLs */ }
+
+  lines.push(`</urlset>`, "");
+  return lines.join("\n");
 }
 
 /** Resolve the path to the built web bundle's index.html. Mirrors the

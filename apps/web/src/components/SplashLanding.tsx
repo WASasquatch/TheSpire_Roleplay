@@ -6,6 +6,8 @@ import { useChat } from "../state/store.js";
 import { resolveSplashTheme, splashBgUrl, themeStyle } from "../lib/theme.js";
 import { AffiliatesCarousel } from "./AffiliatesCarousel.js";
 import { FeaturedWorldsCarousel } from "./FeaturedWorldsCarousel.js";
+import { BookshelfStrip } from "./BookshelfStrip.js";
+import { SpireScroll } from "./SpireScroll.js";
 
 const PROJECT_URL = "https://github.com/WASasquatch/TheSpire_Roleplay";
 
@@ -90,10 +92,17 @@ export function SplashLanding({ onNavigate }: Props) {
     >
       {/* Background art — mirrors SplashShell so the visual identity stays
           consistent between the landing and the auth pages. Same dark-
-          mode swap (resolved palette → bg image variant + corner glows). */}
+          mode swap (resolved palette → bg image variant + corner glows).
+          NB: `fixed inset-0` (not `absolute`) so `bg-cover` sizes against
+          the viewport. The parent expands to fit the carousel + bookshelf
+          + footer below the fold; absolute-positioned cover stretches the
+          2.65:1 panoramic art over that taller box, scaling it up wildly
+          and cropping out everything but a thin center band. Fixed pins
+          the layer to the visible window so the artwork stays in proper
+          aspect and parallax-scrolls under the content. */}
       <div
         aria-hidden
-        className="absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
+        className="fixed inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
         style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
       />
       <div
@@ -115,23 +124,84 @@ export function SplashLanding({ onNavigate }: Props) {
         </>
       ) : null}
 
-      {/* Card. Wider than the AuthGate card (680px vs 560px) so the
-          three-pillar grid below the hero has room to breathe. Same
-          right-anchored desktop positioning so the spire artwork on the
-          left stays visible. */}
-      <div className="relative flex min-h-screen items-center justify-center lg:block">
+      {/* Page-level flex column: hero lives OUTSIDE the card (over
+          the BG image directly), card sits below with the action
+          stack + scroll inside. The whole column scrolls with the
+          window rather than the card scrolling internally. */}
+      <div className="relative flex min-h-screen flex-col items-center justify-start py-8 lg:py-10">
+        {/* HERO — over the spire BG, ABOVE the card. The wordmark
+            reads as the page banner this way instead of feeling
+            tucked into the card content. */}
+        <header className="splash-hero-outside mx-4 mb-6 w-[min(1280px,92vw)] text-center lg:mb-8">
+          <div className="splash-rule mx-auto mb-4 flex w-[min(360px,80%)] items-center gap-3 opacity-85" aria-hidden>
+            <span className="line h-px flex-1" style={{ background: "linear-gradient(90deg, transparent, rgb(var(--keep-accent) / 0.6), transparent)" }} />
+            <span className="diamond block h-[7px] w-[7px] rotate-45" style={{ background: "rgb(var(--keep-accent))", boxShadow: "0 0 10px rgb(var(--keep-accent) / 0.6)" }} />
+            <span className="line h-px flex-1" style={{ background: "linear-gradient(90deg, transparent, rgb(var(--keep-accent) / 0.6), transparent)" }} />
+          </div>
+          {/* The hero sits over the spire BG image, which is light
+              parchment on light themes and deep blue-black on dark
+              themes. Subtitle/tagline text is white on both with a
+              strong dark shadow so it reads against the cloudy
+              parchment AND the dark sky variant. The logo image gets
+              a luminous teal glow on light themes (where its own
+              dark engraving blends into the parchment) and a black
+              drop-shadow on dark themes (where the glowing star
+              already pops). `light-dark(...)` in the filter color
+              swaps the two without a JS re-render. */}
+          <h1
+            style={{
+              ...logoStyle,
+              textShadow:
+                "0 2px 8px light-dark(rgba(134, 192, 185, 0.85), rgba(0, 0, 0, 0.65))",
+            }}
+            className="font-action text-4xl tracking-wide text-keep-text sm:text-5xl"
+          >
+            {branding.logoUrl ? (
+              <img
+                src={branding.logoUrl}
+                alt={siteName}
+                className="mx-auto max-h-24 w-auto select-none sm:max-h-28"
+                draggable={false}
+                style={{
+                  filter:
+                    "drop-shadow(0 0 18px light-dark(rgba(134, 192, 185, 0.85), rgba(0, 0, 0, 0.5))) drop-shadow(0 4px 10px light-dark(rgba(134, 192, 185, 0.4), rgba(0, 0, 0, 0.55)))",
+                }}
+              />
+            ) : (
+              siteName
+            )}
+          </h1>
+          <p
+            className="mt-3 text-base sm:text-lg"
+            style={{
+              color: "rgba(255, 255, 255, 0.95)",
+              textShadow:
+                "0 2px 8px rgba(0, 0, 0, 0.85), 0 0 4px rgba(0, 0, 0, 0.6)",
+            }}
+          >
+            Build characters. Tell stories. Find your circle.
+          </p>
+          <p
+            className="mt-2 text-xs uppercase tracking-[0.3em]"
+            style={{
+              color: "rgba(255, 255, 255, 0.78)",
+              textShadow:
+                "0 1px 4px rgba(0, 0, 0, 0.85), 0 0 3px rgba(0, 0, 0, 0.6)",
+            }}
+          >
+            a sanctuary for collaborative roleplay
+          </p>
+        </header>
+
         <div
           className="
-            mx-4 my-8
-            w-[min(680px,92vw)]
-            max-h-[calc(100vh-4rem)] overflow-y-auto
-            lg:absolute lg:top-1/2 lg:right-[max(2rem,calc(25%-21rem))] lg:my-0 lg:mx-0 lg:-translate-y-1/2
-            lg:max-h-[calc(100vh-2rem)]
+            mx-4
+            w-[min(1280px,92vw)]
             rounded-md border
             bg-keep-bg/55 backdrop-blur-xl border-keep-border/60
             ring-1 ring-keep-bg/40 ring-inset
-            lg:bg-keep-bg/95 lg:backdrop-blur-sm lg:border-keep-border lg:ring-0
-            shadow-[0_20px_60px_-15px_rgba(0,0,0,0.45)]
+            lg:bg-keep-bg/60 lg:backdrop-blur-md lg:border-keep-border/80 lg:ring-1 lg:ring-keep-bg/30 lg:ring-inset
+            shadow-[0_24px_70px_-18px_rgba(0,0,0,0.55)]
           "
         >
           <div
@@ -140,71 +210,12 @@ export function SplashLanding({ onNavigate }: Props) {
             style={{ background: "linear-gradient(90deg, transparent, #3fa5a0 30%, #3fa5a0 70%, transparent)" }}
           />
 
-          <div className="px-6 py-8 sm:px-10 sm:py-10">
-            {/* HERO — site name + value prop. The h1 carries the SEO weight;
-                the subhead spells out what the site actually does in
-                keyword-rich plain English so crawlers and humans both
-                get the pitch in one glance. */}
-            <header className="text-center">
-              <h1
-                style={logoStyle}
-                className="font-action text-4xl tracking-wide text-keep-text sm:text-5xl"
-              >
-                {branding.logoUrl ? (
-                  // Image logo (default install ships /thespire-logo.png,
-                  // admins can replace via /admin/settings or upload).
-                  // The <h1> stays for SEO + screen-readers; alt is the
-                  // siteName so the brand string is still indexable.
-                  // The splash gets a generous max-height since the card
-                  // has the vertical room — matches the size used in
-                  // AuthGate's hero so the splash + login feel of one
-                  // piece.
-                  <img
-                    src={branding.logoUrl}
-                    alt={siteName}
-                    className="mx-auto max-h-24 w-auto select-none sm:max-h-28"
-                    draggable={false}
-                  />
-                ) : (
-                  siteName
-                )}
-              </h1>
-              <p className="mt-3 text-base text-keep-text/80 sm:text-lg">
-                Build characters. Tell stories. Find your circle.
-              </p>
-              <p className="mt-2 text-xs uppercase tracking-[0.3em] text-keep-muted">
-                a sanctuary for collaborative roleplay
-              </p>
-            </header>
-
-            {/* PILLARS — three feature highlights. Concrete and skimmable;
-                each one names a thing the visitor can do here and why it
-                matters. Uses <h2> so they show up as section headings to
-                crawlers. */}
-            <section className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <Pillar
-                icon="✦"
-                title="Characters"
-                body="Build a persona with bios, portraits, and stats. Switch between them as your stories shift."
-              />
-              <Pillar
-                icon="◈"
-                title="Worlds"
-                body="Author the settings you play in. Public worlds anyone can join, private ones for your circle."
-              />
-              <Pillar
-                icon="✎"
-                title="Forums"
-                body="Long-form topics that persist between sessions. Pick up a thread weeks later, right where you left it."
-              />
-            </section>
-
-            {/* PRIMARY CTA + secondary link. The CTA promotes registration
-                — the most valuable action a visitor can take. Login is a
-                quieter text link below for returning users; bookmarkable
-                separately at /login so frequent visitors aren't nagged
-                with the CTA on every sign-in. */}
-            <div className="mt-8 flex flex-col items-center gap-3">
+          <div className="px-6 py-6 sm:px-10 sm:py-8 lg:px-14 lg:py-10">
+            {/* CONDENSED CTA — button + login link inline so the
+                action stack reads as one tight block at the top of
+                the card. Stats + welcome live just below it and the
+                scroll takes the full width beneath. */}
+            <div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center sm:gap-5">
               {branding.registrationOpen ? (
                 <a
                   href="/register"
@@ -212,8 +223,8 @@ export function SplashLanding({ onNavigate }: Props) {
                   className="
                     inline-flex items-center justify-center gap-2
                     rounded-md border border-keep-action
-                    bg-keep-action px-6 py-2.5
-                    text-base font-semibold uppercase tracking-widest
+                    bg-keep-action px-5 py-2
+                    text-sm font-semibold uppercase tracking-widest
                     text-keep-bg
                     shadow-[0_4px_14px_-4px_rgba(0,0,0,0.45)]
                     transition hover:brightness-110 active:brightness-95
@@ -223,7 +234,7 @@ export function SplashLanding({ onNavigate }: Props) {
                 </a>
               ) : (
                 <div className="rounded border border-keep-rule/50 bg-keep-bg/40 px-4 py-2 text-center text-xs text-keep-muted">
-                  Registration is currently closed. Returning members can sign in below.
+                  Registration is currently closed.
                 </div>
               )}
               <a
@@ -235,25 +246,19 @@ export function SplashLanding({ onNavigate }: Props) {
               </a>
             </div>
 
-            {/* OPTIONAL LIVE SIGNALS — each clause is independently
-                gated by its own toggle. The writers/online line stays
-                in its existing inline-paragraph treatment because the
-                marketing copy reads conversationally. The 24h-message
-                count gets its own HERO block (big tabular number,
-                uppercase label beneath) because admins surfacing chat
-                volume want it to anchor the eye, not get lost in a
-                muted paragraph. When both are on the hero sits above
-                the conversational line so the headline reads first. */}
+            {/* OPTIONAL LIVE SIGNALS — admin-gated stats. The 24h
+                hero number is compact here (smaller than before)
+                since the CTA above it owns the visual anchor. */}
             {branding.splashMessages24hEnabled && stats && typeof stats.messages24h === "number" ? (
-              <div className="mt-6 text-center">
+              <div className="mt-5 text-center">
                 <div
-                  className={`text-3xl font-bold tabular-nums leading-none sm:text-4xl ${
+                  className={`text-2xl font-bold tabular-nums leading-none sm:text-3xl ${
                     stats.messages24h > 0 ? "text-keep-action" : "text-keep-text"
                   }`}
                 >
                   {stats.messages24h.toLocaleString()}
                 </div>
-                <div className="mt-1.5 text-[10px] uppercase tracking-[0.2em] text-keep-muted">
+                <div className="mt-1 text-[10px] uppercase tracking-[0.2em] text-keep-muted">
                   {stats.messages24h === 1 ? "message" : "messages"} in the last 24h
                 </div>
               </div>
@@ -262,8 +267,8 @@ export function SplashLanding({ onNavigate }: Props) {
               <p
                 className={`text-center text-xs text-keep-muted ${
                   branding.splashMessages24hEnabled && typeof stats.messages24h === "number"
-                    ? "mt-3"
-                    : "mt-6"
+                    ? "mt-2"
+                    : "mt-4"
                 }`}
               >
                 {typeof stats.totalRegistered === "number" ? (
@@ -291,21 +296,41 @@ export function SplashLanding({ onNavigate }: Props) {
               </p>
             ) : null}
 
-            {/* ADMIN WELCOME — only renders when set. Surfaces the
-                site's own voice / lore beat between the static pillars
-                and the social-proof carousels. */}
+            {/* ADMIN WELCOME — only renders when set. Centered text
+                that spans the card so it doesn't sit as a narrow
+                column inside the now-1280px-wide card. */}
             {branding.welcomeHtml.trim() ? (
               <div
-                className="prose prose-sm mx-auto mt-6 max-w-none border-t border-keep-rule/50 pt-5 text-keep-text/90"
+                className="prose prose-xl mt-5 max-w-none text-center border-t border-keep-rule/50 pt-4 text-keep-text/90 [&_*]:text-center"
                 dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(branding.welcomeHtml) }}
               />
             ) : null}
+
+            {/* SPIRE SCROLL — full container width below the CTA.
+                With the wider canvas, descriptions fit on one line
+                and the scroll's overall height is shorter. */}
+            <div className="mt-8">
+              <SpireScroll />
+            </div>
           </div>
 
-          {/* SOCIAL PROOF CAROUSELS — both honor their admin toggles
-              and render nothing when empty. Below the CTA so they
-              support the pitch rather than competing with it. */}
-          {branding.featuredWorldsEnabled ? <FeaturedWorldsCarousel /> : null}
+          {/* SOCIAL PROOF — worlds orb + bookshelf, side-by-side on
+              wide viewports so a first-time visitor sees both the
+              "play in these worlds" and "read these stories" pitches
+              above the fold without needing to scroll. `auto-fit`
+              with a 450px min collapses the layout to a single
+              stacked column on narrower viewports (or when the
+              orb is hidden because there are no featured worlds —
+              the bookshelf naturally fills the row alone). Each
+              child owns its own panel container so the segments
+              read as distinct surfaces. */}
+          <div
+            className="mt-6 grid gap-4 px-2 pb-8 sm:px-6 lg:px-8"
+            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(450px, 1fr))" }}
+          >
+            {branding.featuredWorldsEnabled ? <FeaturedWorldsCarousel onNavigate={onNavigate} /> : null}
+            <BookshelfStrip onNavigate={onNavigate} />
+          </div>
           <AffiliatesCarousel />
 
           {/* Upstream project credit + version link. Distinct from the
@@ -331,12 +356,3 @@ export function SplashLanding({ onNavigate }: Props) {
   );
 }
 
-function Pillar({ icon, title, body }: { icon: string; title: string; body: string }) {
-  return (
-    <div className="rounded border border-keep-rule/40 bg-keep-bg/40 p-3 text-center">
-      <div className="text-2xl text-keep-action" aria-hidden>{icon}</div>
-      <h2 className="mt-1 font-action text-lg text-keep-text">{title}</h2>
-      <p className="mt-1 text-xs leading-snug text-keep-text/75">{body}</p>
-    </div>
-  );
-}

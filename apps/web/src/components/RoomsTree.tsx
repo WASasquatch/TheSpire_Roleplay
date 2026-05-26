@@ -290,10 +290,41 @@ function RoomGroup({
   onWorldClick: (worldId: string) => void;
 }) {
   const isPrivate = room.type === "private";
+  /**
+   * Flicker guard: bridge transient empty `occupants` arrays so the
+   * userlist doesn't vanish for the brief window where a /rooms
+   * refetch (triggered by every `presence:update` / `rooms:tree-
+   * changed` server event) momentarily sees the room with zero
+   * occupants — typically caused by the sending socket's tab being
+   * mid-broadcast when `currentOccupants` calls `fetchSockets()`.
+   *
+   * We cache the most-recent non-empty occupants list and stamp the
+   * moment it was last "seen full." If a render brings in an empty
+   * list within {@link FLICKER_GUARD_MS}, we keep showing the cached
+   * value instead. Past the window we accept the empty state — a
+   * room that genuinely emptied (the actual last person left) will
+   * still render "empty" after the guard expires.
+   *
+   * Note: this is a stop-gap. The underlying cause is on the server
+   * (`currentOccupants` reading `io.in().fetchSockets()` races with
+   * send-time socket joins/leaves under load). Removing this guard
+   * once that root cause is fixed is safe.
+   */
+  const FLICKER_GUARD_MS = 1200;
+  const lastNonEmptyRef = useRef<{ list: RoomOccupant[]; at: number }>({ list: [], at: 0 });
+  if (room.occupants.length > 0) {
+    lastNonEmptyRef.current = { list: room.occupants, at: Date.now() };
+  }
+  const displayedOccupants =
+    room.occupants.length === 0
+    && lastNonEmptyRef.current.list.length > 0
+    && Date.now() - lastNonEmptyRef.current.at < FLICKER_GUARD_MS
+      ? lastNonEmptyRef.current.list
+      : room.occupants;
   // Group occupants by primary world. Unaffiliated bucket keys "_none" so
   // it sorts to the end deterministically. Within a world, sort by display
   // name; world buckets sort by world name; "_none" is always last.
-  const groups = groupByPrimaryWorld(room.occupants);
+  const groups = groupByPrimaryWorld(displayedOccupants);
   const showHeaders = groups.length > 1; // a single bucket is just a flat list
   // Active theme drives the legibility nudge that keeps the staff
   // icons readable against the rail bg — even on a custom palette
@@ -311,7 +342,7 @@ function RoomGroup({
         type="button"
         onClick={() => onRoomClick(room.id)}
         title={room.topic ?? ""}
-        className={`flex w-full items-baseline justify-between px-3 py-2.5 text-left font-bold hover:bg-keep-banner/30 hover:text-keep-accent lg:py-1 ${
+        className={`flex w-full items-baseline justify-between px-3 py-2.5 text-left text-[1.1rem] font-bold hover:bg-keep-banner/30 hover:text-keep-accent lg:py-1 ${
           isCurrent ? "text-keep-action" : "text-keep-accent"
         }`}
       >
@@ -352,9 +383,9 @@ function RoomGroup({
           {isPrivate ? <span title="private - password required" className="mr-1">🔒</span> : null}
           {room.name}
         </span>
-        <span className="ml-2 shrink-0 font-normal text-keep-muted">({room.occupants.length})</span>
+        <span className="ml-2 shrink-0 font-normal text-keep-muted">({displayedOccupants.length})</span>
       </button>
-      {room.occupants.length === 0 ? (
+      {displayedOccupants.length === 0 ? (
         <div className="px-5 pb-2 text-[11px] italic text-keep-muted lg:pb-1">empty</div>
       ) : (
         <ul className="pb-1">

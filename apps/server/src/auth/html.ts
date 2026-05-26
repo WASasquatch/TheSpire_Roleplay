@@ -308,3 +308,25 @@ export function sanitizeBio(html: string): string {
     allowVulnerableTags: true,
   });
 }
+
+/**
+ * Strip `<aside class="margin-note">…</aside>` blocks from a Scriptorium
+ * chapter body. Margin notes are collaborator-side drafting comments
+ * (per the Phase 5 spec) that MUST NOT survive publish — readers never
+ * see them, and unpublishing a chapter doesn't restore them.
+ *
+ * Matches any `<aside>` whose class attribute contains `margin-note`
+ * as a whitespace-separated token. Case-insensitive. The strip is
+ * non-nesting: an `<aside class="margin-note">` containing another
+ * `<aside>` would close at the OUTER tag's first `</aside>` which is
+ * a reasonable trade — the editor doesn't nest notes in practice.
+ *
+ * Pure string transform; no DOM parser needed server-side.
+ */
+export function stripMarginNotes(html: string): string {
+  if (!html || !/<aside\b/i.test(html)) return html;
+  return html.replace(
+    /<aside\b[^>]*\bclass\s*=\s*(?:"[^"]*\bmargin-note\b[^"]*"|'[^']*\bmargin-note\b[^']*')[^>]*>[\s\S]*?<\/aside>/gi,
+    "",
+  );
+}

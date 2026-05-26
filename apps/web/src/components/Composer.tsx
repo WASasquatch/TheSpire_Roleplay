@@ -11,6 +11,7 @@ import {
 import type { CommandDoc, RoomOccupant, ThreadCategory } from "@thekeep/shared";
 import { CompleterPopup, type CompletionItem } from "./CompleterPopup.js";
 import { EarningStatsStrip } from "./EarningStatsStrip.js";
+import { EmoticonPickerButton } from "./EmoticonPickerButton.js";
 import { SynonymPopup } from "./SynonymPopup.js";
 import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
@@ -430,6 +431,19 @@ export function Composer({
   // store so a tuning change picks up live (the store is hydrated
   // from /me/profile on first auth-ed boot).
   const maxTopicTitleLength = useChat((s) => s.inputLimits.maxForumTopicTitleLength);
+  const maxChatLength = useChat((s) => s.inputLimits.maxMessageLength);
+  const maxForumPostLength = useChat((s) => s.inputLimits.maxForumPostLength);
+  // Server-side dispatch picks per-room (dispatch.ts: `isForum ?
+  // maxForumPostLength : maxMessageLength`). The composer mirrors
+  // that here so the toolbar counter and the pre-flight gate
+  // reflect the cap the server will actually enforce on send —
+  // otherwise a forum room with the 8000 cap was showing 4000 in
+  // the counter and forcing trims that the server would have
+  // accepted. Topic-create body (no `activeTopic` yet) is also a
+  // forum post, so the forum cap applies the moment the user is
+  // in a nested room.
+  const effectiveMaxLength = isForumRoom ? maxForumPostLength : maxChatLength;
+  const setNotice = useChat((s) => s.setNotice);
 
   useEffect(() => {
     if (!roomId) {
@@ -781,6 +795,20 @@ export function Composer({
     // (accidental trailing newline / spaces on copy-paste).
     if (!value.trim()) return;
     const t = value.trimEnd();
+    // Length gate. chat:input is fire-and-forget — by the time the
+    // server's TOO_LONG `error:notice` echoes back, the call site
+    // below has already cleared the input and the user's text is
+    // gone. Validate here so an over-cap submit surfaces the same
+    // notice but LEAVES the draft in place for the user to trim
+    // and resend. Counter in the toolbar (below) tracks the same
+    // value so over-cap is visible before the user even hits send.
+    if (t.length > effectiveMaxLength) {
+      setNotice({
+        code: "TOO_LONG",
+        message: `${isForumRoom ? "Post" : "Message"} is ${t.length} chars; limit is ${effectiveMaxLength}. Trim it and try again.`,
+      });
+      return;
+    }
     const buf = historyRef.current;
     if (buf[buf.length - 1] !== t) {
       buf.push(t);
@@ -1102,6 +1130,28 @@ export function Composer({
       el2.focus();
       el2.setSelectionRange(newCaret, newCaret);
       setCaret(newCaret);
+    });
+  }
+
+  /**
+   * Insert a literal string at the caret position (or replacing the
+   * current selection). Used by the inline-emoticon picker — no
+   * wrap, just paste the token and advance the caret past it.
+   */
+  function insertAtCursor(literal: string): void {
+    const el = inputRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? start;
+    const next = value.slice(0, start) + literal + value.slice(end);
+    onChange(next);
+    const caretPos = start + literal.length;
+    requestAnimationFrame(() => {
+      const el2 = inputRef.current;
+      if (!el2) return;
+      el2.focus();
+      el2.setSelectionRange(caretPos, caretPos);
+      setCaret(caretPos);
     });
   }
 
@@ -1430,15 +1480,41 @@ export function Composer({
           <FmtButton title="Image — inserts ![alt](url)" onClick={() => insertLinkOrImage("image")}>
             <span aria-hidden>🖼</span>
           </FmtButton>
-          {/* Earning stats strip — desktop placement: pushed to the
-              right of the formatting buttons via ml-auto. Hidden on
-              mobile where the strip lives ABOVE the toolbar in its
-              own row (see the conditional just above). */}
-          {onOpenEarning ? (
-            <div className="ml-auto hidden lg:flex">
-              <EarningStatsStrip onOpenEarning={onOpenEarning} />
-            </div>
-          ) : null}
+          {/* Inline emoticon: pops the picker, then inserts the
+              :slug:idx: token at the caret. The markdown renderer
+              converts the token to a 24px sprite that scales up on
+              hover.
+              Explicit `className` mirrors FmtButton's geometry
+              (h-8 w-8 squared, hairline border, bg-keep-bg/60) so
+              the inline-emoticon trigger sits flush with the
+              surrounding B / I / U / etc. The component's default
+              className matches the SHARED FormattingToolbar (h-6
+              transparent-border), which is what DM + Forum
+              composers use — Composer's bigger row would otherwise
+              look like a smaller pill dropped into the wrong
+              toolbar. */}
+          <EmoticonPickerButton
+            onPick={(slug, idx) => insertAtCursor(`:${slug}:${idx}:`)}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+          />
+          {/* Right-aligned group: character counter + earning strip
+              together. Earlier each had its own `ml-auto` and flex
+              split the slack between them, leaving the counter
+              floating in the middle of the row. Wrapping both in a
+              single `ml-auto` container collapses that to one
+              right-aligned cluster with a tiny gap between them.
+              The earning strip stays desktop-only via `hidden
+              lg:flex`; on mobile the strip lives in its own row
+              above (see the conditional just above), so this
+              container only renders the counter on small screens. */}
+          <div className="ml-auto flex shrink-0 items-center gap-3">
+            <ComposerCharCount length={value.trimEnd().length} max={effectiveMaxLength} />
+            {onOpenEarning ? (
+              <div className="hidden lg:flex">
+                <EarningStatsStrip onOpenEarning={onOpenEarning} />
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -1612,6 +1688,47 @@ export function Composer({
       </div>
       </div>
     </form>
+  );
+}
+
+/**
+ * Inline character counter for the toolbar row. Three-tier tint:
+ *   - resting (≤ 80% of cap): muted, blends with the toolbar
+ *   - approaching (> 80%, ≤ cap): amber, a warning before submit
+ *   - over: accent (the theme's emphasis color), matches the
+ *     TOO_LONG notice color so the toolbar and the toast feel
+ *     coordinated. Submit handler blocks at > cap and leaves the
+ *     draft in place; this is the user's visual cue to trim before
+ *     resubmitting.
+ */
+function ComposerCharCount({
+  length,
+  max,
+  className,
+}: {
+  length: number;
+  max: number;
+  className?: string;
+}) {
+  const over = length > max;
+  const near = !over && length > max * 0.8;
+  const tint = over
+    ? "text-keep-accent font-semibold"
+    : near
+      ? "text-amber-500"
+      : "text-keep-muted";
+  return (
+    <span
+      aria-live="polite"
+      aria-label={`Character count: ${length} of ${max}`}
+      title={`${length} / ${max} characters`}
+      className={`select-none whitespace-nowrap text-[11px] tabular-nums ${tint} ${className ?? ""}`}
+    >
+      {length} / {max}
+      {/* "Chars" suffix hidden on narrow viewports to keep the
+       *  counter compact when toolbar real estate is tight. */}
+      <span className="ml-1 hidden lg:inline">Chars</span>
+    </span>
   );
 }
 

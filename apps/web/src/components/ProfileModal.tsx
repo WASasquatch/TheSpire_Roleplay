@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
-import { isAdminRole } from "@thekeep/shared";
+import { isAdminRole, isDarkPalette } from "@thekeep/shared";
 import type { CharacterPortrait, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
 import { buildOrnamentStyle } from "../lib/ornaments/index.js";
@@ -147,6 +147,48 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
       }
     : undefined;
 
+  // Sample the BG image's average luminance so the modal can nudge
+  // its scoped text color toward the high-contrast end and tighten
+  // the glass panel opacity. Sampling is best-effort: cross-origin
+  // images without CORS headers taint the canvas and `getImageData`
+  // throws, in which case we leave the luminance null and still
+  // apply the opacity-tightening fallback. Avoids the "neon city
+  // BG bleeds through the panel and the soft theme text becomes
+  // unreadable" failure mode.
+  const bgLuminance = useBgLuminance(profileBgUrl || null);
+
+  // Scoped CSS-var overrides applied to the modal card. Only present
+  // when a profile BG image is set; otherwise nothing here changes
+  // (so plain profiles keep their existing theme treatment).
+  const ownerIsDark = isDarkPalette(ownerTheme);
+  const legibilityVars: Record<string, string> = {};
+  if (profileBgUrl) {
+    // 1) Tighter glass tint. The default (~42% panel) lets a busy BG
+    //    bleed through and compete with body text; bumping to ~85%
+    //    keeps the panel readable while still feeling glassy.
+    legibilityVars["--keep-glass-panel-tint"] = ownerIsDark
+      ? "rgb(var(--keep-panel) / 0.85)"
+      : "rgb(255 255 255 / 0.92)";
+    legibilityVars["--keep-glass-bg-tint"] = ownerIsDark
+      ? "rgb(var(--keep-bg) / 0.85)"
+      : "rgb(255 255 255 / 0.92)";
+
+    // 2) If we successfully sampled the BG luminance, swap the text
+    //    color toward the opposite extreme so contrast is guaranteed
+    //    regardless of which neon hue is blooming behind the panel.
+    //    Mid-luminance BGs (0.35..0.6) leave the theme default alone
+    //    — those are already neutral enough for the theme to win.
+    if (bgLuminance !== null) {
+      if (bgLuminance > 0.6) {
+        legibilityVars["--keep-text"] = "20 20 20";
+        legibilityVars["--keep-muted"] = "80 80 80";
+      } else if (bgLuminance < 0.35) {
+        legibilityVars["--keep-text"] = "240 240 240";
+        legibilityVars["--keep-muted"] = "180 180 180";
+      }
+    }
+  }
+
   return (
     <Modal
       onClose={onClose}
@@ -168,8 +210,9 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
         // Desktop (md+): 75vw on widescreens with a ceiling so it doesn't
         // become absurd on ultra-wide monitors, capped at 85vh tall, with
         // the original border / rounded / shadow treatment.
-        style={{ ...themeStyle(ownerTheme), ...ownerOrnaments.vars }}
+        style={{ ...themeStyle(ownerTheme), ...ownerOrnaments.vars, ...legibilityVars }}
         data-theme-style={ownerOrnaments.styleKey}
+        data-profile-bg={profileBgUrl ? "1" : undefined}
         className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
         onClick={(e) => e.stopPropagation()}
       >
@@ -206,6 +249,55 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
       </div>
     </Modal>
   );
+}
+
+/* ============================================================ *
+ *  useBgLuminance — sample the average perceived luminance of a
+ *  remote image. Returns null while loading, on error, or on
+ *  CORS-tainted canvas (cross-origin images without the right
+ *  headers throw on getImageData). Callers fall back to safer
+ *  fixed-opacity scrims when sampling fails so legibility holds
+ *  regardless of the source's CORS posture.
+ * ============================================================ */
+function useBgLuminance(url: string | null): number | null {
+  const [lum, setLum] = useState<number | null>(null);
+  useEffect(() => {
+    if (!url) { setLum(null); return; }
+    let cancelled = false;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.referrerPolicy = "no-referrer";
+    img.onload = () => {
+      if (cancelled) return;
+      try {
+        const w = 32, h = 32;
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, w, h);
+        const { data } = ctx.getImageData(0, 0, w, h);
+        let total = 0;
+        const samples = data.length / 4;
+        for (let i = 0; i < data.length; i += 4) {
+          // Rec. 709 perceived luminance — weights human eye
+          // sensitivity to green much higher than red/blue, so a
+          // neon-cyan BG reads as bright (forces dark text) where
+          // a deep navy reads as dark (forces light text).
+          total += 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!;
+        }
+        if (!cancelled) setLum(total / samples / 255);
+      } catch {
+        // CORS-tainted canvas — getImageData throws. Leave null so
+        // callers fall back to the opacity-tightening path.
+        if (!cancelled) setLum(null);
+      }
+    };
+    img.onerror = () => { if (!cancelled) setLum(null); };
+    img.src = url;
+    return () => { cancelled = true; };
+  }, [url]);
+  return lum;
 }
 
 /* ============================================================ *
@@ -469,6 +561,18 @@ function ProfileBody({
                     <span className="ml-1 italic text-keep-action">· Moderator</span>
                   ) : profile.profile.role === "trusted" ? (
                     <span className="ml-1 italic text-keep-system" title="Trusted account - elevated rate limits earned through participation.">· Trusted</span>
+                  ) : null}
+                  {/* Scriptorium passive author tier — surfaces alongside
+                      the role chip. Counted from the master account's
+                      published-story count; same value on master and
+                      character views. */}
+                  {profile.profile.scriptoriumAuthor ? (
+                    <span
+                      className={`ml-1 italic ${scriptoriumTierClass(profile.profile.scriptoriumAuthor.tier)}`}
+                      title={`${profile.profile.scriptoriumAuthor.publishedStories} ${profile.profile.scriptoriumAuthor.publishedStories === 1 ? "story" : "stories"} published in the Scriptorium`}
+                    >
+                      · {scriptoriumTierLabel(profile.profile.scriptoriumAuthor.tier)}
+                    </span>
                   ) : null}
                 </span>
               )}
@@ -928,6 +1032,28 @@ function NsfwGate({
       </div>
     </div>
   );
+}
+
+/**
+ * Display label + tint for the Scriptorium passive author tier. Three
+ * tiers, three colors — same palette family as the role chips above
+ * so the author badge feels native to the profile header. The full
+ * `(N stories)` count is in the title attribute (hover/tap) — we
+ * don't crowd the inline text with it.
+ */
+function scriptoriumTierLabel(tier: "author" | "storyteller" | "loremaster"): string {
+  switch (tier) {
+    case "author":      return "Author";
+    case "storyteller": return "Storyteller";
+    case "loremaster":  return "Loremaster";
+  }
+}
+function scriptoriumTierClass(tier: "author" | "storyteller" | "loremaster"): string {
+  switch (tier) {
+    case "author":      return "text-sky-300";
+    case "storyteller": return "text-amber-300";
+    case "loremaster":  return "text-rose-300";
+  }
 }
 
 /**

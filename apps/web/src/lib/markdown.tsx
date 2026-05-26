@@ -2,6 +2,8 @@ import { Fragment, useState, type ReactNode } from "react";
 import { customCmdCssToStyle, splitOnCode, VMARK_SPAN_RE } from "@thekeep/shared";
 import { splitMentions } from "./mentions.js";
 import { useActiveTheme } from "./theme.js";
+import { useEmoticons } from "../state/emoticons.js";
+import { EmoticonSprite } from "../components/EmoticonSprite.js";
 
 /**
  * Inline markdown renderer for chat message bodies.
@@ -355,6 +357,24 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
   // delimiter that happens to be inside it.
   const htmlMatch = tryHtmlTag(text, i, depth);
   if (htmlMatch) return htmlMatch;
+
+  // Inline emoticon token: `:slug:idx:` — produced by the emoticon
+  // picker button when the user inserts a sprite into a message body.
+  // The slug must start with a letter (rules out `:42:end:` ratios
+  // and the like); the idx is plain digits. Looked up at render time
+  // against the emoticon store so a missing sheet falls back to the
+  // literal text rather than a broken image.
+  if (text[i] === ":") {
+    const m = /^:([a-z][a-z0-9_-]*):(\d+):/.exec(text.slice(i));
+    if (m) {
+      const slug = m[1]!;
+      const idx = parseInt(m[2]!, 10);
+      return {
+        end: i + m[0].length,
+        node: <InlineEmoticon slug={slug} cellIndex={idx} />,
+      };
+    }
+  }
 
   const ch = text[i];
   const ch2 = text[i + 1] ?? "";
@@ -1150,6 +1170,42 @@ function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
           />
         </span>
       ) : null}
+    </span>
+  );
+}
+
+/**
+ * Detect "this whole message body is a single emoticon token" so
+ * the message renderer can promote it to a sticker (84px) instead
+ * of the inline 24px sprite. Mirrors the inline-emoticon regex in
+ * parseInline above, but anchored with `$` so trailing prose (or
+ * a second emoticon) opts the message OUT of sticker treatment.
+ * Trim is intentional — common chat ergonomics is "hit enter on
+ * a lone emoji", so trailing whitespace shouldn't disqualify.
+ */
+export function solitaryEmoticonToken(body: string): { slug: string; cellIndex: number } | null {
+  const m = /^\s*:([a-z][a-z0-9_-]*):(\d+):\s*$/.exec(body);
+  if (!m) return null;
+  return { slug: m[1]!, cellIndex: parseInt(m[2]!, 10) };
+}
+
+/* =============================================================
+ *  InlineEmoticon — renders a `:slug:idx:` token as the matching
+ *  sprite, or falls through to the literal text when the sheet
+ *  isn't in the emoticon store (admin removed it, or the sheet
+ *  index hasn't loaded yet on a cold start). The component
+ *  subscribes to the emoticon store so a sheet hot-swap renders
+ *  through to existing message bodies without a refresh.
+ * ============================================================= */
+function InlineEmoticon({ slug, cellIndex }: { slug: string; cellIndex: number }) {
+  const sheet = useEmoticons((s) => s.sheets.find((sh) => sh.slug === slug));
+  if (!sheet || cellIndex < 0 || cellIndex >= sheet.cells.length) {
+    return <>{`:${slug}:${cellIndex}:`}</>;
+  }
+  const label = sheet.cells[cellIndex] || "";
+  return (
+    <span className="inline-emoticon" title={label || undefined}>
+      <EmoticonSprite sheetSlug={slug} cellIndex={cellIndex} size={24} />
     </span>
   );
 }

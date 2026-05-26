@@ -13,6 +13,7 @@ import { FormattingToolbar } from "./FormattingToolbar.js";
 import { SynonymPopup } from "./SynonymPopup.js";
 import { UsernameAutocomplete } from "./UsernameAutocomplete.js";
 import { CloseButton } from "./CloseButton.js";
+import { ReactionBar } from "./ReactionBar.js";
 
 interface Props {
   onClose: () => void;
@@ -24,6 +25,15 @@ interface Props {
    * profiles. Null/undefined opens to the empty-state.
    */
   initialOtherUserId?: string | null;
+  /**
+   * Open another user's profile by display name. Threaded from
+   * App.tsx so clicking a name / avatar in a DM bubble OR the
+   * thread header opens the profile modal — same flow chat uses on
+   * the avatar tile. Optional so the modal stays callable from
+   * surfaces that don't have profile-open wired (none today, but
+   * keeping the option open).
+   */
+  onOpenProfile?: (displayName: string) => void;
 }
 
 interface FriendListEntry {
@@ -53,6 +63,18 @@ interface FriendRequestEntry {
   /** My (receiver) character id when the request was fetched; null = OOC inbox. */
   friendedCharacterId: string | null;
   createdAt: number;
+}
+
+/** Match returned by /me/friend-resolve. Mirrors the server's
+ *  FriendResolveMatch — kept inline to avoid threading a shared
+ *  type through the API surface. */
+interface FriendResolveMatch {
+  kind: "master" | "character";
+  userId: string;
+  characterId: string | null;
+  displayName: string;
+  masterUsername: string;
+  avatarUrl: string | null;
 }
 
 /** Stable empty array sentinel — see Zustand selector notes elsewhere. */
@@ -93,7 +115,7 @@ const PAGE_SIZE = 50;
  * conversation slides the thread pane in (with a Back chevron in
  * its header). Desktop shows both side-by-side.
  */
-export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props) {
+export function MessagesModal({ onClose, onCommand, initialOtherUserId, onOpenProfile }: Props) {
   const me = useChat((s) => s.me);
   const dmConversations = useChat((s) => s.dmConversations);
   const setDmConversations = useChat((s) => s.setDmConversations);
@@ -284,9 +306,17 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
     }
   }, [setDmConversations, setPendingFriendRequests, inboxFilterCharId]);
 
+  // `friendsVersion` from the store is the cross-tab/cross-user
+  // refresh signal — the App-level `friend:request` socket listener
+  // bumps it on every echo (accept, decline, unfriend, new request).
+  // Without this dep, accepting in one user's modal updated their own
+  // friends list (via the local `refreshKey` bump in `acceptRequest`)
+  // but the OTHER party's modal stayed stale until they closed and
+  // reopened it or hit a full page refresh.
+  const friendsVersion = useChat((s) => s.friendsVersion);
   useEffect(() => {
     refreshLists();
-  }, [refreshLists, refreshKey]);
+  }, [refreshLists, refreshKey, friendsVersion]);
 
   /**
    * Inbox counts feed the per-identity chip badges. Kept on a separate
@@ -297,6 +327,11 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
    * every identity I own, regardless of the inbox filter, so the chips
    * keep showing badges for unread on the OTHER characters too.
    */
+  // `inboxCountsVersion` bumps from ThreadPane (after the /read
+  // POST resolves) and from the App-level `dm:read` socket listener.
+  // Both signals mean "the server-side read marker just advanced —
+  // refetch counts so the chip pip stops lying."
+  const inboxCountsVersion = useChat((s) => s.inboxCountsVersion);
   useEffect(() => {
     let cancelled = false;
     fetch("/me/inbox-counts", { credentials: "include" })
@@ -309,7 +344,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
       })
       .catch(() => { /* badges are non-critical */ });
     return () => { cancelled = true; };
-  }, [dmConversations, pendingFriendRequests, refreshKey]);
+  }, [dmConversations, pendingFriendRequests, refreshKey, inboxCountsVersion]);
 
   // Re-fire refreshLists whenever the inbox filter changes — Char A
   // and Char B keep separate friends + DM inboxes, so flipping
@@ -529,32 +564,45 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
    *   - 404 no_user      → "No user named <name>."
    *   - 400 self         → "Can't friend yourself."
    */
-  async function sendFriendRequest(e: FormEvent) {
-    e.preventDefault();
-    const name = addDraft.trim();
-    if (!name) return;
+  /**
+   * Two-step friend add:
+   *   1. Resolve the typed name to all matching identities (master
+   *      + any number of characters that share the name).
+   *   2. Zero matches → "no user." One match → commit immediately
+   *      (preserves the legacy single-input UX). Multiple → expose
+   *      a picker so the user explicitly chooses the identity
+   *      they meant. Sender-side `characterId` stays scoped to the
+   *      caller's currently-active identity.
+   */
+  const [resolveMatches, setResolveMatches] = useState<FriendResolveMatch[] | null>(null);
+
+  async function commitFriendRequest(match: FriendResolveMatch) {
     setAddStatus({ kind: "info", text: "Sending…" });
+    setResolveMatches(null);
     try {
       const r = await fetch("/me/friend-requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: name,
-          // Friend FROM my active identity. When I'm in character, this
-          // is the character; when OOC, omitted = master.
+          // Explicit identity target — bypasses the server's name-
+          // based resolution so the picker's choice is honored
+          // exactly (a character with the same name as a master
+          // doesn't lose to the master).
+          targetUserId: match.userId,
+          targetCharacterId: match.characterId,
           characterId: inboxFilterCharId ?? undefined,
         }),
       });
       const j = await r.json().catch(() => ({} as { error?: string; status?: string; username?: string }));
       if (!r.ok) {
         const msg =
-          j.error === "no_user" ? `No user named "${name}".`
+          j.error === "no_user" ? `No user named "${match.displayName}".`
           : j.error === "self" ? "You can't friend yourself."
           : j.error ?? "Friend request failed.";
         setAddStatus({ kind: "error", text: msg });
         return;
       }
-      const target = j.username ?? name;
+      const target = match.displayName;
       const ok =
         j.status === "accepted" ? `You and ${target} are now friends.`
         : j.status === "already_pending" ? `Friend request to ${target} is still pending.`
@@ -562,9 +610,41 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
         : `Friend request sent to ${target}.`;
       setAddStatus({ kind: "ok", text: ok });
       setAddDraft("");
-      // Refresh inbox so the new pending row shows up (or disappears
-      // if we just auto-accepted into mutual friendship).
       setRefreshKey((v) => v + 1);
+    } catch {
+      setAddStatus({ kind: "error", text: "Network error — try again." });
+    }
+  }
+
+  async function sendFriendRequest(e: FormEvent) {
+    e.preventDefault();
+    const name = addDraft.trim();
+    if (!name) return;
+    setAddStatus({ kind: "info", text: "Looking up…" });
+    setResolveMatches(null);
+    try {
+      const r = await fetch(`/me/friend-resolve?name=${encodeURIComponent(name)}`, {
+        credentials: "include",
+      });
+      if (!r.ok) {
+        setAddStatus({ kind: "error", text: "Lookup failed." });
+        return;
+      }
+      const j = (await r.json()) as { matches?: FriendResolveMatch[] };
+      const matches = j.matches ?? [];
+      if (matches.length === 0) {
+        setAddStatus({ kind: "error", text: `No user named "${name}".` });
+        return;
+      }
+      if (matches.length === 1) {
+        // Unambiguous — commit straight through without showing the picker.
+        await commitFriendRequest(matches[0]!);
+        return;
+      }
+      // Ambiguous — surface the picker. Status text becomes a hint;
+      // the actual UI is rendered inline in the add-friend form.
+      setAddStatus({ kind: "info", text: `Pick the identity you meant:` });
+      setResolveMatches(matches);
     } catch {
       setAddStatus({ kind: "error", text: "Network error — try again." });
     }
@@ -840,6 +920,60 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
                   {addStatus.text}
                 </div>
               ) : null}
+              {/* Disambiguation picker. Shown when a typed name
+                  matches multiple identities (master + characters,
+                  or two characters from different players). Each
+                  match button commits the friend request to that
+                  exact identity, bypassing the server's master-first
+                  name resolution. */}
+              {resolveMatches && resolveMatches.length > 0 ? (
+                <div className="rounded border border-keep-action/40 bg-keep-action/5 p-1">
+                  <ul className="space-y-1">
+                    {resolveMatches.map((m) => (
+                      <li key={`${m.userId}:${m.characterId ?? ""}`}>
+                        <button
+                          type="button"
+                          onClick={() => void commitFriendRequest(m)}
+                          className="flex w-full items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-left text-[11px] hover:border-keep-action hover:bg-keep-action/10"
+                          title={
+                            m.kind === "character"
+                              ? `Send to ${m.displayName} (character of ${m.masterUsername})`
+                              : `Send to ${m.displayName} (master account)`
+                          }
+                        >
+                          {m.avatarUrl ? (
+                            <img
+                              src={m.avatarUrl}
+                              alt=""
+                              referrerPolicy="no-referrer"
+                              className="h-6 w-6 shrink-0 rounded-full object-cover"
+                            />
+                          ) : (
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-keep-panel text-[10px] uppercase text-keep-muted">
+                              {m.displayName.slice(0, 2)}
+                            </span>
+                          )}
+                          <span className="flex min-w-0 flex-1 flex-col">
+                            <span className="truncate font-semibold text-keep-text">{m.displayName}</span>
+                            <span className="truncate text-[10px] text-keep-muted">
+                              {m.kind === "character"
+                                ? `character of ${m.masterUsername}`
+                                : "master account"}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    onClick={() => { setResolveMatches(null); setAddStatus(null); }}
+                    className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[10px] text-keep-muted hover:text-keep-text"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : null}
               <form onSubmit={composeToUser} className="flex gap-1">
                 <UsernameAutocomplete
                   value={composeDraft}
@@ -935,6 +1069,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId }: Props)
                   meId={me?.id ?? null}
                   onCommand={onCommand}
                   myCharacterId={inboxFilterCharId}
+                  {...(onOpenProfile ? { onOpenProfile } : {})}
                 />
               );
             })() : (
@@ -1235,33 +1370,21 @@ function ThreadPane({
   meId,
   onCommand,
   myCharacterId,
+  onOpenProfile,
 }: {
   otherUserId: string;
   fallback: { displayName: string; avatarUrl: string | null; online: boolean } | null;
-  /**
-   * The friend/conv row's pinned character id for the OTHER party,
-   * threaded in from the parent so the first send on a brand-new
-   * thread targets the right character. Without this, opening a DM
-   * with a character-friend whose conversation doesn't yet exist
-   * would default `targetCharacterId` to null and create the
-   * conversation against their OOC side — the per-identity partition
-   * would silently leak to OOC on first contact.
-   */
   initialOtherCharacterId: string | null;
   onBack: () => void;
   appendDmMessage: (msg: DirectMessage) => void;
   setDmMessages: (conversationId: string, msgs: DirectMessage[]) => void;
   meId: string | null;
-  /** Dispatch slash commands (used for /accept and /decline on the pinned banner). */
   onCommand: (text: string) => void;
-  /**
-   * My identity for this thread — the inbox filter from the parent
-   * modal, not the global activeCharacterId. The chip switcher at the
-   * top of the inbox can take this somewhere different than the user's
-   * global voice; the thread fetches / sends MUST follow the filter so
-   * the thread you're viewing stays consistent with its pinned side.
-   */
   myCharacterId: string | null;
+  /** Open the other party's profile when the header name / avatar is
+   *  clicked. When omitted, the header renders the name plainly with
+   *  no click affordance (no point in a click that does nothing). */
+  onOpenProfile?: (displayName: string) => void;
 }) {
   // Resolve conversation reactively — server creates the row on first
   // send, so it may be absent until then. NO_DM_MESSAGES is a stable
@@ -1392,7 +1515,18 @@ function ThreadPane({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ upTo: Date.now(), characterId: activeCharacterId ?? undefined }),
       signal: ac.signal,
-    }).catch(() => {});
+    })
+      .then(() => {
+        // Bump inbox-counts version so the per-character chip pip
+        // refetches NOW that the server-side read marker is
+        // committed. Without this, the inbox-counts refetch
+        // triggered by the optimistic `unreadCount: 0` on
+        // selectedUserId change races ahead of the DB write and
+        // comes back stale — the conversation row badge clears
+        // but the chip pip stays.
+        useChat.getState().bumpInboxCountsVersion();
+      })
+      .catch(() => {});
     return () => { ac.abort(); };
   }, [conversation?.id, setDmMessages, dmReseedTick, activeCharacterId]);
 
@@ -1408,6 +1542,17 @@ function ThreadPane({
     e.preventDefault();
     const text = draft.trim();
     if (!text || busy) return;
+    // Length gate. The server enforces maxDmLength too, but a
+    // pre-flight check skips the wasted round trip AND lets us
+    // surface a clear "X / Y chars; trim and resend" message
+    // instead of the generic server error string. Draft stays in
+    // place either way (the catch path below already preserves
+    // it on server-side rejection), but bailing here keeps the
+    // toolbar counter and this error message in lockstep.
+    if (text.length > maxDmLength) {
+      setError(`Message is ${text.length} chars; limit is ${maxDmLength}. Trim it and try again.`);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -1437,7 +1582,7 @@ function ThreadPane({
     } finally {
       setBusy(false);
     }
-  }, [draft, busy, otherUserId, appendDmMessage, activeCharacterId, targetCharacterId]);
+  }, [draft, busy, otherUserId, appendDmMessage, activeCharacterId, targetCharacterId, maxDmLength]);
 
   return (
     <>
@@ -1450,8 +1595,33 @@ function ThreadPane({
         >
           ←
         </button>
-        <Avatar url={header.avatarUrl} name={header.displayName} size={32} online={header.online} />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-keep-text">{header.displayName}</span>
+        {/* Avatar + name both open the other party's profile when the
+            parent wires `onOpenProfile`. Avatar uses the same
+            click-to-view affordance chat has on its row tiles. */}
+        {onOpenProfile ? (
+          <button
+            type="button"
+            onClick={() => onOpenProfile(header.displayName)}
+            className="shrink-0 rounded hover:opacity-90"
+            title={`View ${header.displayName}'s profile`}
+          >
+            <Avatar url={header.avatarUrl} name={header.displayName} size={32} online={header.online} />
+          </button>
+        ) : (
+          <Avatar url={header.avatarUrl} name={header.displayName} size={32} online={header.online} />
+        )}
+        {onOpenProfile ? (
+          <button
+            type="button"
+            onClick={() => onOpenProfile(header.displayName)}
+            className="min-w-0 flex-1 truncate rounded text-left text-sm font-semibold text-keep-text hover:text-keep-action"
+            title={`View ${header.displayName}'s profile`}
+          >
+            {header.displayName}
+          </button>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-keep-text">{header.displayName}</span>
+        )}
       </div>
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-sm">
@@ -1467,7 +1637,12 @@ function ThreadPane({
         ) : (
           <ul className="flex flex-col gap-1">
             {messages.map((m) => (
-              <DmRow key={m.id} msg={m} isMine={m.senderId === meId} />
+              <DmRow
+                key={m.id}
+                msg={m}
+                isMine={m.senderId === meId}
+                {...(onOpenProfile ? { onOpenProfile } : {})}
+              />
             ))}
           </ul>
         )}
@@ -1544,6 +1719,7 @@ function ThreadPane({
           value={draft}
           onChange={setDraft}
           disabled={busy}
+          maxLength={maxDmLength}
         />
         <div className="flex items-center gap-1">
           {/* Relative wrapper anchors the SynonymPopup to the input's
@@ -1576,7 +1752,7 @@ function ThreadPane({
   );
 }
 
-function DmRow({ msg, isMine }: { msg: DirectMessage; isMine: boolean }) {
+function DmRow({ msg, isMine, onOpenProfile }: { msg: DirectMessage; isMine: boolean; onOpenProfile?: (displayName: string) => void }) {
   // Tap-to-reveal timestamp footer. DMs hide their send time by default
   // to keep threads visually clean; tapping a bubble surfaces the full
   // date+time underneath. Toggling again hides it. Clicks on inline
@@ -1609,14 +1785,30 @@ function DmRow({ msg, isMine }: { msg: DirectMessage; isMine: boolean }) {
   // character-only — no master-avatar fallback — so this can't leak
   // the OOC owner anymore).
   return (
-    <li className={"flex flex-col " + (isMine ? "items-end" : "items-start")}>
+    <li className={"group flex flex-col " + (isMine ? "items-end" : "items-start")}>
       <div
         className={
           "flex items-end gap-1.5 max-w-[90%] md:max-w-[calc(30vw+2.25rem)] " +
           (isMine ? "flex-row-reverse" : "flex-row")
         }
       >
-        <Avatar url={msg.avatarUrl} name={msg.displayName} size={28} />
+        {/* Avatar + sender-name both open the sender's profile when
+            a callback is wired. Only renders the click on the OTHER
+            party's bubble (clicking your own name to open your own
+            profile is a noisy action that has its own /profile
+            command). */}
+        {!isMine && onOpenProfile ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onOpenProfile(msg.displayName); }}
+            className="shrink-0 rounded-full hover:opacity-90"
+            title={`View ${msg.displayName}'s profile`}
+          >
+            <Avatar url={msg.avatarUrl} name={msg.displayName} size={28} />
+          </button>
+        ) : (
+          <Avatar url={msg.avatarUrl} name={msg.displayName} size={28} />
+        )}
         <div
           onClick={toggleTime}
           className={
@@ -1625,7 +1817,18 @@ function DmRow({ msg, isMine }: { msg: DirectMessage; isMine: boolean }) {
           }
         >
           {!isMine ? (
-            <div className="mb-0.5 text-[10px] font-semibold text-keep-muted">{msg.displayName}</div>
+            onOpenProfile ? (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onOpenProfile(msg.displayName); }}
+                className="mb-0.5 rounded text-[10px] font-semibold text-keep-muted hover:text-keep-action"
+                title={`View ${msg.displayName}'s profile`}
+              >
+                {msg.displayName}
+              </button>
+            ) : (
+              <div className="mb-0.5 text-[10px] font-semibold text-keep-muted">{msg.displayName}</div>
+            )
           ) : null}
           <div className="whitespace-pre-wrap break-words text-sm leading-snug">
             {parseInline(msg.body)}
@@ -1638,6 +1841,14 @@ function DmRow({ msg, isMine }: { msg: DirectMessage; isMine: boolean }) {
           {formatDmTime(msg.createdAt)}
         </span>
       ) : null}
+      <div className={"mt-0.5 max-w-[90%] md:max-w-[calc(30vw+2.25rem)] " + (isMine ? "pr-9" : "pl-9")}>
+        <ReactionBar
+          targetKind="dm"
+          targetId={msg.id}
+          {...(msg.reactions ? { initialEntries: msg.reactions } : {})}
+          {...(msg.deletedAt ? { readOnly: true } : {})}
+        />
+      </div>
     </li>
   );
 }

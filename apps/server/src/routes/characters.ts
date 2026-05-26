@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { isAdminRole } from "@thekeep/shared";
+import { isAdminRole, parseTagList, serializeTagList } from "@thekeep/shared";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -154,6 +154,17 @@ const masterUpdateBody = z.object({
    */
   disableInputHistory: z.boolean().optional(),
   disableThesaurus: z.boolean().optional(),
+  /**
+   * Scriptorium catalog prefs (Phase 9). `storyShowNsfw` opts the
+   * caller into R / NC-17 cards in the in-app catalog (anonymous
+   * viewers are still gated server-side regardless). `storyCwBlocklist`
+   * is a content-warning blocklist that hides cards entirely.
+   */
+  storyShowNsfw: z.boolean().optional(),
+  storyCwBlocklist: z
+    .array(z.string().min(1).max(32))
+    .max(50)
+    .optional(),
   /**
    * Userlist display preference — render the rank sigil instead of
    * the gender glyph in rooms-tree rows. Self-hides when the user
@@ -506,6 +517,10 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       soundWhisperEnabled: u.soundWhisperEnabled,
       disableInputHistory: u.disableInputHistory,
       disableThesaurus: u.disableThesaurus,
+      // Scriptorium catalog prefs (Phase 9). Editor's Privacy tab
+      // reads these so the toggles round-trip cleanly.
+      storyShowNsfw: u.storyShowNsfw,
+      storyCwBlocklist: parseTagList(u.storyCwBlocklist),
       useRankAsUserlistIcon: u.useRankAsUserlistIcon,
       showRankInUserlist: u.showRankInUserlist,
       showRankInChat: u.showRankInChat,
@@ -863,6 +878,10 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         ...(body.soundWhisperEnabled !== undefined ? { soundWhisperEnabled: body.soundWhisperEnabled } : {}),
         ...(body.disableInputHistory !== undefined ? { disableInputHistory: body.disableInputHistory } : {}),
         ...(body.disableThesaurus !== undefined ? { disableThesaurus: body.disableThesaurus } : {}),
+        ...(body.storyShowNsfw !== undefined ? { storyShowNsfw: body.storyShowNsfw } : {}),
+        ...(body.storyCwBlocklist !== undefined
+          ? { storyCwBlocklist: serializeTagList(body.storyCwBlocklist) }
+          : {}),
         ...(body.useRankAsUserlistIcon !== undefined ? { useRankAsUserlistIcon: body.useRankAsUserlistIcon } : {}),
         ...(body.showRankInUserlist !== undefined ? { showRankInUserlist: body.showRankInUserlist } : {}),
         ...(body.showRankInChat !== undefined ? { showRankInChat: body.showRankInChat } : {}),

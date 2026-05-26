@@ -150,6 +150,13 @@ export interface ChatMessage {
    * avatar still shows the right frame for offline senders.
    */
   senderSelectedBorderRankKey?: string | null;
+  /**
+   * Emoticon-reaction summary for this message, embedded inline so the
+   * client can render the ReactionBar without a per-row fetch.
+   * Absent on rows with zero reactions (the wire stays compact);
+   * absent on backlog payloads predating the feature.
+   */
+  reactions?: import("./emoticon.js").ReactionEntry[];
 }
 
 /**

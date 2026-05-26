@@ -136,6 +136,47 @@ export interface ProfileMetrics {
   forumReplies: number | null;
 }
 
+/**
+ * Scriptorium passive author tier. Identity-level badge surfaced on
+ * profile views once an author crosses one of the canonical
+ * thresholds. Tiers are purely passive — no XP, no streaks, no daily
+ * grind (per the participation ethos).
+ *
+ *   "author"      — first story published
+ *   "storyteller" — 5 published stories
+ *   "loremaster"  — 25 published stories
+ *
+ * Null = no stories published yet; no badge rendered.
+ */
+export type ScriptoriumAuthorTier = "author" | "storyteller" | "loremaster";
+
+/** Per-tier thresholds (story counts). Owner is admin-tunable in a
+ *  future iteration; this is the canonical default. */
+export const SCRIPTORIUM_AUTHOR_TIERS: readonly { tier: ScriptoriumAuthorTier; minStories: number }[] = [
+  { tier: "loremaster",  minStories: 25 },
+  { tier: "storyteller", minStories: 5 },
+  { tier: "author",      minStories: 1 },
+] as const;
+
+/** Resolve a tier (or null) from a published-story count. */
+export function resolveScriptoriumAuthorTier(publishedStories: number): ScriptoriumAuthorTier | null {
+  for (const t of SCRIPTORIUM_AUTHOR_TIERS) {
+    if (publishedStories >= t.minStories) return t.tier;
+  }
+  return null;
+}
+
+/**
+ * Wire shape embedded on identity profiles (master + character —
+ * value is the same regardless, since stories are owned by the master
+ * account). Surfaces a small "Author" / "Storyteller" / "Loremaster"
+ * badge in the profile header.
+ */
+export interface ScriptoriumAuthorBadge {
+  tier: ScriptoriumAuthorTier;
+  publishedStories: number;
+}
+
 export interface CharacterProfile {
   id: string;
   userId: string;
@@ -180,6 +221,13 @@ export interface CharacterProfile {
   updatedAt: number;
   /** Lifetime activity counters scoped to this character. */
   metrics: ProfileMetrics;
+  /**
+   * Scriptorium passive author tier — populated from the OWNING
+   * master account's published-story count, so a character profile
+   * inherits the same badge as the owner's master profile. Null when
+   * no story has been published yet (no badge rendered).
+   */
+  scriptoriumAuthor: ScriptoriumAuthorBadge | null;
   /**
    * Pinned NON-PET items from this character's Collection (up to 10).
    * Sparse — a character can pin slots 0, 3, 7 and leave the rest
@@ -330,6 +378,11 @@ export interface MasterProfile {
   createdAt: number;
   /** Lifetime activity counters scoped to this master account (every character). */
   metrics: ProfileMetrics;
+  /**
+   * Scriptorium passive author tier. Counted from this master account's
+   * published stories. Null when none published yet.
+   */
+  scriptoriumAuthor: ScriptoriumAuthorBadge | null;
   /**
    * Pinned NON-PET items from this master account's Collection (up
    * to 10). Independent from every character's Collection — items

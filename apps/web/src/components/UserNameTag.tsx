@@ -282,7 +282,7 @@ export function UserNameTag({
         // reach, making italic styled admin names look like the last
         // letter's slant was sheared off.
         className={`rounded py-0.5 font-semibold hover:bg-keep-panel hover:underline${
-          truncate ? " min-w-0 overflow-clip text-ellipsis whitespace-nowrap [overflow-clip-margin:0.5em]" : ""
+          truncate ? " min-w-0 overflow-clip text-ellipsis whitespace-nowrap [overflow-clip-margin:1.75em]" : ""
         }${italic ? " italic" : ""}`}
         // Inline chatColor is preserved as a fallback for users with
         // no equipped style — StyledName below paints over it when a

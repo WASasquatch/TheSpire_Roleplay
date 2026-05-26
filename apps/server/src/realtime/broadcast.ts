@@ -37,6 +37,7 @@ import type { CommandContext, SessionUser } from "../commands/types.js";
 import { expandInlineCommands } from "../commands/registry.js";
 import { getSettings } from "../settings.js";
 import { awardForForum, awardForMessage } from "../earning/award.js";
+import { loadReactionsForTargets } from "../reactions.js";
 import { readPoolRank } from "../earning/resolver.js";
 import { routeMessage } from "../earning/routing.js";
 
@@ -1000,6 +1001,22 @@ export async function sendRoomBacklogTo(
         ? { deletedByDisplayName: m.deletedByDisplayName }
         : {}),
     }));
+  // Embed reactions inline so the ReactionBar renders without a
+  // per-row fetch. Single batched query keyed on the backlog's
+  // message ids; messages with zero reactions just don't get the
+  // field (keeps the wire compact).
+  if (backlog.length > 0) {
+    const reactionMap = await loadReactionsForTargets(
+      db,
+      "chat_message",
+      backlog.map((m) => m.id),
+      viewerUserId,
+    );
+    for (const m of backlog) {
+      const r = reactionMap.get(m.id);
+      if (r && r.length > 0) m.reactions = r;
+    }
+  }
   socket.emit("message:bulk", backlog);
   // Authoritative "older messages exist" signal for the scroll-up
   // paginator. Computed from the DB-level query length (51) so it
@@ -1095,18 +1112,31 @@ export async function joinRoom(
     .map((r) => r.slice(5));
 
   // Drop the user from any previous room before joining the new one.
-  // The per-room "X left." chat broadcast is silenced entirely now —
-  // room moves and tab closes shouldn't generate chat noise. The
-  // userlist update via `broadcastPresence` is the visible signal
-  // (the user disappears from the rail in real time). Only the
-  // explicit Exit-button path (handled in index.ts disconnect)
-  // surfaces a chat message, and only with the "has disconnected."
-  // wording.
+  // Per-room "X has left the room." chat broadcasts fire on real
+  // room switches, but ONLY when no OTHER socket of this account
+  // remains in the room being left — `userHasSocketInRoom` is the
+  // multi-tab gate. If the user has another tab still parked in
+  // the old room (desktop tab stays put while phone tab moves;
+  // second browser window) the move from THIS socket isn't a real
+  // "departure" and we stay silent; userlist update via
+  // `broadcastPresence` is the visible signal regardless. Boot
+  // grace and forum rooms suppress the broadcast. Note we do NOT
+  // gate on `isReconnect` here: a real room switch always comes
+  // through the explicit room:join event on a live socket, so
+  // `consumePendingDisconnect` having found stale ghosts elsewhere
+  // (a tab the user closed minutes ago in a different room)
+  // shouldn't mute the current move. Same rationale for the entry
+  // broadcast below.
   for (const prevId of priorRooms) {
     socket.leave(`room:${prevId}`);
     const expired = await expireIfEmpty(io, db, prevId);
     if (expired) continue;
     await broadcastPresence(io, db, prevId);
+    const stillThere = await userHasSocketInRoom(io, user.id, prevId);
+    if (stillThere || isInBootGrace()) continue;
+    const prevRoom = (await db.select().from(rooms).where(eq(rooms.id, prevId)).limit(1))[0];
+    if (!prevRoom || prevRoom.replyMode === "nested") continue;
+    await addSystemMessage(io, db, prevId, `${user.displayName} has left the room.`);
   }
 
   socket.join(`room:${roomId}`);
@@ -1161,27 +1191,45 @@ export async function joinRoom(
     markSeenDescription(user.id, roomId);
   }
 
-  // "X has connected." chat broadcast is now gated on an explicit
-  // login intent. The client sets `socket.data.loginIntent = true`
-  // on the handshake immediately after a successful login/register
-  // form submit, and never on any subsequent reconnect — so mobile
-  // suspend, tab close, page reload, network blip, and so on all
-  // remain silent in the chat log. The userlist (broadcastPresence
-  // above) still updates so other viewers see the occupant appear
-  // in the rail.
+  // Entry/connect chat broadcast. Three mutually-exclusive cases,
+  // distinguished by `loginIntent` (fresh login/register handshake)
+  // and `priorRooms.length` (was this socket already in another
+  // chat room before this join — i.e. a real room switch):
   //
-  // The "X arrived." wording for room-switches (multi-tab user
-  // popping into a new room) is dropped entirely — room moves
-  // shouldn't generate chat noise. The userlist is the signal.
+  //   loginIntent && priorRooms.length === 0  → "X has connected."
+  //     The handshake just finished, this is the user's first room
+  //     of the session. `isReconnect` gates this off because
+  //     mobile suspend → wake re-runs the handshake and we don't
+  //     want to spam "connected" every time the screen turns back
+  //     on.
+  //   priorRooms.length > 0                   → "X has entered the room."
+  //     Same socket moved A → B via the room:join event; pair with
+  //     the "X has left the room." departure broadcast emitted in
+  //     the leave loop above. NOT gated on `isReconnect` — a real
+  //     room switch is an explicit action on a live socket, and
+  //     `consumePendingDisconnect` may have legitimately swept
+  //     ghosts from a tab the user closed in some OTHER room.
+  //     That shouldn't mute this tab's announce.
+  //   Anything else (reconnect after suspend, page reload, network
+  //   blip, watchers reattaching)            → silent.
   //
-  // Forum rooms suppress regardless of intent; same rationale as
-  // the description above.
+  // Both announce paths share the multi-tab gate via
+  // `userHasSocketInRoom`: if another tab of this account is
+  // already in the destination, we suppress the broadcast (account
+  // is "already here" from the room's perspective, even though
+  // THIS socket just arrived). The userlist update via
+  // `broadcastPresence` above is the visible signal regardless.
+  // Boot grace and forum rooms suppress both paths.
   const loginIntent =
     (socket.data as { loginIntent?: boolean }).loginIntent === true;
   const otherSocketHere = await userHasSocketInRoom(io, user.id, roomId, socket.id);
   const isForumRoom = room.replyMode === "nested";
-  if (loginIntent && !otherSocketHere && !isReconnect && !isInBootGrace() && !isForumRoom) {
+  const isRoomSwitch = priorRooms.length > 0;
+  const baseGate = !otherSocketHere && !isInBootGrace() && !isForumRoom;
+  if (loginIntent && !isRoomSwitch && baseGate && !isReconnect) {
     await addSystemMessage(io, db, roomId, `${user.displayName} has connected.`);
+  } else if (isRoomSwitch && baseGate) {
+    await addSystemMessage(io, db, roomId, `${user.displayName} has entered the room.`);
   }
   if (!otherSocketHere && !isReconnect && !userWasOnlineBefore) {
     // Watcher pings: still relevant in forum rooms — they're per-user

@@ -28,6 +28,7 @@ import {
   unfriendCommand,
 } from "./friends.js";
 import { worldCommand, worldsCommand } from "./world.js";
+import { scriptoriumCommand, storyCommand, writeCommand } from "./scriptorium.js";
 import { expiryCommand, replyModeCommand } from "./room_modes.js";
 import { ignoreCommand, unignoreCommand } from "./ignore.js";
 import { usersCommand } from "./users.js";
@@ -87,6 +88,10 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(friendsCommand);
   reg.registerBuiltin(worldCommand);
   reg.registerBuiltin(worldsCommand);
+  // Scriptorium — long-form fiction.
+  reg.registerBuiltin(writeCommand);
+  reg.registerBuiltin(storyCommand);
+  reg.registerBuiltin(scriptoriumCommand);
   reg.registerBuiltin(expiryCommand);
   reg.registerBuiltin(replyModeCommand);
   reg.registerBuiltin(ignoreCommand);

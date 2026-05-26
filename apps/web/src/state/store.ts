@@ -630,6 +630,37 @@ interface ChatState {
    */
   commandsVersion: number;
   bumpCommandsVersion: () => void;
+  /**
+   * Monotonic counter the App-level `friend:request` socket listener
+   * bumps on every echo (new request, accept, decline, unfriend).
+   * MessagesModal keys its refreshLists effect on this so the
+   * friends list / DM conversations / pending inbox re-poll
+   * whenever friend state changes elsewhere — without this, accepting
+   * a request only refreshed the acceptor's own modal (via its local
+   * refreshKey bump in `acceptRequest`); the other party's modal
+   * showed the stale list until they closed and reopened the modal
+   * or hit a full page refresh.
+   */
+  friendsVersion: number;
+  bumpFriendsVersion: () => void;
+  /**
+   * Monotonic counter for "the per-identity DM unread counts may
+   * have changed." Bumped:
+   *   - by ThreadPane after the `/me/dms/:id/read` POST resolves
+   *     (the server-side read marker write happens BEFORE the
+   *     response, so any refetch fired after this point sees the
+   *     fresh unread count instead of the stale one)
+   *   - by the App-level `dm:read` socket listener when the echo
+   *     comes back to OUR own sockets, so sibling tabs of the
+   *     same user refresh their chip badges too
+   * MessagesModal's `inboxCounts` effect keys on this to refetch
+   * `/me/inbox-counts`. Without it, the per-character chip pip
+   * stayed stale after opening a conversation because the local
+   * optimistic `unreadCount: 0` raced ahead of the server-side
+   * read-marker write.
+   */
+  inboxCountsVersion: number;
+  bumpInboxCountsVersion: () => void;
 }
 
 /**
@@ -1066,4 +1097,10 @@ export const useChat = create<ChatState>((set) => ({
 
   commandsVersion: 0,
   bumpCommandsVersion: () => set((s) => ({ commandsVersion: s.commandsVersion + 1 })),
+
+  friendsVersion: 0,
+  bumpFriendsVersion: () => set((s) => ({ friendsVersion: s.friendsVersion + 1 })),
+
+  inboxCountsVersion: 0,
+  bumpInboxCountsVersion: () => set((s) => ({ inboxCountsVersion: s.inboxCountsVersion + 1 })),
 }));

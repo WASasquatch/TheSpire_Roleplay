@@ -3878,20 +3878,29 @@ aside.margin-note {
 /* Mobile: full-width scroll still works since it's already 100%
  * of container. Tighten typography AND tighten content padding so
  * the inner column has more horizontal room before bleeding past
- * the parchment art. */
+ * the parchment art. Stage height grows to fit all 10 features:
+ * each item wraps to ~2 lines of 11px body + 12px title + 0.7rem
+ * vertical padding ≈ 60px, × 10 = 600px just for the list, plus
+ * ~140px for the rod chrome / paper margins / brass collars.
+ * 880px gives the last feature ("Commands") room to land before
+ * the rod's lower brass collar instead of being clipped by it. */
 @media (max-width: 640px) {
-  .scroll-stage { height: 600px; }
+  .scroll-stage { height: 880px; }
   .scroll-content { padding: 0.85rem 1.25rem 0.75rem; }
+  .scroll-feature-item { padding: 0.25rem 0; }
   .scroll-feature-cap { font-size: 20px; padding-top: 1px; }
   .scroll-feature-title { font-size: 12px; }
   .scroll-feature-body { font-size: 11px; line-height: 1.5; }
 }
 /* Ultra-narrow (older phones, foldables in cover mode). One more
- * step down keeps the cap from eating most of the body line and
- * keeps the description fitting in two-to-three lines instead of
- * overflowing the scroll. */
+ * step down on font size; bump stage height a bit further because
+ * narrower columns mean longer feature descriptions wrap to three
+ * lines (sometimes four), and the cumulative extra row across
+ * 10 items eats real vertical space. */
 @media (max-width: 380px) {
+  .scroll-stage { height: 940px; }
   .scroll-content { padding: 0.75rem 0.9rem 0.65rem; }
+  .scroll-feature-item { padding: 0.2rem 0; }
   .scroll-feature-cap { font-size: 17px; }
   .scroll-feature-title { font-size: 11px; }
   .scroll-feature-body { font-size: 10.5px; line-height: 1.45; }

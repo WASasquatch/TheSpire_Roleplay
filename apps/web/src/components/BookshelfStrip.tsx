@@ -137,14 +137,25 @@ export function BookshelfStrip({ onNavigate }: Props) {
   // book currently flying forward (null when none).
   const [pulledId, setPulledId] = useState<string | null>(null);
   // `hoverCapableRef` decides which path a tap takes. We cache the
-  // matchMedia result on first mount and don't update it on the
-  // fly — a desktop user dragging the window to a touchscreen mid-
-  // session is extraordinarily rare and a stale value just means
-  // the wrong tap path for one session.
+  // matchMedia result on first mount; a stale value just means the
+  // wrong tap path for one session, which is acceptable for the
+  // rare desktop-to-tablet hot-swap case.
+  //
+  // The detection deliberately AND's `(hover: hover)` with
+  // `(pointer: fine)`. Chrome on Android lies about `hover: hover`
+  // for legacy-site compatibility — many older sites broke when
+  // mobile reported `hover: none`, so Android Chrome opted to keep
+  // the `hover: hover` answer even though no actual hover exists.
+  // `(pointer: fine)` is the honest signal: it's `coarse` on any
+  // touch-primary device. Both true → real mouse / trackpad. Either
+  // false → treat as touch and engage the first-tap-pull state
+  // machine.
   const hoverCapableRef = useRef<boolean>(true);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    hoverCapableRef.current = window.matchMedia("(hover: hover)").matches;
+    hoverCapableRef.current = window.matchMedia(
+      "(hover: hover) and (pointer: fine)",
+    ).matches;
   }, []);
 
   useEffect(() => {

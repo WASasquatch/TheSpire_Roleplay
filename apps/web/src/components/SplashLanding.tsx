@@ -326,7 +326,16 @@ export function SplashLanding({ onNavigate }: Props) {
               read as distinct surfaces. */}
           <div
             className="mt-6 grid gap-4 px-2 pb-8 sm:px-6 lg:px-8"
-            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(450px, 1fr))" }}
+            // `min(450px, 100%)` lets each column shrink below 450px
+            // when the parent card itself is narrower than 450px
+            // (every mobile viewport). The previous bare `minmax(450px, 1fr)`
+            // forced a 450px floor on every column — on a 360px-wide
+            // viewport the grid was 450px wide and the orb + bookshelf
+            // both bled past the splash card's right edge, off-screen.
+            // At >= 450px parent widths the `min()` resolves to the
+            // 450px floor and the two-column side-by-side layout still
+            // kicks in via `auto-fit` packing.
+            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(450px, 100%), 1fr))" }}
           >
             {branding.featuredWorldsEnabled ? <FeaturedWorldsCarousel onNavigate={onNavigate} /> : null}
             <BookshelfStrip onNavigate={onNavigate} />

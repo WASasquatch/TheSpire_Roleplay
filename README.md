@@ -4,7 +4,7 @@ A roleplay-focused chat sanctuary. Build characters, share scenes, and tell coll
 
 ### Live demo
 
-[https://thespire.fly.dev/](https://thespire.fly.dev/)
+[https://thespire.games/](https://thespire.games/)
 
 ---
 

@@ -13,7 +13,7 @@ import { FormattingToolbar } from "./FormattingToolbar.js";
 import { SynonymPopup } from "./SynonymPopup.js";
 import { UsernameAutocomplete } from "./UsernameAutocomplete.js";
 import { CloseButton } from "./CloseButton.js";
-import { ReactionBar } from "./ReactionBar.js";
+import { ReactionBar, ReactionAddButton } from "./ReactionBar.js";
 import { handlePlainTextCopy } from "../lib/chatCopy.js";
 
 interface Props {
@@ -1859,11 +1859,37 @@ function DmRow({ msg, isMine, onOpenProfile }: { msg: DirectMessage; isMine: boo
   // attribution (server-side snapshot in resolveSenderSnapshot is now
   // character-only — no master-avatar fallback — so this can't leak
   // the OOC owner anymore).
+  // Floating "react" trigger geometry — the button overlays the
+  // bubble's *outer* bottom corner so it sits in the gutter between
+  // bubbles without taking layout space inside the message row. Outer
+  // here means the edge AWAY from the avatar: bottom-right on received
+  // bubbles, bottom-left on own bubbles. Picked over a fixed corner
+  // (always bottom-right) so the trigger never crowds the avatar /
+  // edit affordances on the user's own messages.
+  //
+  // Always laid out in the DOM (opacity-toggled, not display:none) so
+  // the EmoticonPicker's getBoundingClientRect() always reads a valid
+  // anchor — previously the button was display:none until hover, which
+  // made the picker open against a zero-rect anchor and pop into the
+  // viewport corner whenever the click-to-open path lost hover state
+  // mid-render.
+  const reactBtnPlacement = isMine
+    ? "left-0 -translate-x-1/2"
+    : "right-0 translate-x-1/2";
+  const reactBtnClass =
+    "absolute z-10 bottom-0 translate-y-1/2 " +
+    reactBtnPlacement +
+    " flex h-7 w-7 items-center justify-center rounded-full border border-keep-rule" +
+    " bg-keep-bg text-sm leading-none text-keep-muted shadow-sm transition" +
+    " opacity-0 pointer-events-none" +
+    " group-hover:opacity-100 group-hover:pointer-events-auto" +
+    " group-focus-within:opacity-100 group-focus-within:pointer-events-auto" +
+    " hover:scale-110 hover:border-keep-action hover:text-keep-action";
   return (
     <li className={"group flex flex-col " + (isMine ? "items-end" : "items-start")}>
       <div
         className={
-          "flex items-end gap-1.5 max-w-[90%] md:max-w-[calc(30vw+2.25rem)] " +
+          "relative flex items-end gap-1.5 max-w-[90%] md:max-w-[calc(30vw+2.25rem)] " +
           (isMine ? "flex-row-reverse" : "flex-row")
         }
       >
@@ -1910,6 +1936,16 @@ function DmRow({ msg, isMine, onOpenProfile }: { msg: DirectMessage; isMine: boo
           </div>
           {msg.editedAt ? <span className="text-[9px] italic text-keep-muted">(edited)</span> : null}
         </div>
+        {/* Floating react trigger — sibling of the bubble (not a
+            descendant), so a click on it doesn't bubble through the
+            bubble's onClick={toggleTime}. */}
+        <ReactionAddButton
+          targetKind="dm"
+          targetId={msg.id}
+          className={reactBtnClass}
+          title="React"
+          label={<span aria-hidden>😊</span>}
+        />
       </div>
       {showTime ? (
         <span className="mt-0.5 px-2 text-[10px] text-keep-muted">
@@ -1920,6 +1956,7 @@ function DmRow({ msg, isMine, onOpenProfile }: { msg: DirectMessage; isMine: boo
         <ReactionBar
           targetKind="dm"
           targetId={msg.id}
+          hideAddButton
           {...(msg.reactions ? { initialEntries: msg.reactions } : {})}
           {...(msg.deletedAt ? { readOnly: true } : {})}
         />

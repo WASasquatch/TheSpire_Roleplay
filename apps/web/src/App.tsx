@@ -2908,6 +2908,12 @@ function Chat() {
         <ProfileModal
           profile={openProfile}
           onClose={() => setOpenProfile(null)}
+          // Stack above MessagesModal (z=50) so opening a profile from
+          // inside a DM (avatar/name click in the thread header or a
+          // message bubble) lands on TOP of the messenger instead of
+          // behind it. Other entry points (chat avatar tile, mentions)
+          // open against a modal-free canvas where 60 is still fine.
+          zIndex={60}
           // The owner + site admins skip the NSFW gate splash. Owners
           // wouldn't gain anything from being warned about their own
           // content; admins need to see profiles for moderation regardless

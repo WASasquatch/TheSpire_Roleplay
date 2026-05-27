@@ -61,13 +61,25 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   const setFontStep = useChat((s) => s.setFontStep);
   const refreshIntervalSec = useChat((s) => s.refreshIntervalSec);
   // Total "things in Messages that need attention." Sums unread DMs
-  // across every conversation AND the count of pending friend
-  // requests so both the messenger ✉ icon and the Tools menu
-  // Messages row show one combined cue. Renamed from `dmUnreadTotal`
-  // to make the broader scope explicit.
+  // AND pending friend requests across EVERY identity the user owns
+  // (master / OOC + each character), so both the messenger ✉ icon
+  // and the Tools menu Messages row show one combined cue.
+  //
+  // Reads from `inboxCountsByIdentity` (refreshed on every dm:new /
+  // dm:read / friend:request by the App-level socket handlers, plus
+  // by the messenger when it's open) instead of from
+  // `dmConversations`. The conversations map is IDENTITY-SCOPED —
+  // only the currently-active character's threads are loaded — so a
+  // DM that lands on Char B while the viewer is on Char A would
+  // otherwise leave the badge at zero and the recipient would have
+  // no signal that a message arrived for one of their other
+  // identities. Summing the per-identity counts surfaces every
+  // unread regardless of which chip the viewer is currently on.
   const messagesBadgeTotal = useChat((s) => {
-    let n = s.pendingFriendRequests.length;
-    for (const c of Object.values(s.dmConversations)) n += c.unreadCount;
+    let n = 0;
+    for (const row of s.inboxCountsByIdentity.values()) {
+      n += row.unreadDms + row.pendingFriendRequests;
+    }
     return n;
   });
 

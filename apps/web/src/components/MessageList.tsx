@@ -2445,12 +2445,20 @@ function Line({
       type="button"
       onClick={() => onTimeClick(msg.id)}
       title="Reply to this message"
+      // `data-copy-skip` drops the timestamp from copied chat text
+      // (the copy walker reads this attribute, not `user-select: none`,
+      // since `textContent` doesn't honor the CSS). The `select-none`
+      // class is still here for the in-document selection highlight.
+      data-copy-skip
       className="mr-2 select-none rounded text-xs text-keep-muted tabular-nums hover:text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action"
     >
       {timeText}
     </button>
   ) : (
-    <span className="mr-2 select-none text-xs text-keep-muted tabular-nums">
+    <span
+      data-copy-skip
+      className="mr-2 select-none text-xs text-keep-muted tabular-nums"
+    >
       {timeText}
     </span>
   );
@@ -2467,21 +2475,24 @@ function Line({
   const inlineBorderKey = senderCosmetics?.selectedBorderRankKey ?? msg.senderSelectedBorderRankKey ?? null;
   const inlineAvatar = (inlineEnabled && inlineAvatarUrl)
     ? (
-      <BorderedAvatar
-        avatarUrl={inlineAvatarUrl}
-        name={msg.displayName}
-        borderRankKey={inlineBorderKey}
-        size="xs"
-        onClick={() => onIconClick(msg.userId, msg.displayName)}
-        title={`view ${msg.displayName}'s profile`}
-        // `select-none` excludes the avatar from the text selection
-        // so the chat-feed onCopy handler doesn't fold the image's
-        // alt text (usually the username) into the clipboard output
-        // — without this the sender's name would land twice on
-        // every paste (once from the alt, once from the visible
-        // name tag). Click + hover behavior is unaffected.
-        className="mr-1 select-none align-middle"
-      />
+      // `data-copy-skip` drops the whole avatar subtree (img + the
+      // initials-fallback text the wrapper renders when the avatar
+      // URL fails) from copied chat text. Without it, a copy of a
+      // chat-line with the avatar selected dragged the initials run
+      // into the clipboard right before the styled name. `select-none`
+      // stays on the inner element for the visible-selection highlight
+      // (browsers gray out non-selectable text on click-drag).
+      <span data-copy-skip className="contents">
+        <BorderedAvatar
+          avatarUrl={inlineAvatarUrl}
+          name={msg.displayName}
+          borderRankKey={inlineBorderKey}
+          size="xs"
+          onClick={() => onIconClick(msg.userId, msg.displayName)}
+          title={`view ${msg.displayName}'s profile`}
+          className="mr-1 select-none align-middle"
+        />
+      </span>
     )
     : null;
   const isReply = !!(msg.replyToId && msg.replyToDisplayName);
@@ -2587,7 +2598,7 @@ function Line({
       : null;
     return (
       <div className="text-keep-muted/70">
-        <span className="mr-2 select-none text-xs tabular-nums">{timeText}</span>
+        <span data-copy-skip className="mr-2 select-none text-xs tabular-nums">{timeText}</span>
         <span className="italic">[message removed]</span>
         {/* Admin-only audit reveal: when the server attached the
             pre-delete body on `originalBody` (it only does so for

@@ -150,7 +150,18 @@ export function UserNameTag({
     // gem end up floating above the timestamp / body. With this
     // class the tag sits centered on the line and the gem +
     // username line up with the rest of the chat row.
-    <span className="inline-flex min-w-0 max-w-full items-center gap-1 align-middle">
+    // `data-display-name` carries the raw display name so the chat
+    // copy handler can paste `[Username] body` regardless of how the
+    // visual was rendered. Name-style templates can put the visible
+    // name into CSS `content`, into a sprite-shaped span chain, or
+    // into a `dangerouslySetInnerHTML` blob without ever exposing a
+    // real text node — and without this attribute the clipboard
+    // would receive `[] body` instead. See lib/chatCopy.ts for the
+    // walker that consumes the attribute.
+    <span
+      className="inline-flex min-w-0 max-w-full items-center gap-1 align-middle"
+      data-display-name={displayName}
+    >
       {(() => {
         // Icon slot priority (only when an icon slot is shown at all —
         // chat lines pass `hideIcon` so this branch doesn't render

@@ -292,11 +292,16 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   interface CharChipRow { id: string; name: string; avatarUrl: string | null }
   const [myCharacters, setMyCharacters] = useState<CharChipRow[]>([]);
   /**
-   * Per-identity unread counts (DMs + pending friend requests) keyed
-   * on characterId (null = master). Refreshed alongside the inbox
-   * lists so the chip badges stay in sync with what the list shows.
+   * Per-identity unread counts — sourced from the global store so
+   * the chat-shell ✉ badge and the modal's chip pip see the same
+   * numbers. The store's `refreshInboxCounts` is called from
+   * App-level socket handlers on dm:new / dm:read / friend:request
+   * so the badge stays current without the messenger having to be
+   * open. This effect adds the messenger-local refresh triggers
+   * (opens, list refetches) on top of those.
    */
-  const [inboxCounts, setInboxCounts] = useState<Map<string | null, InboxIdentityCount>>(() => new Map());
+  const inboxCounts = useChat((s) => s.inboxCountsByIdentity);
+  const refreshInboxCounts = useChat((s) => s.refreshInboxCounts);
 
   /** Refetch the left-pane lists (friends + requests + conversations). */
   const refreshLists = useCallback(async () => {
@@ -354,18 +359,8 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   // refetch counts so the chip pip stops lying."
   const inboxCountsVersion = useChat((s) => s.inboxCountsVersion);
   useEffect(() => {
-    let cancelled = false;
-    fetch("/me/inbox-counts", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => {
-        if (cancelled || !j || !Array.isArray(j.counts)) return;
-        const m = new Map<string | null, InboxIdentityCount>();
-        for (const row of j.counts as InboxIdentityCount[]) m.set(row.characterId, row);
-        setInboxCounts(m);
-      })
-      .catch(() => { /* badges are non-critical */ });
-    return () => { cancelled = true; };
-  }, [dmConversations, pendingFriendRequests, refreshKey, inboxCountsVersion]);
+    void refreshInboxCounts();
+  }, [refreshInboxCounts, dmConversations, pendingFriendRequests, refreshKey, inboxCountsVersion]);
 
   // Re-fire refreshLists whenever the inbox filter changes — Char A
   // and Char B keep separate friends + DM inboxes, so flipping

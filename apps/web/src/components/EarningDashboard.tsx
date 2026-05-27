@@ -886,7 +886,16 @@ function OwnedStyleCard({
         </button>
       </div>
 
-      <div className="mt-3 rounded border border-keep-rule/60 bg-keep-bg/60 px-3 py-2 text-2xl font-bold">
+      {/* Preview is read-only — `name-style-preview` is the hook the
+          stylesheet uses to (a) clip decoration overflow to the
+          preview box, so a name-style with sprawling pseudo-elements
+          (the "Fog" overlay was the reported case) can't drape over
+          the Equip button below and intercept its clicks, and (b)
+          force `pointer-events: none` on every descendant so even
+          decorations escaping the box don't capture pointer input.
+          The Equip button is a sibling above this div, not inside,
+          so it stays clickable. */}
+      <div className="name-style-preview mt-3 rounded border border-keep-rule/60 bg-keep-bg/60 px-3 py-2 text-2xl font-bold">
         <StyledName displayName={previewName} styleKey={style.key} config={draft} />
       </div>
 
@@ -949,12 +958,14 @@ function AvailableStyleCard({
           {busy ? "Working…" : "Buy"}
         </button>
       </div>
-      <div className="mt-3 rounded border border-keep-rule/60 bg-keep-bg/60 px-3 py-2 text-2xl font-bold">
+      <div className="name-style-preview mt-3 rounded border border-keep-rule/60 bg-keep-bg/60 px-3 py-2 text-2xl font-bold">
         {/* No config override — each style paints in its catalog
             defaults (Embers → fire orange, Neon Sign → neon pink,
             Aurora → tropical, etc.). The Available preview used to
             hardcode an orange palette which made every style look
-            like a fire variant regardless of its actual design. */}
+            like a fire variant regardless of its actual design.
+            `name-style-preview` is the same hook the Owned card uses —
+            see comment there for the click-shielding rationale. */}
         <StyledName displayName={previewName} styleKey={style.key} config={null} />
       </div>
     </div>

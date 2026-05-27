@@ -2500,6 +2500,45 @@ aside.margin-note {
   transform: scale(1.08) translateY(-1px);
   z-index: 1;
 }
+
+/* ============================================================
+ *  Name-style picker preview shield
+ * ============================================================
+ *
+ * Each Owned / Available card in the Earning dashboard renders a
+ * `<StyledName>` preview directly above the Equip / Buy button.
+ * Admin-authored styles can ship pseudo-elements that paint OUTSIDE
+ * the styled span — fog overlays, halos, sparkle particles — and a
+ * pseudo-element at default `pointer-events: auto` happily eats
+ * pointer input from the area it covers. The Fog style was the
+ * reported case: its overlay drifted across the Equip button and
+ * the button stopped being clickable.
+ *
+ *   `overflow: hidden` clips any pseudo painting outside the preview
+ *   box, so the decoration can never visually overlap the button.
+ *
+ *   `pointer-events: none` cascaded onto every descendant + pseudo
+ *   guarantees that even if some future style somehow escapes (e.g.
+ *   `position: fixed`), it cannot capture pointer input — clicks
+ *   pass through to whatever sits below, which is the card chrome,
+ *   never an interactive surface. The preview is read-only anyway
+ *   so disabling pointer input on its subtree costs nothing.
+ *
+ * The Equip / Buy button is a SIBLING of this container in the JSX,
+ * not a descendant, so the rule never touches the action surface. */
+.name-style-preview {
+  overflow: hidden;
+  /* `position: relative` so any `position: absolute` decoration the
+   * style spawns is contained against this box (not against the
+   * splash card / modal further up the tree). */
+  position: relative;
+}
+.name-style-preview,
+.name-style-preview *,
+.name-style-preview *::before,
+.name-style-preview *::after {
+  pointer-events: none;
+}
 /* Count digit pulses when reactor count changes — driven by a
  * key=count React trick on the chip's number span. */
 .emoticon-chip-count {

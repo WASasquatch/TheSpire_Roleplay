@@ -669,6 +669,26 @@ interface ChatState {
    */
   inboxCountsVersion: number;
   bumpInboxCountsVersion: () => void;
+  /**
+   * Per-identity unread DM + pending-friend-request counts, keyed on
+   * characterId (`null` = master / OOC). Hoisted from
+   * MessagesModal's local state into the store so the chat-shell ✉
+   * badge can sum unread across ALL of the user's identities —
+   * `dmConversations` only holds the currently-active identity's
+   * threads, so a DM that lands on Char B while the viewer is on
+   * Char A would otherwise leave the badge at zero with no signal
+   * to the recipient that a message arrived for one of their other
+   * identities. Refreshed by {@link refreshInboxCounts} on every
+   * `dm:new` / `dm:read` / `friend:request` socket echo so the
+   * badge stays current without the messenger having to be open.
+   */
+  inboxCountsByIdentity: Map<string | null, import("@thekeep/shared").InboxIdentityCount>;
+  /** Best-effort fetch of `/me/inbox-counts` that overwrites
+   *  {@link inboxCountsByIdentity}. Silent on failure — counts are
+   *  non-critical and stale data is preferable to a thrown error.
+   *  Cheap (one indexed SQL query); safe to call after every
+   *  inbound DM event. */
+  refreshInboxCounts: () => Promise<void>;
 }
 
 /**
@@ -1115,4 +1135,21 @@ export const useChat = create<ChatState>((set) => ({
 
   inboxCountsVersion: 0,
   bumpInboxCountsVersion: () => set((s) => ({ inboxCountsVersion: s.inboxCountsVersion + 1 })),
+
+  inboxCountsByIdentity: new Map(),
+  refreshInboxCounts: async () => {
+    try {
+      const r = await fetch("/me/inbox-counts", { credentials: "include" });
+      if (!r.ok) return;
+      const j = await r.json() as {
+        counts?: ReadonlyArray<import("@thekeep/shared").InboxIdentityCount>;
+      };
+      if (!j || !Array.isArray(j.counts)) return;
+      const m = new Map<string | null, import("@thekeep/shared").InboxIdentityCount>();
+      for (const row of j.counts) m.set(row.characterId, row);
+      set({ inboxCountsByIdentity: m });
+    } catch {
+      // Counts are non-critical decoration — never bubble.
+    }
+  },
 }));

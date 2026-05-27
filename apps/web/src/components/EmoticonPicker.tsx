@@ -188,20 +188,21 @@ function SheetToolbar({
       {sheets.map((s) => {
         const firstCellIdx = s.cells.findIndex((c) => !isEmoticonCellEmpty(c));
         const active = activeSheetId === s.id;
-        // Drive the toolbar tab's animation from the cover cell's
-        // label so every theme tab has its own personality at rest
-        // — the sheet that opens with a "happy" face chuckles, the
-        // angry sheet pulses red, etc.
-        const moodClass = firstCellIdx >= 0
-          ? animationClassForLabel(s.cells[firstCellIdx])
-          : "";
+        // Sheet-toolbar tabs are NAVIGATION — pick which sheet's grid
+        // shows below — not reaction targets. The mood-animation
+        // treatment (`emoticon-picker-cell` + an `emoticon-anim-…`
+        // class) is intentionally NOT applied here so the tabs stay
+        // calm: a row of pulsing animated borders along the top of
+        // every picker open read as visual chaos before the user even
+        // got to the actual grid. The cells below in the active
+        // sheet still get the full treatment.
         return (
           <button
             key={s.id}
             type="button"
             onClick={() => onPick(s.id)}
             title={s.name}
-            className={`emoticon-picker-cell ${moodClass} flex h-9 w-9 shrink-0 items-center justify-center rounded transition ${
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded transition ${
               active
                 ? "border border-keep-action bg-keep-action/15"
                 : "border border-transparent hover:bg-keep-panel-200/40"

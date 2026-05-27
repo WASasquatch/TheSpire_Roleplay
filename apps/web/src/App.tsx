@@ -1866,6 +1866,12 @@ function Chat() {
           if (j && Array.isArray(j.requests)) useChat.getState().setPendingFriendRequests(j.requests);
         })
         .catch(() => {});
+      // Per-identity inbox counts — drives the chat-shell ✉ badge so
+      // unread DMs on every identity (not just the currently-active
+      // one) bump the count. Without this initial pull, the badge
+      // would stay at zero on cold-load until the user opened the
+      // messenger to surface its own fetch path.
+      void useChat.getState().refreshInboxCounts();
       bumpDmReseed();
       // Resync room state + backlog. Required for the deep-link case:
       // the socket may have been created (and joined a room) by an
@@ -1888,6 +1894,15 @@ function Chat() {
 
     socket.on("dm:new", ({ message }) => {
       appendDmMessage(message);
+      // Refresh per-identity inbox counts so the chat-shell ✉ badge
+      // bumps even when the DM is for an identity that isn't the
+      // currently-active one. `dmConversations` is identity-scoped
+      // and the refetch below only repopulates it for the viewer's
+      // current characterId — a DM pinned to Char B while the viewer
+      // is on Char A would otherwise never bump any visible counter
+      // and the recipient would have no signal that a message
+      // arrived for one of their other identities.
+      void useChat.getState().refreshInboxCounts();
       // Ping on inbound DMs from someone else; silent on our own echo
       // (the server fans every send to the sender's sockets too so
       // multi-tab works). Same posture as the room-message tap sound.
@@ -2000,6 +2015,10 @@ function Chat() {
           state.upsertDmConversation({ ...conv, unreadCount: 0 });
         }
         state.bumpInboxCountsVersion();
+        // Also refresh the global per-identity counts so the chat-
+        // shell ✉ badge drops to match the just-read state on every
+        // tab, not just the messenger's chip pip.
+        void state.refreshInboxCounts();
       }
     });
     // Emoticon reactions — merge the delta into the cached
@@ -2044,6 +2063,11 @@ function Chat() {
       // lockstep with whatever just changed server-side, even
       // when the user wasn't the one who initiated the action.
       useChat.getState().bumpFriendsVersion();
+      // Per-identity counts refresh — the pending friend-request
+      // half of the chat-shell badge needs to track new requests on
+      // ANY of the user's identities (a friend request to Char B
+      // while the viewer is on Char A should still bump the badge).
+      void useChat.getState().refreshInboxCounts();
       // Soft notice in the banner so the user gets a glance signal
       // even when the chat prompt is offscreen (e.g. they're deep in
       // the forum view). Phrasing keeps it neutral — the actual

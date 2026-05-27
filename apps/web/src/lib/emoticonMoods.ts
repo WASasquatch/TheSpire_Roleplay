@@ -5,36 +5,57 @@
  * labels fall back to a generic pop.
  *
  * Each entry returns the CSS class that, when applied to a chip OR
- * a sprite, triggers the matching keyframe animation defined in
- * styles.css. Animations are one-shot (forwards / 0.6-0.8s) so the
- * class can be left on the element after the animation completes
- * without re-triggering.
+ * a sprite-button, drives the continuous keyframe animations defined
+ * in styles.css (chip border / box-shadow pulse + nested face
+ * transform + decorative pseudo-elements). The animations are
+ * `infinite` — they read as constant signs-of-life rather than a
+ * one-shot reaction. Hover-paused inside each keyframe block so the
+ * chip's own scale hover affordance still reads as a deliberate
+ * interaction target.
  */
 const KEYWORD_TO_MOOD: Array<{ match: RegExp; mood: EmoticonMood }> = [
-  // Joyful / smug — bouncy overshoot + warm gold flash.
-  { match: /(happy|laugh|smug|grin|joy)/i, mood: "joyful" },
-  // Fiery / angry / determined — shake + red flash.
-  { match: /(angry|mad|rage|fury|determin|fierce)/i, mood: "fiery" },
-  // Melancholy / tears — droops in from above with cool tint.
-  { match: /(sad|cry|tear|sleep|tired|sob)/i, mood: "melancholy" },
-  // Jolt / shock — fast zoom with white halo.
-  { match: /(surpris|shock|gasp|wow)/i, mood: "jolt" },
-  // Flush — pink fade-in tilt.
-  { match: /(embarrass|blush|flush|shy)/i, mood: "flush" },
-  // Heart pulse — repeating beat with pink glow.
-  { match: /(love|heart|romance|smitten|swoon)/i, mood: "lovestruck" },
-  // Wobble — confused rotation.
-  { match: /(confus|puzzl|baffl|huh|what)/i, mood: "confused" },
+  // Light laughter — bouncing face + warm gold border pulse.
+  // Keywords cover the broad "happy / fun" surface so any positive
+  // emoticon picks up something instead of dropping to default.
+  { match: /(laugh|lol|hehe|haha|chuckle|happy|joy)/i, mood: "chuckle" },
+  // Squinty smile — gentler than chuckle, sways instead of bouncing.
+  { match: /(giggle|snicker|teehee|grin)/i, mood: "giggle" },
+  // Angry / determined — shake + red flash + ripple ring.
+  { match: /(angry|mad|rage|fury|determin|fierce)/i, mood: "rage" },
+  // Single quiet tear — blue border + a drip from the bottom edge.
+  // Keyworded before `cry` so "sad" never falls through to crying.
+  { match: /(sad|tear|sob)/i, mood: "sad" },
+  // Heavy weep — multiple cascading streams + a side-to-side shake.
+  { match: /(cry|weep|bawl)/i, mood: "crying" },
+  // Sharp pop + "!" mark — fastest in the set so it reads as a snap.
+  { match: /(surpris|shock|gasp|wow|alarm)/i, mood: "surprise" },
+  // Warm flush — inset rose glow that pulses with a slow sway.
+  { match: /(blush|embarrass|flush|shy)/i, mood: "blush" },
+  // Slow purple glide + sparkle — the "cool smug" look.
+  { match: /(smirk|smug|sly|cool)/i, mood: "smirk" },
+  // Breathing border + floating "z" particles.
+  { match: /(sleep|sleepy|tired|drowsy|yawn|doze)/i, mood: "sleep" },
+  // Heartbeat border + orbiting hearts.
+  { match: /(love|heart|romance|smitten|swoon|adore)/i, mood: "love" },
+  // Tilting "?" + diagonal background pattern.
+  { match: /(confus|puzzl|baffl|huh|what|unsure)/i, mood: "confused" },
+  // Sharp twitch + spark — short, jittery, irritated.
+  { match: /(annoy|irritat|exasperat|frown|grump)/i, mood: "annoy" },
 ];
 
 export type EmoticonMood =
-  | "joyful"
-  | "fiery"
-  | "melancholy"
-  | "jolt"
-  | "flush"
-  | "lovestruck"
+  | "chuckle"
+  | "giggle"
+  | "rage"
+  | "sad"
+  | "crying"
+  | "surprise"
+  | "blush"
+  | "smirk"
+  | "sleep"
+  | "love"
   | "confused"
+  | "annoy"
   | "default";
 
 export function moodForLabel(label: string | null | undefined): EmoticonMood {
@@ -45,8 +66,10 @@ export function moodForLabel(label: string | null | undefined): EmoticonMood {
   return "default";
 }
 
-/** Class name used by EmoticonSprite + ReactionChip to apply the
- *  mood-specific one-shot pop animation on mount. */
+/** Class name used by ReactionChip + EmoticonPicker cells to apply
+ *  the mood-specific continuous animation. Stamped onto the
+ *  container; CSS targets nested sprite + ::before/::after for the
+ *  decorative effects. */
 export function animationClassForLabel(label: string | null | undefined): string {
   return `emoticon-anim-${moodForLabel(label)}`;
 }

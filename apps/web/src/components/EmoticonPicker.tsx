@@ -5,6 +5,7 @@ import { isEmoticonCellEmpty } from "@thekeep/shared";
 import { useEmoticons } from "../state/emoticons.js";
 import { EmoticonSprite } from "./EmoticonSprite.js";
 import { MAX_VISIBLE_RECENT, recentPicks } from "../lib/recentEmoticons.js";
+import { animationClassForLabel } from "../lib/emoticonMoods.js";
 
 interface Props {
   /** Called when the user picks a cell. */
@@ -187,13 +188,20 @@ function SheetToolbar({
       {sheets.map((s) => {
         const firstCellIdx = s.cells.findIndex((c) => !isEmoticonCellEmpty(c));
         const active = activeSheetId === s.id;
+        // Drive the toolbar tab's animation from the cover cell's
+        // label so every theme tab has its own personality at rest
+        // — the sheet that opens with a "happy" face chuckles, the
+        // angry sheet pulses red, etc.
+        const moodClass = firstCellIdx >= 0
+          ? animationClassForLabel(s.cells[firstCellIdx])
+          : "";
         return (
           <button
             key={s.id}
             type="button"
             onClick={() => onPick(s.id)}
             title={s.name}
-            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded transition ${
+            className={`emoticon-picker-cell ${moodClass} flex h-9 w-9 shrink-0 items-center justify-center rounded transition ${
               active
                 ? "border border-keep-action bg-keep-action/15"
                 : "border border-transparent hover:bg-keep-panel-200/40"
@@ -221,22 +229,30 @@ function RecentRow({
   recents: Array<{ sheetSlug: string; cellIndex: number }>;
   onPick: (sheetSlug: string, cellIndex: number) => void;
 }) {
+  // Resolve each recent's label from the sheet catalog so the cell
+  // button picks up the right mood-animation class. Falls back to a
+  // null label (→ default mood) when the sheet has been pruned
+  // since the recent was recorded.
+  const getSheetBySlug = useEmoticons((s) => s.getSheetBySlug);
   return (
     <section className="border-b border-keep-rule/60">
       <header className="keep-section-header bg-keep-panel-200/30 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-muted">
         Recent
       </header>
       <div className="grid grid-cols-6 gap-1 p-2">
-        {recents.slice(0, MAX_VISIBLE_RECENT).map((r) => (
-          <button
-            key={`${r.sheetSlug}:${r.cellIndex}`}
-            type="button"
-            onClick={() => onPick(r.sheetSlug, r.cellIndex)}
-            className="emoticon-picker-cell flex items-center justify-center rounded p-1 hover:bg-keep-action/10"
-          >
-            <EmoticonSprite sheetSlug={r.sheetSlug} cellIndex={r.cellIndex} size={48} />
-          </button>
-        ))}
+        {recents.slice(0, MAX_VISIBLE_RECENT).map((r) => {
+          const label = getSheetBySlug(r.sheetSlug)?.cells[r.cellIndex] ?? null;
+          return (
+            <button
+              key={`${r.sheetSlug}:${r.cellIndex}`}
+              type="button"
+              onClick={() => onPick(r.sheetSlug, r.cellIndex)}
+              className={`emoticon-picker-cell ${animationClassForLabel(label)} flex items-center justify-center rounded p-1 hover:bg-keep-action/10`}
+            >
+              <EmoticonSprite sheetSlug={r.sheetSlug} cellIndex={r.cellIndex} size={48} />
+            </button>
+          );
+        })}
       </div>
     </section>
   );
@@ -265,7 +281,7 @@ function PickerGrid({ sheet, onPick }: { sheet: EmoticonSheet; onPick: (slug: st
             type="button"
             onClick={() => onPick(sheet.slug, c.cellIndex)}
             title={c.label}
-            className="emoticon-picker-cell flex items-center justify-center rounded p-1 hover:bg-keep-action/10"
+            className={`emoticon-picker-cell ${animationClassForLabel(c.label)} flex items-center justify-center rounded p-1 hover:bg-keep-action/10`}
           >
             <EmoticonSprite sheetSlug={sheet.slug} cellIndex={c.cellIndex} size={64} />
           </button>

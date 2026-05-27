@@ -7,6 +7,7 @@ import { characters, friends, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { characterIdFromQuery, eqIdentity, ownsCharacter, type Identity } from "../auth/identity.js";
+import { eqNameInsensitive } from "../lib/nameLookup.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -131,16 +132,19 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     if (!me) { reply.code(401); return { error: "auth" }; }
     const name = (req.query.name ?? "").trim();
     if (!name) return { matches: [] as FriendResolveMatch[] };
-    const lower = name.toLowerCase();
 
     const matches: FriendResolveMatch[] = [];
 
-    // Master match. Username uniqueness means at most one.
+    // Master match. Username uniqueness means at most one. Comparison
+    // is space-insensitive: a caller typing `John Doe` matches a master
+    // stored as `John Doe` (NBSP, the master-username canonical) so
+    // the disambiguator surfaces them in the picker even when the user
+    // doesn't know to type Alt+0160.
     const masterRow = (await db
       .select()
       .from(users)
       .where(and(
-        sql`lower(${users.username}) = ${lower}`,
+        eqNameInsensitive(users.username, name),
         isNull(users.disabledAt),
       ))
       .limit(1))[0];
@@ -169,7 +173,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
       .from(characters)
       .innerJoin(users, eq(users.id, characters.userId))
       .where(and(
-        sql`lower(${characters.name}) = ${lower}`,
+        eqNameInsensitive(characters.name, name),
         isNull(characters.deletedAt),
         isNull(users.disabledAt),
       ));
@@ -349,10 +353,13 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     } else {
       const username = (req.body?.username ?? "").trim();
       if (!username) { reply.code(400); return { error: "username required" }; }
+      // Space-insensitive match so a slash-command `/friend John Doe`
+      // resolves a master stored as `John Doe` (NBSP) — same fold the
+      // /me/friend-resolve picker uses above.
       const masterRow = (await db
         .select()
         .from(users)
-        .where(sql`lower(${users.username}) = ${username.toLowerCase()}`)
+        .where(eqNameInsensitive(users.username, username))
         .limit(1))[0];
       if (masterRow && !masterRow.disabledAt) {
         targetIdentity = { userId: masterRow.id, characterId: null };
@@ -361,7 +368,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
         const charRow = (await db
           .select()
           .from(characters)
-          .where(sql`lower(${characters.name}) = ${username.toLowerCase()}`)
+          .where(eqNameInsensitive(characters.name, username))
           .limit(1))[0];
         if (charRow && !charRow.deletedAt) {
           targetIdentity = { userId: charRow.userId, characterId: charRow.id };

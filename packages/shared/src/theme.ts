@@ -368,30 +368,50 @@ export function legibleAgainstBg(color: string, bgHex: string, targetContrast: n
 }
 
 /**
- * Return a copy of the theme with `text` and `muted` slots nudged for
- * readability against `bg` via {@link legibleAgainstBg}. `text` gets
- * the full WCAG normal-text minimum (4.5:1); `muted` gets a softer
- * 3:1 floor so it stays visually "muted" while still being readable.
+ * Return a copy of the theme with every FOREGROUND slot nudged for
+ * readability against `bg` via {@link legibleAgainstBg}.
+ *
+ *   - `text`     — WCAG AA body-text floor (4.5:1)
+ *   - `muted`    — large/secondary-text floor (3:1), kept softer than
+ *                  text so the muted character is preserved
+ *   - `action`   — button labels / links / active-room name. Drives
+ *                  the `text-keep-action` everywhere in the app, so
+ *                  it needs the same 3:1 floor that button labels do
+ *   - `accent`   — exit / strong CTA color, also rendered as text on
+ *                  warning chips. 3:1.
+ *   - `system`   — italic system-message text. 3:1.
+ *   - `border`   — rule lines. Doesn't need WCAG-level contrast but
+ *                  a 1.5:1 floor keeps the dividers from melting into
+ *                  the panel on near-monochrome themes
+ *
+ * The `panel` slot is left at the user's pick — it's a surface, not
+ * a foreground, and its contrast story is "looks distinct from bg"
+ * rather than "readable against bg." `bg` is the reference point we
+ * measure everything else against, so it can't sensibly nudge itself.
  *
  * Applied at theme-application time (both `themeStyle` for scoped
- * subtrees and `applyTheme` for the document root) so users browsing
- * each other's profiles never land on a palette where the body text
- * disappears into the background — a profile-themed modal that
- * happens to ship muted-on-muted in its admin preset still surfaces
- * the bio placeholder, the "Master account · joined …" meta line,
- * and every other muted-text element. The hex stored in the DB is
- * unchanged; only the rendered RGB triple shifts when needed.
+ * subtrees and `applyTheme` for the document root). The hex stored
+ * in the DB is unchanged; only the rendered RGB triple shifts when
+ * a slot fails its target. Original picks are preserved verbatim if
+ * they already meet the floor.
  *
- * The other slots (panel/border/action/accent/system) are left
- * untouched — those are either chrome surfaces with their own
- * contrast story or accent splashes that should respect the user's
- * literal pick.
+ * Important for cross-theme profile viewing: the function nudges
+ * against the OWNER's `bg`, which assumes the rendered surface is
+ * fully opaque. Callers that paint the owner palette onto a
+ * translucent card (where the viewer's theme bleeds through) must
+ * either tighten the surface alpha or pass an effective bg color
+ * — otherwise the contrast guarantee here is computed against a
+ * surface color the user never actually sees.
  */
 export function legibleThemePalette(theme: Theme): Theme {
   return {
     ...theme,
-    text: legibleAgainstBg(theme.text, theme.bg, 4.5),
-    muted: legibleAgainstBg(theme.muted, theme.bg, 3.0),
+    text:   legibleAgainstBg(theme.text,   theme.bg, 4.5),
+    muted:  legibleAgainstBg(theme.muted,  theme.bg, 3.0),
+    action: legibleAgainstBg(theme.action, theme.bg, 3.0),
+    accent: legibleAgainstBg(theme.accent, theme.bg, 3.0),
+    system: legibleAgainstBg(theme.system, theme.bg, 3.0),
+    border: legibleAgainstBg(theme.border, theme.bg, 1.5),
   };
 }
 

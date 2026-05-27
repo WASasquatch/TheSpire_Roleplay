@@ -157,15 +157,31 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   // unreadable" failure mode.
   const bgLuminance = useBgLuminance(profileBgUrl || null);
 
-  // Scoped CSS-var overrides applied to the modal card. Only present
-  // when a profile BG image is set; otherwise nothing here changes
-  // (so plain profiles keep their existing theme treatment).
+  // Scoped CSS-var overrides applied to the modal card.
+  //
+  // Always-on contract (independent of profile BG image): fully opaque
+  // glass tints. Every theme-style's `.keep-frame` / `.keep-panel`
+  // rule reads `--keep-glass-panel-tint` / `--keep-glass-bg-tint`
+  // (the few that don't — scifi's flat 0.5-alpha — are also overridden
+  // by the inline `backgroundColor` on the card div below). Forcing
+  // these to 1.0 alpha means the owner's theme actually renders
+  // against the owner's `bg`, NOT a 50% blend with whatever's behind
+  // the modal (the viewer's chat shell + the bg-black/40 backdrop).
+  // The blend was the legibility killer: text contrast is computed
+  // against `theme.bg` in `legibleThemePalette`, but with translucent
+  // surfaces the rendered bg color was a totally different value, so
+  // the nudge guaranteed nothing.
   const ownerIsDark = isDarkPalette(ownerTheme);
-  const legibilityVars: Record<string, string> = {};
+  const legibilityVars: Record<string, string> = {
+    "--keep-glass-panel-tint": "rgb(var(--keep-panel))",
+    "--keep-glass-bg-tint": "rgb(var(--keep-bg))",
+  };
   if (profileBgUrl) {
-    // 1) Tighter glass tint. The default (~42% panel) lets a busy BG
-    //    bleed through and compete with body text; bumping to ~85%
-    //    keeps the panel readable while still feeling glassy.
+    // Profile BG image path: keep the high-alpha glass tints (~85-92%)
+    // so the image still reads through faintly as a wash behind the
+    // panel chrome. Mark the owner-is-dark hint with a near-opaque
+    // panel-color tint; light themes get a near-opaque white wash so
+    // bright images don't bleach the body text.
     legibilityVars["--keep-glass-panel-tint"] = ownerIsDark
       ? "rgb(var(--keep-panel) / 0.85)"
       : "rgb(255 255 255 / 0.92)";
@@ -173,11 +189,11 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
       ? "rgb(var(--keep-bg) / 0.85)"
       : "rgb(255 255 255 / 0.92)";
 
-    // 2) If we successfully sampled the BG luminance, swap the text
-    //    color toward the opposite extreme so contrast is guaranteed
-    //    regardless of which neon hue is blooming behind the panel.
-    //    Mid-luminance BGs (0.35..0.6) leave the theme default alone
-    //    — those are already neutral enough for the theme to win.
+    // If we successfully sampled the BG luminance, swap the text
+    // color toward the opposite extreme so contrast is guaranteed
+    // regardless of which neon hue is blooming behind the panel.
+    // Mid-luminance BGs (0.35..0.6) leave the theme default alone
+    // — those are already neutral enough for the theme to win.
     if (bgLuminance !== null) {
       if (bgLuminance > 0.6) {
         legibilityVars["--keep-text"] = "20 20 20";
@@ -210,7 +226,28 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
         // Desktop (md+): 75vw on widescreens with a ceiling so it doesn't
         // become absurd on ultra-wide monitors, capped at 85vh tall, with
         // the original border / rounded / shadow treatment.
-        style={{ ...themeStyle(ownerTheme), ...ownerOrnaments.vars, ...legibilityVars }}
+        // Inline `backgroundColor` defeats the scifi `.keep-frame`
+        // rule that paints the modal at 50% panel-alpha — that bleed
+        // was the source of the "viewer's theme leaks through and
+        // collapses contrast" bug. Inline beats every `[data-theme-
+        // style="…"] .keep-frame` selector since none of them use
+        // `!important`. Medieval / modern were already opaque, so
+        // the override is a no-op there. The legibility-nudged text
+        // in `legibleThemePalette` then computes against the bg the
+        // user actually sees, not a blend.
+        //
+        // Skipped when the profile has a BG image: that path is
+        // designed around a frosted-glass treatment that lets the
+        // image read faintly through the card, so we keep the
+        // theme-style's translucent surface in play and rely on
+        // the bgLuminance-driven text-color swap (legibilityVars
+        // above) for legibility instead.
+        style={{
+          ...themeStyle(ownerTheme),
+          ...ownerOrnaments.vars,
+          ...legibilityVars,
+          ...(profileBgUrl ? {} : { backgroundColor: "rgb(var(--keep-bg))" }),
+        }}
         data-theme-style={ownerOrnaments.styleKey}
         data-profile-bg={profileBgUrl ? "1" : undefined}
         className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}

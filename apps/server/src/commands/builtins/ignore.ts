@@ -1,5 +1,6 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { characters, ignores, users } from "../../db/schema.js";
+import { eqNameInsensitive } from "../../lib/nameLookup.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -12,11 +13,13 @@ function notice(ctx: CommandContext, code: string, message: string) {
  * they see in chat. Returns null if the name doesn't resolve to anyone.
  */
 async function resolveTarget(ctx: CommandContext, name: string) {
-  const lower = name.toLowerCase();
+  // Space-insensitive match — NBSP and ASCII space are equivalent for
+  // lookup so `/ignore John Doe` matches a master stored as
+  // `John Doe` (NBSP).
   const u = (await ctx.db
     .select()
     .from(users)
-    .where(sql`lower(${users.username}) = ${lower}`)
+    .where(eqNameInsensitive(users.username, name))
     .limit(1))[0];
   if (u) return u;
 
@@ -26,7 +29,7 @@ async function resolveTarget(ctx: CommandContext, name: string) {
   const c = (await ctx.db
     .select()
     .from(characters)
-    .where(sql`lower(${characters.name}) = ${lower}`)
+    .where(eqNameInsensitive(characters.name, name))
     .limit(1))[0];
   if (c && !c.deletedAt) {
     const owner = (await ctx.db

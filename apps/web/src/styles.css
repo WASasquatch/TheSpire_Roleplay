@@ -2512,148 +2512,531 @@ aside.margin-note {
   100% { transform: scale(1); }
 }
 
-/* ---------- Mood: joyful (happy / laughing / smug) ----------
- * Bouncy overshoot + warm gold halo that pulses with the bounce.
- * The cubic-bezier(0.5, 1.8, 0.5, 1) is the source of the
- * snap-back-and-settle feel. */
-.emoticon-anim-joyful {
-  animation: emoticon-pop-joyful 720ms cubic-bezier(0.5, 1.8, 0.5, 1) both;
+/* ============================================================
+ *  Mood-keyed continuous animations (12 emotions + default)
+ * ============================================================
+ *
+ * Each mood drives a continuous, infinite loop on the container
+ * (border colors / box-shadow / pseudo decorations) plus a nested
+ * animation on the inner sprite (the "face"). The animations
+ * intentionally avoid `transform` on the container itself so the
+ * existing `.emoticon-chip:hover` scale-up still reads as a clean
+ * hover affordance — the chip can scale on hover without colliding
+ * with a perpetual translate / rotate on the same property.
+ *
+ * Decorations (rage ripple, surprise "!", smirk sparkle, sleep "z",
+ * confused "?", annoyed spark, sad tear, love hearts) ride on
+ * `::before` / `::after` so no JSX wiring is needed at the call
+ * sites. Containers must keep `overflow: visible` (reaction chips
+ * and picker cells already do) so out-of-bounds decorations don't
+ * clip — the chip's flex parents are also visible by default.
+ *
+ * Sizing: pseudo-element offsets are tuned for ~32-48px sprite
+ * containers (reaction chips + picker cells). Slightly oversized
+ * picker cells (`emoticon-picker-cell`) get an extra-large variant
+ * override at the bottom of this block so the same mood class
+ * scales naturally between the two surfaces.
+ *
+ * Performance: only `transform`, `opacity`, `background-position`,
+ * `border-color`, `box-shadow`, and `filter` are animated — all
+ * GPU-compositable. 30+ chips on screen render without layout
+ * thrash. */
+
+/* Shared baseline — reaction chips and picker cells need
+ * `position: relative` so pseudo decorations anchor to the chip
+ * rather than escaping to the nearest positioned ancestor (which on
+ * a deeply nested message row is the splash card / modal). The
+ * pseudo elements default to `pointer-events: none` so they never
+ * intercept clicks. */
+.emoticon-chip,
+.emoticon-picker-cell {
+  position: relative;
 }
-.emoticon-chip.emoticon-anim-joyful:hover {
-  box-shadow: 0 0 0 1px rgb(250 204 21 / 0.5), 0 0 10px rgb(250 204 21 / 0.45);
-}
-@keyframes emoticon-pop-joyful {
-  0%   { transform: scale(0)   rotate(-12deg); box-shadow: 0 0 0 rgb(250 204 21 / 0); }
-  45%  { transform: scale(1.35) rotate(6deg);  box-shadow: 0 0 16px rgb(250 204 21 / 0.7); }
-  70%  { transform: scale(0.92) rotate(-2deg); box-shadow: 0 0 10px rgb(250 204 21 / 0.4); }
-  88%  { transform: scale(1.06) rotate(1deg);  box-shadow: 0 0 6px rgb(250 204 21 / 0.25); }
-  100% { transform: scale(1)    rotate(0);     box-shadow: 0 0 0 rgb(250 204 21 / 0); }
+.emoticon-chip::before,
+.emoticon-chip::after,
+.emoticon-picker-cell::before,
+.emoticon-picker-cell::after {
+  pointer-events: none;
 }
 
-/* ---------- Mood: fiery (angry / determined) ----------
- * Hard pop + horizontal shake + red flash. Reads as "I'm pissed." */
-.emoticon-anim-fiery {
-  animation: emoticon-pop-fiery 620ms cubic-bezier(0.5, 1.7, 0.5, 1) both;
-}
-.emoticon-chip.emoticon-anim-fiery:hover {
-  box-shadow: 0 0 0 1px rgb(220 38 38 / 0.5), 0 0 10px rgb(220 38 38 / 0.45);
-}
-@keyframes emoticon-pop-fiery {
-  0%   { transform: scale(0)    translateX(0); box-shadow: 0 0 0 rgb(220 38 38 / 0); }
-  30%  { transform: scale(1.3)  translateX(-3px); box-shadow: 0 0 18px rgb(220 38 38 / 0.75); }
-  45%  { transform: scale(1.15) translateX(3px);  }
-  60%  { transform: scale(1.05) translateX(-2px); }
-  75%  { transform: scale(1.02) translateX(2px);  box-shadow: 0 0 8px rgb(220 38 38 / 0.35); }
-  100% { transform: scale(1)    translateX(0);    box-shadow: 0 0 0 rgb(220 38 38 / 0); }
-}
-
-/* ---------- Mood: melancholy (sad / crying / sleepy) ----------
- * Droops in from above with a cool blue tint. Slower than the
- * others so it feels heavy. */
-.emoticon-anim-melancholy {
-  animation: emoticon-pop-melancholy 820ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-.emoticon-chip.emoticon-anim-melancholy:hover {
-  box-shadow: 0 0 0 1px rgb(96 165 250 / 0.45), 0 0 10px rgb(96 165 250 / 0.4);
-}
-@keyframes emoticon-pop-melancholy {
-  0%   { transform: scale(0.5) translateY(-10px); opacity: 0;   box-shadow: 0 0 0 rgb(96 165 250 / 0); }
-  55%  { transform: scale(1.08) translateY(4px);  opacity: 1;   box-shadow: 0 0 12px rgb(96 165 250 / 0.5); }
-  80%  { transform: scale(0.96) translateY(-1px); }
-  100% { transform: scale(1)    translateY(0);    box-shadow: 0 0 0 rgb(96 165 250 / 0); }
+/* Picker cells need a permanent ring of border-width so the
+ * mood keyframes have something to animate the COLOR of. Without
+ * this the cells render with no `border` declaration at all (the
+ * JSX className is just `rounded p-1` — no `border` Tailwind
+ * utility), the keyframe `border-color: …` lines have no surface
+ * to paint, and the only visible "border-like" effect ends up
+ * being the keyframe box-shadow halo — which pops in and out as
+ * its spread/alpha cycles between transparent and visible frames.
+ * That's the "flashing / disappearing borders" complaint: it
+ * wasn't the color shift, it was the absence of a real border to
+ * shift. The 2px ring mirrors the design-doc HTML demo's
+ * `.react { border: 2px solid … }` baseline. Color defaults to the
+ * theme border so cells without a mood-driven border-color (the
+ * `default` and `confused` moods don't animate the border) still
+ * read as bounded tiles. */
+.emoticon-picker-cell[class*="emoticon-anim-"] {
+  border-width: 2px;
+  border-style: solid;
+  border-color: rgb(var(--keep-border) / 0.6);
 }
 
-/* ---------- Mood: jolt (surprised) ----------
- * Lightning-fast overshoot + white flash. The shortest animation
- * in the set so it reads as instantaneous. */
-.emoticon-anim-jolt {
-  animation: emoticon-pop-jolt 520ms cubic-bezier(0.5, 2, 0.5, 1) both;
+/* Hover discipline on REACTION CHIPS: pause the perpetual loop so
+ * the chip's `:hover` scale transform can take effect without
+ * fighting a keyframe animation on the same element. Applies to
+ * every mood since the rule keys on the shared `.emoticon-chip`
+ * selector. */
+.emoticon-chip:hover,
+.emoticon-chip:focus-visible {
+  animation-play-state: paused;
 }
-.emoticon-chip.emoticon-anim-jolt:hover {
-  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.65), 0 0 12px rgb(255 255 255 / 0.55);
-}
-@keyframes emoticon-pop-jolt {
-  0%   { transform: scale(0);    filter: brightness(2.4);                box-shadow: 0 0 0 rgb(255 255 255 / 0); }
-  35%  { transform: scale(1.6);  filter: brightness(1.6);                box-shadow: 0 0 22px rgb(255 255 255 / 0.85); }
-  60%  { transform: scale(0.88); filter: brightness(1.2); }
-  85%  { transform: scale(1.04); filter: brightness(1.05); }
-  100% { transform: scale(1);    filter: none;                            box-shadow: 0 0 0 rgb(255 255 255 / 0); }
+.emoticon-chip:hover .reaction-chip-sprite > span,
+.emoticon-chip:focus-visible .reaction-chip-sprite > span {
+  animation-play-state: paused;
 }
 
-/* ---------- Mood: flush (embarrassed) ----------
- * Pink fade with a slight tilt, like the chip is shy. */
-.emoticon-anim-flush {
-  animation: emoticon-pop-flush 700ms cubic-bezier(0.45, 1.6, 0.45, 1) both;
+/* ---------- 1. CHUCKLE (laughing / happy) ----------
+ * Yellow border pulses with the face's vertical bounce — the two
+ * read as a single "ha-ha-ha" beat. */
+.emoticon-anim-chuckle {
+  animation: emoticon-chuckle-border 1.2s ease-in-out infinite;
 }
-.emoticon-chip.emoticon-anim-flush:hover {
-  box-shadow: 0 0 0 1px rgb(236 72 153 / 0.45), 0 0 10px rgb(236 72 153 / 0.4);
+.emoticon-anim-chuckle .reaction-chip-sprite > span,
+.emoticon-anim-chuckle.emoticon-picker-cell > span {
+  animation: emoticon-chuckle-bounce 1.2s ease-in-out infinite;
+  transform-origin: 50% 70%;
 }
-@keyframes emoticon-pop-flush {
-  0%   { transform: scale(0.7) rotate(-8deg); opacity: 0;   box-shadow: 0 0 0 rgb(236 72 153 / 0); filter: saturate(1.4); }
-  40%  { transform: scale(1.15) rotate(4deg); opacity: 1;   box-shadow: 0 0 14px rgb(236 72 153 / 0.55); }
-  70%  { transform: scale(0.98) rotate(-2deg); }
-  100% { transform: scale(1)    rotate(0);    box-shadow: 0 0 0 rgb(236 72 153 / 0); filter: none; }
+@keyframes emoticon-chuckle-bounce {
+  0%, 100% { transform: translateY(0) scale(1); }
+  15%      { transform: translateY(-3px) scale(1.08, 0.94); }
+  30%      { transform: translateY(0) scale(0.96, 1.04); }
+  45%      { transform: translateY(-2px) scale(1.04, 0.96); }
+  60%      { transform: translateY(0) scale(1); }
 }
-
-/* ---------- Mood: lovestruck ----------
- * Heart-pulse on mount, then a continuing slow pulse so the chip
- * stays "alive" while it's on screen. The base pop establishes the
- * pink glow; the linger animation re-pulses every couple seconds. */
-.emoticon-anim-lovestruck {
-  animation:
-    emoticon-pop-lovestruck 720ms cubic-bezier(0.5, 1.7, 0.5, 1) both,
-    emoticon-heart-linger 2.4s ease-in-out 720ms infinite;
-}
-.emoticon-chip.emoticon-anim-lovestruck:hover {
-  box-shadow: 0 0 0 1px rgb(244 114 182 / 0.55), 0 0 14px rgb(244 114 182 / 0.55);
-  /* Pause the perpetual heart-linger pulse so the hover-scale
-   * transition above can actually take effect (otherwise the
-   * infinite keyframe transform overrides the hover transform). */
-  animation-play-state: paused, paused;
-}
-@keyframes emoticon-pop-lovestruck {
-  0%   { transform: scale(0);    box-shadow: 0 0 0 rgb(244 114 182 / 0); }
-  40%  { transform: scale(1.4);  box-shadow: 0 0 18px rgb(244 114 182 / 0.75); }
-  60%  { transform: scale(0.9);  box-shadow: 0 0 8px rgb(244 114 182 / 0.4); }
-  80%  { transform: scale(1.15); box-shadow: 0 0 12px rgb(244 114 182 / 0.55); }
-  100% { transform: scale(1);    box-shadow: 0 0 6px rgb(244 114 182 / 0.25); }
-}
-@keyframes emoticon-heart-linger {
-  0%, 100% { transform: scale(1);    box-shadow: 0 0 4px rgb(244 114 182 / 0.18); }
-  50%      { transform: scale(1.08); box-shadow: 0 0 10px rgb(244 114 182 / 0.45); }
+@keyframes emoticon-chuckle-border {
+  0%, 100% { border-color: #f5b400; box-shadow: 0 0 0 0 rgb(245 180 0 / 0.55); }
+  15%, 45% { border-color: #ff8a00; box-shadow: 0 0 0 4px rgb(245 180 0 / 0); }
+  30%      { border-color: #ffb800; box-shadow: 0 0 0 2px rgb(245 180 0 / 0.2); }
 }
 
-/* ---------- Mood: confused ----------
- * Wobble through ?? rotations before settling. */
+/* ---------- 2. GIGGLE (squint smile) ----------
+ * Gentler than chuckle — a rocking sway in the border with the
+ * face nodding side-to-side. */
+.emoticon-anim-giggle {
+  animation: emoticon-giggle-border 1.6s ease-in-out infinite;
+}
+.emoticon-anim-giggle .reaction-chip-sprite > span,
+.emoticon-anim-giggle.emoticon-picker-cell > span {
+  animation: emoticon-giggle-nod 1.6s ease-in-out infinite;
+}
+@keyframes emoticon-giggle-nod {
+  0%, 100% { transform: rotate(-4deg) translateY(0); }
+  50%      { transform: rotate(4deg) translateY(-1px); }
+}
+@keyframes emoticon-giggle-border {
+  0%, 100% { border-color: #ffc94a; }
+  50%      { border-color: #ffd76b; box-shadow: 0 0 0 1px rgb(255 215 107 / 0.35); }
+}
+
+/* ---------- 3. RAGE (angry) ----------
+ * Red border pulse + an outward ripple ring + a tight face jitter.
+ * Container translate is dropped (would fight hover scale) — the
+ * face's sub-pixel jitter carries the "vibrating with anger" read. */
+.emoticon-anim-rage {
+  animation: emoticon-rage-pulse 0.6s ease-in-out infinite;
+}
+.emoticon-anim-rage::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  border: 2px solid #ff5252;
+  opacity: 0;
+  animation: emoticon-rage-ripple 0.9s ease-out infinite;
+}
+.emoticon-anim-rage .reaction-chip-sprite > span,
+.emoticon-anim-rage.emoticon-picker-cell > span {
+  animation: emoticon-rage-jitter 0.12s linear infinite;
+}
+@keyframes emoticon-rage-jitter {
+  0%, 100% { transform: translate(0, 0); }
+  50%      { transform: translate(0.6px, -0.4px); }
+}
+@keyframes emoticon-rage-pulse {
+  0%, 100% { border-color: #d32f2f; box-shadow: inset 0 0 0 0 rgb(211 47 47 / 0); }
+  50%      { border-color: #b71c1c; box-shadow: inset 0 0 0 2px rgb(211 47 47 / 0.18); }
+}
+@keyframes emoticon-rage-ripple {
+  0%   { opacity: 0.7; transform: scale(0.98); }
+  100% { opacity: 0;   transform: scale(1.12); }
+}
+
+/* ---------- 4. SAD (single tear) ----------
+ * Blue border + a single tear that forms at the bottom of the
+ * chip and drips down out of frame. Face sinks gently. */
+.emoticon-anim-sad {
+  border-color: #4a90e2;
+}
+.emoticon-anim-sad::after {
+  content: "";
+  position: absolute;
+  left: 28%;
+  bottom: -2px;
+  width: 5px;
+  height: 8px;
+  background: #4a90e2;
+  border-radius: 50% 50% 50% 50% / 40% 40% 60% 60%;
+  animation: emoticon-sad-drip 2.2s ease-in infinite;
+  opacity: 0;
+}
+.emoticon-anim-sad .reaction-chip-sprite > span,
+.emoticon-anim-sad.emoticon-picker-cell > span {
+  animation: emoticon-sad-sink 2.2s ease-in-out infinite;
+}
+@keyframes emoticon-sad-drip {
+  0%   { transform: translateY(-3px) scale(0.6); opacity: 0; }
+  25%  { transform: translateY(0) scale(1);     opacity: 1; }
+  80%  { transform: translateY(18px) scale(0.9); opacity: 0.9; }
+  100% { transform: translateY(26px) scale(0.4); opacity: 0; }
+}
+@keyframes emoticon-sad-sink {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(1px); }
+}
+
+/* ---------- 5. CRYING (heavy weep) ----------
+ * Two pseudo-element streams (left + right of center) cascade
+ * down, offset so they overlap mid-stream. Face shakes. */
+.emoticon-anim-crying {
+  border-color: #2196f3;
+}
+.emoticon-anim-crying::before,
+.emoticon-anim-crying::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(to bottom, #4fc3f7, #1976d2);
+  border-radius: 2px;
+  transform-origin: top;
+}
+.emoticon-anim-crying::before {
+  left: 28%;
+  height: 12px;
+  animation: emoticon-crying-stream 1.4s ease-in infinite;
+}
+.emoticon-anim-crying::after {
+  right: 28%;
+  height: 12px;
+  animation: emoticon-crying-stream 1.4s ease-in infinite 0.35s;
+}
+.emoticon-anim-crying .reaction-chip-sprite > span,
+.emoticon-anim-crying.emoticon-picker-cell > span {
+  animation: emoticon-crying-shake 1.4s ease-in-out infinite;
+}
+@keyframes emoticon-crying-stream {
+  0%   { transform: translateY(-4px) scaleY(0.2); opacity: 0; }
+  20%  { transform: translateY(0) scaleY(1);     opacity: 1; }
+  100% { transform: translateY(20px) scaleY(1.4); opacity: 0; }
+}
+@keyframes emoticon-crying-shake {
+  0%, 100% { transform: translate(0, 0); }
+  25%      { transform: translate(-0.8px, 0.5px); }
+  75%      { transform: translate(0.8px, 0.5px); }
+}
+
+/* ---------- 6. SURPRISE (exclamation pop) ----------
+ * Orange border snap + a floating "!" above the chip + a face
+ * pop. The "!" rides ::before. */
+.emoticon-anim-surprise {
+  animation: emoticon-surprise-snap 1.8s ease-out infinite;
+}
+.emoticon-anim-surprise::before {
+  content: "!";
+  position: absolute;
+  top: -8px;
+  right: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ff5722;
+  animation: emoticon-surprise-bang 1.8s ease-out infinite;
+}
+.emoticon-anim-surprise .reaction-chip-sprite > span,
+.emoticon-anim-surprise.emoticon-picker-cell > span {
+  animation: emoticon-surprise-pop 1.8s ease-out infinite;
+}
+@keyframes emoticon-surprise-pop {
+  0%, 60%, 100% { transform: scale(1); }
+  10%           { transform: scale(1.18); }
+  20%           { transform: scale(0.96); }
+  30%           { transform: scale(1.04); }
+}
+@keyframes emoticon-surprise-snap {
+  0%, 60%, 100% { border-color: #ff9800; box-shadow: 0 0 0 0 rgb(255 152 0 / 0); }
+  10%           { border-color: #ff5722; box-shadow: 0 0 0 5px rgb(255 152 0 / 0.18); }
+  25%           {                         box-shadow: 0 0 0 0 rgb(255 152 0 / 0); }
+}
+@keyframes emoticon-surprise-bang {
+  0%, 60%, 100% { opacity: 0; transform: translateY(0) scale(0.6); }
+  10%           { opacity: 1; transform: translateY(-3px) scale(1.2); }
+  35%           { opacity: 1; transform: translateY(0) scale(1); }
+  50%           { opacity: 0; transform: translateY(2px) scale(0.8); }
+}
+
+/* ---------- 7. BLUSH (warm flush) ----------
+ * Inset rose glow that breathes up and down with a gentle sway. */
+.emoticon-anim-blush {
+  animation: emoticon-blush-glow 2.4s ease-in-out infinite;
+}
+.emoticon-anim-blush .reaction-chip-sprite > span,
+.emoticon-anim-blush.emoticon-picker-cell > span {
+  animation: emoticon-blush-sway 2.4s ease-in-out infinite;
+}
+@keyframes emoticon-blush-glow {
+  0%, 100% { border-color: #ffb8c8; box-shadow: inset 0 -5px 10px -5px rgb(255 138 163 / 0.3); }
+  50%      { border-color: #ff6b8a; box-shadow: inset 0 -8px 12px -5px rgb(255 107 138 / 0.55); }
+}
+@keyframes emoticon-blush-sway {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50%      { transform: translateY(-1px) rotate(2deg); }
+}
+
+/* ---------- 8. SMIRK (cool slow pulse) ----------
+ * Purple border glide + a tiny sparkle near the top-right + the
+ * face slowly tilts. */
+.emoticon-anim-smirk {
+  animation: emoticon-smirk-glide 3s ease-in-out infinite;
+}
+.emoticon-anim-smirk::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  width: 4px;
+  height: 4px;
+  background: #e1bee7;
+  border-radius: 50%;
+  animation: emoticon-smirk-sparkle 3s ease-in-out infinite;
+}
+.emoticon-anim-smirk .reaction-chip-sprite > span,
+.emoticon-anim-smirk.emoticon-picker-cell > span {
+  animation: emoticon-smirk-tilt 3s ease-in-out infinite;
+}
+@keyframes emoticon-smirk-glide {
+  0%, 100% { border-color: #9c27b0; }
+  50%      { border-color: #ce93d8; box-shadow: 0 0 0 1px rgb(156 39 176 / 0.12); }
+}
+@keyframes emoticon-smirk-tilt {
+  0%, 100% { transform: rotate(-3deg); }
+  50%      { transform: rotate(3deg); }
+}
+@keyframes emoticon-smirk-sparkle {
+  0%, 100% { opacity: 0; transform: scale(0.5); }
+  50%      { opacity: 1; transform: scale(1.4); }
+}
+
+/* ---------- 9. SLEEP (breathing Zs) ----------
+ * Two staggered "z" particles float up from the top-right while
+ * the border + face breathe in sync. */
+.emoticon-anim-sleep {
+  animation: emoticon-sleep-breath 3.4s ease-in-out infinite;
+}
+.emoticon-anim-sleep::before {
+  content: "z";
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #5c6bc0;
+  animation: emoticon-sleep-z 3.4s ease-in-out infinite;
+}
+.emoticon-anim-sleep::after {
+  content: "z";
+  position: absolute;
+  top: -2px;
+  right: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3f51b5;
+  animation: emoticon-sleep-z 3.4s ease-in-out infinite 1.2s;
+}
+.emoticon-anim-sleep .reaction-chip-sprite > span,
+.emoticon-anim-sleep.emoticon-picker-cell > span {
+  animation: emoticon-sleep-bob 3.4s ease-in-out infinite;
+}
+@keyframes emoticon-sleep-breath {
+  0%, 100% { border-color: #9fa8da; }
+  50%      { border-color: #5c6bc0; }
+}
+@keyframes emoticon-sleep-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(1px); }
+}
+@keyframes emoticon-sleep-z {
+  0%   { opacity: 0; transform: translateY(0) translateX(0) scale(0.6); }
+  30%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-12px) translateX(4px) scale(1.2); }
+}
+
+/* ---------- 10. LOVE (orbiting hearts + heartbeat border) ----------
+ * Two heart pseudo-elements orbit out from the top edge, offset.
+ * Border pulses on the heartbeat cadence; face beats with it. */
+.emoticon-anim-love {
+  animation: emoticon-love-beat 1s ease-in-out infinite;
+}
+.emoticon-anim-love::before,
+.emoticon-anim-love::after {
+  content: "♥";
+  position: absolute;
+  top: -2px;
+  font-size: 10px;
+  line-height: 1;
+  color: #ff4081;
+  text-shadow: 0 0 4px rgb(244 114 182 / 0.5);
+  opacity: 0;
+}
+.emoticon-anim-love::before {
+  left: 12%;
+  animation: emoticon-love-float 2.2s ease-in-out infinite;
+}
+.emoticon-anim-love::after {
+  right: 12%;
+  animation: emoticon-love-float 2.2s ease-in-out infinite 1.1s;
+}
+.emoticon-anim-love .reaction-chip-sprite > span,
+.emoticon-anim-love.emoticon-picker-cell > span {
+  animation: emoticon-love-pulse 1s ease-in-out infinite;
+}
+@keyframes emoticon-love-beat {
+  0%, 100% { border-color: #e91e63; box-shadow: 0 0 0 0 rgb(244 114 182 / 0); }
+  20%      { border-color: #ff4081; box-shadow: 0 0 0 3px rgb(244 114 182 / 0.35); }
+  40%      {                         box-shadow: 0 0 0 0 rgb(244 114 182 / 0); }
+  60%      {                         box-shadow: 0 0 0 2px rgb(244 114 182 / 0.25); }
+}
+@keyframes emoticon-love-pulse {
+  0%, 100% { transform: scale(1); }
+  20%      { transform: scale(1.08); }
+  40%, 60% { transform: scale(1); }
+}
+@keyframes emoticon-love-float {
+  0%   { opacity: 0; transform: translateY(0) scale(0.5); }
+  30%  { opacity: 1; transform: translateY(-4px) scale(1); }
+  70%  { opacity: 1; transform: translateY(-9px) scale(1.1); }
+  100% { opacity: 0; transform: translateY(-14px) scale(0.6); }
+}
+
+/* ---------- 11. CONFUSED (tilting "?") ----------
+ * Diagonal striped backdrop slowly drifts; a floating "?" tilts
+ * back and forth above; the face mirrors it at a lower amplitude. */
 .emoticon-anim-confused {
-  animation: emoticon-pop-confused 760ms cubic-bezier(0.36, 1.4, 0.5, 1) both;
+  animation: emoticon-confused-dash 4s linear infinite;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent 0 4px,
+    rgb(123 63 181 / 0.08) 4px 8px
+  );
 }
-.emoticon-chip.emoticon-anim-confused:hover {
-  box-shadow: 0 0 0 1px rgb(167 139 250 / 0.45), 0 0 10px rgb(167 139 250 / 0.45);
+.emoticon-anim-confused::before {
+  content: "?";
+  position: absolute;
+  top: -6px;
+  right: 2px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #7b3fb5;
+  animation: emoticon-confused-q 2.4s ease-in-out infinite;
 }
-@keyframes emoticon-pop-confused {
-  0%   { transform: scale(0)    rotate(-30deg); box-shadow: 0 0 0 rgb(167 139 250 / 0); }
-  35%  { transform: scale(1.2)  rotate(20deg);  box-shadow: 0 0 12px rgb(167 139 250 / 0.55); }
-  55%  { transform: scale(0.95) rotate(-12deg); }
-  72%  { transform: scale(1.04) rotate(7deg); }
-  88%  { transform: scale(0.99) rotate(-3deg); }
-  100% { transform: scale(1)    rotate(0);      box-shadow: 0 0 0 rgb(167 139 250 / 0); }
+.emoticon-anim-confused .reaction-chip-sprite > span,
+.emoticon-anim-confused.emoticon-picker-cell > span {
+  animation: emoticon-confused-tilt 2.4s ease-in-out infinite;
+}
+@keyframes emoticon-confused-tilt {
+  0%, 100% { transform: rotate(-6deg); }
+  50%      { transform: rotate(6deg); }
+}
+@keyframes emoticon-confused-q {
+  0%, 100% { transform: rotate(-12deg) translateY(0); opacity: 0.7; }
+  50%      { transform: rotate(12deg) translateY(-2px); opacity: 1; }
+}
+@keyframes emoticon-confused-dash {
+  0%   { background-position: 0 0; }
+  100% { background-position: 32px 32px; }
 }
 
-/* ---------- Mood: default (unknown labels) ----------
- * Generic bounce-pop with a faint accent-color glow. */
+/* ---------- 12. ANNOY (sharp twitch) ----------
+ * Mostly quiet — every 2.2s the border snaps and a triangular
+ * "spark" pops from the corner. Face shifts a few pixels at the
+ * same beat. */
+.emoticon-anim-annoy {
+  animation: emoticon-annoy-twitch 2.2s ease-in-out infinite;
+}
+.emoticon-anim-annoy::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  right: -2px;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 9px solid #ff9800;
+  transform-origin: 50% 100%;
+  opacity: 0;
+  animation: emoticon-annoy-spark 2.2s ease-in-out infinite;
+}
+.emoticon-anim-annoy .reaction-chip-sprite > span,
+.emoticon-anim-annoy.emoticon-picker-cell > span {
+  animation: emoticon-annoy-shift 2.2s ease-in-out infinite;
+}
+@keyframes emoticon-annoy-twitch {
+  0%, 70%, 100% { border-color: #c2185b; }
+  72%           { border-color: #f50057; }
+}
+@keyframes emoticon-annoy-shift {
+  0%, 70%, 100% { transform: translate(0, 0) rotate(0); }
+  74%           { transform: translate(0, -1px) rotate(-3deg); }
+  78%           { transform: translate(0, 0) rotate(0); }
+}
+@keyframes emoticon-annoy-spark {
+  0%, 65%, 100% { opacity: 0; transform: rotate(0) scale(0.5); }
+  72%           { opacity: 1; transform: rotate(-15deg) scale(1.1); }
+  80%           { opacity: 0; transform: rotate(15deg) scale(0.8); }
+}
+
+/* ---------- Default (no keyword match) ----------
+ * Soft accent-color halo pulse — alive but unobtrusive, so chips
+ * whose labels don't map to a named mood don't sit visually inert
+ * next to their animated siblings. */
 .emoticon-anim-default {
-  animation: emoticon-pop-default 600ms cubic-bezier(0.5, 1.7, 0.5, 1) both;
+  animation: emoticon-default-pulse 2.8s ease-in-out infinite;
 }
-.emoticon-chip.emoticon-anim-default:hover {
-  box-shadow: 0 0 0 1px rgb(var(--keep-action) / 0.5), 0 0 8px rgb(var(--keep-action) / 0.4);
+@keyframes emoticon-default-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--keep-action) / 0); }
+  50%      { box-shadow: 0 0 0 2px rgb(var(--keep-action) / 0.25); }
 }
-@keyframes emoticon-pop-default {
-  0%   { transform: scale(0);    box-shadow: 0 0 0 rgb(var(--keep-action) / 0); }
-  45%  { transform: scale(1.3);  box-shadow: 0 0 12px rgb(var(--keep-action) / 0.5); }
-  70%  { transform: scale(0.92); }
-  100% { transform: scale(1);    box-shadow: 0 0 0 rgb(var(--keep-action) / 0); }
+
+/* ---------- Picker cell scale overrides ----------
+ * The picker grid renders sprites at 64px (recents at 48px) — the
+ * pseudo decorations tuned for 32px chips would look undersized in
+ * that context. Bump font sizes / heights so the same mood class
+ * reads correctly on both surfaces. */
+.emoticon-picker-cell.emoticon-anim-surprise::before { top: -10px; font-size: 18px; }
+.emoticon-picker-cell.emoticon-anim-confused::before { top: -8px;  font-size: 20px; }
+.emoticon-picker-cell.emoticon-anim-smirk::before    { width: 6px; height: 6px; top: 4px; right: 6px; }
+.emoticon-picker-cell.emoticon-anim-sleep::before    { font-size: 14px; top: 4px; right: 8px; }
+.emoticon-picker-cell.emoticon-anim-sleep::after     { font-size: 18px; top: -4px; right: 2px; }
+.emoticon-picker-cell.emoticon-anim-love::before,
+.emoticon-picker-cell.emoticon-anim-love::after      { font-size: 14px; top: -4px; }
+.emoticon-picker-cell.emoticon-anim-crying::before,
+.emoticon-picker-cell.emoticon-anim-crying::after    { width: 3px; height: 18px; }
+.emoticon-picker-cell.emoticon-anim-annoy::before    {
+  border-left-width: 7px;
+  border-right-width: 7px;
+  border-bottom-width: 12px;
+  top: -6px;
+  right: -3px;
 }
+.emoticon-picker-cell.emoticon-anim-sad::after       { width: 7px; height: 11px; }
 
 /* ---------- Picker polish ---------- */
 .emoticon-picker-panel {
@@ -2811,21 +3194,33 @@ aside.margin-note {
   display: inline-flex;
 }
 
-/* Honor `prefers-reduced-motion` — strip the keyframe pops and the
- * perpetual lovestruck linger; keep the gentle hover scale so the
- * affordance is still there. Accessibility win without losing the
- * visual structure. */
+/* Honor `prefers-reduced-motion` — kill every perpetual mood loop
+ * (chip border pulses, face transforms, ::before / ::after
+ * decorations) AND the chip-count pulse. Keep the gentle hover
+ * transition so the affordance is still there. Accessibility win
+ * without losing the visual structure. */
 @media (prefers-reduced-motion: reduce) {
-  .emoticon-anim-joyful,
-  .emoticon-anim-fiery,
-  .emoticon-anim-melancholy,
-  .emoticon-anim-jolt,
-  .emoticon-anim-flush,
-  .emoticon-anim-lovestruck,
+  .emoticon-anim-chuckle,
+  .emoticon-anim-giggle,
+  .emoticon-anim-rage,
+  .emoticon-anim-sad,
+  .emoticon-anim-crying,
+  .emoticon-anim-surprise,
+  .emoticon-anim-blush,
+  .emoticon-anim-smirk,
+  .emoticon-anim-sleep,
+  .emoticon-anim-love,
   .emoticon-anim-confused,
+  .emoticon-anim-annoy,
   .emoticon-anim-default,
   .emoticon-picker-panel,
   .emoticon-chip-count {
+    animation: none !important;
+  }
+  /* Also halt nested sprite + pseudo decoration animations. */
+  .emoticon-chip .reaction-chip-sprite > span,
+  [class*="emoticon-anim-"]::before,
+  [class*="emoticon-anim-"]::after {
     animation: none !important;
   }
   .emoticon-chip,

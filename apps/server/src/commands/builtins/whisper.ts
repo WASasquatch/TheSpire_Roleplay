@@ -1,8 +1,9 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { ChatMessage } from "@thekeep/shared";
 import { ignores, messages, users } from "../../db/schema.js";
 import { pushTriggers } from "../../realtime/broadcast.js";
+import { eqNameInsensitive } from "../../lib/nameLookup.js";
 import { stripFirstToken } from "../parser.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
@@ -48,12 +49,17 @@ export const whisperCommand: CommandHandler = {
       return;
     }
 
-    // Resolve recipient - master username first, then active character name.
-    const targetLower = targetName.toLowerCase();
+    // Resolve recipient - master username first, then active character
+    // name. Comparison is space-insensitive (NBSP folds to ASCII space)
+    // so `/whisper John Doe` matches a master stored as `John Doe`
+    // (NBSP-separated, the master-username canonical form) without the
+    // caller having to know to type Alt+0160. Same fold applies to
+    // character-name lookups so a regular-space character name still
+    // matches when the caller habit-types NBSP from the master side.
     let target = (await ctx.db
       .select()
       .from(users)
-      .where(sql`lower(${users.username}) = ${targetLower}`)
+      .where(eqNameInsensitive(users.username, targetName))
       .limit(1))[0];
 
     if (!target) {
@@ -62,7 +68,7 @@ export const whisperCommand: CommandHandler = {
       const c = (await ctx.db
         .select()
         .from(characters)
-        .where(sql`lower(${characters.name}) = ${targetLower}`)
+        .where(eqNameInsensitive(characters.name, targetName))
         .limit(1))[0];
       if (c && !c.deletedAt) {
         const owner = (await ctx.db

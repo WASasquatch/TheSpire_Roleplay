@@ -51,6 +51,19 @@ const BATCH_DEBOUNCE_MS = 80;
 const BATCH_MAX = 64;
 
 /**
+ * Canonicalize a mention name for cache comparison: lowercase + fold
+ * every space-equivalent codepoint (currently U+00A0 NBSP) to ASCII
+ * space. Mirrors the server-side helper in
+ * `apps/server/src/lib/nameLookup.ts` so a mention typed as
+ * `@John Doe` (ASCII space) and a mention typed as `@John Doe`
+ * (NBSP) — both pointing at the same master account — share one
+ * cache entry and one round trip.
+ */
+function canonicalizeMention(name: string): string {
+  return name.replace(/[ ]/g, " ").toLowerCase();
+}
+
+/**
  * Queue a list of mention names for resolution. Names already known
  * or already in flight are filtered out. A short debounce coalesces
  * the batch so a message list that renders 30 messages with mentions
@@ -61,7 +74,7 @@ export function requestMentionResolve(names: ReadonlyArray<string>): void {
   const { known, unknown, pending } = useMentionsCache.getState();
   let queued = false;
   for (const raw of names) {
-    const n = raw.toLowerCase();
+    const n = canonicalizeMention(raw);
     if (!n) continue;
     if (known.has(n) || unknown.has(n) || pending.has(n) || pendingBatch.has(n)) continue;
     pendingBatch.add(n);
@@ -95,7 +108,11 @@ async function flushBatch(): Promise<void> {
     });
     if (!r.ok) throw new Error(`/mentions/resolve ${r.status}`);
     const j = (await r.json()) as { valid?: string[] };
-    const validSet = new Set((j.valid ?? []).map((s) => s.toLowerCase()));
+    // Server responds in canonical (lowered + NBSP-folded) form so a
+    // mention of `@John Doe` lands in the same bucket as the master
+    // stored as `John Doe` (NBSP). Re-canonicalize defensively in
+    // case a future server build returns something different.
+    const validSet = new Set((j.valid ?? []).map((s) => canonicalizeMention(s)));
     const next = useMentionsCache.getState();
     for (const n of batch) {
       next.pending.delete(n);
@@ -120,9 +137,11 @@ async function flushBatch(): Promise<void> {
   }
 }
 
-/** Synchronous read used by the renderer. Lowercase the input first. */
+/** Synchronous read used by the renderer. The cache stores canonical
+ *  (lowered + NBSP-folded) forms so the renderer can pass either
+ *  spelling of a name with non-breaking spaces. */
 export function isKnownMention(name: string): boolean {
-  return useMentionsCache.getState().known.has(name.toLowerCase());
+  return useMentionsCache.getState().known.has(canonicalizeMention(name));
 }
 
 /**
@@ -139,7 +158,7 @@ export function markMentionKnown(...names: string[]): void {
   const state = useMentionsCache.getState();
   let changed = false;
   for (const raw of names) {
-    const n = raw.toLowerCase();
+    const n = canonicalizeMention(raw);
     if (!n || state.known.has(n)) continue;
     state.known.add(n);
     state.unknown.delete(n);

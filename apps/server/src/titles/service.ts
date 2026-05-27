@@ -8,6 +8,7 @@ import type {
   ServerToClientEvents,
 } from "@thekeep/shared";
 import { characters, ignores, mutualTitles, titleKinds, users } from "../db/schema.js";
+import { eqNameInsensitive } from "../lib/nameLookup.js";
 import type { Db } from "../db/index.js";
 
 /**
@@ -59,10 +60,14 @@ export async function resolveIdentityByName(db: Db, name: string): Promise<Ident
   const trimmed = name.trim();
   if (!trimmed) return null;
 
+  // Space-insensitive match — NBSP and ASCII space are equivalent on
+  // lookup so a /title or /whois argument typed with a regular space
+  // resolves a master stored with NBSP (the master-username canonical
+  // form).
   const u = (await db
     .select()
     .from(users)
-    .where(sql`lower(${users.username}) = ${trimmed.toLowerCase()}`)
+    .where(eqNameInsensitive(users.username, trimmed))
     .limit(1))[0];
   if (u && !u.disabledAt) {
     return { userId: u.id, characterId: null, displayName: u.username };
@@ -71,7 +76,7 @@ export async function resolveIdentityByName(db: Db, name: string): Promise<Ident
   const c = (await db
     .select()
     .from(characters)
-    .where(sql`lower(${characters.name}) = ${trimmed.toLowerCase()}`)
+    .where(eqNameInsensitive(characters.name, trimmed))
     .limit(1))[0];
   if (!c || c.deletedAt) return null;
 

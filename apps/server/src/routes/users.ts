@@ -5,6 +5,7 @@ import { isAdminRole, isMasterAdminRole, type ClientToServerEvents, type ServerT
 import { characters, messages, userEarning, users } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
+import { canonicalizeNameForLookup, loweredSpaceCanonical, substringNameInsensitive } from "../lib/nameLookup.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -58,9 +59,12 @@ export async function registerUsersRoutes(
 
     // Match search query against master username OR any of the user's
     // character names. Disabled accounts (disabledAt set) and the
-    // system sentinel are excluded. `q` is LIKE-escaped so a literal
-    // `_` or `%` in the search term doesn't widen the match.
-    const escapedQ = q.replace(/[%_]/g, (c) => `\\${c}`);
+    // system sentinel are excluded. Comparison is space-insensitive
+    // (NBSP folds to ASCII space) so typing `john d` matches a master
+    // stored as `John Doe` (NBSP) — the user-directory and add-friend
+    // autocomplete both flow through this endpoint, so the fold here
+    // is what makes Alt+0160 names findable without the searcher
+    // having to know to type Alt+0160 themselves.
     let matchedUserIds: string[];
     // When set, the no-search path pushed LIMIT/OFFSET into SQL and
     // matchedUserIds already represents the page in SQL-sorted order.
@@ -75,14 +79,14 @@ export async function registerUsersRoutes(
         .where(and(
           isNull(users.disabledAt),
           sql`${users.username} != 'system'`,
-          sql`lower(${users.username}) LIKE ${"%" + escapedQ + "%"} ESCAPE '\\'`,
+          substringNameInsensitive(users.username, q),
         ));
       const byChar = await db
         .select({ userId: characters.userId })
         .from(characters)
         .where(and(
           isNull(characters.deletedAt),
-          sql`lower(${characters.name}) LIKE ${"%" + escapedQ + "%"} ESCAPE '\\'`,
+          substringNameInsensitive(characters.name, q),
         ));
       matchedUserIds = [...new Set([
         ...byMaster.map((r) => r.id),
@@ -687,11 +691,20 @@ export async function registerUsersRoutes(
 
     const body = req.body as { names?: unknown };
     const raw = Array.isArray(body?.names) ? body.names : [];
-    const names = raw
-      .filter((n): n is string => typeof n === "string" && n.length > 0 && n.length <= 64)
-      .map((n) => n.toLowerCase())
-      .slice(0, 64);
-    if (names.length === 0) return { valid: [] };
+    // Canonicalize each input to lowercase + space-folded form so a
+    // mention typed as `@John Doe` (ASCII space) matches a master
+    // stored as `John Doe` (NBSP). The response also speaks the
+    // canonical form so the client can compare its own canonicalized
+    // mention strings against `valid` directly — see
+    // apps/web/src/state/mentions.ts which canonicalizes on the read
+    // side too. Dedupe via Set so duplicate or NBSP/space variants of
+    // the same name collapse to one query argument.
+    const canonicals = Array.from(new Set(
+      raw
+        .filter((n): n is string => typeof n === "string" && n.length > 0 && n.length <= 64)
+        .map((n) => canonicalizeNameForLookup(n))
+    )).slice(0, 64);
+    if (canonicals.length === 0) return { valid: [] };
 
     // Master usernames first — globally unique, fast hit. NB: only
     // non-disabled accounts (the system sentinel + any deactivated
@@ -703,10 +716,10 @@ export async function registerUsersRoutes(
         and(
           isNull(users.disabledAt),
           sql`${users.username} != 'system'`,
-          sql`lower(${users.username}) IN (${sql.join(names.map((n) => sql`${n}`), sql`, `)})`,
+          sql`${loweredSpaceCanonical(users.username)} IN (${sql.join(canonicals.map((n) => sql`${n}`), sql`, `)})`,
         ),
       );
-    const valid = new Set(userMatches.map((u) => u.username.toLowerCase()));
+    const valid = new Set(userMatches.map((u) => canonicalizeNameForLookup(u.username)));
 
     // Character names — match against any non-deleted character of
     // a non-disabled owner. The active-character constraint that the
@@ -715,7 +728,7 @@ export async function registerUsersRoutes(
     // RIGHT NOW. The renderer's question is "is this a real name with
     // a clickable profile?" — and an inactive character still has a
     // profile.
-    const remaining = names.filter((n) => !valid.has(n));
+    const remaining = canonicals.filter((n) => !valid.has(n));
     if (remaining.length > 0) {
       const charMatches = await db
         .select({ name: characters.name })
@@ -725,10 +738,10 @@ export async function registerUsersRoutes(
           and(
             isNull(characters.deletedAt),
             isNull(users.disabledAt),
-            sql`lower(${characters.name}) IN (${sql.join(remaining.map((n) => sql`${n}`), sql`, `)})`,
+            sql`${loweredSpaceCanonical(characters.name)} IN (${sql.join(remaining.map((n) => sql`${n}`), sql`, `)})`,
           ),
         );
-      for (const c of charMatches) valid.add(c.name.toLowerCase());
+      for (const c of charMatches) valid.add(canonicalizeNameForLookup(c.name));
     }
 
     return { valid: Array.from(valid) };

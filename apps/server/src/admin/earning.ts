@@ -75,6 +75,32 @@ const sourceFlagsSchema = z.object({
   currency: z.boolean(),
 }).strict();
 
+// Length-bonus + spam-detection knobs. Mirrors the EarningConfig
+// `messageQuality` branch (shared/server side). Bounds match the
+// admin UI's input ranges so anything the editor can send through
+// passes validation.
+const lengthBonusSchema = z.object({
+  enabled: z.boolean(),
+  floorChars: z.number().int().min(0).max(10_000),
+  ceilChars: z.number().int().min(0).max(10_000),
+  maxMultiplier: z.number().min(1).max(10),
+}).strict();
+
+const messageQualitySchema = z.object({
+  lengthBonus: z.object({
+    say: lengthBonusSchema,
+    action: lengthBonusSchema,
+    whisper: lengthBonusSchema,
+  }).strict(),
+  spam: z.object({
+    enabled: z.boolean(),
+    minLengthToCheck: z.number().int().min(0).max(10_000),
+    uniqueCharRatioFloor: z.number().min(0).max(1),
+    dominantTokenRatioCap: z.number().min(0).max(1),
+    echoLookback: z.number().int().min(0).max(100),
+  }).strict(),
+}).strict();
+
 const earningConfigSchema = z.object({
   enabled: z.boolean(),
   awards: z.object({
@@ -92,6 +118,13 @@ const earningConfigSchema = z.object({
     }).strict(),
   }).strict(),
   bodyFloorChars: z.number().int().min(0).max(1000),
+  // Length-bonus + spam-detection branch. Added after the original
+  // earningConfigSchema shipped; without it `.strict()` rejected
+  // the entire admin save with `unrecognized_keys: messageQuality`
+  // because the client always submits the field. `normalizeEarningConfig`
+  // already handles fallbacks for missing pieces, so the editor can
+  // grow new sub-knobs without re-saving every existing config row.
+  messageQuality: messageQualitySchema,
   presenceBlockMinutes: z.number().int().min(1).max(60),
   presenceDailyBlockCap: z.number().int().min(0).max(1000),
   enabledSources: z.object({

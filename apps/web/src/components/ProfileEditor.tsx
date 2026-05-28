@@ -18,7 +18,7 @@ import {
   type PushState,
 } from "../lib/push.js";
 import { readError } from "../lib/http.js";
-import { fetchEarningMe, patchEarningSettings } from "../lib/earning.js";
+import { fetchEarningMe, patchEarningSettings, patchProfileBannerUrl } from "../lib/earning.js";
 import { useChat } from "../state/store.js";
 import { useEarning, lookupRankTier } from "../state/earning.js";
 import { StylePicker } from "./AdminPanel.js";
@@ -243,6 +243,29 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   // keeps this fresh via the `earning:inventory_changed` socket
   // event, so no extra fetch needed.
   const earningSnapshot = useEarning((s) => s.snapshot);
+  // Banner URL is a Flair cosmetic, not a regular profile field, so it
+  // saves through its own PATCH endpoint instead of the main profile
+  // form. After a successful banner save we refresh the earning
+  // snapshot so the editor's preview + read-only badge update without
+  // a manual page reload.
+  const refreshEarning = useEarning((s) => s.refresh);
+  const [bannerDraft, setBannerDraft] = useState<string>("");
+  const [bannerSaving, setBannerSaving] = useState(false);
+  const [bannerError, setBannerError] = useState<string | null>(null);
+  // Sync banner draft to the active identity's currently-saved URL.
+  // Re-runs when the user switches target (master ↔ character) so the
+  // input always shows the URL of the identity currently being edited,
+  // and when the earning snapshot itself updates (e.g. after Save,
+  // after a Flair-tab purchase, or a cross-tab change picked up by the
+  // socket-driven refresh).
+  useEffect(() => {
+    const characterId = target.kind === "character" ? target.id : null;
+    const url = characterId
+      ? (earningSnapshot?.activeCosmetics.byCharacter?.[characterId]?.profileBannerUrl ?? "")
+      : (earningSnapshot?.activeCosmetics.profileBannerUrl ?? "");
+    setBannerDraft(url);
+    setBannerError(null);
+  }, [target, earningSnapshot]);
   /** Extra portraits beyond the primary avatarUrl (character targets only). */
   const [portraits, setPortraits] = useState<CharacterPortrait[]>([]);
   /** Owner-set external links rendered as styled chips on the profile. */
@@ -508,6 +531,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             ...prev,
             bioHtml,
             avatarUrl: avatarUrl.trim() || null,
+            // Gallery-membership flag must round-trip through the
+            // cache or the checkbox snaps back to false on the next
+            // render — the form's local state stays correct, but
+            // when the component re-derives from `master`, an
+            // undefined `includeAvatarInGallery` evaluates to `!!u`
+            // → false, which is what was happening before the fix.
+            includeAvatarInGallery,
             gender,
             notifyPref,
             soundDmEnabled,
@@ -585,6 +615,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                   bioHtml,
                   statsJson: JSON.stringify(stats),
                   avatarUrl: avatarUrl.trim() || null,
+                  // See note on the master path above — without
+                  // this the checkbox flips back to false on the
+                  // next render even though the server persisted
+                  // the value correctly.
+                  includeAvatarInGallery,
                   themeJson: theme ? JSON.stringify(theme) : null,
                   chatColor,
                   styleKey: userStyleKey,
@@ -845,6 +880,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           petCollection: previewCollections.pets,
           nameStyleKey: previewNameStyle.key,
           nameStyleConfig: previewNameStyle.config,
+          // Banner URL isn't editable from ProfileEditor — it lives on
+          // the Flair tab. Surface the currently-equipped URL from
+          // the earning snapshot so the preview shows what's saved
+          // (or null when nothing's set / cosmetic isn't owned).
+          profileBannerUrl: earningSnapshot?.activeCosmetics.profileBannerUrl ?? null,
           // Live BG so the preview's backdrop reflects the editor's
           // controls without a save round-trip.
           publicProfileBgUrl: publicProfileBgUrl.trim() === "" ? null : publicProfileBgUrl.trim(),
@@ -899,11 +939,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         petCollection: previewCollections.pets,
         nameStyleKey: previewNameStyle.key,
         nameStyleConfig: previewNameStyle.config,
+        // Per-character banner URL, looked up by character id; falls
+        // back to null when this character doesn't own the cosmetic.
+        profileBannerUrl: earningSnapshot?.activeCosmetics.byCharacter?.[target.id]?.profileBannerUrl ?? null,
         publicProfileBgUrl: publicProfileBgUrl.trim() === "" ? null : publicProfileBgUrl.trim(),
         publicProfileBgMode,
       },
     };
-  }, [target, master, myUserId, name, bioHtml, avatarUrl, includeAvatarInGallery, gender, stats, theme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey, previewCollections, previewNameStyle, publicProfileBgUrl, publicProfileBgMode]);
+  }, [target, master, myUserId, name, bioHtml, avatarUrl, includeAvatarInGallery, gender, stats, theme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey, previewCollections, previewNameStyle, publicProfileBgUrl, publicProfileBgMode, earningSnapshot]);
 
   const targetOptions = useMemo(() => {
     return [
@@ -1376,6 +1419,110 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                     </div>
                   ) : null}
                 </fieldset>
+                {/* PROFILE BANNER — Flair cosmetic surfaced inline so
+                    the URL is editable here (not just in the Flair tab).
+                    Renders only when this identity OWNS the cosmetic;
+                    purchase still happens on the Flair tab to keep all
+                    buy flows + price logic in one place, but URL edits
+                    happen wherever the user is currently looking at
+                    their appearance — which is here. Per-identity:
+                    master vs each character carries its own banner +
+                    own purchase. */}
+                {(() => {
+                  const bannerOwned = isCharacter
+                    ? (earningSnapshot?.activeCosmetics.byCharacter?.[target.id]?.profileBannerOwned ?? false)
+                    : (earningSnapshot?.activeCosmetics.profileBannerOwned ?? false);
+                  const equippedBannerUrl = isCharacter
+                    ? (earningSnapshot?.activeCosmetics.byCharacter?.[target.id]?.profileBannerUrl ?? null)
+                    : (earningSnapshot?.activeCosmetics.profileBannerUrl ?? null);
+                  if (!bannerOwned) return null;
+                  const trimmedDraft = bannerDraft.trim();
+                  const dirty = trimmedDraft !== (equippedBannerUrl ?? "");
+                  // Live URL preview — `trimmedDraft` for the input's
+                  // current value, falling back to the saved URL so the
+                  // section always has something to render when the
+                  // slot has any image. Empty draft + empty saved =
+                  // blank preview area (the "Clear" state).
+                  const previewUrl = trimmedDraft || equippedBannerUrl;
+                  async function saveBanner(next: string | null) {
+                    setBannerSaving(true);
+                    setBannerError(null);
+                    try {
+                      const characterId = target.kind === "character" ? target.id : null;
+                      await patchProfileBannerUrl(next, characterId);
+                      await refreshEarning();
+                    } catch (e) {
+                      setBannerError(e instanceof Error ? e.message : "Save failed");
+                    } finally {
+                      setBannerSaving(false);
+                    }
+                  }
+                  return (
+                    <fieldset className="rounded border border-keep-rule p-3">
+                      <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
+                        Profile banner
+                      </legend>
+                      <p className="mb-2 text-[10px] text-keep-muted">
+                        Wide images look best. Anything taller than about 220 pixels gets trimmed down to fit.
+                      </p>
+                      <label className="block text-xs">
+                        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Image link</span>
+                        <input
+                          type="url"
+                          inputMode="url"
+                          value={bannerDraft}
+                          onChange={(e) => setBannerDraft(e.target.value)}
+                          placeholder="https://… (leave blank to clear)"
+                          maxLength={1000}
+                          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
+                        />
+                      </label>
+                      {previewUrl ? (
+                        <div className="mt-3">
+                          <span className="mb-1 block text-[10px] uppercase tracking-widest text-keep-muted">Preview</span>
+                          <div className="overflow-hidden rounded border border-keep-rule bg-keep-panel">
+                            <img
+                              src={previewUrl}
+                              alt=""
+                              loading="lazy"
+                              className="block max-h-[220px] w-full object-cover object-center"
+                              onError={(e) => {
+                                const el = e.currentTarget as HTMLImageElement;
+                                el.style.display = "none";
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ) : null}
+                      {bannerError ? (
+                        <p className="mt-1 text-[10px] text-keep-accent">{bannerError}</p>
+                      ) : null}
+                      <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+                        {equippedBannerUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBannerDraft("");
+                              void saveBanner(null);
+                            }}
+                            disabled={bannerSaving}
+                            className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-50"
+                          >
+                            Clear
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => void saveBanner(trimmedDraft || null)}
+                          disabled={bannerSaving || !dirty}
+                          className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+                        >
+                          {bannerSaving ? "Saving…" : "Save banner"}
+                        </button>
+                      </div>
+                    </fieldset>
+                  );
+                })()}
                 {!isCharacter ? (
                   <fieldset className="rounded border border-keep-rule p-3">
                     <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
@@ -1606,8 +1753,17 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
       {previewing && previewProfile ? (
         // stopPropagation so clicking the preview backdrop (which closes the
         // preview) doesn't bubble to the editor's backdrop and close that too.
+        // zIndex must beat the editor underneath us. The editor sits at 50
+        // (or 60 in admin-edit mode), so the preview goes one tier higher
+        // — without this the preview opened UNDER the editor and was
+        // invisible. Modal portals to <body> in both cases, so these
+        // z-index values compete in a single sibling stacking context.
         <div onClick={(e) => e.stopPropagation()}>
-          <ProfileModal profile={previewProfile} onClose={() => setPreviewing(false)} />
+          <ProfileModal
+            profile={previewProfile}
+            onClose={() => setPreviewing(false)}
+            zIndex={isAdminEdit ? 70 : 60}
+          />
         </div>
       ) : null}
       {createOpen ? (

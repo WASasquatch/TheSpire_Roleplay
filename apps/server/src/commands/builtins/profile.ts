@@ -82,6 +82,34 @@ function parseNameStyleConfig(json: string | null): Record<string, unknown> | nu
 }
 
 /**
+ * Pull the equipped profile-banner URL for a master/OOC pool or a
+ * character. Returns null when nothing is equipped OR the identity
+ * doesn't have an active-cosmetics row yet. The URL is server-truth
+ * for what ProfileModal renders as the hero strip on this profile;
+ * write-side validation lives on PATCH /earning/me/banner.
+ */
+async function getEquippedProfileBannerUrl(
+  db: import("../../db/index.js").Db,
+  scope: "user" | "character",
+  ownerId: string,
+): Promise<string | null> {
+  if (scope === "user") {
+    const row = (await db
+      .select({ url: userActiveCosmetics.profileBannerUrl })
+      .from(userActiveCosmetics)
+      .where(eq(userActiveCosmetics.userId, ownerId))
+      .limit(1))[0];
+    return row?.url ?? null;
+  }
+  const row = (await db
+    .select({ url: characterEarning.profileBannerUrl })
+    .from(characterEarning)
+    .where(eq(characterEarning.characterId, ownerId))
+    .limit(1))[0];
+  return row?.url ?? null;
+}
+
+/**
  * Resolve whether the viewer has moderator-tier authority. Used to
  * gate the mod-only `ownerUsername` field on character profiles — a
  * site mod (or admin / masteradmin) sees who voices each character;
@@ -530,6 +558,7 @@ async function lookupProfile(
         petCollection: await listProfilePetCollection(db, "user", u.id),
         nameStyleKey: ns.key,
         nameStyleConfig: ns.config,
+        profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id),
         publicProfileBgUrl: u.publicProfileBgUrl,
         publicProfileBgMode: u.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       },
@@ -592,6 +621,7 @@ async function lookupProfile(
       petCollection: await listProfilePetCollection(db, "character", c.id),
       nameStyleKey: ns.key,
       nameStyleConfig: ns.config,
+      profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id),
       publicProfileBgUrl: c.publicProfileBgUrl,
       publicProfileBgMode: c.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       ...(showOwner ? { ownerUsername: owner.username } : {}),
@@ -677,6 +707,7 @@ async function lookupRandomProfile(
         petCollection: await listProfilePetCollection(db, "user", u.id),
         nameStyleKey: ns.key,
         nameStyleConfig: ns.config,
+        profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id),
         publicProfileBgUrl: u.publicProfileBgUrl,
         publicProfileBgMode: u.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       },
@@ -733,6 +764,7 @@ async function lookupRandomProfile(
       petCollection: await listProfilePetCollection(db, "character", c.id),
       nameStyleKey: ns.key,
       nameStyleConfig: ns.config,
+      profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id),
       publicProfileBgUrl: c.publicProfileBgUrl,
       publicProfileBgMode: c.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       ...(showOwner ? { ownerUsername: row.ownerUsername } : {}),

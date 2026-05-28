@@ -75,6 +75,13 @@ interface Props {
    */
   avatarUrl?: string | null;
   selectedBorderRankKey?: string | null;
+  /** Free-form border (migration 0149). Takes precedence over the
+   *  rank-tier slot in BorderedAvatar's resolution chain. */
+  selectedFreeformBorderKey?: string | null;
+  /** Per-identity color customization for the equipped freeform
+   *  border (migration 0158). Passed through to BorderedAvatar
+   *  unchanged; null = use the catalog row's CSS fallbacks. */
+  freeformBorderConfig?: Record<string, string> | null;
   inlineAvatar?: boolean;
   /**
    * Opt the inner name button into ellipsis truncation. Default off.
@@ -116,6 +123,8 @@ export function UserNameTag({
   nameStyleConfig,
   avatarUrl,
   selectedBorderRankKey,
+  selectedFreeformBorderKey,
+  freeformBorderConfig,
   inlineAvatar,
   truncate = false,
 }: Props) {
@@ -186,6 +195,8 @@ export function UserNameTag({
               avatarUrl={avatarUrl}
               name={displayName}
               borderRankKey={selectedBorderRankKey ?? null}
+              freeformBorderKey={selectedFreeformBorderKey ?? null}
+              freeformConfig={freeformBorderConfig ?? null}
               size="sm"
               onClick={onIconClick}
               title={`view profile (${g.title})`}

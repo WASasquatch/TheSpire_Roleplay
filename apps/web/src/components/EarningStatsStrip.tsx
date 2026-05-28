@@ -120,6 +120,7 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
     maxRankKeyEverHeld: null,
     maxTierEverHeld: null,
     selectedBorderRankKey: null,
+    selectedFreeformBorderKey: null,
     hideCurrencyCount: false,
     hideXpCount: false,
   });

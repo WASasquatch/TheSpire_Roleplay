@@ -117,6 +117,13 @@ export interface RoomOccupant {
    *                             avatar. Per-scope: character's pick
    *                             when attached, master's pick otherwise.
    *                             Null = no border.
+   *  selectedFreeformBorderKey  Free-form (non-rank-tied) border key
+   *                             from the parallel `freeform_borders`
+   *                             catalog. Takes precedence over
+   *                             `selectedBorderRankKey` when both are
+   *                             set — the BorderedAvatar renderer
+   *                             checks the freeform slot first and
+   *                             falls back to the rank-tied slot.
    *  inlineAvatarEnabled        Master-scoped toggle for the
    *                             "show avatar after the timestamp in
    *                             chat lines + replace gender-icon click
@@ -124,6 +131,16 @@ export interface RoomOccupant {
    */
   avatarUrl: string | null;
   selectedBorderRankKey: string | null;
+  selectedFreeformBorderKey: string | null;
+  /**
+   * Per-identity color customization for the equipped freeform border,
+   * if any. Parsed JSON object keyed by `--c-<name>` var-name (without
+   * the `--c-` prefix) → CSS color string. Renderer inlines these on
+   * the BorderedAvatar portal so the cascade overrides the template's
+   * `var(--c-name, <fallback>)` references. Null when no customization
+   * has been saved (renderer falls back to the catalog row's fallbacks).
+   */
+  freeformBorderConfig: Record<string, string> | null;
   inlineAvatarEnabled: boolean;
   /**
    * Master/OOC fallbacks for the avatar + border + inline-avatar
@@ -134,6 +151,8 @@ export interface RoomOccupant {
    */
   masterAvatarUrl: string | null;
   masterSelectedBorderRankKey: string | null;
+  masterSelectedFreeformBorderKey: string | null;
+  masterFreeformBorderConfig: Record<string, string> | null;
   masterInlineAvatarEnabled: boolean;
   /**
    * Userlist display preference. When true AND the occupant has a

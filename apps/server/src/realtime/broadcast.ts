@@ -9,10 +9,16 @@ import type {
   RoomSummary,
   ServerToClientEvents,
 } from "@thekeep/shared";
-import { extractMentions, isAdminRole } from "@thekeep/shared";
+import {
+  DEFAULT_PRESENCE_TEMPLATES,
+  extractMentions,
+  isAdminRole,
+  renderPresenceTemplate,
+} from "@thekeep/shared";
 import {
   bans,
   characterEarning,
+  characterOwnedFreeformBorders,
   characterOwnedNameStyles,
   characters,
   friends,
@@ -23,6 +29,7 @@ import {
   roomWorldLinks,
   rooms,
   userActiveCosmetics,
+  userOwnedFreeformBorders,
   userOwnedNameStyles,
   userEarning,
   users,
@@ -747,7 +754,17 @@ export async function consumePendingDisconnect(io: Io, db: Db, userId: string): 
   }
   ghostKeysByUser.delete(userId);
   for (const roomId of affectedRooms) {
-    await broadcastPresence(io, db, roomId);
+    // Try to expire the room first — clearing the ghost may have left
+    // it empty (no live sockets, no remaining ghosts). Without this,
+    // a user-created public room they were the sole occupant of would
+    // linger in the rooms tree as a zombie row: the ghost-sweep timer
+    // (which would have archived it via expireIfEmpty after the grace
+    // window) gets cancelled by this consume path, so the only
+    // remaining archive trigger is a fresh occupant explicitly exiting
+    // or switching rooms — neither of which is going to happen for an
+    // unoccupied room.
+    const expired = await expireIfEmpty(io, db, roomId);
+    if (!expired) await broadcastPresence(io, db, roomId);
   }
   return true;
 }
@@ -1025,7 +1042,57 @@ export async function sendRoomBacklogTo(
   socket.emit("room:history_meta", { roomId, hasMore: hasMoreOlder });
 }
 
+/**
+ * Per-socket joinRoom serialization queue. socket.io's per-socket
+ * event dispatch processes events in order, but it does NOT wait for
+ * async handlers to finish before dispatching the next event. The
+ * room:join handler is async and contains many awaits (auth checks,
+ * membership lookups, presence-template fetches, broadcastPresence
+ * calls). Without this lock, two rapid room:join events from the
+ * same socket interleave: handler A captures priorRooms = [The_Spire]
+ * and calls socket.leave; while A yields on the next await, handler
+ * B captures priorRooms = [] (A already left), skips the leave loop,
+ * and socket.joins its target. A then resumes and socket.joins ITS
+ * target. The socket ends up in both target rooms, the userlist shows
+ * the user in both rooms, and the per-room join/leave broadcasts go
+ * to the wrong rooms.
+ *
+ * The fix is a per-socket promise chain: each new joinRoom awaits the
+ * previous one's completion before starting its own work. socket.io
+ * already wraps each socket with a unique object, so a WeakMap keyed
+ * on the socket gives us per-socket isolation that cleans up
+ * automatically on disconnect.
+ */
+const joinRoomQueue = new WeakMap<Sock, Promise<void>>();
+
 export async function joinRoom(
+  io: Io,
+  db: Db,
+  socket: Sock,
+  user: SessionUser,
+  roomId: string,
+  opts: { passwordOk?: boolean } = {},
+): Promise<void> {
+  // Chain this call onto the socket's queue. The queued promise
+  // resolves AFTER the previous joinRoom finishes (or after a
+  // resolved promise if there's no in-flight one). We then await
+  // the chain head before doing any work. The new promise we store
+  // back into the WeakMap covers BOTH waiting for the previous one
+  // AND running our own body — so the NEXT call's await sees the
+  // tail of our work and not the head.
+  const prev = joinRoomQueue.get(socket) ?? Promise.resolve();
+  let release: () => void = () => {};
+  const ours = new Promise<void>((res) => { release = res; });
+  joinRoomQueue.set(socket, prev.then(() => ours));
+  try {
+    await prev;
+    await joinRoomBody(io, db, socket, user, roomId, opts);
+  } finally {
+    release();
+  }
+}
+
+async function joinRoomBody(
   io: Io,
   db: Db,
   socket: Sock,
@@ -1097,6 +1164,34 @@ export async function joinRoom(
   //      anywhere) - drives "X has connected" vs "X arrived";
   //   2. which rooms this socket is leaving - drives "X left." in each.
   const userWasOnlineBefore = await userIsOnline(io, user.id, socket.id);
+
+  // Resolve the per-identity room-presence templates ONCE per join.
+  // Character-active rooms read the character's own templates; OOC
+  // rooms read the master's. Null on either column = use the default
+  // phrasing. The session-presence templates are master-only.
+  // Reads are bounded — one row from each table the user touches.
+  const presenceMaster = (await db
+    .select({
+      roomJoinTemplate: userEarning.roomJoinTemplate,
+      roomLeaveTemplate: userEarning.roomLeaveTemplate,
+      sessionConnectTemplate: userEarning.sessionConnectTemplate,
+    })
+    .from(userEarning)
+    .where(eq(userEarning.userId, user.id))
+    .limit(1))[0] ?? null;
+  const presenceCharacter = user.activeCharacterId
+    ? (await db
+        .select({
+          roomJoinTemplate: characterEarning.roomJoinTemplate,
+          roomLeaveTemplate: characterEarning.roomLeaveTemplate,
+        })
+        .from(characterEarning)
+        .where(eq(characterEarning.characterId, user.activeCharacterId))
+        .limit(1))[0] ?? null
+    : null;
+  const roomJoinTemplate = presenceCharacter?.roomJoinTemplate ?? presenceMaster?.roomJoinTemplate ?? null;
+  const roomLeaveTemplate = presenceCharacter?.roomLeaveTemplate ?? presenceMaster?.roomLeaveTemplate ?? null;
+  const sessionConnectTemplate = presenceMaster?.sessionConnectTemplate ?? null;
   // Reconnect detection: if a "has disconnected" was scheduled for this user
   // and hasn't fired yet, this connect is a reconnect inside the grace window.
   // Sweep any idle ghosts the user was holding. Returns true when at
@@ -1136,7 +1231,11 @@ export async function joinRoom(
     if (stillThere || isInBootGrace()) continue;
     const prevRoom = (await db.select().from(rooms).where(eq(rooms.id, prevId)).limit(1))[0];
     if (!prevRoom || prevRoom.replyMode === "nested") continue;
-    await addSystemMessage(io, db, prevId, `${user.displayName} has left the room.`);
+    await addSystemMessage(io, db, prevId, renderPresenceTemplate(
+      roomLeaveTemplate,
+      DEFAULT_PRESENCE_TEMPLATES.roomLeave,
+      { name: user.displayName, room: prevRoom.name },
+    ));
   }
 
   socket.join(`room:${roomId}`);
@@ -1227,17 +1326,42 @@ export async function joinRoom(
   const isRoomSwitch = priorRooms.length > 0;
   const baseGate = !otherSocketHere && !isInBootGrace() && !isForumRoom;
   if (loginIntent && !isRoomSwitch && baseGate && !isReconnect) {
-    await addSystemMessage(io, db, roomId, `${user.displayName} has connected.`);
+    await addSystemMessage(io, db, roomId, renderPresenceTemplate(
+      sessionConnectTemplate,
+      DEFAULT_PRESENCE_TEMPLATES.sessionConnect,
+      { name: user.displayName, room: room.name },
+    ));
   } else if (isRoomSwitch && baseGate) {
-    await addSystemMessage(io, db, roomId, `${user.displayName} has entered the room.`);
+    await addSystemMessage(io, db, roomId, renderPresenceTemplate(
+      roomJoinTemplate,
+      DEFAULT_PRESENCE_TEMPLATES.roomJoin,
+      { name: user.displayName, room: room.name },
+    ));
   }
-  if (!otherSocketHere && !isReconnect && !userWasOnlineBefore) {
+  // Consume the loginIntent flag after the first room of the session
+  // has been announced. Without this, any subsequent joinRoom on the
+  // same socket whose priorRooms snapshot looks empty (e.g. a queued
+  // re-join after a transient network event) would re-evaluate the
+  // first branch and emit a duplicate "X has connected." line.
+  (socket.data as { loginIntent?: boolean }).loginIntent = false;
+  if (!otherSocketHere && !isReconnect && !userWasOnlineBefore && !isRoomSwitch) {
     // Watcher pings: still relevant in forum rooms — they're per-user
     // notifications, not room broadcasts. Fire whenever this is a
     // true online transition regardless of room type. Decoupled from
     // the chat broadcast — a watcher should still get pinged when
     // their friend reconnects after a mobile suspend, even though
     // the chat itself stays silent.
+    //
+    // `!isRoomSwitch` is load-bearing here. `userWasOnlineBefore`
+    // alone is NOT a sufficient gate — `userIsOnline` excludes the
+    // current socket so a single-tab user moving room A → room B
+    // sees their only socket excluded from the check and the
+    // function returns false, even though the user is plainly
+    // already online. Without this gate, watchers received a
+    // spurious "Wallace is online" toast (which `App.tsx` paints
+    // into the watcher's CURRENT room as `☆ Wallace is online.`)
+    // immediately AFTER the user's "has left the room." broadcast.
+    // The room-switch path is not an online transition.
     await pingWatchers(io, db, user);
   }
 }
@@ -1722,18 +1846,28 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   // through the larger result set.
   const userBorderRows = userIds.length
     ? await db
-        .select({ userId: userEarning.userId, selectedBorderRankKey: userEarning.selectedBorderRankKey })
+        .select({
+          userId: userEarning.userId,
+          selectedBorderRankKey: userEarning.selectedBorderRankKey,
+          selectedFreeformBorderKey: userEarning.selectedFreeformBorderKey,
+        })
         .from(userEarning)
         .where(inArray(userEarning.userId, userIds))
     : [];
   const userBorderByUser = new Map(userBorderRows.map((r) => [r.userId, r.selectedBorderRankKey]));
+  const userFreeformBorderByUser = new Map(userBorderRows.map((r) => [r.userId, r.selectedFreeformBorderKey]));
   const charBorderRows = charIds.length
     ? await db
-        .select({ characterId: characterEarning.characterId, selectedBorderRankKey: characterEarning.selectedBorderRankKey })
+        .select({
+          characterId: characterEarning.characterId,
+          selectedBorderRankKey: characterEarning.selectedBorderRankKey,
+          selectedFreeformBorderKey: characterEarning.selectedFreeformBorderKey,
+        })
         .from(characterEarning)
         .where(inArray(characterEarning.characterId, charIds))
     : [];
   const charBorderByChar = new Map(charBorderRows.map((r) => [r.characterId, r.selectedBorderRankKey]));
+  const charFreeformBorderByChar = new Map(charBorderRows.map((r) => [r.characterId, r.selectedFreeformBorderKey]));
   // Pull owned-style configs per identity (since migration 0086).
   // Master configs come from `user_owned_name_styles`; per-character
   // configs come from `character_owned_name_styles`. We only fetch
@@ -1769,6 +1903,58 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   }
   for (const r of charOwnedStyleRows) {
     ownedConfigByIdentityStyle.set(`c::${r.characterId}::${r.styleKey}`, parseConfig(r.configJson));
+  }
+
+  // Parallel lookup for freeform-border per-identity color configs.
+  // Only fetched for identities whose `selectedFreeformBorderKey` is
+  // set — characters cascade off their own row, master cascades off
+  // its own row, so we hit each ownership table once with the union of
+  // (identity, borderKey) pairs.
+  const usersWithFreeformBorder = [...userFreeformBorderByUser.entries()]
+    .filter((e): e is [string, string] => e[1] !== null)
+    .map(([userId]) => userId);
+  const charsWithFreeformBorder = [...charFreeformBorderByChar.entries()]
+    .filter((e): e is [string, string] => e[1] !== null)
+    .map(([characterId]) => characterId);
+  const masterFreeformBorderRows = usersWithFreeformBorder.length > 0
+    ? await db
+        .select({
+          userId: userOwnedFreeformBorders.userId,
+          borderKey: userOwnedFreeformBorders.borderKey,
+          configJson: userOwnedFreeformBorders.configJson,
+        })
+        .from(userOwnedFreeformBorders)
+        .where(inArray(userOwnedFreeformBorders.userId, usersWithFreeformBorder))
+    : [];
+  const charFreeformBorderRows = charsWithFreeformBorder.length > 0
+    ? await db
+        .select({
+          characterId: characterOwnedFreeformBorders.characterId,
+          borderKey: characterOwnedFreeformBorders.borderKey,
+          configJson: characterOwnedFreeformBorders.configJson,
+        })
+        .from(characterOwnedFreeformBorders)
+        .where(inArray(characterOwnedFreeformBorders.characterId, charsWithFreeformBorder))
+    : [];
+  function parseFreeformConfig(json: string | null): Record<string, string> | null {
+    if (!json) return null;
+    try {
+      const parsed = JSON.parse(json);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v === "string" && v.length > 0) out[k] = v;
+      }
+      return Object.keys(out).length > 0 ? out : null;
+    } catch { return null; }
+  }
+  const masterFreeformConfigByUserBorder = new Map<string, Record<string, string> | null>();
+  for (const r of masterFreeformBorderRows) {
+    masterFreeformConfigByUserBorder.set(`u::${r.userId}::${r.borderKey}`, parseFreeformConfig(r.configJson));
+  }
+  const charFreeformConfigByCharBorder = new Map<string, Record<string, string> | null>();
+  for (const r of charFreeformBorderRows) {
+    charFreeformConfigByCharBorder.set(`c::${r.characterId}::${r.borderKey}`, parseFreeformConfig(r.configJson));
   }
 
   // Render one occupant per resolved identity. Two characters of the
@@ -1842,6 +2028,14 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     const selectedBorderRankKey = c
       ? (charBorderByChar.get(c.id) ?? null)
       : (userBorderByUser.get(u.id) ?? null);
+    const selectedFreeformBorderKey = c
+      ? (charFreeformBorderByChar.get(c.id) ?? null)
+      : (userFreeformBorderByUser.get(u.id) ?? null);
+    const freeformBorderConfig = selectedFreeformBorderKey
+      ? (c
+          ? (charFreeformConfigByCharBorder.get(`c::${c.id}::${selectedFreeformBorderKey}`) ?? null)
+          : (masterFreeformConfigByUserBorder.get(`u::${u.id}::${selectedFreeformBorderKey}`) ?? null))
+      : null;
     const inlineAvatarEnabled = c
       ? (charInlineAvatarByChar.get(c.id) ?? false)
       : (masterInlineAvatarByUser.get(u.id) ?? false);
@@ -1851,6 +2045,10 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     // the occupant row represents the user's current character.
     const masterAvatarUrl = u.avatarUrl ?? null;
     const masterSelectedBorderRankKey = userBorderByUser.get(u.id) ?? null;
+    const masterSelectedFreeformBorderKey = userFreeformBorderByUser.get(u.id) ?? null;
+    const masterFreeformBorderConfig = masterSelectedFreeformBorderKey
+      ? (masterFreeformConfigByUserBorder.get(`u::${u.id}::${masterSelectedFreeformBorderKey}`) ?? null)
+      : null;
     const masterInlineAvatarEnabled = masterInlineAvatarByUser.get(u.id) ?? false;
     out.push({
       userId: u.id,
@@ -1879,9 +2077,13 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
       masterNameStyleConfig: masterStyleConfig,
       avatarUrl: occupantAvatarUrl,
       selectedBorderRankKey,
+      selectedFreeformBorderKey,
+      freeformBorderConfig,
       inlineAvatarEnabled,
       masterAvatarUrl,
       masterSelectedBorderRankKey,
+      masterSelectedFreeformBorderKey,
+      masterFreeformBorderConfig,
       masterInlineAvatarEnabled,
       useRankAsUserlistIcon: u.useRankAsUserlistIcon,
     });

@@ -8,18 +8,20 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import pino from "pino";
 import { Server as IoServer } from "socket.io";
 import { ZodError } from "zod";
 import {
+  DEFAULT_PRESENCE_TEMPLATES,
   isAdminRole,
+  renderPresenceTemplate,
   type ClientToServerEvents,
   type ServerToClientEvents,
 } from "@thekeep/shared";
 
 import { db } from "./db/index.js";
-import { bans, characters, roomMembers, roomThreadCategories, rooms, sessions, users } from "./db/schema.js";
+import { bans, characters, roomMembers, roomThreadCategories, rooms, sessions, userEarning, users } from "./db/schema.js";
 import { CommandRegistry } from "./commands/registry.js";
 import { registerBuiltins } from "./commands/builtins/index.js";
 import { dispatchChatInput } from "./realtime/dispatch.js";
@@ -37,6 +39,12 @@ import {
   userIdentityHasSocketInRoom,
   userIsOnline,
 } from "./realtime/broadcast.js";
+import {
+  clearTyperEverywhere,
+  clearTyperFromRoom,
+  markTyping,
+  startTypingTracker,
+} from "./realtime/typing.js";
 import { lookupProfile } from "./commands/builtins/profile.js";
 import { emitMutualSettled, respondToPrompt } from "./titles/service.js";
 import {
@@ -416,6 +424,42 @@ async function main() {
   // idle ghost finally times out. We don't pass io through `registerIdleGhost`
   // every call because the timer outlives the call that scheduled it.
   setGhostSweepIo(io);
+  // Phase 4 typing indicator — kicks off the periodic sweep that
+  // expires stale typer entries and re-broadcasts shrunken sets.
+  // Idempotent if called more than once.
+  startTypingTracker(io, db);
+
+  // Zombie-room sweep. Fires once 60s after boot — long enough that
+  // every client that was in a user-created room when the server
+  // restarted has had a chance to reconnect and re-occupy it, but
+  // not so long that the rooms tree drags around a dead room for
+  // half a session. Any non-system, non-archived room with zero
+  // live sockets at sweep time gets archived (its config row
+  // survives for resurrection on a fresh /create with the same
+  // name). Without this, a user-created room whose owner closed
+  // the tab AND never came back inside the idle-grace window — or
+  // a room that was active when the server last shut down and
+  // nobody returned to — would linger in the tree forever as a
+  // ghost entry with (0) occupants. The runtime triggers
+  // (expireIfEmpty on exit / room-switch / ghost-sweep /
+  // consume-pending-disconnect) only fire when there's a live
+  // event to ride on; a "nobody is here and nobody is coming"
+  // room produces no events to fire on.
+  const ZOMBIE_SWEEP_DELAY_MS = 60_000;
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const candidates = await db
+          .select({ id: rooms.id })
+          .from(rooms)
+          .where(and(eq(rooms.isSystem, false), isNull(rooms.archivedAt)));
+        for (const r of candidates) {
+          try { await expireIfEmpty(io, db, r.id); }
+          catch { /* swallow — one bad row shouldn't stop the sweep */ }
+        }
+      } catch { /* swallow — sweep failure shouldn't crash boot */ }
+    })();
+  }, ZOMBIE_SWEEP_DELAY_MS);
 
   // Routes that need io for socket-room introspection (currently-online
   // occupants per room, presence rebroadcast on character delete, etc.) -
@@ -795,11 +839,46 @@ async function main() {
           ...(threadTitle ? { threadTitle } : {}),
           ...(replyToId ? { replyToId } : {}),
         });
+        // Drop this user's typing-indicator entry for the room now
+        // that the message landed. Without this, a re-pulse mid-send
+        // could leave their "is typing…" hanging in peers' UIs for
+        // the entry-ttl window after their actual message displayed.
+        clearTyperFromRoom(io, db, { roomId: payload.roomId, userId: user.id });
         ack?.({ ok: true });
       } catch (err) {
         log.error({ err }, "chat:input error");
         ack?.({ ok: false, code: "ERR", message: err instanceof Error ? err.message : "error" });
       }
+    });
+
+    /**
+     * Typing pulse — see TypingTracker for the broadcast logic.
+     * Authentication piggybacks on the connection's session
+     * (`user` captured above); we don't gate on
+     * `checkAndExtendSession` here because typing pulses fire many
+     * times during normal use and shouldn't pay the session-write
+     * cost of a chat send. Sessions still expire on chat:input /
+     * presence:active / heartbeat — typing alone never extends them.
+     *
+     * Cheap rate-limit: drop pulses arriving faster than once every
+     * 1.5s for the same room. The client throttles to ~2s already;
+     * this guards against a misbehaving / hostile client.
+     */
+    let lastTypingPulseAt = 0;
+    socket.on("chat:typing", (payload) => {
+      const now = Date.now();
+      if (now - lastTypingPulseAt < 1_500) return;
+      lastTypingPulseAt = now;
+      // Reject pulses for rooms this socket isn't subscribed to —
+      // typing in a room you can't see has no signal value and
+      // would let a stale tab pollute another room's indicator.
+      if (!socket.rooms.has(`room:${payload.roomId}`)) return;
+      markTyping(io, db, {
+        roomId: payload.roomId,
+        userId: user.id,
+        displayName: user.displayName,
+        characterId: user.activeCharacterId ?? null,
+      });
     });
 
     socket.on("room:join", async (payload, ack) => {
@@ -859,6 +938,7 @@ async function main() {
     socket.on("room:leave", async (payload) => {
       if (!(await checkAndExtendSession())) return;
       socket.leave(`room:${payload.roomId}`);
+      clearTyperFromRoom(io, db, { roomId: payload.roomId, userId: user.id });
       await broadcastPresence(io, db, payload.roomId);
     });
 
@@ -1030,6 +1110,12 @@ async function main() {
       const roomIds = [...socket.rooms]
         .filter((r) => r.startsWith("room:"))
         .map((r) => r.slice(5));
+      // Drop any typing-indicator entries this user had. If a
+      // sibling tab is still typing, its next pulse (within ~2s)
+      // re-adds them. Worst case is a brief flicker in peers' UIs;
+      // far less awkward than a stuck "is typing…" pinned to a
+      // disconnected tab for the full TTL.
+      clearTyperEverywhere(io, db, user.id);
       // Snapshot the user identity now - by the time the deferred cleanup
       // runs, the SessionUser object on this socket may already be gone.
       const userId = user.id;
@@ -1088,6 +1174,16 @@ async function main() {
           //     shows the row faded with "(idle)". The room is held
           //     open via the ghost's expireIfEmpty short-circuit until
           //     the idle window elapses with no return.
+          // Master-only session-exit template lookup. Same fetch
+          // shape the join path uses for the connect side. One row
+          // per disconnect; null = use the default "X has
+          // disconnected." phrasing.
+          const sessionExitRow = (await db
+            .select({ sessionExitTemplate: userEarning.sessionExitTemplate })
+            .from(userEarning)
+            .where(eq(userEarning.userId, userId))
+            .limit(1))[0];
+          const sessionExitTemplate = sessionExitRow?.sessionExitTemplate ?? null;
           for (const id of roomIds) {
             if (exitIntent) {
               const expired = await expireIfEmpty(io, db, id);
@@ -1098,7 +1194,11 @@ async function main() {
                 // Forum rooms suppress regardless of intent — the topic
                 // feed isn't a chat log.
                 if (r?.replyMode !== "nested") {
-                  await addSystemMessage(io, db, id, `${displayName} has disconnected.`);
+                  await addSystemMessage(io, db, id, renderPresenceTemplate(
+                    sessionExitTemplate,
+                    DEFAULT_PRESENCE_TEMPLATES.sessionExit,
+                    { name: displayName, room: r?.name ?? "" },
+                  ));
                 }
               }
               await broadcastPresence(io, db, id);

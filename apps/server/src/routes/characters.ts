@@ -10,12 +10,25 @@ import { bioHtmlForEdit, sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
 import { getSettings, parseOwnThemeJson, parseUserThemeJson } from "../settings.js";
 import { broadcastPresence } from "../realtime/broadcast.js";
+import { eqNameInsensitive } from "../lib/nameLookup.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
 /** Same regex used by `/char create` so the two creation paths stay in lockstep. */
 const CHAR_NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
+
+/**
+ * Mirrors `normalizeCharName` in commands/builtins/char.ts. Folds NBSP
+ * (U+00A0) to ASCII space before the regex test so a name typed with a
+ * "fake space" — autocorrect on macOS / iOS, paste from a NBSP-using
+ * source, or a click on an existing master-username link whose
+ * canonical storage IS NBSP — lands without a confusing BAD_CHAR_NAME
+ * error. Keep the two normalizers in sync.
+ */
+function normalizeCharName(input: string): string {
+  return input.replace(/\u00A0/g, " ").trim();
+}
 const createCharacterBody = z.object({ name: z.string().min(1).max(40) }).strict();
 const activeCharacterBody = z.object({
   /** null clears the active character (drops the user back to OOC). */
@@ -356,18 +369,25 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     try { body = createCharacterBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
 
-    const name = body.name.trim();
+    const name = normalizeCharName(body.name);
     if (!CHAR_NAME_RX.test(name)) {
       reply.code(400);
       return { error: "Character name must be 1-40 chars: letters, numbers, spaces, _ - '" };
     }
 
+    // Space-insensitive dup check — uses the same helper the friend /
+    // DM / whisper paths use, so a creating user can't sneak around an
+    // existing "William Wallace" by retyping it with NBSP between the
+    // words (or vice-versa). Pairs with `normalizeCharName` above which
+    // already folds NBSP→space on the incoming side; this guards
+    // against legacy rows that may have been stored with NBSP before
+    // the normalization landed.
     const existing = (await db
       .select()
       .from(characters)
       .where(and(
         eq(characters.userId, me.id),
-        sql`lower(${characters.name}) = ${name.toLowerCase()}`,
+        eqNameInsensitive(characters.name, name),
         isNull(characters.deletedAt),
       ))
       .limit(1))[0];

@@ -8,6 +8,7 @@ import type {
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { useChat } from "../state/store.js";
 import { readError, withIdentityQuery } from "../lib/http.js";
+import { nameForCommand } from "../lib/commandText.js";
 import { parseInline } from "../lib/markdown.js";
 import { FormattingToolbar } from "./FormattingToolbar.js";
 import { SynonymPopup } from "./SynonymPopup.js";
@@ -266,7 +267,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   /**
    * Inbox filter id, modal-local. Drives which identity's friends /
    * DMs / friend-requests show in the left pane and which identity the
-   * thread send routes through. Defaults to the user's global active
+   * thread send routes through. Seeds from the user's global active
    * character so the modal opens to the "current voice" inbox, but the
    * chip switcher at the top of the list can override it without
    * firing `me:switch-character` — that's the design choice from the
@@ -276,6 +277,12 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
    * (the /char dropdown, a slash command, another tab), we mirror that
    * change into the filter — the assumption is that any global switch
    * is also what they want to see in their messages.
+   *
+   * Auto-jump on open: see the effect below. If the seeded identity has
+   * no unread / pending but another identity does, we hop the filter to
+   * that identity on the first counts-load so the user lands directly
+   * on the messages the badge is telling them about — instead of an
+   * empty inbox they have to puzzle out by clicking the dropdown.
    */
   const [inboxFilterCharId, setInboxFilterCharId] = useState<string | null>(activeCharacterId);
   useEffect(() => {
@@ -303,15 +310,33 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   const inboxCounts = useChat((s) => s.inboxCountsByIdentity);
   const refreshInboxCounts = useChat((s) => s.refreshInboxCounts);
 
+  /**
+   * Which `inboxFilterCharId` the current `dmConversations` map was
+   * loaded for. Auto-open consults this so it doesn't grab a target
+   * from the previous chip's stale data — that was the bug behind
+   * "click Kaal chip, Wallace conv auto-opens but the unread badge
+   * never clears": the auto-open ran against OOC's leftover convs
+   * before refreshLists had repopulated Kaal's, picked a target that
+   * wasn't actually in Kaal's inbox, and ThreadPane mounted with
+   * `conversation === null` (so the /read POST never fired).
+   * `undefined` = "no fetch has resolved yet this open."
+   */
+  const [convsLoadedForCharId, setConvsLoadedForCharId] = useState<string | null | undefined>(undefined);
+
   /** Refetch the left-pane lists (friends + requests + conversations). */
   const refreshLists = useCallback(async () => {
     setLoadingList(true);
     setError(null);
+    // Pin the filter id at fetch start. If the user flips chips before
+    // this Promise.all resolves, we'll discard the late result rather
+    // than letting it overwrite the new chip's data — classic stale-
+    // response guard.
+    const startedForCharId = inboxFilterCharId;
     try {
       const [fr, fq, dm] = await Promise.all([
-        fetch(withIdentityQuery("/me/friends", inboxFilterCharId), { credentials: "include" }),
-        fetch(withIdentityQuery("/me/friend-requests", inboxFilterCharId), { credentials: "include" }),
-        fetch(withIdentityQuery("/me/dms", inboxFilterCharId), { credentials: "include" }),
+        fetch(withIdentityQuery("/me/friends", startedForCharId), { credentials: "include" }),
+        fetch(withIdentityQuery("/me/friend-requests", startedForCharId), { credentials: "include" }),
+        fetch(withIdentityQuery("/me/dms", startedForCharId), { credentials: "include" }),
       ]);
       if (!fr.ok && fr.status !== 401) throw new Error(await readError(fr));
       if (!fq.ok && fq.status !== 401) throw new Error(await readError(fq));
@@ -325,6 +350,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
       // list. Local component state is no longer involved.
       setPendingFriendRequests(reqJson.requests);
       setDmConversations(dmJson.conversations);
+      setConvsLoadedForCharId(startedForCharId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "load failed");
     } finally {
@@ -361,6 +387,64 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   useEffect(() => {
     void refreshInboxCounts();
   }, [refreshInboxCounts, dmConversations, pendingFriendRequests, refreshKey, inboxCountsVersion]);
+
+  /**
+   * Auto-jump the inbox filter to the identity that actually holds the
+   * unread items, when the seeded identity is empty. This is the fix
+   * for "the badge says I have messages but my inbox is empty" — the
+   * user got a DM (or friend request) on Char B while active as Char A,
+   * the modal seeded to Char A's empty inbox, and the small pip on the
+   * closed dropdown wasn't loud enough to point them at Char B.
+   *
+   * Runs ONCE per modal open (ref-gated) so a deliberate later chip
+   * switch to an empty identity isn't yanked back. Skipped entirely
+   * when the modal was opened with `initialOtherUserId` — the caller
+   * already picked a specific target, second-guessing the chip would
+   * land them somewhere else and break the deep-link.
+   *
+   * Tie-breaking: pick the identity with the highest combined
+   * (unreadDms + pendingFriendRequests), preferring unread DMs on a
+   * tie because actual messages are more time-sensitive than pending
+   * friendships. Falls back to the seeded filter when nothing has
+   * unread anywhere.
+   */
+  const autoJumpAttempted = useRef(false);
+  useEffect(() => {
+    if (autoJumpAttempted.current) return;
+    if (initialOtherUserId) {
+      // Caller picked a target — don't override their chip.
+      autoJumpAttempted.current = true;
+      return;
+    }
+    if (inboxCounts.size === 0) return; // counts haven't loaded yet
+    const here = inboxCounts.get(inboxFilterCharId);
+    const hereTotal = (here?.unreadDms ?? 0) + (here?.pendingFriendRequests ?? 0);
+    if (hereTotal > 0) {
+      // Seeded identity already has something to look at — don't move.
+      autoJumpAttempted.current = true;
+      return;
+    }
+    let bestId: string | null | undefined = undefined;
+    let bestDms = 0;
+    let bestTotal = 0;
+    for (const row of inboxCounts.values()) {
+      const total = row.unreadDms + row.pendingFriendRequests;
+      if (total === 0) continue;
+      const wins =
+        bestId === undefined
+        || total > bestTotal
+        || (total === bestTotal && row.unreadDms > bestDms);
+      if (wins) {
+        bestId = row.characterId;
+        bestDms = row.unreadDms;
+        bestTotal = total;
+      }
+    }
+    autoJumpAttempted.current = true;
+    if (bestId !== undefined && bestId !== inboxFilterCharId) {
+      setInboxFilterCharId(bestId);
+    }
+  }, [inboxCounts, inboxFilterCharId, initialOtherUserId]);
 
   // Re-fire refreshLists whenever the inbox filter changes — Char A
   // and Char B keep separate friends + DM inboxes, so flipping
@@ -402,6 +486,14 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
    *     button has already picked the target).
    *   - The user has already manually selected something this session.
    *   - No conversations exist yet (empty state stays empty).
+   *   - `dmConversations` is still loaded for a PREVIOUS chip
+   *     (`convsLoadedForCharId !== inboxFilterCharId`). Without this
+   *     gate, clicking a chip auto-opened a target from the previous
+   *     chip's stale conversation list — ThreadPane then mounted with
+   *     `conversation === null` after refreshLists landed, the /read
+   *     POST never fired, and the unread badge on the *actual* most-
+   *     recent thread of the new chip persisted forever.
+   *
    * Triggers only on the transition from null → first-known recency,
    * so re-renders that don't change the conversation set don't
    * stomp the user's later picks.
@@ -410,6 +502,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   useEffect(() => {
     if (autoOpenAttempted.current) return;
     if (selectedTarget !== null) return;
+    if (convsLoadedForCharId !== inboxFilterCharId) return; // stale data — wait
     const convs = Object.values(dmConversations);
     if (convs.length === 0) return;
     autoOpenAttempted.current = true;
@@ -421,7 +514,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
     // tapped Messages and probably wants the inbox view first. Desktop
     // shows both panes anyway, so the auto-selection just highlights
     // the row and seeds the right pane.
-  }, [dmConversations, selectedTarget]);
+  }, [dmConversations, selectedTarget, convsLoadedForCharId, inboxFilterCharId]);
 
   /**
    * Compose the unified list shown in the left pane. Order:
@@ -529,12 +622,53 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
           c.otherUserId === selectedTarget.userId
           && c.otherCharacterId === selectedTarget.characterId,
         );
-      if (conv && conv.unreadCount > 0) {
-        upsertDmConversation({ ...conv, unreadCount: 0 });
+      if (conv) {
+        // Optimistic clear so the badge drops to 0 immediately on
+        // selection — the user expects opening a thread to "consume"
+        // its notification without waiting for the server round-trip.
+        if (conv.unreadCount > 0) {
+          upsertDmConversation({ ...conv, unreadCount: 0 });
+        }
+        // ACTUAL server-side mark-read. Previously this only fired
+        // from ThreadPane's seed effect, gated on `conversation?.id`
+        // changing — so re-clicking the already-selected row, or
+        // auto-opening a thread whose conv.id matched a prior selection,
+        // updated the local store but never advanced
+        // `directConversationReads.lastReadAt`. The next refreshLists
+        // refetch returned the stale server unread count and the
+        // "cleared" badge snapped back to its old value. Firing the
+        // POST here — keyed on identity-aware selection rather than
+        // conversation-id-change — closes that gap.
+        //
+        // `inboxFilterCharId` (not the global `activeCharacterId`) is
+        // the right characterId to send: the conversation is pinned to
+        // the identity the user is currently filtered to, and the
+        // server's identity auth on /read checks the request character
+        // against the conv's pinned side. Sending the global active
+        // character (which may be different from the chip filter)
+        // produced 404s on every off-active-identity read.
+        void fetch(`/me/dms/${conv.id}/read`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            upTo: Date.now(),
+            characterId: inboxFilterCharId ?? undefined,
+          }),
+        })
+          .then((r) => {
+            if (!r.ok) return; // 401/404/etc — leave the optimistic clear standing for UX
+            useChat.getState().bumpInboxCountsVersion();
+            void useChat.getState().refreshInboxCounts();
+          })
+          .catch(() => { /* network blip — next selection will retry */ });
       }
     }
     return () => { setOpenDmOtherUser(null); };
-  }, [selectedTarget, setOpenDmOtherUser, upsertDmConversation]);
+    // `inboxFilterCharId` is in deps so the /read POST carries the
+    // right characterId; the effect itself is fundamentally about
+    // "the user opened this thread under THIS identity."
+  }, [selectedTarget, setOpenDmOtherUser, upsertDmConversation, inboxFilterCharId]);
 
   // Accept/decline route through identity-keyed endpoints, NOT the
   // `/accept <name>` / `/decline <name>` slash commands. Reason:
@@ -581,7 +715,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   }
   function removeFriend(f: FriendListEntry) {
     if (!window.confirm(`Remove ${f.displayName} from your friends list?`)) return;
-    onCommand(`/unfriend ${f.username}`);
+    onCommand(`/unfriend ${nameForCommand(f.username)}`);
     window.setTimeout(() => setRefreshKey((v) => v + 1), 500);
   }
   /**
@@ -1341,6 +1475,27 @@ function CharacterSwitcher({
   for (const c of characters) if (c.id !== selectedId) otherUnread += badgeFor(c.id);
   if (selectedId !== null) otherUnread += badgeFor(null);
 
+  // Build the "jump-to-identity" hint strip — one pill per OTHER
+  // identity that has unread DMs or pending friend requests. Click
+  // jumps the inbox filter straight there without going through the
+  // dropdown. This was added because the old "X unread on other
+  // identities" pip told users SOMETHING was waiting but not WHICH
+  // chip to click, so reports of "the badge says I have messages but
+  // my inbox is empty" persisted even though the data was there.
+  interface JumpHint { id: string | null; label: string; avatarUrl: string | null; count: number }
+  const jumpHints: JumpHint[] = [];
+  if (selectedId !== null) {
+    const oocCount = badgeFor(null);
+    if (oocCount > 0) jumpHints.push({ id: null, label: "OOC", avatarUrl: null, count: oocCount });
+  }
+  for (const c of characters) {
+    if (c.id === selectedId) continue;
+    const n = badgeFor(c.id);
+    if (n > 0) jumpHints.push({ id: c.id, label: c.name, avatarUrl: c.avatarUrl, count: n });
+  }
+  // Sort hottest first so the loudest chip is closest to the dropdown.
+  jumpHints.sort((a, b) => b.count - a.count);
+
   function row(id: string | null, label: string, avatarUrl: string | null) {
     const b = badgeFor(id);
     const active = selectedId === id;
@@ -1388,6 +1543,31 @@ function CharacterSwitcher({
         ) : null}
         <span aria-hidden className="text-keep-muted">{open ? "▴" : "▾"}</span>
       </button>
+      {/* "Jump to other identity" strip. Only renders when at least
+          one OTHER identity has unread DMs or pending friend requests —
+          on a clean inbox the strip is invisible and the dropdown
+          header carries no extra weight. Each pill is its own click
+          target so the user goes straight to the right chip without
+          opening the dropdown first. */}
+      {jumpHints.length > 0 ? (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {jumpHints.map((h) => (
+            <button
+              key={h.id ?? "master"}
+              type="button"
+              onClick={() => onSelect(h.id)}
+              title={`Switch to ${h.label} — ${h.count} waiting`}
+              className="flex items-center gap-1 rounded-full border border-keep-action/40 bg-keep-action/10 px-1.5 py-0.5 text-[10px] text-keep-action hover:bg-keep-action/20"
+            >
+              <Avatar url={h.avatarUrl} name={h.label} size={14} />
+              <span className="max-w-[8rem] truncate font-medium">{h.label}</span>
+              <span className="rounded-full bg-keep-accent px-1 py-px font-semibold leading-none text-keep-bg">
+                {h.count > 99 ? "99+" : h.count}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       {open ? (
         <div
           role="listbox"

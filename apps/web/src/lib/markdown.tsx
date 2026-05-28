@@ -227,12 +227,13 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
             alt=""
             loading="lazy"
             referrerPolicy="no-referrer"
-            // 1.2em keeps the icon visually anchored to the surrounding
-            // text line — taller than cap-height, shorter than line-
-            // height — so it reads as inline punctuation rather than
-            // pushing the row taller. align-middle keeps it centered
-            // against the text baseline.
-            className="inline-block h-[1.2em] w-auto rounded-sm align-middle"
+            // 1.75em renders the icon as a small inline thumbnail —
+            // clearly recognizable as the actual item art rather than
+            // a tiny punctuation-sized hint. align-middle keeps it
+            // centered against the text baseline; the row's
+            // line-height absorbs the extra height without breaking
+            // single-line message rhythm.
+            className="inline-block h-[1.75em] w-auto rounded-sm align-middle"
           />
         ),
       };

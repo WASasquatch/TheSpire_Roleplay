@@ -60,10 +60,13 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   const fontStep = useChat((s) => s.fontStep);
   const setFontStep = useChat((s) => s.setFontStep);
   const refreshIntervalSec = useChat((s) => s.refreshIntervalSec);
-  // Total "things in Messages that need attention." Sums unread DMs
-  // AND pending friend requests across EVERY identity the user owns
-  // (master / OOC + each character), so both the messenger ✉ icon
-  // and the Tools menu Messages row show one combined cue.
+  // Per-kind totals across EVERY identity the user owns (master / OOC
+  // + each character). Kept as two numbers — not one combined cue —
+  // because reports of "the badge said I have messages but they were
+  // friend requests" kept landing: conflating the two left users
+  // hunting for a DM that wasn't there. The envelope renders two
+  // distinct pips so the user can tell apart "you have unread DMs" vs
+  // "someone wants to friend you" without opening the modal.
   //
   // Reads from `inboxCountsByIdentity` (refreshed on every dm:new /
   // dm:read / friend:request by the App-level socket handlers, plus
@@ -75,13 +78,20 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   // no signal that a message arrived for one of their other
   // identities. Summing the per-identity counts surfaces every
   // unread regardless of which chip the viewer is currently on.
-  const messagesBadgeTotal = useChat((s) => {
+  const unreadDmsTotal = useChat((s) => {
     let n = 0;
-    for (const row of s.inboxCountsByIdentity.values()) {
-      n += row.unreadDms + row.pendingFriendRequests;
-    }
+    for (const row of s.inboxCountsByIdentity.values()) n += row.unreadDms;
     return n;
   });
+  const pendingFriendRequestsTotal = useChat((s) => {
+    let n = 0;
+    for (const row of s.inboxCountsByIdentity.values()) n += row.pendingFriendRequests;
+    return n;
+  });
+  // Combined total — used by the inner Tools-drawer "Messages" row
+  // (one-line list item that doesn't have room for two distinct pips)
+  // and as the keep-it-simple hover summary on the envelope.
+  const messagesBadgeTotal = unreadDmsTotal + pendingFriendRequestsTotal;
 
   function cycleFont() {
     setFontStep(((fontStep + 1) % 4) as 0 | 1 | 2 | 3);
@@ -377,16 +387,46 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
         <button
           type="button"
           onClick={onOpenMessages}
-          title={messagesBadgeTotal > 0
-            ? `${messagesBadgeTotal} unread message${messagesBadgeTotal === 1 ? "" : "s"} or friend request${messagesBadgeTotal === 1 ? "" : "s"} — open Messages`
-            : "Open Messages"}
+          title={(() => {
+            // Spell out both numbers in the tooltip — the inner Tools
+            // drawer doesn't have room for two pips so this is the
+            // disambiguation surface for users who can't tell the
+            // DM cue from the friend-request cue at a glance.
+            const parts: string[] = [];
+            if (unreadDmsTotal > 0) {
+              parts.push(`${unreadDmsTotal} unread DM${unreadDmsTotal === 1 ? "" : "s"}`);
+            }
+            if (pendingFriendRequestsTotal > 0) {
+              parts.push(`${pendingFriendRequestsTotal} friend request${pendingFriendRequestsTotal === 1 ? "" : "s"}`);
+            }
+            return parts.length > 0 ? `${parts.join(" + ")} — open Messages` : "Open Messages";
+          })()}
           aria-label="Open Messages"
           className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-sm leading-none hover:bg-keep-banner lg:h-7 lg:w-7"
         >
           <span aria-hidden>✉</span>
-          {messagesBadgeTotal > 0 ? (
-            <span className="absolute -right-1 -top-1 min-w-[1.1rem] rounded-full bg-keep-action px-1 py-0 text-center text-[10px] font-semibold leading-tight text-keep-bg">
-              {messagesBadgeTotal > 99 ? "99+" : messagesBadgeTotal}
+          {/* DM pip — top-right, accent red. Reserved for actual unread
+              messages; users learn to read this corner as "someone
+              messaged me." */}
+          {unreadDmsTotal > 0 ? (
+            <span
+              aria-hidden
+              className="absolute -right-1 -top-1 min-w-[1.1rem] rounded-full bg-keep-action px-1 py-0 text-center text-[10px] font-semibold leading-tight text-keep-bg"
+            >
+              {unreadDmsTotal > 99 ? "99+" : unreadDmsTotal}
+            </span>
+          ) : null}
+          {/* Friend-request pip — bottom-right, accent yellow, with a
+              "+" prefix so it reads as "someone wants to add you" even
+              for a low number. Kept visually distinct from the DM pip
+              so the user doesn't conflate them and go hunting for a
+              message that's actually just a friendship invite. */}
+          {pendingFriendRequestsTotal > 0 ? (
+            <span
+              aria-hidden
+              className="absolute -bottom-1 -right-1 min-w-[1.1rem] rounded-full bg-keep-accent px-1 py-0 text-center text-[10px] font-semibold leading-tight text-keep-bg"
+            >
+              +{pendingFriendRequestsTotal > 99 ? "99" : pendingFriendRequestsTotal}
             </span>
           ) : null}
         </button>

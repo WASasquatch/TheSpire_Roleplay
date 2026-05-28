@@ -3,23 +3,50 @@ import { nanoid } from "nanoid";
 import { characters, users } from "../../db/schema.js";
 import { resolveDisplayName } from "../../auth/session.js";
 import { getSettings } from "../../settings.js";
+import { eqNameInsensitive } from "../../lib/nameLookup.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const MAX_NAME_LEN = 40;
 const NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
+
+/**
+ * Normalize a typed character name to the storage form before the
+ * regex check. The regex itself only accepts ASCII space (U+0020),
+ * but real users routinely hand us NBSP (U+00A0) inside names —
+ * keyboard autocorrect ("smart" typography on macOS / iOS), pasting
+ * from a source that uses NBSP for layout, or clicking an existing
+ * master-username link (whose canonical storage IS NBSP and which the
+ * client surfaces verbatim into the composer). Folding NBSP to ASCII
+ * space here turns a confusing "Character name must be 1-40 chars:
+ * letters, numbers, spaces, _ - '" failure — the error message
+ * literally promises spaces work — into the expected behavior, while
+ * keeping the regex narrow enough to reject genuine whitespace junk
+ * like tabs and newlines.
+ *
+ * Trims surrounding whitespace too so a trailing space typed by the
+ * user (or left over from the dispatcher's leading-token strip)
+ * doesn't bloat the stored value.
+ */
+function normalizeCharName(input: string): string {
+  return input.replace(/\u00A0/g, " ").trim();
+}
 
 function notice(ctx: CommandContext, code: string, message: string) {
   ctx.socket.emit("error:notice", { code, message });
 }
 
 async function findCharacter(ctx: CommandContext, name: string) {
+  // Space-/case-insensitive lookup — same helper the friend / DM /
+  // whisper paths use. Tolerates NBSP-vs-ASCII-space mismatches between
+  // the typed query and whatever's stored, regardless of which form the
+  // user used when creating the character.
   const rows = await ctx.db
     .select()
     .from(characters)
     .where(
       and(
         eq(characters.userId, ctx.user.id),
-        sql`lower(${characters.name}) = ${name.toLowerCase()}`,
+        eqNameInsensitive(characters.name, name),
         isNull(characters.deletedAt),
       ),
     )
@@ -27,7 +54,8 @@ async function findCharacter(ctx: CommandContext, name: string) {
   return rows[0];
 }
 
-async function createSubcommand(ctx: CommandContext, name: string) {
+async function createSubcommand(ctx: CommandContext, rawName: string) {
+  const name = normalizeCharName(rawName);
   if (!NAME_RX.test(name) || name.length > MAX_NAME_LEN) {
     return notice(
       ctx,
@@ -84,7 +112,8 @@ async function applyTabCharacter(
   });
 }
 
-async function switchSubcommand(ctx: CommandContext, name: string) {
+async function switchSubcommand(ctx: CommandContext, rawName: string) {
+  const name = normalizeCharName(rawName);
   // "OOC" / "master" / "off" / "none" all mean "drop the active character and
   // become the master account" - this is the natural inverse of /char switch
   // that's discoverable without remembering /char clear.
@@ -100,13 +129,15 @@ async function clearSubcommand(ctx: CommandContext) {
   await applyTabCharacter(ctx, null);
 }
 
-async function editSubcommand(ctx: CommandContext, name: string) {
+async function editSubcommand(ctx: CommandContext, rawName: string) {
+  const name = normalizeCharName(rawName);
   const c = await findCharacter(ctx, name);
   if (!c) return notice(ctx, "NO_CHAR", `No character named "${name}".`);
   ctx.socket.emit("ui:hint", { kind: "open-character-editor", characterId: c.id });
 }
 
-async function deleteSubcommand(ctx: CommandContext, name: string) {
+async function deleteSubcommand(ctx: CommandContext, rawName: string) {
+  const name = normalizeCharName(rawName);
   const c = await findCharacter(ctx, name);
   if (!c) return notice(ctx, "NO_CHAR", `No character named "${name}".`);
 

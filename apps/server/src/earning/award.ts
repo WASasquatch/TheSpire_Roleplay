@@ -36,6 +36,7 @@ import {
 } from "../db/schema.js";
 import { getSettings } from "../settings.js";
 import type { EarningConfig } from "./config.js";
+import { analyzeMessageQuality, recordAwardedMessage } from "./messageQuality.js";
 import {
   diffCrossing,
   mergeMaxEverHeldSync,
@@ -312,16 +313,54 @@ export async function awardForMessage(input: AwardForMessageInput): Promise<void
 
     const amounts = cfg.awards.message[source];
     const sourceFlags = cfg.enabledSources.message;
-    const xp = sourceFlags.xp ? amounts.xp : 0;
-    const currency = sourceFlags.currency ? amounts.currency : 0;
-    if (xp === 0 && currency === 0) return;
+    const baseXp = sourceFlags.xp ? amounts.xp : 0;
+    const baseCurrency = sourceFlags.currency ? amounts.currency : 0;
+    if (baseXp === 0 && baseCurrency === 0) return;
+
+    // Length bonus + spam detection. Both knobs live on
+    // `cfg.messageQuality`; the helper does the linear interp +
+    // heuristic checks and returns a multiplier + spam verdict.
+    // Spam-flagged messages drop to zero but still write a ledger
+    // row (with metadata.flaggedSpam) so admins can audit. Non-
+    // flagged messages get logged into the echo cache AFTER the
+    // credit decision below (we don't poison the cache with spam).
+    const lengthSpec = cfg.messageQuality.lengthBonus[source];
+    const quality = analyzeMessageQuality(
+      cfg.messageQuality,
+      lengthSpec,
+      input.userId,
+      input.body,
+    );
+    const xp = quality.flaggedSpam ? 0 : Math.round(baseXp * quality.multiplier);
+    const currency = quality.flaggedSpam ? 0 : Math.round(baseCurrency * quality.multiplier);
 
     const reason = `message_${source}`;
-    const metadata = {
+    const metadata: Record<string, unknown> = {
       messageId: input.messageId,
       roomId: input.roomId,
       kind: input.kind,
+      bodyLen: quality.length,
+      multiplier: Number(quality.multiplier.toFixed(2)),
     };
+    if (quality.flaggedSpam) {
+      metadata.flaggedSpam = true;
+      metadata.spamReason = quality.spamReason;
+    }
+
+    // If everything zeroes out (spam OR an admin-disabled source
+    // with no bonus), skip the credit + ledger write entirely.
+    // Writing a ledger row for a 0/0 award would just be noise.
+    if (xp === 0 && currency === 0) {
+      // Don't update the echo cache here — only legitimately-awarded
+      // messages prime it, see helper docstring.
+      return;
+    }
+
+    // Prime echo cache for next-message lookback. Done up-front (not
+    // post-credit) because `creditPool` is async and a rapid follow-
+    // up message could race in before we'd otherwise have recorded
+    // this one. Helper trims + lowercases internally.
+    recordAwardedMessage(input.userId, input.body);
 
     if (scope.kind === "master") {
       await creditPool(input.db, input.io, {

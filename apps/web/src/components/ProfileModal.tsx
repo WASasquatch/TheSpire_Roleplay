@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
-import { isAdminRole, isDarkPalette } from "@thekeep/shared";
+import { isAdminRole, isDarkPalette, parseFreeformBorderConfig } from "@thekeep/shared";
 import type { CharacterPortrait, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
 import { buildOrnamentStyle } from "../lib/ornaments/index.js";
@@ -402,6 +402,12 @@ function ProfileBody({
       .catch(() => { /* unranked / not-found / network — hide the chip */ });
     return () => { cancelled = true; };
   }, [profile.profile.userId]);
+  const freeformConfig = useMemo(() => {
+    const json = earning?.freeformBorderConfigJson;
+    if (!json) return null;
+    const parsed = parseFreeformBorderConfig(json);
+    return Object.keys(parsed).length > 0 ? parsed : null;
+  }, [earning?.freeformBorderConfigJson]);
   // Tap-to-zoom state for the Collection / Pets pin sections. Null
   // when nothing is zoomed; an entry shape (same row the pin
   // rendered) when a pin is clicked. Closes on click anywhere or
@@ -423,8 +429,41 @@ function ProfileBody({
   //     XP/Currency as the prominent chip pair, action buttons inline
   //     beneath the meta.
   const hasActions = !!(onWhisper || onMessage || onIgnore || activeCharacterAction);
+  // Profile banner — the URL slot the owner equipped via the Flair
+  // tab. Renders as a 3:1 hero strip ABOVE the existing avatar/name
+  // hero band. Falls through to nothing when the URL is null (slot
+  // empty, cosmetic not owned, or admin cleared an abusive link).
+  const bannerUrl = profile.profile.profileBannerUrl?.trim() ?? "";
   return (
     <>
+      {bannerUrl ? (
+        <div className="shrink-0 overflow-hidden border-b border-keep-rule bg-keep-panel">
+          {/* Adaptive sizing: full-width, natural aspect ratio up to a
+              `max-h-[220px]` ceiling. Wide banner-shaped uploads (3:1
+              and wider) render at their true proportions and stay
+              under the cap on typical modal widths. Off-spec uploads
+              (squares, portrait phone screenshots) hit the ceiling
+              and `object-cover` center-crops a horizontal slice so the
+              banner stays modal-friendly without distorting the image.
+              A previous version used `aspect-[3/1]` which aggressively
+              cropped anything non-banner-shaped; a follow-up bumped
+              the cap to 40vh which let the banner dominate ~half the
+              modal on wide desktops — 220px is the sweet spot where
+              the strip reads as a hero band, not the whole hero.
+              onError hides the img on a broken link so visitors don't
+              see the browser's "missing image" icon. */}
+          <img
+            src={bannerUrl}
+            alt=""
+            loading="lazy"
+            className="block max-h-[220px] w-full object-cover object-center"
+            onError={(e) => {
+              const el = e.currentTarget as HTMLImageElement;
+              el.style.display = "none";
+            }}
+          />
+        </div>
+      ) : null}
       {/* Hero band - always visible, themed with the owner's panel color.
           Outer flex-col so the mobile action bar can sit underneath
           the avatar/content row without breaking the desktop flex-row. */}
@@ -455,6 +494,8 @@ function ProfileBody({
               name={name}
               size="lg"
               borderRankKey={earning?.selectedBorderRankKey ?? null}
+              freeformBorderKey={earning?.selectedFreeformBorderKey ?? null}
+              freeformConfig={freeformConfig}
             />
           </div>
           <div className="hidden sm:block">
@@ -463,6 +504,8 @@ function ProfileBody({
               name={name}
               size="xl"
               borderRankKey={earning?.selectedBorderRankKey ?? null}
+              freeformBorderKey={earning?.selectedFreeformBorderKey ?? null}
+              freeformConfig={freeformConfig}
             />
           </div>
           <div className="min-w-0 flex-1">

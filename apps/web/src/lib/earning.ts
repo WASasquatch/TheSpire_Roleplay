@@ -23,6 +23,10 @@ export interface PoolView {
   maxRankKeyEverHeld: string | null;
   maxTierEverHeld: number | null;
   selectedBorderRankKey: string | null;
+  /** Free-form border equip slot — independent of the rank-tier
+   *  slot. BorderedAvatar resolves freeform first, falling back to
+   *  the rank slot if unset. Null = no freeform border equipped. */
+  selectedFreeformBorderKey: string | null;
   /** Only set on the master pool; characters cascade off the master flag. */
   hideCurrencyCount?: boolean;
   hideXpCount?: boolean;
@@ -58,9 +62,98 @@ export interface OwnedBorder {
   acquiredAt: number;
 }
 
+/** Free-form border ownership row. Distinct from `OwnedBorder` —
+ *  the keys point at `freeform_borders.key`, not a `ranks.key`, and
+ *  the two ledgers are independent. */
+export interface OwnedFreeformBorder {
+  borderKey: string;
+  /** Per-identity color customization (migration 0158). JSON string
+   *  keyed by var-name without the `--c-` prefix (e.g.
+   *  `{"ring-main":"#ff10f0"}`). Null = use the catalog row's CSS
+   *  fallbacks for every slot. */
+  configJson: string | null;
+  acquiredAt: number;
+}
+
+/** Free-form border catalog row. Either `imageUrl` is set (overlay
+ *  PNG / APNG path) OR `template` + `styleCss` are set (DOM-template
+ *  path that mirrors the name-style system). Server enforces the
+ *  XOR. `rarity` is an open string so admins can introduce new
+ *  tiers without a schema migration; the BordersTab falls back to
+ *  the 'common' palette for unknown values. */
+export interface FreeformBorderRow {
+  key: string;
+  name: string;
+  description: string;
+  imageUrl: string | null;
+  template: string | null;
+  styleCss: string | null;
+  rarity: string;
+  cost: number;
+  isBuiltin: boolean;
+  order: number;
+}
+
 export interface IdentityCosmetics {
   inlineAvatarEnabled: boolean;
   activeNameStyleKey: string | null;
+  /**
+   * Profile banner image URL pasted by the user. Null when the slot
+   * is empty (either no `flair_profile_banner` purchase yet, the
+   * user cleared the URL, or admin moderation cleared an abusive
+   * link). Renders as a 3:1 hero strip at the top of the profile
+   * modal — see ProfileModal.
+   */
+  profileBannerUrl: string | null;
+  /**
+   * Whether this identity has purchased `flair_profile_banner` (the
+   * Flair unlock for the banner URL slot). Separate from
+   * `profileBannerUrl` because the user can own the cosmetic but
+   * have cleared their URL — the Flair tab needs to know to show
+   * "Set / clear URL" instead of "Buy" in that state.
+   */
+  profileBannerOwned: boolean;
+  /** Free-form border equip slot for THIS identity. Mirrors the
+   *  rank-tier `selectedBorderRankKey` field shape on PoolView; we
+   *  surface it here too so character entries can carry it without
+   *  needing a separate PoolView lookup on the consumer side. */
+  selectedFreeformBorderKey?: string | null;
+  /** Phase 5 custom typing phrase. When non-null and the typer is
+   *  alone in the indicator strip, replaces "is typing…" with this
+   *  string. Server clamps to 60 chars and strips control chars
+   *  before writing, so the client can render verbatim (still text-
+   *  escaped — never as HTML). */
+  typingPhrase?: string | null;
+  /** Whether this identity has purchased `flair_typing_phrase`. Same
+   *  pattern as `profileBannerOwned` — separates "owns the unlock"
+   *  from "has currently set a phrase" so the Flair tab can show
+   *  "Buy" vs "Set phrase" cleanly. */
+  typingPhraseOwned?: boolean;
+  /** Phase 6 — Lurking Master toggle state. When true (and owned),
+   *  the typing indicator hides this user from non-admin receivers.
+   *  Admins always see the typing pulse for moderation visibility. */
+  lurkingMasterEnabled?: boolean;
+  /** Whether this identity has purchased `flair_lurking_master`. */
+  lurkingMasterOwned?: boolean;
+  /** Phase 7 (migration 0161) — custom room join template. When
+   *  set AND `roomPresenceOwned` is true, the join broadcast in
+   *  every non-forum room substitutes this text (with `{name}` and
+   *  `{room}` placeholders) for the default phrasing. Null = use
+   *  the default. */
+  roomJoinTemplate?: string | null;
+  /** Twin of `roomJoinTemplate` for the room-leave broadcast. */
+  roomLeaveTemplate?: string | null;
+  /** Whether this identity has purchased `flair_room_presence`. */
+  roomPresenceOwned?: boolean;
+  /** Master-only: custom session-connect broadcast template. Only
+   *  meaningful on the top-level `ActiveCosmetics` shape (the
+   *  byCharacter map omits this since session presence isn't
+   *  per-character). */
+  sessionConnectTemplate?: string | null;
+  /** Master-only: custom session-exit broadcast template. */
+  sessionExitTemplate?: string | null;
+  /** Whether the master has purchased `flair_session_presence`. */
+  sessionPresenceOwned?: boolean;
 }
 
 export interface ActiveCosmetics extends IdentityCosmetics {
@@ -172,16 +265,25 @@ export interface EarningMeResponse {
     ranks: RankRow[];
     rankTiers: RankTierRow[];
     nameStyles: NameStyleCatalogRow[];
+    /** Free-form (non-rank-tied) border catalog. Shipped on every
+     *  /earning/me response so the dashboard can inject the
+     *  template+CSS rows once on open. Independent of `rankTiers`. */
+    freeformBorders: FreeformBorderRow[];
     items: ItemCatalogRow[];
   };
   /** Master/OOC's owned styles (since migration 0086). Characters
    *  carry their own owned lists in `ownedStylesByCharacter`. */
   ownedStyles: OwnedStyle[];
   ownedBorders: OwnedBorder[];
+  /** Master/OOC's owned free-form borders — parallel to
+   *  `ownedBorders` but distinct, since the two catalogs are
+   *  independent. */
+  ownedFreeformBorders: OwnedFreeformBorder[];
   /** Per-character owned styles, keyed by character id. Empty entry
    *  / missing key means the character hasn't bought anything yet. */
   ownedStylesByCharacter: Record<string, OwnedStyle[]>;
   ownedBordersByCharacter: Record<string, OwnedBorder[]>;
+  ownedFreeformBordersByCharacter: Record<string, OwnedFreeformBorder[]>;
   /** Master/OOC inventory — items owned on the OOC pool. Independent
    *  of every character's inventory (`inventoryByCharacter`). */
   inventory: InventoryEntry[];
@@ -233,6 +335,12 @@ export interface PublicEarningResponse {
   tierLabel: string | null;
   sigilImageUrl: string | null;
   selectedBorderRankKey: string | null;
+  selectedFreeformBorderKey: string | null;
+  /** Raw JSON string of the master pool's freeform-border color
+   *  customization (migration 0158). Null when no freeform border is
+   *  equipped or no customization saved. Parsed client-side via
+   *  parseFreeformBorderConfig before being passed to BorderedAvatar. */
+  freeformBorderConfigJson: string | null;
 }
 
 export interface CatalogResponse {
@@ -261,6 +369,18 @@ export interface CatalogResponse {
 export interface AwardAmount { xp: number; currency: number }
 export interface SourceEnableFlags { xp: boolean; currency: boolean }
 
+/** Length-bonus curve for a single message kind. The award engine
+ *  multiplies the per-kind XP/Currency by a linearly-interpolated
+ *  factor from 1.0x at `floorChars` up to `maxMultiplier` at
+ *  `ceilChars` (clamped above). `enabled=false` or `maxMultiplier<=1`
+ *  = always 1.0x. */
+export interface LengthBonusSpec {
+  enabled: boolean;
+  floorChars: number;
+  ceilChars: number;
+  maxMultiplier: number;
+}
+
 export interface EarningConfig {
   enabled: boolean;
   awards: {
@@ -269,6 +389,23 @@ export interface EarningConfig {
     presence: { perBlock: AwardAmount };
   };
   bodyFloorChars: number;
+  /** Length-bonus + spam-detection knobs. Length bonus rewards
+   *  effort on action/RP posts; spam detection drops the award to
+   *  zero on flagged messages (keysmash, repeated tokens, echo). */
+  messageQuality: {
+    lengthBonus: {
+      say: LengthBonusSpec;
+      action: LengthBonusSpec;
+      whisper: LengthBonusSpec;
+    };
+    spam: {
+      enabled: boolean;
+      minLengthToCheck: number;
+      uniqueCharRatioFloor: number;
+      dominantTokenRatioCap: number;
+      echoLookback: number;
+    };
+  };
   presenceBlockMinutes: number;
   presenceDailyBlockCap: number;
   enabledSources: {
@@ -327,9 +464,14 @@ export async function patchEarningSettings(body: {
   hideCurrencyCount?: boolean;
   hideXpCount?: boolean;
   selectedBorderRankKey?: string | null;
-  /** Per-identity scope for border equip (selectedBorderRankKey).
-   *  Hide flags ignore characterId — they're master-only privacy
-   *  preferences. Null/omitted = master pool. */
+  /** Free-form border equip — independent of the rank-tier slot.
+   *  Pass null to unequip the freeform border (the rank border, if
+   *  any, then takes over). */
+  selectedFreeformBorderKey?: string | null;
+  /** Per-identity scope for border equip (selectedBorderRankKey /
+   *  selectedFreeformBorderKey). Hide flags ignore characterId —
+   *  they're master-only privacy preferences. Null/omitted = master
+   *  pool. */
   characterId?: string | null;
 }): Promise<void> {
   const r = await fetch("/earning/me/settings", {
@@ -353,6 +495,225 @@ export async function ackRankUpNotification(notificationId?: string): Promise<vo
 
 export async function fetchEarningCatalog(): Promise<CatalogResponse> {
   return jsonOrThrow<CatalogResponse>(await fetch("/earning/catalog", { credentials: "include" }));
+}
+
+/* ---------- flash sale ---------- */
+
+/** One row of a flash-sale pick. `basePrice` is the catalog row's cost;
+ *  `salePrice` is what `basePrice` becomes after the discount %. Both
+ *  echoed back so the client doesn't have to do percentage math (and so
+ *  the server's rounding rule stays authoritative). */
+export interface FlashSalePick {
+  key: string;
+  name: string;
+  iconUrl?: string | null;
+  basePrice: number;
+  salePrice: number;
+  discountPct: number | null;
+}
+
+export interface FlashSaleResponse {
+  forDate: string;            // 'YYYY-MM-DD' UTC
+  nameStyle: FlashSalePick | null;
+  item: FlashSalePick | null;
+  cosmetic: FlashSalePick | null;
+  /** Free-form border pick (migration 0160). Same shape as the other
+   *  picks; the Overview / catalog renderers preview with
+   *  BorderedAvatar instead of an icon. */
+  freeformBorder: FlashSalePick | null;
+}
+
+export async function fetchFlashSale(): Promise<FlashSaleResponse> {
+  return jsonOrThrow<FlashSaleResponse>(await fetch("/earning/flash-sale", { credentials: "include" }));
+}
+
+/* ---------- rankings ---------- */
+
+export type RankingBoardKey =
+  | "currency" | "xp" | "rank" | "items" | "messages"
+  | "borders" | "styles" | "topics" | "reactions";
+
+/**
+ * A single leaderboard entry. Cosmetic context (border / freeform
+ * config / name-style / rank tier) is carried so the Rankings tab
+ * can paint the entry's avatar + name in the user's actual
+ * equipped look — same fidelity as the userlist.
+ */
+export interface RankingPoolEntry {
+  scope: "user" | "character";
+  ownerId: string;
+  userId: string;
+  characterId: string | null;
+  displayName: string;
+  avatarUrl: string | null;
+  borderRankKey: string | null;
+  freeformBorderKey: string | null;
+  freeformBorderConfigJson: string | null;
+  activeNameStyleKey: string | null;
+  nameStyleConfigJson: string | null;
+  rankKey: string | null;
+  tier: number | null;
+  rankName: string | null;
+  tierLabel: string | null;
+  sigilImageUrl: string | null;
+  value: number;
+}
+
+export interface RankingBoard {
+  key: RankingBoardKey;
+  label: string;
+  metric: string;
+  entries: RankingPoolEntry[];
+}
+
+export interface RankingChampion {
+  boardKey: RankingBoardKey;
+  boardLabel: string;
+  boardMetric: string;
+  entry: RankingPoolEntry;
+}
+
+export interface RankingsResponse {
+  boards: RankingBoard[];
+  champions: RankingChampion[];
+  generatedAt: number;
+}
+
+export async function fetchRankings(): Promise<RankingsResponse> {
+  return jsonOrThrow<RankingsResponse>(await fetch("/earning/rankings", { credentials: "include" }));
+}
+
+/* ---------- admin flash-sale + transfer ---------- */
+
+export interface AdminFlashSaleOverride {
+  category: "name_style" | "item" | "cosmetic" | "freeform_border";
+  forDate: string;
+  targetKey: string;
+  discountPct: number | null;
+}
+
+export interface AdminFlashSaleResponse {
+  today: {
+    forDate: string;
+    nameStyleKey: string | null;
+    itemKey: string | null;
+    cosmeticKey: string | null;
+    freeformBorderKey: string | null;
+    nameStyleDiscountPct: number | null;
+    itemDiscountPct: number | null;
+    cosmeticDiscountPct: number | null;
+    freeformBorderDiscountPct: number | null;
+  };
+  tomorrow: string;
+  overrides: AdminFlashSaleOverride[];
+  settings: {
+    defaultDiscountPct: number;
+    stylesEnabled: boolean;
+    itemsEnabled: boolean;
+    cosmeticsEnabled: boolean;
+    freeformBordersEnabled: boolean;
+  };
+}
+
+export async function fetchAdminFlashSale(): Promise<AdminFlashSaleResponse> {
+  return jsonOrThrow<AdminFlashSaleResponse>(
+    await fetch("/admin/earning/flash-sale", { credentials: "include" }),
+  );
+}
+
+export async function patchAdminFlashSaleSettings(body: {
+  defaultDiscountPct?: number;
+  stylesEnabled?: boolean;
+  itemsEnabled?: boolean;
+  cosmeticsEnabled?: boolean;
+  freeformBordersEnabled?: boolean;
+}): Promise<void> {
+  const r = await fetch("/admin/earning/flash-sale/settings", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+export async function putAdminFlashSaleOverride(body: {
+  category: "name_style" | "item" | "cosmetic" | "freeform_border";
+  forDate: string;
+  targetKey: string | null;
+  discountPct?: number | null;
+}): Promise<void> {
+  const r = await fetch("/admin/earning/flash-sale/overrides", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/** Catalog kinds that have ZIP export/import. */
+export type EarningTransferKind = "name-styles" | "items" | "borders" | "ranks" | "freeform-borders";
+
+/** Trigger a browser file download of the catalog's export ZIP. */
+export async function downloadCatalogExport(kind: EarningTransferKind): Promise<void> {
+  const r = await fetch(`/admin/earning/transfer/${kind}/export`, { credentials: "include" });
+  if (!r.ok) throw new Error(await readError(r));
+  const blob = await r.blob();
+  // Pull the filename out of Content-Disposition so the download
+  // matches what the server proposed (`<kind>-export-YYYYMMDD.zip`)
+  // instead of a UUID blob name.
+  const disposition = r.headers.get("Content-Disposition") ?? "";
+  const m = /filename="([^"]+)"/.exec(disposition);
+  const filename = m?.[1] ?? `${kind}-export.zip`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export interface CatalogImportResult {
+  ok: boolean;
+  inserted: number;
+  updated: number;
+  skippedAssets: number;
+  writtenAssets: string[];
+  warnings: string[];
+}
+
+/** Upload a catalog import ZIP. `file` is a `File` from an `<input type="file">`. */
+export async function uploadCatalogImport(
+  kind: EarningTransferKind,
+  file: File,
+): Promise<CatalogImportResult> {
+  // Same base64-in-JSON wire shape the existing logo upload uses —
+  // no multipart plugin needed server-side.
+  const buf = await file.arrayBuffer();
+  const zipBase64 = bufferToBase64(new Uint8Array(buf));
+  const r = await fetch(`/admin/earning/transfer/${kind}/import`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ zipBase64 }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+  return (await r.json()) as CatalogImportResult;
+}
+
+function bufferToBase64(bytes: Uint8Array): string {
+  // Chunked encoding so a many-MB zip doesn't blow the call stack
+  // on `String.fromCharCode(...bytes)` (max arg count is platform-
+  // dependent, typically ~120k on V8).
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
 }
 
 export async function fetchPublicEarning(userId: string): Promise<PublicEarningResponse> {
@@ -480,6 +841,98 @@ export async function equipCosmetic(
   if (!r.ok) throw new Error(await readError(r));
 }
 
+/**
+ * Set or clear the profile-banner URL for the current identity.
+ * Pass null/empty to clear the slot. Throws on server validation
+ * failure (non-http URL, content-type sniff says it's not an image,
+ * missing `flair_profile_banner` purchase). Returns the
+ * server-normalized URL the slot now holds so the caller can
+ * update local state without re-fetching the snapshot.
+ */
+export async function patchProfileBannerUrl(
+  url: string | null,
+  /** Per-identity scope. Null = master/OOC, character id = character. */
+  characterId: string | null = null,
+): Promise<{ url: string | null }> {
+  const r = await fetch("/earning/me/banner", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ url, characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+  return (await r.json()) as { url: string | null };
+}
+
+/**
+ * Set or clear the custom typing phrase for the current identity.
+ * Pass null/empty to clear the slot. Server normalizes the input
+ * (trim, collapse whitespace, strip control chars) and returns the
+ * post-write phrase so the caller can sync local state without a
+ * full snapshot refresh. Throws on server validation failure
+ * (missing `flair_typing_phrase` purchase, over the 60-char cap).
+ */
+export async function patchTypingPhrase(
+  phrase: string | null,
+  /** Per-identity scope. Null = master/OOC, character id = character. */
+  characterId: string | null = null,
+): Promise<{ phrase: string | null }> {
+  const r = await fetch("/earning/me/typing-phrase", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ phrase, characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+  return (await r.json()) as { phrase: string | null };
+}
+
+/**
+ * Set or clear the room-presence broadcast templates (migration 0161).
+ * Each field is optional — omit to leave the slot unchanged, pass
+ * null to clear it, pass a string to set. Per-identity scope mirrors
+ * the typing-phrase endpoint. Server validates length + strips
+ * control / angle-bracket characters and returns the post-write
+ * values so the caller can sync local state without a refetch.
+ */
+export async function patchRoomPresenceTemplates(
+  body: {
+    joinTemplate?: string | null;
+    leaveTemplate?: string | null;
+    characterId?: string | null;
+  },
+): Promise<{ joinTemplate: string | null; leaveTemplate: string | null }> {
+  const r = await fetch("/earning/me/room-presence", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+  return (await r.json()) as { joinTemplate: string | null; leaveTemplate: string | null };
+}
+
+/**
+ * Set or clear the session-presence templates (migration 0161).
+ * Master-only — no characterId field, no per-character partition.
+ * Same omit/null/string semantics as the room-presence twin.
+ */
+export async function patchSessionPresenceTemplates(
+  body: {
+    connectTemplate?: string | null;
+    exitTemplate?: string | null;
+  },
+): Promise<{ connectTemplate: string | null; exitTemplate: string | null }> {
+  const r = await fetch("/earning/me/session-presence", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+  return (await r.json()) as { connectTemplate: string | null; exitTemplate: string | null };
+}
+
 export async function purchaseBorder(
   rankKey: string,
   characterId: string | null = null,
@@ -489,6 +942,48 @@ export async function purchaseBorder(
     headers: { "content-type": "application/json" },
     credentials: "include",
     body: JSON.stringify({ characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/**
+ * Purchase a free-form (non-rank-tied) border for the active
+ * identity. Mirrors `purchaseBorder` but routes to the parallel
+ * `freeform_borders` catalog. Auto-equips on first purchase when the
+ * identity has no border currently equipped (rank or freeform).
+ */
+export async function purchaseFreeformBorder(
+  borderKey: string,
+  characterId: string | null = null,
+): Promise<void> {
+  const r = await fetch(`/earning/me/freeform-borders/${encodeURIComponent(borderKey)}/purchase`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/**
+ * Set or clear per-identity color customization for an owned
+ * free-form border. Map keys are CSS-var names WITHOUT the `--c-`
+ * prefix (e.g. `{ "ring-main": "#ff10f0" }`); the server prepends
+ * `--c-` and the renderer inlines them on the BorderedAvatar
+ * wrapper. Pass `null` to clear all overrides. Server drops any
+ * keys not in the catalog row's `extractFreeformBorderVars()` set,
+ * so a stale client can't smuggle arbitrary CSS variables.
+ */
+export async function patchFreeformBorderConfig(
+  borderKey: string,
+  config: Record<string, string> | null,
+  characterId: string | null = null,
+): Promise<void> {
+  const r = await fetch(`/earning/me/freeform-borders/${encodeURIComponent(borderKey)}/config`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ config, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -615,6 +1110,77 @@ export async function deleteAdminNameStyle(key: string): Promise<void> {
   if (!r.ok) throw new Error(await readError(r));
 }
 
+/* ---------- Admin — free-form borders CRUD ---------- */
+
+export interface AdminFreeformBorderRow {
+  key: string;
+  name: string;
+  description: string;
+  imageUrl: string | null;
+  template: string | null;
+  styleCss: string | null;
+  rarity: string;
+  cost: number;
+  enabled: boolean;
+  isBuiltin: boolean;
+  order: number;
+  owners: number;
+  equipped: number;
+}
+
+export async function fetchAdminFreeformBorders(): Promise<{ borders: AdminFreeformBorderRow[] }> {
+  return jsonOrThrow(await fetch("/admin/earning/freeform-borders", { credentials: "include" }));
+}
+
+export async function createAdminFreeformBorder(body: {
+  key: string;
+  name: string;
+  description?: string;
+  imageUrl?: string | null;
+  template?: string | null;
+  styleCss?: string | null;
+  rarity?: string;
+  cost?: number;
+  enabled?: boolean;
+  order?: number;
+}): Promise<void> {
+  const r = await fetch("/admin/earning/freeform-borders", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+export async function patchAdminFreeformBorder(key: string, body: {
+  name?: string;
+  description?: string;
+  imageUrl?: string | null;
+  template?: string | null;
+  styleCss?: string | null;
+  rarity?: string;
+  cost?: number;
+  enabled?: boolean;
+  order?: number;
+}): Promise<void> {
+  const r = await fetch(`/admin/earning/freeform-borders/${encodeURIComponent(key)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+export async function deleteAdminFreeformBorder(key: string): Promise<void> {
+  const r = await fetch(`/admin/earning/freeform-borders/${encodeURIComponent(key)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
 /* ---------- Admin — test grants (masteradmin only) ----------
  *
  * Direct grants used for QA / asset preview. They write through
@@ -674,6 +1240,163 @@ export async function adminGrantStyle(username: string, styleKey: string): Promi
     headers: { "content-type": "application/json" },
     credentials: "include",
     body: JSON.stringify({ username, styleKey }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/** Remove ownership of a rank-tier border from the target user.
+ *  If the user had it equipped, the equip slot clears too.
+ *  Idempotent on unowned. Master-pool only — the server endpoint
+ *  doesn't model per-character rank-border ownership today. */
+export async function adminRevokeBorder(username: string, rankKey: string): Promise<void> {
+  const r = await fetch("/admin/earning/revoke-border", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ username, rankKey }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/** Remove a name-style ownership row from the target user. If the
+ *  style was equipped on the master active-cosmetics row it clears
+ *  too. Idempotent on unowned. */
+export async function adminRevokeStyle(username: string, styleKey: string): Promise<void> {
+  const r = await fetch("/admin/earning/revoke-style", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ username, styleKey }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/**
+ * Insert ownership of a free-form (non-rank-tied) border on a
+ * target identity. `characterId` null/omitted = master/OOC pool;
+ * a character id grants to that character's ownership ledger.
+ * Auto-equips on first acquisition if the identity has no
+ * freeform border equipped.
+ */
+export async function adminGrantFreeformBorder(
+  username: string,
+  borderKey: string,
+  characterId: string | null = null,
+): Promise<void> {
+  const r = await fetch("/admin/earning/grant-freeform-border", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ username, borderKey, characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/** Remove a free-form border from a target identity. If equipped,
+ *  the equip slot clears too. Idempotent. */
+export async function adminRevokeFreeformBorder(
+  username: string,
+  borderKey: string,
+  characterId: string | null = null,
+): Promise<void> {
+  const r = await fetch("/admin/earning/revoke-freeform-border", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ username, borderKey, characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/**
+ * Admin moderation lever for the Phase 2 profile-banner Flair.
+ * Wipes the banner URL on the target identity. Ownership of the
+ * cosmetic is retained — the user can paste a new URL afterwards.
+ * Passing `characterId` scopes to that character; null/omitted
+ * clears the master/OOC banner.
+ */
+export async function adminClearProfileBanner(opts: {
+  username: string;
+  characterId?: string | null;
+  reason?: string;
+}): Promise<void> {
+  const r = await fetch("/admin/earning/clear-banner", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      username: opts.username,
+      ...(opts.characterId !== undefined ? { characterId: opts.characterId } : {}),
+      ...(opts.reason ? { reason: opts.reason } : {}),
+    }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/**
+ * Admin moderation lever for the Phase 5 typing-phrase Flair.
+ * Twin of `adminClearProfileBanner`; wipes the `typing_phrase`
+ * column on the target identity. Ownership of the cosmetic is
+ * retained.
+ */
+export async function adminClearTypingPhrase(opts: {
+  username: string;
+  characterId?: string | null;
+  reason?: string;
+}): Promise<void> {
+  const r = await fetch("/admin/earning/clear-typing-phrase", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      username: opts.username,
+      ...(opts.characterId !== undefined ? { characterId: opts.characterId } : {}),
+      ...(opts.reason ? { reason: opts.reason } : {}),
+    }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/**
+ * Admin moderation lever for the migration 0161 room-presence Flair.
+ * Clears BOTH the join and leave templates on the target identity in
+ * a single call. Ownership of the cosmetic is retained.
+ */
+export async function adminClearRoomPresence(opts: {
+  username: string;
+  characterId?: string | null;
+  reason?: string;
+}): Promise<void> {
+  const r = await fetch("/admin/earning/clear-room-presence", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      username: opts.username,
+      ...(opts.characterId !== undefined ? { characterId: opts.characterId } : {}),
+      ...(opts.reason ? { reason: opts.reason } : {}),
+    }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/**
+ * Admin moderation lever for the migration 0161 session-presence
+ * Flair. Master-only — no characterId. Clears BOTH connect and
+ * exit templates in a single call.
+ */
+export async function adminClearSessionPresence(opts: {
+  username: string;
+  reason?: string;
+}): Promise<void> {
+  const r = await fetch("/admin/earning/clear-session-presence", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      username: opts.username,
+      ...(opts.reason ? { reason: opts.reason } : {}),
+    }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -948,7 +1671,21 @@ export function formatLedgerReason(reason: string): string {
     case "admin_revoke": return "Admin revoke";
     case "character_deleted_currency_rollover": return "Rolled over from deleted character";
     default:
+      // Friendlier labels for the Flair purchase keys before the
+      // generic `purchase_` fallback catches them. Flair keys ship
+      // with `flair_` prefixes that read poorly in raw form
+      // ("Purchase: flair_typing_phrase").
+      if (reason === "purchase_flair_profile_banner") return "Purchase: Custom Profile Banner";
+      if (reason === "purchase_flair_typing_phrase") return "Purchase: Custom Typing Phrase";
+      if (reason === "purchase_flair_reaction_sheet") return "Reaction sheet submission";
+      // Reaction submission refund (Phase 3). Two parallel reasons:
+      // the debit at submission time, the credit-back on rejection.
+      // The submission id is part of the suffix but not interesting
+      // to the user — surface a clean label.
+      if (reason.startsWith("emoticon_submission_refund_")) return "Reaction sheet refund";
+      if (reason.startsWith("emoticon_submission_")) return "Reaction sheet submission";
       if (reason.startsWith("purchase_")) return `Purchase: ${reason.slice("purchase_".length)}`;
+      if (reason.startsWith("freeform_border_purchase_")) return `Border purchase: ${reason.slice("freeform_border_purchase_".length)}`;
       if (reason.startsWith("border_purchase_")) return `Border purchase: ${reason.slice("border_purchase_".length)}`;
       if (reason.startsWith("item_purchase_")) return `Item purchase: ${reason.slice("item_purchase_".length)}`;
       return reason;

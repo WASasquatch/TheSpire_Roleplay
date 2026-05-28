@@ -21,12 +21,30 @@ let socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
  * from another tab's recent submit.
  */
 const LOGIN_INTENT_KEY = "tk_login_intent";
+/** Sticky-per-tab marker that the current session has been announced
+ *  to chat. Set alongside `tk_login_intent` so a page reload AFTER a
+ *  successful login doesn't re-announce — the reload's /auth/me
+ *  probe sees this flag and skips its own markLoginIntent call. */
+const SESSION_ANNOUNCED_KEY = "tk_session_announced";
 
-/** Set by AuthGate on form-submit success. One-shot — the next socket
- *  handshake consumes it. */
+/** Set by AuthGate on form-submit success AND by App.tsx when an
+ *  /auth/me probe restores a cookie session in a fresh tab. The
+ *  next socket handshake consumes `tk_login_intent`; the sticky
+ *  `tk_session_announced` flag stays for the lifetime of the tab
+ *  so reloads / re-mounts inside the same tab don't re-announce. */
 export function markLoginIntent(): void {
-  try { window.sessionStorage.setItem(LOGIN_INTENT_KEY, "1"); }
-  catch { /* private-mode — the broadcast just won't fire on this tab */ }
+  try {
+    window.sessionStorage.setItem(LOGIN_INTENT_KEY, "1");
+    window.sessionStorage.setItem(SESSION_ANNOUNCED_KEY, "1");
+  } catch { /* private-mode — the broadcast just won't fire on this tab */ }
+}
+
+/** True when this tab has already announced the current session.
+ *  Used by App.tsx to decide whether to call `markLoginIntent` on
+ *  a successful cookie-restored /auth/me probe. */
+export function hasSessionBeenAnnounced(): boolean {
+  try { return window.sessionStorage.getItem(SESSION_ANNOUNCED_KEY) === "1"; }
+  catch { return true; /* private-mode — assume yes so we don't spam */ }
 }
 
 /**

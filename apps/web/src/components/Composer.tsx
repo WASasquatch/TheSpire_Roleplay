@@ -17,6 +17,7 @@ import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
 import type { InventoryEntry, ItemCatalogRow } from "../lib/earning.js";
 import { markMentionKnown } from "../state/mentions.js";
+import { getSocket } from "../lib/socket.js";
 
 interface Props {
   value: string;
@@ -358,6 +359,15 @@ export function Composer({
 }: Props) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastValueRef = useRef(value);
+  // Phase 4 typing indicator — last time this composer fired a
+  // `chat:typing` pulse. Throttled to once per 2s so a long
+  // sentence costs at most a handful of tiny socket events. The
+  // server's entry TTL is ~5s, so pulsing every 2s comfortably
+  // keeps the user's "is typing…" alive across an entire message
+  // composition. Empty-text and forum-disabled inputs are skipped
+  // (no signal to send). Lives on a ref (not state) so the throttle
+  // gate doesn't trigger renders.
+  const lastTypingEmitAtRef = useRef(0);
 
   // Input history. Each successful send pushes its trimmed body onto a
   // ring buffer (deduped against the most recent entry). ArrowUp opens
@@ -1590,6 +1600,19 @@ export function Composer({
             // selectionStart updates synchronously on input, so this stays
             // in sync with the new value during typing.
             setCaret(e.target.selectionStart ?? e.target.value.length);
+            // Phase 4 typing pulse. Skip when:
+            //   - the composer is disabled (forum-disabled / locked)
+            //   - we don't have a roomId to scope to (mid-room-switch)
+            //   - the textarea is now empty (deleting back to blank is
+            //     a fine moment to let the indicator expire naturally)
+            //   - we already pulsed within the throttle window
+            if (inputDisabled) return;
+            if (!roomId) return;
+            if (e.target.value.length === 0) return;
+            const now = Date.now();
+            if (now - lastTypingEmitAtRef.current < 2_000) return;
+            lastTypingEmitAtRef.current = now;
+            getSocket().emit("chat:typing", { roomId });
           }}
           onKeyUp={syncCaret}
           onClick={syncCaret}

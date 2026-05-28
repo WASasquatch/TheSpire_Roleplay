@@ -438,8 +438,20 @@ function RoomGroup({
                           so the relationship holds at every step. The
                           rank gem at `md` = 1.6em scales with this
                           too, keeping the icon proportional to the
-                          name rather than dwarfing it. */}
-                      <div className="min-w-0 flex-1 truncate text-[0.85em]">
+                          name rather than dwarfing it.
+
+                          Deliberately NOT `truncate` on this wrapper —
+                          UserNameTag's name button already applies
+                          `overflow-clip text-ellipsis` internally when
+                          `truncate` is passed, so the long-name
+                          ellipsis still works. Adding `overflow: hidden`
+                          here as well clipped the avatar's VFX bleed
+                          (Phoenix feathers, Aurora glow, etc.) at the
+                          row's edge — the new in-place template
+                          renderer relies on this wrapper staying
+                          overflow:visible so decoration can paint
+                          into the row gutter. */}
+                      <div className="min-w-0 flex-1 text-[0.85em]">
                         <UserNameTag
                           displayName={o.displayName}
                           gender={o.gender}
@@ -474,6 +486,8 @@ function RoomGroup({
                           // keeps the gender-icon affordance).
                           avatarUrl={o.avatarUrl ?? null}
                           selectedBorderRankKey={o.selectedBorderRankKey ?? null}
+                          selectedFreeformBorderKey={o.selectedFreeformBorderKey ?? null}
+                          freeformBorderConfig={o.freeformBorderConfig ?? null}
                           inlineAvatar={o.inlineAvatarEnabled}
                           onIconClick={() => onIconClick(o.userId, o.displayName)}
                           onNameClick={() => onNameClick(o.userId, o.displayName)}

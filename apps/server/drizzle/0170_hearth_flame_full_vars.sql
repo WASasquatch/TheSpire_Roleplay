@@ -1,0 +1,83 @@
+-- Make every color in `hearth-flame` customizable via `--c-*` vars.
+--
+-- The picker discovers slots by scanning the row's style_css for
+-- `--c-<name>` references; whatever the CSS doesn't reference can't
+-- be customized. Previously only ring + glow + coal-glow were
+-- exposed — the flame body, flame drop-shadows, log wood, haze,
+-- pic shadow, and ring inner shadows were all hardcoded.
+--
+-- Convention: every literal color now lives in a `var(--c-<name>,
+-- <default>)` reference. Defaults preserve the existing warm-hearth
+-- look so anyone with no overrides set sees the original cosmetic.
+-- Owners with an existing config_json keep their (ring-base,
+-- ring-mid, ring-top, glow, coal-glow) overrides; new slots fall
+-- through to defaults until the owner re-picks them.
+
+UPDATE `freeform_borders`
+SET `style_css` = '.b-hearth-flame { padding: 2px; background: linear-gradient(to top, var(--c-ring-base, #b71c1c) 0%, var(--c-ring-mid, #ff7700) 50%, var(--c-ring-top, #ffd244) 100%); background-size: 100% 250%; animation: hfPan 2.4s ease-in-out infinite; box-shadow: 0 -4px 14px color-mix(in srgb, var(--c-glow, #ff8f00) 70%, transparent), 0 0 0 1px var(--c-ring-outline, rgba(255,87,34,.45)), inset 0 -6px 10px var(--c-ring-inner-warm, rgba(255,213,79,.35)), inset 0 4px 6px var(--c-ring-inner-shadow, rgba(0,0,0,.15)); }
+.b-hearth-flame .pic { box-shadow: 0 -2px 8px var(--c-pic-glow, rgba(255,138,80,.5)), inset 0 -6px 14px var(--c-pic-shadow, rgba(0,0,0,.18)); }
+.b-hearth-flame .haze {
+  position: absolute;
+  inset: -2px -2px 50% -2px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 100%, var(--c-haze-bright, rgba(255,180,80,.32)) 0%, var(--c-haze-soft, rgba(255,140,60,.18)) 35%, transparent 65%);
+  filter: blur(2px);
+  animation: hfHaze 3.2s ease-in-out infinite;
+  z-index: 18;
+}
+.b-hearth-flame .flame-stack {
+  position: absolute;
+  left: 0; right: 0; bottom: -10px;
+  height: 28px;
+  pointer-events: none;
+  z-index: 22;
+}
+.b-hearth-flame .flame {
+  position: absolute;
+  bottom: 6px;
+  width: 8px;
+  height: 18px;
+  background: linear-gradient(to top, var(--c-flame-base, #b71c1c) 0%, var(--c-flame-mid, #ff6f00) 45%, var(--c-flame-top, #ffd54f) 80%, transparent 100%);
+  border-radius: 50% 50% 50% 50% / 75% 75% 30% 30%;
+  transform-origin: 50% 100%;
+  filter: drop-shadow(0 0 4px var(--c-flame-glow-inner, #ff6f00)) drop-shadow(0 0 8px var(--c-flame-glow-outer, #d84315));
+  opacity: .92;
+}
+.b-hearth-flame .fl1 { left: 28%; animation: hfFlicker 1.1s ease-in-out -.0s infinite; }
+.b-hearth-flame .fl2 { left: 46%; width: 10px; height: 22px; animation: hfFlicker 1.35s ease-in-out -.32s infinite; }
+.b-hearth-flame .fl3 { left: 62%; animation: hfFlicker 1.2s ease-in-out -.18s infinite; }
+.b-hearth-flame .hearth-log {
+  position: absolute;
+  left: 14%; right: 14%; bottom: -4px;
+  height: 7px;
+  border-radius: 999em;
+  background:
+    radial-gradient(ellipse at center, var(--c-coal-glow, rgba(255,213,79,.85)) 0%, var(--c-coal-ember, rgba(255,111,0,.55)) 35%, transparent 70%),
+    linear-gradient(90deg, var(--c-log-dark, rgba(62,39,35,.85)) 0%, var(--c-log-mid, rgba(109,76,65,.9)) 50%, var(--c-log-dark, rgba(62,39,35,.85)) 100%);
+  box-shadow: 0 -1px 4px var(--c-log-shadow, rgba(255,143,0,.55));
+  filter: blur(.5px);
+  z-index: 21;
+  animation: hfLog 2.4s ease-in-out infinite;
+}
+@keyframes hfPan {
+  0%, 100% { background-position: 0% 100%; }
+  50%      { background-position: 0% 30%; }
+}
+@keyframes hfFlicker {
+  0%   { transform: translateX(0) scaleY(1)    scaleX(1);    opacity: .85; }
+  25%  { transform: translateX(-1px) scaleY(1.15) scaleX(.85); opacity: 1; }
+  50%  { transform: translateX(1px)  scaleY(.92) scaleX(1.08); opacity: .8; }
+  75%  { transform: translateX(-.5px) scaleY(1.1) scaleX(.92); opacity: .95; }
+  100% { transform: translateX(0) scaleY(1)    scaleX(1);    opacity: .85; }
+}
+@keyframes hfLog {
+  0%, 100% { opacity: .65; filter: blur(.5px) brightness(1); }
+  50%      { opacity: 1;   filter: blur(.3px) brightness(1.35); }
+}
+@keyframes hfHaze {
+  0%, 100% { opacity: .4; transform: translateY(0) scale(1); }
+  50%      { opacity: .7; transform: translateY(-2px) scale(1.04); }
+}',
+  `updated_at` = unixepoch() * 1000
+WHERE `key` = 'hearth-flame' AND `is_builtin` = 1;

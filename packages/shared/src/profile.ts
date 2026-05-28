@@ -259,6 +259,13 @@ export interface CharacterProfile {
    */
   nameStyleConfig: Record<string, unknown> | null;
   /**
+   * Profile banner URL — wide hero strip rendered at the top of the
+   * profile modal. Equipped via the `flair_profile_banner` Flair
+   * purchase; this character's owner pastes any public https image
+   * URL. Null when the slot is empty.
+   */
+  profileBannerUrl: string | null;
+  /**
    * Public-profile background image URL + display mode. When the
    * profile modal renders, its backdrop (the area outside the modal
    * card) paints this image so visitors landing on /p/<character>
@@ -401,6 +408,14 @@ export interface MasterProfile {
    */
   nameStyleKey: string | null;
   nameStyleConfig: Record<string, unknown> | null;
+  /**
+   * Profile banner URL — wide hero strip rendered at the top of the
+   * profile modal. Equipped via the `flair_profile_banner` Flair
+   * purchase; the user pastes any public https image URL. Null when
+   * the slot is empty (no purchase, cleared by user, or admin
+   * moderation cleared an abusive link).
+   */
+  profileBannerUrl: string | null;
   /**
    * Public-profile background image URL + display mode. Same
    * semantics as `CharacterProfile.publicProfileBgUrl/Mode` — each

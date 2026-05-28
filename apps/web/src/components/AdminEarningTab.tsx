@@ -23,6 +23,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { isMasterAdminRole } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
+import { BorderedAvatar } from "./BorderedAvatar.js";
 import { useEarning } from "../state/earning.js";
 import { applyNameStylePlaceholders } from "../lib/nameStyleTemplate.js";
 import {
@@ -41,9 +42,21 @@ import {
   deleteAdminTier,
   fetchAdminAwards,
   fetchAdminCosmetics,
+  fetchAdminFreeformBorders,
   fetchAdminItems,
   fetchAdminNameStyles,
   fetchAdminRanks,
+  createAdminFreeformBorder,
+  patchAdminFreeformBorder,
+  deleteAdminFreeformBorder,
+  adminClearProfileBanner,
+  adminClearRoomPresence,
+  adminClearSessionPresence,
+  adminClearTypingPhrase,
+  adminGrantFreeformBorder,
+  adminRevokeFreeformBorder,
+  adminRevokeBorder,
+  adminRevokeStyle,
   patchAdminCosmetic,
   patchAdminItem,
   patchAdminNameStyle,
@@ -51,20 +64,29 @@ import {
   patchAdminTier,
   putAdminAwards,
   uploadRankAsset,
+  fetchAdminFlashSale,
+  patchAdminFlashSaleSettings,
+  putAdminFlashSaleOverride,
+  downloadCatalogExport,
+  uploadCatalogImport,
   ITEM_CATEGORIES,
   ITEM_CATEGORY_LABELS,
   type AdminCosmeticRow,
+  type AdminFreeformBorderRow,
   type AdminItemRow,
   type AdminNameStyleRow,
   type AdminRankRow,
   type AdminTierRow,
+  type AdminFlashSaleResponse,
   type AwardAmount,
+  type CatalogImportResult,
+  type EarningTransferKind,
   type ItemCategory,
   type SourceEnableFlags,
   type EarningConfig,
 } from "../lib/earning.js";
 
-type SubTab = "awards" | "ranks" | "styles" | "cosmetics" | "items" | "grants";
+type SubTab = "awards" | "ranks" | "styles" | "borders" | "cosmetics" | "items" | "flashsale" | "transfer" | "grants";
 
 /** Single source of truth for the Earning sub-sections. Order here is
  *  used by both the desktop button strip and the mobile dropdown. The
@@ -74,8 +96,11 @@ const SUB_TABS: ReadonlyArray<{ id: SubTab; label: string; masterOnly?: boolean 
   { id: "awards", label: "Awards" },
   { id: "ranks", label: "Ranks" },
   { id: "styles", label: "Name Styles" },
-  { id: "cosmetics", label: "Cosmetics" },
+  { id: "borders", label: "Borders" },
+  { id: "cosmetics", label: "Flair" },
   { id: "items", label: "Items" },
+  { id: "flashsale", label: "Flash Sale" },
+  { id: "transfer", label: "Backup" },
   { id: "grants", label: "Test grants", masterOnly: true },
 ];
 
@@ -109,8 +134,11 @@ export function AdminEarningTab() {
       {subTab === "awards" ? <AwardsSection /> : null}
       {subTab === "ranks" ? <RanksSection /> : null}
       {subTab === "styles" ? <NameStylesSection /> : null}
+      {subTab === "borders" ? <FreeformBordersSection /> : null}
       {subTab === "cosmetics" ? <CosmeticsSection /> : null}
       {subTab === "items" ? <ItemsSection /> : null}
+      {subTab === "flashsale" ? <FlashSaleSection /> : null}
+      {subTab === "transfer" ? <CatalogTransferSection /> : null}
       {subTab === "grants" && isMaster ? <TestGrantsSection /> : null}
     </div>
   );
@@ -290,6 +318,135 @@ function AwardsSection() {
           fieldError={gatedFields.includes("multiCharacterEarnDivisor")}
           onChange={(v) => setConfig({ ...config, multiCharacterEarnDivisor: v })}
         />
+      </SectionFrame>
+
+      <SectionFrame
+        title="Message length bonus"
+        description="Reward longer effortful posts with a multiplier on the per-kind XP+Currency. Linear interpolation from 1.0× at Floor up to Max× at Ceil; above Ceil clamps to Max. Disable per-kind to keep that source on the flat base rate."
+      >
+        <div className="grid gap-3 lg:grid-cols-3">
+          {(["say", "action", "whisper"] as const).map((kind) => {
+            const spec = config.messageQuality.lengthBonus[kind];
+            const update = (next: Partial<typeof spec>) => setConfig({
+              ...config,
+              messageQuality: {
+                ...config.messageQuality,
+                lengthBonus: {
+                  ...config.messageQuality.lengthBonus,
+                  [kind]: { ...spec, ...next },
+                },
+              },
+            });
+            return (
+              <div key={kind} className="rounded border border-keep-rule bg-keep-bg/40 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <strong className="capitalize">{kind}</strong>
+                  <label className="flex items-center gap-1 text-xs text-keep-muted">
+                    <input
+                      type="checkbox"
+                      checked={spec.enabled}
+                      onChange={(e) => update({ enabled: e.target.checked })}
+                    />
+                    Enabled
+                  </label>
+                </div>
+                <div className="grid gap-2">
+                  <NumberRow
+                    label="Floor (chars)"
+                    help="At or below this length: 1.0× (base rate)."
+                    value={spec.floorChars}
+                    min={0}
+                    disabled={!spec.enabled}
+                    onChange={(v) => update({ floorChars: v })}
+                  />
+                  <NumberRow
+                    label="Ceil (chars)"
+                    help="At or above this length: Max multiplier (clamped)."
+                    value={spec.ceilChars}
+                    min={spec.floorChars + 1}
+                    disabled={!spec.enabled}
+                    onChange={(v) => update({ ceilChars: v })}
+                  />
+                  <NumberRow
+                    label="Max multiplier"
+                    help="Cap on the multiplier at or above Ceil. 1.0–10.0."
+                    value={spec.maxMultiplier}
+                    min={1}
+                    max={10}
+                    step={0.1}
+                    disabled={!spec.enabled}
+                    onChange={(v) => update({ maxMultiplier: v })}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </SectionFrame>
+
+      <SectionFrame
+        title="Spam detection"
+        description="Heuristics that drop the award to zero on suspect messages. Each check has its own threshold; setting any to 0 disables that check individually. Master switch (Enabled) bypasses every check at once. Flagged messages still post normally — only the award is denied — and the ledger metadata records why so admins can audit and tune."
+      >
+        <ToggleRow
+          label="Spam detection enabled"
+          value={config.messageQuality.spam.enabled}
+          onChange={(v) => setConfig({
+            ...config,
+            messageQuality: { ...config.messageQuality, spam: { ...config.messageQuality.spam, enabled: v } },
+          })}
+        />
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <NumberRow
+            label="Min length to check"
+            help="Skip every heuristic below this length — short messages are not flagged."
+            value={config.messageQuality.spam.minLengthToCheck}
+            min={0}
+            disabled={!config.messageQuality.spam.enabled}
+            onChange={(v) => setConfig({
+              ...config,
+              messageQuality: { ...config.messageQuality, spam: { ...config.messageQuality.spam, minLengthToCheck: v } },
+            })}
+          />
+          <NumberRow
+            label="Unique-char floor"
+            help='Flag if unique-chars / total-chars is below this. 0.18 catches "aaaaaaaaaa" and "!!!!!!!". 0 disables.'
+            value={config.messageQuality.spam.uniqueCharRatioFloor}
+            min={0}
+            max={1}
+            step={0.01}
+            disabled={!config.messageQuality.spam.enabled}
+            onChange={(v) => setConfig({
+              ...config,
+              messageQuality: { ...config.messageQuality, spam: { ...config.messageQuality.spam, uniqueCharRatioFloor: v } },
+            })}
+          />
+          <NumberRow
+            label="Dominant-token cap"
+            help='Flag if any single word repeats > this share of total tokens. 0.55 catches "spam spam spam spam". 0 disables.'
+            value={config.messageQuality.spam.dominantTokenRatioCap}
+            min={0}
+            max={1}
+            step={0.01}
+            disabled={!config.messageQuality.spam.enabled}
+            onChange={(v) => setConfig({
+              ...config,
+              messageQuality: { ...config.messageQuality, spam: { ...config.messageQuality.spam, dominantTokenRatioCap: v } },
+            })}
+          />
+          <NumberRow
+            label="Echo lookback"
+            help="How many recent messages-per-user to compare for exact-duplicate detection. 0 disables."
+            value={config.messageQuality.spam.echoLookback}
+            min={0}
+            max={20}
+            disabled={!config.messageQuality.spam.enabled}
+            onChange={(v) => setConfig({
+              ...config,
+              messageQuality: { ...config.messageQuality, spam: { ...config.messageQuality.spam, echoLookback: v } },
+            })}
+          />
+        </div>
       </SectionFrame>
 
       <SectionFrame title="Currency transfers (/currency send)"
@@ -1416,6 +1573,446 @@ function StyleEditor({
 }
 
 /* =========================================================
+ *  Free-form Borders sub-tab
+ *
+ *  Catalog CRUD for the parallel `freeform_borders` table
+ *  introduced in migration 0149. Each row ships in EITHER
+ *  `imageUrl` mode (overlay PNG / APNG) OR `template`+`styleCss`
+ *  mode (admin-authored DOM template with the literal `{avatar}`
+ *  placeholder). Server enforces the XOR; this UI surfaces both
+ *  fields and the admin picks one.
+ *
+ *  Rarity is an open string — admins can introduce a new tier
+ *  ("seasonal", "limited", whatever) by typing it. The user-facing
+ *  BordersTab palette covers a fixed set and falls back to the
+ *  'common' palette for anything else.
+ * ========================================================= */
+
+function FreeformBordersSection() {
+  const [rows, setRows] = useState<AdminFreeformBorderRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Partial<AdminFreeformBorderRow> | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  // Pull the admin's own avatar from the room-occupant cosmetics
+  // cache so previews show their actual portrait inside the frame.
+  // Same lookup BordersTab uses for the user-facing preview. Falls
+  // back to null (BorderedAvatar then shows the initials chip).
+  const me = useChat((s) => s.me);
+  const previewAvatarUrl = useChat((s) => {
+    if (!me) return null;
+    for (const list of Object.values(s.occupants)) {
+      const row = list.find((o) => o.userId === me.id);
+      if (row?.avatarUrl) return row.avatarUrl;
+    }
+    return null;
+  });
+
+  async function refresh() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const r = await fetchAdminFreeformBorders();
+      setRows(r.borders);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to load borders");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void refresh(); }, []);
+
+  function beginEdit(row: AdminFreeformBorderRow) {
+    setEditing(row.key);
+    setDraft({ ...row });
+    setCreating(false);
+  }
+
+  function beginCreate() {
+    setEditing(null);
+    setCreating(true);
+    setDraft({
+      key: "",
+      name: "",
+      description: "",
+      imageUrl: null,
+      template: null,
+      styleCss: null,
+      rarity: "common",
+      cost: 0,
+      enabled: true,
+      order: 0,
+    });
+  }
+
+  function cancelEdit() {
+    setEditing(null);
+    setCreating(false);
+    setDraft(null);
+  }
+
+  async function save() {
+    if (!draft) return;
+    setErr(null);
+    try {
+      if (creating) {
+        if (!draft.key || !draft.name) {
+          setErr("Key and name are required");
+          return;
+        }
+        // Build the body with conditional spreads so optional fields
+        // stay undefined-absent (matches `exactOptionalPropertyTypes`).
+        await createAdminFreeformBorder({
+          key: draft.key,
+          name: draft.name,
+          ...(draft.description !== undefined ? { description: draft.description } : {}),
+          imageUrl: draft.imageUrl ?? null,
+          template: draft.template ?? null,
+          styleCss: draft.styleCss ?? null,
+          ...(draft.rarity !== undefined ? { rarity: draft.rarity } : {}),
+          ...(draft.cost !== undefined ? { cost: draft.cost } : {}),
+          ...(draft.enabled !== undefined ? { enabled: draft.enabled } : {}),
+          ...(draft.order !== undefined ? { order: draft.order } : {}),
+        });
+      } else if (editing) {
+        await patchAdminFreeformBorder(editing, {
+          ...(draft.name !== undefined ? { name: draft.name } : {}),
+          ...(draft.description !== undefined ? { description: draft.description } : {}),
+          imageUrl: draft.imageUrl ?? null,
+          template: draft.template ?? null,
+          styleCss: draft.styleCss ?? null,
+          ...(draft.rarity !== undefined ? { rarity: draft.rarity } : {}),
+          ...(draft.cost !== undefined ? { cost: draft.cost } : {}),
+          ...(draft.enabled !== undefined ? { enabled: draft.enabled } : {}),
+          ...(draft.order !== undefined ? { order: draft.order } : {}),
+        });
+      }
+      cancelEdit();
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    }
+  }
+
+  async function remove(row: AdminFreeformBorderRow) {
+    if (row.isBuiltin) {
+      setErr("Built-in borders cannot be deleted; disable instead");
+      return;
+    }
+    const msg = row.owners > 0 || row.equipped > 0
+      ? `Delete "${row.name}"? ${row.owners} owner(s), ${row.equipped} equip(s) will be cleared.`
+      : `Delete "${row.name}"?`;
+    if (!window.confirm(msg)) return;
+    setErr(null);
+    try {
+      await deleteAdminFreeformBorder(row.key);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Delete failed");
+    }
+  }
+
+  const showEditor = creating || (editing !== null && draft !== null);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-action text-sm uppercase tracking-widest text-keep-muted">
+          Free-form Borders
+        </h3>
+        {!showEditor ? (
+          <button
+            type="button"
+            onClick={beginCreate}
+            className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/25"
+          >
+            + New border
+          </button>
+        ) : null}
+      </div>
+      {err ? (
+        <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-sm text-keep-accent">{err}</div>
+      ) : null}
+      {showEditor && draft ? (
+        <FreeformBorderEditor
+          draft={draft}
+          setDraft={setDraft}
+          creating={creating}
+          onCancel={cancelEdit}
+          onSave={() => void save()}
+        />
+      ) : null}
+      {loading ? (
+        <div className="text-sm text-keep-muted">Loading…</div>
+      ) : rows.length === 0 ? (
+        <div className="text-sm text-keep-muted">No free-form borders yet.</div>
+      ) : (
+        // Card grid — one tile per border, with a live preview using
+        // BorderedAvatar's freeformOverride path so disabled rows
+        // still render at full fidelity. Responsive: 1col mobile,
+        // 2col tablet, 3col desktop, 4col wide.
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+          {rows.map((r) => (
+            <div
+              key={r.key}
+              className={`flex flex-col gap-2 rounded border p-3 text-sm ${
+                r.enabled ? "border-keep-rule bg-keep-bg/40" : "border-keep-accent/40 bg-keep-accent/5"
+              }`}
+            >
+              {/* Live preview — same render path as the user-facing
+                  picker. `freeformOverride` bypasses the snapshot
+                  catalog so disabled rows still display, and inlines
+                  the row's CSS into the preview so admin-edited
+                  drafts work too. Show "(no template)" for empty
+                  rows that ship neither path. */}
+              <div className="flex items-center justify-center rounded bg-keep-banner/40 p-2 min-h-[120px]">
+                {r.template || r.imageUrl ? (
+                  <BorderedAvatar
+                    avatarUrl={previewAvatarUrl}
+                    name={r.name}
+                    size="xl"
+                    freeformOverride={{
+                      key: r.key,
+                      imageUrl: r.imageUrl,
+                      template: r.template,
+                      styleCss: r.styleCss,
+                    }}
+                  />
+                ) : (
+                  <span className="text-xs italic text-keep-muted">(no template / image)</span>
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold">{r.name}</span>
+                  <span className="text-xs text-keep-muted">{r.key}</span>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <span className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-keep-muted">
+                    {r.rarity}
+                  </span>
+                  {!r.enabled ? (
+                    <span className="rounded border border-keep-accent/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-keep-accent">
+                      Disabled
+                    </span>
+                  ) : null}
+                  {r.isBuiltin ? (
+                    <span className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-keep-muted">
+                      Built-in
+                    </span>
+                  ) : null}
+                  <span className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-keep-muted">
+                    {r.template ? "Template" : r.imageUrl ? "Image" : "Empty"}
+                  </span>
+                </div>
+                <div className="mt-1 text-[11px] text-keep-muted">
+                  Cost {r.cost} · Owners {r.owners} · Equipped {r.equipped}
+                </div>
+              </div>
+              <div className="mt-auto flex justify-end gap-1">
+                <button
+                  type="button"
+                  onClick={() => beginEdit(r)}
+                  className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs hover:bg-keep-banner"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void remove(r)}
+                  disabled={r.isBuiltin}
+                  title={r.isBuiltin ? "Built-in — disable instead" : "Delete border"}
+                  className="rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/20 disabled:opacity-40"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FreeformBorderEditor({
+  draft,
+  setDraft,
+  creating,
+  onCancel,
+  onSave,
+}: {
+  draft: Partial<AdminFreeformBorderRow>;
+  setDraft: (d: Partial<AdminFreeformBorderRow>) => void;
+  creating: boolean;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  // Local helper to update a single field without losing the
+  // unspecified fields. Lets the input handlers stay terse.
+  function set<K extends keyof AdminFreeformBorderRow>(k: K, v: AdminFreeformBorderRow[K]) {
+    setDraft({ ...draft, [k]: v });
+  }
+  // Pull the admin's own avatar for the live preview — same source
+  // as the section's grid previews.
+  const me = useChat((s) => s.me);
+  const previewAvatarUrl = useChat((s) => {
+    if (!me) return null;
+    for (const list of Object.values(s.occupants)) {
+      const row = list.find((o) => o.userId === me.id);
+      if (row?.avatarUrl) return row.avatarUrl;
+    }
+    return null;
+  });
+  return (
+    <div className="space-y-2 rounded border border-keep-rule bg-keep-bg/40 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="text-sm font-semibold">
+          {creating ? "New free-form border" : `Editing: ${draft.key}`}
+        </div>
+        {/* Live editor preview — feeds the draft through the same
+            BorderedAvatar override path the card grid uses, so the
+            admin sees the rendered border update as they type. */}
+        {draft.template || draft.imageUrl ? (
+          <div className="flex items-center justify-center rounded border border-keep-rule bg-keep-banner/40 p-2">
+            <BorderedAvatar
+              avatarUrl={previewAvatarUrl}
+              name={draft.name ?? draft.key ?? "Preview"}
+              size="xl"
+              freeformOverride={{
+                key: draft.key ?? "preview",
+                imageUrl: draft.imageUrl ?? null,
+                template: draft.template ?? null,
+                styleCss: draft.styleCss ?? null,
+              }}
+            />
+          </div>
+        ) : null}
+      </div>
+      <div className="grid gap-2 md:grid-cols-2">
+        {creating ? (
+          <label className="text-xs">
+            <span className="text-keep-muted">Key (lowercase, a-z 0-9 _ -)</span>
+            <input
+              type="text"
+              value={draft.key ?? ""}
+              onChange={(e) => set("key", e.target.value)}
+              className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+            />
+          </label>
+        ) : null}
+        <label className="text-xs">
+          <span className="text-keep-muted">Name</span>
+          <input
+            type="text"
+            value={draft.name ?? ""}
+            onChange={(e) => set("name", e.target.value)}
+            className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+          />
+        </label>
+        <label className="text-xs">
+          <span className="text-keep-muted">Rarity (open string)</span>
+          <input
+            type="text"
+            value={draft.rarity ?? ""}
+            onChange={(e) => set("rarity", e.target.value)}
+            placeholder="common / rare / epic / legendary / mythic / exotic / atmospheric"
+            className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+          />
+        </label>
+        <label className="text-xs">
+          <span className="text-keep-muted">Cost (Currency)</span>
+          <input
+            type="number"
+            min={0}
+            value={draft.cost ?? 0}
+            onChange={(e) => set("cost", Number(e.target.value))}
+            className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+          />
+        </label>
+        <label className="text-xs">
+          <span className="text-keep-muted">Order</span>
+          <input
+            type="number"
+            value={draft.order ?? 0}
+            onChange={(e) => set("order", Number(e.target.value))}
+            className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+          />
+        </label>
+        <label className="text-xs">
+          <span className="text-keep-muted">Enabled</span>
+          <input
+            type="checkbox"
+            checked={!!draft.enabled}
+            onChange={(e) => set("enabled", e.target.checked)}
+            className="ml-2"
+          />
+        </label>
+      </div>
+      <label className="block text-xs">
+        <span className="text-keep-muted">Description (optional)</span>
+        <textarea
+          rows={2}
+          value={draft.description ?? ""}
+          onChange={(e) => set("description", e.target.value)}
+          className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+        />
+      </label>
+      {/* Image vs template mode is exclusive — the server enforces
+          XOR. The UI lets the admin clear one to switch to the
+          other. */}
+      <label className="block text-xs">
+        <span className="text-keep-muted">Image URL (PNG / APNG / WebP, transparent center). Leave blank if using a template.</span>
+        <input
+          type="text"
+          value={draft.imageUrl ?? ""}
+          onChange={(e) => set("imageUrl", e.target.value || null)}
+          className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+        />
+      </label>
+      <label className="block text-xs">
+        <span className="text-keep-muted">Template (HTML, uses literal `&#123;avatar&#125;` for the avatar slot). Leave blank if using an image URL.</span>
+        <textarea
+          rows={4}
+          value={draft.template ?? ""}
+          onChange={(e) => set("template", e.target.value || null)}
+          placeholder={'<div class="av b-mykey"><div class="pic">{avatar}</div></div>'}
+          className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
+        />
+      </label>
+      <label className="block text-xs">
+        <span className="text-keep-muted">Style CSS (scoped to the `.b-&lt;key&gt;` chain referenced by the template)</span>
+        <textarea
+          rows={6}
+          value={draft.styleCss ?? ""}
+          onChange={(e) => set("styleCss", e.target.value || null)}
+          className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
+        />
+      </label>
+      <div className="flex justify-end gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-xs text-keep-muted hover:bg-keep-banner"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onSave}
+          className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/25"
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
  *  Cosmetics sub-tab
  *
  *  One row per cosmetic; admins edit name / description / cost /
@@ -1448,7 +2045,7 @@ function CosmeticsSection() {
   return (
     <div className="space-y-3">
       <header>
-        <h3 className="font-action text-base">Cosmetics</h3>
+        <h3 className="font-action text-base">Flair</h3>
         <p className="text-xs text-keep-muted">
           Edit the buyable cosmetics catalog. Rank borders are priced per-rank in the Ranks tab; this surface covers everything else.
         </p>
@@ -1456,10 +2053,177 @@ function CosmeticsSection() {
       {err ? (
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-sm text-keep-accent">{err}</div>
       ) : null}
-      <div className="space-y-2">
+      {/* Card grid — saves vertical space on tablet+ while staying
+          1col on mobile. Each CosmeticRow keeps its own layout
+          (header + description + inputs) so converting to a grid is
+          purely the outer flow. */}
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {rows.map((r) => (
           <CosmeticRow key={r.key} row={r} onChanged={() => void refresh()} onError={setErr} />
         ))}
+      </div>
+      <FlairModerationSection />
+    </div>
+  );
+}
+
+/* =========================================================
+ *  Flair moderation levers
+ *
+ *  Per-cosmetic "clear this user's free-form content" actions.
+ *  Banner URL and typing phrase are both user-supplied strings
+ *  protected only by the up-front purchase + length checks — when
+ *  a moderator gets a report ("Bob's banner is hotlinked NSFW",
+ *  "Alice's typing phrase is harassing"), this is where they
+ *  zero it out. Ownership of the cosmetic is retained so the user
+ *  can set a (presumably policy-compliant) value afterwards.
+ *
+ *  Auditable: each action writes a `profile_banner_clear` or
+ *  `typing_phrase_clear` audit row with the optional reason.
+ * ========================================================= */
+function FlairModerationSection() {
+  return (
+    <section className="space-y-3 rounded border border-keep-rule bg-keep-bg/40 p-3">
+      <header>
+        <h4 className="font-action text-sm uppercase tracking-widest text-keep-muted">
+          Moderation
+        </h4>
+        <p className="text-xs text-keep-muted">
+          Wipe a user's free-form Flair content (banner URL, typing phrase) without touching their ownership of the cosmetic.
+        </p>
+      </header>
+      <div className="grid gap-2 md:grid-cols-2">
+        <ClearFlairCard
+          title="Clear profile banner"
+          kind="banner"
+          hint="Empties the banner-URL slot for the target identity. Use after a hotlinked image report."
+        />
+        <ClearFlairCard
+          title="Clear typing phrase"
+          kind="typing-phrase"
+          hint="Empties the custom typing phrase for the target identity. Use after a harassment / language report."
+        />
+        <ClearFlairCard
+          title="Clear room entrance / exit"
+          kind="room-presence"
+          hint="Wipes both the join and leave room broadcast templates for the target identity. Use after an abusive room-presence flair report."
+        />
+        <ClearFlairCard
+          title="Clear session greeting"
+          kind="session-presence"
+          hint="Wipes both the login and logout broadcast templates. Master-only; character id is ignored."
+        />
+      </div>
+    </section>
+  );
+}
+
+function ClearFlairCard({
+  title,
+  kind,
+  hint,
+}: {
+  title: string;
+  kind: "banner" | "typing-phrase" | "room-presence" | "session-presence";
+  hint: string;
+}) {
+  const [username, setUsername] = useState("");
+  const [characterId, setCharacterId] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{ kind: "ok"; message: string } | { kind: "err"; message: string } | null>(null);
+  // Session-presence is master-only — hide the character-id input
+  // so admins don't think they can target a character's session
+  // greeting (it doesn't exist).
+  const supportsCharacterScope = kind !== "session-presence";
+
+  async function submit() {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const args = {
+        username: username.trim(),
+        ...(supportsCharacterScope && characterId.trim() ? { characterId: characterId.trim() } : { characterId: null as string | null }),
+        ...(reason.trim() ? { reason: reason.trim() } : {}),
+      };
+      if (kind === "banner") {
+        await adminClearProfileBanner(args);
+      } else if (kind === "typing-phrase") {
+        await adminClearTypingPhrase(args);
+      } else if (kind === "room-presence") {
+        await adminClearRoomPresence(args);
+      } else {
+        await adminClearSessionPresence({ username: args.username, ...(reason.trim() ? { reason: reason.trim() } : {}) });
+      }
+      setStatus({ kind: "ok", message: "Cleared." });
+      // Leave the username field populated so a moderator can clear
+      // the same user's other slot without retyping. Wipe the reason
+      // so the next click doesn't carry it forward unintentionally.
+      setReason("");
+    } catch (e) {
+      setStatus({ kind: "err", message: e instanceof Error ? e.message : "Clear failed" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const canSubmit = username.trim().length > 0 && !busy;
+  return (
+    <div className="space-y-2 rounded border border-keep-rule bg-keep-bg/60 p-2 text-xs">
+      <div className="font-semibold">{title}</div>
+      <p className="text-[10px] text-keep-muted">{hint}</p>
+      <label className="block">
+        <span className="text-keep-muted">Target username</span>
+        <input
+          type="text"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="username"
+          className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+        />
+      </label>
+      {supportsCharacterScope ? (
+        <label className="block">
+          <span className="text-keep-muted">Character id (optional — leave blank to clear master/OOC)</span>
+          <input
+            type="text"
+            value={characterId}
+            onChange={(e) => setCharacterId(e.target.value)}
+            placeholder="charXXXX…"
+            className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[10px]"
+          />
+        </label>
+      ) : null}
+      <label className="block">
+        <span className="text-keep-muted">Reason (optional, recorded in audit log)</span>
+        <input
+          type="text"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="e.g. hotlinked NSFW"
+          className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+        />
+      </label>
+      {status ? (
+        <div
+          className={`rounded border px-2 py-1 text-[10px] ${
+            status.kind === "ok"
+              ? "border-keep-action/40 bg-keep-action/10 text-keep-action"
+              : "border-keep-accent/40 bg-keep-accent/10 text-keep-accent"
+          }`}
+        >
+          {status.message}
+        </div>
+      ) : null}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={!canSubmit}
+          className="rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+        >
+          {busy ? "Clearing…" : "Clear"}
+        </button>
       </div>
     </div>
   );
@@ -2345,11 +3109,13 @@ function TestGrantsSection() {
   const [tiers, setTiers] = useState<AdminTierRow[]>([]);
   const [styles, setStyles] = useState<AdminNameStyleRow[]>([]);
   const [itemsCatalog, setItemsCatalog] = useState<AdminItemRow[]>([]);
+  const [freeformBorders, setFreeformBorders] = useState<AdminFreeformBorderRow[]>([]);
   useEffect(() => {
     void Promise.all([
       fetchAdminRanks().then((r) => { setRanks(r.ranks); setTiers(r.tiers); }),
       fetchAdminNameStyles().then((r) => setStyles(r.styles)),
       fetchAdminItems().then((r) => setItemsCatalog(r.items)),
+      fetchAdminFreeformBorders().then((r) => setFreeformBorders(r.borders)),
     ]).catch((e) => setErr(e instanceof Error ? e.message : "Failed to load catalogs"));
   }, []);
 
@@ -2465,6 +3231,62 @@ function TestGrantsSection() {
               async () => { await adminGrantItem(target, itemKey, quantity); },
             )
           }
+        />
+      </SectionFrame>
+
+      {/* ---- Free-form border grant / revoke (Phase 1 catalog) ---- */}
+      <SectionFrame
+        title="Grant free-form border"
+        description="Inserts ownership for the chosen free-form border (master pool). Idempotent. Auto-equips on first acquisition if the identity has no freeform border equipped — matches the user-facing purchase behavior."
+      >
+        <GrantPickerRow
+          options={freeformBorders.map((b) => ({ value: b.key, label: `${b.name} (${b.rarity})` }))}
+          placeholder={freeformBorders.length === 0 ? "No free-form borders defined" : "Pick a border…"}
+          busy={busy}
+          buttonLabel="Grant border"
+          onPick={(key) => run(`Grant freeform border ${key}`, () => adminGrantFreeformBorder(target, key))}
+        />
+      </SectionFrame>
+
+      <SectionFrame
+        title="Revoke free-form border"
+        description="Removes ownership of the chosen free-form border from the target's master pool. If they had it equipped, the equip slot clears too. Idempotent on unowned."
+      >
+        <GrantPickerRow
+          options={freeformBorders.map((b) => ({ value: b.key, label: `${b.name} (${b.rarity})` }))}
+          placeholder={freeformBorders.length === 0 ? "No free-form borders defined" : "Pick a border…"}
+          busy={busy}
+          buttonLabel="Revoke border"
+          onPick={(key) => run(`Revoke freeform border ${key}`, () => adminRevokeFreeformBorder(target, key))}
+        />
+      </SectionFrame>
+
+      {/* ---- Revoke for the existing rank-tier catalog rows ---- */}
+      <SectionFrame
+        title="Revoke rank border"
+        description="Removes the chosen rank-tier border from the target's owned set. Clears the equip slot if it pointed at this border."
+      >
+        <GrantPickerRow
+          options={ranks
+            .filter((r) => tier4ByRank.has(r.key) && tier4ByRank.get(r.key)!.borderImageUrl)
+            .map((r) => ({ value: r.key, label: r.name }))}
+          placeholder="Pick a rank…"
+          busy={busy}
+          buttonLabel="Revoke border"
+          onPick={(rankKey) => run(`Revoke border ${rankKey}`, () => adminRevokeBorder(target, rankKey))}
+        />
+      </SectionFrame>
+
+      <SectionFrame
+        title="Revoke name style"
+        description="Removes the chosen name-style ownership row. Clears the active-cosmetics slot if the style was equipped."
+      >
+        <GrantPickerRow
+          options={styles.map((s) => ({ value: s.key, label: s.name }))}
+          placeholder="Pick a style…"
+          busy={busy}
+          buttonLabel="Revoke style"
+          onPick={(styleKey) => run(`Revoke style ${styleKey}`, () => adminRevokeStyle(target, styleKey))}
         />
       </SectionFrame>
     </div>
@@ -2661,5 +3483,458 @@ function GrantPickerRow({
         {buttonLabel}
       </button>
     </div>
+  );
+}
+
+/* ============================================================
+ *  Flash Sale sub-tab
+ *
+ *  Two panels in one section:
+ *    1. Today's picks (read-only — the resolver has already made
+ *       its choice for today; the only way to change it is queue
+ *       an override for a FUTURE date).
+ *    2. Future queue — one row per (category, date) override.
+ *       Admin picks a target key + optional discount %. Queueing
+ *       null target removes the queue (day falls back to random).
+ *
+ *  Plus a settings strip across the top: per-category enable
+ *  toggles + the global default discount %.
+ * ============================================================ */
+function FlashSaleSection() {
+  const [data, setData] = useState<AdminFlashSaleResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [styles, setStyles] = useState<AdminNameStyleRow[]>([]);
+  const [allItems, setAllItems] = useState<AdminItemRow[]>([]);
+  const [allCosmetics, setAllCosmetics] = useState<AdminCosmeticRow[]>([]);
+  const [allFreeformBorders, setAllFreeformBorders] = useState<AdminFreeformBorderRow[]>([]);
+
+  async function refresh() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const [fs, ns, items, cos, fb] = await Promise.all([
+        fetchAdminFlashSale(),
+        fetchAdminNameStyles(),
+        fetchAdminItems(),
+        fetchAdminCosmetics(),
+        fetchAdminFreeformBorders(),
+      ]);
+      setData(fs);
+      setStyles(ns.styles);
+      setAllItems(items.items);
+      setAllCosmetics(cos.cosmetics);
+      setAllFreeformBorders(fb.borders);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Load failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { void refresh(); }, []);
+
+  if (loading) return <p className="text-sm text-keep-muted">Loading flash-sale state…</p>;
+  if (!data) return <p className="text-sm text-keep-accent">{err ?? "Load failed."}</p>;
+
+  // The "for_date" the override form starts at — tomorrow. Admins
+  // can edit the date input to queue further out, but tomorrow is
+  // the most common case.
+  return (
+    <div className="space-y-5">
+      <header className="space-y-1">
+        <h3 className="font-action text-base">Flash Sale</h3>
+        <p className="text-xs text-keep-muted">
+          One row per category goes on sale each UTC day. Today's picks are read-only — the
+          resolver has already chosen. Queue a specific row for any future date, or leave a
+          date un-queued to keep it random. Override targets that get disabled in the catalog
+          before resolution day still get picked (admin intent wins over availability).
+        </p>
+      </header>
+
+      <FlashSaleSettings settings={data.settings} onSaved={refresh} />
+
+      <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
+        <h4 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">Today</h4>
+        <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+          <FlashSaleTodayCell label="Name Style" keyVal={data.today.nameStyleKey} discount={data.today.nameStyleDiscountPct} />
+          <FlashSaleTodayCell label="Border" keyVal={data.today.freeformBorderKey} discount={data.today.freeformBorderDiscountPct} />
+          <FlashSaleTodayCell label="Item" keyVal={data.today.itemKey} discount={data.today.itemDiscountPct} />
+          <FlashSaleTodayCell label="Cosmetic" keyVal={data.today.cosmeticKey} discount={data.today.cosmeticDiscountPct} />
+        </div>
+      </section>
+
+      <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
+        <h4 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
+          Queue for {data.tomorrow} or later
+        </h4>
+        <p className="mb-2 text-xs text-keep-muted">
+          Pick a row + an optional per-pick discount. Click Save to queue. Setting target to
+          "(random)" removes any existing queue for that slot.
+        </p>
+        <div className="space-y-2">
+          {(["name_style", "freeform_border", "item", "cosmetic"] as const).map((cat) => (
+            <FlashSaleOverrideRow
+              key={cat}
+              category={cat}
+              defaultDate={data.tomorrow}
+              allOverrides={data.overrides}
+              styles={styles}
+              items={allItems}
+              cosmetics={allCosmetics}
+              freeformBorders={allFreeformBorders}
+              onSaved={refresh}
+            />
+          ))}
+        </div>
+        {data.overrides.length > 0 ? (
+          <div className="mt-3 border-t border-keep-rule pt-3">
+            <h5 className="mb-2 text-[10px] uppercase tracking-widest text-keep-muted">
+              All queued ({data.overrides.length})
+            </h5>
+            <ul className="space-y-1 text-xs">
+              {data.overrides.map((o) => (
+                <li key={`${o.category}:${o.forDate}`} className="flex flex-wrap items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg px-2 py-1">
+                  <span className="text-keep-muted">{o.forDate}</span>
+                  <span className="rounded bg-keep-banner px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-text">{o.category}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono">{o.targetKey}</span>
+                  {o.discountPct != null ? (
+                    <span className="text-keep-action">-{o.discountPct}%</span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </section>
+
+      {err ? <p className="text-xs text-keep-accent">{err}</p> : null}
+    </div>
+  );
+}
+
+function FlashSaleTodayCell({ label, keyVal, discount }: { label: string; keyVal: string | null; discount: number | null }) {
+  return (
+    <div className="rounded border border-keep-rule bg-keep-bg p-2">
+      <div className="text-[10px] uppercase tracking-widest text-keep-muted">{label}</div>
+      <div className="mt-1 truncate font-mono text-xs text-keep-text">{keyVal ?? "(none)"}</div>
+      {discount != null ? (
+        <div className="text-[10px] text-keep-action">-{discount}% off</div>
+      ) : null}
+    </div>
+  );
+}
+
+function FlashSaleSettings({
+  settings,
+  onSaved,
+}: {
+  settings: AdminFlashSaleResponse["settings"];
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState(settings);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { setDraft(settings); }, [settings]);
+
+  async function save() {
+    setSaving(true);
+    setErr(null);
+    try {
+      await patchAdminFlashSaleSettings(draft);
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
+      <h4 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">Settings</h4>
+      <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+        <label className="flex items-center gap-2">
+          <span className="text-xs text-keep-muted">Default discount %</span>
+          <input
+            type="number"
+            min={1}
+            max={99}
+            value={draft.defaultDiscountPct}
+            onChange={(e) => setDraft({ ...draft, defaultDiscountPct: Math.max(1, Math.min(99, Number.parseInt(e.target.value, 10) || 25)) })}
+            className="w-16 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+          />
+        </label>
+        <ToggleLabel checked={draft.stylesEnabled} onChange={(v) => setDraft({ ...draft, stylesEnabled: v })} label="Name Styles" />
+        <ToggleLabel checked={draft.freeformBordersEnabled} onChange={(v) => setDraft({ ...draft, freeformBordersEnabled: v })} label="Borders" />
+        <ToggleLabel checked={draft.itemsEnabled} onChange={(v) => setDraft({ ...draft, itemsEnabled: v })} label="Items" />
+        <ToggleLabel checked={draft.cosmeticsEnabled} onChange={(v) => setDraft({ ...draft, cosmeticsEnabled: v })} label="Flair" />
+      </div>
+      <div className="mt-2 flex items-center justify-end gap-2">
+        {err ? <span className="mr-auto text-xs text-keep-accent">{err}</span> : null}
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save settings"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ToggleLabel({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+function FlashSaleOverrideRow({
+  category,
+  defaultDate,
+  allOverrides,
+  styles,
+  items,
+  cosmetics,
+  freeformBorders,
+  onSaved,
+}: {
+  category: "name_style" | "item" | "cosmetic" | "freeform_border";
+  defaultDate: string;
+  allOverrides: AdminFlashSaleResponse["overrides"];
+  styles: AdminNameStyleRow[];
+  items: AdminItemRow[];
+  cosmetics: AdminCosmeticRow[];
+  freeformBorders: AdminFreeformBorderRow[];
+  onSaved: () => void;
+}) {
+  const [date, setDate] = useState<string>(defaultDate);
+  // `existing` is derived from the CURRENT date state, not a static
+  // prop — so when the admin types a different future date into the
+  // input, the row immediately reflects "is there already a queue
+  // for this category on that date?" instead of frozenly showing
+  // whatever tomorrow's queue happens to be. Empty string in
+  // target = "(random)" = no queue.
+  const existing = useMemo(
+    () => allOverrides.find((o) => o.category === category && o.forDate === date) ?? null,
+    [allOverrides, category, date],
+  );
+  const [target, setTarget] = useState<string>(existing?.targetKey ?? "");
+  const [discount, setDiscount] = useState<string>(existing?.discountPct != null ? String(existing.discountPct) : "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  // Sync the local form draft to the derived `existing` so a date
+  // change (or a parent refresh after Save) populates the row with
+  // whatever's currently queued for that (category, date) — instead
+  // of leaving a stale "40%" in the discount field after navigating
+  // to a date with no queue. The lookup is by-value of the derived
+  // record, so React only re-runs these when the actual existing row
+  // changes.
+  useEffect(() => { setTarget(existing?.targetKey ?? ""); }, [existing?.targetKey]);
+  useEffect(() => {
+    setDiscount(existing?.discountPct != null ? String(existing.discountPct) : "");
+  }, [existing?.discountPct]);
+  // Parent refresh after Save can also shift `defaultDate` (e.g.,
+  // calendar rolls over mid-session and tomorrow is now a new day);
+  // reset the row's date to match unless the admin moved it manually.
+  // We only follow defaultDate when the row hasn't been edited away.
+  useEffect(() => { setDate((cur) => (cur === defaultDate ? defaultDate : cur)); }, [defaultDate]);
+
+  // Options come from the corresponding catalog. Disabled rows are
+  // included — admins can pin one anyway (intent wins over availability).
+  const options: Array<{ key: string; name: string }> =
+    category === "name_style" ? styles.map((s) => ({ key: s.key, name: s.name }))
+    : category === "item" ? items.map((i) => ({ key: i.key, name: i.name }))
+    : category === "cosmetic" ? cosmetics.map((c) => ({ key: c.key, name: c.name }))
+    : freeformBorders.map((b) => ({ key: b.key, name: b.name }));
+
+  async function save() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const discountPct = discount.trim() === "" ? null : Math.max(1, Math.min(99, Number.parseInt(discount, 10) || 0));
+      await putAdminFlashSaleOverride({
+        category,
+        forDate: date,
+        targetKey: target || null,
+        discountPct,
+      });
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const label = category === "name_style" ? "Name Style"
+    : category === "item" ? "Item"
+    : category === "cosmetic" ? "Cosmetic"
+    : "Border";
+
+  return (
+    <div className="grid items-center gap-2 rounded border border-keep-rule bg-keep-bg p-2 text-xs sm:grid-cols-[120px_140px_1fr_80px_auto]">
+      <div className="font-semibold text-keep-text">{label}</div>
+      <input
+        type="date"
+        value={date}
+        onChange={(e) => setDate(e.target.value)}
+        className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+      />
+      <select
+        value={target}
+        onChange={(e) => setTarget(e.target.value)}
+        className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+      >
+        <option value="">(random)</option>
+        {options.map((o) => (
+          <option key={o.key} value={o.key}>{o.name} — {o.key}</option>
+        ))}
+      </select>
+      <input
+        type="number"
+        placeholder="%"
+        min={1}
+        max={99}
+        value={discount}
+        onChange={(e) => setDiscount(e.target.value)}
+        className="w-16 rounded border border-keep-rule bg-keep-bg px-2 py-1"
+        title="Optional per-pick discount %"
+      />
+      <button
+        type="button"
+        onClick={save}
+        disabled={busy}
+        className="rounded border border-keep-action bg-keep-action/15 px-2 py-1 text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+      >
+        {busy ? "…" : (target ? "Queue" : "Clear")}
+      </button>
+      {err ? <span className="col-span-full text-keep-accent">{err}</span> : null}
+    </div>
+  );
+}
+
+/* ============================================================
+ *  Catalog Backup (export/import) sub-tab
+ *
+ *  Four catalogs available. Each gets an Export button (downloads
+ *  a ZIP) and an Import button (file-picker → POST). Import is
+ *  upsert-by-key; absent rows are left alone — see
+ *  apps/server/src/admin/earningTransfer.ts for the semantics.
+ * ============================================================ */
+function CatalogTransferSection() {
+  const kinds: ReadonlyArray<{ id: EarningTransferKind; label: string; help: string }> = [
+    { id: "name-styles", label: "Name Styles", help: "Templates + CSS. No image assets." },
+    { id: "items", label: "Items", help: "Catalog rows + icon images." },
+    { id: "borders", label: "Borders", help: "Border image + cost on each Tier IV. Surgical: only border columns are touched on import." },
+    { id: "freeform-borders", label: "Free-form Borders", help: "Non-rank-tied border catalog (image-mode and template+CSS-mode). Ownership ledgers are NOT exported." },
+    { id: "ranks", label: "Ranks", help: "Full rank hierarchy: ranks + tiers + sigils + borders." },
+  ];
+  return (
+    <div className="space-y-4">
+      <header className="space-y-1">
+        <h3 className="font-action text-base">Catalog Backup</h3>
+        <p className="text-xs text-keep-muted">
+          Per-catalog ZIP export + import. Imports are <strong>upsert by key</strong> — rows you
+          didn't include keep their existing values. Bundled `/uploads/*` images extract back to
+          their original paths so a round-trip restores custom art too. Re-importing a file you
+          just exported is a clean no-op.
+        </p>
+      </header>
+      {kinds.map((k) => (
+        <TransferRow key={k.id} kind={k.id} label={k.label} help={k.help} />
+      ))}
+    </div>
+  );
+}
+
+function TransferRow({ kind, label, help }: { kind: EarningTransferKind; label: string; help: string }) {
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [result, setResult] = useState<CatalogImportResult | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  async function onExport() {
+    setBusy(true);
+    setStatus(null);
+    setResult(null);
+    try {
+      await downloadCatalogExport(kind);
+      setStatus({ kind: "ok", text: "Export downloaded." });
+    } catch (e) {
+      setStatus({ kind: "error", text: e instanceof Error ? e.message : "Export failed" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file later
+    if (!f) return;
+    if (!window.confirm(`Import ${f.name} into ${label}? This UPSERTS by key — existing rows with matching keys will be overwritten.`)) return;
+    setBusy(true);
+    setStatus(null);
+    setResult(null);
+    try {
+      const r = await uploadCatalogImport(kind, f);
+      setResult(r);
+      setStatus({
+        kind: "ok",
+        text: `Import done. Inserted ${r.inserted}, updated ${r.updated}, ${r.writtenAssets.length} asset(s) written.`,
+      });
+    } catch (err) {
+      setStatus({ kind: "error", text: err instanceof Error ? err.message : "Import failed" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold">{label}</div>
+          <div className="text-xs text-keep-muted">{help}</div>
+        </div>
+        <button
+          type="button"
+          onClick={onExport}
+          disabled={busy}
+          className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs hover:bg-keep-banner disabled:opacity-50"
+        >
+          {busy ? "Working…" : "Export ZIP"}
+        </button>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+          className="rounded border border-keep-action bg-keep-action/15 px-2 py-1 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+        >
+          Import ZIP…
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".zip,application/zip"
+          onChange={onImportFile}
+          className="hidden"
+        />
+      </div>
+      {status ? (
+        <p className={`mt-2 text-xs ${status.kind === "ok" ? "text-keep-action" : "text-keep-accent"}`}>
+          {status.text}
+        </p>
+      ) : null}
+      {result && result.warnings.length > 0 ? (
+        <ul className="mt-2 list-disc pl-5 text-xs text-keep-muted">
+          {result.warnings.map((w, i) => (<li key={i}>{w}</li>))}
+        </ul>
+      ) : null}
+    </section>
   );
 }

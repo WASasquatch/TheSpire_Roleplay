@@ -21,11 +21,18 @@ import {
   equipCosmetic,
   fetchEarningCatalog,
   fetchEarningLedger,
+  fetchRankings,
   formatItemName,
   formatLedgerEntry,
+  patchFreeformBorderConfig,
   patchNameStyleConfig,
   patchEarningSettings,
   purchaseBorder,
+  purchaseFreeformBorder,
+  patchProfileBannerUrl,
+  patchRoomPresenceTemplates,
+  patchSessionPresenceTemplates,
+  patchTypingPhrase,
   purchaseCosmetic,
   purchaseNameStyle,
   setActiveNameStyle,
@@ -33,8 +40,12 @@ import {
   setPetCollectionSlots,
   ITEM_CATEGORIES,
   ITEM_CATEGORY_LABELS,
+  fetchFlashSale,
   type CatalogResponse,
   type CollectionEntry,
+  type FlashSalePick,
+  type FlashSaleResponse,
+  type FreeformBorderRow,
   type InventoryEntry,
   type ItemCatalogRow,
   type ItemCategory,
@@ -42,14 +53,20 @@ import {
   type NameStyleCatalogRow,
   type OwnedStyle,
   type PoolView,
+  type RankingsResponse,
+  type RankingBoard,
+  type RankingChampion,
+  type RankingPoolEntry,
   type RankTierRow,
 } from "../lib/earning.js";
 import { BorderedAvatar } from "./BorderedAvatar.js";
+import { EmoticonSubmissionModal } from "./EmoticonSubmissionModal.js";
 import { CoinAmount } from "./CoinAmount.js";
 import { StyledName } from "./StyledName.js";
 import { CloseButton } from "./CloseButton.js";
+import { extractFreeformBorderVarsWithDefaults, parseFreeformBorderConfig } from "@thekeep/shared";
 
-type DashboardTab = "overview" | "ledger" | "settings" | "styles" | "borders" | "cosmetics" | "items";
+type DashboardTab = "overview" | "ledger" | "settings" | "styles" | "borders" | "cosmetics" | "items" | "rankings";
 type ItemsSubTab = "inventory" | "shop" | "collection" | "pets";
 
 interface Props {
@@ -74,6 +91,17 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab }: Pro
   const refresh = useEarning((s) => s.refresh);
   const me = useChat((s) => s.me);
   const [tab, setTab] = useState<DashboardTab>(initialTab ?? "overview");
+  // Flash Sale → shop tab nav. When the user clicks a sale card, we
+  // jump to the matching tab AND stash the catalog row key the card
+  // referenced. The receiving tab finds the corresponding row via
+  // `data-shop-row="<key>"` and scrolls it into view + briefly
+  // highlights it so the user lands on the exact row they came to
+  // buy instead of dumping them at the top of a long catalog.
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  function navigateTo(nextTab: DashboardTab, key: string | null = null): void {
+    setTab(nextTab);
+    setFocusKey(key);
+  }
 
   // Re-fetch on mount so a freshly-opened dashboard reflects any
   // earnings that landed while the modal was closed (rank-up events
@@ -82,6 +110,23 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab }: Pro
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Today's flash sale, hoisted here so every tab (Overview hero,
+  // Name Styles / Cosmetics / Items shop pips) reads from the same
+  // payload. Single fetch on dashboard mount; cheap warm-path reads
+  // afterwards. Tabs that don't render until clicked still get the
+  // up-to-date sale because we re-fetch when the snapshot refreshes
+  // (purchase, equip, /char switch all trigger refresh → this effect
+  // would NOT re-run because its dep is empty, so we explicitly
+  // refresh on refresh-completion below).
+  const [flashSale, setFlashSale] = useState<FlashSaleResponse | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchFlashSale()
+      .then((r) => { if (!cancelled) setFlashSale(r); })
+      .catch(() => { /* silent — sale info is decoration */ });
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
@@ -105,9 +150,10 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab }: Pro
           >
             <option value="overview">Overview</option>
             <option value="ledger">Activity</option>
+            <option value="rankings">Rankings</option>
             <option value="styles">Name Styles</option>
             <option value="borders">Borders</option>
-            <option value="cosmetics">Cosmetics</option>
+            <option value="cosmetics">Flair</option>
             <option value="items">Items</option>
             <option value="settings">Settings</option>
           </select>
@@ -117,9 +163,10 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab }: Pro
           <nav className="keep-scroll-strip hidden min-w-0 flex-1 gap-1 overflow-x-auto text-xs uppercase tracking-widest lg:flex">
             <TabBtn active={tab === "overview"} onClick={() => setTab("overview")}>Overview</TabBtn>
             <TabBtn active={tab === "ledger"} onClick={() => setTab("ledger")}>Activity</TabBtn>
+            <TabBtn active={tab === "rankings"} onClick={() => setTab("rankings")}>Rankings</TabBtn>
             <TabBtn active={tab === "styles"} onClick={() => setTab("styles")}>Name Styles</TabBtn>
             <TabBtn active={tab === "borders"} onClick={() => setTab("borders")}>Borders</TabBtn>
-            <TabBtn active={tab === "cosmetics"} onClick={() => setTab("cosmetics")}>Cosmetics</TabBtn>
+            <TabBtn active={tab === "cosmetics"} onClick={() => setTab("cosmetics")}>Flair</TabBtn>
             <TabBtn active={tab === "items"} onClick={() => setTab("items")}>Items</TabBtn>
             <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>Settings</TabBtn>
           </nav>
@@ -145,7 +192,7 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab }: Pro
             <p className="text-sm text-keep-muted">No earning record yet — earn XP from chat or forums to start.</p>
           ) : null}
 
-          {snapshot && tab === "overview" ? <OverviewTab snapshot={snapshot} /> : null}
+          {snapshot && tab === "overview" ? <OverviewTab snapshot={snapshot} flashSale={flashSale} onNavigate={navigateTo} /> : null}
           {snapshot && tab === "ledger" ? (
             <LedgerTab
               characters={snapshot.characters.map((c) => ({ id: c.ownerId, name: c.displayName }))}
@@ -153,12 +200,15 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab }: Pro
             />
           ) : null}
           {snapshot && tab === "settings" ? <SettingsTab snapshot={snapshot} myId={me?.id ?? null} /> : null}
-          {snapshot && tab === "styles" ? <NameStylesTab snapshot={snapshot} /> : null}
-          {snapshot && tab === "borders" ? <BordersTab snapshot={snapshot} /> : null}
-          {snapshot && tab === "cosmetics" ? <CosmeticsTab snapshot={snapshot} /> : null}
+          {tab === "rankings" ? <RankingsTab /> : null}
+          {snapshot && tab === "styles" ? <NameStylesTab snapshot={snapshot} flashSale={flashSale} focusKey={focusKey} /> : null}
+          {snapshot && tab === "borders" ? <BordersTab snapshot={snapshot} flashSale={flashSale} focusKey={focusKey} /> : null}
+          {snapshot && tab === "cosmetics" ? <CosmeticsTab snapshot={snapshot} flashSale={flashSale} focusKey={focusKey} /> : null}
           {snapshot && tab === "items" ? (
             <ItemsTab
               snapshot={snapshot}
+              flashSale={flashSale}
+              focusKey={focusKey}
               {...(initialItemSubTab ? { initialSubTab: initialItemSubTab } : {})}
             />
           ) : null}
@@ -180,12 +230,75 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
   );
 }
 
+/**
+ * Shop-row focus utility. When a shop tab opens with a `focusKey`
+ * (set by a Flash Sale card click on the Overview), find the matching
+ * row via its `data-shop-row="<key>"` attribute, scroll it into view,
+ * and apply a brief CSS pulse so the user sees exactly which row they
+ * came to buy. `scrollIntoView` walks up to the nearest scrollable
+ * ancestor automatically — the modal body's `overflow-y-auto` div
+ * is what ends up scrolling.
+ *
+ * The pulse class set is applied via direct DOM mutation rather than
+ * a state-driven rerender, so it works regardless of how the tab
+ * structures its rows. Cleaned up after 2.5s — enough for the user's
+ * eye to land on it without lingering after they start interacting.
+ *
+ * Retries on rAF for ~1.5s to handle tabs that fetch their catalog
+ * on mount and need a tick for rows to land in the DOM.
+ */
+function useShopRowFocus(focusKey: string | null | undefined): void {
+  useEffect(() => {
+    if (!focusKey) return;
+    let cancelled = false;
+    let attempts = 0;
+    let raf = 0;
+    function tick(): void {
+      if (cancelled) return;
+      const el = document.querySelector<HTMLElement>(`[data-shop-row="${CSS.escape(focusKey!)}"]`);
+      if (el) { focus(el); return; }
+      attempts++;
+      if (attempts < 90) raf = requestAnimationFrame(tick);
+    }
+    function focus(el: HTMLElement): void {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      const cls = ["ring-2", "ring-keep-action", "shadow-[0_0_24px_-4px_rgba(255,128,0,0.6)]", "transition-shadow"];
+      el.classList.add(...cls);
+      window.setTimeout(() => { el.classList.remove(...cls); }, 2500);
+    }
+    raf = requestAnimationFrame(tick);
+    return () => { cancelled = true; cancelAnimationFrame(raf); };
+  }, [focusKey]);
+}
+
 /* =========================================================
  *  Section 1 (header) + Section 2 (wallets)
  * ========================================================= */
 
-function OverviewTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {} }) {
+function OverviewTab({ snapshot, flashSale, onNavigate }: {
+  snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {};
+  flashSale: FlashSaleResponse | null;
+  /** Combined tab + focus-key navigator. Flash Sale cards call this
+   *  with both the target tab and the catalog row key the user came
+   *  to buy; the receiving tab scrolls that row into view and
+   *  briefly highlights it. */
+  onNavigate: (tab: DashboardTab, focusKey?: string | null) => void;
+}) {
   const masterRank = lookupRankTier(snapshot, snapshot.master.rankKey, snapshot.master.tier);
+  // Viewer's actual avatar URL — feeds the Flash Sale border preview
+  // so the showcase shows what the border will look like on the
+  // user's own portrait instead of a stand-in initials chip (which
+  // makes the ring blend into its own backdrop and reads as
+  // "inset"). Same source the Borders tab uses.
+  const me = useChat((s) => s.me);
+  const viewerAvatarUrl = useChat((s) => {
+    if (!me) return null;
+    for (const list of Object.values(s.occupants)) {
+      const row = list.find((o) => o.userId === me.id);
+      if (row?.avatarUrl) return row.avatarUrl;
+    }
+    return null;
+  });
   // Zero-state detection: brand-new account, never earned anything,
   // owns nothing. Surfaces an explainer card so the dashboard doesn't
   // read as "everything is empty and I don't know what this is."
@@ -224,6 +337,13 @@ function OverviewTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getS
 
       {isFreshAccount ? <ZeroStateCard /> : null}
 
+      <FlashSaleSection
+        flashSale={flashSale}
+        previewName={snapshot.master.displayName}
+        previewAvatarUrl={viewerAvatarUrl}
+        onNavigate={onNavigate}
+      />
+
       <section>
         <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">Wallets</h3>
         <div className="grid gap-3">
@@ -239,6 +359,318 @@ function OverviewTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getS
       </section>
     </div>
   );
+}
+
+/**
+ * Today's flash sale, surfaced on the Overview tab so it's the first
+ * thing a user sees when they open Earning. Hides itself entirely
+ * when nothing's on sale today (admin disabled every category, or
+ * every enabled category had an empty catalog) — empty state would
+ * read as broken UI, not as "nothing today."
+ *
+ * The category strip uses the same shape the per-tab shop cards use
+ * (avatar/name on the left, base→sale price stacked on the right)
+ * so the visual maps cleanly from "see today's pick" → "open
+ * Name Styles tab to buy it." Clicking a card jumps to the matching
+ * tab; we don't deep-link the row itself because the tab handles
+ * its own "active" highlight and re-fetches on entry.
+ */
+function FlashSaleSection({ flashSale, previewName, previewAvatarUrl, onNavigate }: {
+  flashSale: FlashSaleResponse | null;
+  previewName: string;
+  /** Viewer's actual avatar URL — passed to the border-preview card
+   *  so the showcase paints the freeform frame around the user's real
+   *  portrait, matching the Borders tab. Null falls back to the
+   *  initials-chip path; the ring becomes hard to see without an
+   *  opaque inner circle to contrast against. */
+  previewAvatarUrl: string | null;
+  /** Card-click navigator. Jumps to the matching shop tab AND tells
+   *  it which catalog row to focus, so the user lands on the exact
+   *  on-sale row instead of the top of a long catalog. */
+  onNavigate: (tab: DashboardTab, focusKey?: string | null) => void;
+}) {
+  type Pick = { kind: "nameStyle" | "item" | "cosmetic" | "freeformBorder"; label: string; pick: FlashSalePick };
+  const picks: Pick[] = [];
+  if (flashSale?.nameStyle) picks.push({ kind: "nameStyle", label: "Name Style", pick: flashSale.nameStyle });
+  if (flashSale?.freeformBorder) picks.push({ kind: "freeformBorder", label: "Border", pick: flashSale.freeformBorder });
+  if (flashSale?.item) picks.push({ kind: "item", label: "Item", pick: flashSale.item });
+  if (flashSale?.cosmetic) picks.push({ kind: "cosmetic", label: "Cosmetic", pick: flashSale.cosmetic });
+
+  // Hide until the parent fetch lands (avoids a layout pop) and
+  // also hide when nothing's on sale.
+  if (!flashSale || picks.length === 0) return null;
+
+  // Grid column count tracks the number of picks so a 4-pick day fills
+  // the row without leaving a gap. Mobile stays single-column so each
+  // card gets enough room for its big preview to breathe.
+  const colsClass = picks.length === 1
+    ? ""
+    : picks.length === 2
+      ? "sm:grid-cols-2"
+      : picks.length === 3
+        ? "sm:grid-cols-2 lg:grid-cols-3"
+        : "sm:grid-cols-2 lg:grid-cols-4";
+
+  return (
+    <section className="relative overflow-hidden rounded-lg border-2 border-keep-action/60 bg-gradient-to-br from-keep-action/15 via-keep-bg/20 to-keep-bg/40 p-5 shadow-[0_0_28px_-6px_var(--keep-action,rgba(255,128,0,0.45))]">
+      {/* Radial glow accent — top-right corner — gives the hero a
+          "deal of the day" warmth without the gradient swallowing
+          the cards. Decorative, no pointer interaction. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-keep-action/20 blur-3xl"
+      />
+      <header className="relative mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span aria-hidden className="text-3xl leading-none animate-pulse">⚡</span>
+          <div>
+            <h3 className="font-action text-xl uppercase tracking-widest text-keep-action sm:text-2xl">
+              Flash Sale
+            </h3>
+            <p className="text-[10px] uppercase tracking-widest text-keep-muted">
+              {prettyDate(flashSale.forDate)} · Resets at midnight UTC
+            </p>
+          </div>
+        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-keep-action px-3 py-1 text-[11px] font-black uppercase tracking-widest text-keep-bg shadow-md animate-pulse">
+          <span aria-hidden>🔥</span>
+          <span>Today Only</span>
+        </span>
+      </header>
+      <div className={`relative grid gap-3 ${colsClass}`}>
+        {picks.map(({ kind, label, pick }) => (
+          <FlashSaleCard
+            key={label}
+            kind={kind}
+            kindLabel={label}
+            pick={pick}
+            previewName={previewName}
+            previewAvatarUrl={previewAvatarUrl}
+            onClick={() => onNavigate(
+              kind === "nameStyle" ? "styles"
+              : kind === "freeformBorder" ? "borders"
+              : kind === "item" ? "items"
+              : "cosmetics",
+              pick.key,
+            )}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Reusable "ON SALE -N%" badge. Used on shop catalog cards across
+ * Name Styles / Cosmetics / Items so the user can see today's
+ * discounted rows while browsing — not just on the Overview hero.
+ * Returns null when no sale applies, so callers can render it
+ * unconditionally without scaffolding `{discount ? ... : null}`.
+ */
+function SalePip({ discountPct }: { discountPct: number | null | undefined }) {
+  if (!discountPct || discountPct <= 0) return null;
+  return (
+    <span
+      title={`${discountPct}% off today only`}
+      className="inline-flex items-center gap-0.5 rounded-full bg-keep-action px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-keep-bg"
+    >
+      <span aria-hidden>🔥</span>
+      <span>SALE -{discountPct}%</span>
+    </span>
+  );
+}
+
+/**
+ * Price display for a shop card. When the row is on sale, renders the
+ * base price struck through next to the discounted sale price in the
+ * accent color. When not on sale, falls back to a single CoinAmount
+ * matching the previous design. Centralized so every shop catalog
+ * (Items / Name Styles / Cosmetics) shows the discount the same way.
+ */
+function PriceBlock({
+  basePrice,
+  effectivePrice,
+  onSale,
+}: {
+  basePrice: number;
+  effectivePrice: number;
+  onSale: boolean;
+}) {
+  if (!onSale || basePrice === effectivePrice) {
+    return <CoinAmount amount={basePrice} className="text-xs uppercase tracking-widest text-keep-muted" />;
+  }
+  return (
+    <span className="inline-flex items-baseline gap-1 text-xs uppercase tracking-widest">
+      <span className="text-keep-muted line-through">
+        <CoinAmount amount={basePrice} />
+      </span>
+      <span className="font-semibold text-keep-action">
+        <CoinAmount amount={effectivePrice} />
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Helper that combines a base price with the day's flash-sale snapshot.
+ * Returns the effective unit price + the matching discount %, or null
+ * when the row isn't on sale today. Pure compute against the cached
+ * `flashSale` prop — never re-fetches, so it's cheap to call per row.
+ */
+function flashSalePriceFor(
+  flashSale: FlashSaleResponse | null,
+  category: "nameStyle" | "item" | "cosmetic" | "freeformBorder",
+  key: string,
+  basePrice: number,
+): { effectivePrice: number; discountPct: number | null } {
+  if (!flashSale) return { effectivePrice: basePrice, discountPct: null };
+  const slot = flashSale[category];
+  if (!slot || slot.key !== key) return { effectivePrice: basePrice, discountPct: null };
+  return { effectivePrice: slot.salePrice, discountPct: slot.discountPct };
+}
+
+function FlashSaleCard({
+  kind,
+  kindLabel,
+  pick,
+  previewName,
+  previewAvatarUrl,
+  onClick,
+}: {
+  kind: "nameStyle" | "item" | "cosmetic" | "freeformBorder";
+  kindLabel: string;
+  pick: FlashSalePick;
+  /** Preview rendering uses the viewer's display name for the
+   *  name-style preview so the user can see what it would look like
+   *  on their own row. Falls back to "Username" if none is supplied. */
+  previewName: string;
+  /** Viewer's actual avatar URL for the border preview — null falls
+   *  back to the initials chip. Only consumed by the freeformBorder
+   *  branch; other kinds ignore it. */
+  previewAvatarUrl: string | null;
+  /** Card-level click handler — jumps to the matching shop tab. */
+  onClick: () => void;
+}) {
+  // Per-kind preview affordance:
+  //   - nameStyle    → render <StyledName> at the pick's key so the
+  //                    user sees the actual font/glow rather than an
+  //                    icon. Catalog CSS is already injected globally.
+  //   - freeformBorder → render a <BorderedAvatar> with the freeform
+  //                    key applied so the actual frame is visible at
+  //                    a glance.
+  //   - cosmetic / item → keep the `iconUrl` thumbnail behavior.
+  //
+  // All previews share a fixed-height showcase strip (h-28 = 112px)
+  // centered horizontally, so the four card types align even when
+  // their underlying preview elements differ in intrinsic size.
+  // Previously each card used a different preview size which made
+  // the row look ragged and the visual hierarchy unclear.
+  // Cosmetic-key → emoji fallback when the catalog row has no iconUrl
+  // set (most flairs ship as text/config rather than art). Beats the
+  // bland "no preview" copy that read as broken UI on the original
+  // build.
+  const cosmeticFallbackGlyph =
+    pick.key === "inline_avatar" ? "🖼️"
+    : pick.key === "flair_profile_banner" ? "🪧"
+    : pick.key === "flair_typing_phrase" ? "💬"
+    : pick.key === "flair_lurking_master" ? "🥷"
+    : pick.key === "flair_reaction_sheet" ? "😀"
+    : pick.key === "flair_room_presence" ? "🚪"
+    : pick.key === "flair_session_presence" ? "✨"
+    : "🎁";
+
+  const preview = kind === "nameStyle" ? (
+    <div className="name-style-preview flex h-full w-full items-center justify-center rounded bg-keep-bg/50 px-4 text-4xl font-bold lg:text-5xl">
+      <StyledName displayName={previewName} styleKey={pick.key} config={null} />
+    </div>
+  ) : kind === "freeformBorder" ? (
+    <div className="flex h-full w-full items-center justify-center rounded bg-keep-bg/50 py-2">
+      <BorderedAvatar
+        avatarUrl={previewAvatarUrl}
+        name={previewName}
+        freeformBorderKey={pick.key}
+        size="xl"
+      />
+    </div>
+  ) : pick.iconUrl ? (
+    <div className="flex h-full w-full items-center justify-center rounded bg-keep-bg/50 p-2">
+      <img
+        src={pick.iconUrl}
+        alt=""
+        className="h-full w-full object-contain drop-shadow-[0_0_10px_rgba(255,128,0,0.4)]"
+      />
+    </div>
+  ) : (
+    <div className="flex h-full w-full items-center justify-center rounded bg-keep-bg/50 text-6xl lg:text-7xl">
+      <span aria-hidden className="drop-shadow-[0_0_10px_rgba(255,128,0,0.35)]">{cosmeticFallbackGlyph}</span>
+    </div>
+  );
+
+  const savings = pick.basePrice - pick.salePrice;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`Open in the ${kindLabel} shop`}
+      className="group relative flex flex-col overflow-hidden rounded-lg border border-keep-action/40 bg-gradient-to-b from-keep-bg/80 to-keep-bg/50 text-left transition-all hover:border-keep-action hover:shadow-[0_0_16px_-4px_rgba(255,128,0,0.45)] focus:outline-none focus-visible:ring-2 focus-visible:ring-keep-action"
+    >
+      {/* Big diagonal discount tag — top-right corner. Bold, high-
+          contrast, slightly rotated so it reads as a sticker slapped
+          onto the card. Z-index lifts it above the preview's drop
+          shadow so it never gets visually buried. */}
+      {pick.discountPct != null ? (
+        <div className="absolute right-2 top-2 z-10 rounded-md bg-keep-action px-2.5 py-1 text-base font-black uppercase leading-none tracking-tight text-keep-bg shadow-lg ring-2 ring-keep-action/40">
+          -{pick.discountPct}%
+        </div>
+      ) : null}
+
+      {/* Preview strip — fixed height per breakpoint so cards align
+          and the showcase art has room to breathe. Mobile keeps it
+          modest (128px) so the card stays roughly square; tablet+
+          bumps to 160px and desktop to 192px so the actual icons
+          fill the showcase rather than rattle around in a too-large
+          well. */}
+      <div className="h-32 w-full p-2 sm:h-40 lg:h-48">
+        {preview}
+      </div>
+
+      {/* Info block — kind tag, name, prices, savings line. */}
+      <div className="flex flex-1 flex-col gap-1 border-t border-keep-action/20 bg-keep-banner/30 px-3 py-2.5">
+        <div className="text-[10px] font-bold uppercase tracking-widest text-keep-action/80">
+          {kindLabel}
+        </div>
+        <div className="truncate text-base font-semibold text-keep-text">{pick.name}</div>
+        <div className="mt-1 flex items-baseline gap-2">
+          <span className="text-xs text-keep-muted line-through">
+            <CoinAmount amount={pick.basePrice} />
+          </span>
+          <span className="text-xl font-black text-keep-action">
+            <CoinAmount amount={pick.salePrice} size="md" />
+          </span>
+        </div>
+        {savings > 0 ? (
+          <div className="text-[10px] uppercase tracking-widest text-keep-action/70">
+            You save <CoinAmount amount={savings} />
+          </div>
+        ) : null}
+      </div>
+    </button>
+  );
+}
+
+function prettyDate(yyyyMmDd: string): string {
+  // Render the ISO date in the viewer's locale without dragging in
+  // a date library. "2026-05-27" → "May 27" on en-US, "27 May" on
+  // en-GB — locale-respectful without needing the year (it's today).
+  const [y, m, d] = yyyyMmDd.split("-").map((n) => Number.parseInt(n, 10));
+  if (!y || !m || !d) return yyyyMmDd;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  try {
+    return dt.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+  } catch {
+    return yyyyMmDd;
+  }
 }
 
 /**
@@ -363,6 +795,239 @@ function PoolCard({ pool, snapshot, label }: { pool: PoolView; snapshot: ReturnT
         </div>
       )}
     </div>
+  );
+}
+
+/* =========================================================
+ *  Rankings tab — public leaderboards across the nine boards
+ *
+ *  Fetches /earning/rankings on mount, paints:
+ *    1. A rotating "Spotlight" hero at the top — auto-cycles
+ *       through each board's #1 entry every 5 seconds.
+ *    2. A grid of board cards underneath, each showing the
+ *       board's top N entries as RankingEntryCard rows.
+ *
+ *  Clicking any entry opens that user's profile via the chat
+ *  store's `setOpenProfile` — same path the userlist click uses,
+ *  so the rankings act as a profile-discovery surface.
+ * ========================================================= */
+
+function RankingsTab() {
+  const [data, setData] = useState<RankingsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchRankings()
+      .then((r) => { if (!cancelled) setData(r); })
+      .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load rankings"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+  if (loading) return <p className="text-sm text-keep-muted">Loading rankings…</p>;
+  if (err) return <p className="text-sm text-keep-accent">{err}</p>;
+  if (!data) return <p className="text-sm text-keep-muted">No rankings available.</p>;
+  return (
+    <div className="space-y-6">
+      <RankingsSpotlight champions={data.champions} />
+      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        {data.boards.map((board) =>
+          board.entries.length > 0 ? <RankingBoardCard key={board.key} board={board} /> : null,
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Spotlight hero — large card that rotates through each board's
+ * champion every 5 seconds. Pauses on hover so a viewer who wants
+ * to read the current entry's tagline isn't yanked away mid-read.
+ *
+ * Renders the entry as a big bordered avatar + styled name with
+ * the board label + metric prominent. Clicking opens the profile.
+ */
+function RankingsSpotlight({ champions }: { champions: RankingChampion[] }) {
+  const [idx, setIdx] = useState(0);
+  const [paused, setPaused] = useState(false);
+  useEffect(() => {
+    if (champions.length === 0 || paused) return;
+    const id = window.setInterval(() => {
+      setIdx((i) => (i + 1) % champions.length);
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [champions.length, paused]);
+  // Reset to slot 0 when the champion list changes (refresh / nav).
+  useEffect(() => { setIdx(0); }, [champions.length]);
+  if (champions.length === 0) {
+    return null;
+  }
+  const cur = champions[Math.min(idx, champions.length - 1)]!;
+  return (
+    <section
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      className="relative rounded border border-keep-action/40 bg-gradient-to-br from-keep-action/10 to-keep-bg/40 p-4"
+    >
+      <div className="mb-3 flex items-baseline justify-between">
+        <h3 className="font-action text-sm uppercase tracking-widest text-keep-action">Spotlight</h3>
+        <div className="flex items-center gap-1.5">
+          {champions.map((c, i) => (
+            <button
+              key={c.boardKey}
+              type="button"
+              onClick={() => setIdx(i)}
+              aria-label={`Show ${c.boardLabel} champion`}
+              className={`h-1.5 rounded-full transition-all ${i === idx ? "w-6 bg-keep-action" : "w-1.5 bg-keep-rule hover:bg-keep-muted"}`}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-col items-center gap-3 text-center sm:flex-row sm:gap-5 sm:text-left">
+        {/* `key` tied to the champion pool id forces a full remount of
+            the avatar on rotation. Without this, React reuses the
+            BorderedAvatar instance and only swaps the template HTML
+            via dangerouslySetInnerHTML — the simultaneous inline
+            `<style>` update + innerHTML swap can leave the .av spin
+            and .pic counter-rotation momentarily desynced, which
+            visually reads as the avatar IMG spinning until the
+            counter-rotation re-aligns. Remount guarantees both
+            animations start at t=0 together. */}
+        <ProfileLinkAvatar
+          key={`${cur.entry.scope}::${cur.entry.ownerId}`}
+          entry={cur.entry}
+          size="xl"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="text-xs uppercase tracking-widest text-keep-muted">
+            #1 · {cur.boardLabel}
+          </div>
+          <div className="mt-1 text-2xl font-bold leading-tight">
+            <StyledEntryName entry={cur.entry} />
+          </div>
+          {cur.entry.rankName ? (
+            <div className="mt-1 text-xs text-keep-muted">
+              {cur.entry.rankName}
+              {cur.entry.tierLabel ? <span> · {cur.entry.tierLabel}</span> : null}
+              {cur.entry.scope === "character" ? <span> · character</span> : null}
+            </div>
+          ) : null}
+          <div className="mt-2 text-base text-keep-text">
+            <span className="font-semibold tabular-nums">{cur.entry.value.toLocaleString()}</span>
+            <span className="ml-1.5 text-xs uppercase tracking-widest text-keep-muted">{cur.boardMetric}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** Rendered grid card for a single leaderboard. Header strip names
+ *  the board + its metric; the body lists the entries top-down. */
+function RankingBoardCard({ board }: { board: RankingBoard }) {
+  return (
+    <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
+      <header className="mb-2 flex items-baseline justify-between">
+        <h4 className="font-action text-sm uppercase tracking-widest text-keep-muted">{board.label}</h4>
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">{board.metric}</span>
+      </header>
+      <ol className="space-y-1.5">
+        {board.entries.map((e, i) => (
+          <li key={`${e.scope}::${e.ownerId}`}>
+            <RankingEntryCard rank={i + 1} entry={e} metric={board.metric} />
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+/** Single ranking row — rank pill + avatar (with effects) + styled
+ *  name + metric value. The whole row is a profile-open click target. */
+function RankingEntryCard({ rank, entry, metric }: { rank: number; entry: RankingPoolEntry; metric: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1.5 hover:border-keep-action/40">
+      <div className={`w-6 shrink-0 text-center font-bold tabular-nums ${rank <= 3 ? "text-keep-action" : "text-keep-muted"}`}>
+        {rank}
+      </div>
+      <ProfileLinkAvatar entry={entry} size="sm" />
+      <div className="min-w-0 flex-1">
+        {/* `overflow-clip` + a 1.75em margin matches the userlist's
+            UserNameTag pattern: still ellipsizes long names, but the
+            margin lets glow / drop-shadow / pseudo-element decoration
+            from the name style render past the box edge instead of
+            being chopped at the text baseline. Plain `truncate`
+            (overflow:hidden) clipped the Synthwave glow off mid-stroke. */}
+        <div className="min-w-0 overflow-clip whitespace-nowrap text-ellipsis text-sm font-semibold [overflow-clip-margin:1.75em]">
+          <StyledEntryName entry={entry} />
+        </div>
+        {entry.scope === "character" || entry.rankName ? (
+          <div className="truncate text-[10px] uppercase tracking-wide text-keep-muted">
+            {entry.scope === "character" ? <span>character</span> : null}
+            {entry.scope === "character" && entry.rankName ? <span> · </span> : null}
+            {entry.rankName ?? null}
+          </div>
+        ) : null}
+      </div>
+      <div className="shrink-0 text-right">
+        <div className="text-sm font-semibold tabular-nums">{entry.value.toLocaleString()}</div>
+        <div className="text-[10px] uppercase tracking-widest text-keep-muted">{metric}</div>
+      </div>
+    </div>
+  );
+}
+
+/** Avatar with cosmetic context (border + freeform config) that
+ *  opens the entry's profile on click. Mirrors the userlist's
+ *  click-to-profile affordance using the chat store's setOpenProfile. */
+function ProfileLinkAvatar({ entry, size }: { entry: RankingPoolEntry; size: "sm" | "xl" }) {
+  const setOpenProfile = useChat((s) => s.setOpenProfile);
+  const freeformConfig = useMemo(() => {
+    const json = entry.freeformBorderConfigJson;
+    if (!json) return null;
+    const parsed = parseFreeformBorderConfig(json);
+    return Object.keys(parsed).length > 0 ? parsed : null;
+  }, [entry.freeformBorderConfigJson]);
+  async function openProfile() {
+    try {
+      const r = await fetch(`/profiles/${encodeURIComponent(entry.displayName)}`, { credentials: "include" });
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j && "kind" in j) setOpenProfile(j);
+    } catch { /* network blip — silent */ }
+  }
+  return (
+    <BorderedAvatar
+      avatarUrl={entry.avatarUrl}
+      name={entry.displayName}
+      borderRankKey={entry.borderRankKey}
+      freeformBorderKey={entry.freeformBorderKey}
+      freeformConfig={freeformConfig}
+      size={size}
+      onClick={() => void openProfile()}
+      title={`View ${entry.displayName}'s profile`}
+    />
+  );
+}
+
+/** Render an entry's display name with their active name-style
+ *  applied. Falls back to a plain span when no style is equipped. */
+function StyledEntryName({ entry }: { entry: RankingPoolEntry }) {
+  const config = useMemo<Record<string, unknown> | null>(() => {
+    if (!entry.nameStyleConfigJson) return null;
+    try { return JSON.parse(entry.nameStyleConfigJson) as Record<string, unknown>; }
+    catch { return null; }
+  }, [entry.nameStyleConfigJson]);
+  if (!entry.activeNameStyleKey) {
+    return <span>{entry.displayName}</span>;
+  }
+  return (
+    <StyledName
+      displayName={entry.displayName}
+      styleKey={entry.activeNameStyleKey}
+      config={config}
+    />
   );
 }
 
@@ -646,7 +1311,12 @@ function StubTab({ title, phase }: { title: string; phase: string }) {
  *                in Phase 3 (every style is buyable).
  * ========================================================= */
 
-function NameStylesTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {} }) {
+function NameStylesTab({ snapshot, flashSale, focusKey }: {
+  snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {};
+  flashSale: FlashSaleResponse | null;
+  focusKey: string | null;
+}) {
+  useShopRowFocus(focusKey);
   const me = useChat((s) => s.me);
   // The tab's equip / unequip writes scope to the user's CURRENTLY
   // ACTIVE identity (master/OOC when no character is selected;
@@ -675,12 +1345,35 @@ function NameStylesTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.ge
     () => new Set(ownedStylesForIdentity.map((o) => o.styleKey)),
     [ownedStylesForIdentity],
   );
-  const owned = styles.filter((s) => ownedKeys.has(s.key));
+  // Flash Sale → Name Styles deep-link: switch to whichever sub-tab
+  // contains the row the user came to buy. Without this, an
+  // unowned-sale row click lands on the "Owned" tab and the scroll
+  // hook's row query whiffs because the row only exists in the
+  // "Available" tab's render branch.
+  useEffect(() => {
+    if (!focusKey) return;
+    setTab(ownedKeys.has(focusKey) ? "owned" : "available");
+  }, [focusKey, ownedKeys]);
   const available = styles.filter((s) => !ownedKeys.has(s.key));
   // Active equipped style for the CURRENT identity.
   const activeKey = activeCharacterId
     ? (snapshot.activeCosmetics.byCharacter?.[activeCharacterId]?.activeNameStyleKey ?? null)
     : snapshot.activeCosmetics.activeNameStyleKey;
+  // Owned list, with the equipped style floated to the top. Rest of
+  // the list keeps the catalog's existing order so the user's mental
+  // map of "where is X?" stays stable when nothing's equipped. Sort
+  // is computed AFTER `activeKey` resolves so a `/char switch` that
+  // changes which identity's `activeKey` is in scope re-floats the
+  // correct row without a refetch.
+  const owned = useMemo(() => {
+    const filtered = styles.filter((s) => ownedKeys.has(s.key));
+    if (!activeKey) return filtered;
+    const activeIdx = filtered.findIndex((s) => s.key === activeKey);
+    if (activeIdx <= 0) return filtered;
+    const next = filtered.slice();
+    const [hit] = next.splice(activeIdx, 1);
+    return [hit!, ...next];
+  }, [styles, ownedKeys, activeKey]);
   const ownedConfigByKey = useMemo(() => {
     const out = new Map<string, Record<string, unknown> | null>();
     for (const o of ownedStylesForIdentity) {
@@ -781,7 +1474,7 @@ function NameStylesTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.ge
       ) : null}
 
       {tab === "owned" ? (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {activeKey ? (
             <button
               type="button"
@@ -795,37 +1488,51 @@ function NameStylesTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.ge
           {owned.length === 0 ? (
             <p className="text-sm text-keep-muted">You don't own any styles yet. Switch to "Available" to browse.</p>
           ) : (
-            owned.map((s) => (
-              <OwnedStyleCard
-                key={s.key}
-                style={s}
-                config={ownedConfigByKey.get(s.key) ?? null}
-                previewName={previewName}
-                isActive={s.key === activeKey}
-                busy={busyKey === s.key}
-                onEquip={() => void equip(s.key === activeKey ? null : s.key)}
-                onSaveConfig={(cfg) => void saveConfig(s.key, cfg)}
-              />
-            ))
+            // Two-column grid on md+ so the catalog stops being a
+            // tall vertical scroll. Stays one column on mobile where
+            // each card's preview + color row needs the full width.
+            // `auto-rows-fr` keeps the per-row card heights aligned
+            // so a card with no description doesn't run shorter than
+            // its neighbor and break the visual rhythm.
+            <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
+              {owned.map((s) => (
+                <div key={s.key} data-shop-row={s.key} className="rounded">
+                  <OwnedStyleCard
+                    style={s}
+                    config={ownedConfigByKey.get(s.key) ?? null}
+                    previewName={previewName}
+                    isActive={s.key === activeKey}
+                    busy={busyKey === s.key}
+                    onEquip={() => void equip(s.key === activeKey ? null : s.key)}
+                    onSaveConfig={(cfg) => void saveConfig(s.key, cfg)}
+                    flashSale={flashSale}
+                  />
+                </div>
+              ))}
+            </div>
           )}
         </div>
       ) : null}
 
       {tab === "available" ? (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {available.length === 0 ? (
             <p className="text-sm text-keep-muted">You own every available style. Nice.</p>
           ) : (
-            available.map((s) => (
-              <AvailableStyleCard
-                key={s.key}
-                style={s}
-                previewName={previewName}
-                busy={busyKey === s.key}
-                affordable={activeWallet >= s.cost}
-                onBuy={() => void buy(s.key, s.cost)}
-              />
-            ))
+            <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
+              {available.map((s) => (
+                <div key={s.key} data-shop-row={s.key} className="rounded">
+                  <AvailableStyleCard
+                    style={s}
+                    previewName={previewName}
+                    busy={busyKey === s.key}
+                    affordable={activeWallet >= flashSalePriceFor(flashSale, "nameStyle", s.key, s.cost).effectivePrice}
+                    onBuy={() => void buy(s.key, flashSalePriceFor(flashSale, "nameStyle", s.key, s.cost).effectivePrice)}
+                    flashSale={flashSale}
+                  />
+                </div>
+              ))}
+            </div>
           )}
         </div>
       ) : null}
@@ -841,6 +1548,7 @@ function OwnedStyleCard({
   busy,
   onEquip,
   onSaveConfig,
+  flashSale,
 }: {
   style: NameStyleCatalogRow;
   config: Record<string, unknown> | null;
@@ -849,6 +1557,7 @@ function OwnedStyleCard({
   busy: boolean;
   onEquip: () => void;
   onSaveConfig: (config: Record<string, unknown> | null) => void;
+  flashSale: FlashSaleResponse | null;
 }) {
   // Local draft so the color picker can stage changes without a
   // per-keystroke server roundtrip. Persisted via Save below.
@@ -866,11 +1575,26 @@ function OwnedStyleCard({
     { key: "glow", label: "Glow" },
   ];
 
+  const sale = flashSalePriceFor(flashSale, "nameStyle", style.key, style.cost);
   return (
-    <div className={`rounded border ${isActive ? "border-keep-action" : "border-keep-rule"} bg-keep-bg/40 p-3`}>
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+    <div className={`relative flex flex-col rounded border ${isActive ? "border-keep-action" : "border-keep-rule"} bg-keep-bg/40 p-3`}>
+      {/* `ns-card-controls` lifts the Equip/Unequip row above the
+          preview's stacking context. Without it, when the user's
+          equipped style was the SAME card being rendered (so this
+          card carried `isActive`), any decoration that escaped the
+          preview — even subtly — landed over the Equip row and ate
+          the click. Reports surfaced as "owned name style is
+          invisible and can't be interacted with" specifically on the
+          equipped style; the workaround was unequipping to "default
+          appearance." Pairing this class with `name-style-preview`'s
+          `contain: paint; isolation: isolate;` is the belt-and-
+          suspenders fix. */}
+      <div className="ns-card-controls flex flex-wrap items-baseline justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="font-semibold">{style.name}</div>
+          <div className="flex flex-wrap items-center gap-1.5 font-semibold">
+            <span className="truncate">{style.name}</span>
+            <SalePip discountPct={sale.discountPct} />
+          </div>
           {style.description ? <div className="text-xs text-keep-muted">{style.description}</div> : null}
         </div>
         {isActive ? (
@@ -899,7 +1623,7 @@ function OwnedStyleCard({
         <StyledName displayName={previewName} styleKey={style.key} config={draft} />
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-3">
+      <div className="ns-card-controls mt-3 flex flex-wrap gap-3">
         {colorKeys.map(({ key, label }) => {
           const cur = typeof draft[key] === "string" ? (draft[key] as string) : "#ff7a45";
           return (
@@ -933,21 +1657,27 @@ function AvailableStyleCard({
   busy,
   affordable,
   onBuy,
+  flashSale,
 }: {
   style: NameStyleCatalogRow;
   previewName: string;
   busy: boolean;
   affordable: boolean;
   onBuy: () => void;
+  flashSale: FlashSaleResponse | null;
 }) {
+  const sale = flashSalePriceFor(flashSale, "nameStyle", style.key, style.cost);
   return (
-    <div className="rounded border border-keep-rule bg-keep-bg/40 p-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+    <div className="relative flex flex-col rounded border border-keep-rule bg-keep-bg/40 p-3">
+      <div className="ns-card-controls flex flex-wrap items-baseline justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="font-semibold">{style.name}</div>
+          <div className="flex flex-wrap items-center gap-1.5 font-semibold">
+            <span className="truncate">{style.name}</span>
+            <SalePip discountPct={sale.discountPct} />
+          </div>
           {style.description ? <div className="text-xs text-keep-muted">{style.description}</div> : null}
         </div>
-        <CoinAmount amount={style.cost} className="text-xs uppercase tracking-widest text-keep-muted" />
+        <PriceBlock basePrice={style.cost} effectivePrice={sale.effectivePrice} onSale={sale.discountPct != null} />
         <button
           type="button"
           onClick={onBuy}
@@ -1003,7 +1733,12 @@ function normalizeHex(s: string): string {
  *  necessarily traversed).
  * ========================================================= */
 
-function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {} }) {
+function BordersTab({ snapshot, flashSale, focusKey }: {
+  snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {};
+  flashSale: FlashSaleResponse | null;
+  focusKey: string | null;
+}) {
+  useShopRowFocus(focusKey);
   const refresh = useEarning((s) => s.refresh);
   // Per-identity scope: borders are partitioned the same way name
   // styles are. The active character buys / equips from its own
@@ -1050,6 +1785,24 @@ function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getSt
   const selectedKey = activeCharacterId
     ? (activeCharacterView?.selectedBorderRankKey ?? null)
     : snapshot.master.selectedBorderRankKey;
+
+  // Free-form border parallel state — same per-identity partitioning
+  // rules. Ownership is independent of rank-tier ownership; the
+  // equip slot is also independent (the BorderedAvatar resolver
+  // checks the freeform slot first and falls back to the rank slot).
+  const ownedFreeformForIdentity = useMemo(() => {
+    if (activeCharacterId) {
+      return snapshot.ownedFreeformBordersByCharacter?.[activeCharacterId] ?? [];
+    }
+    return snapshot.ownedFreeformBorders;
+  }, [activeCharacterId, snapshot.ownedFreeformBorders, snapshot.ownedFreeformBordersByCharacter]);
+  const ownedFreeformKeys = useMemo(
+    () => new Set(ownedFreeformForIdentity.map((b) => b.borderKey)),
+    [ownedFreeformForIdentity],
+  );
+  const selectedFreeformKey = activeCharacterId
+    ? (activeCharacterView?.selectedFreeformBorderKey ?? null)
+    : snapshot.master.selectedFreeformBorderKey;
 
   // Capstone tiers (Tier IV with a borderImageUrl + cost).
   const capstones = useMemo(() => {
@@ -1113,6 +1866,47 @@ function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getSt
     }
   }
 
+  async function buyFreeform(borderKey: string) {
+    const who = activeCharacterId ? "this character" : "your master account";
+    if (!window.confirm(`Buy this border from ${who}'s pool?`)) return;
+    setBusyKey(`freeform:${borderKey}`);
+    setErr(null);
+    try {
+      await purchaseFreeformBorder(borderKey, activeCharacterId);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Purchase failed");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function equipFreeform(borderKey: string | null) {
+    setBusyKey(borderKey ? `freeform:${borderKey}` : "__unequip_freeform__");
+    setErr(null);
+    try {
+      await patchEarningSettings({ selectedFreeformBorderKey: borderKey, characterId: activeCharacterId });
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Equip failed");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function saveFreeformConfig(borderKey: string, config: Record<string, string> | null) {
+    setBusyKey(`freeform:${borderKey}`);
+    setErr(null);
+    try {
+      await patchFreeformBorderConfig(borderKey, config, activeCharacterId);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   const owned: typeof capstones = [];
   const available: typeof capstones = [];
   const locked: typeof capstones = [];
@@ -1121,6 +1915,28 @@ function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getSt
     else if (eligibleKeys.has(c.tier.rankKey)) available.push(c);
     else locked.push(c);
   }
+
+  // Free-form catalog rows partitioned the same way: owned vs
+  // available. There's no "locked" bucket — free-form borders have
+  // no eligibility gate. Rarity-sorted within each bucket so the
+  // user sees common/rare/etc. cluster predictably.
+  const freeformCatalog = snapshot.catalog.freeformBorders;
+  const ownedFreeform: FreeformBorderRow[] = [];
+  const availableFreeform: FreeformBorderRow[] = [];
+  for (const b of freeformCatalog) {
+    if (ownedFreeformKeys.has(b.key)) ownedFreeform.push(b);
+    else availableFreeform.push(b);
+  }
+  // Index per-identity color customizations by border key so the
+  // "owned" / "equipped" cards can preview with the user's actual
+  // color picks instead of the catalog row's CSS fallbacks.
+  const ownedFreeformConfigByKey = useMemo(() => {
+    const out = new Map<string, string | null>();
+    for (const row of ownedFreeformForIdentity) {
+      out.set(row.borderKey, row.configJson ?? null);
+    }
+    return out;
+  }, [ownedFreeformForIdentity]);
 
   return (
     <div className="space-y-4">
@@ -1150,7 +1966,7 @@ function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getSt
         {owned.length === 0 ? (
           <p className="text-sm text-keep-muted">You don't own any borders yet.</p>
         ) : (
-          <div className="flex flex-col gap-3">
+          <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
             {owned.map(({ tier, rank }) => (
               <BorderCard
                 key={tier.rankKey}
@@ -1174,7 +1990,7 @@ function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getSt
         {available.length === 0 ? (
           <p className="text-sm text-keep-muted">No borders available to purchase right now. Climb the ladder to unlock more.</p>
         ) : (
-          <div className="flex flex-col gap-3">
+          <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
             {available.map(({ tier, rank }) => (
               <BorderCard
                 key={tier.rankKey}
@@ -1197,7 +2013,7 @@ function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getSt
           <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
             Locked ({locked.length})
           </h3>
-          <div className="flex flex-col gap-3">
+          <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
             {locked.map(({ tier, rank }) => (
               <BorderCard
                 key={tier.rankKey}
@@ -1210,6 +2026,317 @@ function BordersTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getSt
             ))}
           </div>
         </section>
+      ) : null}
+
+      {freeformCatalog.length > 0 ? (
+        <>
+          {/* Divider + section header. Free-form (non-rank-tied)
+              borders live in a parallel catalog with their own
+              ownership ledger and equip slot. The chip below the
+              header shows whichever freeform border is currently
+              equipped — independent of the rank-tier equip state
+              displayed at the top of this tab. */}
+          <div className="border-t border-keep-rule pt-4">
+            <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
+              Free-form
+            </h3>
+            {selectedFreeformKey ? (
+              <div className="mb-3 flex items-center gap-2 text-xs text-keep-muted">
+                <span>Currently equipped:</span>
+                <strong className="text-keep-text">
+                  {freeformCatalog.find((b) => b.key === selectedFreeformKey)?.name ?? selectedFreeformKey}
+                </strong>
+                <button
+                  type="button"
+                  onClick={() => void equipFreeform(null)}
+                  disabled={busyKey !== null}
+                  className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-keep-muted hover:bg-keep-banner disabled:opacity-50"
+                >
+                  Unequip
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          {ownedFreeform.length > 0 ? (
+            <section>
+              <h4 className="mb-2 font-action text-xs uppercase tracking-widest text-keep-muted">
+                Owned ({ownedFreeform.length})
+              </h4>
+              <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
+                {ownedFreeform.map((b) => (
+                  <div key={b.key} data-shop-row={b.key} className="rounded">
+                    <FreeformBorderCard
+                      border={b}
+                      state={selectedFreeformKey === b.key ? "equipped" : "owned"}
+                      busy={busyKey === `freeform:${b.key}`}
+                      onAction={() => void equipFreeform(selectedFreeformKey === b.key ? null : b.key)}
+                      onSaveConfig={(cfg) => void saveFreeformConfig(b.key, cfg)}
+                      userDisplayName={snapshot.master.displayName}
+                      userAvatarUrl={viewerAvatarUrl}
+                      configJson={ownedFreeformConfigByKey.get(b.key) ?? null}
+                    />
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {availableFreeform.length > 0 ? (
+            <section>
+              <h4 className="mb-2 font-action text-xs uppercase tracking-widest text-keep-muted">
+                Available ({availableFreeform.length})
+              </h4>
+              <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
+                {availableFreeform.map((b) => {
+                  const sale = flashSalePriceFor(flashSale, "freeformBorder", b.key, b.cost);
+                  return (
+                    <div key={b.key} data-shop-row={b.key} className="rounded">
+                      <FreeformBorderCard
+                        border={b}
+                        state="available"
+                        busy={busyKey === `freeform:${b.key}`}
+                        affordable={(activeCharacterView?.currency ?? snapshot.master.currency) >= sale.effectivePrice}
+                        onAction={() => void buyFreeform(b.key)}
+                        userDisplayName={snapshot.master.displayName}
+                        userAvatarUrl={viewerAvatarUrl}
+                        effectivePrice={sale.effectivePrice}
+                        discountPct={sale.discountPct}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** Pill color per rarity — open string in the catalog row, so
+ *  unknown values fall back to the common-tier palette. */
+function rarityPalette(rarity: string): { ring: string; text: string; label: string } {
+  switch (rarity.toLowerCase()) {
+    case "rare":      return { ring: "border-blue-400/60",   text: "text-blue-300",   label: "Rare" };
+    case "epic":      return { ring: "border-purple-400/60", text: "text-purple-300", label: "Epic" };
+    case "legendary": return { ring: "border-amber-400/60",  text: "text-amber-300",  label: "Legendary" };
+    case "mythic":    return { ring: "border-pink-400/60",   text: "text-pink-300",   label: "Mythic" };
+    case "exotic":    return { ring: "border-cyan-400/60",   text: "text-cyan-300",   label: "Exotic" };
+    case "atmospheric":
+    case "atmos":     return { ring: "border-slate-400/60",  text: "text-slate-300",  label: "Atmospheric" };
+    default:          return { ring: "border-keep-rule",     text: "text-keep-muted", label: rarity || "Common" };
+  }
+}
+
+function FreeformBorderCard({
+  border,
+  state,
+  busy,
+  affordable,
+  onAction,
+  onSaveConfig,
+  userDisplayName,
+  userAvatarUrl,
+  configJson,
+  effectivePrice,
+  discountPct,
+}: {
+  border: FreeformBorderRow;
+  state: "equipped" | "owned" | "available";
+  busy?: boolean;
+  affordable?: boolean;
+  onAction?: () => void;
+  /** Save the per-identity color customization. Only relevant for
+   *  owned/equipped state. Pass `null` to clear all overrides
+   *  (renderer falls back to the catalog row's CSS fallbacks). */
+  onSaveConfig?: (config: Record<string, string> | null) => void;
+  userDisplayName: string;
+  userAvatarUrl?: string | null;
+  /** Owned-row's saved color customization (raw JSON string). Renders
+   *  the preview with the user's actual picks for owned/equipped
+   *  cards; null on available cards (catalog fallbacks). */
+  configJson?: string | null;
+  /** Resolved sale price for the Available state. Defaults to the
+   *  border's base cost; only diverges when this row is today's
+   *  flash-sale pick. */
+  effectivePrice?: number;
+  /** Flash-sale discount % to display alongside the price chip. */
+  discountPct?: number | null;
+}) {
+  const palette = rarityPalette(border.rarity);
+  const savedConfig = useMemo(() => {
+    if (!configJson) return {} as Record<string, string>;
+    return parseFreeformBorderConfig(configJson);
+  }, [configJson]);
+  // Customizable slots — names AND default fallback colors extracted
+  // from the row's styleCss. Empty when the catalog row defines no
+  // `--c-*` references; we hide the color picker entirely in that
+  // case so cards without user-customizable slots don't display a
+  // misleading empty editor. The defaultColor for each slot is the
+  // `var(--c-name, <default>)` fallback the picker shows as the
+  // starting swatch when the user hasn't yet picked an override.
+  const slots = useMemo(
+    () => extractFreeformBorderVarsWithDefaults(border.styleCss ?? ""),
+    [border.styleCss],
+  );
+  const [draft, setDraft] = useState<Record<string, string>>(savedConfig);
+  useEffect(() => { setDraft(savedConfig); }, [savedConfig]);
+  // Live preview uses the draft (instant feedback on color picks)
+  // rather than the saved config — saved config only re-renders the
+  // border after the user clicks Save.
+  const previewConfig = useMemo(() => {
+    const merged: Record<string, string> = { ...draft };
+    return Object.keys(merged).length > 0 ? merged : null;
+  }, [draft]);
+  // Only the EQUIPPED card gets the color editor — owned-but-not-
+  // equipped cards would otherwise duplicate the same long picker
+  // grid for every collected border, spamming the catalog. Equipping
+  // a card flips it into the editor state; unequipping hides it again.
+  const canCustomize = state === "equipped" && slots.length > 0 && onSaveConfig;
+  const isDirty = useMemo(() => {
+    if (Object.keys(draft).length !== Object.keys(savedConfig).length) return true;
+    for (const k of Object.keys(draft)) {
+      if (draft[k] !== savedConfig[k]) return true;
+    }
+    return false;
+  }, [draft, savedConfig]);
+  return (
+    <div className={`flex flex-col gap-3 rounded border p-3 ${state === "equipped" ? "border-keep-action bg-keep-action/5" : `${palette.ring} bg-keep-bg/40`}`}>
+      <div className="flex items-center gap-3">
+        <BorderedAvatar
+          avatarUrl={userAvatarUrl ?? null}
+          name={userDisplayName}
+          freeformBorderKey={border.key}
+          freeformConfig={previewConfig}
+          size="xl"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <div className="font-semibold">{border.name}</div>
+            <span className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${palette.ring} ${palette.text}`}>
+              {palette.label}
+            </span>
+          </div>
+          {border.description ? (
+            <div className="text-xs text-keep-muted">{border.description}</div>
+          ) : null}
+          <div className="flex items-center gap-1.5 text-xs text-keep-muted">
+            {state === "available" ? (
+              <>
+                <PriceBlock
+                  basePrice={border.cost}
+                  effectivePrice={effectivePrice ?? border.cost}
+                  onSale={discountPct != null}
+                />
+                <SalePip discountPct={discountPct ?? null} />
+              </>
+            ) : null}
+          </div>
+        </div>
+        {state === "equipped" ? (
+          <button
+            type="button"
+            onClick={onAction}
+            disabled={busy}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-50"
+          >
+            Unequip
+          </button>
+        ) : state === "owned" ? (
+          <button
+            type="button"
+            onClick={onAction}
+            disabled={busy}
+            className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+          >
+            Equip
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onAction}
+            disabled={busy || !affordable}
+            title={affordable ? "Buy this border" : "Not enough Currency"}
+            className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+          >
+            {busy ? "Working…" : "Buy"}
+          </button>
+        )}
+      </div>
+      {/* Color picker — one `<input type="color">` per `--c-*` slot
+          discovered in the row's styleCss. Mirrors the name-style
+          OwnedStyleCard pattern: stage in local draft, persist via
+          Save button. Reset clears all customization back to the
+          catalog row's CSS fallbacks.
+
+          Laid out as a responsive uniform grid (auto-fill, min 8rem
+          per cell) so any number of slots wraps cleanly instead of
+          the previous flex-wrap row whose ragged break points read
+          as chaos when a border like Hearth Flame exposed ~20 slots.
+          Each slot is a compact swatch + name pair, with the
+          action row pinned at the bottom. */}
+      {canCustomize ? (
+        <div className="border-t border-keep-rule/40 pt-3">
+          <div className="mb-2 flex items-baseline justify-between">
+            <h5 className="text-[10px] font-action uppercase tracking-widest text-keep-muted">
+              Customize colors
+            </h5>
+            <span className="text-[10px] text-keep-muted">
+              {slots.length} slot{slots.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]">
+            {slots.map(({ name: slot, defaultColor }) => {
+              // Starting swatch precedence:
+              //   1. User's current draft pick (if set).
+              //   2. The catalog row's `var(--c-slot, <default>)`
+              //      fallback — the actual color the border renders
+              //      with when no override is saved.
+              //   3. A neutral grey for slots whose fallback isn't a
+              //      parseable color (named colors, hsl(), color-mix,
+              //      etc. — rare in our catalog).
+              const cur = typeof draft[slot] === "string"
+                ? draft[slot]
+                : (defaultColor ?? "#808080");
+              return (
+                <label
+                  key={slot}
+                  title={defaultColor ? `${slot} (default: ${defaultColor})` : slot}
+                  className="flex items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/40 px-2 py-1 text-[11px] hover:border-keep-rule"
+                >
+                  <input
+                    type="color"
+                    value={normalizeHex(cur)}
+                    onChange={(e) => setDraft((d) => ({ ...d, [slot]: e.target.value }))}
+                    aria-label={`Color for ${slot}`}
+                    className="h-5 w-7 shrink-0 cursor-pointer rounded border border-keep-rule bg-keep-bg"
+                  />
+                  <span className="min-w-0 truncate text-keep-muted">{slot}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="mt-2 flex items-center justify-end gap-1">
+            <button
+              type="button"
+              onClick={() => { setDraft({}); onSaveConfig?.(null); }}
+              disabled={busy || (!isDirty && Object.keys(savedConfig).length === 0)}
+              className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-40"
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              onClick={() => onSaveConfig?.(Object.keys(draft).length === 0 ? null : draft)}
+              disabled={busy || !isDirty}
+              className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+            >
+              Save colors
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -1304,7 +2431,12 @@ function BorderCard({
  *  Purchase is one-time; the toggle is free to flip after.
  * ========================================================= */
 
-function CosmeticsTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {} }) {
+function CosmeticsTab({ snapshot, flashSale, focusKey }: {
+  snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {};
+  flashSale: FlashSaleResponse | null;
+  focusKey: string | null;
+}) {
+  useShopRowFocus(focusKey);
   const refresh = useEarning((s) => s.refresh);
   // Same per-identity story as the Name Styles tab: the toggle
   // scopes to the user's currently-active character (or OOC/master
@@ -1328,9 +2460,18 @@ function CosmeticsTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.get
     return () => { cancelled = true; };
   }, []);
 
-  if (loading) return <p className="text-sm text-keep-muted">Loading cosmetics…</p>;
+  if (loading) return <p className="text-sm text-keep-muted">Loading flair…</p>;
   const inlineAvatarRow = catalog?.cosmetics.find((c) => c.key === "inline_avatar");
-  if (!inlineAvatarRow) return <p className="text-sm text-keep-muted">No cosmetics available right now.</p>;
+  const profileBannerRow = catalog?.cosmetics.find((c) => c.key === "flair_profile_banner");
+  const typingPhraseRow = catalog?.cosmetics.find((c) => c.key === "flair_typing_phrase");
+  const reactionSheetRow = catalog?.cosmetics.find((c) => c.key === "flair_reaction_sheet");
+  const lurkingMasterRow = catalog?.cosmetics.find((c) => c.key === "flair_lurking_master");
+  const roomPresenceRow = catalog?.cosmetics.find((c) => c.key === "flair_room_presence");
+  const sessionPresenceRow = catalog?.cosmetics.find((c) => c.key === "flair_session_presence");
+  if (!inlineAvatarRow && !profileBannerRow && !typingPhraseRow && !reactionSheetRow
+      && !lurkingMasterRow && !roomPresenceRow && !sessionPresenceRow) {
+    return <p className="text-sm text-keep-muted">No flair available right now.</p>;
+  }
 
   // Ownership is PER-IDENTITY: the server's purchase ledger writes a
   // row scoped to (user|character, ownerId), so master buying a
@@ -1398,46 +2539,978 @@ function CosmeticsTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.get
     }
   }
 
+  // Flash-sale price for the inline_avatar cosmetic if it's today's
+  // pick. Pure compute against the cached flashSale prop — server
+  // applies the same discount on the actual purchase, so this is
+  // faithful to what `doBuy()` will end up debiting.
+  const inlineAvatarSale = inlineAvatarRow
+    ? flashSalePriceFor(flashSale, "cosmetic", inlineAvatarRow.key, inlineAvatarRow.cost)
+    : null;
+
+  // Banner-cosmetic state for the current identity. `profileBannerOwned`
+  // gates the URL form (must purchase first); `profileBannerUrl` is
+  // the saved value the form is initialized from.
+  const bannerOwned = activeCharacterId
+    ? (perCharacterMap[activeCharacterId]?.profileBannerOwned ?? false)
+    : (snapshot.activeCosmetics.profileBannerOwned ?? false);
+  const bannerUrl = activeCharacterId
+    ? (perCharacterMap[activeCharacterId]?.profileBannerUrl ?? null)
+    : (snapshot.activeCosmetics.profileBannerUrl ?? null);
+  const bannerSale = profileBannerRow
+    ? flashSalePriceFor(flashSale, "cosmetic", profileBannerRow.key, profileBannerRow.cost)
+    : null;
+
+  async function doBuyBanner() {
+    if (!profileBannerRow) return;
+    const who = activeCharacterId ? "this character" : "your master account";
+    if (!window.confirm(`Buy "${profileBannerRow.name}" for ${bannerSale!.effectivePrice} Currency from ${who}'s pool?`)) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await purchaseCosmetic("flair_profile_banner", activeCharacterId);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Purchase failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Typing-phrase Flair state for the current identity — same
+  // shape as the banner state above.
+  const typingPhraseOwned = activeCharacterId
+    ? (perCharacterMap[activeCharacterId]?.typingPhraseOwned ?? false)
+    : (snapshot.activeCosmetics.typingPhraseOwned ?? false);
+  const typingPhrase = activeCharacterId
+    ? (perCharacterMap[activeCharacterId]?.typingPhrase ?? null)
+    : (snapshot.activeCosmetics.typingPhrase ?? null);
+  const typingPhraseSale = typingPhraseRow
+    ? flashSalePriceFor(flashSale, "cosmetic", typingPhraseRow.key, typingPhraseRow.cost)
+    : null;
+
+  async function doBuyTypingPhrase() {
+    if (!typingPhraseRow || !typingPhraseSale) return;
+    const who = activeCharacterId ? "this character" : "your master account";
+    if (!window.confirm(`Buy "${typingPhraseRow.name}" for ${typingPhraseSale.effectivePrice} Currency from ${who}'s pool?`)) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await purchaseCosmetic("flair_typing_phrase", activeCharacterId);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Purchase failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Phase 6 Lurking Master state for the current identity.
+  const lurkingMasterOwned = activeCharacterId
+    ? (perCharacterMap[activeCharacterId]?.lurkingMasterOwned ?? false)
+    : (snapshot.activeCosmetics.lurkingMasterOwned ?? false);
+  const lurkingMasterEnabled = activeCharacterId
+    ? (perCharacterMap[activeCharacterId]?.lurkingMasterEnabled ?? false)
+    : (snapshot.activeCosmetics.lurkingMasterEnabled ?? false);
+  const lurkingMasterSale = lurkingMasterRow
+    ? flashSalePriceFor(flashSale, "cosmetic", lurkingMasterRow.key, lurkingMasterRow.cost)
+    : null;
+
+  async function doBuyLurkingMaster() {
+    if (!lurkingMasterRow || !lurkingMasterSale) return;
+    const who = activeCharacterId ? "this character" : "your master account";
+    if (!window.confirm(`Buy "${lurkingMasterRow.name}" for ${lurkingMasterSale.effectivePrice} Currency from ${who}'s pool?`)) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await purchaseCosmetic("flair_lurking_master", activeCharacterId);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Purchase failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function doToggleLurking(next: boolean) {
+    setBusy(true);
+    setErr(null);
+    try {
+      await equipCosmetic("flair_lurking_master", next, activeCharacterId);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Toggle failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Phase 7 (migration 0161) — room-presence Flair state for the
+  // current identity. Templates are per-identity; the broadcaster
+  // reads the active character's row when voicing a character, the
+  // master's row otherwise.
+  const roomPresenceOwned = activeCharacterId
+    ? (perCharacterMap[activeCharacterId]?.roomPresenceOwned ?? false)
+    : (snapshot.activeCosmetics.roomPresenceOwned ?? false);
+  const roomJoinTemplate = activeCharacterId
+    ? (perCharacterMap[activeCharacterId]?.roomJoinTemplate ?? null)
+    : (snapshot.activeCosmetics.roomJoinTemplate ?? null);
+  const roomLeaveTemplate = activeCharacterId
+    ? (perCharacterMap[activeCharacterId]?.roomLeaveTemplate ?? null)
+    : (snapshot.activeCosmetics.roomLeaveTemplate ?? null);
+  const roomPresenceSale = roomPresenceRow
+    ? flashSalePriceFor(flashSale, "cosmetic", roomPresenceRow.key, roomPresenceRow.cost)
+    : null;
+  async function doBuyRoomPresence() {
+    if (!roomPresenceRow || !roomPresenceSale) return;
+    const who = activeCharacterId ? "this character" : "your master account";
+    if (!window.confirm(`Buy "${roomPresenceRow.name}" for ${roomPresenceSale.effectivePrice} Currency from ${who}'s pool?`)) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await purchaseCosmetic("flair_room_presence", activeCharacterId);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Purchase failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Session-presence is master-only — no character partition. Read
+  // straight off the top-level snapshot fields.
+  const sessionPresenceOwned = snapshot.activeCosmetics.sessionPresenceOwned ?? false;
+  const sessionConnectTemplate = snapshot.activeCosmetics.sessionConnectTemplate ?? null;
+  const sessionExitTemplate = snapshot.activeCosmetics.sessionExitTemplate ?? null;
+  const sessionPresenceSale = sessionPresenceRow
+    ? flashSalePriceFor(flashSale, "cosmetic", sessionPresenceRow.key, sessionPresenceRow.cost)
+    : null;
+  async function doBuySessionPresence() {
+    if (!sessionPresenceRow || !sessionPresenceSale) return;
+    // Always charges the master pool — session presence is account-
+    // level, not per-character. Pass `null` to scope to master.
+    if (!window.confirm(`Buy "${sessionPresenceRow.name}" for ${sessionPresenceSale.effectivePrice} Currency from your master account's pool?`)) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await purchaseCosmetic("flair_session_presence", null);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Purchase failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-3">
       {err ? (
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-sm text-keep-accent">{err}</div>
       ) : null}
-      <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
-        <header className="flex flex-wrap items-baseline justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="font-semibold">{inlineAvatarRow.name}</div>
-            {inlineAvatarRow.description ? (
-              <p className="text-xs text-keep-muted">{inlineAvatarRow.description}</p>
+      {/* Grid container — pre-arranges so adding a Flair row in admin
+          auto-fills the next grid slot rather than requiring another
+          layout pass. */}
+      <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {inlineAvatarRow && inlineAvatarSale ? (
+          <section data-shop-row={inlineAvatarRow.key} className="flex flex-col rounded border border-keep-rule bg-keep-bg/40 p-3">
+            <header className="flex flex-wrap items-baseline justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5 font-semibold">
+                  <span className="truncate">{inlineAvatarRow.name}</span>
+                  <SalePip discountPct={inlineAvatarSale.discountPct} />
+                </div>
+                {inlineAvatarRow.description ? (
+                  <p className="text-xs text-keep-muted">{inlineAvatarRow.description}</p>
+                ) : null}
+              </div>
+              {!owns ? (
+                <>
+                  <PriceBlock
+                    basePrice={inlineAvatarRow.cost}
+                    effectivePrice={inlineAvatarSale.effectivePrice}
+                    onSale={inlineAvatarSale.discountPct != null}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void doBuy()}
+                    disabled={busy || activeWallet < inlineAvatarSale.effectivePrice}
+                    title={activeWallet >= inlineAvatarSale.effectivePrice ? "Buy + auto-equip" : "Not enough Currency"}
+                    className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+                  >
+                    {busy ? "Working…" : "Buy"}
+                  </button>
+                </>
+              ) : (
+                <label className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={equipped}
+                    onChange={(e) => void doToggle(e.target.checked)}
+                    disabled={busy}
+                  />
+                  <span>{equipped ? "Equipped" : "Owned (off)"}</span>
+                </label>
+              )}
+            </header>
+          </section>
+        ) : null}
+
+        {profileBannerRow && bannerSale ? (
+          <div data-shop-row={profileBannerRow.key} className="rounded">
+            <ProfileBannerFlairCard
+              row={profileBannerRow}
+              sale={bannerSale}
+              owned={bannerOwned}
+              currentUrl={bannerUrl}
+              activeCharacterId={activeCharacterId}
+              activeWallet={activeWallet}
+              busy={busy}
+              onBuy={() => void doBuyBanner()}
+              onSaved={() => void refresh()}
+              onError={(message) => setErr(message)}
+            />
+          </div>
+        ) : null}
+
+        {typingPhraseRow && typingPhraseSale ? (
+          <div data-shop-row={typingPhraseRow.key} className="rounded">
+            <TypingPhraseFlairCard
+              row={typingPhraseRow}
+              sale={typingPhraseSale}
+              owned={typingPhraseOwned}
+              currentPhrase={typingPhrase}
+              activeCharacterId={activeCharacterId}
+              activeWallet={activeWallet}
+              busy={busy}
+              onBuy={() => void doBuyTypingPhrase()}
+              onSaved={() => void refresh()}
+              onError={(message) => setErr(message)}
+            />
+          </div>
+        ) : null}
+
+        {reactionSheetRow ? (
+          <div data-shop-row={reactionSheetRow.key} className="rounded">
+            <ReactionSheetFlairCard
+              row={reactionSheetRow}
+              activeWallet={activeWallet}
+              onRefreshEarning={() => void refresh()}
+            />
+          </div>
+        ) : null}
+
+        {roomPresenceRow && roomPresenceSale ? (
+          <div data-shop-row={roomPresenceRow.key} className="rounded">
+            <PresenceTemplatesFlairCard
+              row={roomPresenceRow}
+            sale={roomPresenceSale}
+            owned={roomPresenceOwned}
+            firstLabel="Join"
+            firstTemplate={roomJoinTemplate}
+            firstDefault="{name} has entered the room."
+            firstPlaceholder="{name} strolls into {room}."
+            secondLabel="Leave"
+            secondTemplate={roomLeaveTemplate}
+            secondDefault="{name} has left the room."
+            secondPlaceholder="{name} fades out of {room}."
+            supportsRoomPlaceholder
+            activeCharacterId={activeCharacterId}
+            activeWallet={activeWallet}
+            busy={busy}
+            onBuy={() => void doBuyRoomPresence()}
+            onSave={async (next) => {
+              await patchRoomPresenceTemplates({
+                joinTemplate: next.firstTemplate,
+                leaveTemplate: next.secondTemplate,
+                characterId: activeCharacterId,
+              });
+            }}
+              onSaved={() => void refresh()}
+              onError={(message) => setErr(message)}
+            />
+          </div>
+        ) : null}
+
+        {sessionPresenceRow && sessionPresenceSale ? (
+          <div data-shop-row={sessionPresenceRow.key} className="rounded">
+            <PresenceTemplatesFlairCard
+              row={sessionPresenceRow}
+              sale={sessionPresenceSale}
+              owned={sessionPresenceOwned}
+              firstLabel="Connect"
+              firstTemplate={sessionConnectTemplate}
+              firstDefault="{name} has connected."
+              firstPlaceholder="{name} arrives at the Keep."
+              secondLabel="Exit"
+              secondTemplate={sessionExitTemplate}
+              secondDefault="{name} has disconnected."
+              secondPlaceholder="{name} fades into the night."
+              supportsRoomPlaceholder={false}
+              /* Session presence is master-only — pass null so the card
+                 doesn't show a "this character" badge. */
+              activeCharacterId={null}
+              activeWallet={snapshot.master.currency}
+              busy={busy}
+              onBuy={() => void doBuySessionPresence()}
+              onSave={async (next) => {
+                await patchSessionPresenceTemplates({
+                  connectTemplate: next.firstTemplate,
+                  exitTemplate: next.secondTemplate,
+                });
+              }}
+              onSaved={() => void refresh()}
+              onError={(message) => setErr(message)}
+            />
+          </div>
+        ) : null}
+
+        {lurkingMasterRow && lurkingMasterSale ? (
+          <section data-shop-row={lurkingMasterRow.key} className="flex flex-col rounded border border-keep-rule bg-keep-bg/40 p-3">
+            <header className="flex flex-wrap items-baseline justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5 font-semibold">
+                  <span className="truncate">{lurkingMasterRow.name}</span>
+                  <SalePip discountPct={lurkingMasterSale.discountPct} />
+                </div>
+                {lurkingMasterRow.description ? (
+                  <p className="text-xs text-keep-muted">{lurkingMasterRow.description}</p>
+                ) : null}
+              </div>
+              {!lurkingMasterOwned ? (
+                <>
+                  <PriceBlock
+                    basePrice={lurkingMasterRow.cost}
+                    effectivePrice={lurkingMasterSale.effectivePrice}
+                    onSale={lurkingMasterSale.discountPct != null}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void doBuyLurkingMaster()}
+                    disabled={busy || activeWallet < lurkingMasterSale.effectivePrice}
+                    title={activeWallet >= lurkingMasterSale.effectivePrice ? "Buy the Lurking Master cosmetic" : "Not enough Currency"}
+                    className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+                  >
+                    {busy ? "Working…" : "Buy"}
+                  </button>
+                </>
+              ) : (
+                <label className="flex items-center gap-2 text-xs" title="Hide your typing status from peers (admins still see it)">
+                  <input
+                    type="checkbox"
+                    checked={lurkingMasterEnabled}
+                    onChange={(e) => void doToggleLurking(e.target.checked)}
+                    disabled={busy}
+                  />
+                  <span>{lurkingMasterEnabled ? "Lurking" : "Owned (off)"}</span>
+                </label>
+              )}
+            </header>
+            {lurkingMasterOwned && lurkingMasterEnabled ? (
+              <p className="mt-2 text-[10px] italic text-keep-muted">
+                You're hidden from peers' "is typing…" indicators. Admins still see you for moderation.
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Banner-URL Flair card. Two render modes depending on ownership:
+ *   - Not owned → "Buy" button + price (sale-aware). Same purchase
+ *     flow as inline_avatar.
+ *   - Owned → URL text input + Save button + Clear button. Live
+ *     preview strip shows what the banner will look like on the
+ *     profile modal. Empty input clears the slot on save.
+ *
+ * Per-identity scoping mirrors the rest of the Flair tab — the
+ * active character's purchase is independent of master's, and a
+ * user voicing a character writes to that character's slot.
+ */
+function ProfileBannerFlairCard({
+  row,
+  sale,
+  owned,
+  currentUrl,
+  activeCharacterId,
+  activeWallet,
+  busy,
+  onBuy,
+  onSaved,
+  onError,
+}: {
+  row: { key: string; name: string; description: string; cost: number };
+  sale: ReturnType<typeof flashSalePriceFor>;
+  owned: boolean;
+  currentUrl: string | null;
+  activeCharacterId: string | null;
+  activeWallet: number;
+  busy: boolean;
+  onBuy: () => void;
+  onSaved: () => void;
+  onError: (message: string) => void;
+}) {
+  const [draft, setDraft] = useState<string>(currentUrl ?? "");
+  const [saving, setSaving] = useState(false);
+  // Sync local draft when the prop changes (e.g. another tab edited
+  // the URL, or the user switched identities and the active card
+  // now reflects a different person's slot).
+  useEffect(() => { setDraft(currentUrl ?? ""); }, [currentUrl]);
+
+  async function save(next: string | null) {
+    setSaving(true);
+    try {
+      await patchProfileBannerUrl(next, activeCharacterId);
+      onSaved();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const trimmed = draft.trim();
+  const dirty = trimmed !== (currentUrl ?? "");
+
+  return (
+    <section className="flex flex-col gap-2 rounded border border-keep-rule bg-keep-bg/40 p-3">
+      <header className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5 font-semibold">
+            <span className="truncate">{row.name}</span>
+            <SalePip discountPct={sale.discountPct} />
+          </div>
+          {row.description ? (
+            <p className="text-xs text-keep-muted">{row.description}</p>
+          ) : null}
+        </div>
+        {!owned ? (
+          <>
+            <PriceBlock
+              basePrice={row.cost}
+              effectivePrice={sale.effectivePrice}
+              onSale={sale.discountPct != null}
+            />
+            <button
+              type="button"
+              onClick={onBuy}
+              disabled={busy || activeWallet < sale.effectivePrice}
+              title={activeWallet >= sale.effectivePrice ? "Buy the banner slot" : "Not enough Currency"}
+              className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+            >
+              {busy ? "Working…" : "Buy"}
+            </button>
+          </>
+        ) : null}
+      </header>
+
+      {owned ? (
+        <>
+          {/* Inline editor kept compact — paired with a tiny thumbnail
+              that just confirms a link resolves. The full-size preview
+              lives in Profile » Appearance, where the field reads as a
+              banner-shaped strip at the size visitors actually see.
+              Going small here keeps the Flair grid's columns aligned
+              with the rest of the cosmetic cards. */}
+          <div className="flex items-end gap-2">
+            <label className="min-w-0 flex-1 block text-xs text-keep-muted">
+              Image link
+              <input
+                type="url"
+                inputMode="url"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="https://example.com/banner.png"
+                className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm text-keep-text"
+              />
+            </label>
+            {trimmed ? (
+              <img
+                src={trimmed}
+                alt=""
+                loading="lazy"
+                className="block h-9 w-24 shrink-0 rounded border border-keep-rule bg-keep-banner/40 object-cover"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                }}
+              />
             ) : null}
           </div>
-          {!owns ? (
-            <>
-              <CoinAmount amount={inlineAvatarRow.cost} className="text-xs uppercase tracking-widest text-keep-muted" />
+          <p className="text-[10px] text-keep-muted">
+            Manage from Profile » Appearance to see a full-size preview.
+          </p>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {currentUrl ? (
               <button
                 type="button"
-                onClick={() => void doBuy()}
-                disabled={busy || activeWallet < inlineAvatarRow.cost}
-                title={activeWallet >= inlineAvatarRow.cost ? "Buy + auto-equip" : "Not enough Currency"}
-                className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+                onClick={() => void save(null)}
+                disabled={saving}
+                className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-50"
               >
-                {busy ? "Working…" : "Buy"}
+                Clear
               </button>
-            </>
-          ) : (
-            <label className="flex items-center gap-2 text-xs">
-              <input
-                type="checkbox"
-                checked={equipped}
-                onChange={(e) => void doToggle(e.target.checked)}
-                disabled={busy}
-              />
-              <span>{equipped ? "Equipped" : "Owned (off)"}</span>
-            </label>
-          )}
-        </header>
-      </section>
-    </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void save(trimmed.length === 0 ? null : trimmed)}
+              disabled={saving || !dirty}
+              className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+/** Hard cap mirrored from the server's TYPING_PHRASE_MAX. Keeping
+ *  it as a literal here (not a fetched value) is fine — the server
+ *  re-clamps on save, this is purely for the live char-count hint
+ *  and the textarea maxLength. */
+const TYPING_PHRASE_MAX_CLIENT = 60;
+
+/**
+ * Custom typing-phrase Flair card. Two render modes depending on
+ * ownership:
+ *   - Not owned → "Buy" button + price (sale-aware).
+ *   - Owned → text input + Save/Clear with a live preview of how
+ *     the indicator will read ("YourName <phrase>").
+ *
+ * Mirrors the banner card's per-identity scoping rules — the
+ * active character's phrase is independent of master's, and a user
+ * voicing a character writes to that character's slot.
+ */
+function TypingPhraseFlairCard({
+  row,
+  sale,
+  owned,
+  currentPhrase,
+  activeCharacterId,
+  activeWallet,
+  busy,
+  onBuy,
+  onSaved,
+  onError,
+}: {
+  row: { key: string; name: string; description: string; cost: number };
+  sale: ReturnType<typeof flashSalePriceFor>;
+  owned: boolean;
+  currentPhrase: string | null;
+  activeCharacterId: string | null;
+  activeWallet: number;
+  busy: boolean;
+  onBuy: () => void;
+  onSaved: () => void;
+  onError: (message: string) => void;
+}) {
+  const [draft, setDraft] = useState<string>(currentPhrase ?? "");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setDraft(currentPhrase ?? ""); }, [currentPhrase]);
+
+  // Active identity's display name — drives the live preview so
+  // the user sees the same "Name <phrase>" shape peers will see.
+  const meName = useChat((s) => {
+    const me = s.me;
+    if (!me) return "You";
+    if (activeCharacterId) {
+      for (const list of Object.values(s.occupants)) {
+        const row = list.find((o) => o.userId === me.id && o.characterId === activeCharacterId);
+        if (row) return row.displayName;
+      }
+    }
+    return me.username;
+  });
+
+  async function save(next: string | null) {
+    setSaving(true);
+    try {
+      await patchTypingPhrase(next, activeCharacterId);
+      onSaved();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const trimmed = draft.trim();
+  const dirty = trimmed !== (currentPhrase ?? "");
+  const tooLong = trimmed.length > TYPING_PHRASE_MAX_CLIENT;
+
+  return (
+    <section className="flex flex-col gap-2 rounded border border-keep-rule bg-keep-bg/40 p-3">
+      <header className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5 font-semibold">
+            <span className="truncate">{row.name}</span>
+            <SalePip discountPct={sale.discountPct} />
+          </div>
+          {row.description ? (
+            <p className="text-xs text-keep-muted">{row.description}</p>
+          ) : null}
+        </div>
+        {!owned ? (
+          <>
+            <PriceBlock
+              basePrice={row.cost}
+              effectivePrice={sale.effectivePrice}
+              onSale={sale.discountPct != null}
+            />
+            <button
+              type="button"
+              onClick={onBuy}
+              disabled={busy || activeWallet < sale.effectivePrice}
+              title={activeWallet >= sale.effectivePrice ? "Buy the typing-phrase slot" : "Not enough Currency"}
+              className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+            >
+              {busy ? "Working…" : "Buy"}
+            </button>
+          </>
+        ) : null}
+      </header>
+
+      {owned ? (
+        <>
+          <label className="block text-xs text-keep-muted">
+            <div className="flex items-center justify-between">
+              <span>Phrase</span>
+              <span className={tooLong ? "text-keep-accent" : ""}>
+                {trimmed.length}/{TYPING_PHRASE_MAX_CLIENT}
+              </span>
+            </div>
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              maxLength={TYPING_PHRASE_MAX_CLIENT * 2 /* allow over-paste so the user sees the count flag */}
+              placeholder="is scheming…"
+              className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm text-keep-text"
+            />
+          </label>
+          {/* Live preview — same shape peers will see in the
+              indicator strip when this identity is the sole typer.
+              Falls back to the default suffix on empty drafts so
+              the user can compare. */}
+          <div className="rounded border border-keep-rule bg-keep-banner/40 px-2 py-1 text-xs italic text-keep-muted">
+            {trimmed
+              ? `${meName} ${trimmed}`
+              : `${meName} is typing… (default)`}
+          </div>
+          <p className="text-[10px] text-keep-muted">
+            Up to {TYPING_PHRASE_MAX_CLIENT} characters. Replaces the default "is typing…" suffix when you're the only person typing. Admins can clear abusive phrases.
+          </p>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {currentPhrase ? (
+              <button
+                type="button"
+                onClick={() => void save(null)}
+                disabled={saving}
+                className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-50"
+              >
+                Clear
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void save(trimmed.length === 0 ? null : trimmed)}
+              disabled={saving || !dirty || tooLong}
+              className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+/** Hard cap on a single presence template. Matches PRESENCE_TEMPLATE_MAX
+ *  in shared/presenceTemplate.ts; the textarea uses it for the
+ *  character-count badge and a generous maxLength (× 2 so the user
+ *  sees the count flag instead of being silently truncated). */
+const PRESENCE_TEMPLATE_MAX_CLIENT = 100;
+
+/**
+ * Generic two-template Flair card — drives both the Custom Room
+ * Entrance and Custom Session Greeting cards. Mirrors the
+ * TypingPhraseFlairCard shape (Buy → Set/Clear input → live preview)
+ * but lays out TWO inputs side by side (or stacked on narrow widths)
+ * because each flair owns an enter/exit PAIR unlocked by the single
+ * purchase.
+ *
+ * The room variant accepts `{room}` in addition to `{name}`; the
+ * session variant accepts only `{name}`. `supportsRoomPlaceholder`
+ * gates the help text + preview substitution.
+ */
+function PresenceTemplatesFlairCard({
+  row,
+  sale,
+  owned,
+  firstLabel,
+  firstTemplate,
+  firstDefault,
+  firstPlaceholder,
+  secondLabel,
+  secondTemplate,
+  secondDefault,
+  secondPlaceholder,
+  supportsRoomPlaceholder,
+  activeCharacterId,
+  activeWallet,
+  busy,
+  onBuy,
+  onSave,
+  onSaved,
+  onError,
+}: {
+  row: { key: string; name: string; description: string; cost: number };
+  sale: ReturnType<typeof flashSalePriceFor>;
+  owned: boolean;
+  firstLabel: string;
+  firstTemplate: string | null;
+  firstDefault: string;
+  firstPlaceholder: string;
+  secondLabel: string;
+  secondTemplate: string | null;
+  secondDefault: string;
+  secondPlaceholder: string;
+  supportsRoomPlaceholder: boolean;
+  /** Null = master-only flair (session presence) OR room presence
+   *  with no character active; a string = per-character scope. The
+   *  card uses it only for the preview's identity name; the parent
+   *  handler reads it directly for the PATCH call. */
+  activeCharacterId: string | null;
+  activeWallet: number;
+  busy: boolean;
+  onBuy: () => void;
+  /** Caller wires this to the matching PATCH fetcher. Receives the
+   *  draft pair (null = clear, string = set, but the caller only sees
+   *  the resolved fields after normalize). */
+  onSave: (next: {
+    firstTemplate: string | null;
+    secondTemplate: string | null;
+  }) => Promise<void>;
+  onSaved: () => void;
+  onError: (message: string) => void;
+}) {
+  const [firstDraft, setFirstDraft] = useState<string>(firstTemplate ?? "");
+  const [secondDraft, setSecondDraft] = useState<string>(secondTemplate ?? "");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setFirstDraft(firstTemplate ?? ""); }, [firstTemplate]);
+  useEffect(() => { setSecondDraft(secondTemplate ?? ""); }, [secondTemplate]);
+
+  // Active identity's display name — feeds the preview so the user
+  // sees the same `{name}` substitution peers will see.
+  const meName = useChat((s) => {
+    const me = s.me;
+    if (!me) return "You";
+    if (activeCharacterId) {
+      for (const list of Object.values(s.occupants)) {
+        const r = list.find((o) => o.userId === me.id && o.characterId === activeCharacterId);
+        if (r) return r.displayName;
+      }
+    }
+    return me.username;
+  });
+  // Preview room name only used when supportsRoomPlaceholder. Picks
+  // the user's current room from the chat store so the preview reads
+  // realistically; falls back to a stand-in when not in any room.
+  const previewRoom = useChat((s) => {
+    if (!supportsRoomPlaceholder) return "";
+    const cur = s.currentRoomId;
+    if (!cur) return "the Keep";
+    return s.rooms[cur]?.name ?? "the Keep";
+  });
+
+  function render(template: string, fallback: string): string {
+    const src = template.trim().length > 0 ? template : fallback;
+    return src
+      .replace(/\{name\}/g, meName)
+      .replace(/\{room\}/g, previewRoom);
+  }
+
+  const firstTrim = firstDraft.trim();
+  const secondTrim = secondDraft.trim();
+  const firstTooLong = firstTrim.length > PRESENCE_TEMPLATE_MAX_CLIENT;
+  const secondTooLong = secondTrim.length > PRESENCE_TEMPLATE_MAX_CLIENT;
+  const dirty = firstTrim !== (firstTemplate ?? "") || secondTrim !== (secondTemplate ?? "");
+  const tooLong = firstTooLong || secondTooLong;
+
+  async function save(opts: { clearAll?: boolean } = {}) {
+    setSaving(true);
+    try {
+      if (opts.clearAll) {
+        await onSave({ firstTemplate: null, secondTemplate: null });
+      } else {
+        await onSave({
+          firstTemplate: firstTrim.length === 0 ? null : firstTrim,
+          secondTemplate: secondTrim.length === 0 ? null : secondTrim,
+        });
+      }
+      onSaved();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-2 rounded border border-keep-rule bg-keep-bg/40 p-3">
+      <header className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5 font-semibold">
+            <span className="truncate">{row.name}</span>
+            <SalePip discountPct={sale.discountPct} />
+          </div>
+          {row.description ? (
+            <p className="text-xs text-keep-muted">{row.description}</p>
+          ) : null}
+        </div>
+        {!owned ? (
+          <>
+            <PriceBlock
+              basePrice={row.cost}
+              effectivePrice={sale.effectivePrice}
+              onSale={sale.discountPct != null}
+            />
+            <button
+              type="button"
+              onClick={onBuy}
+              disabled={busy || activeWallet < sale.effectivePrice}
+              title={activeWallet >= sale.effectivePrice ? `Buy ${row.name}` : "Not enough Currency"}
+              className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+            >
+              {busy ? "Working…" : "Buy"}
+            </button>
+          </>
+        ) : null}
+      </header>
+
+      {owned ? (
+        <>
+          {(["first", "second"] as const).map((slot) => {
+            const isFirst = slot === "first";
+            const label = isFirst ? firstLabel : secondLabel;
+            const value = isFirst ? firstDraft : secondDraft;
+            const setValue = isFirst ? setFirstDraft : setSecondDraft;
+            const trim = isFirst ? firstTrim : secondTrim;
+            const long = isFirst ? firstTooLong : secondTooLong;
+            const fallback = isFirst ? firstDefault : secondDefault;
+            const ph = isFirst ? firstPlaceholder : secondPlaceholder;
+            return (
+              <div key={slot}>
+                <label className="block text-xs text-keep-muted">
+                  <div className="flex items-center justify-between">
+                    <span>{label}</span>
+                    <span className={long ? "text-keep-accent" : ""}>
+                      {trim.length}/{PRESENCE_TEMPLATE_MAX_CLIENT}
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    maxLength={PRESENCE_TEMPLATE_MAX_CLIENT * 2}
+                    placeholder={ph}
+                    className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm text-keep-text"
+                  />
+                </label>
+                <div className="mt-1 rounded border border-keep-rule bg-keep-banner/40 px-2 py-1 text-xs italic text-keep-muted">
+                  {render(value, fallback)}
+                  {value.trim().length === 0 ? <span className="not-italic text-[10px]"> (default)</span> : null}
+                </div>
+              </div>
+            );
+          })}
+          <p className="text-[10px] text-keep-muted">
+            Use <code className="rounded bg-keep-banner px-1">{"{name}"}</code> for your name
+            {supportsRoomPlaceholder ? <> and <code className="rounded bg-keep-banner px-1">{"{room}"}</code> for the room name</> : null}.
+            Up to {PRESENCE_TEMPLATE_MAX_CLIENT} characters each. Admins can clear abusive templates.
+          </p>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {(firstTemplate || secondTemplate) ? (
+              <button
+                type="button"
+                onClick={() => void save({ clearAll: true })}
+                disabled={saving}
+                className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-50"
+              >
+                Clear both
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={saving || !dirty || tooLong}
+              className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * Custom Reaction Sheet Flair card (Phase 3). Unlike the banner /
+ * typing-phrase cards, this is NOT a one-time purchase with a
+ * subsequent "set your content" form. Each submission re-pays the
+ * cost; the catalog row exists only as the pricing slot. The card's
+ * single button opens the submission modal which contains the full
+ * form + history list.
+ */
+function ReactionSheetFlairCard({
+  row,
+  activeWallet,
+  onRefreshEarning,
+}: {
+  row: { key: string; name: string; description: string; cost: number };
+  activeWallet: number;
+  onRefreshEarning: () => void;
+}) {
+  // The modal pulls the active character from the chat store
+  // directly, so the card doesn't need to thread the id through —
+  // matches how the picker and chat composer scope their identity.
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="flex flex-col gap-2 rounded border border-keep-rule bg-keep-bg/40 p-3">
+      <header className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5 font-semibold">
+            <span className="truncate">{row.name}</span>
+          </div>
+          {row.description ? (
+            <p className="text-xs text-keep-muted">{row.description}</p>
+          ) : null}
+        </div>
+        <div className="text-xs text-keep-muted">
+          <CoinAmount amount={row.cost} /> per submission
+        </div>
+      </header>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25"
+        >
+          Submit / Manage…
+        </button>
+      </div>
+      {open ? (
+        <EmoticonSubmissionModal
+          onClose={() => setOpen(false)}
+          costAtSubmission={row.cost}
+          activeWallet={activeWallet}
+          onRefreshEarning={onRefreshEarning}
+        />
+      ) : null}
+    </section>
   );
 }
 
@@ -1464,17 +3537,35 @@ function CosmeticsTab({ snapshot }: { snapshot: ReturnType<typeof useEarning.get
 function ItemsTab({
   snapshot,
   initialSubTab,
+  flashSale,
+  focusKey,
 }: {
   snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {};
   /** Deep-link landing sub-tab — defaults to "inventory" when omitted.
    *  Plumbed in from the `/shop` / `/collection` / `/pets` builtin
    *  commands via EarningDashboard's prop. */
   initialSubTab?: "inventory" | "shop" | "collection" | "pets";
+  flashSale: FlashSaleResponse | null;
+  focusKey: string | null;
 }) {
+  useShopRowFocus(focusKey);
   const me = useChat((s) => s.me);
   const activeCharacterId = useChat((s) => s.activeCharacterId);
   const refresh = useEarning((s) => s.refresh);
-  const [tab, setTab] = useState<"inventory" | "shop" | "collection" | "pets">(initialSubTab ?? "inventory");
+  // Flash Sale → Items deep-link lands on the shop sub-tab by default
+  // (otherwise the user clicks an item-sale card and gets the
+  // inventory tab where the item likely isn't yet, no scroll target).
+  const [tab, setTab] = useState<"inventory" | "shop" | "collection" | "pets">(initialSubTab ?? (focusKey ? "shop" : "inventory"));
+  // When arriving via Flash Sale, also reset the shop filters so the
+  // target item isn't hidden by a leftover category chip or search
+  // term — the user came here to buy a specific row, surface it
+  // unconditionally.
+  useEffect(() => {
+    if (!focusKey) return;
+    setTab("shop");
+    setShopCategory("all");
+    setShopQuery("");
+  }, [focusKey]);
   // Shop category chip — "all" shows everything, otherwise filter to
   // that bucket. Stored in component state so flipping chips doesn't
   // round-trip through the URL or persist between dashboard opens.
@@ -1724,23 +3815,30 @@ function ItemsTab({
                       : "No items in this category."}
                   </p>
                 ) : (
-                  filtered.map((entry) => {
-                    const row = catalogByKey.get(entry.itemKey);
-                    if (!row) {
-                      // Catalog row vanished — shouldn't happen given
-                      // the FK on identity_inventory, but render a
-                      // defensive fallback rather than crashing the tab.
-                      return (
-                        <article
-                          key={entry.itemKey}
-                          className="rounded border border-keep-rule bg-keep-bg/40 p-2 text-xs text-keep-muted"
-                        >
-                          Unknown item <code>{entry.itemKey}</code> × {entry.quantity.toLocaleString()}
-                        </article>
-                      );
-                    }
-                    return <InventoryRow key={entry.itemKey} item={row} quantity={entry.quantity} />;
-                  })
+                  // Same grid scaffold the Shop tab uses so identity-
+                  // owned inventory reads as the column/row companion
+                  // to the catalog above. `auto-rows-fr` keeps cards in
+                  // the same row height-aligned regardless of which
+                  // ones have a 3-line description vs a one-liner.
+                  <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {filtered.map((entry) => {
+                      const row = catalogByKey.get(entry.itemKey);
+                      if (!row) {
+                        // Catalog row vanished — shouldn't happen given
+                        // the FK on identity_inventory, but render a
+                        // defensive fallback rather than crashing the tab.
+                        return (
+                          <article
+                            key={entry.itemKey}
+                            className="rounded border border-keep-rule bg-keep-bg/40 p-2 text-xs text-keep-muted"
+                          >
+                            Unknown item <code>{entry.itemKey}</code> × {entry.quantity.toLocaleString()}
+                          </article>
+                        );
+                      }
+                      return <InventoryRow key={entry.itemKey} item={row} quantity={entry.quantity} />;
+                    })}
+                  </div>
                 )}
               </>
             );
@@ -1835,19 +3933,30 @@ function ItemsTab({
                 </p>
               );
             }
-            return filtered.map((item) => {
-              const owned = inventoryByKey.get(item.key)?.quantity ?? 0;
-              return (
-                <ShopRow
-                  key={item.key}
-                  item={item}
-                  owned={owned}
-                  wallet={activeIdentity.currency}
-                  busy={busyKey === item.key}
-                  onBuy={(qty) => void doBuy(item.key, qty)}
-                />
-              );
-            });
+            // Grid layout — better use of horizontal space than the
+            // previous full-width stacked rows. 1 col mobile, 2 col
+            // tablet, 3 col desktop. `auto-rows-fr` keeps the per-row
+            // card heights aligned even when one card has a longer
+            // description than its neighbor.
+            return (
+              <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {filtered.map((item) => {
+                  const owned = inventoryByKey.get(item.key)?.quantity ?? 0;
+                  return (
+                    <div key={item.key} data-shop-row={item.key} className="rounded">
+                      <ShopRow
+                        item={item}
+                        owned={owned}
+                        wallet={activeIdentity.currency}
+                        busy={busyKey === item.key}
+                        onBuy={(qty) => void doBuy(item.key, qty)}
+                        flashSale={flashSale}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            );
           })()}
         </div>
       ) : null}
@@ -2206,23 +4315,53 @@ function InventoryRow({ item, quantity }: { item: ItemCatalogRow; quantity: numb
     item.availableCommands.drop ? "/drop" : null,
   ].filter(Boolean);
   return (
-    <article className="flex items-center gap-3 rounded border border-keep-rule bg-keep-bg/40 p-2">
-      <ItemIcon iconUrl={item.iconUrl} name={item.name} size="md" />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-2">
-          <span className="font-semibold">
-            {formatItemName(item, quantity)} × {quantity.toLocaleString()}
+    <article className="flex flex-col gap-2 rounded border border-keep-rule bg-keep-bg/40 p-3">
+      {/* Icon centered at the top of the card, sized to match the
+          Shop tab's grid card so an item in inventory visually
+          rhymes with its shop-tab counterpart. Quantity chip
+          overlays the icon's bottom-right corner so the "× N" count
+          stays attached to the visual without stealing a row of
+          vertical space. The relative wrapper sits on the ICON,
+          not the centering container, so `absolute` anchors to the
+          icon's actual edges regardless of viewport size. */}
+      <div className="flex justify-center">
+        <div className="relative">
+          {item.iconUrl ? (
+            <img
+              src={item.iconUrl}
+              alt=""
+              loading="lazy"
+              className="h-20 w-20 rounded border border-keep-rule/60 bg-keep-bg object-contain sm:h-24 sm:w-24 lg:h-28 lg:w-28"
+            />
+          ) : (
+            <div
+              aria-hidden="true"
+              className="grid h-20 w-20 place-items-center rounded border border-keep-rule/60 bg-keep-banner/40 text-keep-muted sm:h-24 sm:w-24 lg:h-28 lg:w-28"
+            >
+              <span className="text-3xl font-semibold sm:text-4xl">{item.name.slice(0, 1).toUpperCase()}</span>
+            </div>
+          )}
+          <span
+            className="absolute -bottom-1 -right-1 rounded-full border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-[11px] font-semibold tabular-nums shadow"
+            title={`You have ${quantity.toLocaleString()}`}
+          >
+            ×{quantity.toLocaleString()}
           </span>
+        </div>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-1.5">
+          <span className="truncate font-semibold">{formatItemName(item, quantity)}</span>
           {!item.enabled ? (
             <span className="rounded border border-keep-accent/40 bg-keep-accent/10 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent">
               no longer available
             </span>
           ) : null}
         </div>
-        <p className="text-xs text-keep-muted">{item.description}</p>
+        <p className="line-clamp-2 text-xs text-keep-muted" title={item.description}>{item.description}</p>
         {commandList.length > 0 && item.enabled ? (
-          <p className="mt-0.5 text-[10px] uppercase tracking-widest text-keep-muted">
-            commands: {commandList.join(" · ")}
+          <p className="mt-auto pt-1 text-[10px] uppercase tracking-widest text-keep-muted">
+            {commandList.join(" · ")}
           </p>
         ) : null}
       </div>
@@ -2230,29 +4369,42 @@ function InventoryRow({ item, quantity }: { item: ItemCatalogRow; quantity: numb
   );
 }
 
-/** Shop row — icon, name + description, price, quantity stepper, Buy.
+/** Shop card — vertical layout for grid display. Icon on top, name +
+ *  description in the middle, price + qty + Buy at the bottom.
+ *
  *  Buy disables when the price exceeds the active identity's wallet
  *  or the stack would overflow. The sale window's "opens in / ends in"
  *  reason renders inline when `purchasable=false` so the user knows
- *  why an item they can see isn't buyable yet. */
+ *  why an item they can see isn't buyable yet. When the row is today's
+ *  flash-sale pick, `<SalePip />` appears next to the name and the
+ *  base price is struck through with the discounted price in accent.
+ *  Server applies the same discount on the actual purchase — the UI
+ *  display is faithful to what the user will be charged. */
 function ShopRow({
   item,
   owned,
   wallet,
   busy,
   onBuy,
+  flashSale,
 }: {
   item: ItemCatalogRow;
   owned: number;
   wallet: number;
   busy: boolean;
   onBuy: (quantity: number) => void;
+  flashSale: FlashSaleResponse | null;
 }) {
+  const sale = flashSalePriceFor(flashSale, "item", item.key, item.price);
+  const effectiveUnitPrice = sale.effectivePrice;
   const [qty, setQty] = useState(1);
   const capRemaining = Math.max(0, item.stackLimit - owned);
-  const maxBuyable = Math.min(capRemaining, Math.floor(wallet / Math.max(1, item.price)) || 0);
+  // Buyable cap respects the DISCOUNTED price so a sale puts more
+  // units in reach of a thin wallet. Mirrors what the server actually
+  // debits — they pay `effectiveUnitPrice * qty`, not base.
+  const maxBuyable = Math.min(capRemaining, Math.floor(wallet / Math.max(1, effectiveUnitPrice)) || 0);
   const clampedQty = Math.min(Math.max(1, qty), Math.max(1, maxBuyable));
-  const total = item.price * clampedQty;
+  const total = effectiveUnitPrice * clampedQty;
   const blockedReason = useMemo(() => {
     if (!item.enabled) return "Not available.";
     if (!item.forSale) return "Not currently for sale.";
@@ -2262,52 +4414,55 @@ function ShopRow({
     }
     if (item.saleEndsAt && now >= item.saleEndsAt) return "Sale ended.";
     if (capRemaining === 0) return `Stack full (${item.stackLimit}).`;
-    if (wallet < item.price) return "Not enough Currency.";
+    if (wallet < effectiveUnitPrice) return "Not enough Currency.";
     return null;
-  }, [item, capRemaining, wallet]);
+  }, [item, capRemaining, wallet, effectiveUnitPrice]);
 
   return (
-    <article className="flex flex-wrap items-center gap-3 rounded border border-keep-rule bg-keep-bg/40 p-3 sm:gap-4">
-      {/* Shop icon is intentionally LARGE so the visual identity of the
-          item dominates the row — users scan icons faster than names.
-          Ramp: 80px mobile → 96 sm → 128 md → 160 lg → 192 xl → 256
-          on 2xl ultrawide (≥1536px). Aspect locked square via
-          h-N w-N pairs so the icon never stretches. */}
-      <div className="shrink-0">
+    <article className="flex flex-col gap-2 rounded border border-keep-rule bg-keep-bg/40 p-3">
+      {/* Icon centered at top of the card. Sized down from the
+          previous full-width row variant so the card fits 3-up at
+          desktop widths without dominating the available space. */}
+      <div className="flex justify-center">
         {item.iconUrl ? (
           <img
             src={item.iconUrl}
             alt=""
             loading="lazy"
-            className="h-20 w-20 rounded border border-keep-rule/60 bg-keep-bg object-contain sm:h-24 sm:w-24 md:h-32 md:w-32 lg:h-40 lg:w-40 xl:h-48 xl:w-48 2xl:h-64 2xl:w-64"
+            className="h-20 w-20 rounded border border-keep-rule/60 bg-keep-bg object-contain sm:h-24 sm:w-24 lg:h-28 lg:w-28"
           />
         ) : (
           <div
             aria-hidden="true"
-            className="grid h-20 w-20 place-items-center rounded border border-keep-rule/60 bg-keep-banner/40 text-keep-muted sm:h-24 sm:w-24 md:h-32 md:w-32 lg:h-40 lg:w-40 xl:h-48 xl:w-48 2xl:h-64 2xl:w-64"
+            className="grid h-20 w-20 place-items-center rounded border border-keep-rule/60 bg-keep-banner/40 text-keep-muted sm:h-24 sm:w-24 lg:h-28 lg:w-28"
           >
-            <span className="text-3xl font-semibold sm:text-4xl md:text-5xl">{item.name.slice(0, 1).toUpperCase()}</span>
+            <span className="text-3xl font-semibold sm:text-4xl">{item.name.slice(0, 1).toUpperCase()}</span>
           </div>
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-2">
-          <span className="font-semibold">{item.name}</span>
-          <CoinAmount amount={item.price} className="text-xs uppercase tracking-widest text-keep-muted" />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="truncate font-semibold">{item.name}</span>
+          <SalePip discountPct={sale.discountPct} />
+        </div>
+        <p className="line-clamp-2 text-xs text-keep-muted" title={item.description}>{item.description}</p>
+        <div className="mt-1 flex flex-wrap items-baseline gap-2">
+          <PriceBlock basePrice={item.price} effectivePrice={effectiveUnitPrice} onSale={sale.discountPct != null} />
           {owned > 0 ? (
             <span className="text-[10px] uppercase tracking-widest text-keep-muted">
               you own {owned}/{item.stackLimit}
             </span>
           ) : null}
         </div>
-        <p className="text-xs text-keep-muted">{item.description}</p>
         {item.saleEndsAt && item.purchasable ? (
           <p className="text-[10px] uppercase tracking-widest text-keep-action">
             on sale until {new Date(item.saleEndsAt).toLocaleString()}
           </p>
         ) : null}
       </div>
-      <div className="flex items-center gap-2">
+      {/* Bottom action row pinned via mt-auto so cards of different
+          description lengths line their Buy buttons up. */}
+      <div className="mt-auto flex items-center justify-end gap-2">
         <input
           type="number"
           min={1}
@@ -2328,7 +4483,7 @@ function ShopRow({
         </button>
       </div>
       {blockedReason && !busy ? (
-        <p className="w-full text-[11px] text-keep-muted">{blockedReason}</p>
+        <p className="text-[11px] text-keep-muted">{blockedReason}</p>
       ) : null}
     </article>
   );

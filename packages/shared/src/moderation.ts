@@ -51,7 +51,16 @@ export type AuditAction =
   // Emoticon catalog management
   | "emoticon_sheet_create"
   | "emoticon_sheet_update"
-  | "emoticon_sheet_delete";
+  | "emoticon_sheet_delete"
+  // Emoticon-sheet user submissions (Phase 3)
+  | "emoticon_sheet_submit"
+  | "emoticon_sheet_approve"
+  | "emoticon_sheet_reject"
+  // Flair / cosmetics moderation
+  | "profile_banner_clear"
+  | "typing_phrase_clear"
+  | "room_presence_clear"
+  | "session_presence_clear";
 
 export interface AuditEntry {
   id: string;

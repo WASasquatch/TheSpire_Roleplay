@@ -27,6 +27,20 @@ export interface SourceEnableFlags {
   currency: boolean;
 }
 
+/**
+ * Length-bonus curve for a single message kind. Linear interpolation
+ * between (floorChars, 1.0x) and (ceilChars, maxMultiplier); below
+ * floor stays 1.0x, above ceil clamps to maxMultiplier.
+ *   enabled=false → always 1.0x
+ *   maxMultiplier <= 1 → effectively disabled (no upside)
+ */
+export interface LengthBonusSpec {
+  enabled: boolean;
+  floorChars: number;
+  ceilChars: number;
+  maxMultiplier: number;
+}
+
 export interface EarningConfig {
   /** Master kill-switch. When false, no source awards anything. */
   enabled: boolean;
@@ -46,6 +60,57 @@ export interface EarningConfig {
   };
   /** Messages shorter than this many trimmed characters earn 0. */
   bodyFloorChars: number;
+  /**
+   * Per-message-kind length-bonus + spam-detection knobs.
+   *
+   * Length bonus rewards effort on action / scene RP posts. The award
+   * engine multiplies the per-kind XP+Currency by a linearly-
+   * interpolated factor between 1.0x at `floorChars` and `maxMultiplier`
+   * at `ceilChars`. Messages above `ceilChars` clamp to the max — no
+   * "infinite wall of text" exploit. Disabled per-kind = always 1.0x.
+   *
+   * Spam detection drops the award to 0 for messages that fail any of
+   * the heuristics in `analyzeMessageQuality`:
+   *   - very low unique-char ratio over a length threshold
+   *     ("aaaaaaaaaaa", "!!!!!!!!!!")
+   *   - a single token dominating the body ("spam spam spam spam")
+   *   - exact-duplicate of the user's last few messages (echo)
+   * The ledger row carries `metadata.flaggedSpam = true` so admins can
+   * audit + tune; `enabled: false` skips all checks (legacy behavior).
+   */
+  messageQuality: {
+    /** Per-message-kind length bonus. Action defaults to a steeper
+     *  curve than say — RP posts get the reward, casual chat gets a
+     *  flatter multiplier. Whisper inherits action's settings but is
+     *  effectively no-op while whisper award is 0. */
+    lengthBonus: {
+      say: LengthBonusSpec;
+      action: LengthBonusSpec;
+      whisper: LengthBonusSpec;
+    };
+    /** Spam detection — applied AFTER the length multiplier (so a
+     *  100-word spammy wall of text still earns 0). */
+    spam: {
+      enabled: boolean;
+      /** Below this many trimmed chars, skip every heuristic (short
+       *  messages like "yes" are not spam — they just earn the base
+       *  rate). */
+      minLengthToCheck: number;
+      /** Reject messages where (unique chars / total chars) is below
+       *  this AND length ≥ minLengthToCheck. 0.18 catches most
+       *  keysmash / repeated-letter spam without dinging legitimate
+       *  short repetitions. Range 0..1; 0 disables. */
+      uniqueCharRatioFloor: number;
+      /** Reject messages where any single whitespace-split token
+       *  occupies > this fraction of the body. 0.55 catches "spam
+       *  spam spam spam" without dinging legitimate "no no no no". */
+      dominantTokenRatioCap: number;
+      /** How many of the user's most recent messages to compare
+       *  against for echo detection. 0 disables. The cache is bounded
+       *  per-user in memory. */
+      echoLookback: number;
+    };
+  };
   /** Length of a single presence-award block in minutes. Default 5. */
   presenceBlockMinutes: number;
   /** Hard cap on presence blocks awarded per scope per UTC day. */
@@ -98,6 +163,32 @@ export const DEFAULT_EARNING_CONFIG: EarningConfig = {
     },
   },
   bodyFloorChars: 5,
+  messageQuality: {
+    lengthBonus: {
+      // Casual chat — gentle curve. A heart-felt one-liner shouldn't
+      // be punished, but a paragraph reply gets a small bump.
+      say: { enabled: true, floorChars: 40, ceilChars: 240, maxMultiplier: 1.5 },
+      // RP action posts — steeper curve. A descriptive paragraph
+      // earns ~2x; a long scene-setting block earns 3x.
+      action: { enabled: true, floorChars: 60, ceilChars: 600, maxMultiplier: 3.0 },
+      // Whispers default to whatever the action curve is — moot
+      // while the whisper award is 0, but the knob is there if an
+      // admin enables whisper rewards.
+      whisper: { enabled: false, floorChars: 60, ceilChars: 600, maxMultiplier: 1.0 },
+    },
+    spam: {
+      enabled: true,
+      minLengthToCheck: 12,
+      // 0.18 = "1 unique character per ~5.5 total chars". Catches
+      // "aaaaaaaaaaa" and "!!!!!!!!!!!!" without tripping legitimate
+      // short emphatic posts.
+      uniqueCharRatioFloor: 0.18,
+      // 0.55 = "more than half the body is a single repeated token".
+      // Catches "spam spam spam spam" without dinging "no, no, no!".
+      dominantTokenRatioCap: 0.55,
+      echoLookback: 3,
+    },
+  },
   presenceBlockMinutes: 5,
   presenceDailyBlockCap: 12,
   enabledSources: {
@@ -147,6 +238,19 @@ function flags(input: unknown, fallback: SourceEnableFlags): SourceEnableFlags {
   return { xp: bool(src.xp, fallback.xp), currency: bool(src.currency, fallback.currency) };
 }
 
+function lengthBonus(input: unknown, fallback: LengthBonusSpec): LengthBonusSpec {
+  const src = obj(input);
+  return {
+    enabled: bool(src.enabled, fallback.enabled),
+    floorChars: Math.max(0, num(src.floorChars, fallback.floorChars)),
+    ceilChars: Math.max(0, num(src.ceilChars, fallback.ceilChars)),
+    // Clamp to a sane upper bound — 10x on a 5XP base = 50XP per
+    // message, which is already extreme. Beyond that is almost
+    // certainly an admin typo.
+    maxMultiplier: Math.max(1.0, Math.min(10.0, num(src.maxMultiplier, fallback.maxMultiplier))),
+  };
+}
+
 /**
  * Normalize a stored JSON blob (or a partial admin patch) into a full
  * EarningConfig. Every missing key falls back to the corresponding
@@ -180,6 +284,26 @@ export function normalizeEarningConfig(input: unknown): EarningConfig {
       },
     },
     bodyFloorChars: num(src.bodyFloorChars, def.bodyFloorChars),
+    messageQuality: (() => {
+      const mq = obj(src.messageQuality);
+      const lb = obj(mq.lengthBonus);
+      const sp = obj(mq.spam);
+      const defMq = def.messageQuality;
+      return {
+        lengthBonus: {
+          say: lengthBonus(lb.say, defMq.lengthBonus.say),
+          action: lengthBonus(lb.action, defMq.lengthBonus.action),
+          whisper: lengthBonus(lb.whisper, defMq.lengthBonus.whisper),
+        },
+        spam: {
+          enabled: bool(sp.enabled, defMq.spam.enabled),
+          minLengthToCheck: Math.max(0, num(sp.minLengthToCheck, defMq.spam.minLengthToCheck)),
+          uniqueCharRatioFloor: Math.max(0, Math.min(1, num(sp.uniqueCharRatioFloor, defMq.spam.uniqueCharRatioFloor))),
+          dominantTokenRatioCap: Math.max(0, Math.min(1, num(sp.dominantTokenRatioCap, defMq.spam.dominantTokenRatioCap))),
+          echoLookback: Math.max(0, Math.min(20, num(sp.echoLookback, defMq.spam.echoLookback))),
+        },
+      };
+    })(),
     presenceBlockMinutes: num(src.presenceBlockMinutes, def.presenceBlockMinutes),
     presenceDailyBlockCap: num(src.presenceDailyBlockCap, def.presenceDailyBlockCap),
     enabledSources: {

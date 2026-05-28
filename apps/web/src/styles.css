@@ -2532,12 +2532,39 @@ aside.margin-note {
    * style spawns is contained against this box (not against the
    * splash card / modal further up the tree). */
   position: relative;
+  /* CSS containment: `paint` clips ALL descendant rendering to this
+   * box — strictly stronger than `overflow: hidden`. Notably it also
+   * clips `position: fixed` descendants, which `overflow: hidden`
+   * does NOT do; if a future admin-authored style ships a
+   * `position: fixed` pseudo, it still can't overlap the card chrome.
+   * `layout` prevents descendant layout from leaking out (baseline
+   * alignment, margin collapse) so the preview box's height stays
+   * predictable regardless of what a style does inside. */
+  contain: layout paint;
+  /* Fresh stacking context — a name-style that bumps z-index in an
+   * animation keyframe can't escape above the surrounding card
+   * (Equip button, Save row, etc.) because every internal layer
+   * now lives in this isolated context. */
+  isolation: isolate;
 }
 .name-style-preview,
 .name-style-preview *,
 .name-style-preview *::before,
 .name-style-preview *::after {
   pointer-events: none;
+}
+/* Belt-and-suspenders for the Earning dashboard's owned/available
+ * cards: lift every interactive control inside an .ns-card-controls
+ * wrapper into its own stacking context above the preview. Even if a
+ * future style somehow defeats `contain: paint` (browser bug, exotic
+ * blend-mode), the buttons / inputs stay clickable because they sit
+ * on a higher z-index layer. `pointer-events: auto` is the explicit
+ * counterweight to the `*` rule above so the inheritance chain can't
+ * accidentally cascade `none` onto these controls. */
+.ns-card-controls {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
 }
 /* Count digit pulses when reactor count changes — driven by a
  * key=count React trick on the chip's number span. */

@@ -1041,9 +1041,83 @@ export const siteSettings = sqliteTable("site_settings", {
    * Shape: see EarningConfig in apps/server/src/earning/config.ts.
    */
   earningConfigJson: text("earning_config_json"),
+  /**
+   * Daily flash-sale system. Defaults at 25% off, all three categories
+   * enabled, so the system starts producing daily sales without
+   * further admin action. Per-category toggles let admins mute one
+   * surface (e.g. cosmetics off) without disabling the whole feature.
+   * Per-pick `discount_pct` on a `flash_sale_overrides` row beats the
+   * default; the resolver snapshots the effective discount onto each
+   * `flash_sales` row so a mid-day default tweak doesn't silently
+   * re-price an active sale.
+   */
+  flashSaleDefaultDiscountPct: integer("flash_sale_default_discount_pct").notNull().default(25),
+  flashSaleStylesEnabled: integer("flash_sale_styles_enabled", { mode: "boolean" }).notNull().default(true),
+  flashSaleItemsEnabled: integer("flash_sale_items_enabled", { mode: "boolean" }).notNull().default(true),
+  flashSaleCosmeticsEnabled: integer("flash_sale_cosmetics_enabled", { mode: "boolean" }).notNull().default(true),
+  flashSaleFreeformBordersEnabled: integer("flash_sale_freeform_borders_enabled", { mode: "boolean" }).notNull().default(true),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
 });
+
+/* ---------- flash_sales ----------
+ * One row per UTC date. Holds the resolved picks for that day; the
+ * resolver picks and writes in a single transaction so concurrent
+ * first-readers don't race two random picks. NULL means "no row was
+ * eligible at pick time" (catalog empty or category disabled when
+ * the resolver ran). Each FK uses `ON DELETE SET NULL` so a later
+ * catalog deletion doesn't 404 the historical sale row.
+ *
+ * `*_discount_pct` is snapshotted on insert: either the override's
+ * per-pick discount or the global default at pick time. NULL on
+ * read means "no pick for this category that day", not "use global
+ * default" — the resolver always materializes a number on insert.
+ */
+export const flashSales = sqliteTable("flash_sales", {
+  /** ISO 'YYYY-MM-DD' UTC. Singleton per day. */
+  forDate: text("for_date").primaryKey(),
+  nameStyleKey: text("name_style_key")
+    .references(() => nameStyles.key, { onDelete: "set null" }),
+  itemKey: text("item_key")
+    .references(() => items.key, { onDelete: "set null" }),
+  cosmeticKey: text("cosmetic_key")
+    .references(() => cosmetics.key, { onDelete: "set null" }),
+  /** Free-form border pick (migration 0160). Same scope as
+   *  nameStyleKey — one row per UTC date, resolver-snapshotted
+   *  discount alongside the FK. */
+  freeformBorderKey: text("freeform_border_key")
+    .references(() => freeformBorders.key, { onDelete: "set null" }),
+  nameStyleDiscountPct: integer("name_style_discount_pct"),
+  itemDiscountPct: integer("item_discount_pct"),
+  cosmeticDiscountPct: integer("cosmetic_discount_pct"),
+  freeformBorderDiscountPct: integer("freeform_border_discount_pct"),
+  createdAt: ts("created_at"),
+});
+
+/* ---------- flash_sale_overrides ----------
+ * Admin "queue a specific pick for date X" rows. Consumed (read,
+ * not deleted) by the resolver when it materializes that date's
+ * `flash_sales` row, so the audit trail of what was scheduled
+ * survives. Composite primary key (category, for_date) keeps the
+ * one-pick-per-category-per-day invariant cheap to enforce.
+ */
+export const flashSaleOverrides = sqliteTable(
+  "flash_sale_overrides",
+  {
+    /** 'name_style' | 'item' | 'cosmetic'. No CHECK constraint so future categories drop in. */
+    category: text("category").notNull(),
+    /** ISO 'YYYY-MM-DD' UTC. */
+    forDate: text("for_date").notNull(),
+    /** Catalog row key. App validates against the right table on insert. */
+    targetKey: text("target_key").notNull(),
+    /** Optional per-pick discount. NULL = inherit site default at resolve time. */
+    discountPct: integer("discount_pct"),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.category, t.forDate] }),
+  }),
+);
 
 /* ---------- push subscriptions (Phase 4) ---------- */
 /**
@@ -2214,6 +2288,43 @@ export const userEarning = sqliteTable("user_earning", {
   hideXpCount: integer("hide_xp_count", { mode: "boolean" }).notNull().default(false),
   /** Which owned border is currently equipped on the master avatar (null = none). */
   selectedBorderRankKey: text("selected_border_rank_key"),
+  /**
+   * Equipped FREE-FORM border key (migration 0149). When non-null
+   * AND the user actually owns the row in `user_owned_freeform_borders`,
+   * BorderedAvatar prefers this over `selectedBorderRankKey`. ON
+   * DELETE SET NULL via the migration so an admin deleting a freeform
+   * border row clears every active equip rather than orphaning them.
+   */
+  selectedFreeformBorderKey: text("selected_freeform_border_key"),
+  /**
+   * Custom typing-phrase Flair (migration 0150). Free-form text the
+   * user picks after purchasing `flair_typing_phrase`. Rendered by
+   * the typing indicator in place of the default "is typing…" when
+   * this user is the sole typer. Null = use the default phrasing.
+   * Length-capped at 60 chars by the writer; admin clear endpoint
+   * resets to null for moderation.
+   */
+  typingPhrase: text("typing_phrase"),
+  /**
+   * Custom room-presence templates (migration 0161). Override the
+   * default "{name} has entered the room." / "{name} has left the
+   * room." system lines. Gated on this user owning
+   * `flair_room_presence`. Supports `{name}` and `{room}`
+   * placeholders. Null = use the default phrasing.
+   */
+  roomJoinTemplate: text("room_join_template"),
+  roomLeaveTemplate: text("room_leave_template"),
+  /**
+   * Custom session-presence templates (migration 0161). Override the
+   * site-level "{name} has connected." / "{name} has disconnected."
+   * lines that surface in the user's first room when they log in /
+   * out. Gated on this user owning `flair_session_presence`.
+   * Session presence is master-only — characters are sub-identities
+   * of the active session, not session participants themselves.
+   * Supports `{name}` only. Null = use the default phrasing.
+   */
+  sessionConnectTemplate: text("session_connect_template"),
+  sessionExitTemplate: text("session_exit_template"),
   createdAt: ts("created_at"),
   updatedAt: ts("updated_at"),
 });
@@ -2236,6 +2347,10 @@ export const characterEarning = sqliteTable("character_earning", {
   maxTierEverHeld: integer("max_tier_ever_held"),
   /** Per-character border equip choice (drawn from the owner's user_owned_borders set). */
   selectedBorderRankKey: text("selected_border_rank_key"),
+  /** Per-character free-form border equip (migration 0149). Same precedence
+   *  rule as the master pool: when non-null AND owned, beats the rank-tier
+   *  equip. ON DELETE SET NULL clears the slot if the border row is dropped. */
+  selectedFreeformBorderKey: text("selected_freeform_border_key"),
   /**
    * Per-character equipped name-style key. Distinct from
    * `user_active_cosmetics.active_name_style_key` (which now scopes
@@ -2253,6 +2368,38 @@ export const characterEarning = sqliteTable("character_earning", {
   inlineAvatarEnabled: integer("inline_avatar_enabled", { mode: "boolean" })
     .notNull()
     .default(false),
+  /**
+   * Per-character "Lurking Master" toggle (migration 0152). When
+   * true AND this character owns `flair_lurking_master`, the typing
+   * indicator omits this character from the broadcast typer set
+   * for non-admin receivers. Admins still see the row regardless.
+   */
+  lurkingMasterEnabled: integer("lurking_master_enabled", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  /**
+   * Per-character banner image URL. Same per-identity partition as
+   * the cosmetics above — character-active shows this character's
+   * banner on their profile, OOC shows the master's
+   * (`user_active_cosmetics.profile_banner_url`). Writable only when
+   * this character (not the master) owns `flair_profile_banner` in
+   * the earning ledger.
+   */
+  profileBannerUrl: text("profile_banner_url"),
+  /**
+   * Per-character custom typing phrase (migration 0150). Same
+   * partition rule as `profileBannerUrl` above — gated on THIS
+   * character (not the master) owning `flair_typing_phrase`.
+   */
+  typingPhrase: text("typing_phrase"),
+  /**
+   * Per-character room-presence templates (migration 0161). Same
+   * partition rule as `typingPhrase` above — gated on THIS character
+   * (not the master) owning `flair_room_presence`. Character-active
+   * rooms render this row's templates; OOC rooms render the master's.
+   */
+  roomJoinTemplate: text("room_join_template"),
+  roomLeaveTemplate: text("room_leave_template"),
   createdAt: ts("created_at"),
   updatedAt: ts("updated_at"),
 });
@@ -2383,6 +2530,89 @@ export const characterOwnedBorders = sqliteTable(
   (t) => ({
     pk: primaryKey({ columns: [t.characterId, t.rankKey] }),
     characterIdx: index("character_owned_borders_character_idx").on(t.characterId),
+  }),
+);
+
+/* ---------- freeform_borders ----------
+ * Free-form purchasable avatar borders (migration 0149). Coexists
+ * with rank-tier borders; the BordersTab merges the two catalogs
+ * for users. Each row ships in EITHER `imageUrl` mode (PNG / APNG
+ * overlay) OR `template` + `styleCss` mode (DOM template with
+ * scoped CSS, mirroring the name-style system). App-layer validator
+ * enforces exactly one path on insert/update.
+ *
+ * `rarity` is a free-string tier slug — drives the chip-strip
+ * filter and the per-card accent color in the user-facing UI.
+ * Open string (no CHECK) so admins can add new tiers without a
+ * schema migration; client falls back to a 'common' palette for
+ * unknown values.
+ */
+export const freeformBorders = sqliteTable("freeform_borders", {
+  key: text("key").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  /** PNG / APNG / WebP URL. Mutually exclusive with `template`. */
+  imageUrl: text("image_url"),
+  /** DOM template with `{avatar}` placeholder. Mutually exclusive with `imageUrl`. */
+  template: text("template"),
+  /** Scoped CSS for the `.b-<key>` class chain referenced by template. */
+  styleCss: text("style_css"),
+  /** 'rare' | 'epic' | 'legendary' | 'mythic' | 'exotic' | 'atmospheric' | ... */
+  rarity: text("rarity").notNull().default("common"),
+  cost: integer("cost").notNull().default(0),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  /** Seed-protected. Admin can edit but not delete. */
+  isBuiltin: integer("is_builtin", { mode: "boolean" }).notNull().default(false),
+  order: integer("order").notNull().default(0),
+  createdAt: ts("created_at"),
+  updatedAt: ts("updated_at"),
+});
+
+/* ---------- user_owned_freeform_borders ---------- */
+export const userOwnedFreeformBorders = sqliteTable(
+  "user_owned_freeform_borders",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    borderKey: text("border_key")
+      .notNull()
+      .references(() => freeformBorders.key, { onDelete: "cascade" }),
+    acquiredAt: ts("acquired_at"),
+    /**
+     * Per-identity color customization (migration 0158). JSON map of
+     * CSS custom-property names → values keyed without the `--c-`
+     * prefix (e.g. `{"ring-main":"#ff10f0"}`). The renderer prepends
+     * `--c-` and injects each as an inline CSS variable on the
+     * BorderedAvatar wrapper; the catalog row's CSS reads them via
+     * `var(--c-ring-main, <fallback>)`. Null = use the CSS fallbacks.
+     */
+    configJson: text("config_json"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.borderKey] }),
+    userIdx: index("user_owned_freeform_borders_user_idx").on(t.userId),
+  }),
+);
+
+/* ---------- character_owned_freeform_borders ---------- */
+export const characterOwnedFreeformBorders = sqliteTable(
+  "character_owned_freeform_borders",
+  {
+    characterId: text("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    borderKey: text("border_key")
+      .notNull()
+      .references(() => freeformBorders.key, { onDelete: "cascade" }),
+    acquiredAt: ts("acquired_at"),
+    /** Per-character color customization. Same shape as
+     *  `user_owned_freeform_borders.configJson`. */
+    configJson: text("config_json"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.characterId, t.borderKey] }),
+    characterIdx: index("character_owned_freeform_borders_character_idx").on(t.characterId),
   }),
 );
 
@@ -2571,9 +2801,21 @@ export const userActiveCosmetics = sqliteTable("user_active_cosmetics", {
     .references(() => users.id, { onDelete: "cascade" }),
   /** Inline-avatar cosmetic equipped on chat lines. Requires ownership recorded in earning_ledger. */
   inlineAvatarEnabled: integer("inline_avatar_enabled", { mode: "boolean" }).notNull().default(false),
+  /** Master/OOC "Lurking Master" toggle (migration 0152). When true
+   *  AND the master owns `flair_lurking_master`, the typing
+   *  indicator hides this user from non-admin receivers' typer sets.
+   *  Admins always see the row for moderation visibility. */
+  lurkingMasterEnabled: integer("lurking_master_enabled", { mode: "boolean" }).notNull().default(false),
   /** Currently-active name style (FK; set null on style delete). */
   activeNameStyleKey: text("active_name_style_key")
     .references(() => nameStyles.key, { onDelete: "set null" }),
+  /**
+   * Banner image URL pasted by the user on ProfileModal. Renders as a
+   * 3:1 hero strip on their profile. Writable only when this user
+   * owns the `flair_profile_banner` cosmetic (purchase check on the
+   * PATCH route, not enforced in SQL). Null/empty = no banner.
+   */
+  profileBannerUrl: text("profile_banner_url"),
   updatedAt: ts("updated_at"),
 });
 
@@ -2647,6 +2889,36 @@ export const emoticonSheets = sqliteTable(
     createdByUserId: text("created_by_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    /**
+     * Moderation lifecycle (migration 0151).
+     *   'approved' — admin-created OR admin-approved user submission.
+     *                Only these surface in the user-facing picker.
+     *   'pending'  — user submission awaiting review.
+     *   'rejected' — submission denied; Currency was refunded; the
+     *                image file has been deleted from disk but the
+     *                row is retained for the moderation audit trail.
+     * Open string (no DB CHECK) so future states ('flagged', etc.)
+     * don't need a migration.
+     */
+    status: text("status").notNull().default("approved"),
+    /** Scope of the paying identity on submission. 'user' = master
+     *  pool, 'character' = that character's pool. Null for admin-
+     *  created rows (no payment flow). */
+    submitterScope: text("submitter_scope"),
+    /** Matching ownerId for the refund debit-reverse. user.id when
+     *  scope='user', characters.id when scope='character'. */
+    submitterPoolId: text("submitter_pool_id"),
+    /** Snapshot of the cost paid at submission time. Used by the
+     *  reject path so an admin can't accidentally refund a different
+     *  amount after retuning the catalog price. */
+    costPaid: integer("cost_paid"),
+    /** Moderation timestamp / actor / reason. All null on pending or
+     *  never-reviewed (admin-created) rows. */
+    reviewedAt: integer("reviewed_at"),
+    reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    rejectionReason: text("rejection_reason"),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
   },

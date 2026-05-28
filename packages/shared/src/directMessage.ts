@@ -49,6 +49,18 @@ export interface DirectConversationSummary {
    * a reply lands in the same thread rather than spawning a new one.
    */
   otherCharacterId: string | null;
+  /**
+   * The VIEWER's character id pinned to this conversation, or null
+   * when the viewer is on this thread as their master OOC handle.
+   * Echoed back from the request's `?characterId=` filter so client
+   * code that doesn't know the current chip filter (e.g. the App-level
+   * `dm:new` socket handler, which lives outside MessagesModal) can
+   * still send a correct `/read` POST without spoofing the global
+   * active character. Without it, mark-read POSTs from the dm:new
+   * handler 404'd whenever the user was viewing a chip-filtered
+   * inbox that didn't match their globally-active identity.
+   */
+  myCharacterId: string | null;
   otherUsername: string;
   otherDisplayName: string;
   otherAvatarUrl: string | null;

@@ -1,4 +1,5 @@
 import { useEffect, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 interface ModalProps {
   onClose: () => void;
@@ -103,7 +104,19 @@ export function Modal({
     return () => document.removeEventListener("keydown", onKey);
   }, [closeOnEscape, onClose]);
 
-  return (
+  // Portal to <body> so the backdrop's `position: fixed` always
+  // resolves against the viewport. Without this, a modal opened
+  // from inside a `.keep-frame` (or any ancestor with `transform`,
+  // `filter`, `backdrop-filter`, `perspective`, etc.) gets clipped
+  // to that ancestor's box, since those properties make the
+  // ancestor the containing block for fixed descendants. This bit
+  // the nested EmoticonSubmissionModal in glass theme — the
+  // dashboard's `.keep-frame` has `backdrop-filter: blur(...)`,
+  // so the submission modal's `fixed inset-0` rendered only over
+  // the dashboard card and its stacking context trapped the
+  // z-index, producing a blank dark overlay with no visible card.
+  // Portaling lifts every modal out of those traps in one place.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -116,6 +129,7 @@ export function Modal({
       onClick={closeOnBackdrop ? onClose : undefined}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   );
 }

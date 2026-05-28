@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Server as IoServer } from "socket.io";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { createHash } from "node:crypto";
@@ -20,12 +20,16 @@ import {
   isEmoticonCellEmpty,
 } from "@thekeep/shared";
 import {
+  characterEarning,
   characters,
+  cosmetics,
   directConversations,
   directMessages,
+  earningLedger,
   emoticonSheets,
   messageReactions,
   messages,
+  userEarning,
   users,
 } from "../db/schema.js";
 import type { Db } from "../db/index.js";
@@ -211,11 +215,19 @@ export async function registerEmoticonRoutes(
     return { url: `/uploads/emoticons/${filename}`, mime: detected.mime, bytes: bytes.length };
   }
 
-  /* ---------- Public catalog ---------- */
+  /* ---------- Public catalog ----------
+   *
+   * Approved-only filter (migration 0151). Pending and rejected
+   * user submissions live in the same table but must NEVER surface
+   * in the picker — pending rows aren't live, and rejected rows
+   * exist only as moderation history with their image files
+   * already deleted.
+   */
   app.get("/emoticons", async () => {
     const rows = await db
       .select()
       .from(emoticonSheets)
+      .where(eq(emoticonSheets.status, "approved"))
       .orderBy(asc(emoticonSheets.sortOrder), asc(emoticonSheets.createdAt));
     return { sheets: rows.map(sheetRowToWire) };
   });
@@ -315,9 +327,25 @@ export async function registerEmoticonRoutes(
     const current = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.id, req.params.id)).limit(1))[0];
     if (!current) { reply.code(404); return { error: "not found" }; }
 
+    // Phase 3 — DELETE refuses to touch pending submissions. Those
+    // rows hold the submitter's paid Currency until the moderation
+    // queue resolves them; a blind DELETE here would orphan the
+    // payment with no refund. Force the admin through the
+    // moderation queue's reject path so the refund + audit row fire
+    // together.
+    if (current.status === "pending") {
+      reply.code(409);
+      return {
+        error: "submission is pending review",
+        message: "Use the Reject button in the user-submissions queue to refund the submitter's Currency. Direct delete would orphan their payment.",
+      };
+    }
+
     // FK ON DELETE CASCADE on message_reactions.sheet_id wipes any
     // reactions placed with this sheet. That's intentional — pulling
     // a sheet means every emoticon from it disappears everywhere.
+    // For rejected rows the image file is already gone (Phase 3
+    // reject path deletes it); the unlink below is a no-op then.
     await db.delete(emoticonSheets).where(eq(emoticonSheets.id, current.id));
 
     if (current.imageUrl.startsWith("/uploads/emoticons/")) {
@@ -347,8 +375,12 @@ export async function registerEmoticonRoutes(
     // Resolve the sheet (slug → row) and validate the cell isn't
     // "empty" (those cells aren't pickable). Slug → id mapping is the
     // wire convention: clients refer to sheets by slug, the DB by id.
+    // Pending and rejected sheets (migration 0151) are NOT reactable —
+    // the picker filters them out, but a client could in principle
+    // know the slug of a friend's pending submission and try to
+    // bypass; reject server-side too.
     const sheet = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.slug, body.sheetSlug)).limit(1))[0];
-    if (!sheet) { reply.code(404); return { error: "emoticon sheet not found" }; }
+    if (!sheet || sheet.status !== "approved") { reply.code(404); return { error: "emoticon sheet not found" }; }
     const cells = parseSheetCells(sheet.cells);
     const label = cells[body.cellIndex] ?? "";
     if (isEmoticonCellEmpty(label)) {
@@ -466,4 +498,461 @@ export async function registerEmoticonRoutes(
       return summary;
     },
   );
+
+  /* =========================================================
+   *  User submissions — Phase 3 of the cosmetic expansion.
+   *
+   *  Flow:
+   *    1. User submits a custom 4×4 reaction sheet via POST
+   *       /me/emoticon-submissions with a base64 image data URL.
+   *    2. Server validates, writes the file, debits the cost of
+   *       `flair_reaction_sheet` from the active identity's pool,
+   *       and inserts an emoticon_sheets row with status='pending'.
+   *    3. Admin reviews via the moderation queue (GET /admin/
+   *       emoticons/submissions), then approves or rejects.
+   *    4. Reject path refunds the cost (single credit-back ledger
+   *       entry) and deletes the asset file.
+   *    5. Approve path flips status='approved'; the row immediately
+   *       surfaces in the user-facing picker (filtered above).
+   *
+   *  Anti-abuse: 3 concurrent pending submissions per user. A user
+   *  with 3 pending can't submit a 4th until one resolves. Approved
+   *  and rejected rows don't count.
+   * ========================================================= */
+
+  /** Per-user concurrent-pending cap. Prevents an abuser from
+   *  flooding the moderation queue with junk in hopes of getting a
+   *  refund treadmill going. Approvers can raise this in code; an
+   *  admin-tunable setting would be overkill for the first cut. */
+  const MAX_PENDING_PER_USER = 3;
+
+  const submitSheetBody = z.object({
+    slug: z.string().min(1).max(40).regex(SLUG_RX, "slug must be 1-40 lowercase letters / digits / hyphens"),
+    name: z.string().min(1).max(80),
+    cells: z.array(z.string().max(40)).length(EMOTICON_SHEET_CELL_COUNT),
+    imageDataUrl: z.string().min(32).max(8 * 1024 * 1024),
+    /** Per-identity pool that pays. Null/omitted = master/OOC pool;
+     *  a character id pays from that character's pool and tags the
+     *  submission so the refund (if any) lands on the right pool. */
+    characterId: z.string().nullable().optional(),
+  }).strict();
+
+  app.post<{ Body: unknown }>("/me/emoticon-submissions", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+
+    let body: z.infer<typeof submitSheetBody>;
+    try { body = submitSheetBody.parse(req.body); }
+    catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+
+    const slug = body.slug.toLowerCase();
+    const dup = (await db.select({ id: emoticonSheets.id })
+      .from(emoticonSheets).where(eq(emoticonSheets.slug, slug)).limit(1))[0];
+    if (dup) { reply.code(409); return { error: "slug already in use" }; }
+
+    const scopeCharacterId = body.characterId ?? null;
+    if (scopeCharacterId) {
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+        .from(characters)
+        .where(eq(characters.id, scopeCharacterId))
+        .limit(1))[0];
+      if (!c || c.userId !== me.id || c.deletedAt) {
+        reply.code(403);
+        return { error: "not your character" };
+      }
+    }
+
+    // Cap concurrent pending submissions across ALL of the user's
+    // identities — the abuse concern is per-account, not per-pool.
+    // We include both master-paid (submitter_pool_id = me.id) AND
+    // character-paid pending rows owned by this user's characters.
+    const myCharIds = (await db
+      .select({ id: characters.id })
+      .from(characters)
+      .where(and(eq(characters.userId, me.id), sql`${characters.deletedAt} IS NULL`))).map((r) => r.id);
+    const poolIds = [me.id, ...myCharIds];
+    const pending = await db
+      .select({ id: emoticonSheets.id })
+      .from(emoticonSheets)
+      .where(and(
+        eq(emoticonSheets.status, "pending"),
+        inArray(emoticonSheets.submitterPoolId, poolIds),
+      ));
+    if (pending.length >= MAX_PENDING_PER_USER) {
+      reply.code(429);
+      return { error: `you already have ${pending.length} pending submission${pending.length === 1 ? "" : "s"}; wait for review before submitting more` };
+    }
+
+    // Look up the current submission cost. The `flair_reaction_sheet`
+    // cosmetic row is seeded by migration 0151; admins can tune the
+    // price via the Flair admin tab. Per-submission (NOT a one-time
+    // purchase) — each upload re-pays.
+    const costRow = (await db
+      .select({ cost: cosmetics.cost, enabled: cosmetics.enabled })
+      .from(cosmetics)
+      .where(eq(cosmetics.key, "flair_reaction_sheet"))
+      .limit(1))[0];
+    if (!costRow || !costRow.enabled) {
+      reply.code(503);
+      return { error: "reaction sheet submissions are currently disabled" };
+    }
+    const cost = costRow.cost;
+
+    // Write the image BEFORE the txn. We use a freshly-generated id
+    // as the content-hash prefix so the file path is unique to this
+    // submission; if the txn fails (race on funds, slug uniqueness)
+    // we clean up the orphan file in the catch below.
+    const submissionId = nanoid();
+    const imageResult = await writeSheetImage(submissionId, body.imageDataUrl);
+    if ("error" in imageResult) { reply.code(imageResult.status); return { error: imageResult.error }; }
+
+    // Resolve the refund-target pool id. For master scope this is
+    // the user id; for character scope it's the character id.
+    const submitterScope: "user" | "character" = scopeCharacterId ? "character" : "user";
+    const submitterPoolId = scopeCharacterId ?? me.id;
+
+    try {
+      db.transaction((tx) => {
+        // Race-safe re-check of funds + lazy-ensure the earning row
+        // exists. Same pattern as runPurchaseTxn in earning.ts.
+        if (scopeCharacterId) {
+          tx.insert(characterEarning).values({ characterId: scopeCharacterId }).onConflictDoNothing().run();
+          const row = tx.select({ currency: characterEarning.currency })
+            .from(characterEarning).where(eq(characterEarning.characterId, scopeCharacterId)).limit(1).all()[0];
+          const balance = row?.currency ?? 0;
+          if (balance < cost) throw new InsufficientFunds(cost, balance);
+          tx.update(characterEarning)
+            .set({ currency: balance - cost, updatedAt: new Date() })
+            .where(eq(characterEarning.characterId, scopeCharacterId))
+            .run();
+        } else {
+          tx.insert(userEarning).values({ userId: me.id }).onConflictDoNothing().run();
+          const row = tx.select({ currency: userEarning.currency })
+            .from(userEarning).where(eq(userEarning.userId, me.id)).limit(1).all()[0];
+          const balance = row?.currency ?? 0;
+          if (balance < cost) throw new InsufficientFunds(cost, balance);
+          tx.update(userEarning)
+            .set({ currency: balance - cost, updatedAt: new Date() })
+            .where(eq(userEarning.userId, me.id))
+            .run();
+        }
+        // Append the ledger row. Reason embeds the submission id so
+        // the refund path can find the matching debit if needed; the
+        // refund record uses a parallel `emoticon_submission_refund_<id>`
+        // reason.
+        tx.insert(earningLedger).values({
+          id: nanoid(),
+          scope: submitterScope,
+          ownerId: submitterPoolId,
+          xpDelta: 0,
+          currencyDelta: -cost,
+          reason: `emoticon_submission_${submissionId}`,
+          metadataJson: JSON.stringify({ kind: "emoticon_submission", submissionId, slug, name: body.name }),
+          createdAt: new Date(),
+        }).run();
+        // And finally the sheet row itself. status='pending' keeps
+        // it out of the picker until an admin approves.
+        tx.insert(emoticonSheets).values({
+          id: submissionId,
+          slug,
+          name: body.name,
+          imageUrl: imageResult.url,
+          cells: JSON.stringify(body.cells),
+          // Pending submissions don't compete for the sortOrder slot —
+          // admins decide where it sits when they approve. Start at 0;
+          // the approve endpoint reorders to the tail.
+          sortOrder: 0,
+          createdByUserId: me.id,
+          status: "pending",
+          submitterScope,
+          submitterPoolId,
+          costPaid: cost,
+        }).run();
+      });
+    } catch (err) {
+      // Roll back the orphan file write (best-effort) and surface
+      // the actual error to the caller.
+      unlink(join(emoticonsDir, imageResult.url.slice("/uploads/emoticons/".length)))
+        .catch(() => { /* best-effort */ });
+      if (err instanceof InsufficientFunds) {
+        reply.code(402);
+        return { error: "insufficient funds", required: err.required, balance: err.balance };
+      }
+      throw err;
+    }
+
+    await recordAudit(db, {
+      actorUserId: me.id,
+      action: "emoticon_sheet_submit",
+      metadata: {
+        id: submissionId, slug, name: body.name,
+        cost, scope: submitterScope, ownerId: submitterPoolId,
+      },
+    });
+
+    reply.code(201);
+    return { ok: true, submissionId, slug, status: "pending", costPaid: cost };
+  });
+
+  /* ---------- User: list my submissions (any status) ---------- */
+  app.get("/me/emoticon-submissions", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+
+    // Caller's submissions = master-paid (pool = me.id) ∪
+    // character-paid (pool ∈ caller's characters). Same pool-id
+    // construction as the cap check above.
+    const myCharIds = (await db
+      .select({ id: characters.id })
+      .from(characters)
+      .where(and(eq(characters.userId, me.id), sql`${characters.deletedAt} IS NULL`))).map((r) => r.id);
+    const poolIds = [me.id, ...myCharIds];
+    const rows = await db
+      .select()
+      .from(emoticonSheets)
+      .where(and(
+        // Only rows that went through the submission flow have a
+        // non-null submitterPoolId; admin-created rows are excluded
+        // even when the admin happens to be the caller.
+        sql`${emoticonSheets.submitterPoolId} IS NOT NULL`,
+        inArray(emoticonSheets.submitterPoolId, poolIds),
+      ))
+      .orderBy(desc(emoticonSheets.createdAt));
+    return {
+      submissions: rows.map((r) => ({
+        id: r.id,
+        slug: r.slug,
+        name: r.name,
+        imageUrl: r.imageUrl,
+        cells: parseSheetCells(r.cells),
+        status: r.status,
+        submitterScope: r.submitterScope,
+        submitterPoolId: r.submitterPoolId,
+        costPaid: r.costPaid,
+        rejectionReason: r.rejectionReason,
+        reviewedAt: r.reviewedAt ? +r.reviewedAt : null,
+        createdAt: +r.createdAt,
+      })),
+    };
+  });
+
+  /* ---------- Admin: list pending + recent submissions ----------
+   *
+   * Returns up to 50 most-recent submissions of any status. The
+   * Flair admin UI uses this for the moderation queue card.
+   */
+  app.get("/admin/emoticons/submissions", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
+    const rows = await db
+      .select()
+      .from(emoticonSheets)
+      .where(sql`${emoticonSheets.submitterPoolId} IS NOT NULL`)
+      .orderBy(desc(emoticonSheets.createdAt))
+      .limit(50);
+    // Resolve submitter display names so admin doesn't have to
+    // squint at uuids. Pull user + character rows in two batched
+    // queries, then map by pool id.
+    const userPoolIds = rows.filter((r) => r.submitterScope === "user").map((r) => r.submitterPoolId!).filter(Boolean);
+    const charPoolIds = rows.filter((r) => r.submitterScope === "character").map((r) => r.submitterPoolId!).filter(Boolean);
+    const userRows = userPoolIds.length
+      ? await db.select({ id: users.id, username: users.username })
+          .from(users)
+          .where(inArray(users.id, userPoolIds))
+      : [];
+    const charRows = charPoolIds.length
+      ? await db.select({ id: characters.id, name: characters.name, userId: characters.userId })
+          .from(characters)
+          .where(inArray(characters.id, charPoolIds))
+      : [];
+    const usernameById = new Map(userRows.map((r) => [r.id, r.username]));
+    const charById = new Map(charRows.map((r) => [r.id, r]));
+    return {
+      submissions: rows.map((r) => {
+        let submitterLabel = "(unknown)";
+        if (r.submitterScope === "user" && r.submitterPoolId) {
+          submitterLabel = usernameById.get(r.submitterPoolId) ?? "(deleted user)";
+        } else if (r.submitterScope === "character" && r.submitterPoolId) {
+          const c = charById.get(r.submitterPoolId);
+          if (c) {
+            submitterLabel = `${c.name} (${usernameById.get(c.userId) ?? "?"})`;
+          } else {
+            submitterLabel = "(deleted character)";
+          }
+        }
+        return {
+          id: r.id,
+          slug: r.slug,
+          name: r.name,
+          imageUrl: r.imageUrl,
+          cells: parseSheetCells(r.cells),
+          status: r.status,
+          submitterScope: r.submitterScope,
+          submitterPoolId: r.submitterPoolId,
+          submitterLabel,
+          submitterUserId: r.createdByUserId,
+          costPaid: r.costPaid,
+          rejectionReason: r.rejectionReason,
+          reviewedAt: r.reviewedAt ? +r.reviewedAt : null,
+          createdAt: +r.createdAt,
+        };
+      }),
+    };
+  });
+
+  /* ---------- Admin: approve a pending submission ----------
+   *
+   * Flips status='approved', tail-orders the sortOrder so the new
+   * sheet surfaces last in the picker (admin can reorder later via
+   * the existing sheet PATCH), records audit, broadcasts the
+   * `emoticons:updated` pulse so every connected client re-fetches.
+   * No Currency movement — the submission cost was debited at
+   * submission time and stays spent.
+   */
+  app.post<{ Params: { id: string } }>(
+    "/admin/emoticons/submissions/:id/approve",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
+      const row = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.id, req.params.id)).limit(1))[0];
+      if (!row) { reply.code(404); return { error: "not found" }; }
+      if (row.status !== "pending") {
+        reply.code(409);
+        return { error: `submission already ${row.status}` };
+      }
+      const tail = (await db
+        .select({ max: sql<number>`coalesce(max(${emoticonSheets.sortOrder}), -1)` })
+        .from(emoticonSheets))[0];
+      const newSortOrder = (tail?.max ?? -1) + 1;
+      await db.update(emoticonSheets)
+        .set({
+          status: "approved",
+          sortOrder: newSortOrder,
+          reviewedAt: Date.now(),
+          reviewedByUserId: me.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(emoticonSheets.id, row.id));
+      await recordAudit(db, {
+        actorUserId: me.id,
+        action: "emoticon_sheet_approve",
+        targetUserId: row.createdByUserId ?? null,
+        metadata: { id: row.id, slug: row.slug, costPaid: row.costPaid },
+      });
+      io.emit("emoticons:updated");
+      return { ok: true };
+    },
+  );
+
+  /* ---------- Admin: reject a pending submission ----------
+   *
+   * Flips status='rejected', refunds the snapshotted cost to the
+   * paying identity, deletes the image file, records audit. The
+   * row is retained for the moderation audit trail (with the
+   * imageUrl pointing at a now-deleted file — clients filter by
+   * status='approved' so this never reaches them).
+   */
+  const rejectSubmissionBody = z.object({
+    reason: z.string().max(500).optional(),
+  }).strict();
+
+  app.post<{ Params: { id: string }; Body: unknown }>(
+    "/admin/emoticons/submissions/:id/reject",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
+      let body: z.infer<typeof rejectSubmissionBody>;
+      try { body = rejectSubmissionBody.parse(req.body ?? {}); }
+      catch { reply.code(400); return { error: "invalid body" }; }
+      const row = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.id, req.params.id)).limit(1))[0];
+      if (!row) { reply.code(404); return { error: "not found" }; }
+      if (row.status !== "pending") {
+        reply.code(409);
+        return { error: `submission already ${row.status}` };
+      }
+      const refundAmount = row.costPaid ?? 0;
+      const refundScope = row.submitterScope as "user" | "character" | null;
+      const refundPoolId = row.submitterPoolId;
+      // Refund + status flip in one transaction so a crash between
+      // the two can't leave the user out their Currency on a
+      // rejected submission.
+      db.transaction((tx) => {
+        if (refundAmount > 0 && refundScope && refundPoolId) {
+          if (refundScope === "character") {
+            const cur = tx.select({ currency: characterEarning.currency })
+              .from(characterEarning).where(eq(characterEarning.characterId, refundPoolId)).limit(1).all()[0];
+            const balance = cur?.currency ?? 0;
+            tx.update(characterEarning)
+              .set({ currency: balance + refundAmount, updatedAt: new Date() })
+              .where(eq(characterEarning.characterId, refundPoolId))
+              .run();
+          } else {
+            const cur = tx.select({ currency: userEarning.currency })
+              .from(userEarning).where(eq(userEarning.userId, refundPoolId)).limit(1).all()[0];
+            const balance = cur?.currency ?? 0;
+            tx.update(userEarning)
+              .set({ currency: balance + refundAmount, updatedAt: new Date() })
+              .where(eq(userEarning.userId, refundPoolId))
+              .run();
+          }
+          tx.insert(earningLedger).values({
+            id: nanoid(),
+            scope: refundScope,
+            ownerId: refundPoolId,
+            xpDelta: 0,
+            currencyDelta: refundAmount,
+            reason: `emoticon_submission_refund_${row.id}`,
+            metadataJson: JSON.stringify({
+              kind: "emoticon_submission_refund",
+              submissionId: row.id,
+              slug: row.slug,
+              rejectionReason: body.reason ?? null,
+            }),
+            createdAt: new Date(),
+          }).run();
+        }
+        tx.update(emoticonSheets)
+          .set({
+            status: "rejected",
+            reviewedAt: Date.now(),
+            reviewedByUserId: me.id,
+            rejectionReason: body.reason ?? null,
+            updatedAt: new Date(),
+          })
+          .where(eq(emoticonSheets.id, row.id))
+          .run();
+      });
+      // Delete the asset file outside the txn. Best-effort — a stale
+      // file on disk after a successful reject is a janitor problem,
+      // not a correctness issue (the row is rejected, picker won't
+      // see it, the URL is dead from the client's perspective).
+      if (row.imageUrl.startsWith("/uploads/emoticons/")) {
+        const filename = row.imageUrl.slice("/uploads/emoticons/".length);
+        unlink(join(emoticonsDir, filename)).catch(() => { /* best-effort */ });
+      }
+      await recordAudit(db, {
+        actorUserId: me.id,
+        action: "emoticon_sheet_reject",
+        targetUserId: row.createdByUserId ?? null,
+        reason: body.reason ?? null,
+        metadata: { id: row.id, slug: row.slug, refundAmount, refundScope, refundPoolId },
+      });
+      return { ok: true, refundedAmount: refundAmount };
+    },
+  );
+}
+
+/** Local sentinel for the insufficient-funds branch inside the
+ *  submission transaction. Thrown to roll back the txn and let the
+ *  outer handler emit the right 402 response without leaking a
+ *  generic 500. */
+class InsufficientFunds extends Error {
+  required: number;
+  balance: number;
+  constructor(required: number, balance: number) {
+    super("insufficient funds");
+    this.required = required;
+    this.balance = balance;
+  }
 }

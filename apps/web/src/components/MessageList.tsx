@@ -421,6 +421,8 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   const cosmeticsByIdentity = new Map<string, {
     avatarUrl: string | null;
     selectedBorderRankKey: string | null;
+    selectedFreeformBorderKey: string | null;
+    freeformBorderConfig: Record<string, string> | null;
     inlineAvatarEnabled: boolean;
   }>();
   const genderByIdentity = new Map<string, Gender>();
@@ -437,6 +439,8 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     cosmeticsByIdentity.set(k, {
       avatarUrl: o.avatarUrl,
       selectedBorderRankKey: o.selectedBorderRankKey,
+      selectedFreeformBorderKey: o.selectedFreeformBorderKey,
+      freeformBorderConfig: o.freeformBorderConfig,
       inlineAvatarEnabled: o.inlineAvatarEnabled,
     });
     // ALSO write the master/OOC identity (`identityKey(userId, null)`)
@@ -455,6 +459,8 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       cosmeticsByIdentity.set(masterKey, {
         avatarUrl: o.masterAvatarUrl,
         selectedBorderRankKey: o.masterSelectedBorderRankKey,
+        selectedFreeformBorderKey: o.masterSelectedFreeformBorderKey,
+        freeformBorderConfig: o.masterFreeformBorderConfig,
         inlineAvatarEnabled: o.masterInlineAvatarEnabled,
       });
     }
@@ -1406,6 +1412,22 @@ export function ForumAvatar({
     }
     return null;
   });
+  const occupantFreeformBorderKey = useChat((s) => {
+    if (!userId) return null;
+    for (const list of Object.values(s.occupants)) {
+      const row = list.find((o) => o.userId === userId);
+      if (row) return row.selectedFreeformBorderKey;
+    }
+    return null;
+  });
+  const occupantFreeformBorderConfig = useChat((s) => {
+    if (!userId) return null;
+    for (const list of Object.values(s.occupants)) {
+      const row = list.find((o) => o.userId === userId);
+      if (row) return row.freeformBorderConfig;
+    }
+    return null;
+  });
   // Fall back to live occupant avatar when the message snapshot
   // didn't carry one (older messages, system rows, etc.). Lets a
   // user who set their avatar AFTER posting still see the new
@@ -1427,6 +1449,8 @@ export function ForumAvatar({
       avatarUrl={effectiveSrc}
       name={name}
       borderRankKey={effectiveBorder ?? null}
+      freeformBorderKey={occupantFreeformBorderKey}
+      freeformConfig={occupantFreeformBorderConfig}
       size={mappedSize}
       {...(onClick ? { onClick } : {})}
       title={`View ${name}'s profile`}
@@ -2410,6 +2434,7 @@ function Line({
   senderCosmetics: {
     avatarUrl: string | null;
     selectedBorderRankKey: string | null;
+    selectedFreeformBorderKey: string | null;
     inlineAvatarEnabled: boolean;
   } | null;
   isSenderAdmin: boolean;
@@ -2473,6 +2498,13 @@ function Line({
   const inlineEnabled = senderCosmetics?.inlineAvatarEnabled ?? !!msg.senderInlineAvatarEnabled;
   const inlineAvatarUrl = senderCosmetics?.avatarUrl ?? msg.avatarUrl ?? null;
   const inlineBorderKey = senderCosmetics?.selectedBorderRankKey ?? msg.senderSelectedBorderRankKey ?? null;
+  // Free-form border has no per-message snapshot field yet (no
+  // schema column for it on `messages`); we only have the LIVE
+  // occupant cache to consult. For senders who've logged out, the
+  // freeform border falls away on backlog while the rank border
+  // still renders from the message snapshot — matches the existing
+  // graceful-degradation pattern for name-style configs.
+  const inlineFreeformBorderKey = senderCosmetics?.selectedFreeformBorderKey ?? null;
   const inlineAvatar = (inlineEnabled && inlineAvatarUrl)
     ? (
       // `data-copy-skip` drops the whole avatar subtree (img + the
@@ -2487,6 +2519,7 @@ function Line({
           avatarUrl={inlineAvatarUrl}
           name={msg.displayName}
           borderRankKey={inlineBorderKey}
+          freeformBorderKey={inlineFreeformBorderKey}
           size="xs"
           onClick={() => onIconClick(msg.userId, msg.displayName)}
           title={`view ${msg.displayName}'s profile`}
@@ -2700,6 +2733,18 @@ function Line({
   const showModDelete = canModerate && !msg.deletedAt && REPLYABLE_KINDS.has(msg.kind) && !showOwnControls;
   const showAdminEdit = canAdminEdit && !msg.deletedAt && REPLYABLE_KINDS.has(msg.kind) && !showOwnControls;
   const showModControls = showModDelete || showAdminEdit;
+  // Inline edit lives at the ROW level, not inside the controls dock.
+  // The dock is `md:absolute md:right-3` on desktop so its children
+  // (Bookmark, React, OwnControls, ModControls, Report) stack neatly on
+  // the right — but anything `w-full` inside the dock is "100% of the
+  // dock's content width," which is a narrow strip. That's exactly
+  // what made the edit textarea scrunch up against the right edge.
+  // Lifting the form's open/closed state here lets us render it as a
+  // sibling of `lineEl` (full row width) instead. `editMode` is the
+  // discriminator so author-style and admin-style edits can pick
+  // different colors / labels without two parallel state pairs.
+  const [editMode, setEditMode] = useState<null | "own" | "mod">(null);
+  const isEditingHere = editMode !== null;
   const editedBadge = msg.editedAt ? (
     <span
       className="ml-1 text-[10px] italic text-keep-muted"
@@ -3021,12 +3066,34 @@ function Line({
           floats next to Bookmark — fine, still left of any
           ModControls/Report that might follow. */}
       {chatReactButton}
-      {showOwnControls ? <OwnControls msg={msg} /> : null}
-      {showModControls ? (
-        <ModControls msg={msg} canEdit={showAdminEdit} canDelete={showModDelete} />
+      {/* When the inline edit form is open, the buttons collapse so
+          the user isn't staring at duplicate Edit/Cancel affordances
+          (the form has its own Save / Cancel). The form itself
+          renders below as a row-level sibling. */}
+      {showOwnControls && !isEditingHere ? (
+        <OwnControls msg={msg} onStartEdit={() => setEditMode("own")} />
+      ) : null}
+      {showModControls && !isEditingHere ? (
+        <ModControls
+          msg={msg}
+          canEdit={showAdminEdit}
+          canDelete={showModDelete}
+          onStartEdit={() => setEditMode("mod")}
+        />
       ) : null}
       {effectiveShowReport ? <ReportButton msg={msg} /> : null}
     </div>
+  ) : null;
+  // Row-level edit form. Rendered as a sibling of `lineEl` so its
+  // `w-full` resolves against the message row's full width rather
+  // than the narrow absolute-positioned controls dock that scrunched
+  // the previous in-dock form to a sliver on the right.
+  const inlineEditForm = isEditingHere ? (
+    <InlineEditForm
+      msg={msg}
+      variant={editMode!}
+      onClose={() => setEditMode(null)}
+    />
   ) : null;
 
   // `tabIndex=-1` makes the row focusable from a tap without putting it
@@ -3072,6 +3139,7 @@ function Line({
       >
         <div className="pl-12">{quote}</div>
         {lineEl}
+        {inlineEditForm}
         {controls}
         {reactionBar}
       </div>
@@ -3085,6 +3153,7 @@ function Line({
       className={`group relative transition-colors duration-700 ${rowFocusProps.className} ${hoverRow} ${whisperRest}`}
     >
       {lineEl}
+      {inlineEditForm}
       {controls}
       {reactionBar}
     </div>
@@ -3152,44 +3221,14 @@ function ReportButton({ msg }: { msg: ChatMessage }) {
  * authoritative on the grace cap; clicks that land just past the window
  * surface the server's error verbatim rather than failing silently.
  */
-function OwnControls({ msg }: { msg: ChatMessage }) {
+function OwnControls({ msg, onStartEdit }: { msg: ChatMessage; onStartEdit: () => void }) {
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(msg.body);
   const [error, setError] = useState<string | null>(null);
   // Same admin-configurable grace window the visibility gate above
   // checks against. Threaded down so the button tooltip reads the
   // current cap instead of a hardcoded "60s" that drifted from the
   // server once admins bumped the value.
   const graceMs = useChat((s) => s.branding.editGraceMs);
-
-  async function submitEdit(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = draft.trim();
-    if (!trimmed) return;
-    if (trimmed === msg.body) { setEditing(false); return; }
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch(`/messages/${msg.id}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: trimmed }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({} as { error?: string }));
-        throw new Error(j.error ?? `HTTP ${res.status}`);
-      }
-      // Server emits message:update; the store action picks it up and the
-      // line re-renders. We just close the inline editor.
-      setEditing(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "edit failed");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function doDelete() {
     if (!window.confirm("Delete this message? You can only do this within 60 seconds of sending.")) return;
@@ -3211,64 +3250,6 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
     }
   }
 
-  if (editing) {
-    return (
-      // `block w-full` is load-bearing. The OwnControls wrapper above this
-      // uses `md:contents` on desktop, so the form ends up as a direct
-      // child of the message row. Without an explicit width the form was
-      // collapsing to a narrow slot on the right of the line — looked like
-      // a tiny ~200px input next to the message body. Forcing block + 100%
-      // makes the editor span the full row width on every viewport.
-      // `basis-full` is the flex-context fallback in case the form lands
-      // inside a horizontal flex container in some future caller.
-      <form
-        onSubmit={submitEdit}
-        className="mt-1 flex w-full basis-full flex-col gap-1"
-        onKeyDown={(e) => {
-          if (e.key === "Escape") { setEditing(false); setDraft(msg.body); }
-        }}
-      >
-        <textarea
-          // eslint-disable-next-line jsx-a11y/no-autofocus
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          // Auto-grow with the draft: floor at 1 row so single-line edits
-          // keep the original inline feel, cap at 10 so a long forum body
-          // doesn't blow the row's vertical budget.
-          rows={Math.min(10, Math.max(1, draft.split("\n").length))}
-          // Enter saves (mirrors the composer's send-on-Enter convention);
-          // Shift+Enter inserts a newline. Without this override the form's
-          // onSubmit would never fire because <textarea> swallows Enter.
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-              e.preventDefault();
-              e.currentTarget.form?.requestSubmit();
-            }
-          }}
-          className="min-w-0 flex-1 resize-y rounded border border-keep-action bg-keep-bg px-2 py-1 text-sm outline-none"
-        />
-        <div className="flex items-center justify-end gap-1">
-          {error ? <span className="mr-auto text-[10px] text-keep-accent">{error}</span> : null}
-          <button
-            type="button"
-            onClick={() => { setEditing(false); setDraft(msg.body); setError(null); }}
-            className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={busy}
-            className="shrink-0 rounded border border-keep-action bg-keep-action/10 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
-          >
-            {busy ? "..." : "Save"}
-          </button>
-        </div>
-      </form>
-    );
-  }
-
   return (
     // Always visible (no hover gate). The caller only renders <OwnControls>
     // when `showOwnControls` is true, which already means "your own message,
@@ -3283,10 +3264,17 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
     // three-button row reads as one set. Edit is neutral; delete is
     // accent-tinted as the danger-coded option so a fast click can't
     // confuse the two.
+    //
+    // Editing state itself lives on the parent Line — clicking Edit
+    // just signals up via `onStartEdit` so the row can render the
+    // form full-width as a sibling of the message body. Keeping
+    // state out of this component means the absolute-positioned
+    // controls dock that surrounds these buttons can never again
+    // squeeze the edit textarea into the narrow strip on the right.
     <span className="inline-flex gap-1">
       <button
         type="button"
-        onClick={() => { setDraft(msg.body); setEditing(true); }}
+        onClick={onStartEdit}
         title={`Edit (within ${formatGraceWindow(graceMs)} of sending)`}
         className="flex h-5 items-center rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action"
       >
@@ -3307,20 +3295,24 @@ function OwnControls({ msg }: { msg: ChatMessage }) {
 }
 
 /**
- * Mod / admin cross-author controls on a chat line. Mirrors {@link OwnControls}'s
- * shape (inline edit input + Save/Cancel; Delete button on the right) but
- * gates the buttons on the viewer's privileges rather than authorship and
- * the grace window:
- *   - `canEdit` (admin tier) renders the Edit button + inline editor.
- *   - `canDelete` (mod tier or higher) renders the Delete button.
- * Both bypass the edit window server-side via the `isAdminRole` /
- * mod gates on PATCH and DELETE /messages/:id. Confirm copy names the
- * post's author so a moderator double-checks they're acting on the
- * right line.
+ * Shared inline edit form for both author (in-grace) and admin
+ * (out-of-grace) edits. Lives at the message-row level (sibling of
+ * `lineEl`) so its `w-full` resolves against the full row instead of
+ * the narrow absolute-positioned controls dock. `variant` picks the
+ * border / button tint and the aria-label phrasing — author edits are
+ * accent-neutral (matches their own controls), admin edits are
+ * accent-red to remind the actor they're using a moderation lever.
  */
-function ModControls({ msg, canEdit, canDelete }: { msg: ChatMessage; canEdit: boolean; canDelete: boolean }) {
+function InlineEditForm({
+  msg,
+  variant,
+  onClose,
+}: {
+  msg: ChatMessage;
+  variant: "own" | "mod";
+  onClose: () => void;
+}) {
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(msg.body);
   const [error, setError] = useState<string | null>(null);
 
@@ -3328,7 +3320,7 @@ function ModControls({ msg, canEdit, canDelete }: { msg: ChatMessage; canEdit: b
     e.preventDefault();
     const trimmed = draft.trim();
     if (!trimmed) return;
-    if (trimmed === msg.body) { setEditing(false); return; }
+    if (trimmed === msg.body) { onClose(); return; }
     setBusy(true);
     setError(null);
     try {
@@ -3342,13 +3334,100 @@ function ModControls({ msg, canEdit, canDelete }: { msg: ChatMessage; canEdit: b
         const j = await res.json().catch(() => ({} as { error?: string }));
         throw new Error(j.error ?? `HTTP ${res.status}`);
       }
-      setEditing(false);
+      // Server emits message:update; the store action picks it up and
+      // the line re-renders with the new body. We just close the editor.
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "edit failed");
     } finally {
       setBusy(false);
     }
   }
+
+  const isAdmin = variant === "mod";
+  const textareaClass = isAdmin
+    ? "min-w-0 flex-1 resize-y rounded border border-keep-accent bg-keep-bg px-2 py-1 text-sm outline-none"
+    : "min-w-0 flex-1 resize-y rounded border border-keep-action bg-keep-bg px-2 py-1 text-sm outline-none";
+  const saveButtonClass = isAdmin
+    ? "shrink-0 rounded border border-keep-accent bg-keep-accent/10 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+    : "shrink-0 rounded border border-keep-action bg-keep-action/10 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/20 disabled:opacity-50";
+
+  return (
+    <form
+      onSubmit={submitEdit}
+      // Full row width — that's the entire reason this form lives at
+      // the Line level instead of inside the absolute-positioned
+      // controls dock. `mt-1` keeps a small breath between the
+      // original message body and the editor; `flex-col` stacks the
+      // textarea above its Cancel/Save row.
+      className="mt-1 flex w-full flex-col gap-1"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
+    >
+      <textarea
+        // eslint-disable-next-line jsx-a11y/no-autofocus
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        // Auto-grow with the draft: floor at 1 row so single-line
+        // edits keep the original inline feel, cap at 10 so a long
+        // body doesn't blow the row's vertical budget.
+        rows={Math.min(10, Math.max(1, draft.split("\n").length))}
+        // Enter saves (mirrors the composer's send-on-Enter convention);
+        // Shift+Enter inserts a newline. Without this override the form's
+        // onSubmit would never fire because <textarea> swallows Enter.
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            e.preventDefault();
+            e.currentTarget.form?.requestSubmit();
+          }
+        }}
+        className={textareaClass}
+        {...(isAdmin ? { "aria-label": `Admin edit of ${msg.displayName}'s message` } : {})}
+      />
+      <div className="flex items-center justify-end gap-1">
+        {error ? <span className="mr-auto text-[10px] text-keep-accent">{error}</span> : null}
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+        >
+          Cancel
+        </button>
+        <button type="submit" disabled={busy} className={saveButtonClass}>
+          {busy ? "..." : "Save"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Mod / admin cross-author controls on a chat line. Mirrors {@link OwnControls}'s
+ * shape (inline edit input + Save/Cancel; Delete button on the right) but
+ * gates the buttons on the viewer's privileges rather than authorship and
+ * the grace window:
+ *   - `canEdit` (admin tier) renders the Edit button + inline editor.
+ *   - `canDelete` (mod tier or higher) renders the Delete button.
+ * Both bypass the edit window server-side via the `isAdminRole` /
+ * mod gates on PATCH and DELETE /messages/:id. Confirm copy names the
+ * post's author so a moderator double-checks they're acting on the
+ * right line.
+ */
+function ModControls({
+  msg,
+  canEdit,
+  canDelete,
+  onStartEdit,
+}: {
+  msg: ChatMessage;
+  canEdit: boolean;
+  canDelete: boolean;
+  onStartEdit: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function doDelete() {
     const ok = window.confirm(
@@ -3373,51 +3452,6 @@ function ModControls({ msg, canEdit, canDelete }: { msg: ChatMessage; canEdit: b
     }
   }
 
-  if (editing) {
-    return (
-      <form
-        onSubmit={submitEdit}
-        className="mt-1 flex w-full basis-full flex-col gap-1"
-        onKeyDown={(e) => {
-          if (e.key === "Escape") { setEditing(false); setDraft(msg.body); }
-        }}
-      >
-        <textarea
-          // eslint-disable-next-line jsx-a11y/no-autofocus
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          rows={Math.min(10, Math.max(1, draft.split("\n").length))}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-              e.preventDefault();
-              e.currentTarget.form?.requestSubmit();
-            }
-          }}
-          className="min-w-0 flex-1 resize-y rounded border border-keep-accent bg-keep-bg px-2 py-1 text-sm outline-none"
-          aria-label={`Admin edit of ${msg.displayName}'s message`}
-        />
-        <div className="flex items-center justify-end gap-1">
-          {error ? <span className="mr-auto text-[10px] text-keep-accent">{error}</span> : null}
-          <button
-            type="button"
-            onClick={() => { setEditing(false); setDraft(msg.body); setError(null); }}
-            className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={busy}
-            className="shrink-0 rounded border border-keep-accent bg-keep-accent/10 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
-          >
-            {busy ? "..." : "Save"}
-          </button>
-        </div>
-      </form>
-    );
-  }
-
   return (
     // Visual contract mirrors OwnControls (same h-5 pill row) but every
     // button is accent-tinted so the actor sees they're using a
@@ -3430,6 +3464,11 @@ function ModControls({ msg, canEdit, canDelete }: { msg: ChatMessage; canEdit: b
     // pattern ReportButton / BookmarkButton use for cross-author
     // affordances. Mobile follows the parent wrapper's
     // `hidden group-focus-within:flex` — tap a row to reveal.
+    //
+    // Editing itself lives on the parent Line and renders the form as
+    // a row-level sibling (full width), so this component stays focused
+    // on the buttons and never has to fight the absolute-positioned
+    // controls dock for horizontal space.
     <span className="inline-flex gap-1 md:invisible md:group-hover:visible md:group-focus-within:visible">
       {canEdit ? (
         <button
@@ -3439,8 +3478,7 @@ function ModControls({ msg, canEdit, canDelete }: { msg: ChatMessage; canEdit: b
               `Edit this message from ${msg.displayName} as an admin? The (edited) badge will appear to all viewers; the original body is preserved server-side for audit.`,
             );
             if (!ok) return;
-            setDraft(msg.body);
-            setEditing(true);
+            onStartEdit();
           }}
           title={`Admin: edit ${msg.displayName}'s message`}
           className="flex h-5 items-center rounded border border-keep-accent/40 bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-accent/80 hover:bg-keep-accent/10 hover:text-keep-accent"

@@ -1,82 +1,67 @@
 /**
- * BorderedAvatar — round avatar with an optional rank-border frame
+ * BorderedAvatar — round avatar with an optional border frame
  * overlaid on top.
  *
- * Architecture (per user's prescription):
- *   1. **Outer container** — the layout slot. Sized to fit the ornate
- *      frame design, NOT just the avatar. Establishes the positioning
- *      context for both layers.
+ * Two border systems share this renderer:
+ *
+ *   1. **Rank-tier borders** (the original) — driven by `borderRankKey`,
+ *      look up `catalog.rankTiers` for the Tier IV `borderImageUrl`,
+ *      and paint that PNG as an overlay on top of the avatar.
+ *
+ *   2. **Free-form borders** (migration 0149) — driven by
+ *      `freeformBorderKey`, look up `catalog.freeformBorders`. Each
+ *      row ships in EITHER `imageUrl` mode (overlay <img>, same code
+ *      path as rank-tier) OR `template`+`styleCss` mode (admin-
+ *      authored DOM template with the literal `{avatar}` placeholder,
+ *      rendered via dangerouslySetInnerHTML after a DOMPurify pass).
+ *      Template-mode borders bring their OWN sizing via their scoped
+ *      CSS — the BorderedAvatar size prop only governs the inline /
+ *      showcase decision (and is ignored on template-mode rows).
+ *
+ * Resolution order: freeform first, rank-tier as fallback. The
+ * freeform slot is the user's deliberate "this is my cosmetic"
+ * choice; the rank-tier slot is the gated reward. When both are set
+ * (e.g. a user with a rank border equipped AS WELL AS a flair one),
+ * the freeform wins.
+ *
+ * Architecture for rank-tier / image-based borders (per user's
+ * prescription):
+ *   1. **Outer container** — the layout slot. Sized to fit the
+ *      ornate frame design, NOT just the avatar.
  *   2. **Avatar layer** — centered inside the container at the
- *      avatar's intrinsic visual size (smaller than the container so
- *      the surrounding frame has room).
- *   3. **Frame overlay** — fills the container, painted on TOP of the
- *      avatar. The PNG has transparency in the middle so the avatar
- *      shows through the frame's inner cutout.
+ *      avatar's intrinsic visual size.
+ *   3. **Frame overlay** — fills the container, painted on TOP of
+ *      the avatar.
  *
- * Why the container is larger than the avatar:
- *   The shipped frame PNGs (rank*_tier4_border.png) are ornate ovals
- *   ~440-480px square where the central "avatar slot" cutout occupies
- *   only the inner ~50%. If we sized the container to the avatar and
- *   let the frame overflow, the frame band ended up clipping into the
- *   portrait and reading as a tight ring rather than a frame. Sizing
- *   the container to the frame and centering the avatar inside gives
- *   the frame the breathing room its design assumes.
- *
- * Two layout modes (chosen automatically by size):
- *   - **xs/sm/md (inline)** — frame design isn't a fit for tight
- *     chat-line / userlist rows, so we keep the container at the
- *     avatar size and skip the frame entirely if one is requested.
- *     The chat-line was never the place to show off an ornate ring.
- *   - **lg/xl (showcase)** — container expands to ~2× the avatar so
- *     the frame design renders at intended scale (used in the
- *     borders catalog + profile hero).
+ * Inline (xs/sm/md) vs showcase (lg/xl) modes:
+ *   - **xs (chat-line)** — skip ornate frames entirely. The chat-line
+ *     row was never the place for a 2× frame. Image-based / rank
+ *     borders are suppressed; template borders are also skipped at
+ *     xs since their CSS targets a fixed pixel size.
+ *   - **sm/md/lg/xl** — render the frame at the catalog-defined size.
  *
  * Fallback: when no avatar URL is provided, renders a circular
- * initials chip in the keep-banner color. When the avatar URL is
- * broken (404 / deleted), an onError handler swaps to the initials
- * fallback inline so the row doesn't show a broken-image glyph.
+ * initials chip in the keep-banner color.
  */
 
 import { useState } from "react";
+import DOMPurify from "dompurify";
+import { extractFreeformBorderVars, freeformBorderInlineVars } from "@thekeep/shared";
 import { useEarning } from "../state/earning.js";
+import { applyFreeformBorderPlaceholders } from "../lib/freeformBorderTemplate.js";
 
 export type BorderedAvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
 type Size = BorderedAvatarSize;
 
-/** Avatar (portrait) diameter per size. CSS length values, not raw
- *  numbers, so the inline tiers can `clamp()` against the document
- *  font-size: chat-line + userlist scale between a 30px floor and a
- *  ~40px ceiling (≈ Discord chat avatars) as the user steps through
- *  the font-scale preferences. At medium / large font scales the
- *  inline avatar lands near the 40px cap; small / xl get clamped to
- *  the bounds. The showcase tiers stay fixed pixels — those slots
- *  (forum body, earning catalog, profile hero) have layouts tuned
- *  to specific avatar diameters and shouldn't drift with font-size. */
+/** Avatar (portrait) diameter per size. */
 const AVATAR_SIZE: Record<Size, string> = {
-  xs: "clamp(31px, 2.125rem, 41px)", // chat-line inline — Discord-like prominence;
-                                     //   small font →31, medium →34, large →38, xl →41
-  sm: "clamp(32px, 2.2rem, 40px)", // userlist row — one notch tighter than the
-                                   //   chat-line but in the same visual class
-  md: "32px", // forum post avatar
-  lg: "64px", // earning modal mid-size preview
-  xl: "124px", // borders catalog showcase — sized to fill the frame's
-               // inner ring (frame container at 1.5× = 186px, avatar at
-               // 124px ≈ 67% of container so its edge tucks under the
-               // ring instead of leaving a gap or its own border line
-               // visible inside the frame's cutout).
+  xs: "clamp(31px, 2.125rem, 41px)",
+  sm: "clamp(32px, 2.2rem, 40px)",
+  md: "32px",
+  lg: "64px",
+  xl: "124px",
 };
 
-/** Container scale: how much bigger the frame container is than the
- *  avatar. The avatar sits centered inside; the frame PNG fills the
- *  container. Tuned so the avatar's edge tucks JUST under the
- *  frame's inner ring (hides the avatar's own border line). `xs` is
- *  pinned at 1 so the chat-line inline avatar never carries the
- *  frame — the ornate ring throws off message-line spacing and
- *  reads as visual noise next to the timestamp; that slot stays
- *  plain regardless of which border the user equipped. Larger tiers
- *  use the 1.5× ratio so the frame's decorative ring nests around
- *  the avatar the same way at userlist, forum body, and profile
- *  hero. */
 const CONTAINER_SCALE: Record<Size, number> = {
   xs: 1,
   sm: 1.5,
@@ -85,12 +70,92 @@ const CONTAINER_SCALE: Record<Size, number> = {
   xl: 1.5,
 };
 
+/** Tags the freeform template sanitizer accepts. Wider than the
+ *  name-style tag list because borders use structural elements
+ *  (div + nested decorative spans for leaves, sparks, bolts, etc.). */
+const FREEFORM_SANITIZER_TAGS = ["div", "span", "img", "i", "b", "em", "strong", "small", "sub", "sup", "mark"];
+const FREEFORM_SANITIZER_ATTRS = ["class", "style", "src", "alt", "loading", "referrerpolicy", "data-*"];
+
+/** Native dimensions every template assumes via the injector
+ *  preamble — `.av` is 84px square (FRAME, including ring), `.pic`
+ *  (inner avatar circle) is 76px. The 4px difference per side
+ *  produces a ~6.5px ring at xl scale and ~2.3px at inline tiers.
+ *  The render path scales by `targetAvatarPx / TEMPLATE_NATIVE_PIC`
+ *  to land the visible avatar at the right size for each slot.
+ *
+ *  The frame was originally 82px (3px ring native, ~1.4px at sm)
+ *  but a 1.4px ring sat below the comfortable visibility threshold
+ *  on small slots — the userlist row showed proportionally-correct
+ *  but visually invisible borders. Bumping native ring 1px makes
+ *  the inline-tier ring readable without overhauling the per-slot
+ *  scale math. xl thickens proportionally; the additional weight
+ *  reads as a cleaner accent at showcase size, not chunky. */
+const TEMPLATE_NATIVE_AV = 84;
+const TEMPLATE_NATIVE_PIC = 76;
+
+/** Target on-screen avatar diameter per slot, in pixels, for the
+ *  template-mode render path. These are fixed numbers (not the
+ *  responsive clamp() strings AVATAR_SIZE carries) because
+ *  `transform: scale(<value>)` requires a unitless number — and
+ *  `scale(calc(<length> / <length>))` resolves to a length in every
+ *  current browser, invalidating the scale call entirely. Templates
+ *  lose the chat-line-font-scale responsiveness as a result; rank-
+ *  tier and image-mode borders still flow with clamp() because
+ *  their renderer uses CSS-length math directly.
+ *
+ *  Inline-tier targets (sm, md) are slightly larger than the
+ *  default non-template avatar (clamp ~32-40px) so the visible ring
+ *  has room to render without smearing into the row's text. The
+ *  template wrapper has overflow:visible, so the few extra pixels
+ *  bleed cleanly into the row's gutter. */
+const TEMPLATE_TARGET_AVATAR_PX: Record<Size, number> = {
+  xs: 32,    // unused — xs skips template borders entirely
+  sm: 44,    // userlist row — boosted from 36 so the ring reads at glance distance
+  md: 40,    // forum post avatar — boosted from 32 for the same reason
+  lg: 64,    // mid-size preview
+  xl: 124,   // catalog showcase
+};
+
+
+
+/** Inline freeform border row, supplied directly for previews when
+ *  the row may not be present in the user-facing catalog snapshot
+ *  (admin views show disabled rows; submission previews ship the
+ *  draft before any DB write). Mirrors the wire shape of
+ *  `FreeformBorderRow` from `lib/earning.ts` so the same data flows
+ *  through unchanged. */
+export interface FreeformBorderOverride {
+  key: string;
+  imageUrl?: string | null;
+  template?: string | null;
+  styleCss?: string | null;
+}
+
 interface Props {
   avatarUrl: string | null | undefined;
   /** Display name — used to derive the initials fallback. */
   name: string;
   /** Rank whose tier-IV border PNG should frame the avatar. */
   borderRankKey?: string | null;
+  /** Free-form border key from migration 0149's `freeform_borders`
+   *  catalog. Takes precedence over `borderRankKey` when both are
+   *  set — see resolution order in the file header. */
+  freeformBorderKey?: string | null;
+  /** Direct inline override — bypasses the catalog lookup. Used by
+   *  the admin Free-form Borders tab so disabled rows still preview,
+   *  and by the editor's live-preview before a row is saved. Wins
+   *  over `freeformBorderKey` when both are set. CSS for the
+   *  override is injected into the document via an `aria-hidden`
+   *  `<style>` element local to this component. */
+  freeformOverride?: FreeformBorderOverride | null;
+  /** Per-identity color customization for the freeform border —
+   *  map of var-name (without `--c-` prefix) → CSS color value.
+   *  The renderer inlines these as `--c-<name>` CSS custom
+   *  properties on the wrapper; the cascade reaches the
+   *  `.av .b-<key>` template's `var(--c-name, <fallback>)`
+   *  references and overrides their fallbacks. Pass null/undefined
+   *  to use the catalog row's CSS fallbacks. */
+  freeformConfig?: Record<string, string> | null;
   size?: Size;
   onClick?: (e: React.MouseEvent) => void;
   title?: string;
@@ -101,6 +166,9 @@ export function BorderedAvatar({
   avatarUrl,
   name,
   borderRankKey,
+  freeformBorderKey,
+  freeformOverride,
+  freeformConfig,
   size = "sm",
   onClick,
   title,
@@ -109,38 +177,67 @@ export function BorderedAvatar({
   const snapshot = useEarning((s) => s.snapshot);
   const avatarSize = AVATAR_SIZE[size];
   const containerScale = CONTAINER_SCALE[size];
-  const borderUrl = borderRankKey && snapshot
+  const [errored, setErrored] = useState(false);
+  const showAvatar = !!avatarUrl && !errored;
+
+  // Resolve which border (if any) applies. Freeform wins over rank-
+  // tier; within freeform, image-based and template-based are
+  // exclusive (server validates on write). Override (when supplied)
+  // bypasses the snapshot lookup entirely — used by admin previews
+  // for disabled rows that aren't in the user-facing catalog.
+  const freeformRow = freeformOverride ?? (
+    freeformBorderKey && snapshot
+      ? snapshot.catalog.freeformBorders.find((b) => b.key === freeformBorderKey)
+      : null
+  );
+  const rankBorderUrl = borderRankKey && snapshot
     ? snapshot.catalog.rankTiers.find((t) => t.rankKey === borderRankKey && t.tier === 4)?.borderImageUrl ?? null
     : null;
-  // Only enlarge the container when there's actually a border to show
-  // AND the size is a showcase tier. Inline sizes never enlarge — the
-  // chat-line layout can't accommodate a 2× footprint.
-  const useFrameContainer = !!borderUrl && containerScale > 1;
-  // `calc()` here so the scale-up survives the inline tiers' clamp()
-  // — multiplying a numeric px would have dropped the responsive
-  // sizing. Showcase tiers are static pixel strings so calc() just
-  // multiplies them straight.
+  // Template-mode freeform border. Skipped at `xs` (chat-line) since
+  // the catalog CSS targets fixed pixel sizes that throw off the
+  // chat-line layout.
+  const freeformTemplate = freeformRow?.template && containerScale > 1 ? freeformRow : null;
+  // Image-mode freeform border falls into the same overlay path as
+  // rank-tier borders.
+  const freeformImageUrl = freeformRow?.imageUrl && containerScale > 1 ? freeformRow.imageUrl : null;
+  const overlayBorderUrl = freeformImageUrl ?? rankBorderUrl;
+
+  // Template-mode renders its own outer markup with its own sizing,
+  // so we bypass the rank-tier container math entirely.
+  if (freeformTemplate?.template) {
+    // Pass the row's styleCss in BOTH override and catalog modes —
+    // override-mode needs it because the CSS isn't in the global
+    // injector yet, catalog-mode needs it so the var-extraction can
+    // resolve which `--c-*` slots the template actually references
+    // (the injector inlines the same CSS globally; this is a harmless
+    // duplicate that scopes the rules to the portal subtree).
+    return (
+      <TemplateAvatar
+        template={freeformTemplate.template}
+        styleCss={freeformTemplate.styleCss ?? null}
+        avatarUrl={showAvatar ? avatarUrl : null}
+        name={name}
+        size={size}
+        {...(freeformConfig ? { freeformConfig } : {})}
+        {...(onClick ? { onClick } : {})}
+        {...(title ? { title } : {})}
+        {...(className ? { className } : {})}
+      />
+    );
+  }
+
+  // Rank-tier / image-mode freeform / no border — original layout.
+  const useFrameContainer = !!overlayBorderUrl && containerScale > 1;
   const containerSize = useFrameContainer ? `calc(${avatarSize} * ${containerScale})` : avatarSize;
-  // Userlist row alignment: reserve the same horizontal footprint
-  // for `sm` (userlist) whether or not the user has a border, so
-  // names line up cleanly when the list mixes border owners with
-  // borderless members. Height stays at the avatar size so
-  // borderless rows don't gain vertical air they didn't ask for.
   const containerWidth = (size === "sm" && !useFrameContainer)
     ? `calc(${avatarSize} * ${CONTAINER_SCALE.sm})`
     : containerSize;
-  const [errored, setErrored] = useState(false);
-  const showAvatar = !!avatarUrl && !errored;
 
   const wrapper = (
     <span
       className={`relative inline-block shrink-0 ${className ?? ""}`}
       style={{ width: containerWidth, height: containerSize }}
     >
-      {/* Avatar layer — always centered in the container. When the
-          container is sized to the frame (useFrameContainer), the
-          avatar lives in the central cutout area; when not, it just
-          fills the container. */}
       <span
         className="absolute"
         style={{
@@ -169,16 +266,9 @@ export function BorderedAvatar({
           </span>
         )}
       </span>
-      {/* Frame overlay — paints on TOP of the avatar. PNG transparency
-          in the center lets the portrait show through; the opaque
-          decorative band frames the visible avatar. `pointer-events:
-          none` so the frame can't intercept clicks on the avatar.
-          Skipped when the container is at 1× scale (xs / chat-line
-          inline) — without the extra container room the frame band
-          would crush onto the portrait and read as a tight ring. */}
-      {borderUrl && useFrameContainer ? (
+      {overlayBorderUrl && useFrameContainer ? (
         <img
-          src={borderUrl}
+          src={overlayBorderUrl}
           alt=""
           aria-hidden
           draggable={false}
@@ -194,11 +284,6 @@ export function BorderedAvatar({
         type="button"
         onClick={(e) => onClick(e)}
         title={title}
-        // Strip the default button chrome so the avatar reads as the
-        // affordance, not a chip. `focus-visible:` keeps keyboard nav
-        // accessible without painting a ring after a mouse click —
-        // the browser only fires focus-visible when focus arrives via
-        // keyboard, never via pointer.
         className="inline-block rounded-full bg-transparent p-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-keep-action"
       >
         {wrapper}
@@ -206,6 +291,121 @@ export function BorderedAvatar({
     );
   }
   return wrapper;
+}
+
+/**
+ * Template-mode avatar renderer.
+ *
+ * Renders the template in-place at the layout slot — no portal. The
+ * scaled visual escapes its 82px native frame via `overflow: visible`
+ * on the wrapping span, so box-shadow glows and pseudo-element
+ * decorations (petals, sparks, rays) paint past the avatar circle.
+ * Bleed propagates up the ancestor chain until it hits an
+ * `overflow: hidden`/`auto` boundary — typically the Earning modal's
+ * scroll pane or the userlist rail. That's the right behavior: the
+ * avatar gets to escape its immediate row but stays inside the modal
+ * it was rendered in.
+ *
+ * Earlier versions used `createPortal(..., document.body)` so the
+ * bleed could clear every ancestor's clipping. The cost was the
+ * visual hovered over the modal header / outside the scroll pane
+ * when the row scrolled out of view, which required a synthetic
+ * occlusion check walking up the ancestor chain on every scroll.
+ * Both problems disappear by rendering in place and letting natural
+ * CSS clipping do its job.
+ */
+function TemplateAvatar({
+  template,
+  styleCss,
+  avatarUrl,
+  name,
+  size,
+  freeformConfig,
+  onClick,
+  title,
+  className,
+}: {
+  template: string;
+  styleCss: string | null;
+  avatarUrl: string | null | undefined;
+  name: string;
+  size: Size;
+  freeformConfig?: Record<string, string> | null;
+  onClick?: (e: React.MouseEvent) => void;
+  title?: string;
+  className?: string;
+}) {
+  const targetAvatarPx = TEMPLATE_TARGET_AVATAR_PX[size];
+  const scaleFactor = targetAvatarPx / TEMPLATE_NATIVE_PIC;
+  const wrapperPx = TEMPLATE_NATIVE_AV * scaleFactor;
+
+  const merged = applyFreeformBorderPlaceholders(template, { avatarUrl, name });
+  const clean = DOMPurify.sanitize(merged, {
+    ALLOWED_TAGS: FREEFORM_SANITIZER_TAGS,
+    ALLOWED_ATTR: FREEFORM_SANITIZER_ATTRS,
+    KEEP_CONTENT: true,
+  });
+
+  // Resolve the per-identity color overrides into `--c-<name>: <value>`
+  // inline declarations. `extractFreeformBorderVars` gates the keys
+  // against what the template actually references, so a stale config
+  // entry from a previous border can't smuggle properties onto the
+  // wrapper. The cascade carries them into the template's
+  // `var(--c-name, <fallback>)` references and overrides their
+  // fallbacks.
+  const customVars = freeformConfig && styleCss
+    ? freeformBorderInlineVars(freeformConfig, extractFreeformBorderVars(styleCss))
+    : null;
+
+  const visual = (
+    <span
+      className={`relative inline-block shrink-0 ${className ?? ""}`}
+      style={{
+        width: `${wrapperPx}px`,
+        height: `${wrapperPx}px`,
+        verticalAlign: "middle",
+        // Bleed past the 82px native frame — sized for the unscaled
+        // template; the wrapper has no clipping so glows + falling
+        // petals reach into the row's gutter.
+        overflow: "visible",
+      }}
+      title={title}
+    >
+      {/* Override-mode rows that aren't in the user-facing catalog
+          ship their CSS inline alongside the template; catalog hits
+          rely on the global injector preamble (harmless duplicate
+          when both are present). */}
+      {styleCss ? <style>{styleCss}</style> : null}
+      <span
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: `${TEMPLATE_NATIVE_AV}px`,
+          height: `${TEMPLATE_NATIVE_AV}px`,
+          transformOrigin: "top left",
+          transform: `scale(${scaleFactor})`,
+          ...(customVars ?? {}),
+        } as React.CSSProperties}
+        dangerouslySetInnerHTML={{ __html: clean }}
+      />
+    </span>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => onClick(e)}
+        title={title}
+        className="inline-block bg-transparent p-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-keep-action"
+      >
+        {visual}
+      </button>
+    );
+  }
+  return visual;
 }
 
 function initialsFor(name: string): string {

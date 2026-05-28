@@ -6,6 +6,7 @@ import { AuthGate, SplashShell } from "./components/AuthGate.js";
 import { SplashLanding } from "./components/SplashLanding.js";
 import { Banner } from "./components/Banner.js";
 import { Composer } from "./components/Composer.js";
+import { TypingIndicator } from "./components/TypingIndicator.js";
 import { HelpModal } from "./components/HelpModal.js";
 import { MessageList } from "./components/MessageList.js";
 import { MutualPrompts } from "./components/MutualPrompts.js";
@@ -31,13 +32,14 @@ import { StoryCatalogModal } from "./components/StoryCatalogModal.js";
 import { StoryEditorModal } from "./components/StoryEditorModal.js";
 import { StoryReaderModal } from "./components/StoryReaderModal.js";
 import { WelcomeModal } from "./components/WelcomeModal.js";
-import { getSocket, disconnect as disconnectSocket, loadTabCharacter, rememberTabCharacter, rememberTabRoom } from "./lib/socket.js";
+import { getSocket, disconnect as disconnectSocket, hasSessionBeenAnnounced, loadTabCharacter, markLoginIntent, rememberTabCharacter, rememberTabRoom } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
 import { ActiveThemeContext, applyFontPrefs, applyTheme, resolveSplashTheme, splashBgUrl, themeStyle, type UiFontScale } from "./lib/theme.js";
 import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
 import { fire as fireNotification, permission as notifPermission, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
+import { nameForCommand } from "./lib/commandText.js";
 import { playAlert, playPing, playTap, playWhisper } from "./lib/sound.js";
 import { saveCachedActiveTheme, useChat, type SiteBranding } from "./state/store.js";
 import { fetchEmoticonCatalog, useEmoticons } from "./state/emoticons.js";
@@ -45,6 +47,7 @@ import { parseScriptoriumFromUrl, storyPermalink } from "./lib/scriptoriumUrl.js
 import { useEarning } from "./state/earning.js";
 import { runStruckEffect } from "./lib/chatEffects.js";
 import { injectNameStyles } from "./lib/nameStyleInjector.js";
+import { injectFreeformBorders } from "./lib/freeformBorderInjector.js";
 
 export function App() {
   const me = useChat((s) => s.me);
@@ -107,6 +110,25 @@ export function App() {
       .then((j) => {
         if (cancelled) return;
         if (j) {
+          // Cookie-restored session = first time this tab has entered
+          // the app under this account. Treat it as a real "session
+          // start" so the server fires the "X has connected." chat
+          // broadcast (and the custom session-connect template if the
+          // user has the flair). Without this, returning users who
+          // re-enter via an existing cookie got the watcher ping
+          // ("X is online") in their friends' rooms but their own
+          // room never saw an arrival message — the Wallace re-entry
+          // bug. `hasSessionBeenAnnounced` reads a tab-sticky
+          // sessionStorage flag that `markLoginIntent` sets, so a
+          // page reload within the SAME tab is silent (sessionStorage
+          // survives reload) while a brand-new tab gets a fresh slate
+          // and announces correctly. The login form path also calls
+          // markLoginIntent independently; both ultimately set the
+          // same one-shot sessionStorage marker the socket auth
+          // callback consumes.
+          if (!hasSessionBeenAnnounced()) {
+            markLoginIntent();
+          }
           setMe({ id: j.id, username: j.username, role: j.role });
           // Detect a post-deploy version drift on the very first probe.
           // If the user opened this tab before a deploy, the bundle they
@@ -148,6 +170,15 @@ export function App() {
   useEffect(() => {
     if (nameStyleCatalog) injectNameStyles(nameStyleCatalog);
   }, [nameStyleCatalog]);
+
+  // Free-form borders — same idempotent CSS-injection pattern as
+  // name styles. Only the `template`+`style_css` rows contribute
+  // rules; image-based rows render via overlay <img> in
+  // BorderedAvatar and have no CSS to ship.
+  const freeformBorderCatalog = useEarning((s) => s.snapshot?.catalog.freeformBorders);
+  useEffect(() => {
+    if (freeformBorderCatalog) injectFreeformBorders(freeformBorderCatalog);
+  }, [freeformBorderCatalog]);
 
   // Backstop poll: re-verify the session every 60s so admin-shortened TTLs
   // (or janitor sweeps) drop the user back to the login splash even if they
@@ -1530,6 +1561,13 @@ function Chat() {
       // an open FriendsModal will lag slightly until the user re-
       // opens it; acceptable for a non-live affordance.
     });
+    // Phase 4 typing indicator. Server is authoritative; we just
+    // replace the room's typer set with whatever lands. Server has
+    // already filtered the viewer themselves and anyone they've
+    // ignored, so the renderer can show every entry verbatim.
+    socket.on("chat:typing:update", ({ roomId, typers }) => {
+      useChat.getState().setTypers(roomId, typers);
+    });
     // Global rooms-tree invalidation. Server-emits this any time room
     // creation/deletion/archival/metadata/presence anywhere in the app
     // could change the rooms tree the user sees. Debounced because a
@@ -1973,14 +2011,23 @@ function Chat() {
           && state.openDmOtherCharacterId === known.otherCharacterId;
         if (viewing && !isSelf) {
           // Mark read on the server so the next /me/dms refetch
-          // returns unreadCount=0 too. Carries the active character
-          // so the server-side identity auth on the read endpoint
-          // matches this conversation's pinned identity.
+          // returns unreadCount=0 too. Use the VIEWER's character id
+          // pinned to THIS conversation (echoed back from the server
+          // in `myCharacterId`), NOT the global `activeCharacterId`.
+          // The chip filter in the open messenger can differ from the
+          // user's globally-active character — sending the global id
+          // 404'd whenever the user was reading a chip-filtered inbox
+          // that wasn't their current voice, which meant the read
+          // marker never advanced and the unread badge snapped back
+          // to its server value on the next inbox refetch.
           fetch(`/me/dms/${known.id}/read`, {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ upTo: Date.now(), characterId: state.activeCharacterId ?? undefined }),
+            body: JSON.stringify({
+              upTo: Date.now(),
+              characterId: known.myCharacterId ?? undefined,
+            }),
           }).catch(() => {});
         }
         upsertDmConversation({
@@ -2122,6 +2169,7 @@ function Chat() {
     return () => {
       socket.off("room:state");
       socket.off("presence:update");
+      socket.off("chat:typing:update");
       socket.off("rooms:tree-changed");
       if (treeDebounceId != null) window.clearTimeout(treeDebounceId);
       socket.off("message:new");
@@ -2436,7 +2484,13 @@ function Chat() {
       send("/profile");
       return;
     }
-    setComposerText((cur) => `/whisper ${displayName} ${cur ?? ""}`);
+    // `nameForCommand` NBSPs any ASCII spaces inside the displayName so
+    // the server's tokenizer keeps a multi-word handle like
+    // "Khalbir Dhor'ashiq" as one argument. Without it, clicking a
+    // multi-word name pre-filled `/whisper Khalbir Dhor'ashiq ` and the
+    // tokenizer split it into two args, leaving the user looking at a
+    // `No user named "Khalbir"` error every time.
+    setComposerText((cur) => `/whisper ${nameForCommand(displayName)} ${cur ?? ""}`);
   }
 
   /**
@@ -2861,6 +2915,13 @@ function Chat() {
               bright end — so the rail genuinely emits into the
               bloom rather than floating on bare ambient. */}
           <div aria-hidden className="keep-accent-rail" data-rail="footer" />
+          {/* Phase 4 — "is typing…" strip. Renders null when nobody
+              else is typing, so it consumes zero vertical space at
+              rest. Sits AFTER the accent rail so the rail stays
+              flush with the composer when the strip is hidden, and
+              the strip slides in just under the rail when somebody
+              starts typing. */}
+          <TypingIndicator roomId={currentRoomId} />
           <Composer
             value={composerText}
             onChange={setComposerText}
@@ -2953,7 +3014,9 @@ function Chat() {
                   setOpenProfile(null);
                   // Prepend rather than overwrite — the user may have
                   // had a draft going when they opened the profile.
-                  setComposerText((cur) => `/whisper ${name} ${cur ?? ""}`);
+                  // NBSP the name so multi-word handles survive the
+                  // server tokenizer; see nameForCommand JSDoc.
+                  setComposerText((cur) => `/whisper ${nameForCommand(name)} ${cur ?? ""}`);
                 },
                 // Open the unified Messages modal pinned to the right
                 // per-identity thread: when the profile in view is a
@@ -2973,7 +3036,7 @@ function Chat() {
                 },
                 onIgnore: (name: string) => {
                   setOpenProfile(null);
-                  send(`/ignore ${name}`);
+                  send(`/ignore ${nameForCommand(name)}`);
                 },
               }
             : {})}

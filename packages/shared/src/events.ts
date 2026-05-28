@@ -122,6 +122,26 @@ export interface ClientToServerEvents {
    * attached. No-op when the socket isn't in any room.
    */
   "me:resync": () => void;
+  /**
+   * "Hey, I'm typing in this room" pulse. Client emits at most once
+   * every ~2s while the user is actively keystroking the Composer
+   * (and not /away). Server records {userId, displayName,
+   * characterId} into a per-room in-memory map with a ~5s expiry,
+   * sweeps periodically, and broadcasts `chat:typing:update` to the
+   * room (filtered to exclude the typer themselves and anyone in
+   * their ignore list).
+   *
+   * No explicit "stop" event. The composer simply stops emitting
+   * when the user pauses or sends; the server's expiry sweep is what
+   * actually drops the entry from the typer set. Keeps the wire
+   * tiny — no signal needed on the common case of "user finished a
+   * sentence and walked away".
+   *
+   * Phase 4 of the cosmetic expansion. Phase 5 layers the custom
+   * typing phrase cosmetic ("Embers smolder…" instead of "is
+   * typing…") on top of this same wire.
+   */
+  "chat:typing": (payload: { roomId: string }) => void;
 }
 
 /** Events emitted by the server → client. */
@@ -411,6 +431,52 @@ export interface ServerToClientEvents {
       | "item_purchase"
       | "admin_grant";
   }) => void;
+  /**
+   * Authoritative "who is currently typing in this room" set. Sent
+   * to every socket subscribed to the room whenever the set CHANGES
+   * (new typer joins, existing typer expires). Idle ticks that don't
+   * change the set are suppressed — the wire only carries deltas.
+   *
+   * The receiver replaces its cached set for `roomId` with `typers`
+   * wholesale. Sends an empty `typers: []` array when the last
+   * person in the room stops typing — the client uses that to clear
+   * the indicator.
+   *
+   * The server filters each receiver's payload by their ignore list,
+   * so a user who ignored Alice doesn't see "Alice is typing…"
+   * even when she actually is. Matches how chat messages handle
+   * ignore — kept silent on the receiving side.
+   */
+  "chat:typing:update": (payload: {
+    roomId: string;
+    typers: TypingEntry[];
+  }) => void;
+}
+
+/** One row in the typing-set wire payload. */
+export interface TypingEntry {
+  /** User id of the typer. Stable across character switches; the
+   *  display name below may change. */
+  userId: string;
+  /** Display name to render in the indicator. Mirrors the chat-line
+   *  rule: character name when the typer is voicing a character,
+   *  master username when OOC. */
+  displayName: string;
+  /** Character id if the typer is voicing one, else null. Used by
+   *  the renderer for any per-identity styling (custom typing phrase
+   *  cosmetic in Phase 5, etc.). */
+  characterId: string | null;
+  /** Custom typing phrase (Phase 5 — `flair_typing_phrase`
+   *  cosmetic). When present, the indicator renders this in place
+   *  of the default "is typing…" suffix — BUT only when this is
+   *  the sole typer in the room. Joint forms ("Alice and Bob are
+   *  typing…") read poorly with mixed custom phrases so the
+   *  renderer falls back to defaults for sets of 2+. Server reads
+   *  the value off `user_earning.typing_phrase` (or
+   *  `character_earning.typing_phrase`) at broadcast time, so a
+   *  user editing their phrase mid-session sees it land within one
+   *  typing pulse. Null/absent = use the default phrasing. */
+  phrase?: string | null;
 }
 
 export type UiHint =

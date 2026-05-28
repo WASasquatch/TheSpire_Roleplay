@@ -8,6 +8,7 @@ import type {
   RoomOccupant,
   RoomSummary,
   Theme,
+  TypingEntry,
 } from "@thekeep/shared";
 import { DEFAULT_THEME } from "@thekeep/shared";
 
@@ -465,6 +466,18 @@ interface ChatState {
   setOccupants: (roomId: string, occ: RoomOccupant[]) => void;
   setRoom: (room: RoomSummary) => void;
 
+  /**
+   * Phase 4 typing indicator — who is currently typing in each
+   * room, keyed by roomId. Server filters out the viewer and
+   * anyone they've ignored before sending, so the renderer can
+   * splat this directly into the indicator strip.
+   *
+   * Cleared wholesale on each `chat:typing:update`; the server is
+   * authoritative on the set.
+   */
+  typersByRoom: Record<string, TypingEntry[]>;
+  setTypers: (roomId: string, typers: TypingEntry[]) => void;
+
   notice: { code: string; message: string } | null;
   setNotice: (n: { code: string; message: string } | null) => void;
 
@@ -736,6 +749,7 @@ export const useChat = create<ChatState>((set) => ({
 
   rooms: {},
   occupants: {},
+  typersByRoom: {},
   messagesByRoom: {},
 
   appendMessage: (msg) =>
@@ -1020,6 +1034,19 @@ export const useChat = create<ChatState>((set) => ({
 
   setOccupants: (roomId, occ) =>
     set((s) => ({ occupants: { ...s.occupants, [roomId]: occ } })),
+
+  setTypers: (roomId, typers) =>
+    set((s) => {
+      // Clean up empty arrays — keeps the dict small and lets the
+      // indicator-renderer's `Object.keys` check stay cheap.
+      if (typers.length === 0) {
+        if (!s.typersByRoom[roomId]) return {};
+        const next = { ...s.typersByRoom };
+        delete next[roomId];
+        return { typersByRoom: next };
+      }
+      return { typersByRoom: { ...s.typersByRoom, [roomId]: typers } };
+    }),
 
   setRoom: (room) => set((s) => ({ rooms: { ...s.rooms, [room.id]: room } })),
 

@@ -20,8 +20,10 @@ import { z } from "zod";
 import type { Db } from "../db/index.js";
 import {
   characterEarning,
+  characterOwnedFreeformBorders,
   characters,
   cosmetics,
+  emoticonSheets,
   identityCollection,
   identityInventory,
   items,
@@ -31,9 +33,14 @@ import {
   earningLedger,
   userActiveCosmetics,
   userOwnedBorders,
+  userOwnedFreeformBorders,
   userOwnedNameStyles,
   userEarning,
   users,
+  freeformBorders,
+  flashSaleOverrides,
+  flashSales,
+  siteSettings,
 } from "../db/schema.js";
 import { getSettings, updateSettings } from "../settings.js";
 import {
@@ -43,6 +50,18 @@ import {
 } from "../earning/config.js";
 import { backfillAllRankPlacements, mergeMaxEverHeld, resolveRankForXp } from "../earning/resolver.js";
 import { creditPool } from "../earning/award.js";
+import { clearEchoCacheFor } from "../earning/messageQuality.js";
+import { recordAudit } from "../audit.js";
+import {
+  dateOffsetUtc,
+  resolveTodayFlashSale,
+  todayUtc,
+} from "../earning/flashSale.js";
+import {
+  exportCatalog,
+  importCatalog,
+  type EarningCatalogKind,
+} from "./earningTransfer.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -642,6 +661,208 @@ export function registerAdminEarningRoutes(
   });
 
   /* =========================================================
+   *  Free-form borders — full CRUD on the parallel `freeform_borders`
+   *  catalog introduced in migration 0149. Two render paths share one
+   *  table; the body validators enforce the XOR (either `imageUrl` OR
+   *  `template`+`styleCss`, never both, never neither) so the
+   *  BorderedAvatar renderer always has exactly one path to take.
+   *
+   *  Rarity is an OPEN string by design — admins introduce new tiers
+   *  without a schema migration; the client falls back to the
+   *  'common' palette for unknown values, so a brand-new rarity that
+   *  ships before the BordersTab knows about it still renders sanely.
+   * ========================================================= */
+
+  /** Shared validation: each row must travel either the image path
+   *  OR the template path, never both. Server enforces here so the
+   *  rest of the codebase (renderer, /earning/me, BordersTab) can
+   *  trust the catalog invariant. */
+  function validateFreeformBorderShape(opts: {
+    imageUrl?: string | null;
+    template?: string | null;
+    styleCss?: string | null;
+  }): string | null {
+    const hasImage = !!opts.imageUrl;
+    const hasTemplate = !!opts.template;
+    if (hasImage && hasTemplate) {
+      return "border must ship in EITHER image-url mode OR template mode, not both";
+    }
+    if (!hasImage && !hasTemplate) {
+      return "border must ship with EITHER image-url OR template + style-css";
+    }
+    return null;
+  }
+
+  const createFreeformBorderBody = z.object({
+    key: z.string().min(1).max(64).regex(/^[a-z][a-z0-9_-]*$/),
+    name: z.string().min(1).max(80),
+    description: z.string().max(500).optional(),
+    imageUrl: z.string().min(1).max(2000).nullable().optional(),
+    template: z.string().min(1).max(8000).nullable().optional(),
+    styleCss: z.string().max(64000).nullable().optional(),
+    rarity: z.string().min(1).max(40).optional(),
+    cost: z.number().int().min(0).max(1_000_000).optional(),
+    enabled: z.boolean().optional(),
+    order: z.number().int().optional(),
+  }).strict();
+
+  const patchFreeformBorderBody = z.object({
+    name: z.string().min(1).max(80).optional(),
+    description: z.string().max(500).optional(),
+    imageUrl: z.string().min(1).max(2000).nullable().optional(),
+    template: z.string().min(1).max(8000).nullable().optional(),
+    styleCss: z.string().max(64000).nullable().optional(),
+    rarity: z.string().min(1).max(40).optional(),
+    cost: z.number().int().min(0).max(1_000_000).optional(),
+    enabled: z.boolean().optional(),
+    order: z.number().int().optional(),
+  }).strict();
+
+  app.get("/admin/earning/freeform-borders", async () => {
+    const rows = await db.select().from(freeformBorders).orderBy(asc(freeformBorders.order));
+    // Owner / equipped counts for the destructive-action confirmation
+    // prompts. Mirrors the name-style endpoint shape — admins lean on
+    // this to know whether disabling a row will yank cosmetics from
+    // live users.
+    const userOwnerRows = await db.all<{ borderKey: string; n: number }>(sql`
+      SELECT border_key AS borderKey, COUNT(*) AS n FROM user_owned_freeform_borders GROUP BY border_key
+    `);
+    const charOwnerRows = await db.all<{ borderKey: string; n: number }>(sql`
+      SELECT border_key AS borderKey, COUNT(*) AS n FROM character_owned_freeform_borders GROUP BY border_key
+    `);
+    const userEquippedRows = await db.all<{ borderKey: string | null; n: number }>(sql`
+      SELECT selected_freeform_border_key AS borderKey, COUNT(*) AS n FROM user_earning
+      WHERE selected_freeform_border_key IS NOT NULL GROUP BY selected_freeform_border_key
+    `);
+    const charEquippedRows = await db.all<{ borderKey: string | null; n: number }>(sql`
+      SELECT selected_freeform_border_key AS borderKey, COUNT(*) AS n FROM character_earning
+      WHERE selected_freeform_border_key IS NOT NULL GROUP BY selected_freeform_border_key
+    `);
+    const ownersByKey = new Map<string, number>();
+    for (const r of userOwnerRows) ownersByKey.set(r.borderKey, (ownersByKey.get(r.borderKey) ?? 0) + r.n);
+    for (const r of charOwnerRows) ownersByKey.set(r.borderKey, (ownersByKey.get(r.borderKey) ?? 0) + r.n);
+    const equippedByKey = new Map<string, number>();
+    for (const r of userEquippedRows) {
+      if (r.borderKey) equippedByKey.set(r.borderKey, (equippedByKey.get(r.borderKey) ?? 0) + r.n);
+    }
+    for (const r of charEquippedRows) {
+      if (r.borderKey) equippedByKey.set(r.borderKey, (equippedByKey.get(r.borderKey) ?? 0) + r.n);
+    }
+    return {
+      borders: rows.map((r) => ({
+        key: r.key,
+        name: r.name,
+        description: r.description,
+        imageUrl: r.imageUrl,
+        template: r.template,
+        styleCss: r.styleCss,
+        rarity: r.rarity,
+        cost: r.cost,
+        enabled: !!r.enabled,
+        isBuiltin: !!r.isBuiltin,
+        order: r.order,
+        owners: ownersByKey.get(r.key) ?? 0,
+        equipped: equippedByKey.get(r.key) ?? 0,
+      })),
+    };
+  });
+
+  app.post<{ Body: unknown }>("/admin/earning/freeform-borders", async (req, reply) => {
+    let body: z.infer<typeof createFreeformBorderBody>;
+    try { body = createFreeformBorderBody.parse(req.body); }
+    catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+    const shapeError = validateFreeformBorderShape({
+      imageUrl: body.imageUrl ?? null,
+      template: body.template ?? null,
+      styleCss: body.styleCss ?? null,
+    });
+    if (shapeError) { reply.code(400); return { error: shapeError }; }
+    const dup = (await db.select().from(freeformBorders).where(eq(freeformBorders.key, body.key)).limit(1))[0];
+    if (dup) { reply.code(409); return { error: "border key already exists" }; }
+    const maxOrderRow = (await db.select({ m: sql<number>`MAX("order")` }).from(freeformBorders))[0];
+    const order = body.order ?? ((maxOrderRow?.m ?? 0) + 1);
+    await db.insert(freeformBorders).values({
+      key: body.key,
+      name: body.name,
+      description: body.description ?? "",
+      imageUrl: body.imageUrl ?? null,
+      template: body.template ?? null,
+      styleCss: body.styleCss ?? null,
+      rarity: body.rarity ?? "common",
+      cost: body.cost ?? 0,
+      enabled: body.enabled ?? true,
+      isBuiltin: false,
+      order,
+    });
+    return { ok: true, key: body.key };
+  });
+
+  app.patch<{ Params: { key: string }; Body: unknown }>(
+    "/admin/earning/freeform-borders/:key",
+    async (req, reply) => {
+      let body: z.infer<typeof patchFreeformBorderBody>;
+      try { body = patchFreeformBorderBody.parse(req.body); }
+      catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+      const existing = (await db.select().from(freeformBorders).where(eq(freeformBorders.key, req.params.key)).limit(1))[0];
+      if (!existing) { reply.code(404); return { error: "border not found" }; }
+      // Re-validate the XOR against the resolved post-patch shape so
+      // a partial PATCH can't break the invariant by clearing the
+      // wrong field. Pull the post-patch value for each path: body
+      // value when present, existing row's value otherwise.
+      const resolvedImage = body.imageUrl === undefined ? existing.imageUrl : body.imageUrl;
+      const resolvedTemplate = body.template === undefined ? existing.template : body.template;
+      const resolvedStyleCss = body.styleCss === undefined ? existing.styleCss : body.styleCss;
+      const shapeError = validateFreeformBorderShape({
+        imageUrl: resolvedImage,
+        template: resolvedTemplate,
+        styleCss: resolvedStyleCss,
+      });
+      if (shapeError) { reply.code(400); return { error: shapeError }; }
+      const update: Partial<typeof freeformBorders.$inferInsert> = { updatedAt: new Date() };
+      if (body.name !== undefined) update.name = body.name;
+      if (body.description !== undefined) update.description = body.description;
+      if (body.imageUrl !== undefined) update.imageUrl = body.imageUrl;
+      if (body.template !== undefined) update.template = body.template;
+      if (body.styleCss !== undefined) update.styleCss = body.styleCss;
+      if (body.rarity !== undefined) update.rarity = body.rarity;
+      if (body.cost !== undefined) update.cost = body.cost;
+      if (body.enabled !== undefined) update.enabled = body.enabled;
+      if (body.order !== undefined) update.order = body.order;
+      await db.update(freeformBorders).set(update).where(eq(freeformBorders.key, req.params.key));
+      return { ok: true };
+    },
+  );
+
+  /**
+   * DELETE /admin/earning/freeform-borders/:key
+   *
+   * Built-in rows protected, mirroring the name-style policy. Custom
+   * rows can be deleted; FK cascades clear ownership rows and the
+   * SET NULL on the equip slots clears the active equip on every
+   * affected identity (migration 0149).
+   */
+  app.delete<{ Params: { key: string } }>(
+    "/admin/earning/freeform-borders/:key",
+    async (req, reply) => {
+      const existing = (await db.select().from(freeformBorders).where(eq(freeformBorders.key, req.params.key)).limit(1))[0];
+      if (!existing) { reply.code(404); return { error: "border not found" }; }
+      if (existing.isBuiltin) {
+        reply.code(409);
+        return {
+          error: "built-in borders cannot be deleted",
+          message: "Disable it instead — the seed row backs anyone who owns it.",
+        };
+      }
+      // Ownership rows cascade via ON DELETE CASCADE on
+      // user/character_owned_freeform_borders; equip slots clear via
+      // ON DELETE SET NULL (migration 0149). No manual cleanup
+      // needed.
+      await db.delete(freeformBorders).where(eq(freeformBorders.key, req.params.key));
+      return { ok: true };
+    },
+  );
+
+  /* =========================================================
    *  Cosmetics tab — minimal CRUD for the inline_avatar row
    *  (the only buyable cosmetic that ships in Phase 4). Rank
    *  border prices live on rank_tiers.borderCost via the Ranks
@@ -975,6 +1196,18 @@ export function registerAdminEarningRoutes(
   const grantStyleBody = z.object({
     username: z.string().min(1).max(80),
     styleKey: z.string().min(1).max(64),
+  }).strict();
+
+  /** Free-form border grant/revoke (Phase 1 catalog). Same shape as
+   *  the rank-tier border grant but `characterId` adds per-identity
+   *  routing — master pool grants to user_owned_freeform_borders;
+   *  character grants to character_owned_freeform_borders. */
+  const grantFreeformBorderBody = z.object({
+    username: z.string().min(1).max(80),
+    borderKey: z.string().min(1).max(64),
+    /** Per-identity scope. Null/omitted = master/OOC pool;
+     *  character id = that character's ownership ledger. */
+    characterId: z.string().nullable().optional(),
   }).strict();
 
   const grantItemBody = z.object({
@@ -1422,6 +1655,148 @@ export function registerAdminEarningRoutes(
   });
 
   /**
+   * POST /admin/earning/grant-freeform-border
+   * Insert ownership of a free-form border on the target identity,
+   * bypassing the Currency cost. Mirrors the rank-tier border grant
+   * but with per-identity routing — passing a characterId scopes
+   * the grant to that character's pool (the character must belong
+   * to the target user). Idempotent.
+   *
+   * Auto-equip on first grant: matches the user-facing purchase
+   * flow — if the identity has no freeform border equipped yet,
+   * we set this one as the equipped key.
+   */
+  app.post<{ Body: unknown }>("/admin/earning/grant-freeform-border", async (req, reply) => {
+    const me = masterAdminGate(req, reply); if (!me) return;
+    let body: z.infer<typeof grantFreeformBorderBody>;
+    try { body = grantFreeformBorderBody.parse(req.body); }
+    catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+    const target = await resolveTargetUser(body.username);
+    if (!target) { reply.code(404); return { error: "user not found" }; }
+    const border = (await db.select().from(freeformBorders).where(eq(freeformBorders.key, body.borderKey)).limit(1))[0];
+    if (!border) { reply.code(404); return { error: "freeform border not found" }; }
+    const characterId = body.characterId ?? null;
+    if (characterId) {
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+        .from(characters)
+        .where(eq(characters.id, characterId))
+        .limit(1))[0];
+      if (!c || c.userId !== target.id || c.deletedAt) {
+        reply.code(404);
+        return { error: "no such character on this user" };
+      }
+    }
+
+    if (characterId) {
+      await db.insert(characterOwnedFreeformBorders).values({
+        characterId,
+        borderKey: body.borderKey,
+      }).onConflictDoNothing();
+      // Auto-equip on first acquisition (matches the purchase flow's
+      // behavior so admin grants land visible immediately).
+      await db.insert(characterEarning).values({ characterId }).onConflictDoNothing();
+      const cur = (await db.select({ selected: characterEarning.selectedFreeformBorderKey })
+        .from(characterEarning).where(eq(characterEarning.characterId, characterId)).limit(1))[0];
+      if (!cur?.selected) {
+        await db.update(characterEarning)
+          .set({ selectedFreeformBorderKey: body.borderKey, updatedAt: new Date() })
+          .where(eq(characterEarning.characterId, characterId));
+      }
+    } else {
+      await db.insert(userOwnedFreeformBorders).values({
+        userId: target.id,
+        borderKey: body.borderKey,
+      }).onConflictDoNothing();
+      await db.insert(userEarning).values({ userId: target.id }).onConflictDoNothing();
+      const cur = (await db.select({ selected: userEarning.selectedFreeformBorderKey })
+        .from(userEarning).where(eq(userEarning.userId, target.id)).limit(1))[0];
+      if (!cur?.selected) {
+        await db.update(userEarning)
+          .set({ selectedFreeformBorderKey: body.borderKey, updatedAt: new Date() })
+          .where(eq(userEarning.userId, target.id));
+      }
+    }
+    await db.insert(earningLedger).values({
+      id: nanoid(),
+      scope: characterId ? "character" : "user",
+      ownerId: characterId ?? target.id,
+      xpDelta: 0,
+      currencyDelta: 0,
+      reason: "admin_grant",
+      metadataJson: JSON.stringify({
+        actor: me.id,
+        kind: "freeform_border",
+        borderKey: body.borderKey,
+        characterId,
+      }),
+    });
+    return { ok: true };
+  });
+
+  /**
+   * POST /admin/earning/revoke-freeform-border
+   * Remove a free-form border from the target identity. If the
+   * equip slot pointed at this border it clears too. Idempotent.
+   */
+  app.post<{ Body: unknown }>("/admin/earning/revoke-freeform-border", async (req, reply) => {
+    const me = masterAdminGate(req, reply); if (!me) return;
+    let body: z.infer<typeof grantFreeformBorderBody>;
+    try { body = grantFreeformBorderBody.parse(req.body); }
+    catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+    const target = await resolveTargetUser(body.username);
+    if (!target) { reply.code(404); return { error: "user not found" }; }
+    const characterId = body.characterId ?? null;
+    if (characterId) {
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId })
+        .from(characters)
+        .where(eq(characters.id, characterId))
+        .limit(1))[0];
+      if (!c || c.userId !== target.id) {
+        reply.code(404);
+        return { error: "no such character on this user" };
+      }
+      await db.delete(characterOwnedFreeformBorders).where(and(
+        eq(characterOwnedFreeformBorders.characterId, characterId),
+        eq(characterOwnedFreeformBorders.borderKey, body.borderKey),
+      ));
+      await db.update(characterEarning)
+        .set({ selectedFreeformBorderKey: null, updatedAt: new Date() })
+        .where(and(
+          eq(characterEarning.characterId, characterId),
+          eq(characterEarning.selectedFreeformBorderKey, body.borderKey),
+        ));
+    } else {
+      await db.delete(userOwnedFreeformBorders).where(and(
+        eq(userOwnedFreeformBorders.userId, target.id),
+        eq(userOwnedFreeformBorders.borderKey, body.borderKey),
+      ));
+      await db.update(userEarning)
+        .set({ selectedFreeformBorderKey: null, updatedAt: new Date() })
+        .where(and(
+          eq(userEarning.userId, target.id),
+          eq(userEarning.selectedFreeformBorderKey, body.borderKey),
+        ));
+    }
+    await db.insert(earningLedger).values({
+      id: nanoid(),
+      scope: characterId ? "character" : "user",
+      ownerId: characterId ?? target.id,
+      xpDelta: 0,
+      currencyDelta: 0,
+      reason: "admin_revoke",
+      metadataJson: JSON.stringify({
+        actor: me.id,
+        kind: "freeform_border",
+        borderKey: body.borderKey,
+        characterId,
+      }),
+    });
+    return { ok: true };
+  });
+
+  /**
    * GET /admin/earning/user-ownership?username=…
    * Surface a target user's owned styles + borders so the admin UI
    * can render a revoke list. Master-only; same role gate as the
@@ -1441,6 +1816,14 @@ export function registerAdminEarningRoutes(
       .select({ rankKey: userOwnedBorders.rankKey })
       .from(userOwnedBorders)
       .where(eq(userOwnedBorders.userId, target.id));
+    // Free-form border ownership. Master scope here; per-character
+    // ownership lookup ships in the per-character section below
+    // alongside character_owned_borders if a future admin UI needs
+    // it. For now the master list is enough for revoke targeting.
+    const ownedFreeformBorders = await db
+      .select({ borderKey: userOwnedFreeformBorders.borderKey })
+      .from(userOwnedFreeformBorders)
+      .where(eq(userOwnedFreeformBorders.userId, target.id));
     // Per-identity inventory: master rows + per-character rows. The
     // admin UI uses the master list to surface "what does this user
     // currently hold on their OOC pool?" before granting; characters
@@ -1476,6 +1859,7 @@ export function registerAdminEarningRoutes(
       userId: target.id,
       ownedStyles: ownedStyles.map((s) => s.styleKey),
       ownedBorders: ownedBorders.map((b) => b.rankKey),
+      ownedFreeformBorders: ownedFreeformBorders.map((b) => b.borderKey),
       inventory,
       inventoryByCharacter,
       characters: targetCharRows,
@@ -1504,6 +1888,10 @@ export function registerAdminEarningRoutes(
 
     // Zero out the master earning row (lazy-create first so the row
     // exists to update — keeps the post-reset state consistent).
+    // Includes every cosmetic equip slot + free-form text field
+    // added across migrations 0148-0151 so a reset is genuinely a
+    // clean slate (a leftover `typing_phrase` on a reset account
+    // would surprise QA tracing a Flair regression).
     await db.insert(userEarning).values({ userId: target.id }).onConflictDoNothing();
     await db.update(userEarning).set({
       xp: 0,
@@ -1513,10 +1901,14 @@ export function registerAdminEarningRoutes(
       maxRankKeyEverHeld: null,
       maxTierEverHeld: null,
       selectedBorderRankKey: null,
+      selectedFreeformBorderKey: null,
+      typingPhrase: null,
       updatedAt: new Date(),
     }).where(eq(userEarning.userId, target.id));
 
-    // Zero out every character pool tied to this user.
+    // Zero out every character pool tied to this user. Same set of
+    // columns; character_earning carries the per-character cosmetic
+    // slots from migrations 0148-0151 too.
     const ownedCharIds = (await db
       .select({ id: characters.id })
       .from(characters)
@@ -1531,15 +1923,50 @@ export function registerAdminEarningRoutes(
         maxRankKeyEverHeld: null,
         maxTierEverHeld: null,
         selectedBorderRankKey: null,
+        selectedFreeformBorderKey: null,
+        profileBannerUrl: null,
+        typingPhrase: null,
+        lurkingMasterEnabled: false,
+        inlineAvatarEnabled: false,
         updatedAt: new Date(),
       }).where(inArray(characterEarning.characterId, ownedCharIds));
     }
 
     // Wipe ownership rows. Deleting (rather than soft-marking) is
     // intentional — the whole point is a clean slate for testing.
+    // Free-form border ownership is partitioned the same way as the
+    // rank-tier set; both master + character pools need their rows
+    // dropped.
     await db.delete(userOwnedBorders).where(eq(userOwnedBorders.userId, target.id));
     await db.delete(userOwnedNameStyles).where(eq(userOwnedNameStyles.userId, target.id));
+    await db.delete(userOwnedFreeformBorders).where(eq(userOwnedFreeformBorders.userId, target.id));
+    if (ownedCharIds.length > 0) {
+      await db.delete(characterOwnedFreeformBorders)
+        .where(inArray(characterOwnedFreeformBorders.characterId, ownedCharIds));
+    }
     await db.delete(userActiveCosmetics).where(eq(userActiveCosmetics.userId, target.id));
+
+    // Phase 3 reaction submissions. Pending rows hold paid Currency
+    // — but a reset is destructive by design (used by QA / dev),
+    // and the same operator that zeroes wallets is OK losing the
+    // amounts here too. The image files on disk get orphaned but a
+    // janitor sweep / manual cleanup handles that; the rows
+    // themselves vanish so the user's `3 pending` cap resets too.
+    // Approved submissions stay live (they're admin-curated content
+    // now, decoupled from the originating account).
+    const submissionPoolIds = [target.id, ...ownedCharIds];
+    if (submissionPoolIds.length > 0) {
+      await db.delete(emoticonSheets).where(and(
+        sql`${emoticonSheets.status} IN ('pending', 'rejected')`,
+        inArray(emoticonSheets.submitterPoolId, submissionPoolIds),
+      ));
+    }
+
+    // In-memory anti-spam echo cache (Phase 6 messageQuality).
+    // Clearing here ensures a reset user doesn't carry old echoes
+    // through into testing scenarios where they're meant to repeat
+    // canned messages.
+    clearEchoCacheFor(target.id);
 
     // Ledger audit. Single row; the metadata captures what was wiped.
     await db.insert(earningLedger).values({
@@ -1555,6 +1982,427 @@ export function registerAdminEarningRoutes(
       }),
     });
 
+    return { ok: true };
+  });
+
+  /* =========================================================
+   *  Flash Sales — admin
+   *
+   *  Reads:
+   *    GET /admin/earning/flash-sale → settings + today's picks +
+   *      every queued future override.
+   *
+   *  Writes:
+   *    PATCH /admin/earning/flash-sale/settings  → toggle per-
+   *      category enable, change default discount %.
+   *    PUT   /admin/earning/flash-sale/overrides → queue (or
+   *      replace) tomorrow's pick for one category. Pass null
+   *      `targetKey` to remove an existing queue.
+   *
+   *  Today's row is resolver-owned (it's already been picked); the
+   *  admin can ONLY override future dates. The UI passes the date
+   *  explicitly so an admin can also queue "two days out" without
+   *  the server having to model "tomorrow" specially.
+   * ========================================================= */
+
+  app.get("/admin/earning/flash-sale", async () => {
+    const today = await resolveTodayFlashSale(db);
+    // Future overrides — anything for_date >= tomorrow. Today's
+    // overrides have been consumed into `flash_sales` already; we
+    // surface them on the today object so admins can see what
+    // chose vs random.
+    const tomorrow = dateOffsetUtc(1);
+    const overrides = await db
+      .select()
+      .from(flashSaleOverrides)
+      .where(sql`${flashSaleOverrides.forDate} >= ${tomorrow}`)
+      .orderBy(asc(flashSaleOverrides.forDate), asc(flashSaleOverrides.category));
+    const settings = (await db.select().from(siteSettings).limit(1))[0];
+    return {
+      today,
+      tomorrow,
+      overrides: overrides.map((r) => ({
+        category: r.category,
+        forDate: r.forDate,
+        targetKey: r.targetKey,
+        discountPct: r.discountPct,
+      })),
+      settings: {
+        defaultDiscountPct: settings?.flashSaleDefaultDiscountPct ?? 25,
+        stylesEnabled: settings?.flashSaleStylesEnabled ?? true,
+        itemsEnabled: settings?.flashSaleItemsEnabled ?? true,
+        cosmeticsEnabled: settings?.flashSaleCosmeticsEnabled ?? true,
+        freeformBordersEnabled: settings?.flashSaleFreeformBordersEnabled ?? true,
+      },
+    };
+  });
+
+  const flashSaleSettingsBody = z.object({
+    defaultDiscountPct: z.number().int().min(1).max(99).optional(),
+    stylesEnabled: z.boolean().optional(),
+    itemsEnabled: z.boolean().optional(),
+    cosmeticsEnabled: z.boolean().optional(),
+    freeformBordersEnabled: z.boolean().optional(),
+  }).strict();
+
+  app.patch<{ Body: unknown }>("/admin/earning/flash-sale/settings", async (req, reply) => {
+    let body: z.infer<typeof flashSaleSettingsBody>;
+    try { body = flashSaleSettingsBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const me = (req as FastifyRequest & { sessionUser?: { id: string } }).sessionUser;
+    const patch: Record<string, unknown> = {};
+    if (body.defaultDiscountPct !== undefined) patch.flashSaleDefaultDiscountPct = body.defaultDiscountPct;
+    if (body.stylesEnabled !== undefined) patch.flashSaleStylesEnabled = body.stylesEnabled;
+    if (body.itemsEnabled !== undefined) patch.flashSaleItemsEnabled = body.itemsEnabled;
+    if (body.cosmeticsEnabled !== undefined) patch.flashSaleCosmeticsEnabled = body.cosmeticsEnabled;
+    if (body.freeformBordersEnabled !== undefined) patch.flashSaleFreeformBordersEnabled = body.freeformBordersEnabled;
+    if (Object.keys(patch).length === 0) return { ok: true, noop: true };
+    await db
+      .update(siteSettings)
+      .set({ ...patch, updatedAt: new Date(), updatedById: me?.id ?? null })
+      .where(eq(siteSettings.id, "singleton"));
+    return { ok: true };
+  });
+
+  const flashSaleOverrideBody = z.object({
+    /** 'name_style' | 'item' | 'cosmetic' | 'freeform_border'. */
+    category: z.enum(["name_style", "item", "cosmetic", "freeform_border"]),
+    /**
+     * ISO 'YYYY-MM-DD' UTC. Must be strictly in the future — today
+     * has already been resolved by the time the admin sees it. The
+     * shape regex catches typos; the `refine` catches values that
+     * SHAPE like a date but aren't valid (e.g. "2026-99-99"), which
+     * would otherwise pass through and never match any real `for_date`
+     * the resolver writes.
+     */
+    forDate: z.string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .refine((s) => {
+        const d = new Date(s + "T00:00:00Z");
+        return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+      }, { message: "invalid calendar date" }),
+    /** Catalog row key, or null to REMOVE an existing queue for this slot. */
+    targetKey: z.string().min(1).nullable(),
+    /** Optional per-pick discount; null/undefined = inherit default. */
+    discountPct: z.number().int().min(1).max(99).nullable().optional(),
+  }).strict();
+
+  /* =========================================================
+   *  Per-catalog export / import (ZIP)
+   *
+   *  Four catalogs are bundle-able: name-styles, items, borders,
+   *  ranks. Each ships rows + any /uploads/* image assets referenced
+   *  by those rows so the round-trip is lossless even when admins
+   *  uploaded custom art. Import is UPSERT BY KEY — admin-managed
+   *  catalogs survive a partial import without losing rows that
+   *  weren't in the file.
+   *
+   *  Wire encoding: export returns the raw zip bytes with
+   *  `Content-Type: application/zip` + `Content-Disposition: attachment`
+   *  so the browser auto-saves the file. Import accepts the zip
+   *  base64-encoded inside a JSON body to dodge the multipart
+   *  plugin dep — same pattern the existing logo upload uses.
+   * ========================================================= */
+
+  function parseKind(raw: string): EarningCatalogKind | null {
+    switch (raw) {
+      case "name-styles":
+      case "items":
+      case "borders":
+      case "ranks":
+        return raw;
+      default:
+        return null;
+    }
+  }
+
+  app.get<{ Params: { kind: string } }>(
+    "/admin/earning/transfer/:kind/export",
+    async (req, reply) => {
+      const kind = parseKind(req.params.kind);
+      if (!kind) { reply.code(404); return { error: "unknown catalog kind" }; }
+      const result = await exportCatalog(db, kind, uploadsRoot);
+      reply.header("Content-Type", "application/zip");
+      reply.header("Content-Disposition", `attachment; filename="${result.filename}"`);
+      reply.header("Content-Length", String(result.zip.byteLength));
+      return reply.send(result.zip);
+    },
+  );
+
+  const importZipBody = z.object({
+    /** Base64-encoded ZIP. Cap mirrors the logo upload (8MB) so a
+     *  fat-fingered binary upload can't blow the JSON body limit. */
+    zipBase64: z.string().min(32).max(16 * 1024 * 1024),
+  }).strict();
+
+  app.post<{ Params: { kind: string }; Body: unknown }>(
+    "/admin/earning/transfer/:kind/import",
+    async (req, reply) => {
+      const kind = parseKind(req.params.kind);
+      if (!kind) { reply.code(404); return { error: "unknown catalog kind" }; }
+      let body: z.infer<typeof importZipBody>;
+      try { body = importZipBody.parse(req.body); }
+      catch { reply.code(400); return { error: "invalid body" }; }
+      let bytes: Buffer;
+      try { bytes = Buffer.from(body.zipBase64, "base64"); }
+      catch { reply.code(400); return { error: "invalid base64 payload" }; }
+      try {
+        const result = await importCatalog(db, bytes, uploadsRoot, kind);
+        return { ok: true, ...result };
+      } catch (err) {
+        reply.code(400);
+        return { error: err instanceof Error ? err.message : "import failed" };
+      }
+    },
+  );
+
+  app.put<{ Body: unknown }>("/admin/earning/flash-sale/overrides", async (req, reply) => {
+    let body: z.infer<typeof flashSaleOverrideBody>;
+    try { body = flashSaleOverrideBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const today = todayUtc();
+    if (body.forDate <= today) {
+      reply.code(400);
+      return { error: `forDate must be strictly after today (${today})` };
+    }
+    if (body.targetKey === null) {
+      // Remove queue for this slot — leaves the day random again.
+      await db
+        .delete(flashSaleOverrides)
+        .where(and(
+          eq(flashSaleOverrides.category, body.category),
+          eq(flashSaleOverrides.forDate, body.forDate),
+        ));
+      return { ok: true, removed: true };
+    }
+    // Validate the target key against the relevant catalog so a
+    // typo doesn't materialize as a NULL pick on resolution day.
+    const exists = body.category === "name_style"
+      ? (await db.select({ k: nameStyles.key }).from(nameStyles).where(eq(nameStyles.key, body.targetKey)).limit(1))[0]
+      : body.category === "item"
+        ? (await db.select({ k: items.key }).from(items).where(eq(items.key, body.targetKey)).limit(1))[0]
+        : body.category === "cosmetic"
+          ? (await db.select({ k: cosmetics.key }).from(cosmetics).where(eq(cosmetics.key, body.targetKey)).limit(1))[0]
+          : (await db.select({ k: freeformBorders.key }).from(freeformBorders).where(eq(freeformBorders.key, body.targetKey)).limit(1))[0];
+    if (!exists) {
+      reply.code(404);
+      return { error: `no ${body.category} with key '${body.targetKey}'` };
+    }
+    // Upsert by (category, forDate) — replacing an admin's earlier
+    // pick on the same slot rather than 409ing.
+    await db
+      .insert(flashSaleOverrides)
+      .values({
+        category: body.category,
+        forDate: body.forDate,
+        targetKey: body.targetKey,
+        discountPct: body.discountPct ?? null,
+      })
+      .onConflictDoUpdate({
+        target: [flashSaleOverrides.category, flashSaleOverrides.forDate],
+        set: { targetKey: body.targetKey, discountPct: body.discountPct ?? null },
+      });
+    return { ok: true };
+  });
+
+  /* =========================================================
+   *  Flair moderation — clear a user's banner URL
+   *
+   *  Admin-only moderation lever for the URL-based profile banner.
+   *  Use case: a user pastes a hotlink to something the admin's
+   *  community shouldn't see (NSFW outside the NSFW gate, doxxing,
+   *  copyrighted material). Clearing wipes the column on master OR
+   *  on a specific character. The user retains ownership of the
+   *  `flair_profile_banner` cosmetic and can paste a new (hopefully
+   *  policy-compliant) URL afterwards.
+   *
+   *  Auditable via `profile_banner_clear` in the audit log so the
+   *  reason + actor survive for the moderation timeline.
+   * ========================================================= */
+  const clearBannerBody = z.object({
+    /** Master username — the account to clear. Same lookup the grant endpoints use. */
+    username: z.string().min(1).max(80),
+    /** When set, clears that character's banner instead of the master's. */
+    characterId: z.string().nullable().optional(),
+    /** Optional moderator reason recorded in the audit row. */
+    reason: z.string().max(500).optional(),
+  }).strict();
+
+  app.post<{ Body: unknown }>("/admin/earning/clear-banner", async (req, reply) => {
+    const me = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let body: z.infer<typeof clearBannerBody>;
+    try { body = clearBannerBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const target = await resolveTargetUser(body.username);
+    if (!target) { reply.code(404); return { error: "no such user" }; }
+    if (body.characterId) {
+      // Verify the character belongs to the target. Without this an
+      // admin could clear a stranger's character banner by guessing
+      // ids — the column would still wipe but the audit row would
+      // be misleading.
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId })
+        .from(characters)
+        .where(eq(characters.id, body.characterId))
+        .limit(1))[0];
+      if (!c || c.userId !== target.id) {
+        reply.code(404); return { error: "no such character on this user" };
+      }
+      await db.update(characterEarning)
+        .set({ profileBannerUrl: null, updatedAt: new Date() })
+        .where(eq(characterEarning.characterId, body.characterId));
+    } else {
+      await db.update(userActiveCosmetics)
+        .set({ profileBannerUrl: null, updatedAt: new Date() })
+        .where(eq(userActiveCosmetics.userId, target.id));
+    }
+    await recordAudit(db, {
+      actorUserId: me.id,
+      action: "profile_banner_clear",
+      targetUserId: target.id,
+      reason: body.reason ?? null,
+      metadata: body.characterId ? { characterId: body.characterId } : null,
+    });
+    return { ok: true };
+  });
+
+  /* =========================================================
+   *  POST /admin/earning/clear-typing-phrase
+   *
+   *  Twin of clear-banner above, for the Phase 5 custom typing
+   *  phrase Flair. Wipes the `typing_phrase` column on master or
+   *  on a specific character. Ownership of `flair_typing_phrase`
+   *  is retained — the user can set a (presumably policy-
+   *  compliant) phrase again afterwards.
+   *
+   *  Auditable via `typing_phrase_clear` in the audit log.
+   * ========================================================= */
+  const clearTypingPhraseBody = z.object({
+    username: z.string().min(1).max(80),
+    characterId: z.string().nullable().optional(),
+    reason: z.string().max(500).optional(),
+  }).strict();
+
+  app.post<{ Body: unknown }>("/admin/earning/clear-typing-phrase", async (req, reply) => {
+    const me = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let body: z.infer<typeof clearTypingPhraseBody>;
+    try { body = clearTypingPhraseBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const target = await resolveTargetUser(body.username);
+    if (!target) { reply.code(404); return { error: "no such user" }; }
+    if (body.characterId) {
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId })
+        .from(characters)
+        .where(eq(characters.id, body.characterId))
+        .limit(1))[0];
+      if (!c || c.userId !== target.id) {
+        reply.code(404); return { error: "no such character on this user" };
+      }
+      await db.update(characterEarning)
+        .set({ typingPhrase: null, updatedAt: new Date() })
+        .where(eq(characterEarning.characterId, body.characterId));
+    } else {
+      // Master scope writes to user_earning (NOT user_active_cosmetics
+      // — typing phrase lives on the earning row alongside other
+      // master-pool fields).
+      await db.update(userEarning)
+        .set({ typingPhrase: null, updatedAt: new Date() })
+        .where(eq(userEarning.userId, target.id));
+    }
+    await recordAudit(db, {
+      actorUserId: me.id,
+      action: "typing_phrase_clear",
+      targetUserId: target.id,
+      reason: body.reason ?? null,
+      metadata: body.characterId ? { characterId: body.characterId } : null,
+    });
+    return { ok: true };
+  });
+
+  /* =========================================================
+   *  POST /admin/earning/clear-room-presence
+   *  POST /admin/earning/clear-session-presence
+   *
+   *  Twins of clear-typing-phrase above, for the migration 0161
+   *  room-presence and session-presence Flairs. Same body shape:
+   *  username + optional characterId + optional reason. Master
+   *  scope when characterId is null; character scope when set.
+   *
+   *  Both endpoints clear BOTH templates the flair owns at once —
+   *  granular per-slot clears would be too fiddly for moderation
+   *  (the abuse case is usually "wipe all of this user's custom
+   *  presence text"; surgical per-slot is unnecessary).
+   *
+   *  session-presence is master-only; passing a characterId returns
+   *  400 since there's no character-scoped session template.
+   * ========================================================= */
+  const clearRoomPresenceBody = z.object({
+    username: z.string().min(1).max(80),
+    characterId: z.string().nullable().optional(),
+    reason: z.string().max(500).optional(),
+  }).strict();
+
+  app.post<{ Body: unknown }>("/admin/earning/clear-room-presence", async (req, reply) => {
+    const me = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let body: z.infer<typeof clearRoomPresenceBody>;
+    try { body = clearRoomPresenceBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const target = await resolveTargetUser(body.username);
+    if (!target) { reply.code(404); return { error: "no such user" }; }
+    if (body.characterId) {
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId })
+        .from(characters)
+        .where(eq(characters.id, body.characterId))
+        .limit(1))[0];
+      if (!c || c.userId !== target.id) {
+        reply.code(404); return { error: "no such character on this user" };
+      }
+      await db.update(characterEarning)
+        .set({ roomJoinTemplate: null, roomLeaveTemplate: null, updatedAt: new Date() })
+        .where(eq(characterEarning.characterId, body.characterId));
+    } else {
+      await db.update(userEarning)
+        .set({ roomJoinTemplate: null, roomLeaveTemplate: null, updatedAt: new Date() })
+        .where(eq(userEarning.userId, target.id));
+    }
+    await recordAudit(db, {
+      actorUserId: me.id,
+      action: "room_presence_clear",
+      targetUserId: target.id,
+      reason: body.reason ?? null,
+      metadata: body.characterId ? { characterId: body.characterId } : null,
+    });
+    return { ok: true };
+  });
+
+  const clearSessionPresenceBody = z.object({
+    username: z.string().min(1).max(80),
+    reason: z.string().max(500).optional(),
+  }).strict();
+
+  app.post<{ Body: unknown }>("/admin/earning/clear-session-presence", async (req, reply) => {
+    const me = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let body: z.infer<typeof clearSessionPresenceBody>;
+    try { body = clearSessionPresenceBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const target = await resolveTargetUser(body.username);
+    if (!target) { reply.code(404); return { error: "no such user" }; }
+    await db.update(userEarning)
+      .set({ sessionConnectTemplate: null, sessionExitTemplate: null, updatedAt: new Date() })
+      .where(eq(userEarning.userId, target.id));
+    await recordAudit(db, {
+      actorUserId: me.id,
+      action: "session_presence_clear",
+      targetUserId: target.id,
+      reason: body.reason ?? null,
+      metadata: null,
+    });
     return { ok: true };
   });
 }

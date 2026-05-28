@@ -21,10 +21,20 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
+import {
+  normalizePresenceTemplate,
+  validatePresenceTemplate,
+} from "@thekeep/shared";
+import {
+  extractFreeformBorderVars,
+  isValidFreeformBorderConfigKey,
+  isValidFreeformBorderConfigValue,
+  FREEFORM_CONFIG_MAX_ENTRIES,
+} from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -32,6 +42,9 @@ import { nanoid } from "nanoid";
 import {
   characterEarning,
   characterOwnedBorders,
+  characterOwnedFreeformBorders,
+  freeformBorders,
+  userOwnedFreeformBorders,
   characterOwnedNameStyles,
   characters,
   cosmetics,
@@ -55,6 +68,11 @@ import {
   ackAllForUser,
   listUnacknowledged,
 } from "../earning/notifications.js";
+import {
+  applyDiscount,
+  resolveTodayFlashSale,
+} from "../earning/flashSale.js";
+import { buildRankings } from "../earning/rankings.js";
 // creditPool is no longer called directly here — purchase endpoints
 // run their own sqlite transaction (see `runPurchaseTxn` below) for
 // atomicity. The award engine still imports it for the live earn
@@ -67,10 +85,18 @@ const patchSettingsBody = z.object({
   hideXpCount: z.boolean().optional(),
   selectedBorderRankKey: z.string().nullable().optional(),
   /**
-   * Per-identity scope for `selectedBorderRankKey`. Null/omitted
-   * writes the master's user_earning row; a character id writes
-   * that character's character_earning row. Ownership of the
-   * border is checked against the same scope's ownership table.
+   * Equip slot for a FREE-FORM border (migration 0149). Independent
+   * of `selectedBorderRankKey` — both columns can be set; the
+   * renderer prefers freeform when present. Set null to drop the
+   * freeform slot back to the rank-tier fallback.
+   */
+  selectedFreeformBorderKey: z.string().nullable().optional(),
+  /**
+   * Per-identity scope for `selectedBorderRankKey` /
+   * `selectedFreeformBorderKey`. Null/omitted writes the master's
+   * user_earning row; a character id writes that character's
+   * character_earning row. Ownership of the border is checked
+   * against the same scope's ownership table.
    */
   characterId: z.string().nullable().optional(),
 }).strict();
@@ -93,6 +119,10 @@ interface PoolView {
   maxRankKeyEverHeld: string | null;
   maxTierEverHeld: number | null;
   selectedBorderRankKey: string | null;
+  /** Freeform border equip slot — independent of the rank-tier slot.
+   *  Resolution precedence (BorderedAvatar): freeform first, rank
+   *  border as fallback. Null means no freeform border equipped. */
+  selectedFreeformBorderKey: string | null;
   /** Only emitted on master pool — character pools cascade off this flag. */
   hideCurrencyCount?: boolean;
   /** Only emitted on master pool. Mirrors hideCurrencyCount for XP. */
@@ -138,6 +168,7 @@ async function buildUserPoolView(
       maxRankKeyEverHeld: null,
       maxTierEverHeld: null,
       selectedBorderRankKey: null,
+      selectedFreeformBorderKey: null,
       hideCurrencyCount: false,
       hideXpCount: false,
     };
@@ -158,6 +189,7 @@ async function buildUserPoolView(
     maxRankKeyEverHeld: row.maxRankKeyEverHeld,
     maxTierEverHeld: row.maxTierEverHeld,
     selectedBorderRankKey: row.selectedBorderRankKey,
+    selectedFreeformBorderKey: row.selectedFreeformBorderKey,
     hideCurrencyCount: row.hideCurrencyCount,
     hideXpCount: row.hideXpCount,
   };
@@ -190,6 +222,7 @@ async function buildCharacterPoolView(
       maxRankKeyEverHeld: null,
       maxTierEverHeld: null,
       selectedBorderRankKey: null,
+      selectedFreeformBorderKey: null,
     };
   }
   const rankName = row.rankKey ? rankByKey.get(row.rankKey)?.name ?? null : null;
@@ -208,6 +241,7 @@ async function buildCharacterPoolView(
     maxRankKeyEverHeld: row.maxRankKeyEverHeld,
     maxTierEverHeld: row.maxTierEverHeld,
     selectedBorderRankKey: row.selectedBorderRankKey,
+    selectedFreeformBorderKey: row.selectedFreeformBorderKey,
   };
 }
 
@@ -291,6 +325,18 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           .from(characterOwnedBorders)
           .where(inArray(characterOwnedBorders.characterId, charIdsForOwnership))
       : [];
+    // Free-form border ownership — parallel to rank-tier borders. Two
+    // independent ledgers per the migration 0149 comment.
+    const ownedFreeformBorderRows = await db
+      .select()
+      .from(userOwnedFreeformBorders)
+      .where(eq(userOwnedFreeformBorders.userId, me.id));
+    const charOwnedFreeformBorderRows = charIdsForOwnership.length
+      ? await db
+          .select()
+          .from(characterOwnedFreeformBorders)
+          .where(inArray(characterOwnedFreeformBorders.characterId, charIdsForOwnership))
+      : [];
     const activeCosmeticsRow = (await db
       .select()
       .from(userActiveCosmetics)
@@ -308,10 +354,131 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             characterId: characterEarning.characterId,
             activeNameStyleKey: characterEarning.activeNameStyleKey,
             inlineAvatarEnabled: characterEarning.inlineAvatarEnabled,
+            profileBannerUrl: characterEarning.profileBannerUrl,
+            selectedFreeformBorderKey: characterEarning.selectedFreeformBorderKey,
+            typingPhrase: characterEarning.typingPhrase,
+            lurkingMasterEnabled: characterEarning.lurkingMasterEnabled,
+            roomJoinTemplate: characterEarning.roomJoinTemplate,
+            roomLeaveTemplate: characterEarning.roomLeaveTemplate,
           })
           .from(characterEarning)
           .where(inArray(characterEarning.characterId, charIds))
       : [];
+    // Master's typing phrase + presence templates live on user_earning
+    // (NOT user_active_cosmetics). The pool view query a few lines up
+    // already touches user_earning, but it doesn't pull these columns,
+    // so one extra single-row read here.
+    const masterEarningRow = (await db
+      .select({
+        typingPhrase: userEarning.typingPhrase,
+        roomJoinTemplate: userEarning.roomJoinTemplate,
+        roomLeaveTemplate: userEarning.roomLeaveTemplate,
+        sessionConnectTemplate: userEarning.sessionConnectTemplate,
+        sessionExitTemplate: userEarning.sessionExitTemplate,
+      })
+      .from(userEarning)
+      .where(eq(userEarning.userId, me.id))
+      .limit(1))[0];
+    // Flair-purchase ownership lookup: which identities (master +
+    // characters) have bought `flair_profile_banner` from the
+    // earning ledger? Used by the Flair tab to gate the "Set
+    // banner URL" form behind a purchase, and by the per-identity
+    // dropdown so an admin who cleared one identity's URL doesn't
+    // see "Buy" on an identity that already owns it. One query
+    // covers both scopes via an OR.
+    const bannerOwnerRows = await db
+      .select({
+        scope: earningLedger.scope,
+        ownerId: earningLedger.ownerId,
+      })
+      .from(earningLedger)
+      .where(and(
+        eq(earningLedger.reason, "purchase_flair_profile_banner"),
+        or(
+          and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
+          ...(charIds.length > 0
+            ? [and(eq(earningLedger.scope, "character"), inArray(earningLedger.ownerId, charIds))]
+            : []),
+        ),
+      ));
+    const masterOwnsBanner = bannerOwnerRows.some((r) => r.scope === "user");
+    const characterBannerOwnership = new Set(
+      bannerOwnerRows.filter((r) => r.scope === "character").map((r) => r.ownerId),
+    );
+    // Same shape, for the Phase 5 typing-phrase Flair. Twin lookup
+    // against `purchase_flair_typing_phrase` ledger rows.
+    const typingPhraseOwnerRows = await db
+      .select({
+        scope: earningLedger.scope,
+        ownerId: earningLedger.ownerId,
+      })
+      .from(earningLedger)
+      .where(and(
+        eq(earningLedger.reason, "purchase_flair_typing_phrase"),
+        or(
+          and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
+          ...(charIds.length > 0
+            ? [and(eq(earningLedger.scope, "character"), inArray(earningLedger.ownerId, charIds))]
+            : []),
+        ),
+      ));
+    const masterOwnsTypingPhrase = typingPhraseOwnerRows.some((r) => r.scope === "user");
+    const characterTypingPhraseOwnership = new Set(
+      typingPhraseOwnerRows.filter((r) => r.scope === "character").map((r) => r.ownerId),
+    );
+    // Phase 6 — Lurking Master Flair. Same ownership-lookup shape
+    // as the banner / typing-phrase rows above.
+    const lurkingOwnerRows = await db
+      .select({
+        scope: earningLedger.scope,
+        ownerId: earningLedger.ownerId,
+      })
+      .from(earningLedger)
+      .where(and(
+        eq(earningLedger.reason, "purchase_flair_lurking_master"),
+        or(
+          and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
+          ...(charIds.length > 0
+            ? [and(eq(earningLedger.scope, "character"), inArray(earningLedger.ownerId, charIds))]
+            : []),
+        ),
+      ));
+    const masterOwnsLurking = lurkingOwnerRows.some((r) => r.scope === "user");
+    const characterLurkingOwnership = new Set(
+      lurkingOwnerRows.filter((r) => r.scope === "character").map((r) => r.ownerId),
+    );
+    // Phase 7 (migration 0161) — room-presence Flair ownership. Same
+    // lookup shape; gates the Flair tab's "Custom Room Entrance"
+    // editor + the broadcaster's template substitution.
+    const roomPresenceOwnerRows = await db
+      .select({
+        scope: earningLedger.scope,
+        ownerId: earningLedger.ownerId,
+      })
+      .from(earningLedger)
+      .where(and(
+        eq(earningLedger.reason, "purchase_flair_room_presence"),
+        or(
+          and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
+          ...(charIds.length > 0
+            ? [and(eq(earningLedger.scope, "character"), inArray(earningLedger.ownerId, charIds))]
+            : []),
+        ),
+      ));
+    const masterOwnsRoomPresence = roomPresenceOwnerRows.some((r) => r.scope === "user");
+    const characterRoomPresenceOwnership = new Set(
+      roomPresenceOwnerRows.filter((r) => r.scope === "character").map((r) => r.ownerId),
+    );
+    // Session-presence is master-only — no character lookup needed.
+    const masterOwnsSessionPresence = (await db
+      .select({ ownerId: earningLedger.ownerId })
+      .from(earningLedger)
+      .where(and(
+        eq(earningLedger.reason, "purchase_flair_session_presence"),
+        eq(earningLedger.scope, "user"),
+        eq(earningLedger.ownerId, me.id),
+      ))
+      .limit(1)).length > 0;
     // Bundle every ENABLED name style on this response so the client
     // can inject the CSS + template lookup map once on app load
     // without a separate /earning/catalog fetch. Disabled rows are
@@ -326,6 +493,16 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .from(nameStyles)
       .where(eq(nameStyles.enabled, true))
       .orderBy(asc(nameStyles.order));
+
+    // Free-form borders catalog. Same enabled-only filter as name
+    // styles — disabled rows still resolve on the renderer side
+    // (owned but admin-disabled rows keep displaying), but they're
+    // hidden from the buy list.
+    const freeformBorderRows = await db
+      .select()
+      .from(freeformBorders)
+      .where(eq(freeformBorders.enabled, true))
+      .orderBy(asc(freeformBorders.order));
 
     // Items catalog. We ship ALL items (enabled or not) so the
     // inventory view can still resolve display data for items the
@@ -449,6 +626,23 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           isBuiltin: !!r.isBuiltin,
           order: r.order,
         })),
+        // Free-form borders catalog — shipped alongside name styles so
+        // the client can inject any template+CSS rows once on the
+        // dashboard open. `image_url` rows render as overlay <img>;
+        // `template`+`style_css` rows feed the catalog CSS injector
+        // (mirror of the name-style injector).
+        freeformBorders: freeformBorderRows.map((r) => ({
+          key: r.key,
+          name: r.name,
+          description: r.description,
+          imageUrl: r.imageUrl,
+          template: r.template,
+          styleCss: r.styleCss,
+          rarity: r.rarity,
+          cost: r.cost,
+          isBuiltin: !!r.isBuiltin,
+          order: r.order,
+        })),
         items: itemCatalog,
       },
       // Master-only owned lists (unchanged shape for back-compat).
@@ -461,6 +655,15 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         rankKey: r.rankKey,
         acquiredAt: +r.acquiredAt,
       })),
+      ownedFreeformBorders: ownedFreeformBorderRows.map((r) => ({
+        borderKey: r.borderKey,
+        // Per-identity color customization (migration 0158). JSON
+        // string keyed by var-name without the `--c-` prefix; the
+        // client parses + filters against the catalog's declared
+        // var set when rendering.
+        configJson: r.configJson,
+        acquiredAt: +r.acquiredAt,
+      })),
       // Per-character owned lists, keyed by character id. Each entry
       // mirrors the master shape. Empty maps when the character
       // hasn't purchased anything from their own pool yet.
@@ -471,6 +674,11 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       })),
       ownedBordersByCharacter: groupByCharacter(charOwnedBorderRows, (r) => ({
         rankKey: r.rankKey,
+        acquiredAt: +r.acquiredAt,
+      })),
+      ownedFreeformBordersByCharacter: groupByCharacter(charOwnedFreeformBorderRows, (r) => ({
+        borderKey: r.borderKey,
+        configJson: r.configJson,
         acquiredAt: +r.acquiredAt,
       })),
       // Per-identity inventory. `inventory` is the master/OOC pool;
@@ -498,6 +706,34 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         // identity tab.
         inlineAvatarEnabled: !!activeCosmeticsRow?.inlineAvatarEnabled,
         activeNameStyleKey: activeCosmeticsRow?.activeNameStyleKey ?? null,
+        // Profile-banner URL for master/OOC. Null = no banner. Gated
+        // server-side by the `flair_profile_banner` purchase; the
+        // column is only writable through PATCH /earning/me/banner.
+        profileBannerUrl: activeCosmeticsRow?.profileBannerUrl ?? null,
+        profileBannerOwned: masterOwnsBanner,
+        // Phase 5 custom typing phrase — same per-identity pattern
+        // as the banner. Null phrase = use the default "is typing…"
+        // suffix. The Flair tab uses `typingPhraseOwned` to gate
+        // the editor between "Buy" and "Set phrase".
+        typingPhrase: masterEarningRow?.typingPhrase ?? null,
+        typingPhraseOwned: masterOwnsTypingPhrase,
+        // Phase 6 Lurking Master Flair — when true, the typing
+        // indicator hides this user from non-admin receivers.
+        lurkingMasterEnabled: !!activeCosmeticsRow?.lurkingMasterEnabled,
+        lurkingMasterOwned: masterOwnsLurking,
+        // Phase 7 (migration 0161) — custom room-presence templates
+        // for the master/OOC identity. The Flair tab uses
+        // `roomPresenceOwned` to gate the editor between Buy / Set;
+        // the broadcaster reads these column values to substitute
+        // into the join/leave system lines.
+        roomJoinTemplate: masterEarningRow?.roomJoinTemplate ?? null,
+        roomLeaveTemplate: masterEarningRow?.roomLeaveTemplate ?? null,
+        roomPresenceOwned: masterOwnsRoomPresence,
+        // Session-presence (master only). No per-character mirror —
+        // characters are sub-identities of the account session.
+        sessionConnectTemplate: masterEarningRow?.sessionConnectTemplate ?? null,
+        sessionExitTemplate: masterEarningRow?.sessionExitTemplate ?? null,
+        sessionPresenceOwned: masterOwnsSessionPresence,
         // Per-character slots, keyed by character id. Each entry
         // mirrors the master shape. Characters without an earning
         // row get null/false defaults so the client can read them
@@ -508,6 +744,16 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             {
               activeNameStyleKey: r.activeNameStyleKey,
               inlineAvatarEnabled: !!r.inlineAvatarEnabled,
+              profileBannerUrl: r.profileBannerUrl ?? null,
+              profileBannerOwned: characterBannerOwnership.has(r.characterId),
+              selectedFreeformBorderKey: r.selectedFreeformBorderKey ?? null,
+              typingPhrase: r.typingPhrase ?? null,
+              typingPhraseOwned: characterTypingPhraseOwnership.has(r.characterId),
+              lurkingMasterEnabled: !!r.lurkingMasterEnabled,
+              lurkingMasterOwned: characterLurkingOwnership.has(r.characterId),
+              roomJoinTemplate: r.roomJoinTemplate ?? null,
+              roomLeaveTemplate: r.roomLeaveTemplate ?? null,
+              roomPresenceOwned: characterRoomPresenceOwnership.has(r.characterId),
             },
           ]),
         ),
@@ -537,6 +783,25 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     const isSelf = me?.id === target.id;
     const showCurrency = !view.hideCurrencyCount || isSelf;
     const showXp = !view.hideXpCount || isSelf;
+    // Hero portrait on the public profile renders the user's
+    // free-form border with their per-identity color customization;
+    // pull the ownership row's configJson when the master pool has
+    // a freeform border equipped. Char-scope customizations aren't
+    // surfaced here — the public profile shows the MASTER identity
+    // (chat lines/userlist use the broadcast.ts feed which already
+    // resolves per-occupant config).
+    let freeformBorderConfigJson: string | null = null;
+    if (view.selectedFreeformBorderKey) {
+      const row = (await db
+        .select({ configJson: userOwnedFreeformBorders.configJson })
+        .from(userOwnedFreeformBorders)
+        .where(and(
+          eq(userOwnedFreeformBorders.userId, target.id),
+          eq(userOwnedFreeformBorders.borderKey, view.selectedFreeformBorderKey),
+        ))
+        .limit(1))[0];
+      freeformBorderConfigJson = row?.configJson ?? null;
+    }
     return {
       userId: target.id,
       username: target.username,
@@ -551,7 +816,20 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       tierLabel: view.tierLabel,
       sigilImageUrl: view.sigilImageUrl,
       selectedBorderRankKey: view.selectedBorderRankKey,
+      selectedFreeformBorderKey: view.selectedFreeformBorderKey,
+      freeformBorderConfigJson,
     };
+  });
+
+  /**
+   * Public leaderboards across the nine earning boards. No auth —
+   * the dashboard's Rankings tab paints this for anyone with the
+   * modal open. Per-pool privacy filters (`hideCurrencyCount`,
+   * `hideXpCount`, `users.isPublic = false`, soft-delete) live
+   * inside the engine so each board enforces its own gates.
+   */
+  app.get("/earning/rankings", async () => {
+    return await buildRankings(db);
   });
 
   /**
@@ -667,6 +945,32 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           .set({ selectedBorderRankKey: value, updatedAt: new Date() })
           .where(eq(characterEarning.characterId, characterId));
       }
+      if (body.selectedFreeformBorderKey !== undefined) {
+        let value: string | null = null;
+        if (body.selectedFreeformBorderKey !== null) {
+          // Ownership check against character_owned_freeform_borders.
+          // Master's ownership doesn't satisfy — borders here are
+          // per-identity even when the underlying catalog row is the
+          // same. Same per-identity partition as rank-tier borders.
+          const owned = (await db
+            .select()
+            .from(characterOwnedFreeformBorders)
+            .where(and(
+              eq(characterOwnedFreeformBorders.characterId, characterId),
+              eq(characterOwnedFreeformBorders.borderKey, body.selectedFreeformBorderKey),
+            ))
+            .limit(1))[0];
+          if (!owned) {
+            reply.code(403);
+            return { error: "this character doesn't own that border" };
+          }
+          value = body.selectedFreeformBorderKey;
+        }
+        await db
+          .update(characterEarning)
+          .set({ selectedFreeformBorderKey: value, updatedAt: new Date() })
+          .where(eq(characterEarning.characterId, characterId));
+      }
       await rebroadcastPresenceForUser(me.id);
       return { ok: true };
     }
@@ -697,6 +1001,25 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         update.selectedBorderRankKey = body.selectedBorderRankKey;
       }
     }
+    if (body.selectedFreeformBorderKey !== undefined) {
+      if (body.selectedFreeformBorderKey === null) {
+        update.selectedFreeformBorderKey = null;
+      } else {
+        const owned = (await db
+          .select()
+          .from(userOwnedFreeformBorders)
+          .where(and(
+            eq(userOwnedFreeformBorders.userId, me.id),
+            eq(userOwnedFreeformBorders.borderKey, body.selectedFreeformBorderKey),
+          ))
+          .limit(1))[0];
+        if (!owned) {
+          reply.code(403);
+          return { error: "you don't own that border" };
+        }
+        update.selectedFreeformBorderKey = body.selectedFreeformBorderKey;
+      }
+    }
     if (Object.keys(update).length === 1) return { ok: true }; // only updatedAt — nothing to do
     await db.update(userEarning).set(update).where(eq(userEarning.userId, me.id));
     // Border equip changes the bordered-avatar rendering on every line
@@ -705,7 +1028,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     // affect the dashboard view (not occupants), so the broadcast is a
     // no-op for those — cheap regardless since the function early-exits
     // when the user has no live sockets.
-    if (body.selectedBorderRankKey !== undefined) {
+    if (body.selectedBorderRankKey !== undefined || body.selectedFreeformBorderKey !== undefined) {
       await rebroadcastPresenceForUser(me.id);
     }
     return { ok: true };
@@ -781,6 +1104,84 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         config: r.configJson ? safeParse(r.configJson) : null,
       })),
       items: itemRows.map((r) => shapeItemCatalogRow(r, nowMs)),
+    };
+  });
+
+  /**
+   * GET /earning/flash-sale
+   *
+   * Today's flash-sale picks across all categories, with the
+   * effective discount % per pick and a hydrated catalog snippet
+   * so the client can render the Overview section without a
+   * second fetch (name + base price → discounted price). Anonymous
+   * callers get the same payload — sale info is public so the
+   * "Currency 25% off Embers today" banner can show on the splash.
+   *
+   * The resolver lazily writes today's row on first read, so this
+   * endpoint is the canonical "kick off rollover" path. Calls are
+   * cheap (single row read on the warm path).
+   */
+  app.get("/earning/flash-sale", async () => {
+    const sale = await resolveTodayFlashSale(db);
+    // Hydrate, but only surface rows the user can actually buy right
+    // now. Admin overrides win at PICK time (intent over availability),
+    // but if the admin then disables the picked row mid-day, the user
+    // shouldn't see "Embers on sale!" with a Buy button that'd 404 on
+    // click. Same gate the purchase path uses (enabled / for_sale /
+    // sale window).
+    const nowMs = Date.now();
+    const styleRow = sale.nameStyleKey
+      ? (await db.select().from(nameStyles).where(eq(nameStyles.key, sale.nameStyleKey)).limit(1))[0] ?? null
+      : null;
+    const styleBuyable = !!styleRow && styleRow.enabled && styleRow.cost > 0;
+    const itemRow = sale.itemKey
+      ? (await db.select().from(items).where(eq(items.key, sale.itemKey)).limit(1))[0] ?? null
+      : null;
+    const itemBuyable = !!itemRow
+      && itemRow.enabled
+      && itemRow.forSale
+      && itemRow.price > 0
+      && (!itemRow.saleStartsAt || +itemRow.saleStartsAt <= nowMs)
+      && (!itemRow.saleEndsAt || +itemRow.saleEndsAt > nowMs);
+    const cosmeticRow = sale.cosmeticKey
+      ? (await db.select().from(cosmetics).where(eq(cosmetics.key, sale.cosmeticKey)).limit(1))[0] ?? null
+      : null;
+    const cosmeticBuyable = !!cosmeticRow && cosmeticRow.enabled && cosmeticRow.cost > 0;
+    const freeformBorderRow = sale.freeformBorderKey
+      ? (await db.select().from(freeformBorders).where(eq(freeformBorders.key, sale.freeformBorderKey)).limit(1))[0] ?? null
+      : null;
+    const freeformBorderBuyable = !!freeformBorderRow && freeformBorderRow.enabled && freeformBorderRow.cost > 0;
+    return {
+      forDate: sale.forDate,
+      nameStyle: styleBuyable && styleRow ? {
+        key: styleRow.key,
+        name: styleRow.name,
+        basePrice: styleRow.cost,
+        salePrice: applyDiscount(styleRow.cost, sale.nameStyleDiscountPct),
+        discountPct: sale.nameStyleDiscountPct,
+      } : null,
+      item: itemBuyable && itemRow ? {
+        key: itemRow.key,
+        name: itemRow.name,
+        iconUrl: itemRow.iconUrl,
+        basePrice: itemRow.price,
+        salePrice: applyDiscount(itemRow.price, sale.itemDiscountPct),
+        discountPct: sale.itemDiscountPct,
+      } : null,
+      cosmetic: cosmeticBuyable && cosmeticRow ? {
+        key: cosmeticRow.key,
+        name: cosmeticRow.name,
+        basePrice: cosmeticRow.cost,
+        salePrice: applyDiscount(cosmeticRow.cost, sale.cosmeticDiscountPct),
+        discountPct: sale.cosmeticDiscountPct,
+      } : null,
+      freeformBorder: freeformBorderBuyable && freeformBorderRow ? {
+        key: freeformBorderRow.key,
+        name: freeformBorderRow.name,
+        basePrice: freeformBorderRow.cost,
+        salePrice: applyDiscount(freeformBorderRow.cost, sale.freeformBorderDiscountPct),
+        discountPct: sale.freeformBorderDiscountPct,
+      } : null,
     };
   });
 
@@ -861,6 +1262,11 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         }
       }
 
+      // Resolve today's flash sale OUTSIDE the txn (resolveTodayFlashSale
+      // may lazy-insert the day's row, which has to be async). Inside
+      // validate() the lookup against this snapshot is a pure compare —
+      // if the user is buying today's pick, the discount applies.
+      const flashSale = await resolveTodayFlashSale(db);
       // Entire purchase runs in one sqlite transaction so the funds
       // check, ownership insert, currency debit, and ledger insert
       // can't race. Per-identity scope routes to the right ownership
@@ -884,7 +1290,15 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             )).limit(1).all()[0];
             if (already) return { ok: false, status: 409, error: "already owned" };
           }
-          return { ok: true, cost: style.cost };
+          // Flash-sale discount: only when this exact key is today's
+          // pick. Server-authoritative — the client's "Buy" button
+          // shows the discounted price for UX, but the actual cost
+          // is recomputed here so a stale client can't claim a
+          // discount on a row that isn't on sale.
+          const cost = flashSale.nameStyleKey === req.params.key
+            ? applyDiscount(style.cost, flashSale.nameStyleDiscountPct)
+            : style.cost;
+          return { ok: true, cost };
         },
         grant: (tx) => {
           if (characterId) {
@@ -1133,17 +1547,36 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     characterId: z.string().nullable().optional(),
   }).strict().optional();
 
+  /**
+   * Cosmetic keys this endpoint accepts. `rank_border` is the
+   * placeholder row whose purchase goes through the per-rank border
+   * endpoint instead (price lives on rank_tiers.borderCost), so it's
+   * intentionally excluded here. Adding a new purchasable Flair
+   * cosmetic = add its key here and decide whether it needs a
+   * grant-side side-effect in the switch below.
+   */
+  /** Cosmetics buyable through the standard /earning/me/cosmetics/
+   *  :key/purchase endpoint. Each one is a ONE-TIME unlock —
+   *  re-purchase returns 409. `flair_reaction_sheet` is NOT in
+   *  this set on purpose: each submission re-pays via its own
+   *  endpoint (POST /me/emoticon-submissions), so the standard
+   *  endpoint's "already owned" check would lock out the second
+   *  submission. */
+  const PURCHASABLE_COSMETIC_KEYS = new Set<string>([
+    "inline_avatar",
+    "flair_profile_banner",
+    "flair_typing_phrase",
+    "flair_lurking_master",
+    "flair_room_presence",
+    "flair_session_presence",
+  ]);
+
   app.post<{ Params: { key: string }; Body: unknown }>(
     "/earning/me/cosmetics/:key/purchase",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
       if (!me) { reply.code(401); return { error: "auth" }; }
-      // Only the cosmetics that ship in Phase 4 are buyable through
-      // this endpoint. `rank_border` is a placeholder row in the
-      // cosmetics table — the actual purchase goes through the
-      // border-specific endpoint below because pricing lives on
-      // rank_tiers.borderCost.
-      if (req.params.key !== "inline_avatar") {
+      if (!PURCHASABLE_COSMETIC_KEYS.has(req.params.key)) {
         reply.code(404);
         return { error: "unknown cosmetic key" };
       }
@@ -1162,6 +1595,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           return { error: "not your character" };
         }
       }
+      const flashSale = await resolveTodayFlashSale(db);
       const outcome = runPurchaseTxn(db, me.id, {
         characterId,
         validate: (tx) => {
@@ -1182,12 +1616,23 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
                 eq(earningLedger.reason, `purchase_${req.params.key}`),
               )).limit(1).all()[0];
           if (existingPurchase) return { ok: false, status: 409, error: "already owned" };
-          return { ok: true, cost: cosmetic.cost };
+          // Flash-sale discount when this cosmetic is today's pick.
+          const cost = flashSale.cosmeticKey === req.params.key
+            ? applyDiscount(cosmetic.cost, flashSale.cosmeticDiscountPct)
+            : cosmetic.cost;
+          return { ok: true, cost };
         },
         grant: (tx) => {
-          // Auto-enable on first purchase, writing to the right
-          // identity's slot (character_earning when character-scoped,
-          // user_active_cosmetics for master/OOC).
+          // Side-effect on first purchase depends on the cosmetic:
+          //   - inline_avatar  → auto-enable the toggle so the cosmetic
+          //                      is visible immediately (no second click
+          //                      to equip).
+          //   - flair_profile_banner → just record the purchase via the
+          //                      ledger; URL slot stays null until the
+          //                      user pastes one via PATCH /earning/me/banner.
+          //                      No row-state change needed beyond the
+          //                      ledger insert that `runPurchaseTxn` does.
+          if (req.params.key !== "inline_avatar") return;
           if (characterId) {
             tx.insert(characterEarning).values({ characterId, inlineAvatarEnabled: true }).onConflictDoUpdate({
               target: characterEarning.characterId,
@@ -1230,15 +1675,46 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     },
   );
 
+  /** Cosmetic keys that have an "on/off" per-identity toggle on
+   *  either `user_active_cosmetics` or `character_earning`. Each
+   *  one routes to its own column via TOGGLE_COLUMN_BY_KEY below.
+   *  Adding a new toggle-style Flair cosmetic = add the key here
+   *  + the column descriptor below + the migration that creates
+   *  the column. The equip endpoint validates membership before
+   *  doing anything. */
+  const TOGGLEABLE_COSMETIC_KEYS = new Set<string>([
+    "inline_avatar",
+    "flair_lurking_master",
+  ]);
+
+  /** Column mapping for each toggleable cosmetic. The master row
+   *  field lives on `user_active_cosmetics`; the per-character
+   *  field on `character_earning`. */
+  const TOGGLE_COLUMNS: Record<string, {
+    masterField: "inlineAvatarEnabled" | "lurkingMasterEnabled";
+    characterField: "inlineAvatarEnabled" | "lurkingMasterEnabled";
+  }> = {
+    inline_avatar: {
+      masterField: "inlineAvatarEnabled",
+      characterField: "inlineAvatarEnabled",
+    },
+    flair_lurking_master: {
+      masterField: "lurkingMasterEnabled",
+      characterField: "lurkingMasterEnabled",
+    },
+  };
+
   app.post<{ Params: { key: string }; Body: unknown }>(
     "/earning/me/cosmetics/:key/equip",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
       if (!me) { reply.code(401); return { error: "auth" }; }
-      if (req.params.key !== "inline_avatar") {
+      const key = req.params.key;
+      if (!TOGGLEABLE_COSMETIC_KEYS.has(key)) {
         reply.code(404);
         return { error: "unknown cosmetic key" };
       }
+      const cols = TOGGLE_COLUMNS[key]!;
       let body: z.infer<typeof equipCosmeticBody>;
       try { body = equipCosmeticBody.parse(req.body); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1254,19 +1730,19 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           reply.code(403);
           return { error: "not your character" };
         }
-        if (body.enabled && !(await hasPurchased("character", body.characterId, req.params.key))) {
+        if (body.enabled && !(await hasPurchased("character", body.characterId, key))) {
           reply.code(403);
           return { error: "this character hasn't purchased it" };
         }
         await db
           .insert(characterEarning)
-          .values({ characterId: c.id, inlineAvatarEnabled: body.enabled })
+          .values({ characterId: c.id, [cols.characterField]: body.enabled })
           .onConflictDoUpdate({
             target: characterEarning.characterId,
-            set: { inlineAvatarEnabled: body.enabled, updatedAt: new Date() },
+            set: { [cols.characterField]: body.enabled, updatedAt: new Date() },
           });
       } else {
-        if (body.enabled && !(await hasPurchased("user", me.id, req.params.key))) {
+        if (body.enabled && !(await hasPurchased("user", me.id, key))) {
           reply.code(403);
           return { error: "purchase required" };
         }
@@ -1277,22 +1753,402 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           .limit(1))[0];
         if (existing) {
           await db.update(userActiveCosmetics)
-            .set({ inlineAvatarEnabled: body.enabled, updatedAt: new Date() })
+            .set({ [cols.masterField]: body.enabled, updatedAt: new Date() })
             .where(eq(userActiveCosmetics.userId, me.id));
         } else {
           await db.insert(userActiveCosmetics).values({
             userId: me.id,
-            inlineAvatarEnabled: body.enabled,
+            [cols.masterField]: body.enabled,
           });
         }
       }
       // Toggle changes whether the avatar tile renders next to the
       // user's name on every chat line — peers need a fresh occupant
       // snapshot or the change waits until the next presence event.
+      // (Lurking Master doesn't affect occupants directly — its
+      // effect is on the typing-indicator broadcast — but
+      // rebroadcasting is harmless and keeps the code path uniform.)
       await rebroadcastPresenceForUser(me.id);
       return { ok: true };
     },
   );
+
+  /* =========================================================
+   *  Profile Banner — set / clear the URL slot
+   *
+   *  Gated by ownership of the `flair_profile_banner` cosmetic on
+   *  the identity being written. Per-identity: master writes its own
+   *  banner URL onto `user_active_cosmetics.profile_banner_url`,
+   *  character writes onto `character_earning.profile_banner_url`.
+   *
+   *  Validation:
+   *    - URL must be empty (clears) or absolute http/https
+   *    - HEAD-sniff content-type begins with `image/` (soft check;
+   *      5s timeout, network failure does NOT block — many image
+   *      hosts reject HEAD or hot-link checks, and we'd rather let
+   *      the user equip a working image than fail closed on a
+   *      finicky CDN).
+   *    - Length capped at 1024 so a malformed paste can't bloat the
+   *      row.
+   *
+   *  Returns the post-write URL so the client can update store
+   *  optimistically and discover any server-side normalization.
+   * ========================================================= */
+
+  const setBannerBody = z.object({
+    /** Null or empty string clears the slot. Otherwise absolute http(s) URL. */
+    url: z.string().max(1024).nullable(),
+    /** Per-identity scope: null = master/OOC, character id = that character's banner. */
+    characterId: z.string().nullable().optional(),
+  }).strict();
+
+  app.patch<{ Body: unknown }>("/earning/me/banner", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let body: z.infer<typeof setBannerBody>;
+    try { body = setBannerBody.parse(req.body); }
+    catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+    const characterId = body.characterId ?? null;
+    if (characterId) {
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+        .from(characters)
+        .where(eq(characters.id, characterId))
+        .limit(1))[0];
+      if (!c || c.userId !== me.id || c.deletedAt) {
+        reply.code(403);
+        return { error: "not your character" };
+      }
+    }
+    // Trim + normalize. Empty string and null both mean "clear".
+    const trimmed = (body.url ?? "").trim();
+    const final: string | null = trimmed.length === 0 ? null : trimmed;
+    if (final !== null) {
+      // Cheap shape check before we even consider the network sniff —
+      // bare paths, javascript:, data:, and other non-http URLs are
+      // rejected here so we don't hand them to the URL parser at all.
+      if (!/^https?:\/\//i.test(final)) {
+        reply.code(400);
+        return { error: "banner URL must start with http:// or https://" };
+      }
+      // Ownership gate is required only when SETTING (not clearing).
+      // A user who lost the cosmetic via admin revoke can still clear
+      // their stale banner; they just can't set a new one.
+      const scope: "user" | "character" = characterId ? "character" : "user";
+      const ownerId = characterId ?? me.id;
+      if (!(await hasPurchased(scope, ownerId, "flair_profile_banner"))) {
+        reply.code(403);
+        return { error: "purchase 'Custom Profile Banner' to set a banner URL" };
+      }
+      // Soft content-type sniff. Best-effort: failed fetch is treated
+      // as "let it through" because many image hosts (S3, Cloudinary,
+      // some CDNs) reject HEAD with 405 or return no content-type.
+      // The eventual `<img>` render fails gracefully if the URL isn't
+      // actually an image, so this gate is for clearly-non-image
+      // mistakes (text/html, application/json) more than a security
+      // boundary.
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        const r = await fetch(final, { method: "HEAD", signal: controller.signal, redirect: "follow" });
+        clearTimeout(timer);
+        const ct = r.headers.get("content-type") ?? "";
+        if (r.ok && ct && !ct.startsWith("image/")) {
+          reply.code(400);
+          return { error: `URL doesn't appear to be an image (Content-Type: ${ct})` };
+        }
+      } catch {
+        // Network blip, CORS, abort, server hates HEAD — allow.
+      }
+    }
+    if (characterId) {
+      await db
+        .insert(characterEarning)
+        .values({ characterId, profileBannerUrl: final })
+        .onConflictDoUpdate({
+          target: characterEarning.characterId,
+          set: { profileBannerUrl: final, updatedAt: new Date() },
+        });
+    } else {
+      const existing = (await db
+        .select()
+        .from(userActiveCosmetics)
+        .where(eq(userActiveCosmetics.userId, me.id))
+        .limit(1))[0];
+      if (existing) {
+        await db.update(userActiveCosmetics)
+          .set({ profileBannerUrl: final, updatedAt: new Date() })
+          .where(eq(userActiveCosmetics.userId, me.id));
+      } else {
+        await db.insert(userActiveCosmetics).values({
+          userId: me.id,
+          profileBannerUrl: final,
+        });
+      }
+    }
+    return { ok: true, url: final };
+  });
+
+  /* =========================================================
+   *  Custom Typing Phrase — set / clear the phrase slot
+   *
+   *  Twin of the banner endpoint above. Gated by ownership of
+   *  `flair_typing_phrase` on the identity being written. Per-
+   *  identity: master writes onto `user_earning.typing_phrase`,
+   *  character writes onto `character_earning.typing_phrase`.
+   *
+   *  Validation:
+   *    - Empty / null clears the slot.
+   *    - Non-empty trimmed length must be 1..60 chars.
+   *    - Linebreaks, NUL, and other control characters are
+   *      stripped (the indicator strip is a single inline run).
+   *    - No HTML — the renderer text-escapes everything.
+   *
+   *  Returns the post-write phrase so the client can update store
+   *  optimistically and discover any server-side normalization
+   *  (trimming, control-char strip).
+   * ========================================================= */
+
+  /** Hard cap. Indicator strip width starts to break around 60 chars
+   *  on mobile; better to enforce here than rely on CSS truncation. */
+  const TYPING_PHRASE_MAX = 60;
+
+  const setTypingPhraseBody = z.object({
+    /** Null or empty/whitespace string clears the slot. */
+    phrase: z.string().max(200).nullable(),
+    /** Per-identity scope: null = master/OOC, character id = that character's phrase. */
+    characterId: z.string().nullable().optional(),
+  }).strict();
+
+  app.patch<{ Body: unknown }>("/earning/me/typing-phrase", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let body: z.infer<typeof setTypingPhraseBody>;
+    try { body = setTypingPhraseBody.parse(req.body); }
+    catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+    const characterId = body.characterId ?? null;
+    if (characterId) {
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+        .from(characters)
+        .where(eq(characters.id, characterId))
+        .limit(1))[0];
+      if (!c || c.userId !== me.id || c.deletedAt) {
+        reply.code(403);
+        return { error: "not your character" };
+      }
+    }
+    // Normalize. Trim outer whitespace, strip control chars + line
+    // breaks (the indicator is single-line), collapse interior runs
+    // of whitespace so a pasted multi-space string doesn't smear.
+    // Empty after normalization == clear.
+    const raw = body.phrase ?? "";
+    const cleaned = raw
+      .replace(/[ -]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const final: string | null = cleaned.length === 0 ? null : cleaned;
+    if (final !== null) {
+      if (final.length > TYPING_PHRASE_MAX) {
+        reply.code(400);
+        return { error: `phrase must be ${TYPING_PHRASE_MAX} characters or fewer` };
+      }
+      // Ownership gate only when SETTING (clearing is always allowed
+      // — a user whose flair was revoked can still drop their stale
+      // phrase). Same pattern as the banner.
+      const scope: "user" | "character" = characterId ? "character" : "user";
+      const ownerId = characterId ?? me.id;
+      if (!(await hasPurchased(scope, ownerId, "flair_typing_phrase"))) {
+        reply.code(403);
+        return { error: "purchase 'Custom Typing Phrase' to set a custom phrase" };
+      }
+    }
+    if (characterId) {
+      await db
+        .insert(characterEarning)
+        .values({ characterId, typingPhrase: final })
+        .onConflictDoUpdate({
+          target: characterEarning.characterId,
+          set: { typingPhrase: final, updatedAt: new Date() },
+        });
+    } else {
+      await db
+        .insert(userEarning)
+        .values({ userId: me.id, typingPhrase: final })
+        .onConflictDoUpdate({
+          target: userEarning.userId,
+          set: { typingPhrase: final, updatedAt: new Date() },
+        });
+    }
+    return { ok: true, phrase: final };
+  });
+
+  /* =========================================================
+   *  Presence broadcast templates (migration 0161).
+   *
+   *  Two endpoints — one per Flair — each accepting an OPTIONAL
+   *  partial update of the pair it owns. Omit a field to leave that
+   *  slot unchanged; pass null to clear it (renderer falls back to
+   *  the default phrasing). Pass a non-empty string to set.
+   *
+   *  Ownership gate fires only on the SET path; clearing is always
+   *  allowed so a revoked-flair user can drop their stale templates
+   *  without a "purchase first to clear" gotcha. Same pattern the
+   *  banner / typing-phrase clears use.
+   * ========================================================= */
+
+  /** Local helper — apply the shared validator + normalizer to a
+   *  single field. `undefined` means "field omitted in body"; `null`
+   *  means "clear the slot"; a string means "validate + normalize +
+   *  set". Returns the resolved value or an error string. */
+  function resolvePresenceTemplateField(
+    raw: string | null | undefined,
+  ): { ok: true; value: string | null | undefined } | { ok: false; error: string } {
+    if (raw === undefined) return { ok: true, value: undefined };
+    if (raw === null) return { ok: true, value: null };
+    const normalized = normalizePresenceTemplate(raw);
+    if (normalized === null) return { ok: true, value: null };
+    const err = validatePresenceTemplate(normalized);
+    if (err) return { ok: false, error: err };
+    return { ok: true, value: normalized };
+  }
+
+  const setRoomPresenceBody = z.object({
+    joinTemplate: z.string().max(500).nullable().optional(),
+    leaveTemplate: z.string().max(500).nullable().optional(),
+    /** Per-identity scope: null = master/OOC slot, character id =
+     *  that character's templates. Matches the typing-phrase scope. */
+    characterId: z.string().nullable().optional(),
+  }).strict();
+
+  app.patch<{ Body: unknown }>("/earning/me/room-presence", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let body: z.infer<typeof setRoomPresenceBody>;
+    try { body = setRoomPresenceBody.parse(req.body); }
+    catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+    const characterId = body.characterId ?? null;
+    if (characterId) {
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+        .from(characters)
+        .where(eq(characters.id, characterId))
+        .limit(1))[0];
+      if (!c || c.userId !== me.id || c.deletedAt) {
+        reply.code(403); return { error: "not your character" };
+      }
+    }
+    const join = resolvePresenceTemplateField(body.joinTemplate);
+    if (!join.ok) { reply.code(400); return { error: `joinTemplate: ${join.error}` }; }
+    const leave = resolvePresenceTemplateField(body.leaveTemplate);
+    if (!leave.ok) { reply.code(400); return { error: `leaveTemplate: ${leave.error}` }; }
+    // Ownership gate only when SETTING at least one slot to a non-null
+    // value. A user whose flair was revoked can still pass nulls to
+    // clear their stale templates.
+    const settingAny = (join.value !== undefined && join.value !== null)
+                    || (leave.value !== undefined && leave.value !== null);
+    if (settingAny) {
+      const scope: "user" | "character" = characterId ? "character" : "user";
+      const ownerId = characterId ?? me.id;
+      if (!(await hasPurchased(scope, ownerId, "flair_room_presence"))) {
+        reply.code(403);
+        return { error: "purchase 'Custom Room Entrance' to set custom presence templates" };
+      }
+    }
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (join.value !== undefined) updates.roomJoinTemplate = join.value;
+    if (leave.value !== undefined) updates.roomLeaveTemplate = leave.value;
+    // No-op when neither field was supplied — still return the
+    // current row so the client can sync without a follow-up GET.
+    if (characterId) {
+      if (Object.keys(updates).length > 1) {
+        await db
+          .insert(characterEarning)
+          .values({ characterId, ...updates })
+          .onConflictDoUpdate({
+            target: characterEarning.characterId,
+            set: updates,
+          });
+      }
+      const row = (await db
+        .select({
+          roomJoinTemplate: characterEarning.roomJoinTemplate,
+          roomLeaveTemplate: characterEarning.roomLeaveTemplate,
+        })
+        .from(characterEarning)
+        .where(eq(characterEarning.characterId, characterId))
+        .limit(1))[0];
+      return { ok: true, joinTemplate: row?.roomJoinTemplate ?? null, leaveTemplate: row?.roomLeaveTemplate ?? null };
+    }
+    if (Object.keys(updates).length > 1) {
+      await db
+        .insert(userEarning)
+        .values({ userId: me.id, ...updates })
+        .onConflictDoUpdate({
+          target: userEarning.userId,
+          set: updates,
+        });
+    }
+    const row = (await db
+      .select({
+        roomJoinTemplate: userEarning.roomJoinTemplate,
+        roomLeaveTemplate: userEarning.roomLeaveTemplate,
+      })
+      .from(userEarning)
+      .where(eq(userEarning.userId, me.id))
+      .limit(1))[0];
+    return { ok: true, joinTemplate: row?.roomJoinTemplate ?? null, leaveTemplate: row?.roomLeaveTemplate ?? null };
+  });
+
+  const setSessionPresenceBody = z.object({
+    connectTemplate: z.string().max(500).nullable().optional(),
+    exitTemplate: z.string().max(500).nullable().optional(),
+  }).strict();
+
+  app.patch<{ Body: unknown }>("/earning/me/session-presence", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let body: z.infer<typeof setSessionPresenceBody>;
+    try { body = setSessionPresenceBody.parse(req.body); }
+    catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+    const connect = resolvePresenceTemplateField(body.connectTemplate);
+    if (!connect.ok) { reply.code(400); return { error: `connectTemplate: ${connect.error}` }; }
+    const exit = resolvePresenceTemplateField(body.exitTemplate);
+    if (!exit.ok) { reply.code(400); return { error: `exitTemplate: ${exit.error}` }; }
+    const settingAny = (connect.value !== undefined && connect.value !== null)
+                    || (exit.value !== undefined && exit.value !== null);
+    if (settingAny) {
+      if (!(await hasPurchased("user", me.id, "flair_session_presence"))) {
+        reply.code(403);
+        return { error: "purchase 'Custom Session Greeting' to set custom session templates" };
+      }
+    }
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (connect.value !== undefined) updates.sessionConnectTemplate = connect.value;
+    if (exit.value !== undefined) updates.sessionExitTemplate = exit.value;
+    if (Object.keys(updates).length > 1) {
+      await db
+        .insert(userEarning)
+        .values({ userId: me.id, ...updates })
+        .onConflictDoUpdate({
+          target: userEarning.userId,
+          set: updates,
+        });
+    }
+    const row = (await db
+      .select({
+        sessionConnectTemplate: userEarning.sessionConnectTemplate,
+        sessionExitTemplate: userEarning.sessionExitTemplate,
+      })
+      .from(userEarning)
+      .where(eq(userEarning.userId, me.id))
+      .limit(1))[0];
+    return {
+      ok: true,
+      connectTemplate: row?.sessionConnectTemplate ?? null,
+      exitTemplate: row?.sessionExitTemplate ?? null,
+    };
+  });
 
   /* =========================================================
    *  Borders — per-rank Tier IV purchase + equip
@@ -1447,6 +2303,266 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   );
 
   /* =========================================================
+   *  Free-form borders — purchase + auto-equip
+   *
+   *  Companion to the rank-tier border endpoint above. The catalog
+   *  lives in `freeform_borders` (independent of `rank_tiers`) and
+   *  has no eligibility gate — anyone with Currency can buy. Pricing
+   *  comes off `freeform_borders.cost`. Flash-sale support is
+   *  intentionally omitted on the first cut; borders aren't in the
+   *  rotation today and adding it later only requires extending the
+   *  resolver lookup.
+   *
+   *  Equip: auto-equips on first purchase by writing
+   *  `selected_freeform_border_key`. The existing PATCH
+   *  /earning/me/settings endpoint accepts `selectedFreeformBorderKey`
+   *  with ownership validation for unequip / switch.
+   * ========================================================= */
+
+  app.post<{ Params: { key: string }; Body: unknown }>(
+    "/earning/me/freeform-borders/:key/purchase",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      const borderKey = req.params.key;
+      let body: z.infer<typeof purchaseBorderBody> | undefined;
+      try { body = purchaseBorderBody.parse(req.body ?? {}); }
+      catch { reply.code(400); return { error: "invalid body" }; }
+      const characterId = body?.characterId ?? null;
+      if (characterId) {
+        const c = (await db
+          .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters)
+          .where(eq(characters.id, characterId))
+          .limit(1))[0];
+        if (!c || c.userId !== me.id || c.deletedAt) {
+          reply.code(403);
+          return { error: "not your character" };
+        }
+      }
+
+      // Resolve today's flash sale outside the txn so the validate
+      // step can compare snapshot keys without lazy-inserting inside
+      // the transaction (the resolver may upsert today's row, which
+      // we don't want nested under a purchase txn).
+      const flashSale = await resolveTodayFlashSale(db);
+      const outcome = runPurchaseTxn(db, me.id, {
+        characterId,
+        validate: (tx) => {
+          const row = tx.select().from(freeformBorders).where(eq(freeformBorders.key, borderKey)).limit(1).all()[0];
+          if (!row || !row.enabled) return { ok: false, status: 404, error: "border not found or disabled" };
+          if (characterId) {
+            const already = tx.select().from(characterOwnedFreeformBorders).where(and(
+              eq(characterOwnedFreeformBorders.characterId, characterId),
+              eq(characterOwnedFreeformBorders.borderKey, borderKey),
+            )).limit(1).all()[0];
+            if (already) return { ok: false, status: 409, error: "already owned" };
+          } else {
+            const already = tx.select().from(userOwnedFreeformBorders).where(and(
+              eq(userOwnedFreeformBorders.userId, me.id),
+              eq(userOwnedFreeformBorders.borderKey, borderKey),
+            )).limit(1).all()[0];
+            if (already) return { ok: false, status: 409, error: "already owned" };
+          }
+          // Server-authoritative discount: only when this border is
+          // today's pick. The client surfaces the discounted price
+          // for UX, but the actual debit is recomputed here.
+          const cost = flashSale.freeformBorderKey === borderKey
+            ? applyDiscount(row.cost, flashSale.freeformBorderDiscountPct)
+            : row.cost;
+          return { ok: true, cost };
+        },
+        grant: (tx) => {
+          if (characterId) {
+            tx.insert(characterOwnedFreeformBorders).values({ characterId, borderKey }).onConflictDoNothing().run();
+            // Auto-equip on first purchase when the freeform slot is
+            // empty. Doing this regardless of the rank-tier slot is
+            // deliberate: a user just paid Currency for a deliberate
+            // cosmetic, and the renderer resolves freeform first, so
+            // a freshly-purchased freeform with an existing rank
+            // border equipped would otherwise sit invisible behind
+            // the rank one until the user found the equip control.
+            // The rank border equip stays untouched on
+            // user/character_earning.selectedBorderRankKey and
+            // re-emerges automatically if the user later unequips
+            // the freeform.
+            tx.insert(characterEarning).values({ characterId }).onConflictDoNothing().run();
+            const cur = tx.select({
+              freeform: characterEarning.selectedFreeformBorderKey,
+            }).from(characterEarning).where(eq(characterEarning.characterId, characterId)).limit(1).all()[0];
+            if (!cur?.freeform) {
+              tx.update(characterEarning)
+                .set({ selectedFreeformBorderKey: borderKey, updatedAt: new Date() })
+                .where(eq(characterEarning.characterId, characterId))
+                .run();
+            }
+          } else {
+            tx.insert(userOwnedFreeformBorders).values({ userId: me.id, borderKey }).onConflictDoNothing().run();
+            tx.insert(userEarning).values({ userId: me.id }).onConflictDoNothing().run();
+            const cur = tx.select({
+              freeform: userEarning.selectedFreeformBorderKey,
+            }).from(userEarning).where(eq(userEarning.userId, me.id)).limit(1).all()[0];
+            if (!cur?.freeform) {
+              tx.update(userEarning)
+                .set({ selectedFreeformBorderKey: borderKey, updatedAt: new Date() })
+                .where(eq(userEarning.userId, me.id))
+                .run();
+            }
+          }
+        },
+        reason: `freeform_border_purchase_${borderKey}`,
+        metadata: { kind: "freeform_border", borderKey },
+      });
+      if (!outcome.ok) {
+        reply.code(outcome.status);
+        return outcome.required !== undefined
+          ? { error: outcome.error, required: outcome.required, balance: outcome.balance }
+          : { error: outcome.error };
+      }
+      await emitWalletUpdate(
+        io,
+        me.id,
+        outcome.final,
+        -outcome.cost,
+        `freeform_border_purchase_${borderKey}`,
+        characterId ? { scope: "character", ownerId: characterId } : { scope: "user" },
+      );
+      await rebroadcastPresenceForUser(me.id);
+      return { ok: true };
+    },
+  );
+
+  /* =========================================================
+   *  Free-form border color customization (migration 0158).
+   *
+   *  Mirror of /earning/me/name-styles/:key/config — per-identity
+   *  JSON map of CSS custom-property values. The catalog row's CSS
+   *  references customizable colors via `var(--c-<name>, <fallback>)`;
+   *  this endpoint writes the user's override values into
+   *  `<scope>_owned_freeform_borders.config_json`. The renderer
+   *  inlines them as `--c-<name>: <value>` on the BorderedAvatar
+   *  wrapper so the cascade reaches the `.av .b-<key>` template.
+   *
+   *  Pass `config: null` to clear all overrides for this border on
+   *  this identity (reverts to the catalog row's CSS fallbacks).
+   *
+   *  Server-side filter: any key not in the catalog's
+   *  `extractFreeformBorderVars()` set is dropped. This is the
+   *  first line of defense against a malformed client trying to
+   *  write arbitrary CSS variables. The second line is the
+   *  renderer applying the same filter on read.
+   * ========================================================= */
+
+  const patchFreeformBorderConfigBody = z.object({
+    /** Map of var-name (without `--c-` prefix) → CSS color string.
+     *  Pass null/omit to clear. */
+    config: z.record(z.string(), z.string()).nullable(),
+    /** Per-identity scope. Null/omitted = master. */
+    characterId: z.string().nullable().optional(),
+  }).strict();
+
+  app.patch<{ Params: { key: string }; Body: unknown }>(
+    "/earning/me/freeform-borders/:key/config",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      let body: z.infer<typeof patchFreeformBorderConfigBody>;
+      try { body = patchFreeformBorderConfigBody.parse(req.body); }
+      catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+
+      const borderKey = req.params.key;
+      const characterId = body.characterId ?? null;
+
+      // Look up the catalog row so we can extract the set of
+      // customizable vars and filter the incoming config to that
+      // set. A row that's been disabled or deleted between the
+      // client fetching and submitting falls through to the
+      // ownership lookup which 404s cleanly.
+      const borderRow = (await db
+        .select({ styleCss: freeformBorders.styleCss })
+        .from(freeformBorders)
+        .where(eq(freeformBorders.key, borderKey))
+        .limit(1))[0];
+      if (!borderRow) { reply.code(404); return { error: "border not found" }; }
+
+      // Build the filtered config. Drop unknown keys silently
+      // (client may know about more vars than the current CSS
+      // declares — e.g. after an admin edit that removed a slot),
+      // and validate each remaining value.
+      let cleaned: Record<string, string> | null = null;
+      if (body.config) {
+        const allowed = new Set(extractFreeformBorderVars(borderRow.styleCss ?? ""));
+        cleaned = {};
+        let count = 0;
+        for (const [k, v] of Object.entries(body.config)) {
+          if (!allowed.has(k)) continue;
+          if (!isValidFreeformBorderConfigKey(k)) continue;
+          if (!isValidFreeformBorderConfigValue(v)) continue;
+          cleaned[k] = v;
+          count += 1;
+          if (count >= FREEFORM_CONFIG_MAX_ENTRIES) break;
+        }
+        // An entirely-empty config after filtering is the same as
+        // null — store null so the snapshot view can render "no
+        // overrides" without distinguishing between the two states.
+        if (count === 0) cleaned = null;
+      }
+
+      if (characterId) {
+        const c = (await db
+          .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters)
+          .where(eq(characters.id, characterId))
+          .limit(1))[0];
+        if (!c || c.userId !== me.id || c.deletedAt) {
+          reply.code(403);
+          return { error: "not your character" };
+        }
+        const owned = (await db
+          .select({ borderKey: characterOwnedFreeformBorders.borderKey })
+          .from(characterOwnedFreeformBorders)
+          .where(and(
+            eq(characterOwnedFreeformBorders.characterId, characterId),
+            eq(characterOwnedFreeformBorders.borderKey, borderKey),
+          ))
+          .limit(1))[0];
+        if (!owned) { reply.code(404); return { error: "not owned" }; }
+        await db
+          .update(characterOwnedFreeformBorders)
+          .set({ configJson: cleaned ? JSON.stringify(cleaned) : null })
+          .where(and(
+            eq(characterOwnedFreeformBorders.characterId, characterId),
+            eq(characterOwnedFreeformBorders.borderKey, borderKey),
+          ));
+      } else {
+        const owned = (await db
+          .select({ borderKey: userOwnedFreeformBorders.borderKey })
+          .from(userOwnedFreeformBorders)
+          .where(and(
+            eq(userOwnedFreeformBorders.userId, me.id),
+            eq(userOwnedFreeformBorders.borderKey, borderKey),
+          ))
+          .limit(1))[0];
+        if (!owned) { reply.code(404); return { error: "not owned" }; }
+        await db
+          .update(userOwnedFreeformBorders)
+          .set({ configJson: cleaned ? JSON.stringify(cleaned) : null })
+          .where(and(
+            eq(userOwnedFreeformBorders.userId, me.id),
+            eq(userOwnedFreeformBorders.borderKey, borderKey),
+          ));
+      }
+      // Borders render on every chat line + userlist row of this
+      // user. Once we surface configs in the occupant payload (a
+      // future broadcast extension), peer renders pick up new
+      // colors here too. For now this rebroadcast is a no-op for
+      // peers but cheap.
+      await rebroadcastPresenceForUser(me.id);
+      return { ok: true };
+    },
+  );
+
+  /* =========================================================
    *  Items — shop purchase
    *
    *  POST /earning/me/items/:key/buy
@@ -1493,6 +2609,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       const ownerScope: "user" | "character" = characterId ? "character" : "user";
       const ownerId = characterId ?? me.id;
 
+      const flashSale = await resolveTodayFlashSale(db);
       const outcome = runPurchaseTxn(db, me.id, {
         characterId,
         validate: (tx) => {
@@ -1529,7 +2646,14 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               error: `would exceed stack limit (${item.stackLimit})`,
             };
           }
-          return { ok: true, cost: item.price * body.quantity };
+          // Flash-sale discount applies per UNIT (not per stack) — a
+          // bulk-buy of an on-sale item gets the discount on every
+          // unit. Done after the stack-cap check so the discounted
+          // cost reflects the actual quantity going through.
+          const unitPrice = flashSale.itemKey === req.params.key
+            ? applyDiscount(item.price, flashSale.itemDiscountPct)
+            : item.price;
+          return { ok: true, cost: unitPrice * body.quantity };
         },
         grant: (tx) => {
           // Upsert: increment quantity if a row already exists for this

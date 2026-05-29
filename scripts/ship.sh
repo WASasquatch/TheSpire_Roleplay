@@ -4,15 +4,16 @@
 # Default flow:
 #   1. Refuse to run from a non-main branch (use git directly for PR work)
 #   2. Type-check shared / server / web (catch obvious mistakes pre-deploy)
-#   3. Stage apps/ + packages/ + README.md + pnpm-lock.yaml + root
-#      package.json (deliberately narrow - skips dotfiles, SECURITY-AUDIT.md,
-#      /tmp scratch, etc.); README is included so deploy/changelog notes
-#      ship alongside code, and the lockfile + root package.json are
-#      auto-staged because they're tightly coupled to any workspace
-#      package.json edit (otherwise a `pnpm add` deploys a half-update and
-#      the Docker `pnpm install --frozen-lockfile` step fails). Use --all
-#      to also pick up other root-level files (fly.toml, Dockerfile,
-#      scripts/, etc.).
+#   3. Stage all tracked-file modifications (`git add -u` across the whole
+#      repo) PLUS new untracked files under apps/ + packages/. The -u
+#      pass catches edits to root-level deploy / build infra
+#      (fly.toml, Dockerfile, .dockerignore, pnpm-workspace.yaml,
+#      tsconfig.base.json, scripts/*.sh, remote-deploy.sh,
+#      local-deploy.sh, first-deployment.sh) so those changes always
+#      ship without having to remember --all. Untracked-file gating
+#      stays in place for the project root, so a stray .env or scratch
+#      file there can't sneak into a commit. Use --all to also pick up
+#      NEW untracked root-level files (e.g. a brand-new Dockerfile.dev).
 #   4. Commit with the supplied message (skipped if there's nothing staged)
 #   5. Push origin main
 #   6. flyctl deploy
@@ -247,21 +248,38 @@ if [[ "$HAS_CHANGES" -eq 1 ]]; then
     echo "==> Staging all tracked + untracked changes (.gitignore filters)..."
     git add -A
   else
-    echo "==> Staging apps + packages + README.md + pnpm-lock.yaml + root package.json..."
+    # Narrow stage with two complementary passes:
+    #
+    #   1. `git add -u` — stages MODIFICATIONS + DELETIONS for every
+    #      tracked file in the repo. Catches edits to root-level
+    #      deploy / build infra (fly.toml, Dockerfile, .dockerignore,
+    #      pnpm-workspace.yaml, tsconfig.base.json, scripts/*.sh,
+    #      remote-deploy.sh, local-deploy.sh, first-deployment.sh)
+    #      so an admin who tunes any of those for a deploy doesn't
+    #      have to remember --all every time. Untracked files at
+    #      root are still gated to --all so a stray .env or scratch
+    #      file in the project root never sneaks into a commit.
+    #
+    #   2. `git add apps packages` — picks up NEW untracked files
+    #      under apps/+packages/ (the only places where new source
+    #      should land). New files at root keep needing --all.
+    #
+    # The combo means any tracked file's modifications always ship,
+    # which closes the silent-skip gap that bit deploy-infra edits
+    # in the past.
+    echo "==> Staging tracked-file modifications + new files in apps/packages..."
+    git add -u
     git add apps packages
-    # README.md is included so deploy/changelog notes ride along with code
-    # changes. The conditional avoids a fatal error on a brand-new clone
-    # where README hasn't been touched.
+    # README.md is included so deploy/changelog notes ride along with
+    # code changes. Already covered by `git add -u` when modified;
+    # the explicit add handles the brand-new-clone edge case where the
+    # file exists but isn't yet tracked.
     if [[ -f README.md ]]; then git add README.md; fi
-    # pnpm-lock.yaml + root package.json are tightly coupled to any
-    # workspace package.json change — `pnpm add <pkg>` updates both
-    # the workspace's package.json (under apps/ or packages/, already
-    # staged above) AND the root lockfile/package.json. Shipping the
-    # apps/ change without the matching lockfile bump would land a
-    # deploy where Docker's `pnpm install --frozen-lockfile` fails.
-    # Staging them unconditionally is safe: when they're unchanged
-    # they're a no-op, and when they ARE changed they almost always
-    # belong with the workspace edit that triggered them.
+    # pnpm-lock.yaml + root package.json — already covered by
+    # `git add -u` when modified. Kept here as explicit no-ops so the
+    # intent ("workspace edits ALWAYS ship with their lockfile bump")
+    # stays loud in the script. Without the matching lockfile,
+    # Docker's `pnpm install --frozen-lockfile` fails the deploy.
     if [[ -f pnpm-lock.yaml ]]; then git add pnpm-lock.yaml; fi
     if [[ -f package.json ]]; then git add package.json; fi
   fi

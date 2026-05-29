@@ -1341,7 +1341,9 @@ export const worlds = sqliteTable(
     /** Public URL to the catalog cover image (uploaded via /worlds/:id/cover). Null = render text-only fallback. */
     coverImageUrl: text("cover_image_url"),
     /** Soft cadence signal for would-be members. Null = unspecified. */
-    pacing: text("pacing", { enum: ["casual", "structured", "long-form"] }),
+    pacing: text("pacing", {
+      enum: ["freeform", "drop-in", "casual", "slice-of-life", "structured", "long-form"],
+    }),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
   },
@@ -1428,6 +1430,36 @@ export const worldMembers = sqliteTable(
     // The actual "at most one primary per user" is enforced via a partial
     // unique index in the migration (drizzle's typed builder doesn't expose
     // partial indexes, so the migration is the source of truth).
+  }),
+);
+
+/**
+ * Per-world editing collaborators. The world's `ownerUserId` is always
+ * an implicit editor; this table grants the same edit rights to
+ * additional users the owner invites. Collaborators can edit world
+ * metadata + pages but cannot manage the collaborator list itself,
+ * transfer ownership, or delete the world. Created in migration 0174.
+ *
+ * Mirrors the scriptorium collaborator pattern (0144): minimal row
+ * shape (no role enum yet) with the actual permission decisions
+ * computed at request time in the worlds route.
+ */
+export const worldCollaborators = sqliteTable(
+  "world_collaborators",
+  {
+    worldId: text("world_id")
+      .notNull()
+      .references(() => worlds.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    addedAt: ts("added_at"),
+    addedByUserId: text("added_by_user_id")
+      .references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.worldId, t.userId] }),
+    userIdx: index("world_collaborators_user_idx").on(t.userId),
   }),
 );
 

@@ -1,5 +1,42 @@
-import type { WorldPage } from "@thekeep/shared";
+import type { WorldCollaborator, WorldPage } from "@thekeep/shared";
+import { readError } from "./http.js";
 export { deriveSlug } from "@thekeep/shared";
+
+/**
+ * Owner-only: add a user as an editing collaborator on this world.
+ * Server validates that the caller owns the world AND that the named
+ * user exists. Returns the updated collaborator list.
+ */
+export async function addWorldCollaborator(
+  idOrSlug: string,
+  username: string,
+): Promise<{ collaborators: WorldCollaborator[] }> {
+  const r = await fetch(`/worlds/${encodeURIComponent(idOrSlug)}/collaborators`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ username }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+  return (await r.json()) as { collaborators: WorldCollaborator[] };
+}
+
+/**
+ * Owner-only (or self-leave): drop a collaborator. Returns the updated
+ * collaborator list. The server lets a collaborator remove themselves
+ * even if they're not the owner — same UX as "leave" elsewhere.
+ */
+export async function removeWorldCollaborator(
+  idOrSlug: string,
+  userId: string,
+): Promise<{ collaborators: WorldCollaborator[] }> {
+  const r = await fetch(
+    `/worlds/${encodeURIComponent(idOrSlug)}/collaborators/${encodeURIComponent(userId)}`,
+    { method: "DELETE", credentials: "include" },
+  );
+  if (!r.ok) throw new Error(await readError(r));
+  return (await r.json()) as { collaborators: WorldCollaborator[] };
+}
 
 export interface WorldTreeNode {
   page: WorldPage;

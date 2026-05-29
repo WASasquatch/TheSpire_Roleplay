@@ -26,6 +26,7 @@ interface Props {
    *  visitors can browse via FeaturedStoriesStrip + the `/stories/...`
    *  shareable links instead. */
   onOpenScriptorium: () => void;
+  onOpenWorlds: () => void;
 }
 
 /**
@@ -39,7 +40,7 @@ interface Props {
  * the active theme's panel color / text color / font-action stack when not
  * overridden, so a fresh install still looks coherent.
  */
-export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium }: Props) {
+export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium, onOpenWorlds }: Props) {
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
   const branding = useChat((s) => s.branding);
@@ -137,6 +138,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   function fireAdmin() { if (onOpenAdmin) onOpenAdmin(); setMenuOpen(false); }
   function fireEarning() { onOpenEarning(); setMenuOpen(false); }
   function fireScriptorium() { onOpenScriptorium(); setMenuOpen(false); }
+  function fireWorlds() { onOpenWorlds(); setMenuOpen(false); }
   function fireLogout() { setMenuOpen(false); void logout(); }
 
   return (
@@ -217,8 +219,8 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               className="relative uppercase tracking-widest text-keep-muted hover:text-keep-text"
               title={
                 storyInviteCount > 0
-                  ? `${storyInviteCount} pending collaboration ${storyInviteCount === 1 ? "invite" : "invites"} — open the Scriptorium to act on ${storyInviteCount === 1 ? "it" : "them"}`
-                  : "The Scriptorium — long-form fiction by the people who live here"
+                  ? `${storyInviteCount} pending collaboration ${storyInviteCount === 1 ? "invite" : "invites"}. Open the Scriptorium to act on ${storyInviteCount === 1 ? "it" : "them"}`
+                  : "The Scriptorium. Long-form fiction by the people who live here"
               }
             >
               Scriptorium
@@ -228,6 +230,15 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                   className="absolute -top-0.5 -right-1 inline-block h-1.5 w-1.5 rounded-full bg-keep-action"
                 />
               ) : null}
+            </button>
+            <span className="text-keep-rule">|</span>
+            <button
+              type="button"
+              onClick={onOpenWorlds}
+              className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
+              title="Worlds catalog. Browse open roleplay worlds, lore, and wikis"
+            >
+              Worlds
             </button>
             <span className="text-keep-rule">|</span>
           </>
@@ -337,6 +348,13 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                   {storyInviteCount > 0 ? (
                     <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-keep-action" />
                   ) : null}
+                </button>
+                <button
+                  type="button"
+                  onClick={fireWorlds}
+                  className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
+                >
+                  <span>Worlds</span>
                 </button>
               </>
             ) : null}

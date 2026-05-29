@@ -1,10 +1,32 @@
 import { resolve } from "node:path";
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, ne, or } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import type { FastifyRequest } from "fastify";
 import type { Db } from "./db/index.js";
-import { stories, users } from "./db/schema.js";
+import { characters, stories, users, worlds } from "./db/schema.js";
 import { getSettings } from "./settings.js";
+
+/**
+ * Site-wide keyword shelf shared across every public route. Lead with
+ * the term the user-facing complaint identified: searches for
+ * "The Spire Chat" should land here, not on RPG-sites unrelated to
+ * the actual product. Order matters for some crawlers — most-specific
+ * first, broader synonyms later.
+ */
+const DEFAULT_KEYWORDS =
+  "roleplay chat, online roleplay, RP chat, writing community, " +
+  "collaborative fiction, story writing, character roleplay, " +
+  "forum roleplay, The Spire chat, The Spire RP";
+
+/**
+ * Homepage tagline appended after the admin-configured siteName. Keeps
+ * the `<title>` keyword-rich without forcing admins to bake search
+ * keywords into the brand name itself — the bare brand still gets to
+ * own the `og:site_name` slot. Mirrors the static default in
+ * `apps/web/index.html` so the rewritten and bare-GET copies of the
+ * page tell the same story to indexers.
+ */
+const HOMEPAGE_TAGLINE = "Roleplay Chat & Collaborative Writing";
 
 /**
  * Generate a fresh nonce for a single HTTP response. Base64 of 16 random
@@ -142,36 +164,25 @@ export async function renderSplashHtml(
     (s.welcomeHtml ? stripToText(s.welcomeHtml) : "") ||
     "A roleplay-focused chat sanctuary.";
 
-  // Per-route SEO. /login and /register are bookmarkable form pages, so
-  // each gets its own title + description + canonical URL — otherwise
-  // crawlers see three identical pages and duplicate-content rules
-  // collapse them into one, costing us the targeted keyword space.
-  // Deep-link routes (/p/, /u/, /w/) keep the site-level defaults
-  // because their content is rendered client-side and the actual public
-  // profile/world pages serve their own meta from the routes that
-  // populate the modal — the SPA shell here is just a loader.
+  // Per-route SEO. Every public bookmarkable page gets its own title,
+  // description, canonical URL, and keyword shelf — otherwise crawlers
+  // see N identical pages and duplicate-content rules collapse them,
+  // costing us the targeted keyword space. Routes serving real data
+  // (profiles, worlds, stories) do a tiny scoped DB read to pull the
+  // record's name + bio/summary; private / NSFW / nonexistent rows fall
+  // through to site defaults so we never leak the existence of a
+  // hidden entity in OG metadata.
   let title: string;
   let description: string;
+  let keywords: string;
   let canonicalUrl: string;
-  if (pathname === "/login") {
-    title = `Log in — ${siteName}`;
-    description = `Sign in to ${siteName} to continue your stories, manage characters, and rejoin your circles.`;
-    canonicalUrl = `${origin}/login`;
-  } else if (pathname === "/register") {
-    title = `Create your character — ${siteName}`;
-    description = `Join ${siteName}. Build a character, step into the worlds, and find your roleplay circle.`;
-    canonicalUrl = `${origin}/register`;
-  } else {
-    // `/`, deep links, anything else — site-level defaults. Canonical
-    // points to `/` so crawler-side dedup folds non-canonical hits up.
-    title = siteName;
-    description = siteDescription;
-    canonicalUrl = `${origin}/`;
-  }
+  const perRoute = await resolveRouteMeta(db, pathname, origin, siteName, siteDescription);
+  ({ title, description, keywords, canonicalUrl } = perRoute);
 
   const titleAttr = escapeHtmlAttr(title);
   const descAttr = escapeHtmlAttr(description);
   const urlAttr = escapeHtmlAttr(canonicalUrl);
+  const keywordsAttr = escapeHtmlAttr(keywords);
 
   // Replace tags by exact-attribute match. Each replace is targeted to a
   // specific tag name + attribute so they don't trip over each other.
@@ -180,6 +191,14 @@ export async function renderSplashHtml(
     .replace(
       /<meta name="description" content="[^"]*"\s*\/?>/,
       `<meta name="description" content="${descAttr}" />`,
+    )
+    .replace(
+      // Per-route keyword shelf. Google ignores `<meta name="keywords">`
+      // but Bing, DuckDuckGo, and a long tail of niche crawlers still
+      // index it — and Discord / Slack card scrapers pass it through to
+      // their previews. Cheap inclusion, measurable upside.
+      /<meta name="keywords" content="[^"]*"\s*\/?>/,
+      `<meta name="keywords" content="${keywordsAttr}" />`,
     )
     .replace(
       /<link rel="canonical" href="[^"]*"\s*\/?>/,
@@ -279,11 +298,20 @@ export function renderRobotsTxt(origin: string): string {
   ].join("\n");
 }
 
-/** Sitemap.xml. Exposes the three public entrance URLs (`/`, `/login`,
- *  `/register`) plus every published SFW public story (`G`, `PG`,
- *  `PG-13`). Stories rated R / NC-17 are intentionally omitted so
- *  crawlers and unauthenticated browsers never receive a list of
- *  mature URLs. Everything past auth is walled. */
+/** Sitemap.xml. Exposes the public entrance URLs plus deep links for
+ *  every published SFW story, public profile, and public world. Caps
+ *  each category at 1000 to keep the sitemap small and snappy.
+ *
+ *  Privacy fence (matches the per-route SEO rules in `resolveRouteMeta`):
+ *    - Stories: only `visibility = "public"`, `status` not draft/abandoned,
+ *      rating in `G | PG | PG-13`. R / NC-17 are NEVER listed regardless of
+ *      catalog visibility.
+ *    - Profiles: only `users.isPublic = true && !isNsfw`. Characters are
+ *      reachable via the same `/p/:name` route the SPA exposes but listing
+ *      characters in addition to master usernames could double up the same
+ *      person — we stick to master accounts here for cleaner crawl shape.
+ *    - Worlds: any non-private world (public OR open).
+ */
 export async function renderSitemapXml(db: Db, origin: string): Promise<string> {
   const today = new Date().toISOString().slice(0, 10);
   const lines: string[] = [
@@ -307,11 +335,18 @@ export async function renderSitemapXml(db: Db, origin: string): Promise<string> 
     `    <changefreq>monthly</changefreq>`,
     `    <priority>0.6</priority>`,
     `  </url>`,
+    `  <url>`,
+    `    <loc>${origin}/scriptorium</loc>`,
+    `    <lastmod>${today}</lastmod>`,
+    `    <changefreq>daily</changefreq>`,
+    `    <priority>0.8</priority>`,
+    `  </url>`,
   ];
 
-  // Public + SFW (G/PG/PG-13) published stories. Cap at 1000 entries —
-  // generous for a single-instance app. Stories rated R or NC-17 are
-  // NEVER listed regardless of catalog visibility.
+  // Public + SFW (G/PG/PG-13) published stories. The previous version
+  // pointed at `/stories/@…` — those URLs 404 because the actual
+  // route is `/scriptorium/@…` (see index.ts:1396). Fixed here so
+  // crawlers don't blacklist us for serving a sitemap full of 404s.
   try {
     const rows = await db
       .select({
@@ -335,7 +370,7 @@ export async function renderSitemapXml(db: Db, origin: string): Promise<string> 
       .limit(1000);
     for (const r of rows) {
       const day = new Date(+r.updatedAt).toISOString().slice(0, 10);
-      const loc = `${origin}/stories/@${encodeURIComponent(r.handle.toLowerCase())}/${encodeURIComponent(r.slug)}`;
+      const loc = `${origin}/scriptorium/@${encodeURIComponent(r.handle.toLowerCase())}/${encodeURIComponent(r.slug)}`;
       lines.push(
         `  <url>`,
         `    <loc>${loc}</loc>`,
@@ -347,6 +382,60 @@ export async function renderSitemapXml(db: Db, origin: string): Promise<string> 
     }
   } catch { /* swallow — the sitemap still serves the entrance URLs */ }
 
+  // Public, non-NSFW user profiles. Master accounts only (characters
+  // share the same /p/:name space — adding them too would double-list
+  // the same person from a search-results perspective).
+  try {
+    const rows = await db
+      .select({
+        username: users.username,
+      })
+      .from(users)
+      .where(and(
+        eq(users.isPublic, true),
+        eq(users.isNsfw, false),
+      ))
+      .orderBy(desc(users.createdAt))
+      .limit(1000);
+    for (const r of rows) {
+      const loc = `${origin}/p/${encodeURIComponent(r.username.toLowerCase())}`;
+      lines.push(
+        `  <url>`,
+        `    <loc>${loc}</loc>`,
+        `    <changefreq>weekly</changefreq>`,
+        `    <priority>0.4</priority>`,
+        `  </url>`,
+      );
+    }
+  } catch { /* swallow */ }
+
+  // Non-private worlds (public + open). World owners explicitly chose
+  // a non-private visibility, so listing them here matches their
+  // intent that the world be discoverable.
+  try {
+    const rows = await db
+      .select({
+        slug: worlds.slug,
+        updatedAt: worlds.updatedAt,
+      })
+      .from(worlds)
+      .where(ne(worlds.visibility, "private"))
+      .orderBy(desc(worlds.updatedAt))
+      .limit(1000);
+    for (const r of rows) {
+      const day = new Date(+r.updatedAt).toISOString().slice(0, 10);
+      const loc = `${origin}/w/${encodeURIComponent(r.slug)}`;
+      lines.push(
+        `  <url>`,
+        `    <loc>${loc}</loc>`,
+        `    <lastmod>${day}</lastmod>`,
+        `    <changefreq>weekly</changefreq>`,
+        `    <priority>0.4</priority>`,
+        `  </url>`,
+      );
+    }
+  } catch { /* swallow */ }
+
   lines.push(`</urlset>`, "");
   return lines.join("\n");
 }
@@ -355,6 +444,229 @@ export async function renderSitemapXml(db: Db, origin: string): Promise<string> 
  *  path math fastify-static uses elsewhere in index.ts. */
 export function resolveIndexHtmlPath(serverDir: string): string {
   return resolve(serverDir, "..", "..", "web", "dist", "index.html");
+}
+
+interface RouteMeta {
+  title: string;
+  description: string;
+  keywords: string;
+  canonicalUrl: string;
+}
+
+/**
+ * Per-route SEO resolver. Dispatches on `pathname` to a route-specific
+ * meta block, doing a single small DB read when the route serves real
+ * data (profile / world / story). Privacy fence: only public,
+ * non-NSFW, non-draft rows produce route-specific meta. Anything else
+ * (private, NSFW, missing) falls through to a generic block with a
+ * canonical URL pointing back at `/` so we don't leak the existence of
+ * a hidden entity and don't fragment crawler dedup across broken
+ * deep-links.
+ *
+ * Title format: `{Specific thing} · {SiteName}` — pipe-delimited
+ * variants sometimes show up in tweaked SEO advice, but the middle dot
+ * matches what `apps/web/src/lib/scriptoriumUrl.ts` and similar use
+ * for in-app breadcrumbs, so the format stays consistent across
+ * server-rendered and client-rendered views.
+ */
+async function resolveRouteMeta(
+  db: Db,
+  pathname: string,
+  origin: string,
+  siteName: string,
+  siteDescription: string,
+): Promise<RouteMeta> {
+  // ---- bookmarkable form pages ----
+  if (pathname === "/login") {
+    return {
+      title: `Log in · ${siteName} - Roleplay Chat`,
+      description: `Sign in to ${siteName} to continue your stories, manage characters, and rejoin your roleplay rooms.`,
+      keywords: `${DEFAULT_KEYWORDS}, login, sign in`,
+      canonicalUrl: `${origin}/login`,
+    };
+  }
+  if (pathname === "/register") {
+    return {
+      title: `Create your character · ${siteName} - Roleplay Chat`,
+      description: `Join ${siteName}. Build a character, step into the worlds, and find your roleplay circle. Free to sign up.`,
+      keywords: `${DEFAULT_KEYWORDS}, sign up, create account, character creation`,
+      canonicalUrl: `${origin}/register`,
+    };
+  }
+
+  // ---- Scriptorium catalog ----
+  if (pathname === "/scriptorium") {
+    return {
+      title: `Scriptorium - Collaborative Stories · ${siteName}`,
+      description: `Read and write collaborative roleplay fiction on ${siteName}. The Scriptorium hosts open-invite stories, one-shots, and long-form serials from the community.`,
+      keywords: `${DEFAULT_KEYWORDS}, scriptorium, collaborative stories, story catalog, fanfiction, serial fiction, one-shots`,
+      canonicalUrl: `${origin}/scriptorium`,
+    };
+  }
+
+  // ---- Individual story permalink: /scriptorium/@handle/slug ----
+  const storyMatch = pathname.match(/^\/scriptorium\/@([^/]+)\/([^/]+)\/?$/);
+  if (storyMatch) {
+    const handle = decodeURIComponent(storyMatch[1]!);
+    const slug = decodeURIComponent(storyMatch[2]!);
+    try {
+      const row = (await db
+        .select({
+          title: stories.title,
+          summary: stories.summary,
+          synopsisHtml: stories.synopsisHtml,
+          tags: stories.tags,
+          authorUsername: users.username,
+        })
+        .from(stories)
+        .innerJoin(users, eq(users.id, stories.authorUserId))
+        .where(and(
+          eq(stories.slug, slug),
+          sql`lower(${users.username}) = lower(${handle})`,
+          eq(stories.visibility, "public"),
+          ne(stories.status, "draft"),
+          ne(stories.status, "abandoned"),
+          or(
+            eq(stories.rating, "G"),
+            eq(stories.rating, "PG"),
+            eq(stories.rating, "PG-13"),
+          ),
+        ))
+        .limit(1))[0];
+      if (row) {
+        // Prefer summary; fall back to a synopsis snippet if the
+        // author left summary blank.
+        const desc = row.summary?.trim()
+          || (row.synopsisHtml ? stripToText(row.synopsisHtml) : "")
+          || `A story by @${row.authorUsername} on ${siteName}.`;
+        const tagKeywords = (row.tags || "")
+          .split(",")
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0)
+          .slice(0, 8)
+          .join(", ");
+        const keywords = [tagKeywords, "story", "scriptorium", DEFAULT_KEYWORDS]
+          .filter(Boolean)
+          .join(", ");
+        return {
+          title: `${row.title} by @${row.authorUsername} · Scriptorium · ${siteName}`,
+          description: desc,
+          keywords,
+          canonicalUrl: `${origin}/scriptorium/@${encodeURIComponent(row.authorUsername.toLowerCase())}/${encodeURIComponent(slug)}`,
+        };
+      }
+    } catch { /* fall through */ }
+    // Private / no match — generic Scriptorium meta, canonical at the catalog.
+    return {
+      title: `Scriptorium - Collaborative Stories · ${siteName}`,
+      description: siteDescription,
+      keywords: DEFAULT_KEYWORDS,
+      canonicalUrl: `${origin}/scriptorium`,
+    };
+  }
+
+  // ---- Profile: /p/:name or /u/:name ----
+  // Try master account first; fall back to character lookup so
+  // `/p/<characterName>` resolves too. Both gates require isPublic &&
+  // !isNsfw before any name or bio escapes into OG.
+  const profileMatch = pathname.match(/^\/(?:p|u)\/([^/]+)\/?$/);
+  if (profileMatch) {
+    const name = decodeURIComponent(profileMatch[1]!);
+    try {
+      const userRow = (await db
+        .select({
+          username: users.username,
+          bioHtml: users.bioHtml,
+        })
+        .from(users)
+        .where(and(
+          sql`lower(${users.username}) = lower(${name})`,
+          eq(users.isPublic, true),
+          eq(users.isNsfw, false),
+        ))
+        .limit(1))[0];
+      if (userRow) {
+        const bio = stripToText(userRow.bioHtml);
+        return {
+          title: `${userRow.username} - Roleplay Profile · ${siteName}`,
+          description: bio || `${userRow.username}'s roleplay profile on ${siteName}. Read their bio, browse characters, and start a scene.`,
+          keywords: `${userRow.username}, roleplay profile, character, ${DEFAULT_KEYWORDS}`,
+          canonicalUrl: `${origin}/p/${encodeURIComponent(userRow.username.toLowerCase())}`,
+        };
+      }
+      const charRow = (await db
+        .select({
+          name: characters.name,
+          bioHtml: characters.bioHtml,
+        })
+        .from(characters)
+        .where(and(
+          sql`lower(${characters.name}) = lower(${name})`,
+          eq(characters.isPublic, true),
+          eq(characters.isNsfw, false),
+          isNull(characters.deletedAt),
+        ))
+        .limit(1))[0];
+      if (charRow) {
+        const bio = stripToText(charRow.bioHtml);
+        return {
+          title: `${charRow.name} - Roleplay Character · ${siteName}`,
+          description: bio || `${charRow.name} is a roleplay character on ${siteName}. Read their bio and find them in chat.`,
+          keywords: `${charRow.name}, roleplay character, ${DEFAULT_KEYWORDS}`,
+          canonicalUrl: `${origin}/p/${encodeURIComponent(charRow.name.toLowerCase())}`,
+        };
+      }
+    } catch { /* fall through */ }
+    return {
+      title: `${siteName} - ${HOMEPAGE_TAGLINE}`,
+      description: siteDescription,
+      keywords: DEFAULT_KEYWORDS,
+      canonicalUrl: `${origin}/`,
+    };
+  }
+
+  // ---- World: /w/:slug ----
+  const worldMatch = pathname.match(/^\/w\/([^/]+)\/?$/);
+  if (worldMatch) {
+    const slug = decodeURIComponent(worldMatch[1]!);
+    try {
+      const row = (await db
+        .select({
+          name: worlds.name,
+          description: worlds.description,
+        })
+        .from(worlds)
+        .where(and(
+          eq(worlds.slug, slug),
+          ne(worlds.visibility, "private"),
+        ))
+        .limit(1))[0];
+      if (row) {
+        const desc = (row.description ? stripToText(row.description) : "")
+          || `${row.name} is a roleplay world on ${siteName}. Lore, places, and characters in one wiki.`;
+        return {
+          title: `${row.name} - Roleplay World · ${siteName}`,
+          description: desc,
+          keywords: `${row.name}, roleplay world, worldbuilding, lore, ${DEFAULT_KEYWORDS}`,
+          canonicalUrl: `${origin}/w/${encodeURIComponent(slug)}`,
+        };
+      }
+    } catch { /* fall through */ }
+    return {
+      title: `${siteName} - ${HOMEPAGE_TAGLINE}`,
+      description: siteDescription,
+      keywords: DEFAULT_KEYWORDS,
+      canonicalUrl: `${origin}/`,
+    };
+  }
+
+  // ---- Homepage / anything else ----
+  return {
+    title: `${siteName} - ${HOMEPAGE_TAGLINE}`,
+    description: siteDescription,
+    keywords: DEFAULT_KEYWORDS,
+    canonicalUrl: `${origin}/`,
+  };
 }
 
 /**

@@ -31,6 +31,7 @@ import {
   roomWorldLinks,
   rooms,
   users,
+  worldCollaborators,
   worldMembers,
   worldPages,
   worlds,
@@ -57,7 +58,14 @@ const genreEnum = z.enum([
   "western", "steampunk", "mythological", "other",
 ]);
 const statusEnum = z.enum(["active", "featured", "archived"]);
-const pacingEnum = z.enum(["casual", "structured", "long-form"]);
+const pacingEnum = z.enum([
+  "freeform",
+  "drop-in",
+  "casual",
+  "slice-of-life",
+  "structured",
+  "long-form",
+]);
 const contentWarningEnum = z.enum(CONTENT_WARNINGS as unknown as [string, ...string[]]);
 
 // Tags: each entry must look like a slug-ish kebab token. The canonical
@@ -343,6 +351,56 @@ async function resolveWorld(
   return w;
 }
 
+/**
+ * Whether a given viewer can edit a world's metadata + pages. Owner
+ * and admins always can; otherwise the viewer must appear in the
+ * world_collaborators list. The check is centralized here so every
+ * mutation endpoint uses the same rule.
+ *
+ * `null` viewer (anon) is never an editor.
+ */
+async function canEditWorld(
+  db: Db,
+  worldRow: typeof worlds.$inferSelect,
+  viewerUserId: string | null,
+  viewerRole: Role | null,
+): Promise<boolean> {
+  if (!viewerUserId) return false;
+  if (worldRow.ownerUserId === viewerUserId) return true;
+  if (viewerRole && isAdminRole(viewerRole)) return true;
+  const row = (await db
+    .select({ userId: worldCollaborators.userId })
+    .from(worldCollaborators)
+    .where(and(
+      eq(worldCollaborators.worldId, worldRow.id),
+      eq(worldCollaborators.userId, viewerUserId),
+    ))
+    .limit(1))[0];
+  return !!row;
+}
+
+/** Load the list of collaborator user-refs for a world, with usernames. */
+async function collaboratorListFor(
+  db: Db,
+  worldId: string,
+): Promise<Array<{ userId: string; username: string; addedAt: number | null }>> {
+  const rows = await db
+    .select({
+      userId: worldCollaborators.userId,
+      username: users.username,
+      addedAt: worldCollaborators.addedAt,
+    })
+    .from(worldCollaborators)
+    .innerJoin(users, eq(users.id, worldCollaborators.userId))
+    .where(eq(worldCollaborators.worldId, worldId))
+    .orderBy(asc(worldCollaborators.addedAt));
+  return rows.map((r) => ({
+    userId: r.userId,
+    username: r.username,
+    addedAt: r.addedAt ? +r.addedAt : null,
+  }));
+}
+
 /** Walk the parent chain to compute a candidate page's depth (root = 0). */
 async function depthOf(db: Db, parentPageId: string | null): Promise<number> {
   if (!parentPageId) return 0;
@@ -607,15 +665,91 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       .orderBy(asc(worldPages.sortOrder), asc(worldPages.createdAt));
     const members = await memberListFor(db, w.id);
     const viewerMember = me ? members.find((m) => m.userId === me.id) ?? null : null;
+    // Collaborator surface. Always loaded so the client can show the
+    // wiki-editor's owner-only "Collaborators" panel without a second
+    // round trip. Non-owners get the same list — handy for "who else
+    // can edit this" transparency on a shared wiki — but the client
+    // gates the add/remove controls on viewerIsOwner.
+    const collaborators = await collaboratorListFor(db, w.id);
+    const viewerIsOwner = !!me && w.ownerUserId === me.id;
+    const viewerCanEdit = await canEditWorld(db, w, me?.id ?? null, me?.role ?? null);
     const detail: WorldDetail = {
       world: await toSummary(db, w),
       pages: pages.map(pageRowToWire),
       members,
       viewerIsMember: viewerMember !== null,
       viewerPrimary: !!viewerMember?.isPrimary,
+      viewerIsOwner,
+      viewerCanEdit,
+      collaborators,
     };
     return detail;
   });
+
+  /* ---------- Collaborators (list / add / remove) ----------
+   * Adding and removing collaborators is owner-only (or admin).
+   * Collaborators themselves cannot manage the collaborator list,
+   * matching the migration 0174 design note. */
+  app.post<{ Params: { idOrSlug: string }; Body: unknown }>(
+    "/worlds/:idOrSlug/collaborators",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
+      if (!w) { reply.code(404); return { error: "not found" }; }
+      // Owner OR admin only — collaborators can't promote others.
+      if (w.ownerUserId !== me.id && !isAdminRole(me.role)) {
+        reply.code(403); return { error: "owner only" };
+      }
+      const body = z.object({ username: z.string().min(1).max(80) }).safeParse(req.body);
+      if (!body.success) { reply.code(400); return { error: "invalid body" }; }
+      const username = body.data.username.trim();
+      const user = (await db
+        .select({ id: users.id, username: users.username })
+        .from(users)
+        .where(sql`lower(${users.username}) = lower(${username})`)
+        .limit(1))[0];
+      if (!user) { reply.code(404); return { error: "no such user" }; }
+      if (user.id === w.ownerUserId) {
+        reply.code(409); return { error: "owner is already an editor" };
+      }
+      await db
+        .insert(worldCollaborators)
+        .values({
+          worldId: w.id,
+          userId: user.id,
+          addedByUserId: me.id,
+        })
+        .onConflictDoNothing({
+          target: [worldCollaborators.worldId, worldCollaborators.userId],
+        });
+      return { ok: true, collaborators: await collaboratorListFor(db, w.id) };
+    },
+  );
+
+  app.delete<{ Params: { idOrSlug: string; userId: string } }>(
+    "/worlds/:idOrSlug/collaborators/:userId",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
+      if (!w) { reply.code(404); return { error: "not found" }; }
+      // Two valid removers: the world owner / admin, or the
+      // collaborator removing themselves ("leave"). Anyone else is 403.
+      const selfLeave = req.params.userId === me.id;
+      const isOwnerOrAdmin = w.ownerUserId === me.id || isAdminRole(me.role);
+      if (!selfLeave && !isOwnerOrAdmin) {
+        reply.code(403); return { error: "owner only" };
+      }
+      await db
+        .delete(worldCollaborators)
+        .where(and(
+          eq(worldCollaborators.worldId, w.id),
+          eq(worldCollaborators.userId, req.params.userId),
+        ));
+      return { ok: true, collaborators: await collaboratorListFor(db, w.id) };
+    },
+  );
 
   /* ---------- Update world ---------- */
   app.patch<{ Params: { idOrSlug: string }; Body: unknown }>("/worlds/:idOrSlug", async (req, reply) => {
@@ -623,7 +757,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     if (!me) { reply.code(401); return { error: "auth" }; }
     const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
     if (!w) { reply.code(404); return { error: "not found" }; }
-    if (w.ownerUserId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
+    if (!(await canEditWorld(db, w, me.id, me.role))) { reply.code(403); return { error: "not yours" }; }
 
     let body;
     try { body = updateWorldBody.parse(req.body); }
@@ -706,7 +840,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       if (!me) { reply.code(401); return { error: "auth" }; }
       const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
       if (!w) { reply.code(404); return { error: "not found" }; }
-      if (w.ownerUserId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
+      if (!(await canEditWorld(db, w, me.id, me.role))) { reply.code(403); return { error: "not yours" }; }
 
       let body;
       try { body = createPageBody.parse(req.body); }
@@ -768,7 +902,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       if (!me) { reply.code(401); return { error: "auth" }; }
       const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
       if (!w) { reply.code(404); return { error: "not found" }; }
-      if (w.ownerUserId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
+      if (!(await canEditWorld(db, w, me.id, me.role))) { reply.code(403); return { error: "not yours" }; }
 
       let body;
       try { body = updatePageBody.parse(req.body); }
@@ -848,7 +982,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       if (!me) { reply.code(401); return { error: "auth" }; }
       const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
       if (!w) { reply.code(404); return { error: "not found" }; }
-      if (w.ownerUserId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
+      if (!(await canEditWorld(db, w, me.id, me.role))) { reply.code(403); return { error: "not yours" }; }
       const existing = (await db
         .select()
         .from(worldPages)

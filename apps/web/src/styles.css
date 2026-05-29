@@ -256,6 +256,127 @@
   78%  { opacity: 1;   transform: translate(-50%, -8px)  scale(1.0); }
   100% { opacity: 0;   transform: translate(-50%, -22px) scale(0.95); }
 }
+/* Animated lightning bolt used in the Earning Overview's Flash Sale
+ * banner header. Replaces the static `⚡` emoji with a small
+ * self-contained "strike from above" loop: a streak descends, the
+ * bolt lands with a flash + ground impact, holds a beat with a soft
+ * afterglow, then resets off-screen and runs the loop again.
+ *
+ * Sized for a header chip (~44px square) so the storm scene is
+ * scoped to its own little box — the flash overlay's `inset: 0`
+ * stays inside the container, never washing out the header.
+ *
+ * Honors `prefers-reduced-motion`: the rule block at the bottom
+ * leaves the bolt visible (with a static glow) and disables the
+ * strike / flash / streak / ground animations entirely.
+ */
+.flash-bolt {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  overflow: hidden;
+  border-radius: 8px;
+  vertical-align: middle;
+  /* Subtle dark cell so the flash reads as lightning in a storm
+   * rather than a random bright square in the orange-tinted header.
+   * Keeps the chip self-contained without painting a hard border. */
+  background: rgba(11, 14, 23, 0.35);
+}
+.flash-bolt-flash {
+  position: absolute;
+  inset: 0;
+  background: #cfe6ff;
+  opacity: 0;
+  z-index: 1;
+  pointer-events: none;
+  animation: flash-bolt-flash 1s infinite;
+}
+.flash-bolt-streak {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 2px;
+  height: 48%;
+  background: #dcf2ff;
+  transform: translateX(-50%) scaleY(0);
+  transform-origin: top;
+  opacity: 0;
+  z-index: 2;
+  animation: flash-bolt-streak 1s infinite;
+}
+.flash-bolt-ground {
+  position: absolute;
+  bottom: 18%;
+  left: 50%;
+  width: 60%;
+  height: 4px;
+  border-radius: 50%;
+  background: #8ad6ff;
+  transform: translateX(-50%) scaleX(0.2);
+  opacity: 0;
+  z-index: 1;
+  animation: flash-bolt-ground 1s infinite;
+}
+.flash-bolt-glyph {
+  position: relative;
+  font-size: 1.75rem;
+  line-height: 1;
+  z-index: 3;
+  animation: flash-bolt-strike 1s infinite;
+}
+@keyframes flash-bolt-strike {
+  0%, 55% { transform: translateY(-130%) scale(1); opacity: 0; text-shadow: none; animation-timing-function: cubic-bezier(0.2, 0.85, 0.2, 1); }
+  57%       { transform: translateY(0)     scale(1.1); opacity: 1; text-shadow: 0 0 12px #aef4ff, 0 0 24px #6cc4ff; }
+  59%       { opacity: 0.4; }
+  61%       { opacity: 1; text-shadow: 0 0 18px #ffffff, 0 0 32px #8ad6ff; }
+  63%       { opacity: 0.6; }
+  66%       { transform: translateY(0)     scale(1);   opacity: 1; text-shadow: 0 0 10px #aef4ff, 0 0 20px #6cc4ff; }
+  80%       { opacity: 1; text-shadow: 0 0 5px rgba(108, 196, 255, 0.5); }
+  88%       { opacity: 0; transform: translateY(0)    scale(1); text-shadow: none; }
+  88.5%, 100% { transform: translateY(-130%) scale(1); opacity: 0; text-shadow: none; }
+}
+@keyframes flash-bolt-flash {
+  0%, 56% { opacity: 0; }
+  57%     { opacity: 0.5; }
+  59%     { opacity: 0.08; }
+  61%     { opacity: 0.35; }
+  64%     { opacity: 0; }
+  100%    { opacity: 0; }
+}
+@keyframes flash-bolt-streak {
+  0%, 55% { opacity: 0; transform: translateX(-50%) scaleY(0); }
+  56%     { opacity: 0.95; transform: translateX(-50%) scaleY(1); }
+  59%     { opacity: 0; transform: translateX(-50%) scaleY(1); }
+  100%    { opacity: 0; }
+}
+@keyframes flash-bolt-ground {
+  0%, 56% { opacity: 0; transform: translateX(-50%) scaleX(0.2); }
+  58%     { opacity: 0.7; transform: translateX(-50%) scaleX(1); }
+  68%     { opacity: 0; transform: translateX(-50%) scaleX(1.15); }
+  100%    { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flash-bolt-glyph,
+  .flash-bolt-flash,
+  .flash-bolt-streak,
+  .flash-bolt-ground {
+    animation: none;
+  }
+  .flash-bolt-glyph {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    text-shadow: 0 0 8px rgba(108, 196, 255, 0.4);
+  }
+  .flash-bolt-flash,
+  .flash-bolt-streak,
+  .flash-bolt-ground {
+    opacity: 0;
+  }
+}
+
 .earn-burst {
   animation: earn-burst 3.2s cubic-bezier(0.22, 0.61, 0.36, 1) both;
   /* Float above the `keep-accent-rail` divider (z-index 5) that sits
@@ -1483,6 +1604,26 @@ html[data-theme-style="glass"] [class*="bg-keep-parchment"] {
  * and dark backdrop pixels into a midtone gray. */
 html[data-theme-style="glass"] .bg-keep-bg {
   background-color: var(--keep-glass-bg-tint, rgb(var(--keep-bg) / 0.45)) !important;
+}
+
+/* Opaque surface utility for floating menus / dropdowns that overlay
+ * busy content (the userlist, the chat feed, etc.). The default
+ * `bg-keep-bg` class is intentionally translucent under the glass
+ * theme so the chrome reads as frosted glass — gorgeous for static
+ * panels, terrible for a Tools drawer floating over the userlist
+ * because the menu rows and the names underneath collide visually.
+ *
+ * Apply this on top of `bg-keep-bg` (or alone): it forces a fully
+ * opaque palette-color background, drops the backdrop-filter blur
+ * that the glass theme inherits, and wins via a specificity bump
+ * (`html` ancestor) without needing `!important` on the consumer's
+ * class list. Use on: Tools drawer, identity dropdown, anywhere a
+ * floating menu sits above scrollable content. */
+html .keep-menu-surface,
+html[data-theme-style="glass"] .keep-menu-surface {
+  background-color: rgb(var(--keep-bg)) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 html[data-theme-style="glass"] .bg-keep-banner {
   background-color: var(--keep-glass-panel-tint, rgb(var(--keep-panel) / 0.45)) !important;

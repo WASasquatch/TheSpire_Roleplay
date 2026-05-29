@@ -52,7 +52,7 @@ export interface SeedWorld {
     | "western" | "steampunk" | "mythological" | "other";
   tags?: ReadonlyArray<string>;
   contentWarnings?: ReadonlyArray<string>;
-  pacing?: "casual" | "structured" | "long-form" | null;
+  pacing?: "freeform" | "drop-in" | "casual" | "slice-of-life" | "structured" | "long-form" | null;
 }
 
 const p = (slug: string, title: string, bodyHtml: string): SeedPage => ({ slug, title, bodyHtml });

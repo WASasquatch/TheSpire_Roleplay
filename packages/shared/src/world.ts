@@ -44,8 +44,27 @@ export type WorldStatus = "active" | "featured" | "archived";
 /**
  * `pacing` is a soft signal to potential members about the cadence the
  * world's owner expects. Null = unspecified.
+ *
+ * Ordered roughly from least to most committed:
+ *   - "freeform"     : Anyone, any character, drop in anytime. The most
+ *                      permissive option. Good for community sandboxes
+ *                      and casual hangouts where anything goes.
+ *   - "drop-in"      : Pick-up scenes, no plot continuity expected.
+ *                      Slightly more focused than freeform.
+ *   - "casual"       : Pick-up scenes with some recurring threads;
+ *                      low commitment but not totally ad-hoc.
+ *   - "slice-of-life": Ambient, low-stakes scenes. Daily-life RP,
+ *                      tavern hangs, quiet character moments.
+ *   - "structured"   : Planned scenes / arcs the owner curates.
+ *   - "long-form"    : Extended arcs with deep character commitment.
  */
-export type WorldPacing = "casual" | "structured" | "long-form";
+export type WorldPacing =
+  | "freeform"
+  | "drop-in"
+  | "casual"
+  | "slice-of-life"
+  | "structured"
+  | "long-form";
 
 /**
  * Curated descriptive tags. Each is normalized to lowercase + kebab on
@@ -195,6 +214,30 @@ export interface WorldDetail {
   viewerIsMember: boolean;
   /** True iff the requesting viewer's primary membership points at this world. */
   viewerPrimary: boolean;
+  /** True iff the viewer owns this world (master account match). Used by
+   *  the client to show the owner-only Collaborators panel + Delete button. */
+  viewerIsOwner: boolean;
+  /** True iff the viewer can edit this world's metadata + pages. Owner,
+   *  admin, OR anyone in `collaborators`. The client gates the Edit
+   *  affordance on this so non-editors don't see a UI that 403s on save. */
+  viewerCanEdit: boolean;
+  /** Editing collaborators the owner has invited. Always populated;
+   *  the wiki shows the list to everyone for transparency, but the
+   *  add/remove controls are gated on `viewerIsOwner`. */
+  collaborators: WorldCollaborator[];
+}
+
+/**
+ * One non-owner user who has been granted edit rights on this world.
+ * Returned by GET /worlds/:idOrSlug and by the POST/DELETE collaborator
+ * endpoints (which return the refreshed list).
+ */
+export interface WorldCollaborator {
+  userId: string;
+  username: string;
+  /** Epoch ms when the collaborator was added. Null on a row that
+   *  predates the `added_at` column (none today, future-proof). */
+  addedAt: number | null;
 }
 
 /**

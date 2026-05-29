@@ -104,17 +104,25 @@ export async function resolveTodayFlashSale(
     .where(eq(flashSales.forDate, forDate))
     .limit(1))[0];
   if (existing) {
-    // Backfill any categories that landed null on a pre-migration row.
-    // When a new category column was added (e.g. `freeform_border_key`
-    // in migration 0160), existing rows for today filled with null —
-    // the resolver's old fast path returned them as-is forever,
-    // leaving the new category silently missing from the user-facing
-    // Flash Sale. Fill the gaps lazily on the first read after deploy
-    // so today's row catches up without an admin having to wipe and
-    // re-pick. Subsequent reads see all slots populated and skip
-    // this work on the fast path.
-    const filled = await fillMissingCategories(db, existing, forDate);
-    return toFlashSaleRow(filled);
+    // Today's row is frozen once written — return it verbatim, NULL
+    // slots and all. We deliberately do NOT lazy-backfill missing
+    // categories here.
+    //
+    // Why: the catalog FKs on this table use `ON DELETE SET NULL`
+    // (see `flashSales` in db/schema.ts). Any deploy that runs a
+    // migration deleting a catalog row referenced by today's pick
+    // cascades that slot to NULL — and a lazy backfill would then
+    // re-roll a random replacement, mid-day. That's exactly the
+    // "the lineup changed after I deployed" bug.
+    //
+    // Tradeoff: when a migration adds a brand-new category column
+    // (e.g. `freeform_border_key` arrived in 0160), the column is
+    // NULL on every pre-existing flash_sales row. The day that
+    // migration ships, the new category renders as "no pick" for
+    // existing rows; tomorrow's freshly-resolved row populates it
+    // for the first time. A targeted one-off backfill migration is
+    // the right way to retro-fill historical rows when needed.
+    return toFlashSaleRow(existing);
   }
 
   // Cold path: pick + insert. Reads site settings + overrides +
@@ -172,77 +180,6 @@ export async function resolveTodayFlashSale(
     .where(eq(flashSales.forDate, forDate))
     .limit(1))[0];
   return toFlashSaleRow(final!);
-}
-
-/**
- * Lazy backfill — when today's `flash_sales` row was written before a
- * new category column existed (the column ALTERed in later with a
- * default of NULL), the row's slot for that category is null and
- * `toFlashSaleRow` would surface that as "no pick today" forever.
- * Re-run the per-category pick for null slots whose category is
- * currently enabled, then UPDATE the row in place. Subsequent reads
- * see the populated slots and skip this work.
- */
-async function fillMissingCategories(
-  db: Db,
-  row: typeof flashSales.$inferSelect,
-  forDate: string,
-): Promise<typeof flashSales.$inferSelect> {
-  // Cheap check first — only fall through to the settings/overrides
-  // lookups when at least one slot is actually empty.
-  if (row.nameStyleKey && row.itemKey && row.cosmeticKey && row.freeformBorderKey) {
-    return row;
-  }
-  const settings = (await db.select().from(siteSettings).limit(1))[0];
-  const defaultPct = settings?.flashSaleDefaultDiscountPct ?? 25;
-  const overrideRows = await db
-    .select()
-    .from(flashSaleOverrides)
-    .where(eq(flashSaleOverrides.forDate, forDate));
-  const overrides = new Map<FlashSaleCategory, { targetKey: string; discountPct: number | null }>();
-  for (const r of overrideRows) {
-    overrides.set(r.category as FlashSaleCategory, {
-      targetKey: r.targetKey,
-      discountPct: r.discountPct,
-    });
-  }
-  const patch: Partial<typeof flashSales.$inferInsert> = {};
-  if (!row.nameStyleKey && (settings?.flashSaleStylesEnabled ?? true)) {
-    const pick = await pickCategory(db, "name_style", true, overrides, defaultPct);
-    if (pick.targetKey) {
-      patch.nameStyleKey = pick.targetKey;
-      patch.nameStyleDiscountPct = pick.discountPct;
-    }
-  }
-  if (!row.itemKey && (settings?.flashSaleItemsEnabled ?? true)) {
-    const pick = await pickCategory(db, "item", true, overrides, defaultPct);
-    if (pick.targetKey) {
-      patch.itemKey = pick.targetKey;
-      patch.itemDiscountPct = pick.discountPct;
-    }
-  }
-  if (!row.cosmeticKey && (settings?.flashSaleCosmeticsEnabled ?? true)) {
-    const pick = await pickCategory(db, "cosmetic", true, overrides, defaultPct);
-    if (pick.targetKey) {
-      patch.cosmeticKey = pick.targetKey;
-      patch.cosmeticDiscountPct = pick.discountPct;
-    }
-  }
-  if (!row.freeformBorderKey && (settings?.flashSaleFreeformBordersEnabled ?? true)) {
-    const pick = await pickCategory(db, "freeform_border", true, overrides, defaultPct);
-    if (pick.targetKey) {
-      patch.freeformBorderKey = pick.targetKey;
-      patch.freeformBorderDiscountPct = pick.discountPct;
-    }
-  }
-  if (Object.keys(patch).length === 0) return row;
-  await db.update(flashSales).set(patch).where(eq(flashSales.forDate, forDate));
-  const refreshed = (await db
-    .select()
-    .from(flashSales)
-    .where(eq(flashSales.forDate, forDate))
-    .limit(1))[0];
-  return refreshed ?? row;
 }
 
 function toFlashSaleRow(r: typeof flashSales.$inferSelect): FlashSaleRow {

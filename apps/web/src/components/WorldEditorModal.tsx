@@ -13,13 +13,21 @@ import {
   CONTENT_WARNINGS,
   DEFAULT_THEME,
   WORLD_PAGE_DEPTH_CAP,
+  isAdminRole,
 } from "@thekeep/shared";
-import { buildWorldTree, deriveSlug, type WorldTreeNode } from "../lib/worlds.js";
+import {
+  addWorldCollaborator,
+  buildWorldTree,
+  deriveSlug,
+  removeWorldCollaborator,
+  type WorldTreeNode,
+} from "../lib/worlds.js";
 import { readError } from "../lib/http.js";
 import { themeStyle } from "../lib/theme.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { CloseButton } from "./CloseButton.js";
+import { useChat } from "../state/store.js";
 
 interface Props {
   worldId: string;
@@ -275,6 +283,16 @@ function WorldMetaEditor({
   onDelete: () => void;
 }) {
   const w = detail.world;
+  // "Can manage collaborators" — computed client-side so the panel
+  // works even when the server response predates the viewerIsOwner
+  // field. Two paths qualify: the actual owner (id match against the
+  // world summary's ownerUserId), and any admin role. Mirrors the
+  // server's POST/DELETE /worlds/:id/collaborators gate so the UI
+  // doesn't show controls that would 403 on submit.
+  const me = useChat((s) => s.me);
+  const myId = me?.id ?? null;
+  const canManageCollaborators =
+    (!!myId && myId === w.ownerUserId) || (!!me && isAdminRole(me.role));
   const [name, setName] = useState(w.name);
   const [slug, setSlug] = useState(w.slug);
   const [description, setDescription] = useState(w.description ?? "");
@@ -552,7 +570,10 @@ function WorldMetaEditor({
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
             <option value="">(unspecified)</option>
-            <option value="casual">Casual (pick-up scenes, low commitment)</option>
+            <option value="freeform">Freeform (anyone, any character, anytime)</option>
+            <option value="drop-in">Drop-in (pick-up scenes, no continuity expected)</option>
+            <option value="casual">Casual (pick-up scenes, recurring threads)</option>
+            <option value="slice-of-life">Slice-of-life (ambient, low-stakes)</option>
             <option value="structured">Structured (planned scenes / arcs)</option>
             <option value="long-form">Long-form (extended arcs, deep commitment)</option>
           </select>
@@ -613,6 +634,13 @@ function WorldMetaEditor({
 
       {err ? <div className="text-[11px] text-keep-accent">{err}</div> : null}
 
+      <CollaboratorsPanel
+        worldId={worldId}
+        viewerIsOwner={canManageCollaborators}
+        initialCollaborators={detail.collaborators ?? []}
+        onChanged={onSaved}
+      />
+
       <div className="flex items-center justify-between border-t border-keep-rule pt-3">
         <button
           type="button"
@@ -635,6 +663,133 @@ function WorldMetaEditor({
         </div>
       </div>
     </form>
+  );
+}
+
+/* ------------------------------------------------------------ *
+ *  Collaborators panel (inline, owner-only add/remove)
+ * ------------------------------------------------------------ */
+
+function CollaboratorsPanel({
+  worldId,
+  viewerIsOwner,
+  initialCollaborators,
+  onChanged,
+}: {
+  worldId: string;
+  viewerIsOwner: boolean;
+  initialCollaborators: WorldDetail["collaborators"];
+  onChanged: () => Promise<void> | void;
+}) {
+  const [list, setList] = useState(initialCollaborators);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  // Keep local list in sync if the parent re-fetches the world detail
+  // (e.g. after the metadata save round-trips a fresh snapshot).
+  useEffect(() => { setList(initialCollaborators); }, [initialCollaborators]);
+
+  async function add() {
+    const name = draft.trim();
+    if (!name || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await addWorldCollaborator(worldId, name);
+      setList(r.collaborators);
+      setDraft("");
+      await onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "could not add");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(userId: string) {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await removeWorldCollaborator(worldId, userId);
+      setList(r.collaborators);
+      await onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "could not remove");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded border border-keep-rule p-3 text-xs">
+      <div className="flex items-baseline justify-between">
+        <h4 className="font-action text-sm">Collaborators</h4>
+        <span className="text-[10px] text-keep-muted">
+          {list.length} {list.length === 1 ? "editor" : "editors"} besides you
+        </span>
+      </div>
+      <p className="mt-1 text-[11px] text-keep-muted">
+        {viewerIsOwner
+          ? "Invite other users to co-edit this world's pages. They can add, edit, and delete pages, but only you can manage this list, change visibility critical bits, or delete the world."
+          : "Users with edit access to this world. Only the owner can add or remove collaborators."}
+      </p>
+      {list.length > 0 ? (
+        <ul className="mt-2 space-y-1">
+          {list.map((c) => (
+            <li
+              key={c.userId}
+              className="flex items-center justify-between rounded border border-keep-rule/60 bg-keep-bg/40 px-2 py-1"
+            >
+              <span className="font-mono">{c.username}</span>
+              {viewerIsOwner ? (
+                <button
+                  type="button"
+                  onClick={() => void remove(c.userId)}
+                  disabled={busy}
+                  className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-accent/10 hover:text-keep-accent disabled:opacity-50"
+                >
+                  Remove
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 italic text-keep-muted">No collaborators yet.</p>
+      )}
+      {viewerIsOwner ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void add();
+              }
+            }}
+            placeholder="username to invite"
+            maxLength={80}
+            className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
+          />
+          <button
+            type="button"
+            onClick={() => void add()}
+            disabled={busy || draft.trim().length === 0}
+            className="rounded border border-keep-action bg-keep-action/15 px-2 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+          >
+            {busy ? "..." : "Add"}
+          </button>
+        </div>
+      ) : null}
+      {err ? (
+        <div className="mt-2 rounded border border-keep-accent/50 bg-keep-accent/10 p-2 text-[11px] text-keep-accent">
+          {err}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

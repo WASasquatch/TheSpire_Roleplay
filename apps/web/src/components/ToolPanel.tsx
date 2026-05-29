@@ -198,7 +198,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
               top section title disappear behind the chat banner.
               The internal overflow-y-auto handles any overflow from
               tools sections themselves. */}
-          <div className="absolute inset-x-0 bottom-full z-40 max-h-[calc(100dvh-14rem)] overflow-y-auto rounded-t border-x border-t border-keep-rule bg-keep-bg shadow-2xl">
+          <div className="keep-menu-surface absolute inset-x-0 bottom-full z-40 max-h-[calc(100dvh-14rem)] overflow-y-auto rounded-t border-x border-t border-keep-rule bg-keep-bg shadow-2xl">
             <header className="sticky top-0 flex items-center justify-between border-b border-keep-rule bg-keep-banner px-3 py-2">
               <span className="text-xs font-action uppercase tracking-widest">Tools</span>
               <CloseButton onClick={() => setDrawerOpen(false)} />
@@ -518,7 +518,7 @@ function IdentityButton({
           {/* Anchored to the trigger's top edge; grows upward like
               the Tools drawer. Capped so it never overflows the rail
               even when the user has 30+ characters. */}
-          <div className="absolute inset-x-0 bottom-full z-40 mb-1 max-h-[calc(100dvh-14rem)] overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl">
+          <div className="keep-menu-surface absolute inset-x-0 bottom-full z-40 mb-1 max-h-[calc(100dvh-14rem)] overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl">
             <header className="sticky top-0 border-b border-keep-rule bg-keep-banner px-3 py-1 text-[10px] font-action uppercase tracking-[0.2em] text-keep-muted">
               Switch identity
             </header>

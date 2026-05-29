@@ -193,15 +193,15 @@ export function EmoticonSubmissionModal({
               Build your sheet
             </h3>
             <p className="text-xs text-keep-muted">
-              Sheets are <strong className="text-keep-text">4×4 grid, square cells</strong>, submitted at{" "}
-              <strong className="text-keep-text">600×600px</strong> (so each cell is 150×150px) as{" "}
+              Sheets are <strong className="text-keep-text">4x4 grid, square cells</strong>, submitted at{" "}
+              <strong className="text-keep-text">600x600px</strong> (so each cell is 150x150px) as{" "}
               <strong className="text-keep-text">PNG, WebP, or APNG with a transparent background</strong> so
               reactions composite cleanly over any chat theme. JPEG / GIF also accepted but transparency is lost.
             </p>
             <p className="text-xs text-keep-muted">
-              <strong className="text-keep-text">WebP and APNG can be animated</strong> — looping idle frames,
+              <strong className="text-keep-text">WebP and APNG can be animated</strong>. Looping idle frames,
               blinks, shimmer, etc. all carry through to the picker. You can work at a larger canvas while
-              drawing for clarity, but downscale to 600×600px before submitting so file size stays reasonable.
+              drawing for clarity, but downscale to 600x600px before submitting so file size stays reasonable.
             </p>
             <div className="flex flex-wrap gap-2 pt-1">
               <a
@@ -222,7 +222,7 @@ export function EmoticonSubmissionModal({
               </a>
             </div>
             <p className="text-[10px] italic text-keep-muted">
-              The alignment grid's borders are visual guides only — strip them out of your final sheet so peers don't see grid lines around every reaction.
+              The alignment grid's borders are visual guides only. Strip them out of your final sheet so peers don't see grid lines around every reaction.
             </p>
           </section>
 
@@ -277,7 +277,7 @@ export function EmoticonSubmissionModal({
             {/* Image upload + preview */}
             <label className="block text-xs">
               <span className="text-keep-muted">
-                Sheet image — 4×4 grid at <strong className="text-keep-text">600×600px</strong> (150px cells).{" "}
+                Sheet image. 4x4 grid at <strong className="text-keep-text">600x600px</strong> (150px cells).{" "}
                 <strong className="text-keep-text">Transparent PNG, WebP, or APNG recommended</strong> (WebP / APNG
                 can be animated); JPEG / GIF accepted but lose transparency. ≤6 MB.
               </span>
@@ -312,7 +312,7 @@ export function EmoticonSubmissionModal({
                 Cell labels ({labeledCellCount}/{CELL_COUNT})
               </summary>
               <p className="mb-2 mt-1 text-[10px] text-keep-muted">
-                Pre-filled to match the demo sheet's mood order — edit any cell whose reaction differs, or blank it out to hide that slot from the picker. Order matches the 4×4 grid left-to-right, top-to-bottom.
+                Pre-filled to match the demo sheet's mood order. Edit any cell whose reaction differs, or blank it out to hide that slot from the picker. Order matches the 4x4 grid left-to-right, top-to-bottom.
               </p>
               <div className="grid grid-cols-4 gap-1">
                 {cells.map((c, i) => (

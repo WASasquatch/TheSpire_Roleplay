@@ -23,8 +23,8 @@
 # - SESSION_SECRET MUST be set as a Fly secret before the first deploy or
 #   the server will refuse to start (its index.ts has a min-length guard).
 
-app = "thespire"           # change to your chosen app name
-primary_region = "sjc"     # any Fly region; pick what's near your users
+app = "thespire"
+primary_region = "sjc"
 
 [build]
   dockerfile = "Dockerfile"

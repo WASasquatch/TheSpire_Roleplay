@@ -17,14 +17,33 @@
 #     ./remote-deploy.sh --commit commit.md --bump minor   # message from file
 #     Bumps the version (if --bump given), typechecks, commits the
 #     staged-by-default tree (apps/ + packages/ + README.md), pushes
-#     origin main, then deploys. All arguments forward straight to
-#     ship.sh — see `bash scripts/ship.sh --help` for the full set.
+#     origin main, then deploys. All arguments (except --update-msg,
+#     handled here) forward straight to ship.sh — see
+#     `bash scripts/ship.sh --help` for the full set.
 #
 #     The --commit / -m / --message value can be either a literal string
 #     OR a path to a regular file; when it's a file, ship.sh reads the
 #     file's contents as the commit message. Keeping a running log in
 #     commit.md and shipping it with `--commit commit.md` is the
 #     intended use.
+#
+#   --update-msg "what's in this release":
+#     Short admin-authored note (one sentence) that rides along with the
+#     post-deploy "please refresh" banner each user sees when their
+#     loaded bundle drifts behind the server. Surfaces below the version
+#     lines so users get a hint of what changed before they refresh.
+#     The flag is consumed here and stripped before the remaining args
+#     are forwarded to ship.sh.
+#
+#     The message is staged as the fly secret `UPDATE_MESSAGE`. EVERY
+#     invocation of this script sets that secret — to the provided text
+#     when --update-msg is given, or to the empty string when not — so a
+#     message from yesterday's deploy doesn't linger across today's
+#     deploy. Empty value reads as "no message" on the server.
+#
+#     Example:
+#       ./remote-deploy.sh --commit "patch login race" --bump patch \
+#         --update-msg "fixes the rare login spinner"
 #
 # Both paths hardcode:
 #   --remote-only : build on fly's builders so this dev box doesn't
@@ -89,6 +108,30 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Extract --update-msg before forwarding the rest to ship.sh. ship.sh's
+# parser rejects unknown flags hard, so we strip this one here. Every
+# OTHER arg is preserved verbatim and order is maintained.
+#
+# Supported forms:
+#   --update-msg "text..."
+#   --update-msg=text...
+UPDATE_MSG=""
+REST=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --update-msg)
+      if [[ $# -lt 2 ]]; then
+        echo "remote-deploy: --update-msg requires a value." >&2
+        exit 1
+      fi
+      UPDATE_MSG="$2"; shift 2 ;;
+    --update-msg=*)
+      UPDATE_MSG="${1#--update-msg=}"; shift ;;
+    *)
+      REST+=("$1"); shift ;;
+  esac
+done
+
 # Stage the item-templates force-reseed flag for the next deploy.
 # `--stage` queues the value with flyctl without triggering its own
 # extra restart; ship.sh's flyctl deploy below picks it up cleanly.
@@ -101,10 +144,20 @@ TS="$(date +%s)"
 if command -v flyctl >/dev/null 2>&1; then
   echo "==> Staging FORCE_ITEM_TEMPLATES_RESEED=$TS (force-reseed item templates on next boot)..."
   flyctl secrets set "FORCE_ITEM_TEMPLATES_RESEED=$TS" --stage >/dev/null || true
+  # Always set UPDATE_MESSAGE — to the provided text or to empty —
+  # so a leftover from a previous deploy can't linger past the
+  # release it described. Server treats empty as "no message" and
+  # the stale-version banner renders the version lines alone.
+  if [[ -n "$UPDATE_MSG" ]]; then
+    echo "==> Staging UPDATE_MESSAGE=\"$UPDATE_MSG\" (shown on the post-deploy refresh banner)..."
+  else
+    echo "==> Staging UPDATE_MESSAGE=\"\" (no release note this deploy)..."
+  fi
+  flyctl secrets set "UPDATE_MESSAGE=$UPDATE_MSG" --stage >/dev/null || true
 fi
 
-if [[ $# -eq 0 ]]; then
+if [[ ${#REST[@]} -eq 0 ]]; then
   exec bash scripts/ship.sh --deploy-only --no-seed --remote-only
 fi
 
-exec bash scripts/ship.sh --remote-only --no-seed "$@"
+exec bash scripts/ship.sh --remote-only --no-seed "${REST[@]}"

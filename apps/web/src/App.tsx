@@ -82,13 +82,12 @@ export function App() {
     void fetchEmoticonCatalog();
   }, []);
 
-  // Sync the tab title and the logo font CSS variable with the configured
-  // branding. Both are global to the document; the banner reads the var.
+  // Sync the logo font CSS variable with branding. (Tab title is set
+  // in a separate route-aware effect below.)
   useEffect(() => {
-    document.title = branding.siteName || "The Spire";
     const logoFont = branding.logoFont ?? "";
     document.documentElement.style.setProperty("--keep-logo-font", logoFont);
-  }, [branding.siteName, branding.logoFont]);
+  }, [branding.logoFont]);
 
   // Restore session on mount. Until this resolves we deliberately render
   // *neither* AuthGate nor Chat - otherwise a logged-in user reloading the
@@ -1045,6 +1044,35 @@ function Chat() {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+
+  /**
+   * Route-aware tab title. Mirrors the per-route SEO that the server
+   * renders for crawlers — so the user sees the same name in their
+   * browser tab whether they arrived via deep link (server-rendered)
+   * or by navigating inside the SPA (client-rendered). Falls back to
+   * the admin-configured site name plus a roleplay-chat tagline at
+   * rest, matching the homepage `<title>` the server produces for `/`.
+   *
+   * Priority: open profile > open world viewer > open story reader >
+   * default. The first match wins so the most specific context shows.
+   */
+  useEffect(() => {
+    const siteName = branding.siteName || "The Spire";
+    let title: string;
+    if (openProfile) {
+      const name = openProfile.kind === "master"
+        ? openProfile.profile.username
+        : openProfile.profile.name;
+      title = `${name} - Roleplay Profile · ${siteName}`;
+    } else if (worldViewerId) {
+      title = `Roleplay World · ${siteName}`;
+    } else if (storyReader) {
+      title = `Story · Scriptorium · ${siteName}`;
+    } else {
+      title = `${siteName} - Roleplay Chat & Collaborative Writing`;
+    }
+    document.title = title;
+  }, [branding.siteName, openProfile, worldViewerId, storyReader]);
 
   /**
    * Resolve and apply the caller's *active* theme: the active character's
@@ -2734,6 +2762,7 @@ function Chat() {
         onOpenRules={() => setRulesOpen(true)}
         onOpenEarning={() => setEarningOpen({})}
         onOpenScriptorium={() => setScriptoriumOpen({})}
+        onOpenWorlds={() => setWorldCatalogOpen(true)}
         {...(me && isAdminRole(me.role) ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
       <StaleVersionBanner />

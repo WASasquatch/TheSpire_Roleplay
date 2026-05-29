@@ -185,7 +185,13 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
                 onSetPrimary={setPrimary}
               />
             ) : null}
-            {onEdit && isAuthenticated ? (
+            {/* Edit button only shows when the viewer can actually edit
+                (owner, admin, or invited collaborator). Previously this
+                rendered for any logged-in user, so non-editors could
+                open the editor UI and only learn they lacked permission
+                when the first save returned 403. The server still
+                enforces the same gate on every mutation. */}
+            {onEdit && isAuthenticated && detail?.viewerCanEdit ? (
               <button
                 type="button"
                 onClick={onEdit}

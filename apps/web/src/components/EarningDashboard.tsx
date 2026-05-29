@@ -422,7 +422,19 @@ function FlashSaleSection({ flashSale, previewName, previewAvatarUrl, onNavigate
       />
       <header className="relative mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span aria-hidden className="text-3xl leading-none animate-pulse">⚡</span>
+          {/* Animated lightning bolt — replaces the static `⚡` emoji
+              with a strike-from-above loop (streak descends, bolt
+              lands with a flash + ground impact, holds with an
+              afterglow, resets). Scoped to its own 44px box via
+              `.flash-bolt` so the flash overlay never paints outside
+              the chip. Honors `prefers-reduced-motion` (handled in
+              styles.css). */}
+          <span aria-hidden className="flash-bolt">
+            <span className="flash-bolt-flash" />
+            <span className="flash-bolt-streak" />
+            <span className="flash-bolt-glyph">⚡</span>
+            <span className="flash-bolt-ground" />
+          </span>
           <div>
             <h3 className="font-action text-xl uppercase tracking-widest text-keep-action sm:text-2xl">
               Flash Sale

@@ -38,15 +38,24 @@ export function TypingIndicator({ roomId }: Props) {
   const typers = useChat((s) => (roomId ? s.typersByRoom[roomId] : undefined));
   if (!typers || typers.length === 0) return null;
   return (
-    // `aria-live="polite"` lets screen readers announce a new typer
-    // joining without interrupting the reader; tablet/phone keep
-    // the row visually subdued so it doesn't compete with the
-    // message stream above it. Height is fixed-ish so the
-    // composer's vertical position doesn't jitter when the row
-    // appears / disappears between renders.
+    // Discord-style overlay: the strip floats absolutely over the
+    // bottom of the message stream (whose container is `relative`
+    // and reserves `pb-6` clearance so the last message never sits
+    // beneath this text). Floating instead of inline means no layout
+    // shift when typing starts/stops — the composer never jumps and
+    // the chat area never gives up vertical space.
+    //   - `pointer-events-none` so clicks on messages behind the
+    //     strip's transparent fade area still register.
+    //   - `bg-gradient-to-t from-keep-bg via-keep-bg/90 to-transparent`
+    //     paints a soft fade beneath the text so messages scrolled
+    //     up under the strip dissolve cleanly rather than colliding
+    //     with overlapping glyphs. The text itself sits in the solid
+    //     portion (`pb-1 pt-3`).
+    //   - `aria-live="polite"` lets screen readers announce a new
+    //     typer without interrupting the active reader.
     <div
       aria-live="polite"
-      className="px-3 py-1 text-xs italic text-keep-muted"
+      className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-keep-bg via-keep-bg/90 to-transparent px-3 pb-1 pt-3 text-xs italic text-keep-muted"
     >
       {formatTyperLabel(typers)}
     </div>

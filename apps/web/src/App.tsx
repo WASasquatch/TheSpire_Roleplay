@@ -2814,6 +2814,14 @@ function Chat() {
               Viewing older history — click to return to live
             </button>
           ) : null}
+          {/* Relative wrapper so the TypingIndicator inside can anchor
+              `absolute bottom-0` over the chat feed's reserved bottom
+              padding (see MessageList's `pb-6`). This is the Discord
+              pattern: chat reserves a small strip at the bottom that
+              stays empty when nobody's typing and gets overlaid with
+              the typing strip when someone is — no layout shift, no
+              composer jitter, no chat space lost while typing. */}
+          <div className="relative flex min-h-0 flex-1 flex-col">
           <MessageList
             messages={messages}
             occupants={occ}
@@ -2889,6 +2897,12 @@ function Chat() {
               setTopicCreateMode(true);
             }}
           />
+          {/* TypingIndicator overlays the bottom of the message stream
+              (absolute-positioned inside the relative wrapper above).
+              Renders null when nobody else is typing, so the reserved
+              padding strip is just empty space at rest. */}
+          <TypingIndicator roomId={currentRoomId} />
+          </div>
           <MutualPrompts
             socket={socket}
             onError={(n) => setNotice(n)}
@@ -2915,13 +2929,6 @@ function Chat() {
               bright end — so the rail genuinely emits into the
               bloom rather than floating on bare ambient. */}
           <div aria-hidden className="keep-accent-rail" data-rail="footer" />
-          {/* Phase 4 — "is typing…" strip. Renders null when nobody
-              else is typing, so it consumes zero vertical space at
-              rest. Sits AFTER the accent rail so the rail stays
-              flush with the composer when the strip is hidden, and
-              the strip slides in just under the rail when somebody
-              starts typing. */}
-          <TypingIndicator roomId={currentRoomId} />
           <Composer
             value={composerText}
             onChange={setComposerText}

@@ -688,7 +688,14 @@ function FlatMessageView({
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="flex-1 overflow-y-auto px-4 py-2 leading-relaxed"
+      // `pb-7` (~28px) reserves clearance at the bottom of the feed so
+      // the absolutely-positioned TypingIndicator (anchored to the
+      // relative wrapper in App.tsx) overlays empty space instead of
+      // the last message. Discord-style: the strip is always-floating,
+      // chat always reserves a small bottom gutter; no jitter when the
+      // typing strip toggles, and the last message stays visible even
+      // when the strip is active.
+      className="flex-1 overflow-y-auto px-4 pb-7 pt-2 leading-relaxed"
       style={{ fontSize: FONT_EM[fontStep] }}
     >
       {hasMore || loadingOlder ? (

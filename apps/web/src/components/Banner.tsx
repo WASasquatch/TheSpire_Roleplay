@@ -60,6 +60,12 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   // links on narrow screens where the inline strip would overflow or
   // crowd the brand.
   const [menuOpen, setMenuOpen] = useState(false);
+  // Admin-managed custom links live behind a single "More" dropdown
+  // on desktop so the nav row doesn't grow unbounded with each new
+  // admin-added link. Mobile mirrors the pattern as a collapsible
+  // section inside the hamburger panel.
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,6 +88,27 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [menuOpen]);
+
+  // Desktop "More" dropdown closes on Esc or outside-click. Same
+  // pattern as the mobile hamburger but scoped to a popover, so a
+  // tap on any other nav button or the chat feed dismisses it.
+  useEffect(() => {
+    if (!moreOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setMoreOpen(false);
+    }
+    function onDocClick(e: MouseEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t && t.closest("[data-nav-more]")) return;
+      setMoreOpen(false);
+    }
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDocClick);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDocClick);
+    };
+  }, [moreOpen]);
 
   async function logout() {
     try {
@@ -176,20 +203,48 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
       {/* Desktop nav. Hidden below md+; the hamburger button + dropdown
           below handle narrow screens. */}
       <nav className="hidden items-center gap-3 text-xs uppercase tracking-widest text-keep-muted lg:flex">
-        {links.map((l, i) => (
-          <span key={l.id} className="flex items-center gap-3">
-            {i > 0 ? <span className="text-keep-rule">|</span> : null}
-            <a
-              href={l.href}
-              target={l.target}
-              rel={l.target === "_blank" ? "noopener noreferrer" : undefined}
-              className="hover:text-keep-text"
+        {/* Admin-managed custom links collapse behind a single "More"
+            popover so a busy install with many links doesn't push the
+            built-in nav items off the row. `data-nav-more` is the
+            scope marker the outside-click listener uses to keep the
+            popover alive when the user is interacting with it. */}
+        {links.length > 0 ? (
+          <span className="relative flex items-center gap-3" data-nav-more>
+            <button
+              type="button"
+              onClick={() => setMoreOpen((o) => !o)}
+              aria-expanded={moreOpen}
+              aria-haspopup="menu"
+              className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
+              title="Site links"
             >
-              {l.label}
-            </a>
+              More
+              <span aria-hidden className="ml-1 text-[0.7em]">
+                {moreOpen ? "▴" : "▾"}
+              </span>
+            </button>
+            {moreOpen ? (
+              <div
+                role="menu"
+                className="keep-menu-surface absolute right-0 top-full z-40 mt-1 flex w-56 flex-col overflow-hidden rounded border border-keep-rule text-sm normal-case tracking-normal shadow-2xl"
+              >
+                {links.map((l) => (
+                  <a
+                    key={l.id}
+                    href={l.href}
+                    target={l.target}
+                    rel={l.target === "_blank" ? "noopener noreferrer" : undefined}
+                    onClick={() => setMoreOpen(false)}
+                    className="border-b border-keep-rule/40 px-3 py-2 text-keep-text last:border-b-0 hover:bg-keep-banner"
+                  >
+                    {l.label}
+                  </a>
+                ))}
+              </div>
+            ) : null}
+            <span className="text-keep-rule">|</span>
           </span>
-        ))}
-        {links.length > 0 ? <span className="text-keep-rule">|</span> : null}
+        ) : null}
         {/* Only render the Earning link for signed-in users — the
             dashboard requires auth and the link itself shouldn't tease
             anonymous splash visitors. */}
@@ -308,20 +363,41 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
             className="fixed inset-0 z-30 cursor-default bg-transparent lg:hidden"
           />
           <nav
-            className="absolute right-2 top-full z-40 mt-1 flex w-56 flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg text-sm shadow-2xl lg:hidden"
+            className="keep-menu-surface absolute right-2 top-full z-40 mt-1 flex w-56 flex-col overflow-hidden rounded border border-keep-rule text-sm shadow-2xl lg:hidden"
           >
-            {links.map((l) => (
-              <a
-                key={l.id}
-                href={l.href}
-                target={l.target}
-                rel={l.target === "_blank" ? "noopener noreferrer" : undefined}
-                onClick={() => setMenuOpen(false)}
-                className="border-b border-keep-rule/40 px-3 py-2 text-keep-text hover:bg-keep-banner"
-              >
-                {l.label}
-              </a>
-            ))}
+            {/* Custom links live behind a collapsible row so a long
+                list doesn't crowd the built-in actions. Header taps
+                expand the list in-place; individual link taps close
+                the whole menu, matching the other rows. */}
+            {links.length > 0 ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setMobileMoreOpen((o) => !o)}
+                  aria-expanded={mobileMoreOpen}
+                  className="flex items-center justify-between border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
+                >
+                  <span>More</span>
+                  <span aria-hidden className="text-xs text-keep-muted">
+                    {mobileMoreOpen ? "▴" : "▾"}
+                  </span>
+                </button>
+                {mobileMoreOpen
+                  ? links.map((l) => (
+                      <a
+                        key={l.id}
+                        href={l.href}
+                        target={l.target}
+                        rel={l.target === "_blank" ? "noopener noreferrer" : undefined}
+                        onClick={() => setMenuOpen(false)}
+                        className="border-b border-keep-rule/40 bg-keep-banner/40 py-2 pl-6 pr-3 text-keep-text hover:bg-keep-banner"
+                      >
+                        {l.label}
+                      </a>
+                    ))
+                  : null}
+              </>
+            ) : null}
             {/* These are menu items, not buttons. Drop the `keep-button`
                 class so they don't pick up the pill/lift styling — they
                 render as flat link-style rows matching the <a> siblings

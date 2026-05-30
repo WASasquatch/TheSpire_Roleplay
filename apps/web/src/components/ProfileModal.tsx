@@ -388,20 +388,24 @@ function ProfileBody({
   activeCharacterAction: { label: string; onClick: () => void } | undefined;
 }) {
   const isChar = profile.kind === "character";
-  // Earning — fetch the master pool's rank/tier so the hero can show
-  // a rank chip below the name. One-shot fetch on mount; bad responses
-  // (404, network blip) leave earning=null and the hero falls back
-  // to no chip. Lives here rather than in App because the modal can
-  // be opened from many surfaces (chat name click, userlist icon,
-  // /whois) and we want every entry point to see the chip.
+  // Earning — fetch the IDENTITY's own pool so the hero shows the
+  // right XP / currency / rank / border. Character profiles must
+  // pass their character id; without it the endpoint returns the
+  // master/OOC pool and a fresh character would inherit the owner's
+  // accumulated XP, currency, and equipped border (the project's
+  // "a character is its own account" contract — nothing is shared
+  // between OOC and a character).
+  const characterIdForEarning = isChar
+    ? (profile.profile as { id: string }).id
+    : null;
   const [earning, setEarning] = useState<PublicEarningResponse | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetchPublicEarning(profile.profile.userId)
+    fetchPublicEarning(profile.profile.userId, characterIdForEarning)
       .then((r) => { if (!cancelled) setEarning(r); })
       .catch(() => { /* unranked / not-found / network — hide the chip */ });
     return () => { cancelled = true; };
-  }, [profile.profile.userId]);
+  }, [profile.profile.userId, characterIdForEarning]);
   const freeformConfig = useMemo(() => {
     const json = earning?.freeformBorderConfigJson;
     if (!json) return null;

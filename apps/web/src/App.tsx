@@ -1297,8 +1297,18 @@ function Chat() {
   // one-shot state set inside the load() above, so admin palette
   // changes only landed for the user after a manual reload.
   const activeTheme = useMemo<Theme>(() => {
-    return characterTheme ?? userTheme ?? branding.defaultTheme ?? DEFAULT_THEME;
-  }, [characterTheme, userTheme, branding.defaultTheme]);
+    // A character is its own identity — distinct theme bucket from
+    // OOC. Voicing a character that hasn't picked a theme yet falls
+    // straight through to the SITE default, NOT the master account's
+    // theme. The legacy fallthrough (`characterTheme ?? userTheme`)
+    // smeared OOC's palette onto every fresh character and made
+    // "save a theme on this character" look like it reset back to
+    // OOC's theme as soon as the editor reloaded.
+    if (activeCharacterId) {
+      return characterTheme ?? branding.defaultTheme ?? DEFAULT_THEME;
+    }
+    return userTheme ?? branding.defaultTheme ?? DEFAULT_THEME;
+  }, [activeCharacterId, characterTheme, userTheme, branding.defaultTheme]);
 
   // Apply whichever theme is active to the document. Sets CSS vars on <html>
   // so they override the :root defaults from styles.css.
@@ -1343,13 +1353,14 @@ function Chat() {
     // default so shipped presets carry their design intent without
     // requiring an admin to wire the map for every preset.
     const builtinForPreset = presetName ? DEFAULT_PRESET_DESIGNS[presetName] : undefined;
-    const resolvedStyle =
-      characterStyleKey ||
-      userStyleKey ||
-      pinnedForPreset ||
-      builtinForPreset ||
-      siteStyleKey ||
-      DEFAULT_STYLE_KEY;
+    // Design resolution mirrors the palette: a character is its own
+    // identity, so its design picks don't fall through to the
+    // master's. Voicing a character with no design override goes
+    // straight to the theme-pinned design (if any) and then the site
+    // default. The OOC chain still cascades master → presets → site.
+    const resolvedStyle = activeCharacterId
+      ? (characterStyleKey || pinnedForPreset || builtinForPreset || siteStyleKey || DEFAULT_STYLE_KEY)
+      : (userStyleKey || pinnedForPreset || builtinForPreset || siteStyleKey || DEFAULT_STYLE_KEY);
     applyStyle(activeTheme, resolvedStyle);
 
     // Glass shell-bg URL — character > master > Spire artwork
@@ -1364,8 +1375,12 @@ function Chat() {
     // bg-color, not the artwork.
     const root = document.documentElement;
     if (resolvedStyle === "glass") {
-      const personalUrl = characterBgUrl ?? userBgUrl;
-      const personalMode = (characterBgUrl ? characterBgMode : userBgMode);
+      // Same partition as theme + design: when voicing a character,
+      // ONLY their own bg is considered; OOC's bg never bleeds onto a
+      // character's chat shell, and vice versa. The OOC path keeps
+      // the master bg.
+      const personalUrl = activeCharacterId ? characterBgUrl : userBgUrl;
+      const personalMode = activeCharacterId ? characterBgMode : userBgMode;
       const url = personalUrl ?? (isDarkPalette(activeTheme) ? "/the_spire_bg_dark.jpg" : "/the_spire_bg.jpg");
       const size = personalUrl
         ? (personalMode === "stretch" ? "100% 100%" : personalMode)
@@ -1410,7 +1425,7 @@ function Chat() {
       root.style.removeProperty("--keep-glass-tool-tint");
       root.style.removeProperty("--keep-glass-chat-tint");
     }
-  }, [activeTheme, characterStyleKey, userStyleKey, siteStyleKey, themeDesignMap, me, characterBgUrl, characterBgMode, userBgUrl, userBgMode]);
+  }, [activeTheme, activeCharacterId, characterStyleKey, userStyleKey, siteStyleKey, themeDesignMap, me, characterBgUrl, characterBgMode, userBgUrl, userBgMode]);
 
   // Per-user font/size accessibility. Independent of the palette effect
   // above because font preferences don't layer through character/room
@@ -3155,9 +3170,21 @@ function Chat() {
             closeEditor();
             setThemeVersion((v) => v + 1);
           }}
-          // Re-apply the active theme on every save so users see changes
-          // immediately without having to close the editor.
-          onSaved={() => setThemeVersion((v) => v + 1)}
+          // Re-apply the active theme on save ONLY when the saved
+          // target is the identity this tab is currently voicing.
+          // Otherwise the bump triggers App's theme effect, which
+          // pulls activeTheme from the active identity (not the one
+          // being edited) and clobbers the editor's live preview —
+          // making "Save" look like it reverted the theme to OOC.
+          // Saving the active identity still gives the live-update
+          // experience the comment originally promised.
+          onSaved={(savedTarget) => {
+            if (!savedTarget) return;
+            const editingActive = savedTarget.kind === "master"
+              ? activeCharacterId === null
+              : savedTarget.id === activeCharacterId;
+            if (editingActive) setThemeVersion((v) => v + 1);
+          }}
         />
       ) : null}
       {adminOpen && me && isAdminRole(me.role) ? (

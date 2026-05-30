@@ -330,6 +330,11 @@ export interface LedgerPage {
 export interface PublicEarningResponse {
   userId: string;
   username: string;
+  /** Present only when the response is scoped to a CHARACTER pool —
+   *  echoed back from the `?characterId=` query the caller sent.
+   *  Lets the client confirm it's reading the right pool before
+   *  painting numbers (defensive against a stale state race). */
+  characterId?: string;
   /** null when the user has `hideXpCount` set and the caller isn't them. */
   xp: number | null;
   /** null when the user has `hideCurrencyCount` set and the caller isn't them. */
@@ -721,8 +726,18 @@ function bufferToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export async function fetchPublicEarning(userId: string): Promise<PublicEarningResponse> {
-  return jsonOrThrow<PublicEarningResponse>(await fetch(`/earning/users/${encodeURIComponent(userId)}`, { credentials: "include" }));
+export async function fetchPublicEarning(
+  userId: string,
+  characterId?: string | null,
+): Promise<PublicEarningResponse> {
+  // characterId routes the response to the CHARACTER pool — required
+  // for character profiles, since the master pool's XP / currency /
+  // rank / border belong to a different identity. Omitted (or null)
+  // for master/OOC profiles, which keep the legacy behavior.
+  const qs = characterId ? `?characterId=${encodeURIComponent(characterId)}` : "";
+  return jsonOrThrow<PublicEarningResponse>(
+    await fetch(`/earning/users/${encodeURIComponent(userId)}${qs}`, { credentials: "include" }),
+  );
 }
 
 export async function fetchAdminAwards(): Promise<AdminAwardsResponse> {

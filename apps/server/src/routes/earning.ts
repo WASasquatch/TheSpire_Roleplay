@@ -768,59 +768,134 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    * userlist) can call this when they need an authoritative
    * rank/tier/sigil + currency-when-public.
    */
-  app.get<{ Params: { id: string } }>("/earning/users/:id", async (req, reply) => {
-    const target = (await db
-      .select({ id: users.id, username: users.username, disabledAt: users.disabledAt })
-      .from(users)
-      .where(eq(users.id, req.params.id))
-      .limit(1))[0];
-    if (!target || target.disabledAt) { reply.code(404); return { error: "not found" }; }
-    const me = await getSessionUser(req, db);
-
-    const { rankByKey, tierByKey } = await loadRankTierLookup(db);
-    const view = await buildUserPoolView(db, target.id, target.username, rankByKey, tierByKey);
-    if (!view) { reply.code(404); return { error: "no earning" }; }
-
-    const isSelf = me?.id === target.id;
-    const showCurrency = !view.hideCurrencyCount || isSelf;
-    const showXp = !view.hideXpCount || isSelf;
-    // Hero portrait on the public profile renders the user's
-    // free-form border with their per-identity color customization;
-    // pull the ownership row's configJson when the master pool has
-    // a freeform border equipped. Char-scope customizations aren't
-    // surfaced here — the public profile shows the MASTER identity
-    // (chat lines/userlist use the broadcast.ts feed which already
-    // resolves per-occupant config).
-    let freeformBorderConfigJson: string | null = null;
-    if (view.selectedFreeformBorderKey) {
-      const row = (await db
-        .select({ configJson: userOwnedFreeformBorders.configJson })
-        .from(userOwnedFreeformBorders)
-        .where(and(
-          eq(userOwnedFreeformBorders.userId, target.id),
-          eq(userOwnedFreeformBorders.borderKey, view.selectedFreeformBorderKey),
-        ))
+  // Public earning view for one IDENTITY.
+  //
+  // The endpoint takes a userId in the path and an OPTIONAL
+  // `?characterId=` query. The identity rule is the project's
+  // load-bearing contract: a character is its own account from the
+  // earning system's perspective — distinct pool row, distinct rank,
+  // distinct cosmetics, distinct privacy flags. Reading the master
+  // pool to render a character profile leaks the OOC owner's XP /
+  // currency / border / rank onto a fresh character that should be
+  // showing zero across the board. The `characterId` query routes
+  // through `characterEarning` so character profiles read their own
+  // pool exclusively; without the query (or with characterId = "")
+  // the response is the master/OOC pool, as before.
+  //
+  // We still validate the character against `users.id` in the path
+  // so callers can't ask for "user X's pool for character Y" when Y
+  // belongs to a different account — that'd be a per-identity
+  // ownership leak in the other direction.
+  app.get<{ Params: { id: string }; Querystring: { characterId?: string } }>(
+    "/earning/users/:id",
+    async (req, reply) => {
+      const target = (await db
+        .select({ id: users.id, username: users.username, disabledAt: users.disabledAt })
+        .from(users)
+        .where(eq(users.id, req.params.id))
         .limit(1))[0];
-      freeformBorderConfigJson = row?.configJson ?? null;
-    }
-    return {
-      userId: target.id,
-      username: target.username,
-      // Both XP and Currency honor independent privacy flags. Rank +
-      // tier + sigil stay public regardless — rank is the user's
-      // public identity tag.
-      xp: showXp ? view.xp : null,
-      currency: showCurrency ? view.currency : null,
-      rankKey: view.rankKey,
-      tier: view.tier,
-      rankName: view.rankName,
-      tierLabel: view.tierLabel,
-      sigilImageUrl: view.sigilImageUrl,
-      selectedBorderRankKey: view.selectedBorderRankKey,
-      selectedFreeformBorderKey: view.selectedFreeformBorderKey,
-      freeformBorderConfigJson,
-    };
-  });
+      if (!target || target.disabledAt) { reply.code(404); return { error: "not found" }; }
+      const me = await getSessionUser(req, db);
+
+      const rawCharId = req.query.characterId;
+      const characterId = typeof rawCharId === "string" && rawCharId.length > 0 ? rawCharId : null;
+      let character: { id: string; name: string } | null = null;
+      if (characterId) {
+        const c = (await db
+          .select({ id: characters.id, name: characters.name, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters)
+          .where(eq(characters.id, characterId))
+          .limit(1))[0];
+        // Character must exist, belong to the path's user, and not
+        // be soft-deleted. Mismatch → 404 (don't reveal whether the
+        // id is wrong vs cross-account).
+        if (!c || c.userId !== target.id || c.deletedAt) {
+          reply.code(404);
+          return { error: "not found" };
+        }
+        character = { id: c.id, name: c.name };
+      }
+
+      const { rankByKey, tierByKey } = await loadRankTierLookup(db);
+      const view = character
+        ? await buildCharacterPoolView(db, character.id, character.name, rankByKey, tierByKey)
+        : await buildUserPoolView(db, target.id, target.username, rankByKey, tierByKey);
+      if (!view) { reply.code(404); return { error: "no earning" }; }
+
+      // Privacy flags live on the master row (per-account preference),
+      // even for character views. `buildCharacterPoolView` doesn't
+      // populate `hideCurrencyCount` / `hideXpCount` because the
+      // character pool has no privacy concept of its own; pull the
+      // flags from the master pool view if we need them for redaction.
+      const isSelf = me?.id === target.id;
+      let hideCurrencyCount = false;
+      let hideXpCount = false;
+      if (character) {
+        const masterFlags = (await db
+          .select({ hideCurrencyCount: userEarning.hideCurrencyCount, hideXpCount: userEarning.hideXpCount })
+          .from(userEarning)
+          .where(eq(userEarning.userId, target.id))
+          .limit(1))[0];
+        hideCurrencyCount = masterFlags?.hideCurrencyCount ?? false;
+        hideXpCount = masterFlags?.hideXpCount ?? false;
+      } else {
+        hideCurrencyCount = view.hideCurrencyCount ?? false;
+        hideXpCount = view.hideXpCount ?? false;
+      }
+      const showCurrency = !hideCurrencyCount || isSelf;
+      const showXp = !hideXpCount || isSelf;
+
+      // Hero portrait on the public profile renders the OWNING
+      // identity's free-form border with that identity's per-identity
+      // color customization. Char-scope customizations come from
+      // `character_owned_freeform_borders`; master from
+      // `user_owned_freeform_borders`. Selecting the wrong table
+      // would leak the master's color picks onto a character border
+      // (or vice versa).
+      let freeformBorderConfigJson: string | null = null;
+      if (view.selectedFreeformBorderKey) {
+        if (character) {
+          const row = (await db
+            .select({ configJson: characterOwnedFreeformBorders.configJson })
+            .from(characterOwnedFreeformBorders)
+            .where(and(
+              eq(characterOwnedFreeformBorders.characterId, character.id),
+              eq(characterOwnedFreeformBorders.borderKey, view.selectedFreeformBorderKey),
+            ))
+            .limit(1))[0];
+          freeformBorderConfigJson = row?.configJson ?? null;
+        } else {
+          const row = (await db
+            .select({ configJson: userOwnedFreeformBorders.configJson })
+            .from(userOwnedFreeformBorders)
+            .where(and(
+              eq(userOwnedFreeformBorders.userId, target.id),
+              eq(userOwnedFreeformBorders.borderKey, view.selectedFreeformBorderKey),
+            ))
+            .limit(1))[0];
+          freeformBorderConfigJson = row?.configJson ?? null;
+        }
+      }
+      return {
+        userId: target.id,
+        username: target.username,
+        ...(character ? { characterId: character.id } : {}),
+        // Both XP and Currency honor independent privacy flags. Rank +
+        // tier + sigil stay public regardless — rank is the identity's
+        // public tag.
+        xp: showXp ? view.xp : null,
+        currency: showCurrency ? view.currency : null,
+        rankKey: view.rankKey,
+        tier: view.tier,
+        rankName: view.rankName,
+        tierLabel: view.tierLabel,
+        sigilImageUrl: view.sigilImageUrl,
+        selectedBorderRankKey: view.selectedBorderRankKey,
+        selectedFreeformBorderKey: view.selectedFreeformBorderKey,
+        freeformBorderConfigJson,
+      };
+    },
+  );
 
   /**
    * Public leaderboards across the nine earning boards. No auth —

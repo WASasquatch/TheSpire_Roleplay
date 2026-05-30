@@ -40,7 +40,15 @@ interface Props {
    * theme and re-apply it to the chat. The user doesn't have to close the
    * editor to see their theme change take effect.
    */
-  onSaved?: () => void;
+  /**
+   * Fired after a successful save. The argument tells the parent
+   * which identity was just saved so it can decide whether to
+   * trigger a chat-wide theme refresh (only useful when the saved
+   * target is what THIS tab is currently voicing; saving a sibling
+   * identity should leave the chat's active palette alone). Omit
+   * the parent's logic when not needed — argument is optional.
+   */
+  onSaved?: (savedTarget?: { kind: "master" | "character"; id?: string }) => void;
   /**
    * Admin-acting-on-another-user mode. When set, the editor:
    *   - Forces `mode: "character"` and edits the supplied `characterId`
@@ -659,7 +667,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
       // Stay in the editor so the user can switch to another target. Could also
       // close here - left open by design to support batch edits.
       flashSaved();
-      onSaved?.();
+      onSaved?.(target.kind === "master"
+        ? { kind: "master" }
+        : { kind: "character", id: target.id });
     } catch (err) {
       setError(err instanceof Error ? err.message : "save failed");
     } finally {
@@ -693,7 +703,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         // waiting for the App.tsx-level me:character-update handler
         // to round-trip its state update back to props.
         setMaster((prev) => (prev ? { ...prev, activeCharacterId: charId } : prev));
-        onSaved?.();
+        // Active identity just changed to this character — chat
+        // should refresh to that character's theme.
+        onSaved?.({ kind: "character", id: charId });
       } else {
         setError(res.message ?? "switch failed");
       }
@@ -723,7 +735,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
       setTarget({ kind: "master" });
       // The active theme may change if the deleted char was active (server
       // cleared activeCharacterId, so chat falls back to the master theme).
-      onSaved?.();
+      onSaved?.({ kind: "master" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "delete failed");
     } finally {

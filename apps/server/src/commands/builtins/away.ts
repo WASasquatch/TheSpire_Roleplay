@@ -1,6 +1,5 @@
-import { eq } from "drizzle-orm";
-import { users } from "../../db/schema.js";
 import { addMessage, broadcastPresence } from "../../realtime/broadcast.js";
+import { clearAway, getAway, setAway } from "../../realtime/awayState.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -9,7 +8,13 @@ import type { CommandHandler } from "../types.js";
  *   - With no reason and currently away: returns you to present.
  *   - With no reason and currently present: marks you away with no note.
  *
- * The presence panel and userlist render "[away]" markers using occupant.away.
+ * Scoping (per the per-identity contract used everywhere else in the
+ * app): away is keyed on (userId, activeCharacterId), where the
+ * character id is the one the calling SOCKET is voicing — already
+ * resolved per-tab by the chat:input dispatcher. So /away in a tab
+ * voicing Character A doesn't bleed into a sibling tab voicing OOC
+ * or Character B. State lives in `realtime/awayState.ts`; the chat
+ * userlist render and presence broadcasts read from there.
  */
 export const awayCommand: CommandHandler = {
   name: "away",
@@ -35,22 +40,15 @@ export const awayCommand: CommandHandler = {
   ],
   async run(ctx) {
     const reason = ctx.argsText.trim();
-    const wasAway = ctx.user.awayMessage != null;
+    const charId = ctx.user.activeCharacterId;
+    const wasAway = getAway(ctx.user.id, charId) != null;
 
     if (!reason && wasAway) {
-      await ctx.db
-        .update(users)
-        .set({ awayMessage: null, awaySince: null })
-        .where(eq(users.id, ctx.user.id));
-      ctx.user.awayMessage = null;
+      clearAway(ctx.user.id, charId);
       await addMessage(ctx, { kind: "system", body: `${ctx.user.displayName} is back.` });
     } else {
       const note = reason || "(no reason given)";
-      await ctx.db
-        .update(users)
-        .set({ awayMessage: note, awaySince: new Date() })
-        .where(eq(users.id, ctx.user.id));
-      ctx.user.awayMessage = note;
+      setAway(ctx.user.id, charId, note);
       await addMessage(ctx, { kind: "system", body: `${ctx.user.displayName} is away: ${note}` });
     }
     await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
@@ -74,7 +72,8 @@ export const backCommand: CommandHandler = {
   description: "Clear your away state and return to present.",
   subcommands: [],
   async run(ctx) {
-    const wasAway = ctx.user.awayMessage != null;
+    const charId = ctx.user.activeCharacterId;
+    const wasAway = getAway(ctx.user.id, charId) != null;
     if (!wasAway) {
       ctx.socket.emit("error:notice", {
         code: "not-away",
@@ -82,11 +81,7 @@ export const backCommand: CommandHandler = {
       });
       return;
     }
-    await ctx.db
-      .update(users)
-      .set({ awayMessage: null, awaySince: null })
-      .where(eq(users.id, ctx.user.id));
-    ctx.user.awayMessage = null;
+    clearAway(ctx.user.id, charId);
     await addMessage(ctx, { kind: "system", body: `${ctx.user.displayName} is back.` });
     await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
   },

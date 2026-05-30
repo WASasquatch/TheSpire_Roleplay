@@ -46,6 +46,8 @@ import { expandInlineCommands } from "../commands/registry.js";
 import { getSettings } from "../settings.js";
 import { awardForForum, awardForMessage } from "../earning/award.js";
 import { bumpLifetimeForMessage, classifyMessageForLifetime } from "../lib/lifetimePostCounts.js";
+import { getAway } from "./awayState.js";
+import { getMood } from "./moodState.js";
 import { loadReactionsForTargets } from "../reactions.js";
 import { readPoolRank } from "../earning/resolver.js";
 import { routeMessage } from "../earning/routing.js";
@@ -190,7 +192,14 @@ export async function addMessage(
   const displayName = payload.displayNameOverride ?? ctx.user.displayName;
   // Mood snapshots only on actually-spoken kinds, never on /npc lines (the
   // NPC isn't the user — applying their mood would be misleading).
-  const moodSnapshot = payload.kind === "npc" ? null : ctx.user.currentMood ?? null;
+  //
+  // Per-identity mood: pull from the in-memory store keyed on
+  // (userId, activeCharacterId). The session-user mirror
+  // (`ctx.user.currentMood`) is only fresh inside the same chat:input
+  // tick that ran /mood; the store is the canonical reading.
+  const moodSnapshot = payload.kind === "npc"
+    ? null
+    : (getMood(ctx.user.id, ctx.user.activeCharacterId) ?? null);
   // Avatar snapshot. Prefer the active character's avatar so a forum
   // post stays visually attached to the character it was authored as
   // even if the user later switches characters or that character is
@@ -2115,18 +2124,28 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
       ? (masterFreeformConfigByUserBorder.get(`u::${u.id}::${masterSelectedFreeformBorderKey}`) ?? null)
       : null;
     const masterInlineAvatarEnabled = masterInlineAvatarByUser.get(u.id) ?? false;
+    // Away is per-identity (see `realtime/awayState.ts`): the same
+    // user voicing different characters carries one row per identity
+    // here, so reading from the legacy master-row column would smear
+    // a /away marked on one character onto all the others. The
+    // in-memory store keys on the resolved (userId, characterId)
+    // tuple, same key the rest of this loop's dedupe uses.
+    const awayState = getAway(u.id, id.characterId);
     out.push({
       userId: u.id,
       displayName: c ? c.name : u.username,
       characterId: c?.id ?? null,
-      away: u.awayMessage != null,
-      awayMessage: u.awayMessage,
+      away: awayState != null,
+      awayMessage: awayState?.message ?? null,
       idle: idleKeys.has(`${u.id}::${id.characterId ?? ""}`),
       chatColor: effectiveColor,
       gender: resolveGender(u.gender, c?.statsJson),
       role: roleByUser.get(u.id) ?? "member",
       accountRole: u.role,
-      mood: u.currentMood,
+      // Mood is per-identity in the same in-memory store as away.
+      // Reading the master column here would smear a /mood set on
+      // Character A onto Character B / OOC.
+      mood: getMood(u.id, id.characterId),
       primaryWorld: primaryWorldByUser.get(u.id) ?? null,
       // Per-user toggle. When `showRankInUserlist` is off, the
       // broadcast omits the rank fields entirely (renders as

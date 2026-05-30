@@ -1,6 +1,5 @@
-import { eq } from "drizzle-orm";
-import { users } from "../../db/schema.js";
 import { broadcastPresence } from "../../realtime/broadcast.js";
+import { clearMood, setMood } from "../../realtime/moodState.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const MAX_MOOD_LEN = 32;
@@ -24,10 +23,14 @@ function normalizeMood(raw: string): string | null {
  *                    word out of habit don't accidentally set a literal mood
  *                    of "clear".
  *
+ * Scope: per-identity (see realtime/moodState.ts). Setting a mood
+ * while voicing Character A no longer bleeds onto sibling tabs
+ * voicing Character B or the master OOC handle.
+ *
  * Mood is PUBLIC. It's sent to every occupant via presence updates and
  * snapshotted onto each outgoing chat message - users should not expect it
  * to be private. The /mood command itself emits no chat line; it just
- * updates the user row and re-broadcasts presence.
+ * updates the per-identity state and re-broadcasts presence.
  */
 export const moodCommand: CommandHandler = {
   name: "mood",
@@ -52,12 +55,16 @@ export const moodCommand: CommandHandler = {
       }
     }
 
-    await ctx.db.update(users).set({ currentMood: next }).where(eq(users.id, ctx.user.id));
-    // Mutate the in-flight session user so subsequent messages this socket
-    // sends (until the next chat:input session-reload) snapshot the new
-    // mood. The chat:input handler already reloads the row from DB on every
-    // event, so we don't strictly need this — but it keeps the in-process
-    // state coherent for any sync code that reads ctx.user.
+    const charId = ctx.user.activeCharacterId;
+    if (next === null) {
+      clearMood(ctx.user.id, charId);
+    } else {
+      setMood(ctx.user.id, charId, next);
+    }
+    // Keep the in-flight session user in sync so the message snapshot
+    // path below (addMessage's `moodSnapshot` read) picks up the new
+    // value for any sends piggybacked on the same socket event before
+    // the next session reload.
     ctx.user.currentMood = next;
     await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
   },

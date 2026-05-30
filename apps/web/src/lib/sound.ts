@@ -79,15 +79,17 @@ function getAudio(event: SoundEvent): HTMLAudioElement {
 }
 
 /**
- * True when the current user has marked themselves /away in any room
- * they're currently parked in. We read the occupant rows for the
- * current room rather than tracking a separate "am I away" flag in
- * the store — there's no UI to toggle it outside of /away, and the
- * occupant row already carries the canonical `away` boolean (set by
- * `broadcastPresence` after the slash command writes to `users
- * .awayMessage`). When the user moves rooms the new room's
- * broadcastPresence emits an occupant list that still carries their
- * away flag, so this stays correct.
+ * True when THIS TAB's voiced identity is /away in the current room.
+ *
+ * Away is now per-identity on the server (see realtime/awayState.ts) —
+ * a /away on Char A doesn't mark a sibling tab voicing Char B as
+ * away, so the sound gate has to match the same tuple the broadcast
+ * does. We resolve the occupant row that matches both this tab's
+ * userId AND its currently-voiced `activeCharacterId`; only that
+ * row's `away` flag mutes sound for this tab.
+ *
+ * Sibling tab voicing a different identity reads its own row and
+ * stays unmuted — correct, since that tab hasn't been marked away.
  */
 function isUserAway(): boolean {
   const s = useChat.getState();
@@ -97,10 +99,10 @@ function isUserAway(): boolean {
   if (!roomId) return false;
   const occ = s.occupants[roomId];
   if (!occ) return false;
-  // Multiple occupant rows may share a userId now (one per identity —
-  // see broadcast.ts currentOccupants). Any row matching = the user
-  // is /away on at least one identity, which is all we need.
-  return occ.some((o) => o.userId === myId && o.away);
+  const myCharId = s.activeCharacterId;
+  return occ.some(
+    (o) => o.userId === myId && o.characterId === myCharId && o.away,
+  );
 }
 
 function isEnabled(event: SoundEvent): boolean {

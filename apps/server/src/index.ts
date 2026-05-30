@@ -39,6 +39,8 @@ import {
   userIdentityHasSocketInRoom,
   userIsOnline,
 } from "./realtime/broadcast.js";
+import { clearAllAwayForUser } from "./realtime/awayState.js";
+import { clearAllMoodForUser } from "./realtime/moodState.js";
 import {
   clearTyperEverywhere,
   clearTyperFromRoom,
@@ -1161,6 +1163,13 @@ async function main() {
             if (lastRoomId) {
               await db.update(users).set({ lastRoomId }).where(eq(users.id, userId));
             }
+            // Drop every per-identity away + mood mark for this
+            // user. Both are session signals — when the user has
+            // truly closed every tab and gone, the next login should
+            // land them present with a clean mood slate, not carrying
+            // a stale "brb" / "tired" from yesterday.
+            clearAllAwayForUser(userId);
+            clearAllMoodForUser(userId);
           }
 
           // Per-room decision. For each room the socket was in:

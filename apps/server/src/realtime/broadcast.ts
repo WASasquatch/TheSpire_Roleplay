@@ -1341,10 +1341,37 @@ async function joinRoomBody(
   // Boot grace and forum rooms suppress both paths.
   const loginIntent =
     (socket.data as { loginIntent?: boolean }).loginIntent === true;
+  // Gate "X has connected / entered" on the IDENTITY tuple, not the raw
+  // userId. A user can be live on desktop as Character A and then log
+  // in on mobile as Character B — that's two distinct identities even
+  // though it's one user, and the room should learn about Character B
+  // arriving. The legacy user-only check (userHasSocketInRoom)
+  // silenced the mobile broadcast in that case because "the user was
+  // already here," masking the per-character join from observers.
+  //
+  // Resolve the socket's current characterId the same way the
+  // userlist render path does: a per-tab `tabCharId` set by `/char`
+  // wins; otherwise fall back to the user's master-row default.
+  // `undefined` only happens on a socket that hasn't issued any
+  // /char yet, which still resolves to the DB default — never null
+  // by accident.
+  const tabCharRaw = (socket.data as { tabCharId?: string | null }).tabCharId;
+  const socketCharacterId: string | null =
+    tabCharRaw !== undefined ? tabCharRaw : (user.activeCharacterId ?? null);
+  const otherIdentitySocketHere = await userIdentityHasSocketInRoom(
+    io,
+    user.id,
+    socketCharacterId,
+    roomId,
+    socket.id,
+  );
+  // The user-scoped check is still useful for the watcher-ping branch
+  // further down: watchers care about the user coming online, not
+  // about which character they happen to be voicing.
   const otherSocketHere = await userHasSocketInRoom(io, user.id, roomId, socket.id);
   const isForumRoom = room.replyMode === "nested";
   const isRoomSwitch = priorRooms.length > 0;
-  const baseGate = !otherSocketHere && !isInBootGrace() && !isForumRoom;
+  const baseGate = !otherIdentitySocketHere && !isInBootGrace() && !isForumRoom;
   if (loginIntent && !isRoomSwitch && baseGate && !isReconnect) {
     await addSystemMessage(io, db, roomId, renderPresenceTemplate(
       sessionConnectTemplate,
@@ -1423,9 +1450,11 @@ export async function userIdentityHasSocketInRoom(
   userId: string,
   characterId: string | null,
   roomId: string,
+  excludeSocketId?: string,
 ): Promise<boolean> {
   const sockets = await io.in(`room:${roomId}`).fetchSockets();
   for (const s of sockets) {
+    if (excludeSocketId && s.id === excludeSocketId) continue;
     if ((s.data as { userId?: string }).userId !== userId) continue;
     const raw = (s.data as { tabCharId?: string | null }).tabCharId;
     // `undefined` over the wire means "no per-tab override." For matching

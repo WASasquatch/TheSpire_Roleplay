@@ -96,6 +96,15 @@ const NO_DM_MESSAGES: DirectMessage[] = [];
 
 const PAGE_SIZE = 50;
 
+/** Floor / ceiling for the auto-growing DM composer textarea, in px.
+ *  Floor matches roughly one tappable line at the modal's text-sm
+ *  size + py-1 padding; ceiling caps long drafts so the conversation
+ *  above doesn't get squeezed. Used by BOTH the inline onChange
+ *  handler and the post-send reset effect so neither path can leave
+ *  the input collapsed under one line. */
+const AUTO_GROW_MIN_PX = 36;
+const AUTO_GROW_MAX_PX = 128;
+
 /**
  * Unified Messages modal. Replaces the old standalone FriendsModal,
  * DmListModal, and DmFloatingPanel — the three felt fragmented and
@@ -1730,11 +1739,18 @@ function ThreadPane({
   // covers programmatic resets — primarily setDraft("") after a
   // successful send — so the textarea snaps back to one row instead
   // of staying inflated at its prior height.
+  //
+  // Floor at AUTO_GROW_MIN_PX. On mobile, an empty textarea's
+  // `scrollHeight` can return a value smaller than a usable line
+  // (or even 0 if the modal is still settling its layout when this
+  // effect fires) — without the floor the textarea collapsed to a
+  // sliver and there was nothing to tap into. The floor keeps a
+  // visible one-line tap target no matter what scrollHeight returns.
   useEffect(() => {
     const ta = dmInputRef.current;
     if (!ta) return;
     ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, 128)}px`;
+    ta.style.height = `${Math.max(AUTO_GROW_MIN_PX, Math.min(ta.scrollHeight, AUTO_GROW_MAX_PX))}px`;
   }, [draft]);
 
   const header = useMemo(() => {
@@ -2126,13 +2142,13 @@ function ThreadPane({
               onChange={(e) => {
                 setDraft(e.target.value);
                 // Auto-grow: reset to single-line then expand to fit
-                // content up to maxHeight (CSS caps at 8rem; the
-                // textarea then scrolls internally). Done inline so
-                // the height tracks every keystroke without a
-                // useEffect round-trip.
+                // content. Floored at AUTO_GROW_MIN_PX so the input
+                // can't shrink below one tappable line on mobile (see
+                // the matching useEffect above for the layout-timing
+                // rationale).
                 const ta = e.target;
                 ta.style.height = "auto";
-                ta.style.height = `${Math.min(ta.scrollHeight, 128)}px`;
+                ta.style.height = `${Math.max(AUTO_GROW_MIN_PX, Math.min(ta.scrollHeight, AUTO_GROW_MAX_PX))}px`;
               }}
               onKeyDown={(e) => {
                 // Enter alone -> send. Shift+Enter / Ctrl+Enter /
@@ -2150,7 +2166,14 @@ function ThreadPane({
               maxLength={maxDmLength}
               rows={1}
               className="block w-full resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
-              style={{ maxHeight: "8rem" }}
+              // `minHeight` is the static floor — even before any JS
+              // runs, the textarea reserves a tappable row. The JS
+              // auto-grow then mirrors the same floor so a freshly
+              // mounted modal on mobile never paints the input as a
+              // 0-height sliver. `maxHeight` caps the grow so long
+              // drafts scroll internally instead of crowding the
+              // conversation above.
+              style={{ minHeight: `${AUTO_GROW_MIN_PX}px`, maxHeight: `${AUTO_GROW_MAX_PX}px` }}
             />
           </div>
           <button

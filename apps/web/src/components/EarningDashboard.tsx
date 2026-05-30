@@ -1071,15 +1071,28 @@ function LedgerTab({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  // Live tick from the earning store. Bumps every time the socket
+  // delivers an `earning:earned` event. The fetch effect below uses
+  // it as a dep so the feed catches up to new ledger rows without a
+  // manual reload — previously the activity log silently froze at
+  // whatever was there when the dashboard was first opened.
+  const earnedTick = useEarning((s) => s.earnedTick);
 
-  // Re-fetch from scratch whenever scope changes.
+  // Re-fetch from scratch whenever scope changes OR a new credit
+  // lands. Scope changes reset the cursor + clear the list; a live
+  // tick refetches the first page in place so the user keeps their
+  // scroll position (the upstream limit is small enough that the
+  // newest credit will land in the first page).
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setErr(null);
-    setEntries([]);
-    setCursor(null);
-    setDone(false);
+    // Only blank the visible list on a SCOPE change — a live-tick
+    // refetch keeps the previous page mounted so the user doesn't
+    // see a flash of empty between credits.
+    if (cursor === null) {
+      setEntries([]);
+    }
     fetchEarningLedger({
       scope: scope.kind,
       characterId: scope.kind === "character" ? scope.id : null,
@@ -1097,7 +1110,11 @@ function LedgerTab({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [scope]);
+    // `cursor` intentionally NOT a dep — loadMore drives pagination
+    // and would otherwise re-trigger this effect into an infinite
+    // refetch loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, earnedTick]);
 
   async function loadMore() {
     if (!cursor || loading) return;

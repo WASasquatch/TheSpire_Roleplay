@@ -40,6 +40,15 @@ interface EarningState {
   snapshot: EarningMeResponse | null;
   /** Unacknowledged rank-up notifications, newest first. */
   unackRankUps: RankUpRecord[];
+  /**
+   * Monotonic counter bumped every time `applyEarned` fires. Surfaced
+   * so the Activity (ledger) tab can refetch its first page when a
+   * new credit lands — the ledger endpoint isn't push-based, but
+   * keying a useEffect off this tick keeps the feed in sync with the
+   * live wallet without a manual reload. Initialized at 0; only the
+   * delta matters to listeners.
+   */
+  earnedTick: number;
 
   /** Trigger a fresh fetch. Safe to call multiple times — guards against overlap. */
   refresh: () => Promise<void>;
@@ -85,6 +94,7 @@ const INITIAL = {
   error: null,
   snapshot: null,
   unackRankUps: [],
+  earnedTick: 0,
 };
 
 let inFlight: Promise<void> | null = null;
@@ -121,24 +131,40 @@ export const useEarning = create<EarningState>((set, get) => ({
   reset: () => set({ ...INITIAL }),
 
   applyEarned: (payload) => {
+    // Bump the live-tick regardless of whether we have a snapshot —
+    // the Activity tab listens for it to refetch its page, and that
+    // path should run on cold-cache states too (e.g. brand-new
+    // character whose snapshot hasn't loaded yet but is already
+    // accruing credits in the background).
+    const earnedTick = get().earnedTick + 1;
     const snap = get().snapshot;
-    if (!snap) return; // No snapshot yet — wait for /earning/me to land.
+    if (!snap) {
+      set({ earnedTick });
+      return;
+    }
     if (payload.scope === "user") {
-      if (snap.master.ownerId !== payload.ownerId) return;
+      if (snap.master.ownerId !== payload.ownerId) {
+        set({ earnedTick });
+        return;
+      }
       set({
         snapshot: {
           ...snap,
           master: applyToPool(snap.master, payload),
         },
+        earnedTick,
       });
       return;
     }
     // Character scope: find the matching character entry and update it.
     const idx = snap.characters.findIndex((c) => c.ownerId === payload.ownerId);
-    if (idx === -1) return;
+    if (idx === -1) {
+      set({ earnedTick });
+      return;
+    }
     const updated = [...snap.characters];
     updated[idx] = applyToPool(updated[idx]!, payload);
-    set({ snapshot: { ...snap, characters: updated } });
+    set({ snapshot: { ...snap, characters: updated }, earnedTick });
   },
 
   applyRankUp: (payload) => {

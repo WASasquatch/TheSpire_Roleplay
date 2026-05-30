@@ -64,6 +64,14 @@ export interface DirectConversationSummary {
   otherUsername: string;
   otherDisplayName: string;
   otherAvatarUrl: string | null;
+  /**
+   * Owner-chosen zoom + focal point for `otherAvatarUrl`. Resolved at
+   * fetch time off the pinned identity (the character's crop when the
+   * thread is character-pinned, the master's crop otherwise) so the
+   * conversation list thumbnail honors the same crop the owner picked
+   * in the profile editor. Defaults to centered cover when unset.
+   */
+  otherAvatarCrop: import("./profile.js").AvatarCrop;
   otherOnline: boolean;
   lastMessageAt: number;
   /** Server-side truncated preview (~120 chars). Null when no messages yet. */

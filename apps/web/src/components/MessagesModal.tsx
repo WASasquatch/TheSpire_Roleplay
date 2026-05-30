@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
+  AvatarCrop,
   DirectConversationSummary,
   DirectMessage,
   DirectMessageHistoryPage,
   InboxIdentityCount,
 } from "@thekeep/shared";
+import { cropStyleFor } from "../lib/avatarCrop.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { useChat } from "../state/store.js";
 import { readError, withIdentityQuery } from "../lib/http.js";
@@ -60,6 +62,8 @@ interface FriendListEntry {
   /** Character name when characterId is set; master username otherwise. */
   handle: string;
   avatarUrl: string | null;
+  /** Server-resolved zoom/pan for `avatarUrl`. */
+  avatarCrop: AvatarCrop;
   online: boolean;
 }
 
@@ -573,6 +577,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
       displayName: f.displayName,
       handle: f.handle,
       avatarUrl: f.avatarUrl,
+      avatarCrop: f.avatarCrop,
       online: f.online,
       conv: convByOther.get(identityKey(f.userId, f.characterId)) ?? null,
     }))
@@ -590,6 +595,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
       displayName: c.otherDisplayName,
       handle: c.otherCharacterId ? c.otherDisplayName : c.otherUsername,
       avatarUrl: c.otherAvatarUrl,
+      avatarCrop: c.otherAvatarCrop,
       online: c.otherOnline,
       conv: c,
     }))
@@ -1028,6 +1034,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                           displayName: row.displayName,
                           handle: row.handle,
                           avatarUrl: row.avatarUrl,
+                          avatarCrop: row.avatarCrop,
                           online: row.online,
                         })}
                       />
@@ -1282,6 +1289,8 @@ function UserRow({
     /** Character name when characterId is set; master username otherwise. */
     handle: string;
     avatarUrl: string | null;
+    /** Server-resolved zoom/pan applied to the inbox thumbnail. */
+    avatarCrop: AvatarCrop;
     online: boolean;
     conv: DirectConversationSummary | null;
   };
@@ -1304,7 +1313,7 @@ function UserRow({
   return (
     <li className={"flex items-center gap-2 rounded border p-1.5 " + rowClass}>
       <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-        <Avatar url={row.avatarUrl} name={row.displayName} size={32} online={row.online} />
+        <Avatar url={row.avatarUrl} name={row.displayName} size={32} online={row.online} crop={row.avatarCrop} />
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-2">
             <span
@@ -1350,39 +1359,61 @@ function Avatar({
   name,
   size,
   online,
+  crop,
 }: {
   url: string | null;
   name: string;
   size: number;
   online?: boolean;
+  /** Owner-chosen zoom + focal point. Same shape BorderedAvatar uses;
+   *  null / default = legacy centered-cover render. */
+  crop?: AvatarCrop | null;
 }) {
   const [errored, setErrored] = useState(false);
+  // Resolve the crop via the shared helper so DM avatars stay in sync
+  // with every other avatar surface (BorderedAvatar, freeform-border
+  // templates, world member gallery).
+  const cropStyle = cropStyleFor(crop);
   return (
+    // Outer wrapper is `relative` but NOT `overflow-hidden`/`rounded-full`,
+    // so the online-status pip can sit on the bottom-right corner and
+    // visually overlap the avatar's circular edge without being clipped.
+    // The clipping (rounded mask + image crop) lives on the inner span
+    // below so it's scoped to the photo only.
     <span
-      // Round avatar — matches the chat-line / userlist / profile
-      // treatment so the DM rail and conversation thread agree
-      // visually with everywhere else.
-      className="relative inline-block shrink-0 overflow-hidden rounded-full border border-keep-rule bg-keep-banner"
+      className="relative inline-block shrink-0"
       style={{ width: size, height: size }}
     >
-      {url && !errored ? (
-        <img
-          src={url}
-          alt=""
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          onError={() => setErrored(true)}
-          className="absolute inset-0 h-full w-full object-cover"
-        />
-      ) : (
-        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-keep-muted">
-          {initialsFor(name)}
-        </span>
-      )}
+      <span
+        // Round avatar — matches the chat-line / userlist / profile
+        // treatment so the DM rail and conversation thread agree
+        // visually with everywhere else.
+        className="absolute inset-0 overflow-hidden rounded-full border border-keep-rule bg-keep-banner"
+      >
+        {url && !errored ? (
+          <img
+            src={url}
+            alt=""
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setErrored(true)}
+            className="absolute inset-0 h-full w-full object-cover"
+            style={cropStyle}
+          />
+        ) : (
+          <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-keep-muted">
+            {initialsFor(name)}
+          </span>
+        )}
+      </span>
       {online !== undefined ? (
         <span
           aria-hidden
           className={
+            // Anchored to the outer wrapper (not the clipped circle), so
+            // the pip can spill past the avatar edge. The `ring-2 ring-keep-bg`
+            // gives it a halo against the bg color, matching the same
+            // treatment chat-line + userlist avatars use.
             "absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-keep-bg " +
             (online ? "bg-emerald-500" : "bg-keep-muted/60")
           }
@@ -1668,6 +1699,21 @@ function ThreadPane({
     s.pendingFriendRequests.find((r) => r.userId === otherUserId),
   );
   const removePendingFriendRequest = useChat((s) => s.removePendingFriendRequest);
+  // Viewer's own zoom/pan for THIS thread's pinned identity, pulled
+  // from any room's live occupant cache where the viewer is currently
+  // present. Used to crop the viewer's own DM bubble avatars. Falls
+  // through to null (default crop) when the viewer isn't in any room
+  // at the moment — same graceful-degradation pattern the chat-line
+  // path uses for offline senders.
+  const myAvatarCrop = useChat((s) => {
+    if (!meId) return null;
+    const matchChar = myCharacterId ?? null;
+    for (const list of Object.values(s.occupants)) {
+      const row = list.find((o) => o.userId === meId && o.characterId === matchChar);
+      if (row) return row.avatarCrop;
+    }
+    return null;
+  });
 
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1677,19 +1723,35 @@ function ThreadPane({
   const lastSeenCount = useRef(messages.length);
   // Reference handed to the formatting toolbar so its wrap-with-markdown
   // buttons can read selection bounds + restore focus after each edit.
-  const dmInputRef = useRef<HTMLInputElement | null>(null);
+  const dmInputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Sync the textarea's auto-grown height with the draft value. The
+  // onChange handler keeps things in sync during typing; this effect
+  // covers programmatic resets — primarily setDraft("") after a
+  // successful send — so the textarea snaps back to one row instead
+  // of staying inflated at its prior height.
+  useEffect(() => {
+    const ta = dmInputRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 128)}px`;
+  }, [draft]);
 
   const header = useMemo(() => {
     if (conversation) {
       return {
         displayName: conversation.otherDisplayName,
         avatarUrl: conversation.otherAvatarUrl,
+        avatarCrop: conversation.otherAvatarCrop,
         online: conversation.otherOnline,
       };
     }
     return {
       displayName: fallback?.displayName ?? "…",
       avatarUrl: fallback?.avatarUrl ?? null,
+      // No fallback crop on the compose target — render at the
+      // default (centered cover) until the conversation row arrives.
+      avatarCrop: null as AvatarCrop | null,
       online: fallback?.online ?? false,
     };
   }, [conversation, fallback]);
@@ -1742,7 +1804,13 @@ function ThreadPane({
           : [...j.messages, ...extras].sort((a, b) => a.createdAt - b.createdAt);
         setDmMessages(convId, merged);
         setHasMore(j.hasMore);
-        lastSeenCount.current = merged.length;
+        // Deliberately DON'T sync `lastSeenCount` to the seeded
+        // length here. If we did, the auto-scroll-on-arrival effect
+        // would see `messages.length === lastSeenCount.current` on
+        // its next run and skip — which left the thread parked at
+        // its initial scrollTop=0 (top of list). Letting the effect
+        // observe a genuine 0→N transition makes the initial open
+        // scroll to the most recent message.
       })
       .catch((e: unknown) => {
         // AbortError is the cleanup path firing — not a real error.
@@ -1770,17 +1838,69 @@ function ThreadPane({
     return () => { ac.abort(); };
   }, [conversation?.id, setDmMessages, dmReseedTick, activeCharacterId]);
 
-  // Auto-scroll on new message arrivals.
+  // Auto-scroll on new message arrivals (including the initial seed
+  // load, which is what plants the user at the most-recent message
+  // when they open a thread).
+  //
+  // Two layout-timing gotchas the simple `el.scrollTop = scrollHeight`
+  // version missed:
+  //
+  //   1. React's commit runs BEFORE the browser's layout pass for
+  //      newly-rendered children. Assigning scrollTop here reads the
+  //      pre-layout scrollHeight, which doesn't yet include the
+  //      avatars/images about to flow in. A double rAF defers past
+  //      the next paint so scrollHeight reflects the settled layout.
+  //
+  //   2. Bubble avatars load asynchronously and grow row heights as
+  //      they come in. The first scroll-to-bottom can land "halfway
+  //      up" once each avatar's intrinsic size finally pushes the
+  //      list taller. We re-scroll after every image load inside the
+  //      scroll container (one listener delegated at the container)
+  //      until the user manually scrolls away, in which case future
+  //      re-scrolls are suppressed.
   useEffect(() => {
     if (messages.length === lastSeenCount.current) return;
     lastSeenCount.current = messages.length;
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    let cancelled = false;
+    const scrollToBottom = () => {
+      if (cancelled) return;
+      const cur = scrollRef.current;
+      if (!cur) return;
+      cur.scrollTop = cur.scrollHeight;
+    };
+    // Double rAF: first frame finishes React's commit + initial
+    // layout, second frame guarantees we're reading a settled
+    // scrollHeight.
+    requestAnimationFrame(() => requestAnimationFrame(scrollToBottom));
+    // Catch any avatar/image whose load resolves AFTER the initial
+    // scroll. Delegated `load` listener at the container so we don't
+    // wire one per <img>. Once attached, every image load triggers
+    // a re-pin to the bottom until effect cleanup.
+    const onLoad = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      if (t && t.tagName === "IMG") scrollToBottom();
+    };
+    el.addEventListener("load", onLoad, true);
+    return () => {
+      cancelled = true;
+      el.removeEventListener("load", onLoad, true);
+    };
   }, [messages.length]);
 
-  const send = useCallback(async (e: FormEvent) => {
-    e.preventDefault();
-    const text = draft.trim();
+  /**
+   * Trim leading + trailing whitespace runs entirely, and cap any
+   * interior run of 4+ consecutive newlines down to 3. Users can still
+   * have up to triple-line breaks for visual rhythm; "press Enter 50
+   * times" wall-of-whitespace messages get folded automatically.
+   */
+  function normalizeMessage(text: string): string {
+    return text.replace(/\n{4,}/g, "\n\n\n").trim();
+  }
+
+  const submitDraft = useCallback(async () => {
+    const text = normalizeMessage(draft);
     if (!text || busy) return;
     // Length gate. The server enforces maxDmLength too, but a
     // pre-flight check skips the wasted round trip AND lets us
@@ -1817,12 +1937,23 @@ function ThreadPane({
       // a no-op.
       appendDmMessage(j.message);
       setDraft("");
+      // Refocus the textarea so the user can keep typing without
+      // having to click back into it. Deferred one task so React's
+      // post-send re-render has finished (busy flips back to false,
+      // any disabled state on the textarea / send button propagates)
+      // before focus() is called.
+      setTimeout(() => dmInputRef.current?.focus(), 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "send failed");
     } finally {
       setBusy(false);
     }
   }, [draft, busy, otherUserId, appendDmMessage, activeCharacterId, targetCharacterId, maxDmLength]);
+
+  const send = useCallback((e: FormEvent) => {
+    e.preventDefault();
+    void submitDraft();
+  }, [submitDraft]);
 
   return (
     <>
@@ -1845,7 +1976,7 @@ function ThreadPane({
             className="shrink-0 rounded hover:opacity-90"
             title={`View ${header.displayName}'s profile`}
           >
-            <Avatar url={header.avatarUrl} name={header.displayName} size={32} online={header.online} />
+            <Avatar url={header.avatarUrl} name={header.displayName} size={32} online={header.online} crop={header.avatarCrop} />
           </button>
         ) : (
           <Avatar url={header.avatarUrl} name={header.displayName} size={32} online={header.online} />
@@ -1891,6 +2022,8 @@ function ThreadPane({
                 key={m.id}
                 msg={m}
                 isMine={m.senderId === meId}
+                otherCrop={conversation?.otherAvatarCrop ?? null}
+                myCrop={myAvatarCrop}
                 {...(onOpenProfile ? { onOpenProfile } : {})}
               />
             ))}
@@ -1978,15 +2111,46 @@ function ThreadPane({
               and synonyms land. */}
           <div className="relative min-w-0 flex-1">
             <SynonymPopup inputRef={dmInputRef} value={draft} onChange={setDraft} />
-            <input
+            {/* Textarea (not <input>) so Shift+Enter can insert a
+                newline and multi-line messages are possible. Enter
+                alone submits via the onKeyDown handler below; the
+                form's default Enter-submit behavior doesn't fire on
+                textareas, which conveniently also keeps the textarea
+                focused across sends (the old <input> bounced focus
+                to the submit button on Enter). Auto-grows up to
+                ~8rem then scrolls so long drafts don't crowd out the
+                conversation above. */}
+            <textarea
               ref={dmInputRef}
-              type="text"
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                // Auto-grow: reset to single-line then expand to fit
+                // content up to maxHeight (CSS caps at 8rem; the
+                // textarea then scrolls internally). Done inline so
+                // the height tracks every keystroke without a
+                // useEffect round-trip.
+                const ta = e.target;
+                ta.style.height = "auto";
+                ta.style.height = `${Math.min(ta.scrollHeight, 128)}px`;
+              }}
+              onKeyDown={(e) => {
+                // Enter alone -> send. Shift+Enter / Ctrl+Enter /
+                // Alt+Enter / Meta+Enter -> insert newline (browser
+                // default). IME composition pass-through: a Japanese /
+                // Chinese / Korean user pressing Enter to commit an
+                // IME candidate should NOT submit the message.
+                if (e.key !== "Enter") return;
+                if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+                if (e.nativeEvent.isComposing) return;
+                e.preventDefault();
+                void submitDraft();
+              }}
               placeholder={`Message ${header.displayName}...`}
               maxLength={maxDmLength}
-              disabled={busy}
-              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action disabled:opacity-50"
+              rows={1}
+              className="block w-full resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
+              style={{ maxHeight: "8rem" }}
             />
           </div>
           <button
@@ -2002,7 +2166,17 @@ function ThreadPane({
   );
 }
 
-function DmRow({ msg, isMine, onOpenProfile }: { msg: DirectMessage; isMine: boolean; onOpenProfile?: (displayName: string) => void }) {
+function DmRow({ msg, isMine, otherCrop, myCrop, onOpenProfile }: {
+  msg: DirectMessage;
+  isMine: boolean;
+  /** Live crop for the OTHER party's avatar (from the conversation row). */
+  otherCrop: AvatarCrop | null;
+  /** Live crop for the VIEWER's avatar on this thread's pinned identity.
+   *  Pulled from the live occupant cache by the parent ThreadPane.
+   *  Null = viewer isn't in any room right now, default crop renders. */
+  myCrop: AvatarCrop | null;
+  onOpenProfile?: (displayName: string) => void;
+}) {
   // Tap-to-reveal timestamp footer. DMs hide their send time by default
   // to keep threads visually clean; tapping a bubble surfaces the full
   // date+time underneath. Toggling again hides it. Clicks on inline
@@ -2080,10 +2254,10 @@ function DmRow({ msg, isMine, onOpenProfile }: { msg: DirectMessage; isMine: boo
             className="shrink-0 rounded-full hover:opacity-90"
             title={`View ${msg.displayName}'s profile`}
           >
-            <Avatar url={msg.avatarUrl} name={msg.displayName} size={28} />
+            <Avatar url={msg.avatarUrl} name={msg.displayName} size={28} crop={otherCrop} />
           </button>
         ) : (
-          <Avatar url={msg.avatarUrl} name={msg.displayName} size={28} />
+          <Avatar url={msg.avatarUrl} name={msg.displayName} size={28} crop={isMine ? myCrop : otherCrop} />
         )}
         <div
           onClick={toggleTime}

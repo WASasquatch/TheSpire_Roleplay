@@ -214,20 +214,44 @@ async function linkedRoomCountFor(db: Db, worldId: string): Promise<number> {
  * a join if the modal ever paginates.
  */
 async function memberListFor(db: Db, worldId: string): Promise<WorldMemberRef[]> {
+  // Privacy filter: only members whose master profile is BOTH public
+  // and not NSFW make the list. A user who flipped their profile to
+  // private explicitly opted out of being publicly affiliated, so they
+  // shouldn't appear in any world's member gallery either. The world
+  // page is itself public for any non-private world, so a private user
+  // appearing here would expose the affiliation to anonymous viewers
+  // they never consented to.
   const rows = await db
     .select({
       userId: worldMembers.userId,
       joinedAt: worldMembers.joinedAt,
       isPrimary: worldMembers.isPrimary,
       username: users.username,
+      avatarUrl: users.avatarUrl,
+      avatarZoom: users.avatarZoom,
+      avatarOffsetX: users.avatarOffsetX,
+      avatarOffsetY: users.avatarOffsetY,
     })
     .from(worldMembers)
     .innerJoin(users, eq(users.id, worldMembers.userId))
-    .where(eq(worldMembers.worldId, worldId))
+    .where(and(
+      eq(worldMembers.worldId, worldId),
+      eq(users.isPublic, true),
+      eq(users.isNsfw, false),
+    ))
     .orderBy(desc(worldMembers.isPrimary), asc(worldMembers.joinedAt));
   return rows.map((r) => ({
     userId: r.userId,
     username: r.username,
+    avatarUrl: r.avatarUrl ?? null,
+    // Ship the owner-picked crop alongside the URL so the world
+    // member gallery's MemberAvatar can render the focal point the
+    // owner picked rather than centered-cover-defaults.
+    avatarCrop: {
+      zoom: r.avatarZoom,
+      offsetX: r.avatarOffsetX,
+      offsetY: r.avatarOffsetY,
+    },
     joinedAt: +r.joinedAt,
     isPrimary: !!r.isPrimary,
   }));

@@ -46,9 +46,11 @@
 
 import { useState } from "react";
 import DOMPurify from "dompurify";
+import type { AvatarCrop } from "@thekeep/shared";
 import { extractFreeformBorderVars, freeformBorderInlineVars } from "@thekeep/shared";
 import { useEarning } from "../state/earning.js";
 import { applyFreeformBorderPlaceholders } from "../lib/freeformBorderTemplate.js";
+import { cropStyleAttr, cropStyleFor } from "../lib/avatarCrop.js";
 
 export type BorderedAvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
 type Size = BorderedAvatarSize;
@@ -133,6 +135,12 @@ export interface FreeformBorderOverride {
 
 interface Props {
   avatarUrl: string | null | undefined;
+  /** Owner-picked zoom + focal point applied to the avatar image.
+   *  Optional — when omitted (or the default identity crop is passed
+   *  in) the component renders the legacy centered-cover image with
+   *  no transform, preserving the pre-feature look for callers that
+   *  haven't been threaded with crop data yet. */
+  avatarCrop?: AvatarCrop | null;
   /** Display name — used to derive the initials fallback. */
   name: string;
   /** Rank whose tier-IV border PNG should frame the avatar. */
@@ -164,6 +172,7 @@ interface Props {
 
 export function BorderedAvatar({
   avatarUrl,
+  avatarCrop,
   name,
   borderRankKey,
   freeformBorderKey,
@@ -179,6 +188,13 @@ export function BorderedAvatar({
   const containerScale = CONTAINER_SCALE[size];
   const [errored, setErrored] = useState(false);
   const showAvatar = !!avatarUrl && !errored;
+
+  // Resolve the crop into the inline-style payload the img picks up.
+  // Shared with every other avatar surface via `lib/avatarCrop` so a
+  // single zoom/pan picker drives the userlist, chat lines, profile
+  // hero, DM bubbles, world member gallery, and freeform-border
+  // templates in lockstep.
+  const cropStyle = cropStyleFor(avatarCrop);
 
   // Resolve which border (if any) applies. Freeform wins over rank-
   // tier; within freeform, image-based and template-based are
@@ -216,6 +232,7 @@ export function BorderedAvatar({
         template={freeformTemplate.template}
         styleCss={freeformTemplate.styleCss ?? null}
         avatarUrl={showAvatar ? avatarUrl : null}
+        avatarCrop={avatarCrop ?? null}
         name={name}
         size={size}
         {...(freeformConfig ? { freeformConfig } : {})}
@@ -249,14 +266,36 @@ export function BorderedAvatar({
         }}
       >
         {showAvatar ? (
-          <img
-            src={avatarUrl!}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => setErrored(true)}
-            className="h-full w-full rounded-full border border-keep-rule object-cover"
-          />
+          // When a non-default crop is in play we wrap the img in an
+          // overflow-hidden round clip and let the inner img grow past
+          // it via the scale transform. The wrapper carries the
+          // border + circular mask so the zoomed image looks cropped
+          // to the circle — without this, the scale transform would
+          // visibly spill past the avatar's edge.
+          cropStyle ? (
+            <span
+              className="block h-full w-full overflow-hidden rounded-full border border-keep-rule"
+            >
+              <img
+                src={avatarUrl!}
+                alt=""
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                onError={() => setErrored(true)}
+                className="h-full w-full object-cover"
+                style={cropStyle}
+              />
+            </span>
+          ) : (
+            <img
+              src={avatarUrl!}
+              alt=""
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={() => setErrored(true)}
+              className="h-full w-full rounded-full border border-keep-rule object-cover"
+            />
+          )
         ) : (
           <span
             aria-hidden
@@ -318,6 +357,7 @@ function TemplateAvatar({
   template,
   styleCss,
   avatarUrl,
+  avatarCrop,
   name,
   size,
   freeformConfig,
@@ -328,6 +368,12 @@ function TemplateAvatar({
   template: string;
   styleCss: string | null;
   avatarUrl: string | null | undefined;
+  /** Owner-chosen zoom + focal point. Threaded through to the template's
+   *  `<img>` placeholder so freeform-border templates honor the same
+   *  crop as the plain-render path. The template's own picture
+   *  container provides the circular clip, so no extra wrapper is
+   *  added (which would otherwise shave the border decoration). */
+  avatarCrop: AvatarCrop | null;
   name: string;
   size: Size;
   freeformConfig?: Record<string, string> | null;
@@ -339,7 +385,11 @@ function TemplateAvatar({
   const scaleFactor = targetAvatarPx / TEMPLATE_NATIVE_PIC;
   const wrapperPx = TEMPLATE_NATIVE_AV * scaleFactor;
 
-  const merged = applyFreeformBorderPlaceholders(template, { avatarUrl, name });
+  const merged = applyFreeformBorderPlaceholders(template, {
+    avatarUrl,
+    name,
+    cropStyleAttr: cropStyleAttr(avatarCrop),
+  });
   const clean = DOMPurify.sanitize(merged, {
     ALLOWED_TAGS: FREEFORM_SANITIZER_TAGS,
     ALLOWED_ATTR: FREEFORM_SANITIZER_ATTRS,

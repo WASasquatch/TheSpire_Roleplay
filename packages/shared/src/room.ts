@@ -6,7 +6,7 @@
 export type RoomType = "public" | "private";
 
 import type { LinkedWorldRef } from "./world.js";
-import type { Role } from "./profile.js";
+import type { AvatarCrop, Role } from "./profile.js";
 
 export interface RoomSummary {
   id: string;
@@ -130,6 +130,14 @@ export interface RoomOccupant {
    *                             target in userlist" cosmetic.
    */
   avatarUrl: string | null;
+  /**
+   * Owner-chosen zoom + focal point for the resolved avatar above.
+   * Mirrors `avatarUrl`'s scope rule: when the occupant is voicing a
+   * character, this is the character's crop; otherwise the master's.
+   * BorderedAvatar applies it whenever it differs from the default
+   * (centered, no zoom). See `AvatarCrop` for field semantics.
+   */
+  avatarCrop: AvatarCrop;
   selectedBorderRankKey: string | null;
   selectedFreeformBorderKey: string | null;
   /**
@@ -150,6 +158,11 @@ export interface RoomOccupant {
    * choices, not the character's.
    */
   masterAvatarUrl: string | null;
+  /** Master-slot crop for OOC backlog rendering. Parallel to
+   *  `masterAvatarUrl`: even when this row represents a character,
+   *  the chat renderer still uses this to crop the user's OOC
+   *  avatar on past OOC messages. */
+  masterAvatarCrop: AvatarCrop;
   masterSelectedBorderRankKey: string | null;
   masterSelectedFreeformBorderKey: string | null;
   masterFreeformBorderConfig: Record<string, string> | null;

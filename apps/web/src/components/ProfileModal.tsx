@@ -408,6 +408,12 @@ function ProfileBody({
     const parsed = parseFreeformBorderConfig(json);
     return Object.keys(parsed).length > 0 ? parsed : null;
   }, [earning?.freeformBorderConfigJson]);
+  // Avatar crop lives on the profile payload; BorderedAvatar applies
+  // the zoom + pan when it's non-default. Declared inside ProfileBody
+  // because the outer ProfileModal hoisted-declaration was out of
+  // scope here and crashed the render. See `profile.ts`'s
+  // `AvatarCrop` shape for the field semantics.
+  const avatarCrop = profile.profile.avatarCrop;
   // Tap-to-zoom state for the Collection / Pets pin sections. Null
   // when nothing is zoomed; an entry shape (same row the pin
   // rendered) when a pin is clicked. Closes on click anywhere or
@@ -437,7 +443,12 @@ function ProfileBody({
   return (
     <>
       {bannerUrl ? (
-        <div className="shrink-0 overflow-hidden border-b border-keep-rule bg-keep-panel">
+        // Standalone hero strip - desktop only. On mobile the same
+        // banner image gets re-used as the hero band's background
+        // (see the absolute-positioned `<img>` inside the hero band
+        // below) so we don't burn 220px of precious mobile vertical
+        // space on a separate banner strip.
+        <div className="hidden shrink-0 overflow-hidden border-b border-keep-rule bg-keep-panel sm:block">
           {/* Adaptive sizing: full-width, natural aspect ratio up to a
               `max-h-[220px]` ceiling. Wide banner-shaped uploads (3:1
               and wider) render at their true proportions and stay
@@ -466,16 +477,59 @@ function ProfileBody({
       ) : null}
       {/* Hero band - always visible, themed with the owner's panel color.
           Outer flex-col so the mobile action bar can sit underneath
-          the avatar/content row without breaking the desktop flex-row. */}
-        <div className="flex shrink-0 flex-col border-b border-keep-rule bg-keep-panel">
+          the avatar/content row without breaking the desktop flex-row.
+          `relative` so the mobile banner backdrop + scrim below can
+          absolute-position behind the content. */}
+        <div className="relative flex shrink-0 flex-col border-b border-keep-rule bg-keep-panel">
+        {/* Mobile banner backdrop + scrim. The owner's profile banner
+            doubles as the hero band's background on mobile (sm:hidden)
+            so we don't burn 220px of vertical space on a dedicated
+            banner strip on a phone. The scrim is `bg-keep-bg/75` —
+            the theme's bg color at 75% opacity, which naturally reads
+            dark on dark themes and light on light themes — keeping the
+            avatar / name / chips legible over whatever image the user
+            picked. `pointer-events-none` so the scrim doesn't steal
+            clicks from anything that might extend behind it. */}
+        {bannerUrl ? (
+          <>
+            <img
+              aria-hidden
+              src={bannerUrl}
+              alt=""
+              loading="lazy"
+              className="pointer-events-none absolute inset-0 h-full w-full object-cover object-center sm:hidden"
+              onError={(e) => {
+                const el = e.currentTarget as HTMLImageElement;
+                el.style.display = "none";
+              }}
+            />
+            {/* Scrim color is applied via inline style (NOT a
+                `bg-keep-bg/*` class) on purpose: the glass theme's
+                stylesheet matches `[class*="bg-keep-bg"]` and stamps
+                a heavy `backdrop-filter: blur(18px) saturate(1.3)`
+                onto anything carrying that class — which on top of a
+                translucent overlay reduced the banner to a featureless
+                blur. Inline `style` keeps the theme-aware bg-color
+                tint (var(--keep-bg) is dark on dark themes, light on
+                light themes) WITHOUT triggering the glass blur. The
+                0.45 opacity is enough to keep the avatar / name /
+                chips readable while letting the banner read through. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 sm:hidden"
+              style={{ backgroundColor: "rgb(var(--keep-bg) / 0.45)" }}
+            />
+          </>
+        ) : null}
         {/* `items-center` on the hero so the rank/name/account stack
             sits at the avatar's vertical midline. The avatar (xl =
             124px + frame container) is taller than the three text
             rows; with `items-start` the text floated at the top and
             left a tall empty gutter under it. Mobile drops to `lg`
             avatar (96px frame) so the hero doesn't eat half the
-            viewport. */}
-        <div className="flex items-center gap-3 px-3 py-3 sm:gap-4 sm:px-5 sm:py-4">
+            viewport. `relative` here so the content sits ABOVE the
+            mobile banner backdrop + scrim sibling above. */}
+        <div className="relative flex items-center gap-3 px-3 py-3 sm:gap-4 sm:px-5 sm:py-4">
           {/* Profile hero portrait uses BorderedAvatar so the user's
               equipped rank border frames the avatar exactly the way
               it does in chat / forum / Earning catalog. `xl` slot
@@ -491,6 +545,7 @@ function ProfileBody({
           <div className="sm:hidden">
             <BorderedAvatar
               avatarUrl={avatar}
+              avatarCrop={avatarCrop}
               name={name}
               size="lg"
               borderRankKey={earning?.selectedBorderRankKey ?? null}
@@ -501,6 +556,7 @@ function ProfileBody({
           <div className="hidden sm:block">
             <BorderedAvatar
               avatarUrl={avatar}
+              avatarCrop={avatarCrop}
               name={name}
               size="xl"
               borderRankKey={earning?.selectedBorderRankKey ?? null}
@@ -777,7 +833,7 @@ function ProfileBody({
             Skipped entirely when there are no actions to offer (e.g.
             a self-view with no Switch action). */}
         {hasActions ? (
-          <div className="flex border-t border-keep-rule text-sm sm:hidden">
+          <div className="relative flex border-t border-keep-rule text-sm sm:hidden">
             {activeCharacterAction ? (
               <button
                 type="button"
@@ -1216,7 +1272,16 @@ function CollectionPin({
   variant,
   onClick,
 }: {
-  entry: { itemKey: string; name: string; namePlural: string | null; description: string; iconUrl: string | null };
+  entry: {
+    itemKey: string;
+    name: string;
+    namePlural: string | null;
+    description: string;
+    iconUrl: string | null;
+    /** Owner-assigned nickname; renders as the primary label with the
+     *  catalog `name` shown as a smaller subtitle. Pet pins only. */
+    nickname?: string | null;
+  };
   /** "item" → 10-slot showcase (caps smaller at lg). "pet" → 5-slot
    *  showcase (caps larger because there's only 5 tiles, so each gets
    *  more real estate). */
@@ -1239,7 +1304,11 @@ function CollectionPin({
       type="button"
       onClick={onClick}
       className="flex w-full flex-col items-center gap-1 rounded border border-keep-rule/60 bg-keep-bg/40 p-2 text-center text-[11px] transition hover:border-keep-action hover:bg-keep-banner"
-      title={entry.description ? `${entry.name} — ${entry.description}` : entry.name}
+      title={
+        entry.nickname
+          ? `${entry.nickname} (${entry.name})${entry.description ? ` — ${entry.description}` : ""}`
+          : entry.description ? `${entry.name} — ${entry.description}` : entry.name
+      }
     >
       {entry.iconUrl ? (
         <img
@@ -1256,7 +1325,18 @@ function CollectionPin({
           <span className="text-2xl font-semibold sm:text-3xl md:text-4xl">{entry.name.slice(0, 1).toUpperCase()}</span>
         </div>
       )}
-      <span className="line-clamp-1 break-all font-semibold text-keep-text">{entry.name}</span>
+      {/* When a nickname is set, lead with it; the catalog name (breed
+          / species) reads as a smaller subtitle so viewers still know
+          what kind of creature it is. No nickname → unchanged from the
+          pre-nickname behavior: just the catalog name. */}
+      {entry.nickname ? (
+        <>
+          <span className="line-clamp-1 break-all font-semibold text-keep-text">{entry.nickname}</span>
+          <span className="line-clamp-1 break-all text-[10px] italic text-keep-muted">{entry.name}</span>
+        </>
+      ) : (
+        <span className="line-clamp-1 break-all font-semibold text-keep-text">{entry.name}</span>
+      )}
     </button>
   );
 }

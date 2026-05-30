@@ -264,6 +264,14 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
         // settings, rules, role escalation). Subsequent users default
         // to plain `user` and are promoted by hand.
         role: isFirstUser ? "masteradmin" : "user",
+        // Treat registration itself as the first login so the admin
+        // panel's recent-registrations widget doesn't tag a user who
+        // signed up + immediately started chatting (via the
+        // post-register session token) as "never logged in" — they
+        // never hit POST /auth/login because they were already
+        // authenticated by the issueSession call below, so without
+        // this seed the column stayed null forever.
+        lastLoginAt: new Date(),
       });
     } catch (err) {
       // Race: two simultaneous registrations for the same username slip past
@@ -342,6 +350,28 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       reply.code(401);
       return { error: "not authenticated" };
     }
+    // Treat the silent-poll endpoint as a "last active" stamp so an
+    // ongoing session keeps the `lastLoginAt` column fresh — without
+    // this, a user who registered + chatted continuously via the
+    // post-register session token would show as "never logged in"
+    // forever because they never POST /auth/login. Gated to once per
+    // 15 minutes so the 60s polling cadence (one per tab) doesn't
+    // hammer the DB. Best-effort — failure is ignored, the next poll
+    // tries again.
+    try {
+      const row = (await db
+        .select({ lastLoginAt: users.lastLoginAt })
+        .from(users)
+        .where(eq(users.id, user.id))
+        .limit(1))[0];
+      const last = row?.lastLoginAt ? +row.lastLoginAt : 0;
+      if (Date.now() - last > 15 * 60 * 1000) {
+        await db
+          .update(users)
+          .set({ lastLoginAt: new Date() })
+          .where(eq(users.id, user.id));
+      }
+    } catch { /* non-fatal — auth/me still succeeds */ }
     // `version` rides on every /auth/me poll so the client can detect a
     // post-deploy version drift. The web bundle stamps the build's
     // VERSION at compile time; after a deploy the running server reports

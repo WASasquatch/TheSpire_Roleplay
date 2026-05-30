@@ -34,6 +34,16 @@ export interface MyEmoticonSubmission {
   rejectionReason: string | null;
   reviewedAt: number | null;
   createdAt: number;
+  /** Whether other users pay the standard fee to use this sheet's
+   *  emoticons. Owner can toggle via `setEmoticonCommerce`. Only
+   *  meaningful once the row is approved; pending/rejected rows
+   *  carry the current value but it has no effect. */
+  commerceEnabled: boolean;
+  /** Lifetime usage tally — every successful pick of any cell bumps
+   *  this server-side, regardless of whether commerce was on for that
+   *  use. Powers the "Top used" sort + per-row analytics in the
+   *  uploader's row. */
+  useCount: number;
 }
 
 /** Admin view — includes a pre-resolved human-readable label for the
@@ -44,6 +54,51 @@ export interface AdminEmoticonSubmission extends MyEmoticonSubmission {
    *  their identities paid). Distinct from `submitterPoolId` which
    *  is the character id under character-scope. */
   submitterUserId: string | null;
+}
+
+/**
+ * Spend 1 Currency to use one cell of a community-submitted emoticon
+ * sheet. Server-side: charges the buyer's active pool (master or
+ * character), credits the sheet creator's master pool, writes paired
+ * ledger rows for both sides. Throws on insufficient funds, missing
+ * sheet, or self-use attempt. Resolves on success; the caller then
+ * proceeds with the normal `onPick(sheetSlug, cellIndex)` flow
+ * (insert into composer, post a reaction, etc.).
+ */
+/**
+ * Owner-only: toggle whether other users pay the standard fee to use
+ * this sheet's emoticons. Resolves on success; throws on auth /
+ * ownership errors. Returns the new commerce state so the caller can
+ * sync local UI without refetching the whole submissions list.
+ */
+export async function setEmoticonCommerce(
+  submissionId: string,
+  commerceEnabled: boolean,
+): Promise<{ commerceEnabled: boolean }> {
+  const r = await fetch(`/me/emoticon-submissions/${encodeURIComponent(submissionId)}/commerce`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ commerceEnabled }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+  const j = (await r.json()) as { ok: true; commerceEnabled: boolean };
+  return { commerceEnabled: j.commerceEnabled };
+}
+
+export async function useCommunityEmoticon(
+  sheetId: string,
+  cellIndex: number,
+  characterId: string | null = null,
+): Promise<{ ok: true; charged: number; useId: string }> {
+  const r = await fetch(`/emoticons/community/${encodeURIComponent(sheetId)}/use`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ cellIndex, characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+  return (await r.json()) as { ok: true; charged: number; useId: string };
 }
 
 async function jsonOrThrow<T>(r: Response): Promise<T> {

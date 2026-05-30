@@ -16,6 +16,7 @@ import type {
   ServerToClientEvents,
 } from "@thekeep/shared";
 import {
+  COMMUNITY_EMOTICON_USE_COST,
   EMOTICON_SHEET_CELL_COUNT,
   isEmoticonCellEmpty,
 } from "@thekeep/shared";
@@ -73,7 +74,15 @@ function decodeDataUrl(dataUrl: string): Buffer | null {
   catch { return null; }
 }
 
-function sheetRowToWire(row: typeof emoticonSheets.$inferSelect): WireEmoticonSheet {
+function sheetRowToWire(
+  row: typeof emoticonSheets.$inferSelect,
+  creatorUsername: string | null = null,
+): WireEmoticonSheet {
+  // System vs community classification on the way out — `createdByUserId`
+  // null = admin-seeded system sheet (free to use); non-null = a
+  // moderator-approved user submission (paid per use via the
+  // /emoticons/community/:sheetId/use route).
+  const isCommunity = !!row.createdByUserId;
   return {
     id: row.id,
     slug: row.slug,
@@ -81,6 +90,14 @@ function sheetRowToWire(row: typeof emoticonSheets.$inferSelect): WireEmoticonSh
     imageUrl: row.imageUrl,
     cells: parseSheetCells(row.cells),
     sortOrder: row.sortOrder,
+    kind: isCommunity ? "community" : "system",
+    creatorUserId: isCommunity ? row.createdByUserId : null,
+    creatorUsername: isCommunity ? creatorUsername : null,
+    // System sheets ignore commerce — they're always free regardless
+    // of the column value. Community sheets honor the toggle.
+    commerceEnabled: isCommunity ? !!row.commerceEnabled : false,
+    useCount: row.useCount ?? 0,
+    createdAt: row.createdAt ? +row.createdAt : 0,
   };
 }
 
@@ -224,12 +241,19 @@ export async function registerEmoticonRoutes(
    * already deleted.
    */
   app.get("/emoticons", async () => {
+    // LEFT JOIN users so community sheets ship with the creator's
+    // master username for "by @<name>" display in the picker. System
+    // sheets (createdByUserId IS NULL) join-miss and stay anonymous.
     const rows = await db
-      .select()
+      .select({
+        sheet: emoticonSheets,
+        creatorUsername: users.username,
+      })
       .from(emoticonSheets)
+      .leftJoin(users, eq(users.id, emoticonSheets.createdByUserId))
       .where(eq(emoticonSheets.status, "approved"))
       .orderBy(asc(emoticonSheets.sortOrder), asc(emoticonSheets.createdAt));
-    return { sheets: rows.map(sheetRowToWire) };
+    return { sheets: rows.map((r) => sheetRowToWire(r.sheet, r.creatorUsername)) };
   });
 
   /* ---------- Admin: create sheet ---------- */
@@ -695,6 +719,270 @@ export async function registerEmoticonRoutes(
     return { ok: true, submissionId, slug, status: "pending", costPaid: cost };
   });
 
+  /* ---------- Community emoticon use (pay-per-use) ----------
+   *
+   * Each use of a community sheet's emoticon charges the buyer 1
+   * Currency and credits the creator's master pool 1 Currency. The
+   * buyer's identity (master or character) selects which pool pays.
+   * System sheets (createdByUserId IS NULL) are free and don't
+   * accept this endpoint — clients should never call it for them.
+   *
+   * Transaction: balance read + debit + credit + two ledger rows
+   * land in a single sqlite write lock so a concurrent submission
+   * can't bypass the funds check. Self-purchase (buyer == creator)
+   * is explicitly blocked so the loopback doesn't game any future
+   * leaderboard metric.
+   */
+  const useCommunityEmoticonBody = z.object({
+    cellIndex: z.number().int().min(0).max(EMOTICON_SHEET_CELL_COUNT - 1),
+    /** Which pool the buyer is paying from. Null/omitted = master/OOC. */
+    characterId: z.string().nullable().optional(),
+  }).strict();
+
+  app.post<{ Params: { sheetId: string }; Body: unknown }>(
+    "/emoticons/community/:sheetId/use",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+
+      let body: z.infer<typeof useCommunityEmoticonBody>;
+      try { body = useCommunityEmoticonBody.parse(req.body); }
+      catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+
+      const sheet = (await db.select()
+        .from(emoticonSheets)
+        .where(eq(emoticonSheets.id, req.params.sheetId))
+        .limit(1))[0];
+      if (!sheet) { reply.code(404); return { error: "sheet not found" }; }
+      if (sheet.status !== "approved") { reply.code(404); return { error: "sheet not available" }; }
+      if (!sheet.createdByUserId) {
+        // System sheets are free; the client shouldn't call this for them.
+        reply.code(400);
+        return { error: "system sheets do not require payment" };
+      }
+      if (sheet.createdByUserId === me.id) {
+        // Self-purchase blocked. The picker should disable the buy
+        // path on the creator's own community sheets; this is the
+        // belt-and-braces server gate.
+        reply.code(403);
+        return { error: "you cannot buy use of your own sheet" };
+      }
+
+      // Validate cell isn't empty so a typoed index can't waste coin.
+      const cells = parseSheetCells(sheet.cells);
+      const label = cells[body.cellIndex];
+      if (!label || isEmoticonCellEmpty(label)) {
+        reply.code(400);
+        return { error: "cell is empty" };
+      }
+
+      // Optional character-pool buyer must belong to the caller.
+      const scopeCharacterId = body.characterId ?? null;
+      if (scopeCharacterId) {
+        const c = (await db.select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters).where(eq(characters.id, scopeCharacterId)).limit(1))[0];
+        if (!c || c.deletedAt || c.userId !== me.id) {
+          reply.code(403);
+          return { error: "not your character" };
+        }
+      }
+      const buyerScope: "user" | "character" = scopeCharacterId ? "character" : "user";
+      const buyerPoolId = scopeCharacterId ?? me.id;
+      const cost = COMMUNITY_EMOTICON_USE_COST;
+      const creatorUserId = sheet.createdByUserId;
+      const useId = nanoid();
+      const commerceOn = !!sheet.commerceEnabled;
+
+      // Free path: commerce disabled by the owner. Skip the debit /
+      // credit / ledger entries entirely — there's no transfer to
+      // make. Still bump `use_count` below so the "Top used" sort
+      // reflects every use regardless of payment status. Return the
+      // same shape callers expect (`charged: 0`).
+      if (!commerceOn) {
+        try {
+          await db.update(emoticonSheets)
+            .set({ useCount: sql`${emoticonSheets.useCount} + 1` })
+            .where(eq(emoticonSheets.id, sheet.id));
+        } catch { /* non-fatal */ }
+        return { ok: true, charged: 0, useId };
+      }
+
+      try {
+        db.transaction((tx) => {
+          // Debit buyer pool.
+          if (scopeCharacterId) {
+            tx.insert(characterEarning).values({ characterId: scopeCharacterId }).onConflictDoNothing().run();
+            const row = tx.select({ currency: characterEarning.currency })
+              .from(characterEarning).where(eq(characterEarning.characterId, scopeCharacterId)).limit(1).all()[0];
+            const balance = row?.currency ?? 0;
+            if (balance < cost) throw new InsufficientFunds(cost, balance);
+            tx.update(characterEarning)
+              .set({ currency: balance - cost, updatedAt: new Date() })
+              .where(eq(characterEarning.characterId, scopeCharacterId))
+              .run();
+          } else {
+            tx.insert(userEarning).values({ userId: me.id }).onConflictDoNothing().run();
+            const row = tx.select({ currency: userEarning.currency })
+              .from(userEarning).where(eq(userEarning.userId, me.id)).limit(1).all()[0];
+            const balance = row?.currency ?? 0;
+            if (balance < cost) throw new InsufficientFunds(cost, balance);
+            tx.update(userEarning)
+              .set({ currency: balance - cost, updatedAt: new Date() })
+              .where(eq(userEarning.userId, me.id))
+              .run();
+          }
+          // Credit creator master pool. Revenue always lands in the
+          // creator's user pool regardless of which pool they used to
+          // submit; the creator is the user account, not a specific
+          // character.
+          tx.insert(userEarning).values({ userId: creatorUserId }).onConflictDoNothing().run();
+          const creatorRow = tx.select({ currency: userEarning.currency })
+            .from(userEarning).where(eq(userEarning.userId, creatorUserId)).limit(1).all()[0];
+          const creatorBalance = creatorRow?.currency ?? 0;
+          tx.update(userEarning)
+            .set({ currency: creatorBalance + cost, updatedAt: new Date() })
+            .where(eq(userEarning.userId, creatorUserId))
+            .run();
+          // Twin ledger rows so both sides of the transfer are
+          // auditable. The reasons share the useId so a future
+          // refund / dispute tool can pair them.
+          const meta = {
+            kind: "community_emoticon_use",
+            useId,
+            sheetId: sheet.id,
+            sheetSlug: sheet.slug,
+            cellIndex: body.cellIndex,
+            buyerUserId: me.id,
+            creatorUserId,
+          };
+          tx.insert(earningLedger).values({
+            id: nanoid(),
+            scope: buyerScope,
+            ownerId: buyerPoolId,
+            xpDelta: 0,
+            currencyDelta: -cost,
+            reason: `community_emoticon_use_${useId}`,
+            metadataJson: JSON.stringify(meta),
+            createdAt: new Date(),
+          }).run();
+          tx.insert(earningLedger).values({
+            id: nanoid(),
+            scope: "user",
+            ownerId: creatorUserId,
+            xpDelta: 0,
+            currencyDelta: cost,
+            reason: `community_emoticon_revenue_${useId}`,
+            metadataJson: JSON.stringify(meta),
+            createdAt: new Date(),
+          }).run();
+          // Bump the sheet's lifetime usage tally. Same transaction so
+          // counter + ledger move together — a partial commit can't
+          // leave a credited revenue row without its matching tally
+          // bump or vice versa.
+          tx.update(emoticonSheets)
+            .set({ useCount: sql`${emoticonSheets.useCount} + 1` })
+            .where(eq(emoticonSheets.id, sheet.id))
+            .run();
+        });
+      } catch (err) {
+        if (err instanceof InsufficientFunds) {
+          reply.code(402);
+          return { error: "insufficient funds", required: err.required, balance: err.balance };
+        }
+        throw err;
+      }
+
+      // Best-effort post-commit notify: emit `earning:earned` to both
+      // sides so any open Earning dashboard / wallet pip updates in
+      // real time without a manual refresh. We re-read the new
+      // currency totals from the just-committed transaction so the
+      // wire payload carries the correct value. Failure here is
+      // non-fatal — the charge has landed and the next normal earning
+      // fetch will reconcile.
+      try {
+        const buyerNow = scopeCharacterId
+          ? (await db.select({ xp: characterEarning.xp, currency: characterEarning.currency })
+              .from(characterEarning).where(eq(characterEarning.characterId, scopeCharacterId)).limit(1))[0]
+          : (await db.select({ xp: userEarning.xp, currency: userEarning.currency })
+              .from(userEarning).where(eq(userEarning.userId, me.id)).limit(1))[0];
+        const creatorNow = (await db.select({ xp: userEarning.xp, currency: userEarning.currency })
+          .from(userEarning).where(eq(userEarning.userId, creatorUserId)).limit(1))[0];
+        const sockets = await io.fetchSockets();
+        for (const s of sockets) {
+          const uid = (s.data as { userId?: string }).userId;
+          if (uid === me.id && buyerNow) {
+            s.emit("earning:earned", {
+              scope: buyerScope,
+              ownerId: buyerPoolId,
+              xpDelta: 0,
+              currencyDelta: -cost,
+              xpTotal: buyerNow.xp,
+              currencyTotal: buyerNow.currency,
+              rankKey: null,
+              tier: null,
+              reason: `community_emoticon_use_${useId}`,
+            });
+          } else if (uid === creatorUserId && creatorNow) {
+            s.emit("earning:earned", {
+              scope: "user",
+              ownerId: creatorUserId,
+              xpDelta: 0,
+              currencyDelta: cost,
+              xpTotal: creatorNow.xp,
+              currencyTotal: creatorNow.currency,
+              rankKey: null,
+              tier: null,
+              reason: `community_emoticon_revenue_${useId}`,
+            });
+          }
+        }
+      } catch { /* socket emit best-effort */ }
+
+      return { ok: true, charged: cost, useId };
+    },
+  );
+
+  /* ---------- Sheet owner: toggle commerce on/off ----------
+   *
+   * Only the sheet's `createdByUserId` (or an admin) can flip this.
+   * Flipping doesn't refund any prior uses — it just decides what
+   * happens to FUTURE use calls.
+   */
+  const toggleCommerceBody = z.object({
+    commerceEnabled: z.boolean(),
+  }).strict();
+
+  app.patch<{ Params: { id: string }; Body: unknown }>(
+    "/me/emoticon-submissions/:id/commerce",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      let body: z.infer<typeof toggleCommerceBody>;
+      try { body = toggleCommerceBody.parse(req.body); }
+      catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+
+      const sheet = (await db.select()
+        .from(emoticonSheets)
+        .where(eq(emoticonSheets.id, req.params.id))
+        .limit(1))[0];
+      if (!sheet) { reply.code(404); return { error: "sheet not found" }; }
+      if (!sheet.createdByUserId) {
+        reply.code(400);
+        return { error: "system sheets do not support commerce" };
+      }
+      const isOwner = sheet.createdByUserId === me.id;
+      const isAdmin = isAdminRole(me.role);
+      if (!isOwner && !isAdmin) {
+        reply.code(403);
+        return { error: "not your sheet" };
+      }
+      await db.update(emoticonSheets)
+        .set({ commerceEnabled: body.commerceEnabled, updatedAt: new Date() })
+        .where(eq(emoticonSheets.id, sheet.id));
+      return { ok: true, commerceEnabled: body.commerceEnabled };
+    },
+  );
+
   /* ---------- User: list my submissions (any status) ---------- */
   app.get("/me/emoticon-submissions", async (req, reply) => {
     const me = await getSessionUser(req, db);
@@ -733,6 +1021,8 @@ export async function registerEmoticonRoutes(
         rejectionReason: r.rejectionReason,
         reviewedAt: r.reviewedAt ? +r.reviewedAt : null,
         createdAt: +r.createdAt,
+        commerceEnabled: !!r.commerceEnabled,
+        useCount: r.useCount ?? 0,
       })),
     };
   });

@@ -3,6 +3,7 @@ import {
   index,
   integer,
   primaryKey,
+  real,
   sqliteTable,
   text,
   uniqueIndex,
@@ -25,6 +26,22 @@ export const users = sqliteTable(
     /** master profile body (sanitized HTML) shown when /char clear */
     bioHtml: text("bio_html").notNull().default(""),
     avatarUrl: text("avatar_url"),
+    /**
+     * Avatar zoom / pan / crop (migration 0178). The avatar URL still
+     * points at the full source; these three fields let the owner
+     * pick which part of the source becomes the visible circle.
+     *
+     *   * `avatarZoom`    — 1.0 = no zoom (legacy cover-fit behavior);
+     *                       higher zooms in. Clamped to [1.0, 4.0].
+     *   * `avatarOffsetX` — 0..100, percent. CSS object-position X.
+     *   * `avatarOffsetY` — 0..100, percent. CSS object-position Y.
+     *
+     * Defaults (1.0 / 50 / 50) reproduce the pre-feature centered
+     * cover render exactly, so every legacy row keeps its old look.
+     */
+    avatarZoom: real("avatar_zoom").notNull().default(1.0),
+    avatarOffsetX: real("avatar_offset_x").notNull().default(50.0),
+    avatarOffsetY: real("avatar_offset_y").notNull().default(50.0),
     /**
      * Owner opt-in to surface the avatar as the first tile in the
      * portrait gallery on this profile. When true and avatarUrl is
@@ -195,6 +212,30 @@ export const users = sqliteTable(
     hideForumReplyCount: integer("hide_forum_reply_count", { mode: "boolean" })
       .notNull()
       .default(false),
+    /**
+     * Lifetime post counters. Bumped at message-insert time by
+     * `bumpLifetimeForMessage`, never decremented — a soft-delete or
+     * retention purge leaves the counter intact. The profile view
+     * reads from these columns directly; the legacy COUNT(*) over
+     * `messages` is gone (it decayed every time a row was purged).
+     * Created in migration 0176 and back-filled from the surviving
+     * `messages` rows in the same migration.
+     *
+     * Scope: a master-account counter accumulates EVERY message the
+     * user authored (OOC + every character), so the master profile's
+     * total reads as "all the time this person spent here." The
+     * character table carries its own copies for the per-character
+     * split.
+     */
+    lifetimeChatMessages: integer("lifetime_chat_messages")
+      .notNull()
+      .default(0),
+    lifetimeForumTopics: integer("lifetime_forum_topics")
+      .notNull()
+      .default(0),
+    lifetimeForumReplies: integer("lifetime_forum_replies")
+      .notNull()
+      .default(0),
     /** Free-text "away" reason; null means the user is present. */
     awayMessage: text("away_message"),
     awaySince: integer("away_since", { mode: "timestamp_ms" }),
@@ -286,6 +327,14 @@ export const characters = sqliteTable(
     /** structured stats serialized as JSON; see CharacterStats in @thekeep/shared */
     statsJson: text("stats_json").notNull().default("{}"),
     avatarUrl: text("avatar_url"),
+    /** Mirrors `users.avatarZoom / avatarOffsetX / avatarOffsetY` —
+     *  per-character zoom + pan over the avatar source. Migration
+     *  0178 added all six columns in lockstep so master and per-
+     *  character avatars share the same focal-point UX. Defaults
+     *  (1.0 / 50 / 50) reproduce the legacy centered-cover render. */
+    avatarZoom: real("avatar_zoom").notNull().default(1.0),
+    avatarOffsetX: real("avatar_offset_x").notNull().default(50.0),
+    avatarOffsetY: real("avatar_offset_y").notNull().default(50.0),
     /** Mirrors users.includeAvatarInGallery — per-character opt-in to
      *  surface the avatar as the first tile in this character's
      *  portrait gallery. See the comment on users.includeAvatarInGallery
@@ -312,6 +361,23 @@ export const characters = sqliteTable(
     publicProfileBgUrl: text("public_profile_bg_url"),
     /** Mirrors users.publicProfileBgMode — "cover" | "contain" | "tile" | "stretch". */
     publicProfileBgMode: text("public_profile_bg_mode").notNull().default("cover"),
+    /**
+     * Per-character lifetime post counters. Same semantics as the
+     * triple on `users`: bumped at message-insert time, never
+     * decremented. See migration 0176 for the create + backfill.
+     * The master-account totals on `users` are the sum of OOC posts
+     * plus every character's counter; both surfaces read directly
+     * off the appropriate column.
+     */
+    lifetimeChatMessages: integer("lifetime_chat_messages")
+      .notNull()
+      .default(0),
+    lifetimeForumTopics: integer("lifetime_forum_topics")
+      .notNull()
+      .default(0),
+    lifetimeForumReplies: integer("lifetime_forum_replies")
+      .notNull()
+      .default(0),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
     deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
@@ -2815,6 +2881,15 @@ export const identityPetCollection = sqliteTable(
     itemKey: text("item_key")
       .notNull()
       .references(() => items.key, { onDelete: "cascade" }),
+    /**
+     * Owner-assigned nickname for this specific pet ("Whiskers",
+     * "Smaug"). The catalog `items.name` stays the breed/species label
+     * the world sees ("Maine Coon"); the nickname is the personal name
+     * shown alongside it on the profile. Null = no nickname set;
+     * renderer falls back to the catalog name alone. Trimmed + length-
+     * capped by the route validator. Migration 0175.
+     */
+    nickname: text("nickname"),
     updatedAt: ts("updated_at"),
   },
   (t) => ({
@@ -2951,6 +3026,25 @@ export const emoticonSheets = sqliteTable(
       onDelete: "set null",
     }),
     rejectionReason: text("rejection_reason"),
+    /**
+     * Community-commerce toggle (migration 0177). When 1 (default), a
+     * community sheet's emoticons cost `COMMUNITY_EMOTICON_USE_COST`
+     * Currency per use, paid to the creator. When 0, uses are free
+     * (the sheet still appears in the Community tab; the picker just
+     * skips the debit/credit transaction). System sheets ignore this
+     * flag — they're always free.
+     */
+    commerceEnabled: integer("commerce_enabled", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    /**
+     * Denormalized usage counter (migration 0177). Bumped on every
+     * successful community-use call regardless of whether commerce is
+     * enabled. Powers the "Top used" sort in the picker's Community
+     * tab without forcing a COUNT(*) over the earning ledger on every
+     * picker open.
+     */
+    useCount: integer("use_count").notNull().default(0),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
   },

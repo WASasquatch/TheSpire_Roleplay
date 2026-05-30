@@ -256,6 +256,11 @@ export interface InventoryEntry {
 export interface CollectionEntry {
   slot: number;
   itemKey: string;
+  /** Owner-assigned pet nickname. Only present on entries from the
+   *  pet-collection arrays; the general item-collection ignores it.
+   *  Null when no nickname is set (renderer falls back to the catalog
+   *  item name). */
+  nickname?: string | null;
 }
 
 export interface EarningMeResponse {
@@ -1638,6 +1643,28 @@ export async function setPetCollectionSlots(
     body: JSON.stringify({ slots, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
+}
+
+/**
+ * Set or clear the owner's nickname for the pet pinned in `slot`. Pass
+ * `null` (or an empty string — server normalizes) to remove. Returns
+ * the post-normalization nickname so the caller can sync local state
+ * without re-fetching the whole earning snapshot.
+ */
+export async function setPetNickname(
+  slot: number,
+  nickname: string | null,
+  characterId: string | null = null,
+): Promise<{ slot: number; nickname: string | null }> {
+  const r = await fetch(`/earning/me/pet-collection/${slot}/nickname`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ nickname, characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+  const j = (await r.json()) as { ok: true; slot: number; nickname: string | null };
+  return { slot: j.slot, nickname: j.nickname };
 }
 
 /**

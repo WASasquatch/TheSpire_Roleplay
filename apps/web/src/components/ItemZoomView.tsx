@@ -29,6 +29,9 @@ export interface ItemZoomEntry {
   namePlural: string | null;
   description: string;
   iconUrl: string | null;
+  /** Owner-assigned nickname (pet pins only). When set, the zoom
+   *  header reads "Nickname" with "Catalog name" as a subtitle. */
+  nickname?: string | null;
 }
 
 export function ItemZoomView({
@@ -71,7 +74,14 @@ export function ItemZoomView({
         </div>
       )}
       <div className="max-w-md text-center text-white">
-        <h3 className="font-action text-2xl">{entry.name}</h3>
+        {entry.nickname ? (
+          <>
+            <h3 className="font-action text-2xl">{entry.nickname}</h3>
+            <p className="text-xs italic text-white/60">{entry.name}</p>
+          </>
+        ) : (
+          <h3 className="font-action text-2xl">{entry.name}</h3>
+        )}
         {entry.description ? (
           <p className="mt-2 text-sm text-white/80">{entry.description}</p>
         ) : null}

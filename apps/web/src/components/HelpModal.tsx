@@ -61,19 +61,49 @@ export function HelpModal({ initialFilter, onClose }: Props) {
     if (!commands) return [];
     const q = filter.trim().toLowerCase().replace(/^\//, "");
     if (!q) return commands;
-    return commands.filter((c) => {
-      if (c.name.includes(q)) return true;
-      if (c.aliases.some((a) => a.includes(q))) return true;
-      if (c.description.toLowerCase().includes(q)) return true;
-      if (c.usage.toLowerCase().includes(q)) return true;
+    // Score each command by best-matching field. Lower = better. The
+    // previous implementation was a plain `.filter()` that left results
+    // in catalog order, so searching "request" surfaced /accept,
+    // /decline, /dissolve (which mention "request" in their description)
+    // BEFORE /request itself. Now exact-name matches always win, then
+    // name-prefix, then name-substring, then aliases, then subcommands,
+    // then description/usage hits as the long-tail fallback.
+    function scoreCommand(c: CommandDoc): number {
+      const name = c.name.toLowerCase();
+      if (name === q) return 0;
+      if (name.startsWith(q)) return 1;
+      const aliasExact = c.aliases.some((a) => a.toLowerCase() === q);
+      if (aliasExact) return 2;
+      if (name.includes(q)) return 3;
+      const aliasPrefix = c.aliases.some((a) => a.toLowerCase().startsWith(q));
+      if (aliasPrefix) return 4;
+      const aliasContains = c.aliases.some((a) => a.toLowerCase().includes(q));
+      if (aliasContains) return 5;
+      // Subcommand verb hits: exact / prefix / substring.
+      let bestSub = Infinity;
       for (const s of c.subcommands) {
-        if (s.verb.toLowerCase().includes(q)) return true;
-        if (s.usage.toLowerCase().includes(q)) return true;
-        if (s.description.toLowerCase().includes(q)) return true;
-        if (s.aliases.some((a) => a.toLowerCase().includes(q))) return true;
+        const verb = s.verb.toLowerCase();
+        if (verb === q) bestSub = Math.min(bestSub, 6);
+        else if (verb.startsWith(q)) bestSub = Math.min(bestSub, 7);
+        else if (verb.includes(q)) bestSub = Math.min(bestSub, 8);
+        else if (s.aliases.some((a) => a.toLowerCase() === q)) bestSub = Math.min(bestSub, 8);
+        else if (s.usage.toLowerCase().includes(q)) bestSub = Math.min(bestSub, 9);
+        else if (s.description.toLowerCase().includes(q)) bestSub = Math.min(bestSub, 9);
       }
-      return false;
+      if (bestSub < Infinity) return bestSub;
+      if (c.usage.toLowerCase().includes(q)) return 10;
+      if (c.description.toLowerCase().includes(q)) return 11;
+      return Infinity;
+    }
+    const scored: Array<{ c: CommandDoc; score: number; idx: number }> = [];
+    commands.forEach((c, idx) => {
+      const score = scoreCommand(c);
+      if (score < Infinity) scored.push({ c, score, idx });
     });
+    // Stable sort by score asc, then original index asc so ties keep
+    // catalog order (alphabetical, presumably) instead of shuffling.
+    scored.sort((a, b) => a.score - b.score || a.idx - b.idx);
+    return scored.map((s) => s.c);
   }, [commands, filter]);
 
   return (

@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { customCmdCssToStyle, isAdminRole, resolveMessageColor, type ChatMessage, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
+import { customCmdCssToStyle, isAdminRole, resolveMessageColor, type AvatarCrop, type ChatMessage, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
 import { BorderedAvatar, type BorderedAvatarSize } from "./BorderedAvatar.js";
 import { RankSigil } from "./RankSigil.js";
@@ -420,6 +420,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   const styleByIdentity = new Map<string, { key: string; config: Record<string, unknown> | null }>();
   const cosmeticsByIdentity = new Map<string, {
     avatarUrl: string | null;
+    avatarCrop: AvatarCrop | null;
     selectedBorderRankKey: string | null;
     selectedFreeformBorderKey: string | null;
     freeformBorderConfig: Record<string, string> | null;
@@ -438,6 +439,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     }
     cosmeticsByIdentity.set(k, {
       avatarUrl: o.avatarUrl,
+      avatarCrop: o.avatarCrop,
       selectedBorderRankKey: o.selectedBorderRankKey,
       selectedFreeformBorderKey: o.selectedFreeformBorderKey,
       freeformBorderConfig: o.freeformBorderConfig,
@@ -458,6 +460,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     if (!cosmeticsByIdentity.has(masterKey)) {
       cosmeticsByIdentity.set(masterKey, {
         avatarUrl: o.masterAvatarUrl,
+        avatarCrop: o.masterAvatarCrop,
         selectedBorderRankKey: o.masterSelectedBorderRankKey,
         selectedFreeformBorderKey: o.masterSelectedFreeformBorderKey,
         freeformBorderConfig: o.masterFreeformBorderConfig,
@@ -1447,6 +1450,17 @@ export function ForumAvatar({
     }
     return null;
   });
+  // Crop has no message snapshot — pull from the live occupant cache
+  // alongside the avatar URL so forum posts honor the same zoom/pan
+  // the author picked in their profile editor.
+  const occupantAvatarCrop = useChat((s) => {
+    if (!userId) return null;
+    for (const list of Object.values(s.occupants)) {
+      const row = list.find((o) => o.userId === userId);
+      if (row) return row.avatarCrop;
+    }
+    return null;
+  });
   const effectiveBorder = borderRankKey ?? occupantBorderRankKey;
   const effectiveSrc = src ?? occupantAvatarUrl;
   const mappedSize: BorderedAvatarSize =
@@ -1458,6 +1472,7 @@ export function ForumAvatar({
       borderRankKey={effectiveBorder ?? null}
       freeformBorderKey={occupantFreeformBorderKey}
       freeformConfig={occupantFreeformBorderConfig}
+      avatarCrop={occupantAvatarCrop}
       size={mappedSize}
       {...(onClick ? { onClick } : {})}
       title={`View ${name}'s profile`}
@@ -2440,6 +2455,7 @@ function Line({
   /** Cosmetic state for the sender (avatar + border + inline-avatar toggle). Null = sender no longer in room — inline avatar suppressed for backlog. */
   senderCosmetics: {
     avatarUrl: string | null;
+    avatarCrop: AvatarCrop | null;
     selectedBorderRankKey: string | null;
     selectedFreeformBorderKey: string | null;
     inlineAvatarEnabled: boolean;
@@ -2512,6 +2528,11 @@ function Line({
   // still renders from the message snapshot — matches the existing
   // graceful-degradation pattern for name-style configs.
   const inlineFreeformBorderKey = senderCosmetics?.selectedFreeformBorderKey ?? null;
+  // Crop has no per-message snapshot column — pull from the live
+  // occupant cache when available, fall through to BorderedAvatar's
+  // null-handling (defaults to centered cover) for backlog from
+  // senders who've left the room.
+  const inlineAvatarCrop = senderCosmetics?.avatarCrop ?? null;
   const inlineAvatar = (inlineEnabled && inlineAvatarUrl)
     ? (
       // `data-copy-skip` drops the whole avatar subtree (img + the
@@ -2527,6 +2548,7 @@ function Line({
           name={msg.displayName}
           borderRankKey={inlineBorderKey}
           freeformBorderKey={inlineFreeformBorderKey}
+          avatarCrop={inlineAvatarCrop}
           size="xs"
           onClick={() => onIconClick(msg.userId, msg.displayName)}
           title={`view ${msg.displayName}'s profile`}

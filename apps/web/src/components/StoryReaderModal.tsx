@@ -214,6 +214,44 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
     scheme === "dark"   ? "bg-stone-900 text-stone-100" :
     "bg-keep-bg text-keep-text";
 
+  // Auto-scheme bg-luminance probe. The legibility-nudged
+  // `--keep-text` already targets WCAG 4.5:1 against `--keep-bg`,
+  // but in practice some theme designs ship a text color that's only
+  // *technically* contrast-passing and reads as washed-out — most
+  // notably the scifi palette's dimmed accent-on-deep-navy. We solve
+  // that by sampling the effective bg color from the reader-shell
+  // element after mount and stamping a coarse `dark | light` tone
+  // marker on it. CSS uses that marker to force a high-contrast text
+  // override (near-white on dark, near-black on light) for the
+  // prose / headings / muted notes inside the reader, overriding
+  // whatever dim value the theme calibrated. Only applies under the
+  // auto scheme; the manual light / sepia / dark schemes already pin
+  // their own bg + text and don't need the probe.
+  const readerShellRef = useRef<HTMLDivElement | null>(null);
+  const [readerBgTone, setReaderBgTone] = useState<"dark" | "light">("dark");
+  useLayoutEffect(() => {
+    if (scheme !== "auto") return;
+    const el = readerShellRef.current;
+    if (!el) return;
+    // `--keep-bg` is set as an "R G B" triple by applyTheme. Read it
+    // from computed style and walk to relative luminance via the
+    // standard sRGB weights. Bail to the default tone if anything
+    // looks off (no var, partial parse) — a wrong tone is worse than
+    // the existing rendering.
+    const cs = getComputedStyle(el);
+    const raw = cs.getPropertyValue("--keep-bg").trim();
+    if (!raw) return;
+    const parts = raw.split(/\s+/).map((s) => Number.parseFloat(s));
+    if (parts.length < 3 || parts.some((n) => !Number.isFinite(n))) return;
+    const [r, g, b] = parts as [number, number, number];
+    const toLin = (v: number) => {
+      const s = v / 255;
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    };
+    const luminance = 0.2126 * toLin(r) + 0.7152 * toLin(g) + 0.0722 * toLin(b);
+    setReaderBgTone(luminance < 0.45 ? "dark" : "light");
+  }, [scheme, readerTheme, themeOverride]);
+
   return (
     <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
@@ -280,7 +318,11 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
           <p className="p-6 italic text-keep-muted">Loading...</p>
         ) : (
           <div
+            ref={readerShellRef}
             data-reader-scheme={scheme === "auto" ? undefined : scheme}
+            // Sampled bg luminance — only meaningful under the auto
+            // scheme; the manual schemes pin their own contrast.
+            data-reader-bg-tone={scheme === "auto" ? readerBgTone : undefined}
             className={`reader-shell flex min-h-0 flex-1 gap-3 p-3 ${schemeBgClass}`}
           >
             {/* Sidebar (left). `keep-panel` picks up the theme

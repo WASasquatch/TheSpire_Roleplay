@@ -31,6 +31,13 @@ export function isEmoticonCellEmpty(label: string | null | undefined): boolean {
   return t === "" || t === "empty";
 }
 
+/** Per-use coin cost for community emoticons. Hardcoded for v1; can
+ *  promote to a per-sheet column later if we want admin-tunable
+ *  pricing. The buyer's active identity pays; the sheet creator's
+ *  master pool receives. System sheets (createdByUserId IS NULL) are
+ *  always free. */
+export const COMMUNITY_EMOTICON_USE_COST = 1;
+
 /** Public catalog shape — what `GET /emoticons` returns. The picker
  *  loads this once on app boot and caches in the zustand store. */
 export interface EmoticonSheet {
@@ -42,6 +49,33 @@ export interface EmoticonSheet {
   /** Length always 16. Empty entries are hidden from the picker. */
   cells: string[];
   sortOrder: number;
+  /** "system" = admin-seeded, free to use. "community" = approved
+   *  user submission; each use MAY cost `COMMUNITY_EMOTICON_USE_COST`
+   *  and routes to the creator's master pool — `commerceEnabled`
+   *  decides whether the toll applies. The picker tab UX branches on
+   *  this. */
+  kind: "system" | "community";
+  /** Creator's user id (master account). Null for system sheets.
+   *  The pay-to-use endpoint credits this user's master pool. */
+  creatorUserId: string | null;
+  /** Creator's master username for display ("by @<handle>"). Null
+   *  for system sheets. Snapshotted on read; if the creator renames
+   *  later the picker refreshes on next sheet broadcast. */
+  creatorUsername: string | null;
+  /** Owner-controlled commerce switch for COMMUNITY sheets. True =
+   *  each use costs the standard fee (paid to the creator); false =
+   *  free-to-use, the picker skips the debit entirely. The picker
+   *  surfaces a coin badge only when this is true. System sheets
+   *  hard-code this to false (they're always free). */
+  commerceEnabled: boolean;
+  /** Lifetime usage tally for the sheet — every successful pick of
+   *  any cell bumps this server-side. Powers the "Top used" sort in
+   *  the community tab. System sheets currently leave this at 0
+   *  since the community-use endpoint is the only writer. */
+  useCount: number;
+  /** Epoch ms of the row's creation. Powers the "Newest" / "Oldest"
+   *  sorts in the picker's community tab. */
+  createdAt: number;
 }
 
 /** Compact key the wire uses to refer to a specific emoticon. Renders

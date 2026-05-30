@@ -39,14 +39,23 @@ function escapeHtmlAttr(s: string): string {
  * marked errored upstream), we fall back to an initials chip —
  * matches the React-rendered fallback so a missing avatar doesn't
  * leave the border empty.
+ *
+ * `cropStyleAttr` is an opaque `style="..."` attribute string
+ * (built by `lib/avatarCrop.ts`) that carries the owner's
+ * zoom/pan transform. The template's own picture container
+ * already clips to the circle, so the zoom rides through the same
+ * mask without needing an extra wrapper — preserves the freeform
+ * border's outer decoration unchanged.
  */
 export function buildAvatarFragment(opts: {
   avatarUrl: string | null | undefined;
   name: string;
+  cropStyleAttr?: string;
 }): string {
   if (opts.avatarUrl) {
     const url = escapeHtmlAttr(opts.avatarUrl);
-    return `<img src="${url}" alt="" loading="lazy" referrerpolicy="no-referrer" class="h-full w-full rounded-full object-cover" />`;
+    const crop = opts.cropStyleAttr ?? "";
+    return `<img src="${url}" alt="" loading="lazy" referrerpolicy="no-referrer" class="h-full w-full rounded-full object-cover"${crop} />`;
   }
   const initials = escapeHtmlAttr(initialsFor(opts.name));
   return `<span class="flex h-full w-full items-center justify-center rounded-full">${initials}</span>`;
@@ -54,7 +63,7 @@ export function buildAvatarFragment(opts: {
 
 export function applyFreeformBorderPlaceholders(
   template: string,
-  opts: { avatarUrl: string | null | undefined; name: string },
+  opts: { avatarUrl: string | null | undefined; name: string; cropStyleAttr?: string },
 ): string {
   const avatar = buildAvatarFragment(opts);
   return template.replace(/\{avatar\}/g, avatar);

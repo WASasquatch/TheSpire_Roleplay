@@ -120,9 +120,17 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
    * after a room switch we don't, but after a full reload we do).
    */
   useEffect(() => {
-    if (!identityOpen || characters !== null) return;
+    if (!identityOpen) return;
+    // Re-fetch on every open. The previous "fetch once and cache for
+    // the rest of the mount" guard meant a character created mid-
+    // session via the profile editor never surfaced here until the
+    // user reloaded the page. The dropdown only opens on a deliberate
+    // click so a single network call per open is cheap — and we
+    // render the cached list immediately below so there's no loading
+    // flash while the refresh is in flight; the spinner only shows
+    // when there's no cache to display yet.
     let cancelled = false;
-    setCharactersLoading(true);
+    if (characters === null) setCharactersLoading(true);
     fetch("/characters")
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
@@ -135,14 +143,21 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
               avatarUrl: c.avatarUrl,
             })),
           );
-        } else {
+        } else if (characters === null) {
+          // Only fall to empty when we genuinely had nothing to show.
+          // A bad refresh shouldn't wipe a previously-good cached list.
           setCharacters([]);
         }
       })
-      .catch(() => { if (!cancelled) setCharacters([]); })
+      .catch(() => { if (!cancelled && characters === null) setCharacters([]); })
       .finally(() => { if (!cancelled) setCharactersLoading(false); });
     return () => { cancelled = true; };
-  }, [identityOpen, characters]);
+    // `characters` is intentionally NOT in the dependency list — adding
+    // it would loop the effect on every successful fetch (the fetch
+    // writes characters, which fires the effect, which fetches again).
+    // We only want to (re)fetch when the dropdown opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identityOpen]);
 
   // Esc closes the identity dropdown too — same UX as the Tools drawer.
   useEffect(() => {

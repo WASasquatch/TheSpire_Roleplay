@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
-import { DEFAULT_THEME, isDarkPalette, normalizeTheme } from "@thekeep/shared";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import type { AvatarCrop, CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
+import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, DEFAULT_THEME, clampAvatarCrop, isDarkPalette, isDefaultAvatarCrop, normalizeTheme } from "@thekeep/shared";
 import { applyStyle } from "../lib/ornaments/index.js";
 import { applyTheme } from "../lib/theme.js";
 import { GENDER_OPTIONS, type Gender } from "../lib/gender.js";
@@ -65,6 +65,9 @@ interface MasterData {
   username: string;
   bioHtml: string;
   avatarUrl: string | null;
+  /** Server-shipped avatar crop (migration 0178). Optional in the
+   *  type for forward-compat with older /me/profile responses. */
+  avatarCrop?: AvatarCrop;
   includeAvatarInGallery?: boolean;
   gender: Gender;
   chatColor: string | null;
@@ -110,6 +113,11 @@ interface CharacterRow {
   bioHtml: string;
   statsJson: string;
   avatarUrl: string | null;
+  /** Server-shipped avatar crop (migration 0178). Optional in the
+   *  type for forward-compat with older /characters responses; the
+   *  reader passes whatever comes back through `clampAvatarCrop`
+   *  which snaps undefined to the identity crop. */
+  avatarCrop?: AvatarCrop;
   includeAvatarInGallery?: boolean;
   themeJson: string | null;
   /**
@@ -184,6 +192,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   const [name, setName] = useState("");
   const [bioHtml, setBioHtml] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+  /**
+   * Owner-picked zoom + focal point on the avatar source (migration
+   * 0178). Defaults to the identity crop (centered, no zoom) which
+   * reproduces the legacy render. Re-seeded on target change. The
+   * picker UI below sets these via drag-to-pan + zoom slider; the
+   * save flow ships them as `avatarCrop` on the PUT body.
+   */
+  const [avatarCrop, setAvatarCrop] = useState<AvatarCrop>({ ...AVATAR_CROP_DEFAULTS });
   /**
    * Per-identity "Include in Gallery" toggle next to the avatar URL
    * field. Persisted as `includeAvatarInGallery` on the master /
@@ -365,6 +381,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setName(master.username);
           setBioHtml(master.bioHtml ?? "");
           setAvatarUrl(master.avatarUrl ?? "");
+          // Pull the saved crop off the master preload. clampAvatarCrop
+          // also handles a row that predates the column migration (the
+          // server defaults to the identity crop, so this just normalizes).
+          setAvatarCrop(clampAvatarCrop(master.avatarCrop));
           setIncludeAvatarInGallery(!!master.includeAvatarInGallery);
           setChatColor(master.chatColor);
           setGender(master.gender ?? "undisclosed");
@@ -427,6 +447,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setName(c.name);
           setBioHtml(c.bioHtml ?? "");
           setAvatarUrl(c.avatarUrl ?? "");
+          setAvatarCrop(clampAvatarCrop(c.avatarCrop));
           setIncludeAvatarInGallery(!!c.includeAvatarInGallery);
           // Per-character chat color. Null means "fall back to the
           // master account's color" — preserved as a distinct state
@@ -498,6 +519,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           body: JSON.stringify({
             bioHtml,
             avatarUrl: avatarUrl.trim() || null,
+            avatarCrop,
             includeAvatarInGallery,
             gender,
             theme,
@@ -531,6 +553,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             ...prev,
             bioHtml,
             avatarUrl: avatarUrl.trim() || null,
+            avatarCrop,
             // Gallery-membership flag must round-trip through the
             // cache or the checkbox snaps back to false on the next
             // render — the form's local state stays correct, but
@@ -587,6 +610,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             bioHtml,
             stats,
             avatarUrl: avatarUrl.trim() || null,
+            avatarCrop,
             includeAvatarInGallery,
             theme,
             chatColor,
@@ -846,6 +870,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           username: master.username,
           bioHtml: bioHtml,
           avatarUrl: trimmedAvatar || null,
+          avatarCrop,
           portraits: previewPortraits,
           gender,
           theme: previewTheme,
@@ -911,6 +936,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
         bioHtml,
         stats,
         avatarUrl: trimmedCharAvatar || null,
+        avatarCrop,
         portraits: previewCharPortraits,
         links,
         // Journal entries are managed inline in the editor (not via preview).
@@ -1213,12 +1239,48 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                   readOnly
                   hint={isCharacter ? "Renaming is blocked - message history snapshots the name at send time." : "Set at registration."}
                 />
+                {/* Gender (OOC) — moved up here from below the gallery
+                    toggle so the "who am I" identity fields cluster
+                    together (name + gender) instead of being split by
+                    the avatar block. Character views still keep their
+                    gender inside the structured Stats grid below;
+                    only the master/OOC view surfaces it as a
+                    standalone field. */}
+                {!isCharacter ? (
+                  <label className="block text-xs">
+                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">Gender (OOC)</span>
+                    <select
+                      value={gender}
+                      onChange={(e) => setGender(e.target.value as Gender)}
+                      className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+                    >
+                      {GENDER_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    <span className="mt-1 block text-[10px] text-keep-muted">
+                      Renders as an icon next to your username when no character is active.
+                    </span>
+                  </label>
+                ) : null}
                 <Field
                   label="Main Profile Image URL"
                   value={avatarUrl}
                   onChange={setAvatarUrl}
                   placeholder="https://example.com/portrait.png"
                   hint="Drives the userlist icon and the modal hero."
+                />
+                {/* Zoom + pan picker — lets the owner pick which part
+                    of the source image becomes the visible circle. The
+                    output threads through to the server as `avatarCrop`
+                    on the PUT body, then back out to every BorderedAvatar
+                    render via the `avatarCrop` prop. Defaults to the
+                    identity crop so users who don't open the picker
+                    keep the legacy centered-cover look. */}
+                <AvatarCropPicker
+                  url={avatarUrl}
+                  crop={avatarCrop}
+                  onChange={setAvatarCrop}
                 />
                 {/* "Include in Gallery" — when ticked, the server
                     prepends a synthetic tile (the avatar) to the
@@ -1247,23 +1309,6 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                     </span>
                   </span>
                 </label>
-                {!isCharacter ? (
-                  <label className="block text-xs">
-                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">Gender (OOC)</span>
-                    <select
-                      value={gender}
-                      onChange={(e) => setGender(e.target.value as Gender)}
-                      className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
-                    >
-                      {GENDER_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
-                      ))}
-                    </select>
-                    <span className="mt-1 block text-[10px] text-keep-muted">
-                      Renders as an icon next to your username when no character is active.
-                    </span>
-                  </label>
-                ) : null}
                 {isCharacter ? (
                   <fieldset className="rounded border border-keep-rule p-3">
                     <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Stats</legend>
@@ -2614,6 +2659,199 @@ function LinksEditor({
         </button>
       )}
     </fieldset>
+  );
+}
+
+/**
+ * AvatarCropPicker — drag-to-pan + zoom slider over a square preview.
+ *
+ * Layout: a square crop window (192px) holds a circle-mask overlay
+ * showing exactly what the avatar will look like once saved. The
+ * source image fills the square via `object-fit: cover` and is
+ * positioned with the same `object-position` + `transform-origin`
+ * coupling the renderer uses, so what the picker shows is what the
+ * profile will show.
+ *
+ * Dragging inside the window moves the focal point. Movement is
+ * converted from pixel delta to percent delta against the source's
+ * natural dimensions (read after the image loads), accounting for the
+ * fact that `object-fit: cover` already crops some of the source — we
+ * only let the user pan within the "hidden" overflow region.
+ *
+ * Zoom is a 1..MAX slider. Both axes are clamped via the shared
+ * `clampAvatarCrop` helper so a wild numeric input can't desync the
+ * picker from the renderer.
+ *
+ * No-URL state: when the URL field is empty the picker renders a
+ * muted placeholder explaining that a Main Profile Image URL is
+ * required. Saves still work — they ship the current crop value but
+ * it has no visual effect until an avatar URL exists.
+ */
+function AvatarCropPicker({
+  url,
+  crop,
+  onChange,
+}: {
+  url: string;
+  crop: AvatarCrop;
+  onChange: (next: AvatarCrop) => void;
+}) {
+  const trimmed = url.trim();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const draggingRef = useRef<{ startX: number; startY: number; baseOffsetX: number; baseOffsetY: number } | null>(null);
+  const [imgError, setImgError] = useState(false);
+  // Reset error state when the URL changes so the user gets a clean
+  // attempt instead of a stuck "broken" placeholder after editing.
+  useEffect(() => { setImgError(false); }, [trimmed]);
+
+  function applyClamp(next: Partial<AvatarCrop>) {
+    onChange(clampAvatarCrop({ ...crop, ...next }));
+  }
+
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (!trimmed || imgError) return;
+    const el = containerRef.current;
+    if (!el) return;
+    el.setPointerCapture(e.pointerId);
+    draggingRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      baseOffsetX: crop.offsetX,
+      baseOffsetY: crop.offsetY,
+    };
+  }
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const drag = draggingRef.current;
+    const el = containerRef.current;
+    if (!drag || !el) return;
+    const rect = el.getBoundingClientRect();
+    // Convert pixel delta to percent delta on the source image. We
+    // approximate by treating the container as the source's
+    // shorter-axis projection — for the 192px square preview this
+    // gives a comfortable 1:1 drag feel. Dividing by zoom keeps the
+    // pan rate consistent when zoomed in (a small pixel drag moves
+    // the focal point a smaller percent when the image is bigger).
+    const dxPct = ((e.clientX - drag.startX) / rect.width) * 100 / crop.zoom;
+    const dyPct = ((e.clientY - drag.startY) / rect.height) * 100 / crop.zoom;
+    applyClamp({
+      offsetX: drag.baseOffsetX - dxPct,
+      offsetY: drag.baseOffsetY - dyPct,
+    });
+  }
+  function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    draggingRef.current = null;
+    const el = containerRef.current;
+    if (el && el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+  }
+
+  const showsCrop = !!trimmed && !imgError;
+  const imgStyle: React.CSSProperties = {
+    objectPosition: `${crop.offsetX}% ${crop.offsetY}%`,
+    transform: `scale(${crop.zoom})`,
+    transformOrigin: `${crop.offsetX}% ${crop.offsetY}%`,
+  };
+
+  return (
+    <div className="space-y-1">
+      <span className="block text-xs uppercase tracking-widest text-keep-muted">
+        Avatar position
+      </span>
+      {/* Tight column constrained to the preview's width so the zoom
+          slider and reset button stack neatly below the circle without
+          stretching across the whole form. */}
+      <div className="inline-flex flex-col items-stretch gap-2" style={{ width: 192 }}>
+        <div
+          ref={containerRef}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          className="relative h-48 w-48 select-none overflow-hidden rounded-full border border-keep-rule bg-keep-banner"
+          style={{
+            touchAction: "none",
+            cursor: showsCrop ? (draggingRef.current ? "grabbing" : "grab") : "default",
+          }}
+        >
+          {showsCrop ? (
+            <>
+              <img
+                src={trimmed}
+                alt=""
+                draggable={false}
+                onError={() => setImgError(true)}
+                className="pointer-events-none h-full w-full object-cover"
+                style={imgStyle}
+              />
+              {/* Pan affordance — small four-way arrows badge that
+                  hovers in the bottom-center of the circle so users
+                  who don't read tooltips still see "this is draggable."
+                  Fades on grab so it doesn't compete with the photo
+                  while you're moving things around. */}
+              <span
+                aria-hidden
+                className={`pointer-events-none absolute inset-x-0 bottom-2 flex justify-center transition-opacity ${
+                  draggingRef.current ? "opacity-0" : "opacity-90"
+                }`}
+              >
+                <span className="inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-medium uppercase tracking-widest text-white shadow-sm">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="11"
+                    height="11"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M5 9l-3 3 3 3" />
+                    <path d="M9 5l3-3 3 3" />
+                    <path d="M15 19l-3 3-3-3" />
+                    <path d="M19 9l3 3-3 3" />
+                    <path d="M2 12h20" />
+                    <path d="M12 2v20" />
+                  </svg>
+                  Drag to pan
+                </span>
+              </span>
+            </>
+          ) : (
+            <div className="flex h-full w-full items-center justify-center px-3 text-center text-[11px] italic text-keep-muted">
+              {trimmed && imgError
+                ? "Couldn't load that image — check the URL above."
+                : "Paste a Main Profile Image URL above to crop."}
+            </div>
+          )}
+        </div>
+        {/* Zoom slider directly under the preview, same width. */}
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">
+          <span className="flex items-baseline justify-between">
+            <span>Zoom</span>
+            <span className="normal-case tracking-normal text-keep-muted">{crop.zoom.toFixed(2)}x</span>
+          </span>
+          <input
+            type="range"
+            min={AVATAR_CROP_MIN_ZOOM}
+            max={AVATAR_CROP_MAX_ZOOM}
+            step={0.05}
+            value={crop.zoom}
+            disabled={!showsCrop}
+            onChange={(e) => applyClamp({ zoom: Number.parseFloat(e.target.value) })}
+            className="mt-1 block w-full accent-keep-action"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => onChange({ ...AVATAR_CROP_DEFAULTS })}
+          disabled={!showsCrop || isDefaultAvatarCrop(crop)}
+          className="self-start rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner disabled:opacity-50"
+          title="Restore centered, no-zoom default"
+        >
+          Reset crop
+        </button>
+      </div>
+    </div>
   );
 }
 

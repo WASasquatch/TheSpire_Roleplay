@@ -10,6 +10,7 @@ import type {
   ServerToClientEvents,
 } from "@thekeep/shared";
 import {
+  clampAvatarCrop,
   DEFAULT_PRESENCE_TEMPLATES,
   extractMentions,
   isAdminRole,
@@ -44,6 +45,7 @@ import type { CommandContext, SessionUser } from "../commands/types.js";
 import { expandInlineCommands } from "../commands/registry.js";
 import { getSettings } from "../settings.js";
 import { awardForForum, awardForMessage } from "../earning/award.js";
+import { bumpLifetimeForMessage, classifyMessageForLifetime } from "../lib/lifetimePostCounts.js";
 import { loadReactionsForTargets } from "../reactions.js";
 import { readPoolRank } from "../earning/resolver.js";
 import { routeMessage } from "../earning/routing.js";
@@ -408,7 +410,25 @@ export async function addMessage(
         .from(rooms)
         .where(eq(rooms.id, ctx.roomId))
         .limit(1))[0];
-      const isForum = room?.replyMode === "nested";
+      const replyMode: "flat" | "nested" = room?.replyMode === "nested" ? "nested" : "flat";
+      // Lifetime post-counter bump (migration 0176). One write per
+      // user, plus one per character when the message was authored
+      // under a character. Whispers / system / cmd / announce kinds
+      // classify to null and skip. Failure is logged inside the
+      // helper — don't let a stuck counter roll back the awarding
+      // path below.
+      void bumpLifetimeForMessage(
+        ctx.db,
+        ctx.user.id,
+        ctx.user.activeCharacterId,
+        classifyMessageForLifetime({
+          kind: payload.kind,
+          replyMode,
+          isReply: !!payload.replyToId,
+          hasTitle: !!payload.title,
+        }),
+      );
+      const isForum = replyMode === "nested";
       if (isForum && (payload.title || payload.replyToId)) {
         await awardForForum({
           db: ctx.db,
@@ -2025,6 +2045,17 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     // scope-appropriate row (character_earning when attached,
     // user_active_cosmetics when OOC).
     const occupantAvatarUrl = c?.avatarUrl ?? u.avatarUrl ?? null;
+    // Owner-chosen zoom/pan for that resolved avatar. Same scope rule:
+    // character columns when attached, master columns otherwise. The
+    // schema columns are NOT NULL with sensible defaults (zoom 1.0,
+    // offsets 50/50) so the fallback is just the defaults — but we
+    // round-trip via `clampAvatarCrop` so any out-of-range row written
+    // by an older client can't poison the wire shape.
+    const occupantAvatarCrop = clampAvatarCrop(
+      c
+        ? { zoom: c.avatarZoom, offsetX: c.avatarOffsetX, offsetY: c.avatarOffsetY }
+        : { zoom: u.avatarZoom, offsetX: u.avatarOffsetX, offsetY: u.avatarOffsetY },
+    );
     const selectedBorderRankKey = c
       ? (charBorderByChar.get(c.id) ?? null)
       : (userBorderByUser.get(u.id) ?? null);
@@ -2044,6 +2075,11 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     // for OOC messages; these fields populate that entry even when
     // the occupant row represents the user's current character.
     const masterAvatarUrl = u.avatarUrl ?? null;
+    const masterAvatarCrop = clampAvatarCrop({
+      zoom: u.avatarZoom,
+      offsetX: u.avatarOffsetX,
+      offsetY: u.avatarOffsetY,
+    });
     const masterSelectedBorderRankKey = userBorderByUser.get(u.id) ?? null;
     const masterSelectedFreeformBorderKey = userFreeformBorderByUser.get(u.id) ?? null;
     const masterFreeformBorderConfig = masterSelectedFreeformBorderKey
@@ -2076,11 +2112,13 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
       masterNameStyleKey: masterStyleKey,
       masterNameStyleConfig: masterStyleConfig,
       avatarUrl: occupantAvatarUrl,
+      avatarCrop: occupantAvatarCrop,
       selectedBorderRankKey,
       selectedFreeformBorderKey,
       freeformBorderConfig,
       inlineAvatarEnabled,
       masterAvatarUrl,
+      masterAvatarCrop,
       masterSelectedBorderRankKey,
       masterSelectedFreeformBorderKey,
       masterFreeformBorderConfig,

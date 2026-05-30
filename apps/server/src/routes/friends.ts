@@ -34,6 +34,9 @@ export interface FriendResolveMatch {
   avatarUrl: string | null;
 }
 
+import type { AvatarCrop } from "@thekeep/shared";
+import { clampAvatarCrop } from "@thekeep/shared";
+
 export interface FriendListEntry {
   userId: string;
   username: string;
@@ -59,6 +62,11 @@ export interface FriendListEntry {
    */
   handle: string;
   avatarUrl: string | null;
+  /** Owner-chosen zoom + focal point for `avatarUrl`. Scope matches
+   *  the avatar: pinned character's crop when character-pinned,
+   *  master's crop otherwise. Renderer treats default crop as a
+   *  no-op (legacy centered-cover behavior). */
+  avatarCrop: AvatarCrop;
   online: boolean;
 }
 
@@ -268,6 +276,12 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
       // empty. Null falls through to the initials placeholder
       // client-side, which is the privacy-correct rendering.
       const avatarUrl = usingChar ? (c!.avatarUrl ?? null) : (u?.avatarUrl ?? null);
+      // Crop matches the avatar's scope. When the friend has no
+      // master record (deleted account), fall through to defaults
+      // via clampAvatarCrop's null-handling.
+      const avatarCrop = usingChar
+        ? clampAvatarCrop({ zoom: c!.avatarZoom, offsetX: c!.avatarOffsetX, offsetY: c!.avatarOffsetY })
+        : (u ? clampAvatarCrop({ zoom: u.avatarZoom, offsetX: u.avatarOffsetX, offsetY: u.avatarOffsetY }) : clampAvatarCrop(null));
       return {
         userId: o.userId,
         username: u?.username ?? "(unknown)",
@@ -282,6 +296,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
         // entirely for character-friendship rows.
         handle: usingChar ? c!.name : (u?.username ?? "(unknown)"),
         avatarUrl,
+        avatarCrop,
         online: online.has(o.userId),
       };
     });

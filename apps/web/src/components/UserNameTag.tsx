@@ -1,4 +1,4 @@
-import { resolveMessageColor } from "@thekeep/shared";
+import { resolveMessageColor, type AvatarCrop } from "@thekeep/shared";
 import type { Gender } from "../lib/gender.js";
 import { genderGlyph } from "../lib/gender.js";
 import { useActiveTheme } from "../lib/theme.js";
@@ -82,6 +82,10 @@ interface Props {
    *  border (migration 0158). Passed through to BorderedAvatar
    *  unchanged; null = use the catalog row's CSS fallbacks. */
   freeformBorderConfig?: Record<string, string> | null;
+  /** Owner-chosen zoom + focal point for the inline avatar. Forwarded
+   *  to BorderedAvatar so the userlist / chat-line thumbnail honors
+   *  the same crop the user picked in the profile editor. */
+  avatarCrop?: AvatarCrop | null;
   inlineAvatar?: boolean;
   /**
    * Opt the inner name button into ellipsis truncation. Default off.
@@ -125,6 +129,7 @@ export function UserNameTag({
   selectedBorderRankKey,
   selectedFreeformBorderKey,
   freeformBorderConfig,
+  avatarCrop,
   inlineAvatar,
   truncate = false,
 }: Props) {
@@ -197,6 +202,7 @@ export function UserNameTag({
               borderRankKey={selectedBorderRankKey ?? null}
               freeformBorderKey={selectedFreeformBorderKey ?? null}
               freeformConfig={freeformBorderConfig ?? null}
+              avatarCrop={avatarCrop ?? null}
               size="sm"
               onClick={onIconClick}
               title={`view profile (${g.title})`}

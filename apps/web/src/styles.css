@@ -2288,6 +2288,60 @@ aside.margin-note {
   color: rgb(var(--keep-text));
 }
 
+/* Bg-tone-aware contrast floor for the auto scheme.
+ *
+ * `--keep-text` is calibrated to WCAG 4.5:1 against `--keep-bg` by
+ * `legibleThemePalette`, but a few theme designs ship text colors
+ * that pass the math while reading visually dim (most notably the
+ * scifi palette's deep-navy bg + dimmed-cyan text). StoryReaderModal
+ * samples the rendered bg luminance after mount and stamps
+ * `data-reader-bg-tone="dark"` or `"light"` on the shell; the rules
+ * below then force a near-white text on dark backgrounds and
+ * near-black on light backgrounds, regardless of what value the
+ * theme's `--keep-text` resolved to. This is a deliberate override
+ * — comfort > theme fidelity inside the reader, where the surface
+ * exists to be read for long stretches.
+ *
+ * The override applies to the prose body, the chapter headings,
+ * the `keep-text` / `keep-muted` text helpers, and `currentColor`
+ * inherited content. Inline-styled author colors still win (their
+ * spans set `color:` explicitly).
+ */
+.reader-shell[data-reader-bg-tone="dark"]:not([data-reader-scheme]),
+.reader-shell[data-reader-bg-tone="dark"]:not([data-reader-scheme]) .reader-sidebar,
+.reader-shell[data-reader-bg-tone="dark"]:not([data-reader-scheme]) .reader-main > .keep-panel,
+.reader-shell[data-reader-bg-tone="dark"]:not([data-reader-scheme]) .reader-main > div.keep-panel,
+.reader-shell[data-reader-bg-tone="dark"]:not([data-reader-scheme]) .prose-reader,
+.reader-shell[data-reader-bg-tone="dark"]:not([data-reader-scheme]) h1,
+.reader-shell[data-reader-bg-tone="dark"]:not([data-reader-scheme]) h2,
+.reader-shell[data-reader-bg-tone="dark"]:not([data-reader-scheme]) h3,
+.reader-shell[data-reader-bg-tone="dark"]:not([data-reader-scheme]) h4,
+.reader-shell[data-reader-bg-tone="dark"]:not([data-reader-scheme]) h5,
+.reader-shell[data-reader-bg-tone="dark"]:not([data-reader-scheme]) h6,
+.reader-shell[data-reader-bg-tone="dark"]:not([data-reader-scheme]) .text-keep-text {
+  color: #ececec;
+}
+.reader-shell[data-reader-bg-tone="dark"]:not([data-reader-scheme]) .text-keep-muted {
+  color: #b8b8b8;
+}
+.reader-shell[data-reader-bg-tone="light"]:not([data-reader-scheme]),
+.reader-shell[data-reader-bg-tone="light"]:not([data-reader-scheme]) .reader-sidebar,
+.reader-shell[data-reader-bg-tone="light"]:not([data-reader-scheme]) .reader-main > .keep-panel,
+.reader-shell[data-reader-bg-tone="light"]:not([data-reader-scheme]) .reader-main > div.keep-panel,
+.reader-shell[data-reader-bg-tone="light"]:not([data-reader-scheme]) .prose-reader,
+.reader-shell[data-reader-bg-tone="light"]:not([data-reader-scheme]) h1,
+.reader-shell[data-reader-bg-tone="light"]:not([data-reader-scheme]) h2,
+.reader-shell[data-reader-bg-tone="light"]:not([data-reader-scheme]) h3,
+.reader-shell[data-reader-bg-tone="light"]:not([data-reader-scheme]) h4,
+.reader-shell[data-reader-bg-tone="light"]:not([data-reader-scheme]) h5,
+.reader-shell[data-reader-bg-tone="light"]:not([data-reader-scheme]) h6,
+.reader-shell[data-reader-bg-tone="light"]:not([data-reader-scheme]) .text-keep-text {
+  color: #1c1c1c;
+}
+.reader-shell[data-reader-bg-tone="light"]:not([data-reader-scheme]) .text-keep-muted {
+  color: #555;
+}
+
 /* ============================================================
  * Themed notice bars — top-of-app notification strips
  * ============================================================

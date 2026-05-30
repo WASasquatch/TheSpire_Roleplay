@@ -23,8 +23,10 @@ import { CoinAmount } from "./CoinAmount.js";
 import {
   submitEmoticonSheet,
   fetchMyEmoticonSubmissions,
+  setEmoticonCommerce,
   type MyEmoticonSubmission,
 } from "../lib/emoticonSubmissions.js";
+import { COMMUNITY_EMOTICON_USE_COST } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 
 /** 4×4 grid — same constant the server validates against. */
@@ -412,6 +414,17 @@ export function EmoticonSubmissionModal({
                           Reason: {row.rejectionReason}
                         </div>
                       ) : null}
+                      {/* Commerce toggle + usage tally — only meaningful
+                          on approved rows (the live picker is the only
+                          place commerce_enabled is consulted). Pending
+                          and rejected rows still carry the flag but
+                          surfacing the control there would be misleading. */}
+                      {row.status === "approved" ? (
+                        <ApprovedRowControls
+                          row={row}
+                          onChanged={refreshHistory}
+                        />
+                      ) : null}
                     </div>
                   </li>
                 ))}
@@ -421,6 +434,66 @@ export function EmoticonSubmissionModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Per-approved-row controls: lifetime usage tally + commerce toggle.
+ * Local optimistic state keeps the toggle snappy; we only re-fetch
+ * the parent's list after a successful save so the row's costPaid /
+ * status etc. stay in sync.
+ */
+function ApprovedRowControls({
+  row,
+  onChanged,
+}: {
+  row: MyEmoticonSubmission;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [enabled, setEnabled] = useState(row.commerceEnabled);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { setEnabled(row.commerceEnabled); }, [row.commerceEnabled]);
+  async function flip(next: boolean) {
+    if (saving || enabled === next) return;
+    setSaving(true);
+    setErr(null);
+    // Optimistic flip — the picker shows the new state immediately;
+    // a failure rolls it back.
+    setEnabled(next);
+    try {
+      const r = await setEmoticonCommerce(row.id, next);
+      setEnabled(r.commerceEnabled);
+      await onChanged();
+    } catch (e) {
+      setEnabled(!next);
+      setErr(e instanceof Error ? e.message : "could not save");
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px]">
+      <span className="text-keep-muted">
+        {row.useCount} {row.useCount === 1 ? "use" : "uses"}
+      </span>
+      <span aria-hidden className="text-keep-muted/70">·</span>
+      <label className="inline-flex cursor-pointer items-center gap-1 text-keep-muted">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => void flip(e.target.checked)}
+          disabled={saving}
+          className="h-3 w-3 accent-keep-action"
+        />
+        <span>
+          Charge {COMMUNITY_EMOTICON_USE_COST} Currency per use
+        </span>
+      </label>
+      {err ? (
+        <span className="text-keep-accent">· {err}</span>
+      ) : null}
+    </div>
   );
 }
 

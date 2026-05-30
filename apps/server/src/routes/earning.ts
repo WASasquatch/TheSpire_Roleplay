@@ -34,6 +34,7 @@ import {
   isValidFreeformBorderConfigKey,
   isValidFreeformBorderConfigValue,
   FREEFORM_CONFIG_MAX_ENTRIES,
+  PET_NICKNAME_MAX_LENGTH,
 } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 
@@ -581,10 +582,10 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           ? sql.join(Array.from(charIdSet).map((id) => sql`${id}`), sql`, `)
           : sql`''`
       }))`);
-    const petCollectionMaster: { slot: number; itemKey: string }[] = [];
-    const petCollectionByCharacter: Record<string, { slot: number; itemKey: string }[]> = {};
+    const petCollectionMaster: { slot: number; itemKey: string; nickname: string | null }[] = [];
+    const petCollectionByCharacter: Record<string, { slot: number; itemKey: string; nickname: string | null }[]> = {};
     for (const row of petCollectionRows) {
-      const shaped = { slot: row.slot, itemKey: row.itemKey };
+      const shaped = { slot: row.slot, itemKey: row.itemKey, nickname: row.nickname ?? null };
       if (row.ownerScope === "user" && row.ownerId === me.id) {
         petCollectionMaster.push(shaped);
       } else if (row.ownerScope === "character" && charIdSet.has(row.ownerId)) {
@@ -2948,6 +2949,27 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             }
           }
         }
+        // Snapshot existing nicknames per itemKey BEFORE any deletes so
+        // we can preserve them when the same pet is moved to a different
+        // slot. The PUT body is a slot-keyed diff, so "move Whiskers
+        // from slot 0 to slot 2" comes in as { slot:0, itemKey:null }
+        // + { slot:2, itemKey:'maine_coon' } — without this snapshot the
+        // delete at slot 0 would drop the nickname and the insert at
+        // slot 2 would re-pin the pet anonymous. Re-pinning a DIFFERENT
+        // itemKey in a slot still drops the nickname because it
+        // belonged to a different creature.
+        const priorRows = tx.select({
+          itemKey: identityPetCollection.itemKey,
+          nickname: identityPetCollection.nickname,
+        })
+          .from(identityPetCollection)
+          .where(and(
+            eq(identityPetCollection.ownerScope, ownerScope),
+            eq(identityPetCollection.ownerId, ownerId),
+          ))
+          .all();
+        const priorNicknameByItem = new Map<string, string | null>();
+        for (const r of priorRows) priorNicknameByItem.set(r.itemKey, r.nickname ?? null);
         for (const s of body.slots) {
           if (s.itemKey === null) {
             tx.delete(identityPetCollection).where(and(
@@ -2966,6 +2988,9 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               ownerId,
               slot: s.slot,
               itemKey: s.itemKey,
+              // Carry the prior nickname forward when this pet was
+              // previously pinned (possibly in a different slot).
+              nickname: priorNicknameByItem.get(s.itemKey) ?? null,
             }).run();
           }
         }
@@ -2985,6 +3010,85 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
 
     return { ok: true };
   });
+
+  /* =========================================================
+   *  Pet nickname rename
+   *
+   *  PATCH /earning/me/pet-collection/:slot/nickname
+   *    Body: { nickname: string | null, characterId?: string | null }
+   *    Sets or clears the owner's nickname for the pet pinned in
+   *    `slot`. Owner-only (the route resolves the pool from the
+   *    session; non-owners can't reach this endpoint). The slot must
+   *    actually hold a pet — renaming an empty slot is a no-op error
+   *    so the client can't silently lose a nickname write.
+   * ========================================================= */
+  const renamePetBody = z.object({
+    nickname: z.string().max(PET_NICKNAME_MAX_LENGTH).nullable(),
+    characterId: z.string().nullable().optional(),
+  }).strict();
+
+  app.patch<{ Params: { slot: string }; Body: unknown }>(
+    "/earning/me/pet-collection/:slot/nickname",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      const slot = Number.parseInt(req.params.slot, 10);
+      if (!Number.isInteger(slot) || slot < 0 || slot > 4) {
+        reply.code(400);
+        return { error: "slot must be 0..4" };
+      }
+      let body: z.infer<typeof renamePetBody>;
+      try { body = renamePetBody.parse(req.body); }
+      catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+
+      const characterId = body.characterId ?? null;
+      if (characterId) {
+        const c = (await db
+          .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters)
+          .where(eq(characters.id, characterId))
+          .limit(1))[0];
+        if (!c || c.userId !== me.id || c.deletedAt) {
+          reply.code(403);
+          return { error: "not your character" };
+        }
+      }
+      const ownerScope: "user" | "character" = characterId ? "character" : "user";
+      const ownerId = characterId ?? me.id;
+
+      // Normalize: trim, collapse internal whitespace runs to single
+      // space, treat empty-after-trim as null (matches the "clear the
+      // nickname" semantics callers expect without forcing them to
+      // send literal null).
+      const cleaned = body.nickname == null
+        ? null
+        : body.nickname.replace(/\s+/g, " ").trim();
+      const next = cleaned && cleaned.length > 0 ? cleaned : null;
+
+      const existing = (await db
+        .select({ itemKey: identityPetCollection.itemKey })
+        .from(identityPetCollection)
+        .where(and(
+          eq(identityPetCollection.ownerScope, ownerScope),
+          eq(identityPetCollection.ownerId, ownerId),
+          eq(identityPetCollection.slot, slot),
+        ))
+        .limit(1))[0];
+      if (!existing) {
+        reply.code(404);
+        return { error: "no pet in that slot" };
+      }
+      await db
+        .update(identityPetCollection)
+        .set({ nickname: next, updatedAt: new Date() })
+        .where(and(
+          eq(identityPetCollection.ownerScope, ownerScope),
+          eq(identityPetCollection.ownerId, ownerId),
+          eq(identityPetCollection.slot, slot),
+        ));
+      return { ok: true, slot, nickname: next };
+    },
+  );
 }
 
 function safeParse(json: string): unknown {

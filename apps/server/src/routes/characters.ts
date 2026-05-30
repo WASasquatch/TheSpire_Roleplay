@@ -81,10 +81,25 @@ const BIO_HARD_CAP = 200_000;
 /** `#rrggbb` or `#rgb` literal. Used by chat-color fields on both master and character. */
 const hexColor = z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "color must be a hex like #990000 or #abc");
 
+/** Avatar zoom / pan / focal-point validator. The shared
+ *  `clampAvatarCrop` snaps wild numbers to safe ranges on the way out,
+ *  but we still hand-validate inputs here so a malformed body returns
+ *  a 400 instead of silently snapping to defaults — clearer error
+ *  feedback for the editor when something is off. */
+const avatarCropSchema = z.object({
+  zoom: z.number().min(1.0).max(4.0),
+  offsetX: z.number().min(0).max(100),
+  offsetY: z.number().min(0).max(100),
+}).strict();
+
 const updateBody = z.object({
   bioHtml: z.string().max(BIO_HARD_CAP).optional(),
   stats: statsSchema.optional(),
   avatarUrl: httpUrl.nullable().optional(),
+  /** Optional crop update. Sent alongside an `avatarUrl` change or on
+   *  its own (the picker can fine-tune the crop without re-uploading
+   *  the URL). Omitted = keep current. */
+  avatarCrop: avatarCropSchema.optional(),
   /** Per-character "show avatar at the head of the gallery" opt-in.
    *  See users / characters schema for the synthetic-portrait rationale. */
   includeAvatarInGallery: z.boolean().optional(),
@@ -125,6 +140,9 @@ const updateBody = z.object({
 const masterUpdateBody = z.object({
   bioHtml: z.string().max(BIO_HARD_CAP).optional(),
   avatarUrl: httpUrl.nullable().optional(),
+  /** Same shape as the character schema's avatarCrop. Optional —
+   *  omit to keep the existing crop. */
+  avatarCrop: avatarCropSchema.optional(),
   /** OOC-side counterpart of the character flag; same semantics. */
   includeAvatarInGallery: z.boolean().optional(),
   gender: z.enum(["male", "female", "nonbinary", "other", "undisclosed"]).optional(),
@@ -277,6 +295,13 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
           ...(body.bioHtml !== undefined ? { bioHtml: sanitizeBio(body.bioHtml) } : {}),
           ...(body.stats !== undefined ? { statsJson: JSON.stringify(body.stats) } : {}),
           ...(body.avatarUrl !== undefined ? { avatarUrl: body.avatarUrl } : {}),
+          ...(body.avatarCrop !== undefined
+            ? {
+                avatarZoom: body.avatarCrop.zoom,
+                avatarOffsetX: body.avatarCrop.offsetX,
+                avatarOffsetY: body.avatarCrop.offsetY,
+              }
+            : {}),
           ...(body.includeAvatarInGallery !== undefined
             ? { includeAvatarInGallery: body.includeAvatarInGallery }
             : {}),
@@ -343,7 +368,19 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     // clean source text instead of literal `<br>` strings. Viewer-facing
     // profile reads go through /profiles/:name and keep the persisted
     // HTML as-is for rendering.
-    return { ...c, bioHtml: bioHtmlForEdit(c.bioHtml) };
+    return {
+      ...c,
+      bioHtml: bioHtmlForEdit(c.bioHtml),
+      // Wrap the three avatar-crop columns into the AvatarCrop wire
+      // shape the editor expects (mirrors the master /me/profile
+      // endpoint above). The flat columns are still spread for
+      // backwards compatibility with anything reading them directly.
+      avatarCrop: {
+        zoom: c.avatarZoom,
+        offsetX: c.avatarOffsetX,
+        offsetY: c.avatarOffsetY,
+      },
+    };
   });
 
   app.get("/characters", async (req, reply) => {
@@ -507,6 +544,11 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       // profiles go through /profiles/:name and keep the persisted HTML.
       bioHtml: bioHtmlForEdit(u.bioHtml),
       avatarUrl: u.avatarUrl,
+      avatarCrop: {
+        zoom: u.avatarZoom,
+        offsetX: u.avatarOffsetX,
+        offsetY: u.avatarOffsetY,
+      },
       includeAvatarInGallery: u.includeAvatarInGallery,
       gender: u.gender,
       chatColor: u.chatColor,
@@ -881,6 +923,13 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       .set({
         ...(body.bioHtml !== undefined ? { bioHtml: sanitizeBio(body.bioHtml) } : {}),
         ...(body.avatarUrl !== undefined ? { avatarUrl: body.avatarUrl } : {}),
+        ...(body.avatarCrop !== undefined
+          ? {
+              avatarZoom: body.avatarCrop.zoom,
+              avatarOffsetX: body.avatarCrop.offsetX,
+              avatarOffsetY: body.avatarCrop.offsetY,
+            }
+          : {}),
         ...(body.includeAvatarInGallery !== undefined
           ? { includeAvatarInGallery: body.includeAvatarInGallery }
           : {}),

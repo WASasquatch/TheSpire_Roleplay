@@ -38,6 +38,7 @@ import {
   setActiveNameStyle,
   setCollectionSlots,
   setPetCollectionSlots,
+  setPetNickname,
   ITEM_CATEGORIES,
   ITEM_CATEGORY_LABELS,
   fetchFlashSale,
@@ -4007,10 +4008,11 @@ function ItemsTab({
           maxSlots={5}
           pickerFilter={(row) => row.category === "pet"}
           commitFn={setPetCollectionSlots}
+          renameFn={setPetNickname}
           copy={{
             header: (
               <>
-                Pin up to 5 pets from <span className="font-semibold text-keep-text">{activeIdentity.label}</span>'s inventory to feature on their profile. Non-pet items live in the Collection tab.
+                Pin up to 5 pets from <span className="font-semibold text-keep-text">{activeIdentity.label}</span>'s inventory to feature on their profile. Non-pet items live in the Collection tab. Give each pet a nickname after pinning to show "Whiskers (Maine Coon)" on the profile.
               </>
             ),
             emptyInventory: "No items in this identity's inventory yet. Visit the Shop tab and look for the Pets category.",
@@ -4046,6 +4048,7 @@ function CollectionEditor({
   maxSlots,
   pickerFilter,
   commitFn,
+  renameFn,
   copy,
   onError,
   onSaved,
@@ -4064,6 +4067,12 @@ function CollectionEditor({
   /** Save callback. Same wire shape (slots[] + characterId) for both
    *  collection kinds; differs only in which server endpoint is hit. */
   commitFn: (slots: { slot: number; itemKey: string | null }[], characterId: string | null) => Promise<void>;
+  /** Optional rename callback — when set, the editor surfaces the
+   *  current nickname under each pinned slot's catalog name and adds
+   *  an inline "Pet name" input in the slot's edit panel. Only the
+   *  pet collection wires this; the item collection has no per-item
+   *  nicknames so omits it. */
+  renameFn?: (slot: number, nickname: string | null, characterId: string | null) => Promise<{ slot: number; nickname: string | null }>;
   /** Per-kind UI copy — header sentence + empty-picker message.
    *  `header` is a ReactNode so callers can interpolate the identity
    *  label inline; the other two are plain strings for the empty
@@ -4094,6 +4103,56 @@ function CollectionEditor({
     }
     return m;
   }, [collection, catalogByKey]);
+
+  // Slot index → owner-assigned nickname (pet collection only; the
+  // item-collection entries don't carry a nickname so the map stays
+  // sparse-empty for them). Lookup keyed off the same `collection`
+  // array the slotMap walks so nickname renders stay in sync with the
+  // pinned-itemKey state.
+  const slotNicknames = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const c of collection) {
+      if (c.nickname && c.nickname.trim().length > 0) m.set(c.slot, c.nickname);
+    }
+    return m;
+  }, [collection]);
+
+  // Local rename state for the inline "Pet name" input shown in the
+  // edit panel. Re-seeded from the current nickname whenever the
+  // editing slot changes so reopening the panel doesn't show a stale
+  // draft from a previous session.
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  useEffect(() => {
+    if (editingSlot === null) {
+      setRenameDraft("");
+      return;
+    }
+    setRenameDraft(slotNicknames.get(editingSlot) ?? "");
+  }, [editingSlot, slotNicknames]);
+
+  async function commitRename(override?: string | null) {
+    if (renameFn == null || editingSlot == null || renaming) return;
+    // Accept an explicit override (e.g. from the Clear button) so the
+    // call doesn't have to wait for a state-update round trip. When no
+    // override is provided we use the live draft.
+    const source = override === undefined ? renameDraft : (override ?? "");
+    const trimmed = source.replace(/\s+/g, " ").trim();
+    const next = trimmed.length > 0 ? trimmed : null;
+    // No-op when the draft matches the current value — skip the
+    // round trip rather than churning the ledger.
+    const current = slotNicknames.get(editingSlot) ?? null;
+    if (next === current) return;
+    setRenaming(true);
+    try {
+      await renameFn(editingSlot, next, characterId);
+      onSaved();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Rename failed");
+    } finally {
+      setRenaming(false);
+    }
+  }
 
   // Don't suggest the SAME item twice — the showcase reads as
   // disorganized when slots 0/3/7 all show the same cookie tile.
@@ -4182,7 +4241,19 @@ function CollectionEditor({
                       </span>
                     </div>
                   )}
-                  <span className="line-clamp-1 break-all font-semibold">{pinned.name}</span>
+                  {/* When a nickname is set, the nickname becomes the
+                      primary label and the catalog name (breed/species)
+                      reads as a subtitle. Mirrors the ProfileModal pin
+                      so the owner sees the same shape they're showing
+                      to visitors. */}
+                  {slotNicknames.has(slot) ? (
+                    <>
+                      <span className="line-clamp-1 break-all font-semibold">{slotNicknames.get(slot)}</span>
+                      <span className="line-clamp-1 break-all text-[9px] italic text-keep-muted">{pinned.name}</span>
+                    </>
+                  ) : (
+                    <span className="line-clamp-1 break-all font-semibold">{pinned.name}</span>
+                  )}
                 </>
               ) : (
                 <>
@@ -4221,6 +4292,46 @@ function CollectionEditor({
               </button>
             </div>
           </div>
+          {/* Rename row — only when a pet is pinned in this slot AND
+              the parent provided a renameFn (pet collection only).
+              Empty input clears the nickname; the server normalizes
+              whitespace and treats empty as null. */}
+          {renameFn && slotMap.has(editingSlot) ? (
+            <div className="flex flex-wrap items-end gap-2 rounded border border-keep-rule bg-keep-bg/30 p-2">
+              <label className="min-w-0 flex-1 text-[10px] uppercase tracking-widest text-keep-muted">
+                Pet name (optional)
+                <input
+                  type="text"
+                  value={renameDraft}
+                  onChange={(e) => setRenameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); void commitRename(); }
+                  }}
+                  maxLength={40}
+                  placeholder={slotMap.get(editingSlot)?.name ?? "Name your pet"}
+                  className="mt-1 block w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm normal-case tracking-normal text-keep-text"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void commitRename()}
+                disabled={renaming || renameDraft.replace(/\s+/g, " ").trim() === (slotNicknames.get(editingSlot) ?? "")}
+                className="rounded border border-keep-action bg-keep-action/15 px-2 py-1 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+              >
+                {renaming ? "…" : "Save name"}
+              </button>
+              {slotNicknames.has(editingSlot) ? (
+                <button
+                  type="button"
+                  onClick={() => { setRenameDraft(""); void commitRename(null); }}
+                  disabled={renaming}
+                  className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs text-keep-muted hover:text-keep-accent disabled:opacity-50"
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           {inventory.length === 0 ? (
             <p className="text-xs text-keep-muted">{copy.emptyInventory}</p>
           ) : pickerCandidates.length === 0 ? (

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
-import type { WorldDetail, WorldPage } from "@thekeep/shared";
+import type { WorldDetail, WorldMemberRef, WorldPage } from "@thekeep/shared";
+import { cropStyleFor } from "../lib/avatarCrop.js";
 import { buildWorldTree, parseWorldFromUrl, syncWorldUrl, worldShareUrl, type WorldTreeNode } from "../lib/worlds.js";
 import { readError } from "../lib/http.js";
 import { themeStyle } from "../lib/theme.js";
@@ -231,15 +232,18 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
               </div>
             </aside>
 
-            <section className="min-h-0 flex-1 overflow-y-auto p-5">
-              {selectedPage ? (
-                <PageView page={selectedPage} description={null} />
-              ) : (
-                <PageView
-                  page={null}
-                  description={detail.world.description}
-                />
-              )}
+            <section className="min-h-0 flex-1 overflow-y-auto">
+              <MemberGallery members={detail.members} />
+              <div className="p-5">
+                {selectedPage ? (
+                  <PageView page={selectedPage} description={null} />
+                ) : (
+                  <PageView
+                    page={null}
+                    description={detail.world.description}
+                  />
+                )}
+              </div>
             </section>
           </div>
         ) : null}
@@ -307,6 +311,90 @@ function PageView({ page, description }: { page: WorldPage | null; description: 
         <p className="italic text-keep-muted">This page is empty.</p>
       )}
     </article>
+  );
+}
+
+/**
+ * Member avatars rendered above the world body as a flex gallery
+ * spanning the section width. Capped at three rows tall (~144px) via
+ * a hard max-height + overflow-hidden so a popular world with many
+ * members doesn't push the page content below the fold. Members are
+ * ordered with primary affiliations first (server sort), then by
+ * join date.
+ *
+ * Privacy: the server-side filter in `memberListFor` already drops
+ * users whose master profile is private or NSFW — they explicitly
+ * opted out of public affiliation, so they never appear here. The
+ * client takes the wire list at face value.
+ *
+ * No-op render when the list is empty so a young world doesn't carry
+ * a hollow "Members" strip.
+ */
+function MemberGallery({ members }: { members: WorldMemberRef[] }) {
+  if (members.length === 0) return null;
+  return (
+    <section
+      aria-label="World members"
+      className="border-b border-keep-rule bg-keep-banner/30 px-4 pb-2 pt-3"
+    >
+      <header className="mb-1.5 flex items-baseline justify-between">
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">
+          Members
+        </span>
+        <span className="text-[10px] text-keep-muted">
+          {members.length} {members.length === 1 ? "member" : "members"}
+        </span>
+      </header>
+      {/* Cap at 3 rows: 40px avatar + 8px gap = 48px per row, three rows
+          = 144px tall. Overflow clips additional members; the count in
+          the header still surfaces the true total. */}
+      <div
+        className="flex flex-wrap gap-2 overflow-hidden"
+        style={{ maxHeight: 144 }}
+      >
+        {members.map((m) => (
+          <MemberAvatar key={m.userId} member={m} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function MemberAvatar({ member }: { member: WorldMemberRef }) {
+  const [errored, setErrored] = useState(false);
+  const title = `${member.username}${member.isPrimary ? " (primary affiliation)" : ""}`;
+  // Shared crop resolver — see `lib/avatarCrop`. Default crop maps to
+  // `undefined` so the legacy centered-cover render is byte-identical.
+  const cropStyle = cropStyleFor(member.avatarCrop);
+  return (
+    <span
+      title={title}
+      // Outer wrapper is sized + relative for the primary-ring overlay.
+      // Inner span carries the rounded clip so the photo / initials get
+      // masked to a circle. Primary members get an accent ring so the
+      // owner / core members read as such at a glance.
+      className={`relative inline-block h-10 w-10 shrink-0 rounded-full ${
+        member.isPrimary ? "ring-2 ring-keep-action ring-offset-1 ring-offset-keep-banner" : ""
+      }`}
+    >
+      <span className="absolute inset-0 overflow-hidden rounded-full border border-keep-rule bg-keep-bg">
+        {member.avatarUrl && !errored ? (
+          <img
+            src={member.avatarUrl}
+            alt=""
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setErrored(true)}
+            className="absolute inset-0 h-full w-full object-cover"
+            style={cropStyle}
+          />
+        ) : (
+          <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-keep-muted">
+            {member.username.slice(0, 2).toUpperCase()}
+          </span>
+        )}
+      </span>
+    </span>
   );
 }
 

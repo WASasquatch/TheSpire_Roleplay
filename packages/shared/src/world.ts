@@ -1,4 +1,5 @@
 import type { Theme } from "./theme.js";
+import type { AvatarCrop } from "./profile.js";
 
 /**
  * Worldbuilding wire types. A world is a hierarchical wiki owned by a user
@@ -176,10 +177,24 @@ export interface WorldMembership {
   joinedAt: number;
 }
 
-/** Brief member entry rendered in a world's "Members" section. */
+/** Brief member entry rendered in a world's "Members" section.
+ *
+ *  Privacy: this list omits users whose master profile is private or
+ *  NSFW-flagged — they explicitly opted out of public affiliation, so
+ *  they shouldn't appear in any world's member gallery either. The
+ *  server applies the filter in `memberListFor`; the client can take
+ *  the wire list at face value.
+ */
 export interface WorldMemberRef {
   userId: string;
   username: string;
+  /** Master avatar URL for the gallery thumbnail. Null when the user
+   *  hasn't set one — the client falls back to initials. */
+  avatarUrl: string | null;
+  /** Owner-picked zoom + focal point applied when rendering this
+   *  member's avatar. The gallery thumbnail respects this so the
+   *  same crop the owner chose for their profile carries over. */
+  avatarCrop: AvatarCrop;
   joinedAt: number;
   isPrimary: boolean;
 }

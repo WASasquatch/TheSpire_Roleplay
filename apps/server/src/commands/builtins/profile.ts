@@ -1,5 +1,5 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { characterEarning, characterJournalEntries, characterOwnedNameStyles, characterPortraits, characters, identityCollection, identityPetCollection, items, messages, profileLinks, rooms, stories, userActiveCosmetics, userOwnedNameStyles, userPortraits, users } from "../../db/schema.js";
+import { characterEarning, characterJournalEntries, characterOwnedNameStyles, characterPortraits, characters, identityCollection, identityPetCollection, items, profileLinks, stories, userActiveCosmetics, userOwnedNameStyles, userPortraits, users } from "../../db/schema.js";
 import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLink, ProfileMetrics, ProfileView, Theme } from "@thekeep/shared";
 import { matchThemePreset, resolveScriptoriumAuthorTier, roleRank } from "@thekeep/shared";
 import { getSettings, parseUserThemeJson } from "../../settings.js";
@@ -180,6 +180,7 @@ async function listProfilePetCollection(
       namePlural: items.namePlural,
       description: items.description,
       iconUrl: items.iconUrl,
+      nickname: identityPetCollection.nickname,
     })
     .from(identityPetCollection)
     .innerJoin(items, eq(items.key, identityPetCollection.itemKey))
@@ -188,7 +189,7 @@ async function listProfilePetCollection(
       eq(identityPetCollection.ownerId, ownerId),
     ))
     .orderBy(asc(identityPetCollection.slot));
-  return rows;
+  return rows.map((r) => ({ ...r, nickname: r.nickname ?? null }));
 }
 
 /**
@@ -383,63 +384,40 @@ async function computeProfileMetrics(
   // tiny perf win and so a "private" metric can't accidentally leak
   // via a server log of the underlying SQL.
 
-  // Identity scope — character pool counts messages tagged with that
-  // character; master pool counts every message the user authored
-  // regardless of character attachment.
-  const identityWhere = characterId === null
-    ? eq(messages.userId, userId)
-    : and(eq(messages.userId, userId), eq(messages.characterId, characterId));
-
-  // Chat: flat-room messages of a chat-shape kind. `messages` joins
-  // `rooms` on roomId so we can gate on the room's replyMode without
-  // denormalizing the flag onto every message row.
-  const chatRow = hideChat ? null : (await db
-    .select({ n: sql<number>`count(*)` })
-    .from(messages)
-    .innerJoin(rooms, eq(rooms.id, messages.roomId))
-    .where(and(
-      identityWhere,
-      isNull(messages.deletedAt),
-      isNull(messages.replyToId),
-      eq(rooms.replyMode, "flat"),
-      sql`${messages.kind} IN ('say', 'me', 'ooc', 'roll', 'scene', 'npc')`,
-    )))[0];
-
-  // Forum topics: top-level entries in nested rooms (title is set,
-  // no parent). The `title IS NOT NULL` clause matches the seed-side
-  // contract — the forum dispatcher writes `title` only when the
-  // message is a topic-create.
-  const topicRow = hideTopics ? null : (await db
-    .select({ n: sql<number>`count(*)` })
-    .from(messages)
-    .innerJoin(rooms, eq(rooms.id, messages.roomId))
-    .where(and(
-      identityWhere,
-      isNull(messages.deletedAt),
-      isNull(messages.replyToId),
-      eq(rooms.replyMode, "nested"),
-      sql`${messages.title} IS NOT NULL`,
-    )))[0];
-
-  // Forum replies: every non-deleted message with a parent, in a
-  // nested room. We don't filter by `kind` here because the inherit-
-  // thread-context fix lets /me / /roll / /scene / /npc inherit the
-  // parent topic, and those should count as replies too.
-  const replyRow = hideReplies ? null : (await db
-    .select({ n: sql<number>`count(*)` })
-    .from(messages)
-    .innerJoin(rooms, eq(rooms.id, messages.roomId))
-    .where(and(
-      identityWhere,
-      isNull(messages.deletedAt),
-      sql`${messages.replyToId} IS NOT NULL`,
-      eq(rooms.replyMode, "nested"),
-    )))[0];
+  // Read from the lifetime counter columns (migration 0176) instead
+  // of COUNT(*) on `messages`. The old query decayed every time a row
+  // was retention-purged, soft-deleted, or cascade-removed with its
+  // room; the counter columns are bumped at insert time and never
+  // decremented, so the displayed number stays a true lifetime stat.
+  //
+  // Scope: a master-account profile reads from `users.lifetime_*`
+  // (which accumulates EVERY identity the user has posted under),
+  // and a character profile reads from `characters.lifetime_*`
+  // (per-character only).
+  const counterRow = characterId === null
+    ? (await db
+        .select({
+          chat: users.lifetimeChatMessages,
+          topics: users.lifetimeForumTopics,
+          replies: users.lifetimeForumReplies,
+        })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1))[0]
+    : (await db
+        .select({
+          chat: characters.lifetimeChatMessages,
+          topics: characters.lifetimeForumTopics,
+          replies: characters.lifetimeForumReplies,
+        })
+        .from(characters)
+        .where(eq(characters.id, characterId))
+        .limit(1))[0];
 
   return {
-    chatMessages: hideChat ? null : Number(chatRow?.n ?? 0),
-    forumTopics: hideTopics ? null : Number(topicRow?.n ?? 0),
-    forumReplies: hideReplies ? null : Number(replyRow?.n ?? 0),
+    chatMessages: hideChat ? null : Number(counterRow?.chat ?? 0),
+    forumTopics: hideTopics ? null : Number(counterRow?.topics ?? 0),
+    forumReplies: hideReplies ? null : Number(counterRow?.replies ?? 0),
   };
 }
 
@@ -542,6 +520,11 @@ async function lookupProfile(
         username: u.username,
         bioHtml: u.bioHtml,
         avatarUrl: u.avatarUrl,
+        avatarCrop: {
+          zoom: u.avatarZoom,
+          offsetX: u.avatarOffsetX,
+          offsetY: u.avatarOffsetY,
+        },
         portraits,
         gender: u.gender,
         theme,
@@ -605,6 +588,11 @@ async function lookupProfile(
       bioHtml: c.bioHtml,
       stats: parseStats(c.statsJson),
       avatarUrl: c.avatarUrl,
+      avatarCrop: {
+        zoom: c.avatarZoom,
+        offsetX: c.avatarOffsetX,
+        offsetY: c.avatarOffsetY,
+      },
       portraits: charPortraits,
       links: await listLinks(db, c.userId, c.id),
       journalEntries: await listPublicJournal(db, c.id),
@@ -691,6 +679,11 @@ async function lookupRandomProfile(
         username: u.username,
         bioHtml: u.bioHtml,
         avatarUrl: u.avatarUrl,
+        avatarCrop: {
+          zoom: u.avatarZoom,
+          offsetX: u.avatarOffsetX,
+          offsetY: u.avatarOffsetY,
+        },
         portraits,
         gender: u.gender,
         theme,
@@ -748,6 +741,11 @@ async function lookupRandomProfile(
       bioHtml: c.bioHtml,
       stats: parseStats(c.statsJson),
       avatarUrl: c.avatarUrl,
+      avatarCrop: {
+        zoom: c.avatarZoom,
+        offsetX: c.avatarOffsetX,
+        offsetY: c.avatarOffsetY,
+      },
       portraits,
       links: await listLinks(db, c.userId, c.id),
       journalEntries: await listPublicJournal(db, c.id),

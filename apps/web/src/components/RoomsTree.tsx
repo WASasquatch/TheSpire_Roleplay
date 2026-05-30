@@ -485,6 +485,7 @@ function RoomGroup({
                           // (a user with the cosmetic but no avatar
                           // keeps the gender-icon affordance).
                           avatarUrl={o.avatarUrl ?? null}
+                          avatarCrop={o.avatarCrop ?? null}
                           selectedBorderRankKey={o.selectedBorderRankKey ?? null}
                           selectedFreeformBorderKey={o.selectedFreeformBorderKey ?? null}
                           freeformBorderConfig={o.freeformBorderConfig ?? null}

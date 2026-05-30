@@ -120,7 +120,25 @@ export interface ProfileCollectionEntry {
   namePlural: string | null;
   description: string;
   iconUrl: string | null;
+  /**
+   * Owner-assigned nickname for this specific pinned pet (only set on
+   * entries from the pet collection; item-collection entries always
+   * have this as null/undefined). Renderer convention: show the
+   * nickname as the primary label with the catalog `name` as a smaller
+   * secondary subtitle. Null when the owner hasn't named the pet —
+   * renderer falls back to showing the catalog name alone, same as
+   * the pre-nickname behavior.
+   */
+  nickname?: string | null;
 }
+
+/**
+ * Max length for a per-pet nickname. Short enough to fit alongside the
+ * breed label in a pet card without wrapping; long enough for "Captain
+ * Whiskers III" style names. Server clamps on write, client mirrors
+ * the cap in the rename UI.
+ */
+export const PET_NICKNAME_MAX_LENGTH = 40;
 
 export interface ProfileMetrics {
   /**
@@ -185,6 +203,10 @@ export interface CharacterProfile {
   bioHtml: string;
   stats: CharacterStats;
   avatarUrl: string | null;
+  /** Per-character zoom + focal point on the avatar source. Same
+   *  semantics as `MasterProfile.avatarCrop`; defaults reproduce the
+   *  legacy centered-cover render. */
+  avatarCrop: AvatarCrop;
   /** Additional portraits beyond the primary avatarUrl, in the order the owner set. */
   portraits: CharacterPortrait[];
   /** Owner-set external links (other profiles, world docs, refs). */
@@ -354,11 +376,74 @@ export function roleRank(role: Role): number {
   }
 }
 
+/**
+ * Avatar zoom / pan focal point. Used by the avatar crop picker in the
+ * profile editor to position which part of a larger source image
+ * becomes the visible circle, without re-hosting or modifying the
+ * source bytes.
+ *
+ *   * `zoom`    — multiplier on top of the natural cover-fit. 1.0 =
+ *                 legacy centered cover render (the default for every
+ *                 user pre-migration-0178); higher = zoomed in.
+ *                 Clamped to [1.0, 4.0] by `clampAvatarCrop` below.
+ *   * `offsetX` — 0..100, percent. Maps directly to CSS
+ *                 `object-position` X axis. 0 = far left of source
+ *                 visible, 100 = far right, 50 = centered.
+ *   * `offsetY` — same but vertical.
+ *
+ * Renderer convention: `transform-origin` is set to the same
+ * (offsetX, offsetY) as `object-position` so the zoom appears to zoom
+ * IN ON the focal point the owner picked, not on the geometric
+ * center of the image.
+ */
+export interface AvatarCrop {
+  zoom: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+export const AVATAR_CROP_DEFAULTS: AvatarCrop = {
+  zoom: 1.0,
+  offsetX: 50.0,
+  offsetY: 50.0,
+};
+
+export const AVATAR_CROP_MIN_ZOOM = 1.0;
+export const AVATAR_CROP_MAX_ZOOM = 4.0;
+
+/** Clamp a partial / wild crop input to the documented ranges. NaN /
+ *  missing fields fall back to the defaults so a bad client write
+ *  can't put the avatar into an unrenderable state. */
+export function clampAvatarCrop(input: Partial<AvatarCrop> | null | undefined): AvatarCrop {
+  const z = Number(input?.zoom);
+  const x = Number(input?.offsetX);
+  const y = Number(input?.offsetY);
+  return {
+    zoom: Number.isFinite(z) ? Math.min(AVATAR_CROP_MAX_ZOOM, Math.max(AVATAR_CROP_MIN_ZOOM, z)) : AVATAR_CROP_DEFAULTS.zoom,
+    offsetX: Number.isFinite(x) ? Math.min(100, Math.max(0, x)) : AVATAR_CROP_DEFAULTS.offsetX,
+    offsetY: Number.isFinite(y) ? Math.min(100, Math.max(0, y)) : AVATAR_CROP_DEFAULTS.offsetY,
+  };
+}
+
+/** True when the crop is at its identity values (zoom=1, centered).
+ *  Renderers can short-circuit the transform application when this is
+ *  true so the legacy centered-cover code path is preserved verbatim
+ *  for the vast majority of avatars. */
+export function isDefaultAvatarCrop(c: AvatarCrop): boolean {
+  return c.zoom === AVATAR_CROP_DEFAULTS.zoom
+    && c.offsetX === AVATAR_CROP_DEFAULTS.offsetX
+    && c.offsetY === AVATAR_CROP_DEFAULTS.offsetY;
+}
+
 export interface MasterProfile {
   userId: string;
   username: string;
   bioHtml: string;
   avatarUrl: string | null;
+  /** Owner-picked zoom + focal point applied to the avatar source.
+   *  Defaults reproduce the legacy centered-cover render. See
+   *  `AvatarCrop` above. */
+  avatarCrop: AvatarCrop;
   /**
    * Additional portrait gallery for the master / OOC profile. Same
    * shape as CharacterProfile.portraits — sorted by the owner's

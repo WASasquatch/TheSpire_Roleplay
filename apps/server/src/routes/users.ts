@@ -746,4 +746,142 @@ export async function registerUsersRoutes(
 
     return { valid: Array.from(valid) };
   });
+
+  /**
+   * Identity-keyed autocomplete for DM compose + add-friend pickers.
+   *
+   * The legacy `/users` endpoint rolled character matches up under
+   * their owning master so the UI ended up rendering "MasterName as
+   * CharacterName" — a privacy leak that violated the project's
+   * "characters are their own accounts" contract. This endpoint
+   * returns each matching identity as its own row instead, so a
+   * user typing `King` sees the character `KingArthur` and the
+   * master `KingdomOfMen` as two distinct, equally-rankable
+   * suggestions. The caller picks one identity directly; no
+   * follow-up disambiguation round-trip needed.
+   *
+   * Query: `?q=<substring>&limit=<n>`. Empty `q` returns `[]`.
+   * Caller's own identities are excluded so the picker can't offer
+   * "DM yourself."
+   */
+  app.get<{ Querystring: { q?: string; limit?: string } }>("/identities/autocomplete", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+
+    const q = (req.query.q ?? "").trim();
+    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit ?? "8", 10) || 8));
+    if (!q) return { identities: [] };
+
+    // Match master usernames and character names INDEPENDENTLY. The
+    // two queries run in parallel so a populated install doesn't pay
+    // a serial round-trip on every keystroke.
+    const [masterRows, charRows] = await Promise.all([
+      db
+        .select({
+          userId: users.id,
+          username: users.username,
+          avatarUrl: users.avatarUrl,
+          avatarZoom: users.avatarZoom,
+          avatarOffsetX: users.avatarOffsetX,
+          avatarOffsetY: users.avatarOffsetY,
+        })
+        .from(users)
+        .where(and(
+          isNull(users.disabledAt),
+          sql`${users.username} != 'system'`,
+          substringNameInsensitive(users.username, q),
+        ))
+        .limit(limit * 2),  // overfetch so the merge sort can keep "best matches first" even after self-exclude trims.
+      db
+        .select({
+          characterId: characters.id,
+          characterName: characters.name,
+          userId: characters.userId,
+          avatarUrl: characters.avatarUrl,
+          avatarZoom: characters.avatarZoom,
+          avatarOffsetX: characters.avatarOffsetX,
+          avatarOffsetY: characters.avatarOffsetY,
+          ownerUsername: users.username,
+          ownerDisabledAt: users.disabledAt,
+        })
+        .from(characters)
+        .innerJoin(users, eq(users.id, characters.userId))
+        .where(and(
+          isNull(characters.deletedAt),
+          substringNameInsensitive(characters.name, q),
+        ))
+        .limit(limit * 2),
+    ]);
+
+    // Online lookup once, keyed by master userId. Used to surface the
+    // online dot regardless of which identity matched — being online
+    // is a USER property; a master sitting on Character A still
+    // means Character B is "reachable" from a DM perspective.
+    const sockets = await io.fetchSockets();
+    const onlineUserIds = new Set<string>();
+    for (const s of sockets) {
+      const uid = (s.data as { userId?: string }).userId;
+      if (uid) onlineUserIds.add(uid);
+    }
+
+    interface IdentityRow {
+      kind: "user" | "character";
+      userId: string;
+      characterId: string | null;
+      displayName: string;
+      /** The master username — used only by the server-side caller
+       *  filter; the client should NOT render this on the suggestion
+       *  row, since exposing it leaks the OOC/character relationship
+       *  the partition is meant to hide. */
+      masterUsername: string;
+      avatarUrl: string | null;
+      avatarCrop: { zoom: number; offsetX: number; offsetY: number };
+      online: boolean;
+    }
+
+    const identities: IdentityRow[] = [];
+
+    for (const u of masterRows) {
+      if (u.userId === me.id) continue;
+      identities.push({
+        kind: "user",
+        userId: u.userId,
+        characterId: null,
+        displayName: u.username,
+        masterUsername: u.username,
+        avatarUrl: u.avatarUrl,
+        avatarCrop: { zoom: u.avatarZoom, offsetX: u.avatarOffsetX, offsetY: u.avatarOffsetY },
+        online: onlineUserIds.has(u.userId),
+      });
+    }
+
+    for (const c of charRows) {
+      if (c.ownerDisabledAt) continue;
+      if (c.userId === me.id) continue;
+      identities.push({
+        kind: "character",
+        userId: c.userId,
+        characterId: c.characterId,
+        displayName: c.characterName,
+        masterUsername: c.ownerUsername,
+        avatarUrl: c.avatarUrl,
+        avatarCrop: { zoom: c.avatarZoom, offsetX: c.avatarOffsetX, offsetY: c.avatarOffsetY },
+        online: onlineUserIds.has(c.userId),
+      });
+    }
+
+    // Sort: exact-prefix match wins, then online, then displayName
+    // ascending. Same ranking the friends-rail uses so the order
+    // feels familiar to existing users.
+    const qLower = q.toLowerCase();
+    identities.sort((a, b) => {
+      const aPrefix = a.displayName.toLowerCase().startsWith(qLower) ? 0 : 1;
+      const bPrefix = b.displayName.toLowerCase().startsWith(qLower) ? 0 : 1;
+      if (aPrefix !== bPrefix) return aPrefix - bPrefix;
+      if (a.online !== b.online) return a.online ? -1 : 1;
+      return a.displayName.localeCompare(b.displayName);
+    });
+
+    return { identities: identities.slice(0, limit) };
+  });
 }

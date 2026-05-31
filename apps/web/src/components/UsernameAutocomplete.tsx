@@ -1,34 +1,51 @@
 import { useEffect, useRef, useState } from "react";
+import type { AvatarCrop } from "@thekeep/shared";
+import { cropStyleFor } from "../lib/avatarCrop.js";
 
+/**
+ * Identity suggestion from `/identities/autocomplete`. Each entry is
+ * its OWN account from the picker's perspective — character matches
+ * are first-class rows, not nested under their owning master.
+ *
+ * `masterUsername` is intentionally NOT rendered on the suggestion
+ * card: exposing it leaks the OOC ↔ character relationship the
+ * partition contract is meant to hide. Kept on the wire only because
+ * the form-submission path needs it for legacy text-input flows.
+ */
 interface Suggestion {
-  username: string;
-  /** Active character name when the user is currently in-character, else null. */
-  characterName: string | null;
+  kind: "user" | "character";
+  userId: string;
+  characterId: string | null;
+  displayName: string;
+  masterUsername: string;
   avatarUrl: string | null;
+  avatarCrop: AvatarCrop;
   online: boolean;
 }
 
 /**
- * Lightweight username autocomplete for the Messages modal's add-friend
- * and compose-to-non-friend inputs.
+ * Identity autocomplete for the Messages modal's add-friend and
+ * compose-to-non-friend inputs.
  *
  * Why a new component instead of reusing the main composer's
  * CompleterPopup? CompleterPopup is tied to the textarea + caret-
  * position model used by `@mentions` mid-message. The Messenger inputs
- * are single-purpose username entry fields where the WHOLE value is
- * the username — caret slicing isn't applicable. A tighter, focused
+ * are single-purpose identity entry fields where the WHOLE value is
+ * the target — caret slicing isn't applicable. A tighter, focused
  * component reads more clearly than bending the chat completer.
  *
  * Behavior:
- *   - Debounced fetch (~150ms) to `/users?q=<value>&limit=8` after
- *     the user has typed at least one character.
- *   - Arrow keys navigate the list, Enter picks the highlighted
- *     suggestion (and submits the parent form via the input's normal
- *     enterKeyHint flow if no suggestion is picked).
- *   - Click also picks. Esc closes the popup without picking.
- *   - Picking writes the canonical *master username* back into the
- *     input — that's what /friend / DM lookups resolve, even when a
- *     character is currently active.
+ *   - Debounced fetch (~150ms) to `/identities/autocomplete?q=<value>&limit=8`.
+ *   - Arrow keys navigate; Enter picks the highlighted suggestion.
+ *   - Click also picks. Esc closes the popup.
+ *   - Picking calls `onPick` with the FULL identity tuple so the
+ *     caller can route to the right per-identity surface (DM thread,
+ *     friend-request POST with explicit `targetCharacterId`, etc.)
+ *     without a follow-up name-resolution round-trip.
+ *   - The text input is updated to the picked identity's
+ *     displayName as a visual confirmation (NOT used downstream —
+ *     parents should route off the onPick identity, not the input
+ *     value).
  */
 export function UsernameAutocomplete({
   value,
@@ -39,8 +56,9 @@ export function UsernameAutocomplete({
 }: {
   value: string;
   onChange: (v: string) => void;
-  /** Called when the user explicitly picks a suggestion. Receives the master username. */
-  onPick: (username: string) => void;
+  /** Called when the user explicitly picks a suggestion. Carries the
+   *  full identity tuple — kind, userId, characterId, displayName. */
+  onPick: (identity: Suggestion) => void;
   placeholder?: string;
   disabled?: boolean;
 }) {
@@ -59,31 +77,14 @@ export function UsernameAutocomplete({
     if (q.length < 1) { setSuggestions([]); return; }
     const myReqId = ++reqIdRef.current;
     const t = window.setTimeout(() => {
-      fetch(`/users?q=${encodeURIComponent(q)}&limit=8`)
+      fetch(`/identities/autocomplete?q=${encodeURIComponent(q)}&limit=8`, {
+        credentials: "include",
+      })
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => {
           if (myReqId !== reqIdRef.current) return; // stale
-          if (!j || !Array.isArray(j.users)) { setSuggestions([]); return; }
-          const next: Suggestion[] = j.users.map((u: {
-            username: string;
-            avatarUrl: string | null;
-            online: boolean;
-            characters?: Array<{ id: string; name: string }>;
-            activeCharacterId?: string | null;
-          }) => {
-            // Show the user's active character name when they're in-
-            // character — matches how the rest of the app refers to them.
-            const activeChar = u.activeCharacterId && u.characters
-              ? u.characters.find((c) => c.id === u.activeCharacterId)
-              : undefined;
-            return {
-              username: u.username,
-              characterName: activeChar ? activeChar.name : null,
-              avatarUrl: u.avatarUrl,
-              online: u.online,
-            };
-          });
-          setSuggestions(next);
+          if (!j || !Array.isArray(j.identities)) { setSuggestions([]); return; }
+          setSuggestions(j.identities as Suggestion[]);
           setHighlightedIdx(0);
           setOpen(true);
         })
@@ -93,10 +94,10 @@ export function UsernameAutocomplete({
   }, [value]);
 
   function pick(s: Suggestion) {
-    onChange(s.username);
+    onChange(s.displayName);
     setOpen(false);
     setSuggestions([]);
-    onPick(s.username);
+    onPick(s);
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -147,8 +148,14 @@ export function UsernameAutocomplete({
           role="listbox"
           className="absolute bottom-full left-0 z-30 mb-1 max-h-52 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl"
         >
-          {suggestions.map((s, i) => (
-            <li key={s.username}>
+          {suggestions.map((s, i) => {
+            // Identity-correct key. Two suggestions can share a
+            // displayName (the whole point of this refactor), so we
+            // can't key on it alone — pair with the id tuple.
+            const rowKey = `${s.kind}:${s.characterId ?? s.userId}`;
+            const cropStyle = cropStyleFor(s.avatarCrop);
+            return (
+            <li key={rowKey}>
               <button
                 type="button"
                 // onMouseDown so the click lands BEFORE the input's blur
@@ -161,28 +168,40 @@ export function UsernameAutocomplete({
                 }`}
               >
                 {s.avatarUrl ? (
-                  <img
-                    src={s.avatarUrl}
-                    alt=""
-                    loading="lazy"
-                    referrerPolicy="no-referrer"
-                    className="h-6 w-6 shrink-0 rounded border border-keep-rule object-cover"
-                  />
+                  // Mask the zoomed image inside a fixed circular slot.
+                  // Same overflow-hidden trick BorderedAvatar uses so
+                  // `transform: scale()` on the inner img doesn't spill
+                  // past the slot boundary.
+                  <span className="block h-6 w-6 shrink-0 overflow-hidden rounded border border-keep-rule">
+                    <img
+                      src={s.avatarUrl}
+                      alt=""
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      className="h-full w-full object-cover"
+                      style={cropStyle}
+                    />
+                  </span>
                 ) : (
                   <span className="h-6 w-6 shrink-0 rounded border border-keep-rule bg-keep-banner" aria-hidden />
                 )}
-                <span className="min-w-0 flex-1 truncate">
-                  <span className="font-semibold text-keep-text">{s.username}</span>
-                  {s.characterName ? (
-                    <span className="ml-1 text-keep-muted">as {s.characterName}</span>
-                  ) : null}
+                {/* Per the project's "characters are their own
+                    accounts" contract, the suggestion shows ONLY the
+                    identity's display name. No `as <master>` qualifier
+                    even when the identity is a character — exposing
+                    that label would leak the OOC/character relationship
+                    a privacy-conscious user has every reason to keep
+                    separate from public surfaces. */}
+                <span className="min-w-0 flex-1 truncate font-semibold text-keep-text">
+                  {s.displayName}
                 </span>
                 {s.online ? (
                   <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" title="online" />
                 ) : null}
               </button>
             </li>
-          ))}
+          );
+          })}
         </ul>
       ) : null}
     </div>

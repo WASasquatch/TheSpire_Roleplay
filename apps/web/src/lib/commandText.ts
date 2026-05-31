@@ -39,3 +39,30 @@ const NBSP = " ";
 export function nameForCommand(name: string): string {
   return name.replace(ASCII_SPACE_RX, NBSP);
 }
+
+/**
+ * Build a slash-command target argument from an identity. Prefers
+ * the unambiguous token form (`@cid:<id>` for characters,
+ * `@id:<userId>` for masters) whenever the caller already has the
+ * id, falling back to the NBSP-escaped name only when neither id is
+ * available.
+ *
+ * Server-side `resolveIdentityArg` accepts both forms in the same
+ * argument slot, so callers can switch to this helper without any
+ * coordinated parser change — the token branch just skips the
+ * name-lookup ambiguity check entirely.
+ *
+ * Use this for every click-driven command builder (chat-line whisper
+ * click, profile-modal Whisper / Ignore / Friend buttons, userlist
+ * row click) so the resulting command can't get mis-routed when two
+ * users share the typed name.
+ */
+export function identityArgFor(input: {
+  userId: string | null | undefined;
+  characterId: string | null | undefined;
+  displayName: string;
+}): string {
+  if (input.characterId) return `@cid:${input.characterId}`;
+  if (input.userId) return `@id:${input.userId}`;
+  return nameForCommand(input.displayName);
+}

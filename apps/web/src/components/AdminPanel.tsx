@@ -497,7 +497,13 @@ function OverviewTab() {
     let cancelled = false;
     async function load() {
       try {
-        const r = await fetch("/admin/overview", { credentials: "include" });
+        // Pass the viewer's timezone offset so the server's day-bucket
+        // SQL aligns with the panel's local-time grouping. Without
+        // this the two widgets disagreed on which side of midnight a
+        // signup belonged to. `getTimezoneOffset` returns minutes
+        // west of UTC (positive for the Americas, negative for Asia).
+        const tzOffsetMin = new Date().getTimezoneOffset();
+        const r = await fetch(`/admin/overview?tzOffsetMin=${tzOffsetMin}`, { credentials: "include" });
         if (!r.ok) throw new Error(await readError(r));
         const j = (await r.json()) as AdminOverview;
         if (!cancelled) { setData(j); setError(null); }

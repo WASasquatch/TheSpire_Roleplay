@@ -118,13 +118,33 @@ export async function registerAdminRoutes(
    * the older days will undercount — fine for a dashboard, called out so
    * future-us doesn't chase a phantom bug.
    */
-  app.get("/admin/overview", async () => {
+  app.get<{ Querystring: { tzOffsetMin?: string } }>("/admin/overview", async (req) => {
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
     const since24h = new Date(now - dayMs);
     const since5d = new Date(now - 5 * dayMs);
     const since7d = new Date(now - 7 * dayMs);
     const since30d = new Date(now - 30 * dayMs);
+    // Caller's timezone offset in minutes (JS `Date.getTimezoneOffset()`
+    // convention — positive = west of UTC). Used to align the day
+    // buckets (sparkline + day-grouped widgets) with the viewer's
+    // local "Today / Yesterday" rather than the server's. Without
+    // this, a registration around midnight ended up in one bucket
+    // on the panel ("Yesterday") and another on the chart
+    // ("Today") depending on which side of UTC midnight it landed
+    // on — exactly the desync that surfaced as "Today says 0 but
+    // the chart shows 1."
+    //
+    // Clamp to a generous ±14h range so a malformed input can't
+    // poison the SQL math. Default 0 = server time / UTC.
+    const rawTz = parseInt(req.query.tzOffsetMin ?? "0", 10);
+    const tzOffsetMin = Number.isFinite(rawTz) && Math.abs(rawTz) <= 14 * 60
+      ? rawTz
+      : 0;
+    // Local time = UTC - offset minutes. We shift the unixepoch by
+    // the offset before feeding strftime so the rendered date is
+    // the viewer's local date.
+    const tzShiftSec = -tzOffsetMin * 60;
 
     // Currently-connected users — dedupe by userId across sockets.
     const sockets = await io.fetchSockets();
@@ -268,10 +288,12 @@ export async function registerAdminRoutes(
       .from(auditLog)
       .where(gte(auditLog.createdAt, since7d));
 
-    // 7-day daily series. UTC day buckets (matches the public /stats shape so
-    // the client day-formatter stays single-sourced). Missing days fill as 0.
+    // 7-day daily series. Day buckets are aligned to the CALLER's
+    // local time (via `tzShiftSec` above) so a midnight-crossing
+    // registration lands in the same row everywhere on the
+    // dashboard. Missing days fill as 0.
     const dayExpr = (col: typeof messages.createdAt | typeof sessions.createdAt | typeof users.createdAt) =>
-      sql<string>`strftime('%Y-%m-%d', ${col} / 1000, 'unixepoch')`.as("day");
+      sql<string>`strftime('%Y-%m-%d', (${col} / 1000) + ${tzShiftSec}, 'unixepoch')`.as("day");
 
     const messageFreq = await db
       .select({ day: dayExpr(messages.createdAt), n: sql<number>`count(*)` })
@@ -297,9 +319,14 @@ export async function registerAdminRoutes(
       .where(and(notSystem, gte(users.createdAt, since7d)))
       .groupBy(sql`day`);
 
+    // Build dayKeys in the CALLER's local time so the labels match
+    // the SQL buckets above. We shift `now` by the offset before
+    // slicing the ISO date — same math `tzShiftSec` applies to the
+    // strftime expression.
     const dayKeys: string[] = [];
     for (let i = 6; i >= 0; i--) {
-      dayKeys.push(new Date(now - i * dayMs).toISOString().slice(0, 10));
+      const shifted = new Date(now - i * dayMs - tzOffsetMin * 60_000);
+      dayKeys.push(shifted.toISOString().slice(0, 10));
     }
     const fill = (rows: { day: string; n: number }[]) => {
       const map = new Map(rows.map((r) => [r.day, r.n]));

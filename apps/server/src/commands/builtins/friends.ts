@@ -3,45 +3,39 @@ import { addSystemMessage } from "../../realtime/broadcast.js";
 import { resolveDisplayName } from "../../auth/session.js";
 import { characters, friends, users } from "../../db/schema.js";
 import { eqIdentity, type Identity } from "../../auth/identity.js";
+import { formatAmbiguousNotice, resolveIdentityArg } from "../identityArg.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 /**
- * Resolve a typed-in name to an identity. Master usernames take
- * precedence (globally unique); characters fall through for names
- * that don't match a master. Returns null when nothing matches or
- * the target is disabled/soft-deleted.
+ * Resolve a typed-in target (name or `@id:` / `@cid:` token) to an
+ * Identity, surfacing ambiguous-name notices to the caller. Returns
+ * null on miss or ambiguous (after emitting the appropriate notice),
+ * so the command body can short-circuit with a bare `return`.
  *
- * Handles the NBSP-vs-regular-space dance for master usernames the
- * same way lookupProfile does — tries both forms so a click from
- * chat (canonical NBSP form) and a URL-style spelling (regular
- * space) both resolve.
+ * Friend commands key on `Identity` (per-identity friendships), so
+ * this wrapper drops the richer ResolvedTarget down to that pair —
+ * the displayName/masterUsername are looked up later through
+ * resolveDisplayName for the success copy.
  */
 async function resolveIdentityByName(
-  db: import("../../db/index.js").Db,
-  name: string,
+  ctx: CommandContext,
+  raw: string,
 ): Promise<Identity | null> {
-  const NBSP = String.fromCharCode(0xA0);
-  const variants = Array.from(new Set([
-    name,
-    name.replace(/ /g, NBSP),
-    name.replace(new RegExp(NBSP, "g"), " "),
-  ])).map((v) => v.toLowerCase());
-
-  const u = (await db
-    .select({ id: users.id, disabledAt: users.disabledAt })
-    .from(users)
-    .where(sql`lower(${users.username}) IN (${sql.join(variants.map((v) => sql`${v}`), sql`, `)})`)
-    .limit(1))[0];
-  if (u && !u.disabledAt) return { userId: u.id, characterId: null };
-
-  const c = (await db
-    .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
-    .from(characters)
-    .where(sql`lower(${characters.name}) IN (${sql.join(variants.map((v) => sql`${v}`), sql`, `)})`)
-    .limit(1))[0];
-  if (c && !c.deletedAt) return { userId: c.userId, characterId: c.id };
-  return null;
+  const resolution = await resolveIdentityArg(ctx.db, raw);
+  if (resolution.kind === "none") {
+    notice(ctx, "NO_USER", `No user or character named "${raw}".`);
+    return null;
+  }
+  if (resolution.kind === "ambiguous") {
+    notice(ctx, "FRIEND_AMBIGUOUS", formatAmbiguousNotice(raw, resolution.matches));
+    return null;
+  }
+  return {
+    userId: resolution.target.userId,
+    characterId: resolution.target.characterId,
+  };
 }
+
 
 function meIdentity(ctx: CommandContext): Identity {
   return { userId: ctx.user.id, characterId: ctx.user.activeCharacterId };
@@ -120,8 +114,8 @@ export const friendCommand: CommandHandler = {
     const targetName = ctx.argsText.trim();
     if (!targetName) return notice(ctx, "FRIEND_USAGE", "Usage: /friend <name>");
 
-    const target = await resolveIdentityByName(ctx.db, targetName);
-    if (!target) return notice(ctx, "NO_USER", `No user or character named "${targetName}".`);
+    const target = await resolveIdentityByName(ctx, targetName);
+    if (!target) return;  // resolver emitted the appropriate notice.
 
     const me = meIdentity(ctx);
     if (target.userId === me.userId && target.characterId === me.characterId) {
@@ -186,8 +180,8 @@ export const acceptFriendCommand: CommandHandler = {
     const targetName = ctx.argsText.trim();
     if (!targetName) return notice(ctx, "ACCEPT_USAGE", "Usage: /accept <name>");
 
-    const target = await resolveIdentityByName(ctx.db, targetName);
-    if (!target) return notice(ctx, "NO_USER", `No user or character named "${targetName}".`);
+    const target = await resolveIdentityByName(ctx, targetName);
+    if (!target) return;  // resolver emitted the appropriate notice.
 
     const me = meIdentity(ctx);
     const r = await ctx.db
@@ -216,8 +210,8 @@ export const declineFriendCommand: CommandHandler = {
     const targetName = ctx.argsText.trim();
     if (!targetName) return notice(ctx, "DECLINE_USAGE", "Usage: /decline <name>");
 
-    const target = await resolveIdentityByName(ctx.db, targetName);
-    if (!target) return notice(ctx, "NO_USER", `No user or character named "${targetName}".`);
+    const target = await resolveIdentityByName(ctx, targetName);
+    if (!target) return;  // resolver emitted the appropriate notice.
 
     const me = meIdentity(ctx);
     const r = await ctx.db
@@ -243,8 +237,8 @@ export const unfriendCommand: CommandHandler = {
     const targetName = ctx.argsText.trim();
     if (!targetName) return notice(ctx, "UNFRIEND_USAGE", "Usage: /unfriend <name>");
 
-    const target = await resolveIdentityByName(ctx.db, targetName);
-    if (!target) return notice(ctx, "NO_USER", `No user or character named "${targetName}".`);
+    const target = await resolveIdentityByName(ctx, targetName);
+    if (!target) return;  // resolver emitted the appropriate notice.
 
     const me = meIdentity(ctx);
     // Delete the row for THIS identity pair in either direction. Other

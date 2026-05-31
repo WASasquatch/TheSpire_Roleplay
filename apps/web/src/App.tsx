@@ -39,7 +39,7 @@ import { ActiveThemeContext, applyFontPrefs, applyTheme, resolveSplashTheme, spl
 import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
 import { fire as fireNotification, permission as notifPermission, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
-import { nameForCommand } from "./lib/commandText.js";
+import { identityArgFor, nameForCommand } from "./lib/commandText.js";
 import { playAlert, playPing, playTap, playWhisper } from "./lib/sound.js";
 import { saveCachedActiveTheme, useChat, type SiteBranding } from "./state/store.js";
 import { fetchEmoticonCatalog, useEmoticons } from "./state/emoticons.js";
@@ -2497,43 +2497,49 @@ function Chat() {
    * For any OTHER identity (including other characters you own that
    * aren't active in this tab), open the read-only profile view.
    * (Slash-command equivalents: /whois <name> and /profile.)
+   *
+   * `characterId` is the identity row the click landed on — a
+   * character id when the click targeted a character, null for the
+   * master/OOC row. Used to open the profile of the EXACT identity
+   * clicked rather than letting profile:fetch fall back to a master
+   * lookup that may collide with a same-named character.
    */
-  function onIconClick(userId: string, displayName: string) {
+  function onIconClick(userId: string, displayName: string, characterId?: string | null) {
     if (isSelfActiveIdentity(userId, displayName)) {
       send("/profile");
       return;
     }
-    socket.emit("profile:fetch", { username: displayName }, (res) => {
+    // Token-aware fetch when we have the id: the server resolves the
+    // exact identity and never falls back to the master-takes-precedence
+    // name rule. Bare-name fetch is the legacy path for callers that
+    // didn't carry an id yet (mention clicks, mostly).
+    const tokenName = characterId
+      ? `@cid:${characterId}`
+      : `@id:${userId}`;
+    socket.emit("profile:fetch", { username: tokenName }, (res) => {
       if (res.ok) setOpenProfile(res.profile);
       else setNotice({ code: res.code, message: res.message });
     });
   }
 
   /**
-   * Click on the name - PREPEND `/whisper <name> ` to whatever the user
-   * is already drafting so they don't lose in-progress text. For your
-   * own active identity we fall back to the icon behavior (open editor)
-   * since whispering yourself is useless. Clicking the name of one of
-   * your OTHER characters (not active in this tab) starts a whisper to
-   * them — same flow as any other identity — rather than misrouting to
-   * an editor session bound to the wrong character.
+   * Click on the name - PREPEND `/whisper <token> ` to whatever the
+   * user is already drafting so they don't lose in-progress text. For
+   * your own active identity we fall back to the icon behavior (open
+   * editor) since whispering yourself is useless.
    *
-   * Prepend instead of overwrite: clicking a name while composing a
-   * message used to destroy the draft. Preserving the existing text
-   * lets the user re-target a message they were already writing.
+   * Using `identityArgFor` substitutes a `@cid:` / `@id:` token
+   * whenever the click source has the id (every userlist + chat-line
+   * click does), so two users sharing a name get routed to the right
+   * one. Falls back to the NBSP-escaped name for callers without an id.
    */
-  function onNameClick(userId: string, displayName: string) {
+  function onNameClick(userId: string, displayName: string, characterId?: string | null) {
     if (isSelfActiveIdentity(userId, displayName)) {
       send("/profile");
       return;
     }
-    // `nameForCommand` NBSPs any ASCII spaces inside the displayName so
-    // the server's tokenizer keeps a multi-word handle like
-    // "Khalbir Dhor'ashiq" as one argument. Without it, clicking a
-    // multi-word name pre-filled `/whisper Khalbir Dhor'ashiq ` and the
-    // tokenizer split it into two args, leaving the user looking at a
-    // `No user named "Khalbir"` error every time.
-    setComposerText((cur) => `/whisper ${nameForCommand(displayName)} ${cur ?? ""}`);
+    const targetArg = identityArgFor({ userId, characterId: characterId ?? null, displayName });
+    setComposerText((cur) => `/whisper ${targetArg} ${cur ?? ""}`);
   }
 
   /**
@@ -3063,11 +3069,21 @@ function Chat() {
             ? {
                 onWhisper: (name: string) => {
                   setOpenProfile(null);
-                  // Prepend rather than overwrite — the user may have
-                  // had a draft going when they opened the profile.
-                  // NBSP the name so multi-word handles survive the
-                  // server tokenizer; see nameForCommand JSDoc.
-                  setComposerText((cur) => `/whisper ${nameForCommand(name)} ${cur ?? ""}`);
+                  // Prefer the identity token so a same-named character
+                  // belonging to a different account can't intercept
+                  // the whisper. `identityArgFor` picks `@cid:` when the
+                  // profile is a character, `@id:` for the master, and
+                  // falls back to the NBSP-escaped name only if neither
+                  // id is available (shouldn't happen here — the
+                  // profile carries both).
+                  const targetArg = identityArgFor({
+                    userId: openProfile.profile.userId,
+                    characterId: openProfile.kind === "character"
+                      ? (openProfile.profile.id ?? null)
+                      : null,
+                    displayName: name,
+                  });
+                  setComposerText((cur) => `/whisper ${targetArg} ${cur ?? ""}`);
                 },
                 // Open the unified Messages modal pinned to the right
                 // per-identity thread: when the profile in view is a
@@ -3087,7 +3103,16 @@ function Chat() {
                 },
                 onIgnore: (name: string) => {
                   setOpenProfile(null);
-                  send(`/ignore ${nameForCommand(name)}`);
+                  // Token form for the same disambiguation reason as
+                  // onWhisper above. Server-side /ignore accepts both.
+                  const targetArg = identityArgFor({
+                    userId: openProfile.profile.userId,
+                    characterId: openProfile.kind === "character"
+                      ? (openProfile.profile.id ?? null)
+                      : null,
+                    displayName: name,
+                  });
+                  send(`/ignore ${targetArg}`);
                 },
               }
             : {})}

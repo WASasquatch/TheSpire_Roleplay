@@ -4,6 +4,7 @@ import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileC
 import { matchThemePreset, resolveScriptoriumAuthorTier, roleRank } from "@thekeep/shared";
 import { getSettings, parseUserThemeJson } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
+import { formatAmbiguousNotice, resolveIdentityArg } from "../identityArg.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -448,9 +449,130 @@ async function computeScriptoriumAuthorBadge(
 }
 
 /**
- * Resolve a name (master username OR character name) to a ProfileView.
- * Used by both /whois and the HTTP profile endpoint, plus the click-to-view
+ * Build a ProfileView for an already-fetched master row. Used by the
+ * token shortcut path in `lookupProfile` so a `@id:<userId>` query
+ * skips name-disambiguation entirely. The legacy name-keyed master
+ * branch in `lookupProfile` duplicates this logic inline — a future
+ * cleanup pass can collapse the two; for now they stay parallel.
+ */
+async function buildMasterProfileView(
+  db: import("../../db/index.js").Db,
+  u: typeof users.$inferSelect,
+  viewerId?: string,
+): Promise<ProfileView> {
+  const ns = await getEquippedNameStyle(db, "user", u.id);
+  const portraits = maybePrependAvatarPortrait(
+    await listMasterPortraits(db, u.id),
+    u.avatarUrl,
+    u.includeAvatarInGallery,
+    u.isNsfw,
+  );
+  const theme = await parseUserThemeJson(db, u.themeJson);
+  const styleKey = await resolveProfileStyleKey(db, theme, null, u.styleKey);
+  return {
+    kind: "master",
+    profile: {
+      userId: u.id,
+      username: u.username,
+      bioHtml: u.bioHtml,
+      avatarUrl: u.avatarUrl,
+      avatarCrop: {
+        zoom: u.avatarZoom,
+        offsetX: u.avatarOffsetX,
+        offsetY: u.avatarOffsetY,
+      },
+      portraits,
+      gender: u.gender,
+      theme,
+      styleKey,
+      titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
+      links: await listLinks(db, u.id, null),
+      role: u.role,
+      isPublic: u.isPublic,
+      isNsfw: u.isNsfw,
+      createdAt: +u.createdAt,
+      metrics: await computeProfileMetrics(db, u.id, null, viewerId),
+      scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, u.id),
+      collection: await listProfileCollection(db, "user", u.id),
+      petCollection: await listProfilePetCollection(db, "user", u.id),
+      nameStyleKey: ns.key,
+      nameStyleConfig: ns.config,
+      profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id),
+      publicProfileBgUrl: u.publicProfileBgUrl,
+      publicProfileBgMode: u.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
+    },
+  };
+}
+
+/**
+ * Build a ProfileView for an already-fetched character row + owner.
+ * Parallel to `buildMasterProfileView`. Used by the `@cid:<id>` token
+ * shortcut path.
+ */
+async function buildCharacterProfileView(
+  db: import("../../db/index.js").Db,
+  c: typeof characters.$inferSelect,
+  owner: typeof users.$inferSelect,
+  viewerId?: string,
+): Promise<ProfileView> {
+  const theme = await parseUserThemeJson(db, c.themeJson ?? owner.themeJson);
+  const styleKey = await resolveProfileStyleKey(db, theme, c.styleKey, owner.styleKey);
+  const showOwner = await viewerIsModerator(db, viewerId);
+  const ns = await getEquippedNameStyle(db, "character", c.id);
+  const charPortraits = maybePrependAvatarPortrait(
+    await listPortraits(db, c.id),
+    c.avatarUrl,
+    c.includeAvatarInGallery,
+    c.isNsfw,
+  );
+  return {
+    kind: "character",
+    profile: {
+      id: c.id,
+      userId: c.userId,
+      name: c.name,
+      bioHtml: c.bioHtml,
+      stats: parseStats(c.statsJson),
+      avatarUrl: c.avatarUrl,
+      avatarCrop: {
+        zoom: c.avatarZoom,
+        offsetX: c.avatarOffsetX,
+        offsetY: c.avatarOffsetY,
+      },
+      portraits: charPortraits,
+      links: await listLinks(db, c.userId, c.id),
+      journalEntries: await listPublicJournal(db, c.id),
+      theme,
+      styleKey,
+      titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
+      isPublic: c.isPublic,
+      isNsfw: c.isNsfw,
+      createdAt: +c.createdAt,
+      updatedAt: +c.updatedAt,
+      metrics: await computeProfileMetrics(db, c.userId, c.id, viewerId),
+      scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, c.userId),
+      collection: await listProfileCollection(db, "character", c.id),
+      petCollection: await listProfilePetCollection(db, "character", c.id),
+      nameStyleKey: ns.key,
+      nameStyleConfig: ns.config,
+      profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id),
+      publicProfileBgUrl: c.publicProfileBgUrl,
+      publicProfileBgMode: c.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
+      ...(showOwner ? { ownerUsername: owner.username } : {}),
+    },
+  };
+}
+
+/**
+ * Resolve a name (master username OR character name) or an identity
+ * token (`@id:<userId>` / `@cid:<characterId>`) to a ProfileView.
+ * Used by /whois, the HTTP profile endpoint, and the click-to-view
  * flow on the userlist.
+ *
+ * Tokens shortcut the name-resolution path entirely so the
+ * "/whois @cid:abc" caller gets back exactly that character — not
+ * some other identity that happens to share its display name. Bare
+ * names take the legacy NBSP-variant flow.
  */
 async function lookupProfile(
   db: import("../../db/index.js").Db,
@@ -460,6 +582,39 @@ async function lookupProfile(
    *  counts even when their hide flags are on. */
   viewerId?: string,
 ): Promise<ProfileView | null> {
+  // Token shortcut. We hand-roll the parse here (rather than importing
+  // identityArg) to avoid a circular-import risk between profile.ts
+  // and identityArg.ts during bootstrap — the token format is two
+  // string-prefix checks, cheap to inline.
+  if (name.startsWith("@id:")) {
+    const userId = name.slice(4).trim();
+    if (userId && !/\s/.test(userId)) {
+      const u = (await db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1))[0];
+      if (u && !u.disabledAt) return buildMasterProfileView(db, u, viewerId);
+    }
+    return null;
+  }
+  if (name.startsWith("@cid:")) {
+    const charId = name.slice(5).trim();
+    if (charId && !/\s/.test(charId)) {
+      const c = (await db
+        .select()
+        .from(characters)
+        .where(eq(characters.id, charId))
+        .limit(1))[0];
+      if (c && !c.deletedAt) {
+        const owner = (await db.select().from(users).where(eq(users.id, c.userId)).limit(1))[0];
+        if (owner && !owner.disabledAt) {
+          return buildCharacterProfileView(db, c, owner, viewerId);
+        }
+      }
+    }
+    return null;
+  }
   /**
    * Build the set of name variants to try.
    *
@@ -852,10 +1007,47 @@ export const whoisCommand: CommandHandler = {
       ctx.socket.emit("ui:hint", { kind: "open-profile", profile: view });
       return;
     }
-    // Pass the caller's own userId so /whois on yourself bypasses
-    // your own hide-count privacy flags — same self-view rule as
-    // the HTTP /profiles/:name endpoint.
-    const view = await lookupProfile(ctx.db, target, ctx.user.id);
+    // Token shortcut. Pass directly to lookupProfile so the response
+    // matches exactly what the caller asked for (no master-takes-
+    // precedence fall-through that would skip past the requested
+    // character).
+    if (target.startsWith("@id:") || target.startsWith("@cid:")) {
+      const view = await lookupProfile(ctx.db, target, ctx.user.id);
+      if (!view) {
+        ctx.socket.emit("error:notice", {
+          code: "NO_USER",
+          message: `No identity matches "${target}".`,
+        });
+        return;
+      }
+      ctx.socket.emit("ui:hint", { kind: "open-profile", profile: view });
+      return;
+    }
+    // Bare-name path: run the disambiguating resolver first so
+    // multi-match names get a friendly tokens-to-paste notice
+    // instead of silently snapping to the first hit.
+    const resolution = await resolveIdentityArg(ctx.db, target);
+    if (resolution.kind === "none") {
+      ctx.socket.emit("error:notice", {
+        code: "NO_USER",
+        message: `No user or character named "${target}".`,
+      });
+      return;
+    }
+    if (resolution.kind === "ambiguous") {
+      ctx.socket.emit("error:notice", {
+        code: "WHOIS_AMBIGUOUS",
+        message: formatAmbiguousNotice(target, resolution.matches),
+      });
+      return;
+    }
+    // Unique: fetch the profile through the same id-keyed path the
+    // token shortcut uses so the view matches the resolved identity
+    // exactly (no master-precedence quirk).
+    const tokenName = resolution.target.characterId
+      ? `@cid:${resolution.target.characterId}`
+      : `@id:${resolution.target.userId}`;
+    const view = await lookupProfile(ctx.db, tokenName, ctx.user.id);
     if (!view) {
       ctx.socket.emit("error:notice", {
         code: "NO_USER",

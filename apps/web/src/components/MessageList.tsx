@@ -40,8 +40,12 @@ interface Props {
    * by default. Owner/mod sets via /replymode.
    */
   replyMode?: "flat" | "nested";
-  onIconClick: (userId: string, displayName: string) => void;
-  onNameClick: (userId: string, displayName: string) => void;
+  /** `characterId` lets the handler emit `@cid:` tokens for the
+   *  resulting whisper / profile fetch so a same-named character on
+   *  another account can't intercept the click. Optional — callers
+   *  without an id (mention clicks) still work via the name-only path. */
+  onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
+  onNameClick: (userId: string, displayName: string, characterId?: string | null) => void;
   /** Click handler for @mentions parsed out of the message body. */
   onMentionClick: (name: string) => void;
   /** Click handler for @world:slug mentions parsed out of the message body. */
@@ -432,7 +436,11 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     genderByIdentity.set(k, o.gender);
     // Admin status IS account-wide (the user holds the role
     // regardless of which character they're voicing), so this stays
-    // keyed by userId.
+    // keyed by userId. Call sites that consume this set also need to
+    // gate on the per-message `characterId === null` check to avoid
+    // italicizing a staff user's CHARACTER voices — that would leak
+    // the OOC ↔ character link the per-identity partition is meant
+    // to keep private. See `isSenderAdmin` usage below.
     if (isAdminRole(o.accountRole)) adminUserIds.add(o.userId);
     if (o.activeNameStyleKey) {
       styleByIdentity.set(k, { key: o.activeNameStyleKey, config: o.nameStyleConfig });
@@ -494,7 +502,11 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         gender={genderByIdentity.get(idKey) ?? genderByUser.get(m.userId) ?? "undisclosed"}
         nameStyle={styleByIdentity.get(idKey) ?? null}
         senderCosmetics={cosmeticsByIdentity.get(idKey) ?? null}
-        isSenderAdmin={adminUserIds.has(m.userId)}
+        // Staff italic only when speaking AS the master (characterId
+        // === null). Italicizing a character voice would leak the
+        // OOC ↔ character link — same partition rule applied to the
+        // RoomsTree staff crown.
+        isSenderAdmin={m.characterId === null && adminUserIds.has(m.userId)}
         isRecipientAdmin={!!m.toUserId && adminUserIds.has(m.toUserId)}
         isOwn={!!selfUserId && m.userId === selfUserId}
         // True iff the viewer is the addressed recipient on a whisper.
@@ -843,8 +855,8 @@ function ForumView({
   /** Lower-cased viewer identities for self-mention highlighting. */
   selfNames: ReadonlyArray<string>;
   roomType: "public" | "private" | null;
-  onIconClick: (userId: string, displayName: string) => void;
-  onNameClick: (userId: string, displayName: string) => void;
+  onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
+  onNameClick: (userId: string, displayName: string, characterId?: string | null) => void;
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
@@ -1177,8 +1189,8 @@ function TopicCard({
   /** Viewer identities for self-mention highlighting inside topic/reply bodies. */
   selfNames: ReadonlyArray<string>;
   roomType: "public" | "private" | null;
-  onIconClick: (userId: string, displayName: string) => void;
-  onNameClick: (userId: string, displayName: string) => void;
+  onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
+  onNameClick: (userId: string, displayName: string, characterId?: string | null) => void;
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
@@ -1248,7 +1260,7 @@ function TopicCard({
           size={48}
           onClick={(e) => {
             e.stopPropagation();
-            onIconClick(topic.userId, topic.displayName);
+            onIconClick(topic.userId, topic.displayName, topic.characterId ?? null);
           }}
         />
         <div className="min-w-0 flex-1">
@@ -1290,11 +1302,15 @@ function TopicCard({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onNameClick(topic.userId, topic.displayName);
+                onNameClick(topic.userId, topic.displayName, topic.characterId ?? null);
               }}
               className={
                 "rounded font-semibold text-keep-action hover:underline " +
-                (adminUserIds.has(topic.userId) ? "italic" : "")
+                // Staff-italic only when the topic was authored OOC.
+                // A character voice doesn't get italicized even if
+                // the owner is staff — same partition rule as the
+                // chat-line `isSenderAdmin` above.
+                (topic.characterId === null && adminUserIds.has(topic.userId) ? "italic" : "")
               }
               style={topicAuthorColor ? { color: topicAuthorColor } : undefined}
             >
@@ -1326,7 +1342,7 @@ function TopicCard({
           <ForumPostBody
             msg={topic}
             isOwn={!!selfUserId && topic.userId === selfUserId}
-            isSenderAdmin={adminUserIds.has(topic.userId)}
+            isSenderAdmin={topic.characterId === null && adminUserIds.has(topic.userId)}
             canReport={roomType === "public"}
             canModerate={canModerate}
             canPin={canPin}
@@ -1359,7 +1375,7 @@ function TopicCard({
                   key={r.id}
                   msg={r}
                   isOwn={!!selfUserId && r.userId === selfUserId}
-                  isSenderAdmin={adminUserIds.has(r.userId)}
+                  isSenderAdmin={r.characterId === null && adminUserIds.has(r.userId)}
                   canReport={roomType === "public"}
                   canModerate={canModerate}
                   canPin={canPin}
@@ -1530,8 +1546,8 @@ export function ForumPostBody({
   onQuotePost?: (quoteText: string) => void;
   /** Activate this post's parent topic in the composer for plain reply (no quote). */
   onReply?: () => void;
-  onIconClick: (userId: string, displayName: string) => void;
-  onNameClick: (userId: string, displayName: string) => void;
+  onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
+  onNameClick: (userId: string, displayName: string, characterId?: string | null) => void;
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
@@ -1692,7 +1708,7 @@ export function ForumPostBody({
           userId={msg.userId}
           onClick={(e) => {
             e.stopPropagation();
-            onIconClick(msg.userId, msg.displayName);
+            onIconClick(msg.userId, msg.displayName, msg.characterId ?? null);
           }}
           size={32}
         />
@@ -1714,7 +1730,7 @@ export function ForumPostBody({
             {msg.kind === "me" ? null : (
               <button
                 type="button"
-                onClick={() => onNameClick(msg.userId, msg.displayName)}
+                onClick={() => onNameClick(msg.userId, msg.displayName, msg.characterId ?? null)}
                 className={
                   "rounded font-semibold text-keep-text hover:text-keep-action " +
                   (isSenderAdmin ? "italic" : "")
@@ -2471,8 +2487,8 @@ function Line({
   /** Viewer is admin/masteradmin — surfaces a cross-author Edit button on others' lines. Stricter than canModerate. */
   canAdminEdit: boolean;
   /** Unbound - Line binds with the relevant userId/displayName for sender vs recipient. */
-  onIconClick: (userId: string, displayName: string) => void;
-  onNameClick: (userId: string, displayName: string) => void;
+  onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
+  onNameClick: (userId: string, displayName: string, characterId?: string | null) => void;
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
@@ -2550,7 +2566,7 @@ function Line({
           freeformBorderKey={inlineFreeformBorderKey}
           avatarCrop={inlineAvatarCrop}
           size="xs"
-          onClick={() => onIconClick(msg.userId, msg.displayName)}
+          onClick={() => onIconClick(msg.userId, msg.displayName, msg.characterId ?? null)}
           title={`view ${msg.displayName}'s profile`}
           className="mr-1 select-none align-middle"
         />
@@ -2634,8 +2650,8 @@ function Line({
       // and stack with mood/away into a wall of chips. The userlist (and
       // rooms tree) carries the OOC marker - that's the canonical "who's
       // here" board; chat lines stay tight.
-      onIconClick={() => onIconClick(msg.userId, msg.displayName)}
-      onNameClick={() => onNameClick(msg.userId, msg.displayName)}
+      onIconClick={() => onIconClick(msg.userId, msg.displayName, msg.characterId ?? null)}
+      onNameClick={() => onNameClick(msg.userId, msg.displayName, msg.characterId ?? null)}
       // Chat lines stay compact - viewers open profiles from the userlist.
       hideIcon
     />

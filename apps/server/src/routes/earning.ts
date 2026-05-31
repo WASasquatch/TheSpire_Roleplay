@@ -845,22 +845,79 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       const showCurrency = !hideCurrencyCount || isSelf;
       const showXp = !hideXpCount || isSelf;
 
+      // Defense-in-depth ownership re-verification.
+      //
+      // The equip endpoints already validate ownership on WRITE, so a
+      // valid path can't persist a border the identity doesn't own.
+      // BUT — admin revokes, migrations, manual SQL, and any future
+      // bug can leave a stale `selected_*_border_*` value pointing at
+      // a key that's no longer in the identity's ownership table. If
+      // we returned the stale key, the BorderedAvatar client renderer
+      // would happily paint the catalog row (it doesn't re-check
+      // ownership), leaking a locked border onto a profile that
+      // doesn't actually own it.
+      //
+      // Re-checking here costs at most two indexed lookups per request
+      // and guarantees the public profile never shows a border the
+      // identity has lost (or never owned via a stale row write).
+      let resolvedRankBorderKey: string | null = view.selectedBorderRankKey;
+      let resolvedFreeformBorderKey: string | null = view.selectedFreeformBorderKey;
+      if (resolvedRankBorderKey) {
+        const ownsRank = character
+          ? (await db
+              .select({ rankKey: characterOwnedBorders.rankKey })
+              .from(characterOwnedBorders)
+              .where(and(
+                eq(characterOwnedBorders.characterId, character.id),
+                eq(characterOwnedBorders.rankKey, resolvedRankBorderKey),
+              ))
+              .limit(1))[0]
+          : (await db
+              .select({ rankKey: userOwnedBorders.rankKey })
+              .from(userOwnedBorders)
+              .where(and(
+                eq(userOwnedBorders.userId, target.id),
+                eq(userOwnedBorders.rankKey, resolvedRankBorderKey),
+              ))
+              .limit(1))[0];
+        if (!ownsRank) resolvedRankBorderKey = null;
+      }
+      if (resolvedFreeformBorderKey) {
+        const ownsFreeform = character
+          ? (await db
+              .select({ borderKey: characterOwnedFreeformBorders.borderKey })
+              .from(characterOwnedFreeformBorders)
+              .where(and(
+                eq(characterOwnedFreeformBorders.characterId, character.id),
+                eq(characterOwnedFreeformBorders.borderKey, resolvedFreeformBorderKey),
+              ))
+              .limit(1))[0]
+          : (await db
+              .select({ borderKey: userOwnedFreeformBorders.borderKey })
+              .from(userOwnedFreeformBorders)
+              .where(and(
+                eq(userOwnedFreeformBorders.userId, target.id),
+                eq(userOwnedFreeformBorders.borderKey, resolvedFreeformBorderKey),
+              ))
+              .limit(1))[0];
+        if (!ownsFreeform) resolvedFreeformBorderKey = null;
+      }
+
       // Hero portrait on the public profile renders the OWNING
       // identity's free-form border with that identity's per-identity
       // color customization. Char-scope customizations come from
       // `character_owned_freeform_borders`; master from
-      // `user_owned_freeform_borders`. Selecting the wrong table
-      // would leak the master's color picks onto a character border
-      // (or vice versa).
+      // `user_owned_freeform_borders`. Only fetched when ownership
+      // survived the re-check above.
       let freeformBorderConfigJson: string | null = null;
-      if (view.selectedFreeformBorderKey) {
+      if (resolvedFreeformBorderKey) {
         if (character) {
           const row = (await db
             .select({ configJson: characterOwnedFreeformBorders.configJson })
             .from(characterOwnedFreeformBorders)
             .where(and(
               eq(characterOwnedFreeformBorders.characterId, character.id),
-              eq(characterOwnedFreeformBorders.borderKey, view.selectedFreeformBorderKey),
+              eq(characterOwnedFreeformBorders.borderKey, resolvedFreeformBorderKey),
             ))
             .limit(1))[0];
           freeformBorderConfigJson = row?.configJson ?? null;
@@ -870,7 +927,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             .from(userOwnedFreeformBorders)
             .where(and(
               eq(userOwnedFreeformBorders.userId, target.id),
-              eq(userOwnedFreeformBorders.borderKey, view.selectedFreeformBorderKey),
+              eq(userOwnedFreeformBorders.borderKey, resolvedFreeformBorderKey),
             ))
             .limit(1))[0];
           freeformBorderConfigJson = row?.configJson ?? null;
@@ -890,8 +947,8 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         rankName: view.rankName,
         tierLabel: view.tierLabel,
         sigilImageUrl: view.sigilImageUrl,
-        selectedBorderRankKey: view.selectedBorderRankKey,
-        selectedFreeformBorderKey: view.selectedFreeformBorderKey,
+        selectedBorderRankKey: resolvedRankBorderKey,
+        selectedFreeformBorderKey: resolvedFreeformBorderKey,
         freeformBorderConfigJson,
       };
     },

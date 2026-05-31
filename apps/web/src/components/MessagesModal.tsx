@@ -10,7 +10,7 @@ import { cropStyleFor } from "../lib/avatarCrop.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { useChat } from "../state/store.js";
 import { readError, withIdentityQuery } from "../lib/http.js";
-import { nameForCommand } from "../lib/commandText.js";
+import { identityArgFor, nameForCommand } from "../lib/commandText.js";
 import { parseInline } from "../lib/markdown.js";
 import { FormattingToolbar } from "./FormattingToolbar.js";
 import { SynonymPopup } from "./SynonymPopup.js";
@@ -401,63 +401,18 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
     void refreshInboxCounts();
   }, [refreshInboxCounts, dmConversations, pendingFriendRequests, refreshKey, inboxCountsVersion]);
 
-  /**
-   * Auto-jump the inbox filter to the identity that actually holds the
-   * unread items, when the seeded identity is empty. This is the fix
-   * for "the badge says I have messages but my inbox is empty" — the
-   * user got a DM (or friend request) on Char B while active as Char A,
-   * the modal seeded to Char A's empty inbox, and the small pip on the
-   * closed dropdown wasn't loud enough to point them at Char B.
-   *
-   * Runs ONCE per modal open (ref-gated) so a deliberate later chip
-   * switch to an empty identity isn't yanked back. Skipped entirely
-   * when the modal was opened with `initialOtherUserId` — the caller
-   * already picked a specific target, second-guessing the chip would
-   * land them somewhere else and break the deep-link.
-   *
-   * Tie-breaking: pick the identity with the highest combined
-   * (unreadDms + pendingFriendRequests), preferring unread DMs on a
-   * tie because actual messages are more time-sensitive than pending
-   * friendships. Falls back to the seeded filter when nothing has
-   * unread anywhere.
-   */
-  const autoJumpAttempted = useRef(false);
-  useEffect(() => {
-    if (autoJumpAttempted.current) return;
-    if (initialOtherUserId) {
-      // Caller picked a target — don't override their chip.
-      autoJumpAttempted.current = true;
-      return;
-    }
-    if (inboxCounts.size === 0) return; // counts haven't loaded yet
-    const here = inboxCounts.get(inboxFilterCharId);
-    const hereTotal = (here?.unreadDms ?? 0) + (here?.pendingFriendRequests ?? 0);
-    if (hereTotal > 0) {
-      // Seeded identity already has something to look at — don't move.
-      autoJumpAttempted.current = true;
-      return;
-    }
-    let bestId: string | null | undefined = undefined;
-    let bestDms = 0;
-    let bestTotal = 0;
-    for (const row of inboxCounts.values()) {
-      const total = row.unreadDms + row.pendingFriendRequests;
-      if (total === 0) continue;
-      const wins =
-        bestId === undefined
-        || total > bestTotal
-        || (total === bestTotal && row.unreadDms > bestDms);
-      if (wins) {
-        bestId = row.characterId;
-        bestDms = row.unreadDms;
-        bestTotal = total;
-      }
-    }
-    autoJumpAttempted.current = true;
-    if (bestId !== undefined && bestId !== inboxFilterCharId) {
-      setInboxFilterCharId(bestId);
-    }
-  }, [inboxCounts, inboxFilterCharId, initialOtherUserId]);
+  // NOTE: an earlier "auto-jump to the identity with unread items"
+  // effect lived here. Removed deliberately — characters are their
+  // own accounts per the partition contract; opening the messenger
+  // while voicing Character A should land on Character A's inbox,
+  // even when OOC has waiting DMs. The previous auto-jump caused a
+  // visible "spaz" where the chip would flip to OOC after a beat
+  // and the list briefly desync'd with the chip. The per-chip
+  // unread pips in the switcher already point the user at the
+  // identity with messages; the auto-jump was adding more noise than
+  // signal. If we want to surface "you have unread on OOC" while
+  // viewing a character inbox, the right place is a banner or a
+  // bumped pip — not a forced filter switch.
 
   // Re-fire refreshLists whenever the inbox filter changes — Char A
   // and Char B keep separate friends + DM inboxes, so flipping
@@ -730,7 +685,16 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   }
   function removeFriend(f: FriendListEntry) {
     if (!window.confirm(`Remove ${f.displayName} from your friends list?`)) return;
-    onCommand(`/unfriend ${nameForCommand(f.username)}`);
+    // Token form so a same-named character belonging to another
+    // account can't intercept the unfriend. /unfriend is per-identity
+    // server-side, so the character-id token preserves "remove THIS
+    // friendship, not the OOC one with the same person."
+    const targetArg = identityArgFor({
+      userId: f.userId,
+      characterId: f.characterId,
+      displayName: f.displayName,
+    });
+    onCommand(`/unfriend ${targetArg}`);
     window.setTimeout(() => setRefreshKey((v) => v + 1), 500);
   }
   /**
@@ -1086,8 +1050,22 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                 <UsernameAutocomplete
                   value={addDraft}
                   onChange={setAddDraft}
-                  onPick={() => { /* keep the form open so the user can hit Enter to send */ }}
-                  placeholder="add friend by username..."
+                  // Picking from the dropdown commits the friend
+                  // request to that exact identity — no follow-up
+                  // disambiguation roundtrip. Mirrors the picker's
+                  // commit path so a same-named character on another
+                  // account can't intercept.
+                  onPick={(s) => {
+                    void commitFriendRequest({
+                      kind: s.kind === "character" ? "character" : "master",
+                      userId: s.userId,
+                      characterId: s.characterId,
+                      displayName: s.displayName,
+                      masterUsername: s.masterUsername,
+                      avatarUrl: s.avatarUrl,
+                    });
+                  }}
+                  placeholder="add friend..."
                 />
                 <button
                   type="submit"
@@ -1169,8 +1147,25 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                 <UsernameAutocomplete
                   value={composeDraft}
                   onChange={setComposeDraft}
-                  onPick={() => { /* same — Enter from input submits the form */ }}
-                  placeholder="message non-friend..."
+                  // Picking from the dropdown opens the DM thread to
+                  // that exact identity. We seed `composeFallback`
+                  // with the picked identity so the right pane shows
+                  // the correct name + avatar immediately, even
+                  // before the first message creates the conversation
+                  // row server-side.
+                  onPick={(s) => {
+                    const charId = s.kind === "character" ? s.characterId : null;
+                    setComposeFallback({
+                      userId: s.userId,
+                      characterId: charId,
+                      displayName: s.displayName,
+                      avatarUrl: s.avatarUrl,
+                    });
+                    setComposeDraft("");
+                    setComposeStatus(null);
+                    selectUser(s.userId, charId);
+                  }}
+                  placeholder="message someone..."
                 />
                 <button
                   type="submit"
@@ -1854,6 +1849,17 @@ function ThreadPane({
     return () => { ac.abort(); };
   }, [conversation?.id, setDmMessages, dmReseedTick, activeCharacterId]);
 
+  // Reset the seen-count guard whenever the open conversation
+  // changes so a chip-switch into a cached thread always scrolls to
+  // the bottom — even if the new thread happens to have the same
+  // number of messages as the previous one (which would otherwise
+  // make the length-only check below short-circuit). Without this
+  // reset the "open conversation X with 5 cached messages, then
+  // open Y which also has 5" path landed parked at scrollTop=0.
+  useEffect(() => {
+    lastSeenCount.current = -1;
+  }, [conversation?.id]);
+
   // Auto-scroll on new message arrivals (including the initial seed
   // load, which is what plants the user at the most-recent message
   // when they open a thread).
@@ -1877,6 +1883,7 @@ function ThreadPane({
   useEffect(() => {
     if (messages.length === lastSeenCount.current) return;
     lastSeenCount.current = messages.length;
+    if (messages.length === 0) return;  // nothing to scroll past yet
     const el = scrollRef.current;
     if (!el) return;
     let cancelled = false;
@@ -1890,20 +1897,26 @@ function ThreadPane({
     // layout, second frame guarantees we're reading a settled
     // scrollHeight.
     requestAnimationFrame(() => requestAnimationFrame(scrollToBottom));
+    // Belt-and-suspenders: also re-pin after a short timeout in case
+    // the layout settled past the second rAF (long thread, slow
+    // device). The cancelled flag prevents a stale timer from
+    // jumping us back to bottom after the user scrolled away.
+    const t = window.setTimeout(scrollToBottom, 80);
     // Catch any avatar/image whose load resolves AFTER the initial
     // scroll. Delegated `load` listener at the container so we don't
     // wire one per <img>. Once attached, every image load triggers
     // a re-pin to the bottom until effect cleanup.
     const onLoad = (e: Event) => {
-      const t = e.target as HTMLElement | null;
-      if (t && t.tagName === "IMG") scrollToBottom();
+      const ev = e.target as HTMLElement | null;
+      if (ev && ev.tagName === "IMG") scrollToBottom();
     };
     el.addEventListener("load", onLoad, true);
     return () => {
       cancelled = true;
+      window.clearTimeout(t);
       el.removeEventListener("load", onLoad, true);
     };
-  }, [messages.length]);
+  }, [messages.length, conversation?.id]);
 
   /**
    * Trim leading + trailing whitespace runs entirely, and cap any

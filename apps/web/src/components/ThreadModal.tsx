@@ -27,9 +27,11 @@ interface Props {
   canAdminEdit: boolean;
   /** Room occupants — only used to derive gender + admin flags for the rendered posts so styling matches the inline forum view. */
   occupants: RoomOccupant[];
-  /** Standard click handlers shared with the main forum view; passed through to ForumPostBody. */
-  onIconClick: (userId: string, displayName: string) => void;
-  onNameClick: (userId: string, displayName: string) => void;
+  /** Standard click handlers shared with the main forum view; passed through to ForumPostBody.
+   *  `characterId` lets the handler emit a `@cid:` identity token so a same-named character on
+   *  another account can't intercept the resulting whisper / profile open. */
+  onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
+  onNameClick: (userId: string, displayName: string, characterId?: string | null) => void;
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
@@ -187,7 +189,7 @@ export function ThreadModal({
             size={48}
             onClick={(e) => {
               e.stopPropagation();
-              onIconClick(topic.userId, topic.displayName);
+              onIconClick(topic.userId, topic.displayName, topic.characterId ?? null);
             }}
           />
           <div className="min-w-0 flex-1">
@@ -209,10 +211,13 @@ export function ThreadModal({
               <span>by</span>
               <button
                 type="button"
-                onClick={() => onNameClick(topic.userId, topic.displayName)}
+                onClick={() => onNameClick(topic.userId, topic.displayName, topic.characterId ?? null)}
                 className={
                   "rounded font-semibold text-keep-action hover:underline " +
-                  (adminUserIds.has(topic.userId) ? "italic" : "")
+                  // Staff italic only when OOC. Character voices stay
+                  // un-italicized even when authored by a staff account
+                  // — preserves the OOC ↔ character partition.
+                  (topic.characterId === null && adminUserIds.has(topic.userId) ? "italic" : "")
                 }
                 style={topicAuthorColor ? { color: topicAuthorColor } : undefined}
               >
@@ -242,7 +247,7 @@ export function ThreadModal({
             <ForumPostBody
               msg={topic}
               isOwn={!!selfUserId && topic.userId === selfUserId}
-              isSenderAdmin={adminUserIds.has(topic.userId)}
+              isSenderAdmin={topic.characterId === null && adminUserIds.has(topic.userId)}
               canReport={roomType === "public"}
               canModerate={canModerate}
               canPin={canPin}
@@ -269,7 +274,7 @@ export function ThreadModal({
                   <ForumPostBody
                     msg={r}
                     isOwn={!!selfUserId && r.userId === selfUserId}
-                    isSenderAdmin={adminUserIds.has(r.userId)}
+                    isSenderAdmin={r.characterId === null && adminUserIds.has(r.userId)}
                     canReport={roomType === "public"}
                     canModerate={canModerate}
                     canPin={canPin}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
-import { isAdminRole, isDarkPalette, parseFreeformBorderConfig } from "@thekeep/shared";
+import { isAdminRole, isDarkPalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
 import type { CharacterPortrait, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
 import { buildOrnamentStyle } from "../lib/ornaments/index.js";
@@ -14,6 +14,7 @@ import { ItemZoomView } from "./ItemZoomView.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { RankSigil } from "./RankSigil.js";
 import { StyledName } from "./StyledName.js";
+import { useChat } from "../state/store.js";
 
 interface Props {
   profile: ProfileView;
@@ -388,6 +389,13 @@ function ProfileBody({
   activeCharacterAction: { label: string; onClick: () => void } | undefined;
 }) {
   const isChar = profile.kind === "character";
+  // Viewer's role drives the mod-tools row: mod+ sees copy-id chips so
+  // moderation flows (kick/ban/disable, admin tab lookups) can grab
+  // the raw user/character ids without retyping. Read directly off
+  // the chat store — ProfileModal can be opened from many surfaces
+  // and a dedicated prop would just be parent-prop-drilling.
+  const viewerRole = useChat((s) => s.me?.role ?? null);
+  const isModViewer = viewerRole !== null && roleRank(viewerRole) >= roleRank("mod");
   // Earning — fetch the IDENTITY's own pool so the hero shows the
   // right XP / currency / rank / border. Character profiles must
   // pass their character id; without it the endpoint returns the
@@ -725,36 +733,56 @@ function ProfileBody({
               <span aria-hidden>·</span>
               <CopyProfileLink name={name} />
             </div>
-            {/* Mod-only owner attribution. The server only ships
-                `ownerUsername` on character profiles when the viewer
-                has mod-tier authority (roleRank >= mod), so the field's
-                very presence is the gate — we just render it when set.
+            {/* Mod-only attribution + id-copy chips. Two gates:
+                  - `ownerUsername` is shipped server-side only to
+                    mod+ viewers on character profiles, so its very
+                    presence proves the viewer is privileged.
+                  - For master profiles, the server doesn't ship a
+                    parallel marker; we gate the row on the viewer's
+                    own role read from the chat store (`isModViewer`).
+                Either condition surfaces the row; if both are absent
+                we render nothing so non-mod viewers see no chrome.
                 The MOD chip is a visual reminder that this is
-                privileged info (don't screen-share it carelessly);
-                the username is clickable to open the OOC master's
-                profile so the mod can pivot one click without
-                re-typing into /whois. */}
-            {profile.kind === "character" && profile.profile.ownerUsername ? (
-              <div className="mt-1 flex items-center gap-1.5 text-[11px] text-keep-muted">
+                privileged info — don't screen-share it carelessly. */}
+            {(profile.kind === "character" && profile.profile.ownerUsername) || isModViewer ? (
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-keep-muted">
                 <span
                   className="rounded border border-keep-accent/40 bg-keep-accent/10 px-1 py-0 text-[9px] font-semibold uppercase tracking-widest text-keep-accent"
                   title="Visible to moderators only."
                 >
                   Mod
                 </span>
-                <span>Owned by</span>
-                {onOpenProfile ? (
-                  <button
-                    type="button"
-                    onClick={() => onOpenProfile(profile.profile.ownerUsername!)}
-                    className="font-semibold text-keep-action hover:underline"
-                    title={`Open ${profile.profile.ownerUsername}'s master profile`}
-                  >
-                    {profile.profile.ownerUsername}
-                  </button>
-                ) : (
-                  <span className="font-semibold text-keep-text">{profile.profile.ownerUsername}</span>
-                )}
+                {profile.kind === "character" && profile.profile.ownerUsername ? (
+                  <span className="inline-flex items-center gap-1">
+                    <span>Owned by</span>
+                    {onOpenProfile ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenProfile(profile.profile.ownerUsername!)}
+                        className="font-semibold text-keep-action hover:underline"
+                        title={`Open ${profile.profile.ownerUsername}'s master profile`}
+                      >
+                        {profile.profile.ownerUsername}
+                      </button>
+                    ) : (
+                      <span className="font-semibold text-keep-text">{profile.profile.ownerUsername}</span>
+                    )}
+                  </span>
+                ) : null}
+                {/* Id chips. User id always renders for mod viewers;
+                    character id only on character profiles. Both copy
+                    the full nanoid to the clipboard on click — the
+                    label "user id" / "character id" stays distinct so
+                    a mod copying into /disable vs /ban-by-character
+                    can't grab the wrong one. */}
+                {isModViewer ? (
+                  <>
+                    <CopyId label="user id" id={profile.profile.userId} />
+                    {profile.kind === "character" ? (
+                      <CopyId label="char id" id={profile.profile.id} />
+                    ) : null}
+                  </>
+                ) : null}
               </div>
             ) : null}
             {/* Action row — desktop only. Mobile moves the same
@@ -1223,6 +1251,49 @@ function CopyProfileLink({ name }: { name: string }) {
     >
       {copied ? "copied!" : `/p/${name}`}
     </button>
+  );
+}
+
+/**
+ * Mod-only "copy this id" pill. Renders the identity label
+ * ("user id", "character id") next to a click-to-copy chip showing
+ * an abbreviated prefix of the full id. Tooltip carries the full id
+ * so a mod can confirm what they're about to copy before clicking.
+ *
+ * Used in the moderator attribution row on the profile so mods +
+ * admins can grab the raw id for moderation features (kick/ban/disable
+ * routes, admin tab lookups, etc.) without bouncing through the URL
+ * bar or the admin panel.
+ */
+function CopyId({ label, id }: { label: string; id: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Same Safari pre-13.1 / sandboxed-iframe fallback CopyProfileLink uses.
+      window.prompt("Copy this id:", id);
+    }
+  }
+  // Show only the first segment to keep the chip narrow — full id
+  // rides on the title attribute. nanoid ids run ~21 chars, so a
+  // 6-char prefix is enough to disambiguate at a glance without
+  // crowding the meta row.
+  const preview = id.length > 8 ? `${id.slice(0, 6)}…` : id;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="text-[10px] uppercase tracking-widest text-keep-muted">{label}</span>
+      <button
+        type="button"
+        onClick={copy}
+        title={`Copy ${id}`}
+        className="rounded border border-keep-rule/60 px-1 font-mono text-[10px] hover:border-keep-action hover:text-keep-action"
+      >
+        {copied ? "copied!" : preview}
+      </button>
+    </span>
   );
 }
 

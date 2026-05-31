@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { isAdminRole, isMasterAdminRole, roleRank } from "@thekeep/shared";
 import { bans, mutes, roomMembers, rooms, users } from "../../db/schema.js";
 import {
@@ -10,20 +10,49 @@ import {
 } from "../../realtime/broadcast.js";
 import { formatDuration, parseDuration } from "../duration.js";
 import { recordAudit } from "../../audit.js";
+import { formatAmbiguousNotice, resolveIdentityArg } from "../identityArg.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
   ctx.socket.emit("error:notice", { code, message });
 }
 
-/** Look up a user by master username (the canonical mod-target identifier). */
+/**
+ * Look up a moderation target through the shared resolver. Accepts
+ * `@id:` / `@cid:` tokens AND bare names, and emits the appropriate
+ * notice on miss / ambiguous before returning null. Callers just
+ * check `if (!target) return;`.
+ *
+ * Mod commands operate on the USER account (kick/ban/mute kick the
+ * whole session, not a single character), so we follow the resolved
+ * target's `userId` back to the full users row — that's the shape
+ * the existing call sites consume for permissions + display.
+ *
+ * Stashes the RESOLVED display name on the returned row's
+ * `__resolvedDisplayName` so the caller can broadcast `${target.name}
+ * promoted to room mod` using the IDENTITY the caller typed (the
+ * character name when they targeted a character, the master username
+ * otherwise) instead of always leaking the master username.
+ */
 async function findUserByName(ctx: CommandContext, name: string) {
-  const lower = name.toLowerCase();
-  return (await ctx.db
+  const resolution = await resolveIdentityArg(ctx.db, name);
+  if (resolution.kind === "none") {
+    notice(ctx, "NO_USER", `No user named "${name}".`);
+    return undefined;
+  }
+  if (resolution.kind === "ambiguous") {
+    notice(ctx, "MOD_AMBIGUOUS", formatAmbiguousNotice(name, resolution.matches));
+    return undefined;
+  }
+  const row = (await ctx.db
     .select()
     .from(users)
-    .where(sql`lower(${users.username}) = ${lower}`)
+    .where(eq(users.id, resolution.target.userId))
     .limit(1))[0];
+  if (!row) return undefined;
+  return Object.assign(row, {
+    __resolvedDisplayName: resolution.target.displayName,
+  });
 }
 
 async function getRoomMember(ctx: CommandContext, roomId: string, userId: string) {
@@ -108,7 +137,7 @@ export const kickCommand: CommandHandler = {
     if (!name) return notice(ctx, "EMPTY", "Usage: /kick <username> [reason]");
 
     const target = await findUserByName(ctx, name);
-    if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
+    if (!target) return;  // findUserByName emitted the appropriate notice.
     if (target.id === ctx.user.id) return notice(ctx, "SELF", "Kicking yourself isn't useful.");
     if (roleRank(target.role) > roleRank(ctx.user.role)) {
       return notice(ctx, "PERM", "Site admins can't be kicked by non-admins.");
@@ -198,7 +227,7 @@ export const muteCommand: CommandHandler = {
       return notice(ctx, "BAD_DURATION", "Bad duration. Use forms like 5m, 30m, 1h, 1h20m, 7d.");
     }
     const target = await findUserByName(ctx, name);
-    if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
+    if (!target) return;  // findUserByName emitted the appropriate notice.
     if (target.id === ctx.user.id) return notice(ctx, "SELF", "Muting yourself isn't useful.");
     if (roleRank(target.role) > roleRank(ctx.user.role)) {
       return notice(ctx, "PERM", "Site admins can't be muted by non-admins.");
@@ -250,7 +279,7 @@ export const unmuteCommand: CommandHandler = {
     const name = ctx.argsText.trim();
     if (!name) return notice(ctx, "EMPTY", "Usage: /unmute <username>");
     const target = await findUserByName(ctx, name);
-    if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
+    if (!target) return;  // findUserByName emitted the appropriate notice.
     const r = await ctx.db
       .delete(mutes)
       .where(and(eq(mutes.roomId, ctx.roomId), eq(mutes.userId, target.id)));
@@ -283,10 +312,19 @@ export const promoteCommand: CommandHandler = {
     const name = ctx.argsText.trim();
     if (!name) return notice(ctx, "EMPTY", "Usage: /promote <username>");
     const target = await findUserByName(ctx, name);
-    if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
+    if (!target) return;  // findUserByName emitted the appropriate notice.
     if (target.id === ctx.user.id) return notice(ctx, "SELF", "You're already at the top of this room.");
 
-    // Ensure they have a row, then upgrade to mod.
+    // Ensure they have a row, then upgrade to mod. Room moderation
+    // is stored per-USER on `room_members` today (not per-identity),
+    // so promoting either the master or a character of the same user
+    // grants moderation power across every identity they voice in
+    // this room. That's the current model; the broadcast below uses
+    // the IDENTITY the caller targeted (character name when the
+    // caller typed a character, master name otherwise) so the room
+    // sees the name they recognize — but the underlying privilege is
+    // user-scoped until / unless we partition room_members per
+    // identity.
     await ctx.db
       .insert(roomMembers)
       .values({ roomId: ctx.roomId, userId: target.id, role: "mod" })
@@ -294,9 +332,10 @@ export const promoteCommand: CommandHandler = {
         target: [roomMembers.roomId, roomMembers.userId],
         set: { role: "mod" },
       });
+    const displayed = target.__resolvedDisplayName;
     await addMessage(ctx, {
       kind: "system",
-      body: `${ctx.user.displayName} promoted ${target.username} to room mod.`,
+      body: `${ctx.user.displayName} promoted ${displayed} to room mod.`,
     });
     await recordAudit(ctx.db, {
       actorUserId: ctx.user.id,
@@ -319,11 +358,12 @@ export const demoteCommand: CommandHandler = {
     const name = ctx.argsText.trim();
     if (!name) return notice(ctx, "EMPTY", "Usage: /demote <username>");
     const target = await findUserByName(ctx, name);
-    if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
+    if (!target) return;  // findUserByName emitted the appropriate notice.
+    const displayed = target.__resolvedDisplayName;
     const m = await getRoomMember(ctx, ctx.roomId, target.id);
-    if (!m) return notice(ctx, "NO_MEMBER", `${target.username} isn't in this room's member list.`);
+    if (!m) return notice(ctx, "NO_MEMBER", `${displayed} isn't in this room's member list.`);
     if (m.role === "owner") return notice(ctx, "PERM", "Use /demote on mods only - owners can't be demoted from their own room.");
-    if (m.role === "member") return notice(ctx, "NO_MOD", `${target.username} isn't a mod.`);
+    if (m.role === "member") return notice(ctx, "NO_MOD", `${displayed} isn't a mod.`);
 
     await ctx.db
       .update(roomMembers)
@@ -331,7 +371,7 @@ export const demoteCommand: CommandHandler = {
       .where(and(eq(roomMembers.roomId, ctx.roomId), eq(roomMembers.userId, target.id)));
     await addMessage(ctx, {
       kind: "system",
-      body: `${ctx.user.displayName} demoted ${target.username} to member.`,
+      body: `${ctx.user.displayName} demoted ${displayed} to member.`,
     });
     await recordAudit(ctx.db, {
       actorUserId: ctx.user.id,
@@ -355,7 +395,7 @@ export const promoteAdminCommand: CommandHandler = {
     const name = ctx.argsText.trim();
     if (!name) return notice(ctx, "EMPTY", "Usage: /promoteadmin <username>");
     const target = await findUserByName(ctx, name);
-    if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
+    if (!target) return;  // findUserByName emitted the appropriate notice.
     if (isAdminRole(target.role)) return notice(ctx, "ALREADY", `${target.username} is already a site admin.`);
 
     const priorRole = target.role;
@@ -383,7 +423,7 @@ export const demoteAdminCommand: CommandHandler = {
     const name = ctx.argsText.trim();
     if (!name) return notice(ctx, "EMPTY", "Usage: /demoteadmin <username>");
     const target = await findUserByName(ctx, name);
-    if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
+    if (!target) return;  // findUserByName emitted the appropriate notice.
     // /demoteadmin only handles plain admins. Master admins must be
     // demoted via the admin panel by another master, since /demoteadmin
     // has no way to ask "demote to admin" vs "demote to user" anyway.
@@ -464,7 +504,7 @@ export const banCommand: CommandHandler = {
     const reason = [maybeDur, ...rest].slice(reasonStart - 1).filter(Boolean).join(" ").trim();
 
     const target = await findUserByName(ctx, name);
-    if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
+    if (!target) return;  // findUserByName emitted the appropriate notice.
     if (target.id === ctx.user.id) return notice(ctx, "SELF", "Banning yourself isn't useful.");
     if (roleRank(target.role) > roleRank(ctx.user.role)) {
       return notice(ctx, "PERM", "Site admins can't be banned by non-admins.");
@@ -547,7 +587,7 @@ export const unbanCommand: CommandHandler = {
     const name = ctx.argsText.trim();
     if (!name) return notice(ctx, "EMPTY", "Usage: /unban <username>");
     const target = await findUserByName(ctx, name);
-    if (!target) return notice(ctx, "NO_USER", `No user named "${name}".`);
+    if (!target) return;  // findUserByName emitted the appropriate notice.
 
     const r = await ctx.db
       .delete(bans)

@@ -1,10 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { ChatMessage } from "@thekeep/shared";
-import { ignores, messages, users } from "../../db/schema.js";
+import { characters, ignores, messages, users } from "../../db/schema.js";
 import { pushTriggers } from "../../realtime/broadcast.js";
-import { eqNameInsensitive } from "../../lib/nameLookup.js";
 import { stripFirstToken } from "../parser.js";
+import { formatAmbiguousNotice, resolveIdentityArg } from "../identityArg.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -49,50 +49,48 @@ export const whisperCommand: CommandHandler = {
       return;
     }
 
-    // Resolve recipient - master username first, then active character
-    // name. Comparison is space-insensitive (NBSP folds to ASCII space)
-    // so `/whisper John Doe` matches a master stored as `John Doe`
-    // (NBSP-separated, the master-username canonical form) without the
-    // caller having to know to type Alt+0160. Same fold applies to
-    // character-name lookups so a regular-space character name still
-    // matches when the caller habit-types NBSP from the master side.
-    let target = (await ctx.db
-      .select()
-      .from(users)
-      .where(eqNameInsensitive(users.username, targetName))
-      .limit(1))[0];
-
-    if (!target) {
-      // Try character name → owning user (only if that char is currently active).
-      const { characters } = await import("../../db/schema.js");
-      const c = (await ctx.db
-        .select()
-        .from(characters)
-        .where(eqNameInsensitive(characters.name, targetName))
-        .limit(1))[0];
-      if (c && !c.deletedAt) {
-        const owner = (await ctx.db
-          .select()
-          .from(users)
-          .where(eq(users.id, c.userId))
-          .limit(1))[0];
-        if (owner && owner.activeCharacterId === c.id) target = owner;
-      }
-    }
-
-    if (!target) {
+    // Resolve recipient via the shared token-or-name resolver. Tokens
+    // (`@id:<userId>` / `@cid:<characterId>`) pin a specific identity;
+    // bare names go through NBSP-aware lookup against both tables and
+    // can come back ambiguous when more than one identity shares the
+    // typed name. Ambiguous goes to a system notice listing the
+    // tokens so the user can re-run with the right one.
+    const resolution = await resolveIdentityArg(ctx.db, targetName);
+    if (resolution.kind === "none") {
       notice(ctx, "WHISPER_NO_USER", `No user named "${targetName}".`);
       return;
     }
-    if (target.id === ctx.user.id) {
+    if (resolution.kind === "ambiguous") {
+      notice(ctx, "WHISPER_AMBIGUOUS", formatAmbiguousNotice(targetName, resolution.matches));
+      return;
+    }
+    const targetUserId = resolution.target.userId;
+    if (targetUserId === ctx.user.id) {
       notice(ctx, "WHISPER_SELF", "Whispering yourself isn't useful.");
       return;
     }
+    // Fetch the full target row for downstream needs (activeCharacterId
+    // to resolve display name). One indexed lookup; cheap.
+    const target = (await ctx.db
+      .select()
+      .from(users)
+      .where(eq(users.id, targetUserId))
+      .limit(1))[0];
+    if (!target) {
+      // Resolver said unique but the row vanished between resolve and
+      // fetch — exceedingly rare race (admin disable mid-command).
+      notice(ctx, "WHISPER_NO_USER", `No user named "${targetName}".`);
+      return;
+    }
 
-    // Resolve target's display name - prefer their active character name.
+    // Resolve target's display name. When the resolver hit a character
+    // token, prefer the character's name explicitly — that's the
+    // identity the caller addressed. Otherwise fall back to the
+    // target's currently-active character, then the master username.
     let targetDisplayName = target.username;
-    if (target.activeCharacterId) {
-      const { characters } = await import("../../db/schema.js");
+    if (resolution.target.characterId) {
+      targetDisplayName = resolution.target.displayName;
+    } else if (target.activeCharacterId) {
       const c = (await ctx.db
         .select()
         .from(characters)
@@ -110,7 +108,6 @@ export const whisperCommand: CommandHandler = {
     // on color.
     let senderColor: string | null = ctx.user.chatColor;
     if (ctx.user.activeCharacterId) {
-      const { characters } = await import("../../db/schema.js");
       const cc = (await ctx.db
         .select({ chatColor: characters.chatColor })
         .from(characters)

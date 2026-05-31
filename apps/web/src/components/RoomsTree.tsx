@@ -47,8 +47,8 @@ interface Props {
   activeCharacterId?: string | null;
   /** Display name of the active character — used by the identity button label. */
   activeCharacterName?: string | null;
-  onIconClick: (userId: string, displayName: string) => void;
-  onNameClick: (userId: string, displayName: string) => void;
+  onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
+  onNameClick: (userId: string, displayName: string, characterId?: string | null) => void;
   onRoomClick: (roomId: string) => void;
   onCommand: (text: string) => void;
   /** Open the world viewer modal for a given world id (clicking a primary-world section header). */
@@ -284,8 +284,8 @@ function RoomGroup({
 }: {
   room: RoomWithOccupants;
   isCurrent: boolean;
-  onIconClick: (userId: string, displayName: string) => void;
-  onNameClick: (userId: string, displayName: string) => void;
+  onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
+  onNameClick: (userId: string, displayName: string, characterId?: string | null) => void;
   onRoomClick: (roomId: string) => void;
   onWorldClick: (worldId: string) => void;
 }) {
@@ -490,8 +490,8 @@ function RoomGroup({
                           selectedFreeformBorderKey={o.selectedFreeformBorderKey ?? null}
                           freeformBorderConfig={o.freeformBorderConfig ?? null}
                           inlineAvatar={o.inlineAvatarEnabled}
-                          onIconClick={() => onIconClick(o.userId, o.displayName)}
-                          onNameClick={() => onNameClick(o.userId, o.displayName)}
+                          onIconClick={() => onIconClick(o.userId, o.displayName, o.characterId)}
+                          onNameClick={() => onNameClick(o.userId, o.displayName, o.characterId)}
                           // Rail rows are width-constrained (user-
                           // draggable resize handle) and have to
                           // ellipsize long names. Chat lines pass the
@@ -615,7 +615,21 @@ interface StaffChip {
  * the bg gets nudged toward legibility before the icon paints.
  */
 function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
-  if (o.accountRole === "masteradmin") {
+  // Site-level staff icons (masteradmin / admin / site-mod) are
+  // suppressed on character rows. The account-role is a property of
+  // the MASTER account; surfacing it on a character voice tells the
+  // room "this character belongs to a staff account," which is
+  // exactly the OOC ↔ character partition that's supposed to stay
+  // private. Per the project contract, characters are their own
+  // accounts as far as the public view is concerned — anyone who
+  // wants to claim their staff badge can voice the master to do so.
+  //
+  // Per-room badges (`o.role`) stay independent because they're
+  // already keyed per-identity-in-room: a character voicing a room
+  // they moderate has legitimately earned the room-mod chip in
+  // THIS room.
+  const isMasterRow = o.characterId === null;
+  if (isMasterRow && o.accountRole === "masteradmin") {
     return {
       label: "Master admin",
       Icon: MasterAdminIcon,
@@ -624,7 +638,7 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
         "Master admin — site-wide authority including settings, branding, and account management.",
     };
   }
-  if (o.accountRole === "admin") {
+  if (isMasterRow && o.accountRole === "admin") {
     return {
       label: "Admin",
       Icon: AdminIcon,
@@ -632,10 +646,14 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
       title: "Site admin — site-wide moderation across every room.",
     };
   }
-  if (o.accountRole === "mod" || o.role === "mod" || o.role === "owner") {
+  // Site-mod badge: master row only (same reasoning). Per-room
+  // owner / mod still show on character rows since they're earned
+  // per-identity, not site-wide.
+  const showSiteMod = isMasterRow && o.accountRole === "mod";
+  if (showSiteMod || o.role === "mod" || o.role === "owner") {
     return {
       label:
-        o.accountRole === "mod"
+        showSiteMod
           ? "Site moderator"
           : o.role === "owner"
           ? "Room owner"
@@ -643,7 +661,7 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
       Icon: ModIcon,
       color: legibleAgainstBg(theme.system, theme.bg),
       title:
-        o.accountRole === "mod"
+        showSiteMod
           ? "Site moderator — moderation across every room."
           : o.role === "owner"
           ? "Room owner — moderation authority in this room."

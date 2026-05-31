@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
-import { characters, ignores, users } from "../../db/schema.js";
-import { eqNameInsensitive } from "../../lib/nameLookup.js";
+import { ignores, users } from "../../db/schema.js";
+import { formatAmbiguousNotice, resolveIdentityArg, type ResolvedTarget } from "../identityArg.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -8,38 +8,34 @@ function notice(ctx: CommandContext, code: string, message: string) {
 }
 
 /**
- * Resolve a target name (master username OR active character name) to a
- * user row. Mirrors /whisper's lookup so users can ignore by whichever name
- * they see in chat. Returns null if the name doesn't resolve to anyone.
+ * Resolve `raw` to a target user. Tokens (`@id:` / `@cid:`) win;
+ * otherwise we run the NBSP-aware name lookup and surface ambiguous
+ * matches via a system notice so the caller can pick the right one.
+ *
+ * Returns the ResolvedTarget on success. On any failure (no match,
+ * ambiguous, self-targeting) emits the appropriate notice and returns
+ * null — the caller short-circuits.
+ *
+ * NOTE: `/ignore` is keyed on the OOC master id, so we surface
+ * `target.userId` regardless of whether the caller pointed at a
+ * character. That preserves the "ignoring `Kaal` silences WAS no
+ * matter which face they're wearing" contract — character disambig
+ * just helps you specify WHICH user when names collide.
  */
-async function resolveTarget(ctx: CommandContext, name: string) {
-  // Space-insensitive match — NBSP and ASCII space are equivalent for
-  // lookup so `/ignore John Doe` matches a master stored as
-  // `John Doe` (NBSP).
-  const u = (await ctx.db
-    .select()
-    .from(users)
-    .where(eqNameInsensitive(users.username, name))
-    .limit(1))[0];
-  if (u) return u;
-
-  // Character name resolves to its owning user - regardless of whether that
-  // character is currently active. Ignoring "Kaal" silences WAS no matter
-  // which face they're wearing, which is the intuitive behavior.
-  const c = (await ctx.db
-    .select()
-    .from(characters)
-    .where(eqNameInsensitive(characters.name, name))
-    .limit(1))[0];
-  if (c && !c.deletedAt) {
-    const owner = (await ctx.db
-      .select()
-      .from(users)
-      .where(eq(users.id, c.userId))
-      .limit(1))[0];
-    if (owner) return owner;
+async function resolveIgnoreTarget(
+  ctx: CommandContext,
+  raw: string,
+): Promise<ResolvedTarget | null> {
+  const resolution = await resolveIdentityArg(ctx.db, raw);
+  if (resolution.kind === "none") {
+    notice(ctx, "NO_USER", `No user named "${raw}".`);
+    return null;
   }
-  return null;
+  if (resolution.kind === "ambiguous") {
+    notice(ctx, "IGNORE_AMBIGUOUS", formatAmbiguousNotice(raw, resolution.matches));
+    return null;
+  }
+  return resolution.target;
 }
 
 /**
@@ -94,37 +90,37 @@ export const ignoreCommand: CommandHandler = {
       return;
     }
 
-    const u = await resolveTarget(ctx, target);
-    if (!u) return notice(ctx, "NO_USER", `No user named "${target}".`);
-    if (u.id === ctx.user.id) return notice(ctx, "IGNORE_SELF", "You can't ignore yourself.");
+    const resolved = await resolveIgnoreTarget(ctx, target);
+    if (!resolved) return;
+    if (resolved.userId === ctx.user.id) return notice(ctx, "IGNORE_SELF", "You can't ignore yourself.");
 
     // Toggle semantics: /ignore on an already-ignored user removes the
     // block (matches /unignore). This lets the user re-use the same
     // command for both directions and matches the "click Ignore again
     // to undo" affordance on the profile modal. Both sides of the
     // ignores row key on the OOC master id (ctx.user.id is always the
-    // master; resolveTarget walks character→user) so the block is
+    // master; the resolver walks character→user) so the block is
     // global across every character either side plays.
     const existing = (await ctx.db
       .select()
       .from(ignores)
-      .where(and(eq(ignores.userId, ctx.user.id), eq(ignores.ignoredUserId, u.id)))
+      .where(and(eq(ignores.userId, ctx.user.id), eq(ignores.ignoredUserId, resolved.userId)))
       .limit(1))[0];
 
     if (existing) {
       await ctx.db
         .delete(ignores)
-        .where(and(eq(ignores.userId, ctx.user.id), eq(ignores.ignoredUserId, u.id)));
-      notice(ctx, "UNIGNORED", `No longer ignoring ${u.username}.`);
+        .where(and(eq(ignores.userId, ctx.user.id), eq(ignores.ignoredUserId, resolved.userId)));
+      notice(ctx, "UNIGNORED", `No longer ignoring ${resolved.masterUsername}.`);
       return;
     }
 
     await ctx.db
       .insert(ignores)
-      .values({ userId: ctx.user.id, ignoredUserId: u.id })
+      .values({ userId: ctx.user.id, ignoredUserId: resolved.userId })
       .onConflictDoNothing();
 
-    notice(ctx, "IGNORED", `Now ignoring ${u.username}. Use /unignore ${u.username} (or /ignore ${u.username} again) to undo.`);
+    notice(ctx, "IGNORED", `Now ignoring ${resolved.masterUsername}. Use /unignore ${resolved.masterUsername} (or /ignore ${resolved.masterUsername} again) to undo.`);
   },
 };
 
@@ -142,17 +138,17 @@ export const unignoreCommand: CommandHandler = {
     const target = ctx.argsText.trim();
     if (!target) return notice(ctx, "NEED_NAME", "Usage: /unignore <username>");
 
-    const u = await resolveTarget(ctx, target);
-    if (!u) return notice(ctx, "NO_USER", `No user named "${target}".`);
+    const resolved = await resolveIgnoreTarget(ctx, target);
+    if (!resolved) return;
 
     const result = await ctx.db
       .delete(ignores)
-      .where(and(eq(ignores.userId, ctx.user.id), eq(ignores.ignoredUserId, u.id)));
+      .where(and(eq(ignores.userId, ctx.user.id), eq(ignores.ignoredUserId, resolved.userId)));
 
     if (result.changes === 0) {
-      notice(ctx, "NOT_IGNORED", `You weren't ignoring ${u.username}.`);
+      notice(ctx, "NOT_IGNORED", `You weren't ignoring ${resolved.masterUsername}.`);
     } else {
-      notice(ctx, "UNIGNORED", `No longer ignoring ${u.username}.`);
+      notice(ctx, "UNIGNORED", `No longer ignoring ${resolved.masterUsername}.`);
     }
   },
 };

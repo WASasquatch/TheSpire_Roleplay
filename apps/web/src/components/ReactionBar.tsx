@@ -184,7 +184,13 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetKind, targetId, initialEntries]);
 
-  const entries = cached ?? initialEntries ?? [];
+  // Filter to entries with a well-formed ref. Defensive against a
+  // legacy/in-flight payload that's missing the discriminator; one bad
+  // entry shouldn't crash the whole MessageList. Matches the
+  // null-tolerance in `reactionRefKey` + `isUnicodeReaction`.
+  const entries = (cached ?? initialEntries ?? []).filter(
+    (e) => e.ref && typeof e.ref === "object" && (e.ref.kind === "sheet" || e.ref.kind === "unicode"),
+  );
 
   const toggle = (ref: ReactionRef) => toggleReaction(targetKind, targetId, ref, asCharacterId);
 
@@ -249,10 +255,16 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
  *  the tooltip, and the full-list modal so the rendering posture
  *  stays consistent.
  * ============================================================= */
-function ReactionGlyph({ ref, size }: { ref: ReactionRef; size: number }) {
+function ReactionGlyph({ ref, size }: { ref: ReactionRef | null | undefined; size: number }) {
+  // Defensive: a malformed entry (legacy wire shape, mid-flight
+  // socket payload) renders as nothing rather than crashing the
+  // whole MessageList. The defensive guards mirror those in
+  // `reactionRefKey` / `isUnicodeReaction` over in shared.
+  if (!ref || typeof ref !== "object") return null;
   if (ref.kind === "sheet") {
     return <EmoticonSprite sheetSlug={ref.sheetSlug} cellIndex={ref.cellIndex} size={size} />;
   }
+  if (ref.kind !== "unicode") return null;
   // Unicode: a sized span carrying the raw codepoint. `leading-none`
   // keeps the glyph from inheriting line-height that would push it
   // off-center inside the chip. `lineHeight: 1` on the inline style
@@ -320,7 +332,12 @@ function ReactionChip({ entry, onClick }: { entry: ReactionEntry; onClick: () =>
   // sheet animation hint, so they render with no jiggle. Pass the
   // sheet's label only when the ref is a sheet — empty string for
   // Unicode is a safe no-op for the animationClassForLabel mapper.
-  const moodClass = animationClassForLabel(entry.ref.kind === "sheet" ? entry.label : "");
+  // Defensive: same null-tolerance as ReactionGlyph. A missing ref
+  // resolves to "no mood class" — the chip renders without a jiggle
+  // animation rather than crashing the whole row.
+  const moodClass = animationClassForLabel(
+    entry.ref && typeof entry.ref === "object" && entry.ref.kind === "sheet" ? entry.label : "",
+  );
   return (
     <>
       <button

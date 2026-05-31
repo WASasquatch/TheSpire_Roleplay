@@ -115,17 +115,31 @@ export type ReactionRef =
 /** Stable string key for a ReactionRef. Used as a Map key when
  *  client-side code dedupes reactions and as the audit token in
  *  socket events. Mirror the format the server's COALESCE-based
- *  unique index uses so both layers see the same identifier. */
-export function reactionRefKey(ref: ReactionRef): string {
-  return ref.kind === "sheet"
-    ? `${ref.sheetSlug}:${ref.cellIndex}`
-    : ref.char;
+ *  unique index uses so both layers see the same identifier.
+ *
+ *  Defensive: returns a sentinel when `ref` is missing or malformed.
+ *  This guards the entire reaction-rendering pipeline against an
+ *  in-flight legacy payload (the wire format added `ref` in 0181 —
+ *  any cached/stale entry serialized before that ships without it).
+ *  Crashing the picker / message list for the whole user because one
+ *  reaction is shaped wrong is not worth it; a "?" entry that just
+ *  doesn't merge with anything else is the right failure mode. */
+export function reactionRefKey(ref: ReactionRef | null | undefined): string {
+  if (!ref || typeof ref !== "object") return "?:invalid";
+  if (ref.kind === "sheet") return `${ref.sheetSlug}:${ref.cellIndex}`;
+  if (ref.kind === "unicode") return ref.char;
+  return "?:invalid";
 }
 
 /** Convenience predicate so call sites can write
- *  `if (isUnicodeReaction(entry.ref))` and TypeScript narrows. */
-export function isUnicodeReaction(ref: ReactionRef): ref is Extract<ReactionRef, { kind: "unicode" }> {
-  return ref.kind === "unicode";
+ *  `if (isUnicodeReaction(entry.ref))` and TypeScript narrows.
+ *  Same defensive null-tolerance as `reactionRefKey` — returns false
+ *  for a missing/malformed ref so call sites don't have to add their
+ *  own pre-check. */
+export function isUnicodeReaction(
+  ref: ReactionRef | null | undefined,
+): ref is Extract<ReactionRef, { kind: "unicode" }> {
+  return !!ref && typeof ref === "object" && ref.kind === "unicode";
 }
 
 /** One distinct emoji reaction on a single target, plus the list of

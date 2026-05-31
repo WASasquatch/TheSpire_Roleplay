@@ -3070,17 +3070,30 @@ export const messageReactions = sqliteTable(
     /** Display name snapshot — survives renames the same way
      *  messages.displayName does. */
     displayName: text("display_name").notNull(),
+    /** Legacy sheet ref. Nullable since migration 0181 — set when the
+     *  reaction came from a sheet pick. Mutually exclusive with
+     *  `unicodeChar`. App layer polices the "exactly one" rule. */
     sheetId: text("sheet_id")
-      .notNull()
       .references(() => emoticonSheets.id, { onDelete: "cascade" }),
-    /** 0..15 row-major. */
-    cellIndex: integer("cell_index").notNull(),
+    /** 0..15 row-major. Null when `unicodeChar` is set. */
+    cellIndex: integer("cell_index"),
+    /** Raw Unicode codepoint(s) for emoji-style reactions added via
+     *  the Unicode tab in the picker. Mutually exclusive with the
+     *  sheet ref above. Capped at 16 chars to cover even the longest
+     *  compound RGI sequences (ZWJ families etc.) without leaving the
+     *  column open to arbitrary string dumping. */
+    unicodeChar: text("unicode_char"),
     createdAt: ts("created_at"),
   },
   (t) => ({
-    /** Discord rule: one user, one (sheet, cell), one target. */
+    /** Discord rule: one user, one emoji, one target. Across both ref
+     *  shapes — the index is keyed on a normalized COALESCE expression
+     *  per migration 0181. Drizzle doesn't model expression indexes
+     *  natively; we still declare the column tuple here so the
+     *  migration runner picks up the index by name and the application
+     *  doesn't drift from the DB-level constraint. */
     uniq: uniqueIndex("message_reactions_uniq")
-      .on(t.targetKind, t.targetId, t.userId, t.sheetId, t.cellIndex),
+      .on(t.targetKind, t.targetId, t.userId, t.sheetId, t.cellIndex, t.unicodeChar),
     /** Hot read path: render the ReactionBar for visible rows. */
     targetIdx: index("message_reactions_target_idx").on(t.targetKind, t.targetId),
     /** Defense-in-depth: user reaction history lookups. */
@@ -3132,4 +3145,57 @@ export type DbEarningNotification = typeof earningNotifications.$inferSelect;
 export type DbItem = typeof items.$inferSelect;
 export type DbIdentityInventory = typeof identityInventory.$inferSelect;
 export type DbIdentityCollection = typeof identityCollection.$inferSelect;
+
+/* ---------- role_permission_grants ----------
+ * Phase 1 of the granular permission system (migration 0179). One row per
+ * (role, permission_key) pair. Holds which permissions each role tier has
+ * by default. Masteradmin has no row here — its bypass is hardcoded in
+ * `apps/server/src/auth/permissions.ts`. See plan.md for the catalog +
+ * resolution precedence (masteradmin > user override > role grant > deny).
+ */
+export const rolePermissionGrants = sqliteTable(
+  "role_permission_grants",
+  {
+    role: text("role").notNull(),
+    permissionKey: text("permission_key").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.role, t.permissionKey] }),
+    roleIdx: index("role_permission_grants_role_idx").on(t.role),
+  }),
+);
+
+/* ---------- user_permission_overrides ----------
+ * Per-user grants/revokes that layer on top of the role grants. Lets the
+ * install give a specific user a single extra power (or take one away)
+ * without minting a new role tier. Starts empty after migration 0179; the
+ * Phase-2 matrix UI's "By user" sub-tab fills it.
+ *
+ * `granted = 1` → explicit grant (the user has this permission even if
+ *                 their role doesn't);
+ * `granted = 0` → explicit revoke (the user does NOT have this permission
+ *                 even if their role grants it).
+ * Absence of a row → fall back to the role grant.
+ */
+export const userPermissionOverrides = sqliteTable(
+  "user_permission_overrides",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    permissionKey: text("permission_key").notNull(),
+    granted: integer("granted", { mode: "boolean" }).notNull(),
+    setByUserId: text("set_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    setAt: ts("set_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.permissionKey] }),
+    userIdx: index("user_permission_overrides_user_idx").on(t.userId),
+  }),
+);
+
+export type DbRolePermissionGrant = typeof rolePermissionGrants.$inferSelect;
+export type DbUserPermissionOverride = typeof userPermissionOverrides.$inferSelect;
 export type DbIdentityPetCollection = typeof identityPetCollection.$inferSelect;

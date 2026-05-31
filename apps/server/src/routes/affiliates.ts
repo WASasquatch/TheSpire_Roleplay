@@ -1,12 +1,12 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { isAdminRole } from "@thekeep/shared";
 import { asc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { affiliates } from "../db/schema.js";
-import type { Role } from "@thekeep/shared";
+import type { PermissionKey, Role } from "@thekeep/shared";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
+import { hasPermission } from "../auth/permissions.js";
 import type { Db } from "../db/index.js";
 
 const createBody = z.object({
@@ -28,9 +28,13 @@ interface SessionUserCtx {
   role: Role;
 }
 
-async function requireAdmin(req: FastifyRequest, db: Db): Promise<SessionUserCtx | null> {
+async function requireAdmin(
+  req: FastifyRequest,
+  db: Db,
+  key: PermissionKey,
+): Promise<SessionUserCtx | null> {
   const me = await getSessionUser(req, db);
-  if (!me || !isAdminRole(me.role)) return null;
+  if (!me || !(await hasPermission(me, key, db))) return null;
   return me;
 }
 
@@ -62,8 +66,8 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
 
   /** Admin list - everything, with admin-only fields included for editing. */
   app.get("/admin/affiliates", async (req, reply) => {
-    const me = await requireAdmin(req, db);
-    if (!me) { reply.code(403); return { error: "admin only" }; }
+    const me = await requireAdmin(req, db, "view_admin_affiliates");
+    if (!me) { reply.code(403); return { error: "forbidden", missing: "view_admin_affiliates" }; }
     const rows = await db
       .select()
       .from(affiliates)
@@ -72,8 +76,8 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
   });
 
   app.post<{ Body: unknown }>("/admin/affiliates", async (req, reply) => {
-    const me = await requireAdmin(req, db);
-    if (!me) { reply.code(403); return { error: "admin only" }; }
+    const me = await requireAdmin(req, db, "manage_affiliates");
+    if (!me) { reply.code(403); return { error: "forbidden", missing: "manage_affiliates" }; }
 
     let body;
     try { body = createBody.parse(req.body); }
@@ -98,8 +102,8 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
   });
 
   app.patch<{ Params: { id: string }; Body: unknown }>("/admin/affiliates/:id", async (req, reply) => {
-    const me = await requireAdmin(req, db);
-    if (!me) { reply.code(403); return { error: "admin only" }; }
+    const me = await requireAdmin(req, db, "manage_affiliates");
+    if (!me) { reply.code(403); return { error: "forbidden", missing: "manage_affiliates" }; }
 
     let body;
     try { body = updateBody.parse(req.body); }
@@ -124,8 +128,8 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
   });
 
   app.delete<{ Params: { id: string } }>("/admin/affiliates/:id", async (req, reply) => {
-    const me = await requireAdmin(req, db);
-    if (!me) { reply.code(403); return { error: "admin only" }; }
+    const me = await requireAdmin(req, db, "manage_affiliates");
+    if (!me) { reply.code(403); return { error: "forbidden", missing: "manage_affiliates" }; }
     const existing = (await db.select().from(affiliates).where(eq(affiliates.id, req.params.id)).limit(1))[0];
     if (!existing) { reply.code(404); return { error: "not found" }; }
     await db.delete(affiliates).where(eq(affiliates.id, existing.id));

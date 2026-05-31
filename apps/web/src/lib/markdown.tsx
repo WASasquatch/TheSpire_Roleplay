@@ -4,6 +4,7 @@ import { splitMentions } from "./mentions.js";
 import { useActiveTheme } from "./theme.js";
 import { useEmoticons } from "../state/emoticons.js";
 import { EmoticonSprite } from "../components/EmoticonSprite.js";
+import { LazyMediaEmbed } from "./LazyMediaEmbed.js";
 
 /**
  * Inline markdown renderer for chat message bodies.
@@ -1140,13 +1141,19 @@ function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
             "always fits on screen without scrolling the whole image"
             posture. object-contain keeps the natural aspect ratio
             inside whichever cap binds first.
+
+            LazyMediaEmbed adds IntersectionObserver-based detach when
+            the image scrolls far enough off-screen so a long chat
+            log with many shown images doesn't hold every decoded
+            bitmap in memory. The placeholder keeps the same size so
+            the scroll buffer doesn't reflow on attach/detach.
           */}
-          <img
+          <LazyMediaEmbed
+            kind="img"
             src={url}
             alt={alt ?? ""}
-            loading="lazy"
-            referrerPolicy="no-referrer"
             className="block max-h-[60vh] max-w-[95vw] rounded border border-keep-rule object-contain md:max-w-[30vw]"
+            placeholderLabel="image (offscreen)"
           />
         </span>
       ) : null}
@@ -1159,15 +1166,22 @@ function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
             Vimeo accept; "no-referrer" makes the player refuse to load on
             some YouTube videos. `allowFullScreen` lets the user pop the
             video out without leaving the page.
+
+            LazyMediaEmbed's offscreen-detach is the bigger win here —
+            an autoplay YouTube iframe keeps the player running (and
+            consuming CPU + bandwidth) when scrolled away unless we
+            tear it down. The remount on scroll-back restarts the
+            video, but the alternative (silent CPU eater) is worse.
           */}
-          <iframe
+          <LazyMediaEmbed
+            kind="iframe"
             src={video.src}
             title={video.provider === "youtube" ? "YouTube video player" : "Vimeo video player"}
-            loading="lazy"
-            referrerPolicy="strict-origin-when-cross-origin"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
+            iframeReferrerPolicy="strict-origin-when-cross-origin"
+            iframeAllow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            iframeAllowFullScreen
             className="block aspect-video w-full rounded border border-keep-rule"
+            placeholderLabel="video (offscreen)"
           />
         </span>
       ) : null}

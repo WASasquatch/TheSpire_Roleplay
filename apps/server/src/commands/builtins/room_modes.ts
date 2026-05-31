@@ -1,6 +1,6 @@
 import { and, eq, lt } from "drizzle-orm";
-import { isAdminRole } from "@thekeep/shared";
 import { messages, roomMembers, rooms } from "../../db/schema.js";
+import { hasPermission } from "../../auth/permissions.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -8,7 +8,8 @@ function notice(ctx: CommandContext, code: string, message: string) {
 }
 
 async function callerCanEditRoom(ctx: CommandContext): Promise<boolean> {
-  if (isAdminRole(ctx.user.role) || ctx.user.role === "mod") return true;
+  // Site-wide override via the matrix-grantable key.
+  if (await hasPermission(ctx.user, "edit_any_room_metadata", ctx.db)) return true;
   const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
   if (!room) return false;
   if (room.ownerId === ctx.user.id) return true;

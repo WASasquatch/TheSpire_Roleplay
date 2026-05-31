@@ -1,5 +1,4 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { isAdminRole } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
 import { disconnect } from "../lib/socket.js";
@@ -306,7 +305,11 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
         >
           Rules
         </button>
-        {me && isAdminRole(me.role) && onOpenAdmin ? (
+        {/* Admin button visibility is fully gated by the parent — it
+            only passes `onOpenAdmin` when the viewer holds at least
+            one `view_admin_*` permission. Banner just trusts the
+            presence of the callback. */}
+        {onOpenAdmin ? (
           <>
             <span className="text-keep-rule">|</span>
             <button
@@ -441,7 +444,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
             >
               Rules
             </button>
-            {me && isAdminRole(me.role) && onOpenAdmin ? (
+            {onOpenAdmin ? (
               <button
                 type="button"
                 onClick={fireAdmin}

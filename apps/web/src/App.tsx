@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, WorldDetail } from "@thekeep/shared";
-import { DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isAdminRole, isDarkPalette, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
+import type { ChatMessage, PermissionKey, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, WorldDetail } from "@thekeep/shared";
+import { DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
 import { SplashLanding } from "./components/SplashLanding.js";
@@ -103,7 +103,14 @@ export function App() {
         // request bounces them back to the splash.
         if (r.status === 401) clearSessionToken();
         return r.ok
-          ? (r.json() as Promise<{ id: string; username: string; role: Role; version?: string; updateMessage?: string | null }>)
+          ? (r.json() as Promise<{
+              id: string;
+              username: string;
+              role: Role;
+              permissions: PermissionKey[];
+              version?: string;
+              updateMessage?: string | null;
+            }>)
           : null;
       })
       .then((j) => {
@@ -128,7 +135,12 @@ export function App() {
           if (!hasSessionBeenAnnounced()) {
             markLoginIntent();
           }
-          setMe({ id: j.id, username: j.username, role: j.role });
+          setMe({
+            id: j.id,
+            username: j.username,
+            role: j.role,
+            permissions: j.permissions ?? [],
+          });
           // Detect a post-deploy version drift on the very first probe.
           // If the user opened this tab before a deploy, the bundle they
           // loaded reports an older VERSION than the live server, and
@@ -220,9 +232,40 @@ export function App() {
           setMe(null);
           return;
         }
-        const j = (await r.json()) as { version?: string; updateMessage?: string | null };
+        const j = (await r.json()) as {
+          id: string;
+          username: string;
+          role: Role;
+          permissions?: PermissionKey[];
+          version?: string;
+          updateMessage?: string | null;
+        };
         if (j.version && j.version !== VERSION) {
           useChat.getState().setStaleVersion(j.version, j.updateMessage ?? null);
+        }
+        // Refresh me.permissions on every poll so a matrix edit lands
+        // on the affected user's tab within a minute — but only call
+        // setMe when something actually changed. Calling setMe with a
+        // new object reference on every poll re-renders every
+        // subscriber of `me` (banner, message list, composer, etc.),
+        // which is a noticeable hit every 60 seconds even when nothing
+        // has changed.
+        if (Array.isArray(j.permissions)) {
+          const cur = useChat.getState().me;
+          const changed =
+            !cur
+            || cur.id !== j.id
+            || cur.username !== j.username
+            || cur.role !== j.role
+            || !samePermissions(cur.permissions, j.permissions);
+          if (changed) {
+            setMe({
+              id: j.id,
+              username: j.username,
+              role: j.role,
+              permissions: j.permissions,
+            });
+          }
         }
       } catch { /* network blip - ignore */ }
     }, 60_000);
@@ -584,6 +627,24 @@ export function App() {
  * navigation still works because the server registers `/login` and
  * `/register` as serveSplash routes that ship the same index.html.
  */
+/** Order-insensitive permission-set equality. The server returns
+ *  permissions in catalog order, so identical sets are also
+ *  identical arrays — but we sort defensively to avoid spurious
+ *  inequality from any future re-ordering on the wire. Cheap at
+ *  catalog size (~75 keys). */
+function samePermissions(
+  a: readonly string[] | undefined,
+  b: readonly string[] | undefined,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 function UnauthRouter(props: {
   pendingProfileHint?: { name: string; isPrivate: boolean };
   pendingWorldHint?: { name: string; slug: string };
@@ -2712,18 +2773,30 @@ function Chat() {
   const isForumRoom = room?.replyMode === "nested";
   // Viewer-side moderator gate. Used to expose Lock/Unlock + cross-
   // author Delete in the forum UI. The server is authoritative on
-  // every action — this only controls UI affordance visibility.
-  const canModerate = me?.role === "mod" || (!!me && isAdminRole(me.role));
-  // Viewer-side admin gate. Stricter than canModerate; controls Pin /
-  // Unpin visibility on topic cards. The server enforces admin-only
-  // on PATCH /messages/:id/sticky too.
-  const canPin = !!me && isAdminRole(me.role);
-  // Viewer-side cross-author edit gate. Admin tier (admin / masteradmin)
-  // can edit any user's post — the moderation lever for author touch-up
-  // requests that miss the normal grace window. Mods can hide a post
-  // via Delete but cannot rewrite words. The server re-checks via
-  // `isAdminRole(me.role)` on PATCH /messages/:id.
-  const canAdminEdit = !!me && isAdminRole(me.role);
+  // every action — this only controls UI affordance visibility. Gates
+  // on the granular Phase-2 permission keys (which fold in role grants
+  // + per-user overrides) instead of the legacy tier check, so a user
+  // explicitly granted just `delete_others_message` via the matrix
+  // sees the moderator delete button without needing the full mod
+  // role.
+  const canModerate = !!me && (
+    me.permissions.includes("delete_others_message")
+    || me.permissions.includes("lock_forum_topic")
+  );
+  // Pin/Unpin visibility. Stricter than canModerate.
+  const canPin = !!me && me.permissions.includes("pin_forum_topic");
+  // Cross-author edit gate. The moderation lever for author touch-up
+  // requests that miss the normal grace window. The server re-checks
+  // via `hasPermission(me, "edit_others_message")` on PATCH
+  // /messages/:id.
+  const canAdminEdit = !!me && me.permissions.includes("edit_others_message");
+  // Admin-panel access gate. The matrix-grantable `view_admin_*` keys
+  // each map to an AdminPanel tab; if the viewer holds even one,
+  // they're allowed to open the panel (the tab-visibility helper
+  // inside `AdminPanel` filters the strip to only the tabs they can
+  // actually use). Surfaces the Admin button on the banner and gates
+  // the AdminPanel modal render.
+  const hasAnyAdminAccess = !!me && me.permissions.some((k) => k.startsWith("view_admin_"));
   const activeTopic = useMemo(() => {
     if (!activeTopicId) return null;
     const m = messages.find((x) => x.id === activeTopicId);
@@ -2784,7 +2857,7 @@ function Chat() {
         onOpenEarning={() => setEarningOpen({})}
         onOpenScriptorium={() => setScriptoriumOpen({})}
         onOpenWorlds={() => setWorldCatalogOpen(true)}
-        {...(me && isAdminRole(me.role) ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
+        {...(hasAnyAdminAccess ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
       <StaleVersionBanner />
       {/* Earning — persistent rank-up ribbon. Only renders when the
@@ -3056,11 +3129,17 @@ function Chat() {
           // behind it. Other entry points (chat avatar tile, mentions)
           // open against a modal-free canvas where 60 is still fine.
           zIndex={60}
-          // The owner + site admins skip the NSFW gate splash. Owners
-          // wouldn't gain anything from being warned about their own
-          // content; admins need to see profiles for moderation regardless
-          // of how the author marked them.
-          bypassNsfwGate={!!me && (me.id === openProfile.profile.userId || isAdminRole(me.role))}
+          // The owner + admin-tier moderators skip the NSFW gate
+          // splash. Owners wouldn't gain anything from being warned
+          // about their own content; moderators holding
+          // `view_user_directory_secure` need to see profiles for
+          // moderation regardless of how the author marked them.
+          bypassNsfwGate={
+            !!me && (
+              me.id === openProfile.profile.userId
+              || me.permissions.includes("view_user_directory_secure")
+            )
+          }
           // Whisper / ignore are noise on your own profile - they're for
           // interacting with someone else. Suppress when the profile's
           // owning userId matches the viewer (covers your master profile
@@ -3212,7 +3291,7 @@ function Chat() {
           }}
         />
       ) : null}
-      {adminOpen && me && isAdminRole(me.role) ? (
+      {adminOpen && hasAnyAdminAccess ? (
         <AdminPanel
           onClose={() => setAdminOpen(false)}
           onLinksChanged={() => setNavLinksVersion((v) => v + 1)}

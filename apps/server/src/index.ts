@@ -14,7 +14,6 @@ import { Server as IoServer } from "socket.io";
 import { ZodError } from "zod";
 import {
   DEFAULT_PRESENCE_TEMPLATES,
-  isAdminRole,
   renderPresenceTemplate,
   type ClientToServerEvents,
   type ServerToClientEvents,
@@ -269,7 +268,9 @@ async function main() {
   await registerCommandsRoutes(baseApp, db, registry);
   await registerNavLinkRoutes(baseApp, db, async (req) => {
     const u = await getSessionUser(req, db);
-    return !!u && isAdminRole(u.role);
+    if (!u) return false;
+    const { hasPermission } = await import("./auth/permissions.js");
+    return hasPermission(u, "manage_nav_links", db);
   });
   // (Admin routes need io for the room-delete boot-and-redirect flow, so they
   // are registered after the IoServer is constructed below.)

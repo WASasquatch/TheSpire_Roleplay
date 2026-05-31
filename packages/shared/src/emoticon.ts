@@ -99,14 +99,47 @@ export function parseEmoticonKey(key: string): { sheetSlug: string; cellIndex: n
   return { sheetSlug: slug, cellIndex: n };
 }
 
-/** One distinct (sheet, cell) reaction on a single target, plus the
- *  list of identities that placed it. The ReactionBar renders one
- *  chip per entry. */
+/** Reaction reference — what kind of emoji a reaction points at.
+ *  Discriminated by `kind` so consumers can branch with full
+ *  type-safety. `sheet` is the legacy shape (sticker-sheet cell);
+ *  `unicode` is the new shape that holds a raw Unicode codepoint
+ *  string (browser-native rendering, no catalog lookup needed).
+ *
+ *  Exactly one of the two variants is set on every reaction —
+ *  enforced at the wire level and at the DB level via the COALESCE
+ *  unique index added in migration 0181. */
+export type ReactionRef =
+  | { kind: "sheet"; sheetSlug: string; cellIndex: number }
+  | { kind: "unicode"; char: string };
+
+/** Stable string key for a ReactionRef. Used as a Map key when
+ *  client-side code dedupes reactions and as the audit token in
+ *  socket events. Mirror the format the server's COALESCE-based
+ *  unique index uses so both layers see the same identifier. */
+export function reactionRefKey(ref: ReactionRef): string {
+  return ref.kind === "sheet"
+    ? `${ref.sheetSlug}:${ref.cellIndex}`
+    : ref.char;
+}
+
+/** Convenience predicate so call sites can write
+ *  `if (isUnicodeReaction(entry.ref))` and TypeScript narrows. */
+export function isUnicodeReaction(ref: ReactionRef): ref is Extract<ReactionRef, { kind: "unicode" }> {
+  return ref.kind === "unicode";
+}
+
+/** One distinct emoji reaction on a single target, plus the list of
+ *  identities that placed it. The ReactionBar renders one chip per
+ *  entry. The `ref` field carries the discriminator + ref data; the
+ *  legacy `sheetSlug`/`cellIndex` flat fields are gone — call sites
+ *  branch on `entry.ref.kind`. */
 export interface ReactionEntry {
-  sheetSlug: string;
-  cellIndex: number;
+  ref: ReactionRef;
   /** Cached label so the tooltip can show "happy" without re-resolving
-   *  through the sheet catalog. */
+   *  through the sheet catalog. For Unicode reactions this is the
+   *  best-effort emoji name (e.g. "smile", "heart") used for the
+   *  hover tooltip; falls back to the raw glyph when no name is
+   *  available. */
   label: string;
   /** Tooltip + expanded list source. Sorted by reactedAt asc so the
    *  "first to react" appears first — Discord's behavior. */
@@ -136,8 +169,7 @@ export interface ReactionSummary {
 export interface ReactionEvent {
   targetKind: ReactionTargetKind;
   targetId: string;
-  sheetSlug: string;
-  cellIndex: number;
+  ref: ReactionRef;
   label: string;
   op: "add" | "remove";
   actor: {

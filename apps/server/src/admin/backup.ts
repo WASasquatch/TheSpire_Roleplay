@@ -50,15 +50,16 @@ import { createWriteStream, existsSync, statSync, unlinkSync, writeFileSync } fr
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   BACKUP_FORMAT_VERSION,
-  isMasterAdminRole,
   type BackupContentDocument,
   type BackupSnapshotEntry,
   type ContentImportDiff,
   type FullBackupInspectReport,
+  type PermissionKey,
   type Role,
 } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import { sqliteHandle } from "../db/index.js";
+import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import { recordAudit } from "../audit.js";
 import { exportContent, importContent, diffContent } from "../backup/content.js";
 import {
@@ -121,27 +122,29 @@ export function registerAdminBackupRoutes(
   const { db } = deps;
   ensureOctetStreamParser(app);
 
-  function masterAdminOnly(req: ReqWithSession, reply: FastifyReply): boolean {
-    const u = req.sessionUser;
-    if (!u || !isMasterAdminRole(u.role)) {
-      reply.code(403);
-      reply.send({ error: "master admin only" });
-      return false;
-    }
-    return true;
-  }
+  // Granular permission gate. All backup endpoints are routed through
+  // `manage_backups` (masteradmin-default but matrix-grantable — the
+  // destructive-restore semantics are why the seed pins this to
+  // masteradmin only). Thin closure over the shared
+  // `requireSessionPermission` helper so call sites don't have to
+  // thread `db` through every call.
+  const requirePermission = (
+    req: ReqWithSession,
+    reply: FastifyReply,
+    key: PermissionKey = "manage_backups",
+  ) => requireSessionPermission(req, reply, key, db);
 
   /* ---------- status ---------- */
 
   app.get("/admin/backup/status", async (req, reply) => {
-    if (!masterAdminOnly(req as ReqWithSession, reply)) return;
+    if (!(await requirePermission(req as ReqWithSession, reply))) return;
     return getStatus();
   });
 
   /* ---------- create snapshots ---------- */
 
   app.post("/admin/backup/content/create", async (req, reply) => {
-    if (!masterAdminOnly(req as ReqWithSession, reply)) return;
+    if (!(await requirePermission(req as ReqWithSession, reply))) return;
     const actor = (req as ReqWithSession).sessionUser!;
     const locked = await withLock("content_export", "Exporting content snapshot…", async () => {
       const doc = exportContent(sqliteHandle);
@@ -163,7 +166,7 @@ export function registerAdminBackupRoutes(
   });
 
   app.post("/admin/backup/full/create", async (req, reply) => {
-    if (!masterAdminOnly(req as ReqWithSession, reply)) return;
+    if (!(await requirePermission(req as ReqWithSession, reply))) return;
     const actor = (req as ReqWithSession).sessionUser!;
     const locked = await withLock("full_export", "Running VACUUM INTO (snapshot copy)…", async () => {
       const { path, sizeBytes } = await createFullSnapshot("manual");
@@ -189,7 +192,7 @@ export function registerAdminBackupRoutes(
     "/admin/backup/content/inspect",
     { bodyLimit: CONTENT_BACKUP_BODY_LIMIT },
     async (req, reply) => {
-      if (!masterAdminOnly(req as ReqWithSession, reply)) return;
+      if (!(await requirePermission(req as ReqWithSession, reply))) return;
       const doc = req.body;
       if (!doc || doc.kind !== "content") {
         reply.code(400);
@@ -213,7 +216,7 @@ export function registerAdminBackupRoutes(
     "/admin/backup/full/inspect",
     { bodyLimit: FULL_BACKUP_BODY_LIMIT },
     async (req, reply) => {
-      if (!masterAdminOnly(req as ReqWithSession, reply)) return;
+      if (!(await requirePermission(req as ReqWithSession, reply))) return;
       const stream = req.body as NodeJS.ReadableStream;
       if (!stream || typeof (stream as { pipe?: unknown }).pipe !== "function") {
         reply.code(400);
@@ -256,7 +259,7 @@ export function registerAdminBackupRoutes(
     "/admin/backup/content/import",
     { bodyLimit: CONTENT_BACKUP_BODY_LIMIT },
     async (req, reply) => {
-      if (!masterAdminOnly(req as ReqWithSession, reply)) return;
+      if (!(await requirePermission(req as ReqWithSession, reply))) return;
       const actor = (req as ReqWithSession).sessionUser!;
       const doc = req.body;
       if (!doc || doc.kind !== "content") {
@@ -329,7 +332,7 @@ export function registerAdminBackupRoutes(
     "/admin/backup/full/import",
     { bodyLimit: FULL_BACKUP_BODY_LIMIT },
     async (req, reply) => {
-      if (!masterAdminOnly(req as ReqWithSession, reply)) return;
+      if (!(await requirePermission(req as ReqWithSession, reply))) return;
       const actor = (req as ReqWithSession).sessionUser!;
       const stream = req.body as NodeJS.ReadableStream;
       if (!stream || typeof (stream as { pipe?: unknown }).pipe !== "function") {
@@ -421,14 +424,14 @@ export function registerAdminBackupRoutes(
   /* ---------- snapshot inventory ---------- */
 
   app.get("/admin/backup/snapshots", async (req, reply) => {
-    if (!masterAdminOnly(req as ReqWithSession, reply)) return;
+    if (!(await requirePermission(req as ReqWithSession, reply))) return;
     return { snapshots: listSnapshots() };
   });
 
   app.get<{ Params: { id: string } }>(
     "/admin/backup/snapshots/:id",
     async (req, reply) => {
-      if (!masterAdminOnly(req as ReqWithSession, reply)) return;
+      if (!(await requirePermission(req as ReqWithSession, reply))) return;
       const streamInfo = createSnapshotReadStream(req.params.id);
       if (!streamInfo) {
         reply.code(404);
@@ -449,7 +452,7 @@ export function registerAdminBackupRoutes(
   app.delete<{ Params: { id: string } }>(
     "/admin/backup/snapshots/:id",
     async (req, reply) => {
-      if (!masterAdminOnly(req as ReqWithSession, reply)) return;
+      if (!(await requirePermission(req as ReqWithSession, reply))) return;
       const actor = (req as ReqWithSession).sessionUser!;
       const ok = deleteSnapshot(req.params.id);
       if (!ok) {

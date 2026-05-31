@@ -14,6 +14,7 @@ import { messages, mutes, rooms } from "../db/schema.js";
 import { formatDuration } from "../commands/duration.js";
 import { getSettings } from "../settings.js";
 import { addMessage } from "./broadcast.js";
+import { hasPermission } from "../auth/permissions.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Sock = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -266,11 +267,12 @@ export async function dispatchChatInput(args: {
           });
           return;
         }
-        // Locked topics reject new replies for users — but moderators
-        // (role mod or admin/masteradmin) bypass the gate so they can post
-        // locks/verdicts/notices in the same thread the lock applies to.
-        // Mirrors the slash-command path in commands/builtins/reply.ts.
-        if (parent.lockedAt && user.role !== "mod" && !isAdminRole(user.role)) {
+        // Locked topics reject new replies for users — but holders of
+        // `bypass_topic_lock` (mod + admin by default seed) post past
+        // the gate so they can drop verdicts / notices in the same
+        // thread the lock applies to. Mirrors the slash-command path
+        // in commands/builtins/reply.ts.
+        if (parent.lockedAt && !(await hasPermission(user, "bypass_topic_lock", db))) {
           socket.emit("error:notice", {
             code: "TOPIC_LOCKED",
             message: "This topic is locked and isn't accepting new replies.",
@@ -318,7 +320,12 @@ export async function dispatchChatInput(args: {
     return;
   }
 
-  if (handler.permission && !hasPermission(user, handler.permission)) {
+  // CommandHandler.permission is now a PermissionKey (was a Role
+  // tier). The granular resolver layers per-user overrides + the
+  // masteradmin bypass on top of the legacy role check, so an
+  // install can hand out `/promoteadmin` to a non-admin via the
+  // matrix without touching this dispatcher.
+  if (handler.permission && !(await hasPermission(user, handler.permission, db))) {
     socket.emit("error:notice", { code: "PERM", message: "You don't have permission to use that command." });
     return;
   }
@@ -344,12 +351,15 @@ export async function dispatchChatInput(args: {
         .from(messages)
         .where(eq(messages.id, replyToId))
         .limit(1))[0];
+      const canBypassLock = parent?.lockedAt
+        ? await hasPermission(user, "bypass_topic_lock", db)
+        : true;
       if (
         parent &&
         parent.roomId === roomId &&
         !parent.replyToId &&
         !parent.deletedAt &&
-        (!parent.lockedAt || user.role === "mod" || isAdminRole(user.role))
+        (!parent.lockedAt || canBypassLock)
       ) {
         const snippet = parent.body.length > 120
           ? `${parent.body.slice(0, 120)}…`
@@ -381,7 +391,21 @@ export async function dispatchChatInput(args: {
   }
 }
 
-function hasPermission(user: SessionUser, required: Role): boolean {
+/**
+ * Role-rank hierarchy gate. Returns true when the caller's role tier is
+ * at or above `required`. Used by the command dispatcher's legacy
+ * `CommandHandler.permission: Role` decorator (kept around for
+ * registry compatibility until every handler swaps to the new
+ * `PermissionKey` shape).
+ *
+ * Renamed from the original `hasPermission` to avoid a name collision
+ * with `auth/permissions.ts:hasPermission`, which is the granular
+ * (user, PermissionKey)-shaped check. The two helpers do unrelated
+ * things — `hasRoleAtLeast` answers "is this user at least an admin?",
+ * `hasPermission` answers "does this user have `kick_user`?" — so the
+ * rename trades a misleading shared name for two unambiguous ones.
+ */
+function hasRoleAtLeast(user: SessionUser, required: Role): boolean {
   // `trusted` sits between `user` and `mod` - elevated rate limits / extra
   // privileges, but no moderation authority. `masteradmin` is strictly
   // above `admin`, so an `admin`-required command also accepts a

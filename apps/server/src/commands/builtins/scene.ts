@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
-import { isAdminRole } from "@thekeep/shared";
 import { roomMembers } from "../../db/schema.js";
 import { addMessage } from "../../realtime/broadcast.js";
+import { hasPermission } from "../../auth/permissions.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -9,12 +9,13 @@ function notice(ctx: CommandContext, code: string, message: string) {
 }
 
 /**
- * Caller must be the room owner, a room mod, or a site admin/mod. /scene is
- * a director-shaped feature - random users shouldn't be able to drop scene
- * banners into someone else's room.
+ * Caller must be the room owner, a room mod, or hold the site-wide
+ * `edit_any_room_metadata` (matrix-grantable; admin-default by seed).
+ * /scene is a director-shaped feature — random users shouldn't be able
+ * to drop scene banners into someone else's room.
  */
 async function canMarkScene(ctx: CommandContext): Promise<boolean> {
-  if (isAdminRole(ctx.user.role) || ctx.user.role === "mod") return true;
+  if (await hasPermission(ctx.user, "edit_any_room_metadata", ctx.db)) return true;
   const member = (await ctx.db
     .select()
     .from(roomMembers)

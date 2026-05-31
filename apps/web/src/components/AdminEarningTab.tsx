@@ -21,7 +21,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { isMasterAdminRole } from "@thekeep/shared";
+import type { PermissionKey } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { BorderedAvatar } from "./BorderedAvatar.js";
 import { useEarning } from "../state/earning.js";
@@ -89,10 +89,12 @@ import {
 type SubTab = "awards" | "ranks" | "styles" | "borders" | "cosmetics" | "items" | "flashsale" | "transfer" | "grants";
 
 /** Single source of truth for the Earning sub-sections. Order here is
- *  used by both the desktop button strip and the mobile dropdown. The
- *  `masterOnly` flag mirrors the role check below — plain admins don't
- *  see "Test grants" in either picker. */
-const SUB_TABS: ReadonlyArray<{ id: SubTab; label: string; masterOnly?: boolean }> = [
+ *  used by both the desktop button strip and the mobile dropdown.
+ *  Sections that should be hidden from viewers lacking a specific
+ *  permission carry `requires`; everything else is visible to any
+ *  user who already cleared the AdminPanel's view_admin_earning tab
+ *  gate. */
+const SUB_TABS: ReadonlyArray<{ id: SubTab; label: string; requires?: PermissionKey }> = [
   { id: "awards", label: "Awards" },
   { id: "ranks", label: "Ranks" },
   { id: "styles", label: "Name Styles" },
@@ -101,13 +103,18 @@ const SUB_TABS: ReadonlyArray<{ id: SubTab; label: string; masterOnly?: boolean 
   { id: "items", label: "Items" },
   { id: "flashsale", label: "Flash Sale" },
   { id: "transfer", label: "Backup" },
-  { id: "grants", label: "Test grants", masterOnly: true },
+  // Test grants targets a real user's pool and pushes XP / Currency /
+  // ownership rows that aren't undoable — gated on the matrix's
+  // `grant_earning_award` key (masteradmin-default per seed, but a
+  // masteradmin can hand it to a trusted admin via the matrix).
+  { id: "grants", label: "Test grants", requires: "grant_earning_award" },
 ];
 
 export function AdminEarningTab() {
-  const isMaster = useChat((s) => isMasterAdminRole(s.me?.role ?? "user"));
+  const mePermissions = useChat((s) => s.me?.permissions ?? []);
+  const canGrant = mePermissions.includes("grant_earning_award");
   const [subTab, setSubTab] = useState<SubTab>("awards");
-  const visible = SUB_TABS.filter((t) => !t.masterOnly || isMaster);
+  const visible = SUB_TABS.filter((t) => !t.requires || mePermissions.includes(t.requires));
   return (
     <div className="space-y-3">
       {/* Mobile: dropdown picker, same pattern as the top-level admin
@@ -139,7 +146,7 @@ export function AdminEarningTab() {
       {subTab === "items" ? <ItemsSection /> : null}
       {subTab === "flashsale" ? <FlashSaleSection /> : null}
       {subTab === "transfer" ? <CatalogTransferSection /> : null}
-      {subTab === "grants" && isMaster ? <TestGrantsSection /> : null}
+      {subTab === "grants" && canGrant ? <TestGrantsSection /> : null}
     </div>
   );
 }
@@ -157,7 +164,12 @@ function SubTabBtn({ active, onClick, children }: { active: boolean; onClick: ()
 }
 
 function AwardsSection() {
-  const isMaster = useChat((s) => isMasterAdminRole(s.me?.role ?? "user"));
+  // The two gated fields (`multiCharacterEarnDivisor`,
+  // `backfill.xpPerHistoricalMessage`) are seeded masteradmin-only
+  // via the matrix but matrix-grantable; gate on the granular key so
+  // a delegate admin with `edit_earning_sensitive` can edit them
+  // without holding the full masteradmin role.
+  const canEditSensitive = useChat((s) => s.me?.permissions.includes("edit_earning_sensitive") ?? false);
   const [config, setConfig] = useState<EarningConfig | null>(null);
   const [defaults, setDefaults] = useState<EarningConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -307,14 +319,14 @@ function AwardsSection() {
 
       <SectionFrame title="Multi-character divisor"
         description="Multiplier applied to per-character IC awards when the user has more than one logged-in character. 1.0 = each character earns the full configured rate (current spec). Lower throttles multi-character earning."
-        {...(!isMaster ? { masterOnlyHint: "Master admin only." } : {})}>
+        {...(!canEditSensitive ? { masterOnlyHint: "Requires edit_earning_sensitive permission." } : {})}>
         <NumberRow
           label="Divisor"
           value={config.multiCharacterEarnDivisor}
           min={0}
           max={10}
           step={0.05}
-          disabled={!isMaster}
+          disabled={!canEditSensitive}
           fieldError={gatedFields.includes("multiCharacterEarnDivisor")}
           onChange={(v) => setConfig({ ...config, multiCharacterEarnDivisor: v })}
         />
@@ -498,14 +510,14 @@ function AwardsSection() {
 
       <SectionFrame title="One-shot backfill (historical messages)"
         description="At first boot the engine credited XP per pre-existing message at the rate below. `completedAt` is set automatically by the backfill job; editing it is not exposed."
-        {...(!isMaster ? { masterOnlyHint: "Master admin only." } : {})}>
+        {...(!canEditSensitive ? { masterOnlyHint: "Requires edit_earning_sensitive permission." } : {})}>
         <div className="grid gap-3 sm:grid-cols-2">
           <NumberRow
             label="XP per historical message"
             value={config.backfill.xpPerHistoricalMessage}
             min={0}
             step={0.1}
-            disabled={!isMaster}
+            disabled={!canEditSensitive}
             fieldError={gatedFields.includes("backfill.xpPerHistoricalMessage")}
             onChange={(v) => setConfig({ ...config, backfill: { ...config.backfill, xpPerHistoricalMessage: v } })}
           />

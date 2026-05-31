@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { isAdminRole } from "@thekeep/shared";
+import { hasPermission } from "../auth/permissions.js";
 import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -391,7 +391,13 @@ async function canEditWorld(
 ): Promise<boolean> {
   if (!viewerUserId) return false;
   if (worldRow.ownerUserId === viewerUserId) return true;
-  if (viewerRole && isAdminRole(viewerRole)) return true;
+  // Admin override on someone else's world. `edit_others_world` is the
+  // matrix-grantable key (admin-default per the seed). The role is
+  // passed through so `hasPermission` can resolve role-level grants.
+  if (viewerRole) {
+    const admin = await hasPermission({ id: viewerUserId, role: viewerRole }, "edit_others_world", db);
+    if (admin) return true;
+  }
   const row = (await db
     .select({ userId: worldCollaborators.userId })
     .from(worldCollaborators)
@@ -441,7 +447,8 @@ async function depthOf(db: Db, parentPageId: string | null): Promise<number> {
 }
 
 async function callerCanModerateRoom(db: Db, userId: string, role: Role, roomId: string): Promise<boolean> {
-  if (isAdminRole(role)) return true;
+  // Site-wide override (matrix-grantable, admin-default).
+  if (await hasPermission({ id: userId, role }, "edit_any_room_metadata", db)) return true;
   const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
   if (!room) return false;
   if (room.ownerId === userId) return true;
@@ -629,7 +636,9 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     // 400 over a single forbidden enum value would be hostile when the
     // owner's intent is clearly "publish this world."
     let initialStatus: WorldStatus = body.status ?? "active";
-    if (initialStatus === "featured" && !isAdminRole(me.role)) initialStatus = "active";
+    if (initialStatus === "featured" && !(await hasPermission(me, "feature_worlds", db))) {
+      initialStatus = "active";
+    }
 
     const id = nanoid();
     await db.insert(worlds).values({
@@ -722,7 +731,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
       if (!w) { reply.code(404); return { error: "not found" }; }
       // Owner OR admin only — collaborators can't promote others.
-      if (w.ownerUserId !== me.id && !isAdminRole(me.role)) {
+      if (w.ownerUserId !== me.id && !(await hasPermission(me, "edit_others_world", db))) {
         reply.code(403); return { error: "owner only" };
       }
       const body = z.object({ username: z.string().min(1).max(80) }).safeParse(req.body);
@@ -761,7 +770,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       // Two valid removers: the world owner / admin, or the
       // collaborator removing themselves ("leave"). Anyone else is 403.
       const selfLeave = req.params.userId === me.id;
-      const isOwnerOrAdmin = w.ownerUserId === me.id || isAdminRole(me.role);
+      const isOwnerOrAdmin = w.ownerUserId === me.id || (await hasPermission(me, "edit_others_world", db));
       if (!selfLeave && !isOwnerOrAdmin) {
         reply.code(403); return { error: "owner only" };
       }
@@ -808,7 +817,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       // admins can set `featured`; an owner attempting to self-promote
       // is silently downgraded to `active` for the same UX reason as
       // the create path (no hostile 400 over one field).
-      if (body.status === "featured" && !isAdminRole(me.role)) {
+      if (body.status === "featured" && !(await hasPermission(me, "feature_worlds", db))) {
         update.status = "active";
       } else {
         update.status = body.status;
@@ -841,7 +850,9 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     if (!me) { reply.code(401); return { error: "auth" }; }
     const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
     if (!w) { reply.code(404); return { error: "not found" }; }
-    if (w.ownerUserId !== me.id && !isAdminRole(me.role)) { reply.code(403); return { error: "not yours" }; }
+    if (w.ownerUserId !== me.id && !(await hasPermission(me, "delete_others_world", db))) {
+      reply.code(403); return { error: "not yours" };
+    }
     // Find all rooms currently linked to this world so we can re-broadcast
     // their state after the link cascade-deletes (so the chat banner
     // disappears in real time).
@@ -1036,7 +1047,8 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       const w = await resolveWorld(db, body.worldId, me.id, me.role);
       if (!w) { reply.code(404); return { error: "world not found" }; }
       // Linking other people's worlds requires visibility = open.
-      if (w.ownerUserId !== me.id && !isAdminRole(me.role) && w.visibility !== "open") {
+      if (w.ownerUserId !== me.id && w.visibility !== "open"
+          && !(await hasPermission(me, "edit_others_world", db))) {
         reply.code(403);
         return { error: "world isn't open for catalog use" };
       }
@@ -1079,7 +1091,8 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     // but they can still explicitly "join" to get an explicit membership row
     // (and the option to set the world as their primary). All other users
     // need the world to be open.
-    if (w.ownerUserId !== me.id && w.visibility !== "open" && !isAdminRole(me.role)) {
+    if (w.ownerUserId !== me.id && w.visibility !== "open"
+        && !(await hasPermission(me, "edit_others_world", db))) {
       reply.code(403);
       return { error: "this world isn't open for community membership" };
     }
@@ -1235,12 +1248,15 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       .innerJoin(worlds, eq(worlds.id, worldMembers.worldId))
       .where(eq(worldMembers.userId, req.params.userId))
       .orderBy(desc(worldMembers.isPrimary), asc(worldMembers.joinedAt));
+    // Pre-resolve admin override once; the per-row predicate stays
+    // synchronous and we avoid 1+N permission lookups on a list filter.
+    const meCanSeePrivateAsAdmin = !!me && (await hasPermission(me, "edit_others_world", db));
     const filtered = rows.filter((r) => {
       if (r.visibility !== "private") return true;
       // Private worlds: visible only if the viewer is the world's
       // owner or a site admin. Anonymous viewers (me === null) and
       // unrelated logged-in viewers fall through to false.
-      return !!me && (isAdminRole(me.role) || r.ownerUserId === me.id);
+      return !!me && (meCanSeePrivateAsAdmin || r.ownerUserId === me.id);
     });
     const memberships: WorldMembership[] = await Promise.all(
       filtered.map(async (r) => ({

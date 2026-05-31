@@ -60,7 +60,106 @@ export type AuditAction =
   | "profile_banner_clear"
   | "typing_phrase_clear"
   | "room_presence_clear"
-  | "session_presence_clear";
+  | "session_presence_clear"
+  // Permission-system moderation (Phase 1 — granular roles)
+  | "role_permission_grant"     // a permission was granted to a role in the matrix
+  | "role_permission_revoke"    // a permission was revoked from a role in the matrix
+  | "user_permission_override_set"   // a per-user override was set (grant or revoke)
+  | "user_permission_override_clear"; // a per-user override was removed (falls back to role grant)
+
+/**
+ * Preset action groups for the AuditTab's category dropdown. Each
+ * key is a stable identifier; the value lists the AuditAction strings
+ * the preset bundles. "all" is the empty list (no server filter).
+ *
+ * Adding a category: drop an entry here and the AuditTab dropdown
+ * picks it up via `Object.entries`. Adding a new AuditAction: thread
+ * it into whichever group it semantically belongs to.
+ */
+export const AUDIT_ACTION_GROUPS: Record<string, { label: string; actions: readonly AuditAction[] }> = {
+  all: { label: "All actions", actions: [] },
+  permissions: {
+    label: "Permission changes",
+    actions: [
+      "role_permission_grant",
+      "role_permission_revoke",
+      "user_permission_override_set",
+      "user_permission_override_clear",
+    ],
+  },
+  moderation: {
+    label: "Moderation",
+    actions: ["kick", "mute", "unmute", "ban", "unban", "announce"],
+  },
+  role_changes: {
+    label: "Role changes",
+    actions: [
+      "promote_mod",
+      "demote_mod",
+      "promote_admin",
+      "demote_admin",
+      "promote_masteradmin",
+      "demote_masteradmin",
+      "promote_trusted",
+      "demote_trusted",
+      "auto_promote_trusted",
+    ],
+  },
+  site_config: {
+    label: "Site config",
+    actions: [
+      "settings_update",
+      "custom_command_create",
+      "custom_command_update",
+      "custom_command_delete",
+      "logo_upload",
+    ],
+  },
+  user_admin: {
+    label: "User admin",
+    actions: [
+      "user_disable",
+      "user_enable",
+      "password_reset",
+      "earning_reset",
+      "character_delete_admin",
+      "title_dissolve_admin",
+    ],
+  },
+  reports: {
+    label: "Reports",
+    actions: ["report_resolve", "report_dismiss"],
+  },
+  scriptorium: {
+    label: "Scriptorium",
+    actions: ["story_force_rate", "story_admin_hide", "story_admin_delete"],
+  },
+  emoticons: {
+    label: "Emoticons",
+    actions: [
+      "emoticon_sheet_create",
+      "emoticon_sheet_update",
+      "emoticon_sheet_delete",
+      "emoticon_sheet_submit",
+      "emoticon_sheet_approve",
+      "emoticon_sheet_reject",
+    ],
+  },
+  cosmetic_mod: {
+    label: "Cosmetic moderation",
+    actions: [
+      "profile_banner_clear",
+      "typing_phrase_clear",
+      "room_presence_clear",
+      "session_presence_clear",
+    ],
+  },
+  backups: {
+    label: "Backups",
+    actions: ["backup_create", "backup_import", "backup_delete"],
+  },
+};
+
 
 export interface AuditEntry {
   id: string;

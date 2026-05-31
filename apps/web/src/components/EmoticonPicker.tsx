@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { EmoticonSheet } from "@thekeep/shared";
-import { COMMUNITY_EMOTICON_USE_COST, isEmoticonCellEmpty } from "@thekeep/shared";
+import type { EmoticonSheet, UnicodeEmoji } from "@thekeep/shared";
+import { COMMUNITY_EMOTICON_USE_COST, UNICODE_EMOJI_CATEGORIES, UNICODE_EMOJI_FLAT, isEmoticonCellEmpty } from "@thekeep/shared";
 import { useEmoticons } from "../state/emoticons.js";
 import { useChat } from "../state/store.js";
 import { EmoticonSprite } from "./EmoticonSprite.js";
@@ -10,8 +10,13 @@ import { animationClassForLabel } from "../lib/emoticonMoods.js";
 import { useCommunityEmoticon } from "../lib/emoticonSubmissions.js";
 
 interface Props {
-  /** Called when the user picks a cell. */
+  /** Called when the user picks a sheet cell. */
   onPick: (sheetSlug: string, cellIndex: number) => void;
+  /** Called when the user picks a Unicode emoji from the Unicode tab.
+   *  Optional — call sites that haven't wired up Unicode insertion
+   *  (e.g. the reaction bar, which keys reactions on sheet+cell) can
+   *  omit this and the Unicode tab will stay hidden. */
+  onPickUnicode?: (char: string) => void;
   /** Called when the user clicks outside / presses Escape. */
   onClose: () => void;
   /** Anchor element - the picker positions itself relative to this
@@ -22,6 +27,13 @@ interface Props {
 }
 
 const PANEL_WIDTH = 380;
+/** Upper bound on the picker's height regardless of how much viewport
+ *  room is available. The Unicode tab carries hundreds of entries, so
+ *  letting the panel grow to fill a 1080+px screen is overwhelming —
+ *  500px gives ~10 rows of emoji visible at once, which scrolls
+ *  comfortably with a mouse wheel or trackpad. Tall viewports still
+ *  benefit because the panel WON'T cover most of the chat behind it. */
+const PANEL_MAX_HEIGHT = 500;
 
 /** sessionStorage key for the "don't ask again this session" toggle on
  *  the community-emoticon spend confirmation. Sets the user up so a
@@ -57,7 +69,7 @@ function setAckedSpend(): void {
  * the anchor's right edge with viewport clamping. Click-away + Escape
  * close.
  */
-export function EmoticonPicker({ onPick, onClose, anchor }: Props) {
+export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props) {
   const sheets = useEmoticons((s) => s.sheets);
   const activeCharacterId = useChat((s) => s.activeCharacterId);
   const me = useChat((s) => s.me);
@@ -88,15 +100,22 @@ export function EmoticonPicker({ onPick, onClose, anchor }: Props) {
 
   type View =
     | { kind: "system"; activeSheetId: string | null }
-    | { kind: "community"; activeSheetId: string | null };
-  const [view, setView] = useState<View>(() => ({
-    kind: "system",
-    activeSheetId: systemSheets[0]?.id ?? null,
-  }));
+    | { kind: "community"; activeSheetId: string | null }
+    | { kind: "unicode" };
+  // Default landing view. When the parent wired an `onPickUnicode`
+  // callback (composer, formatting toolbar) the Unicode emoji panel
+  // is the natural landing — that's the surface most chat apps open
+  // to by default. When `onPickUnicode` is absent (reactions are
+  // sheet-based — see ReactionBar) we fall back to the system sheet
+  // grid so the picker stays useful there too.
+  const [view, setView] = useState<View>(() => {
+    if (onPickUnicode) return { kind: "unicode" };
+    return { kind: "system", activeSheetId: systemSheets[0]?.id ?? null };
+  });
 
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const [pos, setPos] = useState<{ top: number; left: number; width: number; placeBelow: boolean }>({
-    top: 0, left: 0, width: PANEL_WIDTH, placeBelow: true,
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxHeight: number; placeBelow: boolean }>({
+    top: 0, left: 0, width: PANEL_WIDTH, maxHeight: PANEL_MAX_HEIGHT, placeBelow: true,
   });
   const [spendError, setSpendError] = useState<string | null>(null);
 
@@ -111,22 +130,35 @@ export function EmoticonPicker({ onPick, onClose, anchor }: Props) {
     function layout() {
       if (!anchor || !panelRef.current) return;
       const ar = anchor.getBoundingClientRect();
-      const pr = panelRef.current.getBoundingClientRect();
       const margin = 8;
       const gap = 6;
       const width = Math.min(PANEL_WIDTH, window.innerWidth - 2 * margin);
-      const belowTop = ar.bottom + gap;
-      const aboveTop = ar.top - pr.height - gap;
-      const wouldClipBelow = belowTop + pr.height > window.innerHeight - margin;
-      const wouldClipAbove = aboveTop < margin;
-      const placeBelow = !wouldClipBelow || wouldClipAbove;
-      const top = placeBelow ? belowTop : aboveTop;
+      // Compute the available vertical room in both directions FIRST,
+      // independent of the panel's intrinsic content height. The panel
+      // gets `maxHeight` clamped to whichever direction has more
+      // headroom, so it never spills past the viewport — internal
+      // scroll handles overflow.
+      const roomBelow = window.innerHeight - ar.bottom - gap - margin;
+      const roomAbove = ar.top - gap - margin;
+      // Prefer below when there's enough room (or even comparable
+      // room); fall back to above only when below is materially
+      // smaller — keeps the picker anchored where the eye expects
+      // a dropdown.
+      const placeBelow = roomBelow >= 200 || roomBelow >= roomAbove;
+      // Two clamps: a floor at 200 so the panel is always usable, and
+      // a ceiling at PANEL_MAX_HEIGHT so a tall viewport doesn't
+      // produce a panel that swallows half the chat behind it.
+      const maxHeight = Math.min(
+        PANEL_MAX_HEIGHT,
+        Math.max(200, placeBelow ? roomBelow : roomAbove),
+      );
+      const top = placeBelow ? ar.bottom + gap : Math.max(margin, ar.top - gap - maxHeight);
       let left = ar.left + ar.width / 2 - width / 2;
       const minLeft = margin;
       const maxLeft = window.innerWidth - width - margin;
       if (left < minLeft) left = minLeft;
       if (left > maxLeft) left = Math.max(minLeft, maxLeft);
-      setPos({ top, left, width, placeBelow });
+      setPos({ top, left, width, maxHeight, placeBelow });
     }
     layout();
     window.addEventListener("resize", layout);
@@ -207,8 +239,10 @@ export function EmoticonPicker({ onPick, onClose, anchor }: Props) {
   // is "community" with no sheet selected we show the community sheet
   // index; with a sheet selected we show its grid (with the paid-use
   // badge). The recent row sits between the toolbar and the grid in
-  // both modes.
-  const activeSystem = systemSheets.find((s) => s.id === view.activeSheetId) ?? systemSheets[0];
+  // both modes. Unicode view has no `activeSheetId`, so we read it
+  // only when the view kind actually carries one.
+  const viewActiveSheetId = view.kind === "unicode" ? null : view.activeSheetId;
+  const activeSystem = systemSheets.find((s) => s.id === viewActiveSheetId) ?? systemSheets[0];
   const activeCommunity = view.kind === "community"
     ? communitySheets.find((s) => s.id === view.activeSheetId) ?? null
     : null;
@@ -218,80 +252,102 @@ export function EmoticonPicker({ onPick, onClose, anchor }: Props) {
   const panel = (
     <div
       ref={panelRef}
-      className="emoticon-picker-panel keep-panel flex flex-col rounded-lg shadow-2xl"
+      // Three-zone layout: a sticky toolbar/recents/error header (no
+      // scroll), a scrolling body, and an implicit footer (none today
+      // but the layout supports it). `min-h-0` is what enables the
+      // body's `flex-1 overflow-y-auto` to actually clamp inside the
+      // parent's `maxHeight`. Without it the body would push the
+      // panel past its declared height because flex children default
+      // to `min-height: auto`.
+      className="emoticon-picker-panel keep-panel flex min-h-0 flex-col overflow-hidden rounded-lg shadow-2xl"
       style={{
         position: "fixed",
         zIndex: 200,
         top: pos.top,
         left: pos.left,
         width: pos.width,
-        maxHeight: "calc(100vh - 16px)",
-        overflowY: "auto",
+        maxHeight: pos.maxHeight,
         transformOrigin: pos.placeBelow ? "top center" : "bottom center",
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <SheetToolbar
-        sheets={systemSheets}
-        activeSheetId={view.kind === "system" ? (activeSystem?.id ?? null) : null}
-        onPickSystem={(id) => { setView({ kind: "system", activeSheetId: id }); setSpendError(null); }}
-        communityActive={view.kind === "community"}
-        onPickCommunity={() => {
-          setView({ kind: "community", activeSheetId: null });
-          setSpendError(null);
-        }}
-        communityCount={communitySheets.length}
-      />
-      {recents.length > 0 ? (
-        <RecentRow
-          recents={recents}
-          myUserId={me?.id ?? null}
-          onPick={(sheetSlug, cellIndex) => {
-            // Route Recent picks through the same dispatcher the
-            // top-level grids use so a community emoticon in Recent
-            // still triggers the spend flow (and an own-sheet recent
-            // forwards free, etc.). Falls back to the parent's onPick
-            // when the sheet has been pruned from the catalog (the
-            // slug no longer resolves) - same posture the legacy
-            // path took, just with kind-awareness on top.
-            const sheet = sheets.find((s) => s.slug === sheetSlug);
-            if (sheet?.kind === "community") {
-              void pickCommunity(sheet, cellIndex);
-              return;
-            }
-            // System path: same as the legacy direct-onPick. The
-            // parent (ReactionBar / composer) decides whether to
-            // close the picker after the pick.
-            onPick(sheetSlug, cellIndex);
+      {/* Header zone — toolbar + recents + error notice. `shrink-0`
+          pins them at the top so they stay visible while the body
+          scrolls (important for the Unicode grid where the user
+          might scroll through hundreds of entries and still need the
+          sheet tabs / search reachable). */}
+      <div className="shrink-0">
+        <SheetToolbar
+          sheets={systemSheets}
+          activeSheetId={view.kind === "system" ? (activeSystem?.id ?? null) : null}
+          onPickSystem={(id) => { setView({ kind: "system", activeSheetId: id }); setSpendError(null); }}
+          communityActive={view.kind === "community"}
+          onPickCommunity={() => {
+            setView({ kind: "community", activeSheetId: null });
+            setSpendError(null);
+          }}
+          communityCount={communitySheets.length}
+          unicodeAvailable={!!onPickUnicode}
+          unicodeActive={view.kind === "unicode"}
+          onPickUnicodeTab={() => {
+            setView({ kind: "unicode" });
+            setSpendError(null);
           }}
         />
-      ) : null}
-      {spendError ? (
-        <div className="border-b border-keep-accent/40 bg-keep-accent/10 px-3 py-1 text-[11px] text-keep-accent">
-          {spendError}
-        </div>
-      ) : null}
-      {view.kind === "system" ? (
-        activeSystem ? (
-          <PickerGrid sheet={activeSystem} onPick={onPick} />
-        ) : (
-          <p className="p-3 text-xs italic text-keep-muted">No emoticon sheets installed.</p>
-        )
-      ) : activeCommunity ? (
-        <CommunityGrid
-          sheet={activeCommunity}
-          isOwnSheet={!!me && activeCommunity.creatorUserId === me.id}
-          onPick={(cellIndex) => void pickCommunity(activeCommunity, cellIndex)}
-          onBack={() => setView({ kind: "community", activeSheetId: null })}
-        />
-      ) : (
-        <CommunityIndex
-          sheets={sortedCommunitySheets}
-          sort={communitySort}
-          onChangeSort={setCommunitySort}
-          onSelect={(id) => setView({ kind: "community", activeSheetId: id })}
-        />
-      )}
+        {recents.length > 0 ? (
+          <RecentRow
+            recents={recents}
+            myUserId={me?.id ?? null}
+            onPick={(sheetSlug, cellIndex) => {
+              const sheet = sheets.find((s) => s.slug === sheetSlug);
+              if (sheet?.kind === "community") {
+                void pickCommunity(sheet, cellIndex);
+                return;
+              }
+              onPick(sheetSlug, cellIndex);
+            }}
+          />
+        ) : null}
+        {spendError ? (
+          <div className="border-b border-keep-accent/40 bg-keep-accent/10 px-3 py-1 text-[11px] text-keep-accent">
+            {spendError}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Body zone — the actual grid. `flex-1 min-h-0 overflow-y-auto`
+          clamps the body to the leftover panel height and scrolls
+          inside. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {view.kind === "system" ? (
+          activeSystem ? (
+            <PickerGrid sheet={activeSystem} onPick={onPick} />
+          ) : (
+            <p className="p-3 text-xs italic text-keep-muted">No emoticon sheets installed.</p>
+          )
+        ) : view.kind === "unicode" && onPickUnicode ? (
+          <UnicodeGrid
+            onPick={(char) => {
+              onPickUnicode(char);
+              onClose();
+            }}
+          />
+        ) : view.kind === "community" && activeCommunity ? (
+          <CommunityGrid
+            sheet={activeCommunity}
+            isOwnSheet={!!me && activeCommunity.creatorUserId === me.id}
+            onPick={(cellIndex) => void pickCommunity(activeCommunity, cellIndex)}
+            onBack={() => setView({ kind: "community", activeSheetId: null })}
+          />
+        ) : view.kind === "community" ? (
+          <CommunityIndex
+            sheets={sortedCommunitySheets}
+            sort={communitySort}
+            onChangeSort={setCommunitySort}
+            onSelect={(id) => setView({ kind: "community", activeSheetId: id })}
+          />
+        ) : null}
+      </div>
     </div>
   );
 
@@ -308,6 +364,9 @@ function SheetToolbar({
   communityActive,
   onPickCommunity,
   communityCount,
+  unicodeAvailable,
+  unicodeActive,
+  onPickUnicodeTab,
 }: {
   sheets: EmoticonSheet[];
   activeSheetId: string | null;
@@ -315,13 +374,27 @@ function SheetToolbar({
   communityActive: boolean;
   onPickCommunity: () => void;
   communityCount: number;
+  /** Whether the parent passed an `onPickUnicode` callback. The Unicode
+   *  tab is hidden when this is false so call sites that don't support
+   *  raw-character insertion (e.g. ReactionBar) don't expose a button
+   *  that would silently no-op on click. */
+  unicodeAvailable: boolean;
+  unicodeActive: boolean;
+  onPickUnicodeTab: () => void;
 }) {
   return (
     <div className="keep-section-header flex shrink-0 items-center gap-1 border-b border-keep-rule px-2 py-1.5">
-      {/* Left side: scrolling system sheets. `min-w-0 flex-1` lets the
-          flexbox shrink it so the Community button on the right stays
-          visible no matter how many system sheets exist. */}
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+      {/* Left side: horizontally scrolling/swipable strip of system
+          sheets. `min-w-0 flex-1` lets the flexbox shrink the strip
+          so the Unicode + Community chips on the right (which are
+          `shrink-0`) stay anchored no matter how many sheets exist.
+          `keep-scroll-strip` hides the scrollbar on touch (swipe is
+          the natural gesture there) and swaps in a slim themed
+          scrollbar on md+ so the affordance is discoverable on
+          desktop. `scroll-smooth` makes any future programmatic
+          scroll-into-view (e.g. clicking a deep-linked sheet)
+          animate instead of jumping. */}
+      <div className="keep-scroll-strip flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scroll-smooth">
         {sheets.map((s) => {
           const firstCellIdx = s.cells.findIndex((c) => !isEmoticonCellEmpty(c));
           const active = !communityActive && activeSheetId === s.id;
@@ -346,6 +419,26 @@ function SheetToolbar({
           );
         })}
       </div>
+      {/* Unicode button — between the scrolling system tabs and the
+          Community button. Hidden when the parent didn't pass an
+          `onPickUnicode` callback (reactions are sheet-based so the
+          ReactionBar omits the prop). Same chip styling as Community
+          so the right-side tabs read as one group. */}
+      {unicodeAvailable ? (
+        <button
+          type="button"
+          onClick={onPickUnicodeTab}
+          title="Unicode emoji (system font)"
+          className={`ml-2 inline-flex shrink-0 items-center gap-1 rounded border px-2 py-1 text-[10px] font-action uppercase tracking-widest transition ${
+            unicodeActive
+              ? "border-keep-action bg-keep-action/15 text-keep-action"
+              : "border-keep-rule bg-keep-bg text-keep-muted hover:bg-keep-panel-200/40 hover:text-keep-text"
+          }`}
+        >
+          <span aria-hidden>😀</span>
+          <span className="sr-only">Unicode emoji</span>
+        </button>
+      ) : null}
       {/* Right side: anchored Community button. Always visible. Hides
           the count badge when the catalog is empty so the button reads
           as "go look" rather than implying empty content with a 0. */}
@@ -731,5 +824,93 @@ function CommunityGrid({
         </div>
       )}
     </section>
+  );
+}
+
+/* =============================================================
+ *  Unicode emoji grid — categorized + searchable. Renders the raw
+ *  character; the browser's system emoji font handles the glyph,
+ *  matching the user's OS rendering (iOS/Android/Win/Linux each
+ *  look native). The catalog lives in `@thekeep/shared`
+ *  (unicodeEmoji.ts) as a curated ~400-entry subset; entries
+ *  carry searchable name + tags so common synonyms find the right
+ *  emoji.
+ * ============================================================= */
+function UnicodeGrid({ onPick }: { onPick: (char: string) => void }) {
+  const [query, setQuery] = useState("");
+  const trimmed = query.trim().toLowerCase();
+  // Pre-compute the search index once per query so the render path
+  // doesn't iterate the catalog per row. Empty query → fall through
+  // to the categorized rendering below.
+  const searchResults = useMemo(() => {
+    if (trimmed.length === 0) return null;
+    return UNICODE_EMOJI_FLAT.filter((e) => {
+      if (e.name.includes(trimmed)) return true;
+      if (e.tags?.some((t) => t.includes(trimmed))) return true;
+      return false;
+    });
+  }, [trimmed]);
+
+  return (
+    <section className="flex flex-col">
+      {/* Search bar sits sticky at the top of the picker body so the
+          input stays reachable while the category list scrolls. */}
+      <header className="keep-section-header sticky top-0 z-10 border-b border-keep-rule/60 bg-keep-panel-200/70 px-2 py-1.5 backdrop-blur-sm">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search emoji…"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
+          aria-label="Search Unicode emoji"
+        />
+      </header>
+      {searchResults !== null ? (
+        searchResults.length === 0 ? (
+          <p className="p-3 text-xs italic text-keep-muted">
+            No emoji match &ldquo;{query}&rdquo;. Try a synonym like &ldquo;happy&rdquo; or &ldquo;love&rdquo;.
+          </p>
+        ) : (
+          <UnicodeRow emoji={searchResults} onPick={onPick} />
+        )
+      ) : (
+        UNICODE_EMOJI_CATEGORIES.map((cat) => (
+          <div key={cat.id}>
+            <header className="keep-section-header bg-keep-panel-200/30 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-muted">
+              {cat.label}
+            </header>
+            <UnicodeRow emoji={cat.emoji} onPick={onPick} />
+          </div>
+        ))
+      )}
+    </section>
+  );
+}
+
+function UnicodeRow({
+  emoji,
+  onPick,
+}: {
+  emoji: readonly UnicodeEmoji[];
+  onPick: (char: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-8 gap-0.5 p-2">
+      {emoji.map((e) => (
+        <button
+          key={e.char + e.name}
+          type="button"
+          onClick={() => onPick(e.char)}
+          title={e.name}
+          // Larger font-size on the emoji glyph so each button reads
+          // at sticker scale rather than inline-text scale. `leading-none`
+          // keeps the row compact.
+          className="flex h-9 items-center justify-center rounded text-2xl leading-none hover:bg-keep-action/10 focus-visible:bg-keep-action/15"
+        >
+          <span aria-hidden>{e.char}</span>
+          <span className="sr-only">{e.name}</span>
+        </button>
+      ))}
+    </div>
   );
 }

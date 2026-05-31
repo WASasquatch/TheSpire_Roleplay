@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
-import { isAdminRole } from "@thekeep/shared";
 import { roomMembers, rooms } from "../../db/schema.js";
 import { addMessage, addSystemMessage, broadcastRoomState } from "../../realtime/broadcast.js";
+import { hasPermission } from "../../auth/permissions.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const NPC_NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
@@ -105,8 +105,8 @@ export const npcModeCommand: CommandHandler = {
       return;
     }
 
-    // Owner / room mod / site mod / site admin.
-    let allowed = isAdminRole(ctx.user.role) || ctx.user.role === "mod";
+    // Owner / room mod / site-wide override via `edit_any_room_metadata`.
+    let allowed = await hasPermission(ctx.user, "edit_any_room_metadata", ctx.db);
     if (!allowed) {
       const member = (await ctx.db
         .select()

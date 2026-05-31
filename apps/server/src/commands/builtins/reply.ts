@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
-import { isAdminRole } from "@thekeep/shared";
 import { messages } from "../../db/schema.js";
 import { addMessage } from "../../realtime/broadcast.js";
+import { hasPermission } from "../../auth/permissions.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const SNIPPET_LEN = 80;
@@ -68,10 +68,11 @@ export const replyCommand: CommandHandler = {
       notice(ctx, "REPLY_NO_MSG", "That message is no longer available to reply to.");
       return;
     }
-    // Locked forum topics reject new replies — except from moderators
-    // (mod or admin), who can still post in the thread to leave a
-    // notice / verdict. Mirrors the plain-say path in dispatch.ts.
-    if (parent.lockedAt && ctx.user.role !== "mod" && !isAdminRole(ctx.user.role)) {
+    // Locked forum topics reject new replies — except holders of
+    // `bypass_topic_lock` (mod + admin by seed default), who can still
+    // post in the thread to leave a notice / verdict. Mirrors the
+    // plain-say path in dispatch.ts.
+    if (parent.lockedAt && !(await hasPermission(ctx.user, "bypass_topic_lock", ctx.db))) {
       notice(ctx, "TOPIC_LOCKED", "This topic is locked and isn't accepting new replies.");
       return;
     }

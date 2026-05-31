@@ -5,6 +5,7 @@ import { z } from "zod";
 import { type Role, VERSION } from "@thekeep/shared";
 import { sessions, users } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../auth/passwords.js";
+import { permissionsFor } from "../auth/permissions.js";
 import { getSettings } from "../settings.js";
 import type { Db } from "../db/index.js";
 
@@ -288,11 +289,21 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     }
 
     const sessionToken = await issueSession(db, id, req);
+    const role: Role = isFirstUser ? "masteradmin" : "user";
+    const permissions = await permissionsFor({ id, role }, db);
+    // Wire shape: `role` and `permissions` now always ride on the
+    // register response (previously `role` was spread only on the
+    // bootstrap path). The change is backwards compatible — older
+    // clients that did `j.role ?? "user"` still work — but new
+    // clients can rely on both fields being present so they don't
+    // have to defensively re-derive permissions from the role tier.
     return {
       id,
       username: body.username,
+      role,
+      permissions,
       sessionToken,
-      ...(isFirstUser ? { role: "masteradmin", bootstrap: true } : {}),
+      ...(isFirstUser ? { bootstrap: true } : {}),
     };
   });
 
@@ -325,7 +336,8 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     }
     await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, u.id));
     const sessionToken = await issueSession(db, u.id, req);
-    return { id: u.id, username: u.username, role: u.role, sessionToken };
+    const permissions = await permissionsFor({ id: u.id, role: u.role }, db);
+    return { id: u.id, username: u.username, role: u.role, permissions, sessionToken };
   });
 
   app.post("/auth/logout", async (req) => {
@@ -389,10 +401,18 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     // the next poll without needing a restart.
     const rawUpdateMsg = process.env.UPDATE_MESSAGE ?? "";
     const updateMessage = rawUpdateMsg.trim().length > 0 ? rawUpdateMsg : null;
+    // `permissions` is the resolved set the granular system answers
+    // for this user — every key for masteradmin, role-grant ∪
+    // user-override otherwise. Client mirrors gate UI on
+    // `me.permissions.includes(...)` instead of `isAdminRole(me.role)`.
+    // Refreshes on the same 60s poll, so a matrix edit lands on the
+    // affected user's tab within a minute.
+    const permissions = await permissionsFor({ id: user.id, role: user.role }, db);
     return {
       id: user.id,
       username: user.username,
       role: user.role,
+      permissions,
       version: VERSION,
       updateMessage,
     };

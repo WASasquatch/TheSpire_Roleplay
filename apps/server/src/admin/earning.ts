@@ -15,7 +15,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import { nanoid } from "nanoid";
-import { isMasterAdminRole, type ClientToServerEvents, type Role, type ServerToClientEvents } from "@thekeep/shared";
+import { type ClientToServerEvents, type PermissionKey, type Role, type ServerToClientEvents } from "@thekeep/shared";
+import { hasPermission } from "../auth/permissions.js";
+import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import { z } from "zod";
 import type { Db } from "../db/index.js";
 import {
@@ -214,7 +216,8 @@ export function registerAdminEarningRoutes(
    * editor can render a "reset to defaults" affordance without a
    * separate roundtrip. Same shape both tiers can read.
    */
-  app.get("/admin/earning/awards", async () => {
+  app.get("/admin/earning/awards", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_earning_config"))) return;
     const settings = await getSettings(db);
     return {
       config: settings.earningConfig,
@@ -237,6 +240,7 @@ export function registerAdminEarningRoutes(
    * job).
    */
   app.put<{ Body: unknown }>("/admin/earning/awards", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "edit_earning_awards"))) return;
     const me = await getSessionUser(req);
     if (!me) { reply.code(401); return { error: "auth" }; }
     let next: EarningConfig;
@@ -248,13 +252,15 @@ export function registerAdminEarningRoutes(
     }
     const settings = await getSettings(db);
     const prior = settings.earningConfig;
-    const isMaster = isMasterAdminRole(me.role);
+    const canEditSensitive = await hasPermission(me, "edit_earning_sensitive", db);
 
-    // Masteradmin-only field policy. Compare each gated field; if
-    // changed and the caller is not masteradmin, 403 the request and
+    // Sensitive-field policy. Compare each gated field; if changed and
+    // the caller lacks `edit_earning_sensitive`, 403 the request and
     // tell them which field tripped the gate so the form can flag it.
+    // Defaults to masteradmin via the migration seed but the matrix
+    // can grant it independently from `edit_earning_awards`.
     const gatedChanges: string[] = [];
-    if (!isMaster) {
+    if (!canEditSensitive) {
       if (next.multiCharacterEarnDivisor !== prior.multiCharacterEarnDivisor) {
         gatedChanges.push("multiCharacterEarnDivisor");
       }
@@ -264,7 +270,7 @@ export function registerAdminEarningRoutes(
     }
     if (gatedChanges.length > 0) {
       reply.code(403);
-      return { error: "master admin only", fields: gatedChanges };
+      return { error: "forbidden", missing: "edit_earning_sensitive", fields: gatedChanges };
     }
 
     // Never let the editor overwrite the backfill completedAt
@@ -297,7 +303,8 @@ export function registerAdminEarningRoutes(
    * see the full ladder) plus the per-rank usage counts so the UI can
    * gate destructive actions (can't delete a rank that has users on it).
    */
-  app.get("/admin/earning/ranks", async () => {
+  app.get("/admin/earning/ranks", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_earning_config"))) return;
     const rankRows = await db.select().from(ranks).orderBy(asc(ranks.order), asc(ranks.name));
     const tierRows = await db.select().from(rankTiers).orderBy(asc(rankTiers.rankKey), asc(rankTiers.tier));
 
@@ -346,6 +353,7 @@ export function registerAdminEarningRoutes(
    * row is editable from the table immediately.
    */
   app.post<{ Body: unknown }>("/admin/earning/ranks", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_ranks"))) return;
     let body: z.infer<typeof createRankBody>;
     try { body = createRankBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -384,6 +392,7 @@ export function registerAdminEarningRoutes(
    * placing new earners.
    */
   app.patch<{ Params: { key: string }; Body: unknown }>("/admin/earning/ranks/:key", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_ranks"))) return;
     let body: z.infer<typeof patchRankBody>;
     try { body = patchRankBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -404,6 +413,7 @@ export function registerAdminEarningRoutes(
    * rank is in use, so existing rank-holders aren't disturbed.
    */
   app.delete<{ Params: { key: string } }>("/admin/earning/ranks/:key", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_ranks"))) return;
     const userCount = (await db.select({ n: sql<number>`COUNT(*)` }).from(userEarning).where(eq(userEarning.rankKey, req.params.key)))[0];
     const charCount = (await db.select({ n: sql<number>`COUNT(*)` }).from(characterEarning).where(eq(characterEarning.rankKey, req.params.key)))[0];
     if ((userCount?.n ?? 0) + (charCount?.n ?? 0) > 0) {
@@ -425,6 +435,7 @@ export function registerAdminEarningRoutes(
    * post a message to see the change).
    */
   app.patch<{ Params: { id: string }; Body: unknown }>("/admin/earning/rank-tiers/:id", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_ranks"))) return;
     let body: z.infer<typeof patchTierBody>;
     try { body = patchTierBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -453,6 +464,7 @@ export function registerAdminEarningRoutes(
    * fresh tier added.
    */
   app.post<{ Params: { key: string }; Body: unknown }>("/admin/earning/ranks/:key/tiers", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_ranks"))) return;
     let body: z.infer<typeof createTierBody>;
     try { body = createTierBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -481,6 +493,7 @@ export function registerAdminEarningRoutes(
    * Only allowed when no users / characters currently sit on this tier.
    */
   app.delete<{ Params: { id: string } }>("/admin/earning/rank-tiers/:id", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_ranks"))) return;
     const existing = (await db.select().from(rankTiers).where(eq(rankTiers.id, req.params.id)).limit(1))[0];
     if (!existing) { reply.code(404); return { error: "tier not found" }; }
     const userCount = (await db.select({ n: sql<number>`COUNT(*)` })
@@ -509,6 +522,7 @@ export function registerAdminEarningRoutes(
    * field via PATCH /admin/earning/rank-tiers/:id.
    */
   app.post<{ Body: unknown }>("/admin/earning/assets/upload", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_ranks"))) return;
     let body: z.infer<typeof uploadAssetBody>;
     try { body = uploadAssetBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
@@ -592,7 +606,8 @@ export function registerAdminEarningRoutes(
    * per-style owned + equipped counts so the editor can warn before
    * a destructive change (delete / disable).
    */
-  app.get("/admin/earning/name-styles", async () => {
+  app.get("/admin/earning/name-styles", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_earning_config"))) return;
     const rows = await db.select().from(nameStyles).orderBy(asc(nameStyles.order));
     const ownerRows = await db.all<{ styleKey: string; n: number }>(sql`
       SELECT style_key AS styleKey, COUNT(*) AS n FROM user_owned_name_styles GROUP BY style_key
@@ -625,6 +640,7 @@ export function registerAdminEarningRoutes(
   });
 
   app.post<{ Body: unknown }>("/admin/earning/name-styles", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_name_styles"))) return;
     let body: z.infer<typeof createStyleBody>;
     try { body = createStyleBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -652,6 +668,7 @@ export function registerAdminEarningRoutes(
   app.patch<{ Params: { key: string }; Body: unknown }>(
     "/admin/earning/name-styles/:key",
     async (req, reply) => {
+      if (!(await requirePermission(req, reply, "manage_name_styles"))) return;
       let body: z.infer<typeof styleBody>;
       try { body = styleBody.parse(req.body); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -683,6 +700,7 @@ export function registerAdminEarningRoutes(
    *     confirmation prompt.
    */
   app.delete<{ Params: { key: string } }>("/admin/earning/name-styles/:key", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_name_styles"))) return;
     const existing = (await db.select().from(nameStyles).where(eq(nameStyles.key, req.params.key)).limit(1))[0];
     if (!existing) { reply.code(404); return { error: "style not found" }; }
     if (existing.isBuiltin) {
@@ -751,7 +769,8 @@ export function registerAdminEarningRoutes(
     order: z.number().int().optional(),
   }).strict();
 
-  app.get("/admin/earning/freeform-borders", async () => {
+  app.get("/admin/earning/freeform-borders", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_earning_config"))) return;
     const rows = await db.select().from(freeformBorders).orderBy(asc(freeformBorders.order));
     // Owner / equipped counts for the destructive-action confirmation
     // prompts. Mirrors the name-style endpoint shape — admins lean on
@@ -801,6 +820,7 @@ export function registerAdminEarningRoutes(
   });
 
   app.post<{ Body: unknown }>("/admin/earning/freeform-borders", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_borders"))) return;
     let body: z.infer<typeof createFreeformBorderBody>;
     try { body = createFreeformBorderBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -833,6 +853,7 @@ export function registerAdminEarningRoutes(
   app.patch<{ Params: { key: string }; Body: unknown }>(
     "/admin/earning/freeform-borders/:key",
     async (req, reply) => {
+      if (!(await requirePermission(req, reply, "manage_borders"))) return;
       let body: z.infer<typeof patchFreeformBorderBody>;
       try { body = patchFreeformBorderBody.parse(req.body); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -877,6 +898,7 @@ export function registerAdminEarningRoutes(
   app.delete<{ Params: { key: string } }>(
     "/admin/earning/freeform-borders/:key",
     async (req, reply) => {
+      if (!(await requirePermission(req, reply, "manage_borders"))) return;
       const existing = (await db.select().from(freeformBorders).where(eq(freeformBorders.key, req.params.key)).limit(1))[0];
       if (!existing) { reply.code(404); return { error: "border not found" }; }
       if (existing.isBuiltin) {
@@ -916,7 +938,8 @@ export function registerAdminEarningRoutes(
     configJson: z.string().max(4000).nullable().optional(),
   }).strict();
 
-  app.get("/admin/earning/cosmetics", async () => {
+  app.get("/admin/earning/cosmetics", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_earning_config"))) return;
     const rows = await db.select().from(cosmetics);
     return {
       cosmetics: rows.map((r) => ({
@@ -933,6 +956,7 @@ export function registerAdminEarningRoutes(
   app.patch<{ Params: { key: string }; Body: unknown }>(
     "/admin/earning/cosmetics/:key",
     async (req, reply) => {
+      if (!(await requirePermission(req, reply, "manage_cosmetics"))) return;
       let body: z.infer<typeof patchCosmeticBody>;
       try { body = patchCosmeticBody.parse(req.body); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1037,7 +1061,8 @@ export function registerAdminEarningRoutes(
    * per-item owner count (distinct identities holding ≥1 of the item)
    * so the editor can warn before a destructive change.
    */
-  app.get("/admin/earning/items", async () => {
+  app.get("/admin/earning/items", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_earning_config"))) return;
     const rows = await db.select().from(items).orderBy(asc(items.order));
     const ownerRows = await db.all<{ itemKey: string; n: number }>(sql`
       SELECT item_key AS itemKey, COUNT(*) AS n
@@ -1080,6 +1105,7 @@ export function registerAdminEarningRoutes(
   });
 
   app.post<{ Body: unknown }>("/admin/earning/items", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_cosmetics"))) return;
     let body: z.infer<typeof itemCreateBody>;
     try { body = itemCreateBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1115,6 +1141,7 @@ export function registerAdminEarningRoutes(
   app.patch<{ Params: { key: string }; Body: unknown }>(
     "/admin/earning/items/:key",
     async (req, reply) => {
+      if (!(await requirePermission(req, reply, "manage_cosmetics"))) return;
       let body: z.infer<typeof itemPatchBody>;
       try { body = itemPatchBody.parse(req.body); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1155,6 +1182,7 @@ export function registerAdminEarningRoutes(
    * surfaces the owner count for the confirm prompt.
    */
   app.delete<{ Params: { key: string } }>("/admin/earning/items/:key", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_cosmetics"))) return;
     const existing = (await db.select().from(items).where(eq(items.key, req.params.key)).limit(1))[0];
     if (!existing) { reply.code(404); return { error: "item not found" }; }
     if (existing.isBuiltin) {
@@ -1194,15 +1222,11 @@ export function registerAdminEarningRoutes(
       .limit(1))[0] ?? null;
   }
 
-  function masterAdminGate(req: FastifyRequest, reply: FastifyReply): SessionUserCtx | null {
-    const me = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
-    if (!me || !isMasterAdminRole(me.role)) {
-      reply.code(403);
-      reply.send({ error: "master admin only" });
-      return null;
-    }
-    return me;
-  }
+  // Permission gate — thin closure over the shared
+  // `requireSessionPermission` helper so call sites don't repeat
+  // the `db` argument on every call.
+  const requirePermission = (req: FastifyRequest, reply: FastifyReply, key: PermissionKey) =>
+    requireSessionPermission(req, reply, key, db);
 
   const grantXpBody = z.object({
     username: z.string().min(1).max(80),
@@ -1267,7 +1291,7 @@ export function registerAdminEarningRoutes(
    * dashboard wallet updates live.
    */
   app.post<{ Body: unknown }>("/admin/earning/grant-xp", async (req, reply) => {
-    const me = masterAdminGate(req, reply); if (!me) return;
+    const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
     let body: z.infer<typeof grantXpBody>;
     try { body = grantXpBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1286,7 +1310,7 @@ export function registerAdminEarningRoutes(
   });
 
   app.post<{ Body: unknown }>("/admin/earning/grant-currency", async (req, reply) => {
-    const me = masterAdminGate(req, reply); if (!me) return;
+    const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
     let body: z.infer<typeof grantCurrencyBody>;
     try { body = grantCurrencyBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1317,7 +1341,7 @@ export function registerAdminEarningRoutes(
    * to re-tune).
    */
   app.post<{ Body: unknown }>("/admin/earning/set-rank", async (req, reply) => {
-    const me = masterAdminGate(req, reply); if (!me) return;
+    const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
     let body: z.infer<typeof setRankBody>;
     try { body = setRankBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1404,7 +1428,7 @@ export function registerAdminEarningRoutes(
    * Idempotent — re-granting an owned border is a no-op.
    */
   app.post<{ Body: unknown }>("/admin/earning/grant-border", async (req, reply) => {
-    const me = masterAdminGate(req, reply); if (!me) return;
+    const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
     let body: z.infer<typeof grantBorderBody>;
     try { body = grantBorderBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1438,7 +1462,7 @@ export function registerAdminEarningRoutes(
    * bypassing the normal Currency purchase. Idempotent.
    */
   app.post<{ Body: unknown }>("/admin/earning/grant-style", async (req, reply) => {
-    const me = masterAdminGate(req, reply); if (!me) return;
+    const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
     let body: z.infer<typeof grantStyleBody>;
     try { body = grantStyleBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1491,7 +1515,7 @@ export function registerAdminEarningRoutes(
    * scope, item, and delta. No currency moves — grants are free.
    */
   app.post<{ Body: unknown }>("/admin/earning/grant-item", async (req, reply) => {
-    const me = masterAdminGate(req, reply); if (!me) return;
+    const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
     let body: z.infer<typeof grantItemBody>;
     try { body = grantItemBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1615,7 +1639,7 @@ export function registerAdminEarningRoutes(
    * too. Idempotent — revoking an unowned border is a no-op.
    */
   app.post<{ Body: unknown }>("/admin/earning/revoke-border", async (req, reply) => {
-    const me = masterAdminGate(req, reply); if (!me) return;
+    const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
     let body: z.infer<typeof grantBorderBody>;
     try { body = grantBorderBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1655,7 +1679,7 @@ export function registerAdminEarningRoutes(
    * equipped state clears too. Idempotent.
    */
   app.post<{ Body: unknown }>("/admin/earning/revoke-style", async (req, reply) => {
-    const me = masterAdminGate(req, reply); if (!me) return;
+    const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
     let body: z.infer<typeof grantStyleBody>;
     try { body = grantStyleBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1700,7 +1724,7 @@ export function registerAdminEarningRoutes(
    * we set this one as the equipped key.
    */
   app.post<{ Body: unknown }>("/admin/earning/grant-freeform-border", async (req, reply) => {
-    const me = masterAdminGate(req, reply); if (!me) return;
+    const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
     let body: z.infer<typeof grantFreeformBorderBody>;
     try { body = grantFreeformBorderBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1773,7 +1797,7 @@ export function registerAdminEarningRoutes(
    * equip slot pointed at this border it clears too. Idempotent.
    */
   app.post<{ Body: unknown }>("/admin/earning/revoke-freeform-border", async (req, reply) => {
-    const me = masterAdminGate(req, reply); if (!me) return;
+    const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
     let body: z.infer<typeof grantFreeformBorderBody>;
     try { body = grantFreeformBorderBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
@@ -1836,7 +1860,7 @@ export function registerAdminEarningRoutes(
    * grant/revoke routes.
    */
   app.get<{ Querystring: { username?: string } }>("/admin/earning/user-ownership", async (req, reply) => {
-    const me = masterAdminGate(req, reply); if (!me) return;
+    const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
     const username = (req.query.username ?? "").trim();
     if (!username) { reply.code(400); return { error: "username required" }; }
     const target = await resolveTargetUser(username);
@@ -1911,7 +1935,7 @@ export function registerAdminEarningRoutes(
    * Masteradmin-only.
    */
   app.post<{ Body: unknown }>("/admin/earning/reset-user", async (req, reply) => {
-    const me = masterAdminGate(req, reply); if (!me) return;
+    const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
     const resetBody = z.object({ username: z.string().min(1).max(40) });
     let body: z.infer<typeof resetBody>;
     try { body = resetBody.parse(req.body); }
@@ -2038,7 +2062,8 @@ export function registerAdminEarningRoutes(
    *  the server having to model "tomorrow" specially.
    * ========================================================= */
 
-  app.get("/admin/earning/flash-sale", async () => {
+  app.get("/admin/earning/flash-sale", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_flash_sale"))) return;
     const today = await resolveTodayFlashSale(db);
     // Future overrides — anything for_date >= tomorrow. Today's
     // overrides have been consumed into `flash_sales` already; we
@@ -2079,6 +2104,7 @@ export function registerAdminEarningRoutes(
   }).strict();
 
   app.patch<{ Body: unknown }>("/admin/earning/flash-sale/settings", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_flash_sale"))) return;
     let body: z.infer<typeof flashSaleSettingsBody>;
     try { body = flashSaleSettingsBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
@@ -2149,11 +2175,31 @@ export function registerAdminEarningRoutes(
     }
   }
 
+  // Map a catalog kind to the matrix-grantable key that gates editing
+  // it. Reused for both export (read-of-config) and import (catalog
+  // mutation) — same key for both since the export ships sensitive
+  // template/asset content and lacking edit permission shouldn't grant
+  // export-side read either.
+  function permKeyForKind(kind: EarningCatalogKind): PermissionKey {
+    switch (kind) {
+      case "name-styles": return "manage_name_styles";
+      case "items": return "manage_cosmetics";
+      case "borders": return "manage_borders";
+      case "freeform-borders": return "manage_borders";
+      case "ranks": return "manage_ranks";
+      default: {
+        const _exhaustive: never = kind;
+        return _exhaustive;
+      }
+    }
+  }
+
   app.get<{ Params: { kind: string } }>(
     "/admin/earning/transfer/:kind/export",
     async (req, reply) => {
       const kind = parseKind(req.params.kind);
       if (!kind) { reply.code(404); return { error: "unknown catalog kind" }; }
+      if (!(await requirePermission(req, reply, permKeyForKind(kind)))) return;
       const result = await exportCatalog(db, kind, uploadsRoot);
       reply.header("Content-Type", "application/zip");
       reply.header("Content-Disposition", `attachment; filename="${result.filename}"`);
@@ -2173,6 +2219,7 @@ export function registerAdminEarningRoutes(
     async (req, reply) => {
       const kind = parseKind(req.params.kind);
       if (!kind) { reply.code(404); return { error: "unknown catalog kind" }; }
+      if (!(await requirePermission(req, reply, permKeyForKind(kind)))) return;
       let body: z.infer<typeof importZipBody>;
       try { body = importZipBody.parse(req.body); }
       catch { reply.code(400); return { error: "invalid body" }; }
@@ -2190,6 +2237,7 @@ export function registerAdminEarningRoutes(
   );
 
   app.put<{ Body: unknown }>("/admin/earning/flash-sale/overrides", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_flash_sale"))) return;
     let body: z.infer<typeof flashSaleOverrideBody>;
     try { body = flashSaleOverrideBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
@@ -2262,8 +2310,8 @@ export function registerAdminEarningRoutes(
   }).strict();
 
   app.post<{ Body: unknown }>("/admin/earning/clear-banner", async (req, reply) => {
-    const me = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
-    if (!me) { reply.code(401); return { error: "auth" }; }
+    const me = await requirePermission(req, reply, "clear_user_cosmetic_override");
+    if (!me) return;
     let body: z.infer<typeof clearBannerBody>;
     try { body = clearBannerBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
@@ -2318,8 +2366,8 @@ export function registerAdminEarningRoutes(
   }).strict();
 
   app.post<{ Body: unknown }>("/admin/earning/clear-typing-phrase", async (req, reply) => {
-    const me = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
-    if (!me) { reply.code(401); return { error: "auth" }; }
+    const me = await requirePermission(req, reply, "clear_user_cosmetic_override");
+    if (!me) return;
     let body: z.infer<typeof clearTypingPhraseBody>;
     try { body = clearTypingPhraseBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
@@ -2379,8 +2427,8 @@ export function registerAdminEarningRoutes(
   }).strict();
 
   app.post<{ Body: unknown }>("/admin/earning/clear-room-presence", async (req, reply) => {
-    const me = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
-    if (!me) { reply.code(401); return { error: "auth" }; }
+    const me = await requirePermission(req, reply, "clear_user_cosmetic_override");
+    if (!me) return;
     let body: z.infer<typeof clearRoomPresenceBody>;
     try { body = clearRoomPresenceBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
@@ -2419,8 +2467,8 @@ export function registerAdminEarningRoutes(
   }).strict();
 
   app.post<{ Body: unknown }>("/admin/earning/clear-session-presence", async (req, reply) => {
-    const me = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
-    if (!me) { reply.code(401); return { error: "auth" }; }
+    const me = await requirePermission(req, reply, "clear_user_cosmetic_override");
+    if (!me) return;
     let body: z.infer<typeof clearSessionPresenceBody>;
     try { body = clearSessionPresenceBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }

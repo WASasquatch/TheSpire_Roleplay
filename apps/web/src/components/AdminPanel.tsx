@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import DOMPurify from "dompurify";
-import type { AuditEntry, ProfileView, ReportEntry, Role, Theme, ThemeableTextSlot, ThreadCategory } from "@thekeep/shared";
-import { THEME_PRESETS } from "@thekeep/shared";
+import type { AuditEntry, PermissionKey, ProfileView, ReportEntry, Role, Theme, ThemeableTextSlot, ThreadCategory } from "@thekeep/shared";
+import { AUDIT_ACTION_GROUPS, THEME_PRESETS } from "@thekeep/shared";
 import {
   DEFAULT_THEME,
   CUSTOM_CMD_CSS_MAX_LEN,
@@ -20,6 +20,7 @@ import { AdminEarningTab } from "./AdminEarningTab.js";
 import { AdminBackupsTab } from "./AdminBackupsTab.js";
 import { AdminScriptoriumTab } from "./AdminScriptoriumTab.js";
 import { AdminEmoticonsTab } from "./AdminEmoticonsTab.js";
+import { AdminPermissionsTab } from "./AdminPermissionsTab.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
@@ -33,32 +34,146 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "scriptorium" | "emoticons" | "audit" | "backups";
+type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "scriptorium" | "emoticons" | "audit" | "backups" | "permissions";
+
+/** Tab grouping for the strip's section dividers. Each tab carries
+ *  the id of the group it belongs to; the render walks the list
+ *  inserting visual separators wherever the group changes. Groups
+ *  also drive the mobile dropdown's `<optgroup>` labels so the
+ *  same mental model surfaces on both layouts. */
+type TabGroup = "monitor" | "people" | "content" | "siteconfig" | "system";
+
+const TAB_GROUP_LABEL: Record<TabGroup, string> = {
+  monitor: "Monitor",
+  people: "People & access",
+  content: "Content & community",
+  siteconfig: "Site configuration",
+  system: "System",
+};
 
 /** Single source of truth for tabs. Order here = order in both the
- *  desktop strip and the mobile dropdown. `masterOnly` tabs are gated
- *  to masteradmin role; plain admins don't see them in either picker. */
-const TAB_ITEMS: ReadonlyArray<{ id: Tab; label: string; masterOnly?: boolean }> = [
-  { id: "overview", label: "Overview" },
-  { id: "settings", label: "Settings", masterOnly: true },
-  { id: "branding", label: "Branding", masterOnly: true },
-  { id: "rules", label: "Rules", masterOnly: true },
-  { id: "links", label: "Nav Links" },
-  { id: "affiliates", label: "Affiliates" },
-  { id: "commands", label: "Commands" },
-  { id: "titles", label: "Titles" },
-  { id: "earning", label: "Earning" },
-  { id: "rooms", label: "Rooms" },
-  { id: "users", label: "Users" },
-  { id: "reports", label: "Reports" },
-  { id: "scriptorium", label: "Scriptorium" },
-  { id: "emoticons", label: "Emoticons" },
-  { id: "audit", label: "Audit" },
-  // Backups is masteradmin-only because the destructive Restore /
-  // Import paths can blow away the whole DB. Plain admins don't see
-  // the tab; the server also 403s every /admin/backup/* endpoint.
-  { id: "backups", label: "Backups", masterOnly: true },
+ *  desktop strip and the mobile dropdown. Grouped by feature axis:
+ *  monitor → people → content → site config → system. Within each
+ *  group, ordering follows typical workflow (e.g. Permissions sets
+ *  policy before Users applies it; Reports surfaces what needs
+ *  attention before Audit shows the broader log).
+ *
+ *  - `masterOnly` tabs are gated to masteradmin role for legacy tabs
+ *    that haven't been ported to permission-key gates yet.
+ *  - `permission` tabs are gated on the granular Phase-2 key; the tab
+ *    appears for any user whose resolved `me.permissions` includes
+ *    the listed key. Lets a masteradmin grant the matrix to a senior
+ *    admin without minting them as full masteradmin. New tabs should
+ *    prefer this form over `masterOnly`. */
+const TAB_ITEMS: ReadonlyArray<{
+  id: Tab;
+  label: string;
+  group: TabGroup;
+  masterOnly?: boolean;
+  permission?: PermissionKey;
+}> = [
+  // ----- Monitor: surfaces for the moderation-queue workflow -----
+  { id: "overview", label: "Overview", group: "monitor" },
+  { id: "audit", label: "Audit", group: "monitor" },
+  { id: "reports", label: "Reports", group: "monitor" },
+
+  // ----- People & access: who can do what -----
+  // Permissions ships first because the workflow is "set policy then
+  // apply it" — admins typically pick a role's grant set before
+  // touching individual user rows.
+  { id: "permissions", label: "Permissions", group: "people", permission: "view_admin_permissions" },
+  { id: "users", label: "Users", group: "people" },
+  { id: "rooms", label: "Rooms", group: "people" },
+
+  // ----- Content & community: catalogs the community engages with -----
+  { id: "earning", label: "Earning", group: "content" },
+  { id: "emoticons", label: "Emoticons", group: "content" },
+  { id: "scriptorium", label: "Scriptorium", group: "content" },
+  { id: "commands", label: "Commands", group: "content" },
+  { id: "titles", label: "Titles", group: "content" },
+
+  // ----- Site configuration: install-level chrome -----
+  { id: "settings", label: "Settings", group: "siteconfig", permission: "view_admin_settings" },
+  { id: "branding", label: "Branding", group: "siteconfig", permission: "view_admin_branding" },
+  { id: "rules", label: "Rules", group: "siteconfig", permission: "view_admin_rules" },
+  { id: "links", label: "Nav Links", group: "siteconfig" },
+  { id: "affiliates", label: "Affiliates", group: "siteconfig" },
+
+  // ----- System: destructive paths land last so a misclick on the
+  //       strip can't take you here by accident. -----
+  // Backups carries the destructive Restore / Import paths that can
+  // blow away the whole DB. The matrix seed pins
+  // `view_admin_backups` to masteradmin-only; the granular key gives
+  // the option of granting it to a delegate without elevating the
+  // delegate to full masteradmin.
+  { id: "backups", label: "Backups", group: "system", permission: "view_admin_backups" },
 ];
+
+/** Tab-visibility predicate. Masteradmin sees every tab unconditionally
+ *  (matches the server-side bypass). Otherwise:
+ *   - A tab with no gate fields is visible to everyone reaching the
+ *     panel.
+ *   - A tab with `permission` is visible iff the viewer holds that
+ *     key in their resolved permission set.
+ *   - A tab with `masterOnly: true` is visible only to masteradmin.
+ *
+ *  The compound case (`masterOnly` AND `permission`) is intentionally
+ *  rejected at the type level via the discriminated-union shape — a
+ *  tab carrying both fields would be ambiguous about which gate
+ *  wins. Stick to one or the other. */
+function tabVisible(
+  tab: { masterOnly?: boolean; permission?: PermissionKey },
+  isMaster: boolean,
+  permissions: readonly PermissionKey[],
+): boolean {
+  if (isMaster) return true;
+  if (tab.permission) return permissions.includes(tab.permission);
+  if (tab.masterOnly) return false;
+  return true;
+}
+
+/** Bucket a list of (already-filtered-for-visibility) tabs by their
+ *  `group` field. Returns the buckets in TAB_ITEMS order so the
+ *  mobile dropdown preserves the same vertical sequence as the
+ *  desktop strip. Empty groups drop out entirely — a viewer whose
+ *  permission set hides every tab in a category doesn't see that
+ *  category's optgroup label. */
+function groupVisibleTabs<T extends { group: TabGroup }>(
+  tabs: readonly T[],
+): Array<[TabGroup, T[]]> {
+  const buckets = new Map<TabGroup, T[]>();
+  for (const t of tabs) {
+    const arr = buckets.get(t.group) ?? [];
+    arr.push(t);
+    buckets.set(t.group, arr);
+  }
+  return Array.from(buckets.entries());
+}
+
+/** Walk the visible-tab list and yield a flat sequence of tab buttons
+ *  interspersed with separator markers whenever the group changes.
+ *  Returns a discriminated union so the renderer can pattern-match
+ *  on `kind` and pick the right element type. The separator carries
+ *  the group it's transitioning AWAY from so the title hover shows
+ *  which section just ended. */
+type StripEntry<T> =
+  | { kind: "tab"; tab: T }
+  | { kind: "separator"; afterGroup: TabGroup };
+
+function withGroupSeparators<T extends { group: TabGroup }>(
+  tabs: readonly T[],
+): StripEntry<T>[] {
+  const out: StripEntry<T>[] = [];
+  let prevGroup: TabGroup | null = null;
+  for (const t of tabs) {
+    if (prevGroup !== null && t.group !== prevGroup) {
+      out.push({ kind: "separator", afterGroup: prevGroup });
+    }
+    out.push({ kind: "tab", tab: t });
+    prevGroup = t.group;
+  }
+  return out;
+}
 
 /**
  * Per-tab access to the AdminPanel modal shell. Tabs use `setFooter`
@@ -107,6 +222,8 @@ export function AdminSaveFooter({
   lastUpdatedAt,
   error,
   saveLabel,
+  canEdit = true,
+  readOnlyHint,
 }: {
   formId: string;
   saving: boolean;
@@ -115,26 +232,38 @@ export function AdminSaveFooter({
   error: string | null;
   /** e.g. "Save settings". The button shows "Saving..." while saving. */
   saveLabel: string;
+  /** Whether the viewer holds the permission to save this form.
+   *  Defaults true for backwards compatibility with tabs that haven't
+   *  threaded the gate through yet. When false the Save button is
+   *  hidden and the left-side status text surfaces `readOnlyHint`
+   *  instead so the tab reads as read-only at a glance. */
+  canEdit?: boolean;
+  /** Short hint shown in the footer when `canEdit` is false. */
+  readOnlyHint?: string;
 }): JSX.Element {
   const shell = useAdminShell();
   return (
     <>
       <span
         className={`min-w-0 truncate text-xs ${
-          error
-            ? "text-keep-accent"
-            : savedFlash
-              ? "text-keep-system"
-              : "text-keep-muted"
+          !canEdit
+            ? "italic text-keep-muted"
+            : error
+              ? "text-keep-accent"
+              : savedFlash
+                ? "text-keep-system"
+                : "text-keep-muted"
         }`}
       >
-        {error
-          ? error
-          : savedFlash
-            ? "Saved."
-            : lastUpdatedAt
-              ? `Last updated ${new Date(lastUpdatedAt).toLocaleString()}`
-              : ""}
+        {!canEdit
+          ? (readOnlyHint ?? "Read-only — you don't have permission to save changes here.")
+          : error
+            ? error
+            : savedFlash
+              ? "Saved."
+              : lastUpdatedAt
+                ? `Last updated ${new Date(lastUpdatedAt).toLocaleString()}`
+                : ""}
       </span>
       <div className="flex shrink-0 items-center gap-2">
         <button
@@ -142,16 +271,18 @@ export function AdminSaveFooter({
           onClick={() => shell?.close()}
           className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-xs hover:bg-keep-banner/60"
         >
-          Cancel
+          {canEdit ? "Cancel" : "Close"}
         </button>
-        <button
-          form={formId}
-          type="submit"
-          disabled={saving}
-          className="keep-button rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
-        >
-          {saving ? "Saving..." : saveLabel}
-        </button>
+        {canEdit ? (
+          <button
+            form={formId}
+            type="submit"
+            disabled={saving}
+            className="keep-button rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
+          >
+            {saving ? "Saving..." : saveLabel}
+          </button>
+        ) : null}
       </div>
     </>
   );
@@ -168,6 +299,16 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
   // `masterOnly*` references below are also used downstream by
   // UsersTab to hide email / disable / masteradmin-role controls.
   const isMaster = useChat((s) => isMasterAdminRole(s.me?.role ?? "user"));
+  // Resolved permission set for the viewer. Drives the
+  // `permission`-keyed tab visibility filter in `tabVisible`. Read
+  // from the store via the AuthMe payload — refreshes on the /auth/me
+  // poll, same as the rest of `me`.
+  const mePermissions = useChat((s) => s.me?.permissions ?? []);
+  // Inline tab-render gate that mirrors `tabVisible` for a single key.
+  // Used on the body-render side so a stale `tab` id can't render a
+  // panel the user no longer has access to.
+  const canSeeTab = (key: PermissionKey) =>
+    tabVisible({ permission: key }, isMaster, mePermissions);
 
   // Per-tab footer slot. Tabs register save/status controls here via
   // `useAdminShell().setFooter(...)` so the previously-empty area
@@ -198,7 +339,11 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             for it. Both pickers feed the same `setTab` setter and read
             from the shared TAB_ITEMS array so they can't drift apart. */}
         <div className="shrink-0 border-b border-keep-rule bg-keep-banner">
-          {/* Mobile: title + dropdown + close, single row, no scroll. */}
+          {/* Mobile: title + dropdown + close, single row, no scroll.
+              The dropdown groups visible tabs into `<optgroup>`s
+              keyed on the tab's `group` field so the same five-bucket
+              mental model (Monitor / People & access / Content & community
+              / Site configuration / System) surfaces on both layouts. */}
           <div className="flex items-center gap-2 px-2 py-2 md:hidden">
             <h2 className="shrink-0 font-action text-base">Admin</h2>
             <select
@@ -207,23 +352,46 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
               aria-label="Admin section"
               className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
             >
-              {TAB_ITEMS.filter((t) => !t.masterOnly || isMaster).map((t) => (
-                <option key={t.id} value={t.id}>{t.label}</option>
-              ))}
+              {groupVisibleTabs(TAB_ITEMS.filter((t) => tabVisible(t, isMaster, mePermissions))).map(
+                ([group, items]) => (
+                  <optgroup key={group} label={TAB_GROUP_LABEL[group]}>
+                    {items.map((t) => (
+                      <option key={t.id} value={t.id}>{t.label}</option>
+                    ))}
+                  </optgroup>
+                ),
+              )}
             </select>
             <CloseButton onClick={onClose} />
           </div>
 
-          {/* Desktop: title + horizontally-scrollable tab strip + close. */}
+          {/* Desktop: title + horizontally-scrollable tab strip + close.
+              A hairline vertical separator renders between groups so the
+              eye can pick out the five clusters without reading every
+              label first. The walk threads the visible-tab list through
+              `withGroupSeparators` so a hidden tab (gated out by a
+              missing permission) doesn't leave an orphaned divider. */}
           <div className="hidden items-center gap-2 px-4 py-2 md:flex">
             <h2 className="shrink-0 font-action text-lg">Admin</h2>
             {/* `keep-scroll-strip` hides the scrollbar on touch and
                 swaps in a thin themed scrollbar on md+ so it never
                 underlines the tab labels. */}
-            <nav className="keep-scroll-strip flex min-w-0 flex-1 gap-1 overflow-x-auto text-xs uppercase tracking-widest">
-              {TAB_ITEMS.filter((t) => !t.masterOnly || isMaster).map((t) => (
-                <TabBtn key={t.id} active={tab === t.id} onClick={() => setTab(t.id)}>{t.label}</TabBtn>
-              ))}
+            <nav className="keep-scroll-strip flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-xs uppercase tracking-widest">
+              {withGroupSeparators(TAB_ITEMS.filter((t) => tabVisible(t, isMaster, mePermissions))).map(
+                (entry) =>
+                  entry.kind === "separator" ? (
+                    <span
+                      key={`sep:${entry.afterGroup}`}
+                      aria-hidden
+                      className="mx-1 h-4 w-px shrink-0 self-center bg-keep-rule/60"
+                      title={TAB_GROUP_LABEL[entry.afterGroup]}
+                    />
+                  ) : (
+                    <TabBtn key={entry.tab.id} active={tab === entry.tab.id} onClick={() => setTab(entry.tab.id)}>
+                      {entry.tab.label}
+                    </TabBtn>
+                  ),
+              )}
             </nav>
             <CloseButton onClick={onClose} />
           </div>
@@ -237,11 +405,13 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             the frame's `overflow-hidden`. */}
         <AdminShellContext.Provider value={shellApi}>
           <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto p-3 sm:p-4">
+            {/* Body render gates mirror the tab-strip visibility
+                helper so a user with a deep-linked stale tab id
+                can't render a panel they don't have access to. */}
             {tab === "overview" ? <OverviewTab /> : null}
-            {/* Master-only render gates mirror the tab visibility above. */}
-            {tab === "settings" && isMaster ? <SettingsTab /> : null}
-            {tab === "branding" && isMaster ? <BrandingTab /> : null}
-            {tab === "rules" && isMaster ? <RulesTab /> : null}
+            {tab === "settings" && canSeeTab("view_admin_settings") ? <SettingsTab /> : null}
+            {tab === "branding" && canSeeTab("view_admin_branding") ? <BrandingTab /> : null}
+            {tab === "rules" && canSeeTab("view_admin_rules") ? <RulesTab /> : null}
             {tab === "links" ? <LinksTab onLinksChanged={onLinksChanged} /> : null}
             {tab === "affiliates" ? <AffiliatesTab /> : null}
             {tab === "commands" ? <CommandsTab /> : null}
@@ -253,7 +423,8 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             {tab === "scriptorium" ? <AdminScriptoriumTab /> : null}
             {tab === "emoticons" ? <AdminEmoticonsTab /> : null}
             {tab === "audit" ? <AuditTab /> : null}
-            {tab === "backups" && isMaster ? <AdminBackupsTab /> : null}
+            {tab === "backups" && canSeeTab("view_admin_backups") ? <AdminBackupsTab /> : null}
+            {tab === "permissions" && canSeeTab("view_admin_permissions") ? <AdminPermissionsTab /> : null}
           </div>
         </AdminShellContext.Provider>
 
@@ -775,6 +946,11 @@ function SparklineAxis({ days }: { days: string[] }) {
 
 function SettingsTab() {
   const setBranding = useChat((s) => s.setBranding);
+  // Edit permission gates the Save button. A delegate granted only
+  // `view_admin_settings` reads the form but can't submit changes —
+  // the server's PUT /admin/settings would 403 anyway, but hiding
+  // Save up front spares the user the wasted round-trip.
+  const canEditSiteSettings = useChat((s) => s.me?.permissions.includes("edit_site_settings") ?? false);
   const [data, setData] = useState<SettingsRow | null>(null);
   const [retention, setRetention] = useState("");
   const [sessionTtl, setSessionTtl] = useState("");
@@ -948,10 +1124,12 @@ function SettingsTab() {
         lastUpdatedAt={data?.updatedAt ?? null}
         error={error}
         saveLabel="Save settings"
+        canEdit={canEditSiteSettings}
+        readOnlyHint="Read-only — needs edit_site_settings to save."
       />,
     );
     return () => shell.setFooter(null);
-  }, [shell, saving, savedFlash, error, data?.updatedAt]);
+  }, [shell, saving, savedFlash, error, data?.updatedAt, canEditSiteSettings]);
 
   if (!data) {
     return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
@@ -1268,6 +1446,21 @@ interface BrandingDraft {
 
 function BrandingTab() {
   const setBranding = useChat((s) => s.setBranding);
+  // Edit gate. Branding submits through PUT /admin/settings, which
+  // now does per-field gating: a patch that only touches branding
+  // fields (site name, logos, banner CSS, welcome HTML, theme-design
+  // map, …) requires `edit_branding`. So we hold the form open for
+  // anyone with EITHER edit_branding OR the broader edit_site_settings
+  // — both let the patch through, and the server is the source of
+  // truth on what counts as "branding-only."
+  //
+  // The Upload-logo affordance below is independently gated on
+  // `upload_logo` because the server pins that to a separate route.
+  const canEditSiteSettings = useChat(
+    (s) => (s.me?.permissions.includes("edit_branding") ?? false)
+      || (s.me?.permissions.includes("edit_site_settings") ?? false),
+  );
+  const canUploadLogo = useChat((s) => s.me?.permissions.includes("upload_logo") ?? false);
   const [data, setData] = useState<SettingsRow | null>(null);
   const [draft, setDraft] = useState<BrandingDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1388,10 +1581,12 @@ function BrandingTab() {
         lastUpdatedAt={data?.updatedAt ?? null}
         error={error}
         saveLabel="Save branding"
+        canEdit={canEditSiteSettings}
+        readOnlyHint="Read-only — needs edit_site_settings to save."
       />,
     );
     return () => shell.setFooter(null);
-  }, [shell, saving, savedFlash, error, data?.updatedAt]);
+  }, [shell, saving, savedFlash, error, data?.updatedAt, canEditSiteSettings]);
 
   if (!data || !draft) {
     return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
@@ -1465,6 +1660,7 @@ function BrandingTab() {
         </p>
         <LogoImageRow
           value={draft.logoUrl}
+          canUpload={canUploadLogo}
           onChange={(next) => setDraft({ ...draft, logoUrl: next })}
           onUploaded={(j) => {
             // The upload endpoint returns the full freshly-saved
@@ -1656,10 +1852,16 @@ function LogoImageRow({
   value,
   onChange,
   onUploaded,
+  canUpload,
 }: {
   value: string;
   onChange: (next: string) => void;
   onUploaded: (j: { url: string; settings: SettingsRow }) => void;
+  /** Whether the viewer holds `upload_logo`. When false the Upload
+   *  button hides — the URL input stays editable since pasting a
+   *  URL only requires `edit_site_settings`, which the parent gates
+   *  independently. */
+  canUpload: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -1719,14 +1921,16 @@ function LogoImageRow({
           onChange={onPick}
           className="hidden"
         />
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          disabled={uploading}
-          className="rounded border border-keep-rule bg-keep-banner px-3 py-1 hover:bg-keep-banner/80 disabled:opacity-50"
-        >
-          {uploading ? "Uploading…" : "Upload…"}
-        </button>
+        {canUpload ? (
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="rounded border border-keep-rule bg-keep-banner px-3 py-1 hover:bg-keep-banner/80 disabled:opacity-50"
+          >
+            {uploading ? "Uploading…" : "Upload…"}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => onChange("")}
@@ -1768,6 +1972,9 @@ function LogoImageRow({
  */
 function RulesTab() {
   const setBranding = useChat((s) => s.setBranding);
+  // Rules saves through PUT /admin/settings (the same endpoint that
+  // backs Settings + Branding), so the gate is `edit_site_settings`.
+  const canEditSiteSettings = useChat((s) => s.me?.permissions.includes("edit_site_settings") ?? false);
   const [data, setData] = useState<SettingsRow | null>(null);
   const [rulesHtml, setRulesHtml] = useState("");
   const [securityHtml, setSecurityHtml] = useState("");
@@ -1868,10 +2075,12 @@ function RulesTab() {
         lastUpdatedAt={data?.updatedAt ?? null}
         error={error}
         saveLabel="Save rules"
+        canEdit={canEditSiteSettings}
+        readOnlyHint="Read-only — needs edit_site_settings to save."
       />,
     );
     return () => shell.setFooter(null);
-  }, [shell, saving, savedFlash, error, data?.updatedAt]);
+  }, [shell, saving, savedFlash, error, data?.updatedAt, canEditSiteSettings]);
 
   if (!data) {
     return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
@@ -4483,6 +4692,11 @@ interface AdminUserRow {
   lastLoginAt: number | null;
   disabled: boolean;
   characters: Array<{ id: string; name: string; deleted: boolean }>;
+  /** Last ~5 distinct IPs this user has logged in from, newest-first.
+   *  `altCount` is the number of OTHER accounts that have logged in
+   *  from the same IP — non-zero values flag ban-evasion or
+   *  shared-device patterns for moderation review. */
+  recentIps: Array<{ ip: string; lastSeenAt: number; altCount: number }>;
 }
 
 type UserSortKey = "username" | "role" | "state" | "chars" | "registered" | "lastSeen";
@@ -4497,6 +4711,12 @@ function UsersTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  // IP pivot — when set, scopes the list to every user who has a
+  // session row from this IP. Set by clicking an IP chip on any
+  // user row; cleared by the "Showing alts on X — clear" affordance
+  // that appears in the toolbar while a pivot is active. Stored
+  // alongside `q` so the two filters compose at the server.
+  const [ipPivot, setIpPivot] = useState("");
   const [editing, setEditing] = useState<AdminUserRow | null>(null);
   // Default sort lands on newest signups so admins see fresh accounts
   // first — supports the moderation workflow of "who joined since I last
@@ -4507,17 +4727,22 @@ function UsersTab() {
   const [stateFilter, setStateFilter] = useState<StateFilter>("any");
   const [registeredFilter, setRegisteredFilter] = useState<RegisteredFilter>("any");
   const [loginFilter, setLoginFilter] = useState<LoginFilter>("any");
-  // Mirror of the panel-level master-admin check. Threaded through to
-  // the edit form so it can lock the master-only fields (email,
-  // disabled, masteradmin role promotion) and to the row action cell
-  // so a plain admin doesn't see a Delete button that the server would
-  // refuse anyway.
+  // Tier check kept for the role-grant guards that stay hardcoded
+  // (only masteradmin can mint another masteradmin, see plan.md's
+  // "hardcoded exceptions"). Field-level permissions migrate to
+  // granular keys via `mePermissions` below.
   const isMaster = useChat((s) => isMasterAdminRole(s.me?.role ?? "user"));
+  const mePermissions = useChat((s) => s.me?.permissions ?? []);
+  const canDeleteUser = mePermissions.includes("hard_delete_user");
 
   async function reload() {
     setLoading(true);
     try {
-      const url = q.trim() ? `/admin/users?q=${encodeURIComponent(q.trim())}` : "/admin/users";
+      const params = new URLSearchParams();
+      if (q.trim()) params.set("q", q.trim());
+      if (ipPivot.trim()) params.set("ip", ipPivot.trim());
+      const qs = params.toString();
+      const url = qs ? `/admin/users?${qs}` : "/admin/users";
       const r = await fetch(url, { credentials: "include" });
       if (!r.ok) throw new Error(await readError(r));
       const j = (await r.json()) as { users: AdminUserRow[] };
@@ -4532,7 +4757,7 @@ function UsersTab() {
   useEffect(() => {
     const t = window.setTimeout(reload, 200);
     return () => window.clearTimeout(t);
-  }, [q]);
+  }, [q, ipPivot]);
 
   async function patch(id: string, body: Record<string, unknown>) {
     const r = await fetch(`/admin/users/${id}`, {
@@ -4651,6 +4876,28 @@ function UsersTab() {
         />
       </div>
 
+      {/* IP pivot chip — surfaces while a click on an IP chip in the
+          table has scoped the list to "every account on this IP." A
+          small × clears it back to the unfiltered view. Sits above
+          the filter row so it reads as a context layer on top of the
+          regular search, not as another filter knob. */}
+      {ipPivot ? (
+        <div className="flex items-center gap-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">
+          <span>
+            Showing every account seen on <span className="font-mono">{ipPivot}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setIpPivot("")}
+            className="ml-auto rounded border border-keep-accent/40 px-1.5 py-0 hover:bg-keep-accent/15"
+            title="Clear IP pivot"
+            aria-label="Clear IP pivot"
+          >
+            × Clear
+          </button>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-end gap-2 rounded border border-keep-rule/60 bg-keep-bg/30 p-2 text-xs">
         <label className="flex flex-col gap-0.5">
           <span className="text-[10px] uppercase tracking-widest text-keep-muted">Role</span>
@@ -4740,6 +4987,10 @@ function UsersTab() {
               <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("role")}>Role{sortIndicator("role")}</th>
               <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("state")}>State{sortIndicator("state")}</th>
               <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("chars")}>Chars{sortIndicator("chars")}</th>
+              <th
+                className="px-2 py-1 text-left"
+                title="Up to 5 most-recent distinct IPs the user has logged in from. Click an IP to pivot the list to every account that shares it. Numeric badge = count of OTHER accounts that have used the same IP — flag for ban evasion or shared-device review."
+              >IPs &amp; alts</th>
               <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("registered")}>Registered{sortIndicator("registered")}</th>
               <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("lastSeen")}>Last seen{sortIndicator("lastSeen")}</th>
               <th className="px-2 py-1"></th>
@@ -4776,6 +5027,13 @@ function UsersTab() {
                 <td className="px-2 py-1 text-center tabular-nums" title={u.characters.map((c) => c.name).join(", ")}>
                   {u.characters.filter((c) => !c.deleted).length}
                 </td>
+                <td className="px-2 py-1">
+                  <UserIpChips
+                    recentIps={u.recentIps}
+                    activeIp={ipPivot}
+                    onPickIp={(ip) => setIpPivot(ip)}
+                  />
+                </td>
                 <td className="px-2 py-1 text-center tabular-nums" title={new Date(u.createdAt).toLocaleString()}>
                   {new Date(u.createdAt).toLocaleDateString()}
                 </td>
@@ -4790,11 +5048,12 @@ function UsersTab() {
                   >
                     Edit
                   </button>
-                  {/* Delete is master-only — hard-deleting a user
-                      cascades through every FK and is one of the
-                      most destructive single-row actions in the
-                      system. */}
-                  {isMaster ? (
+                  {/* Delete is gated on the granular `hard_delete_user`
+                      key. Defaults to masteradmin-only via the matrix
+                      seed since hard-deleting cascades through every
+                      FK and is one of the most destructive single-row
+                      actions; the matrix can hand it to a delegate. */}
+                  {canDeleteUser ? (
                     <button
                       type="button"
                       onClick={() => destroy(u)}
@@ -4823,6 +5082,76 @@ function UsersTab() {
   );
 }
 
+/**
+ * Compact IP renderer for the UsersTab row. Each IP is a clickable
+ * chip that sets the table's `ipPivot` so the surrounding view
+ * scopes to every other account that's used the same address —
+ * the canonical "spot ban evasion / alt accounts" moderation step.
+ *
+ * The chip's badge is the count of OTHER accounts on this IP. 0
+ * means "this IP is only this user", which is the common case for
+ * residential connections; ≥1 flags shared devices / proxies / alts
+ * and is worth a closer look. Larger numbers (a coffee-shop or CGNAT
+ * IP, say) often have benign explanations — the chip is a starting
+ * point, not a verdict.
+ *
+ * `activeIp` highlights the chip when the pivot already matches it,
+ * which is useful while reviewing alts: the row of the IP you
+ * pivoted on stays visually anchored as you scroll the result list.
+ */
+function UserIpChips({
+  recentIps,
+  activeIp,
+  onPickIp,
+}: {
+  recentIps: AdminUserRow["recentIps"];
+  activeIp: string;
+  onPickIp: (ip: string) => void;
+}) {
+  if (recentIps.length === 0) {
+    return <span className="italic text-keep-muted">—</span>;
+  }
+  return (
+    <ul className="flex flex-wrap gap-1">
+      {recentIps.map((entry) => {
+        const isActive = entry.ip === activeIp;
+        // Surface the alt count with a low-effort severity hint: 0
+        // alts is muted (no signal), 1-2 is a neutral chip, 3+ is
+        // accented because three concurrent accounts on one address
+        // is the threshold most installs treat as worth reviewing.
+        const altClass =
+          entry.altCount === 0
+            ? "bg-keep-banner/40 text-keep-muted"
+            : entry.altCount <= 2
+              ? "bg-keep-action/15 text-keep-action"
+              : "bg-keep-accent/20 text-keep-accent";
+        return (
+          <li key={entry.ip}>
+            <button
+              type="button"
+              onClick={() => onPickIp(entry.ip)}
+              title={`Last seen ${new Date(entry.lastSeenAt).toLocaleString()}. Click to show every other account that has used this IP.`}
+              className={`inline-flex items-center gap-1 rounded border px-1.5 py-0 font-mono text-[10px] hover:bg-keep-banner ${
+                isActive
+                  ? "border-keep-accent bg-keep-accent/15 text-keep-accent"
+                  : "border-keep-rule/60 bg-keep-bg text-keep-text"
+              }`}
+            >
+              <span>{entry.ip}</span>
+              <span
+                className={`rounded-full px-1 text-[9px] uppercase tracking-widest ${altClass}`}
+                title={`${entry.altCount} other account${entry.altCount === 1 ? "" : "s"} have logged in from this IP`}
+              >
+                {entry.altCount} alt{entry.altCount === 1 ? "" : "s"}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function UserEditForm({
   user,
   isMaster,
@@ -4831,11 +5160,12 @@ function UserEditForm({
 }: {
   user: AdminUserRow;
   /**
-   * Whether the caller is a master admin. Drives the field-level
-   * lockdown — only masters get email + disabled controls and the
-   * masteradmin role option. Plain admins still see the row but the
-   * inputs are absent (the server enforces the same gate so the UI
-   * just stays honest about what's possible).
+   * Whether the caller is a master admin (role-tier check, not a
+   * permission key). Kept because granting the masteradmin role is a
+   * hardcoded exception in plan.md — no matrix toggle for that one
+   * action. Per-field gates below pull from `me.permissions` so the
+   * matrix can hand out e.g. `edit_user_email` without minting a
+   * masteradmin.
    */
   isMaster: boolean;
   onCancel: () => void;
@@ -4847,10 +5177,20 @@ function UserEditForm({
   const [disabled, setDisabled] = useState(user.disabled);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  // A plain admin can't act on a masteradmin target at all (no
-  // demote, no rename, etc.) — the row stays read-only so they don't
-  // submit a save that would 403. Self-edits route through the
-  // profile editor instead, so we don't need to special-case "is me".
+  // Per-field permission gates. Each one corresponds to a server-side
+  // route check in apps/server/src/routes/users.ts; the UI surface
+  // matches the server so we don't ship affordances that would 403.
+  const mePermissions = useChat((s) => s.me?.permissions ?? []);
+  const canEditEmail = mePermissions.includes("edit_user_email");
+  const canDisableEnable = mePermissions.includes("disable_user") || mePermissions.includes("enable_user");
+  const canResetPassword = mePermissions.includes("reset_user_password");
+  const canGrantEarning = mePermissions.includes("grant_earning_award");
+  const canClearCosmetic = mePermissions.includes("clear_user_cosmetic_override");
+  // A non-masteradmin caller can't act on a masteradmin target at all
+  // (no demote, no rename, etc.) — the row stays read-only so they
+  // don't submit a save that would 403. The "you can't outrank
+  // yourself" guard stays as a tier check per plan.md's hardcoded
+  // exceptions.
   const targetIsMaster = user.role === "masteradmin";
   const locked = !isMaster && targetIsMaster;
 
@@ -4892,10 +5232,11 @@ function UserEditForm({
             className="w-full rounded border border-keep-rule px-2 py-1"
           />
         </label>
-        {/* Email is master-only — it's an account-recovery vector and
-            changing it amounts to identity reassignment. Plain admins
-            see the value read-only via the directory but can't mutate. */}
-        {isMaster ? (
+        {/* Email is gated on `edit_user_email` — it's an
+            account-recovery vector and changing it amounts to identity
+            reassignment. Defaults masteradmin-only via the seed but
+            grantable through the matrix. */}
+        {canEditEmail ? (
           <label>
             <span className="mb-1 block uppercase tracking-widest text-keep-muted">Email</span>
             <input
@@ -4926,9 +5267,11 @@ function UserEditForm({
             {isMaster ? <option value="masteradmin">masteradmin</option> : null}
           </select>
         </label>
-        {/* Disabled toggle is master-only — disabling is an account
-            lockout, which the spec scoped to top-tier admins only. */}
-        {isMaster ? (
+        {/* Disabled toggle is gated on `disable_user`/`enable_user`
+            — disabling is an account lockout, which the seed scopes
+            to masteradmin-default; the matrix can hand it out per
+            user or per role. */}
+        {canDisableEnable ? (
           <label className="flex items-end gap-2 pb-1">
             <input
               type="checkbox"
@@ -4966,16 +5309,25 @@ function UserEditForm({
         </button>
       </div>
 
-      {/* Master-only admin tools, separated from the main edit so
-          each operation is its own POST. Hidden for plain admins —
-          all the routes 403 server-side anyway, but keeping the UI
-          honest avoids the "why doesn't this button work" question. */}
-      {isMaster && !locked ? (
+      {/* Per-action admin tools. Each section gates on its own
+          permission key so a delegate admin with (say) just
+          `reset_user_password` sees only the reset section, not the
+          earning or cosmetic ones. `locked` still hides the whole
+          block when the target outranks the caller. */}
+      {!locked && (canResetPassword || canGrantEarning || canClearCosmetic) ? (
         <div className="mt-4 space-y-3 border-t border-keep-rule pt-3">
-          <PasswordResetSection userId={user.userId} username={user.username} />
-          <EarningGrantSection username={user.username} />
-          <CosmeticGrantSection username={user.username} />
-          <EarningResetSection username={user.username} />
+          {canResetPassword ? (
+            <PasswordResetSection userId={user.userId} username={user.username} />
+          ) : null}
+          {canGrantEarning ? (
+            <>
+              <EarningGrantSection username={user.username} />
+              <EarningResetSection username={user.username} />
+            </>
+          ) : null}
+          {canClearCosmetic ? (
+            <CosmeticGrantSection username={user.username} />
+          ) : null}
         </div>
       ) : null}
     </form>
@@ -5733,6 +6085,11 @@ function ReportsTab() {
  * ========================================================= */
 function AuditTab() {
   const [actionFilter, setActionFilter] = useState("");
+  // Category preset bundles multiple action strings into a single
+  // ?actions= query so the feed can render e.g. "all permission
+  // changes" without pasting four names into the text filter.
+  // "all" / "" means no preset; the text input still works alongside.
+  const [groupFilter, setGroupFilter] = useState<string>("all");
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -5741,7 +6098,11 @@ function AuditTab() {
     let cancelled = false;
     setEntries(null);
     setError(null);
-    const qs = actionFilter ? `?action=${encodeURIComponent(actionFilter)}` : "";
+    const params = new URLSearchParams();
+    if (actionFilter) params.set("action", actionFilter);
+    const groupActions = AUDIT_ACTION_GROUPS[groupFilter]?.actions ?? [];
+    if (groupActions.length > 0) params.set("actions", groupActions.join(","));
+    const qs = params.toString() ? `?${params.toString()}` : "";
     fetch(`/admin/audit${qs}`, { credentials: "include" })
       .then(async (r) => {
         if (!r.ok) throw new Error(await readError(r));
@@ -5750,13 +6111,23 @@ function AuditTab() {
       .then((j) => { if (!cancelled) setEntries(j.entries); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "load failed"); });
     return () => { cancelled = true; };
-  }, [actionFilter, refreshKey]);
+  }, [actionFilter, groupFilter, refreshKey]);
 
   return (
     <section className="space-y-2 text-sm">
       <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="font-action text-base">Audit log</h3>
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <select
+            value={groupFilter}
+            onChange={(e) => setGroupFilter(e.target.value)}
+            aria-label="Audit category"
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5"
+          >
+            {Object.entries(AUDIT_ACTION_GROUPS).map(([key, group]) => (
+              <option key={key} value={key}>{group.label}</option>
+            ))}
+          </select>
           <input
             type="text"
             value={actionFilter}

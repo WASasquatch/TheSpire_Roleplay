@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { isAdminRole, isMasterAdminRole, roleRank } from "@thekeep/shared";
+import { isAdminRole, roleRank, type PermissionKey } from "@thekeep/shared";
 import { bans, mutes, roomMembers, rooms, users } from "../../db/schema.js";
+import { hasPermission } from "../../auth/permissions.js";
 import {
   addMessage,
   broadcastPresence,
@@ -84,11 +85,27 @@ async function isKeymaster(ctx: CommandContext, userId: string): Promise<boolean
 }
 
 /**
- * Caller has *some* moderation authority over the current room: site admin,
- * room owner (by row OR by membership row), or room mod.
+ * Caller has moderation authority for the current room.
+ *
+ * Three paths grant authority (any one suffices):
+ *   1. Site-level permission `siteKey` — admin tier (and anyone the
+ *      matrix has granted that specific moderation permission) skips
+ *      the per-room ownership check.
+ *   2. Room owner — `rooms.ownerId = caller` OR `room_members.role =
+ *      "owner"`. Local privilege; not site-wide.
+ *   3. Room mod — `room_members.role = "mod"`. Local privilege; the
+ *      room owner promoted them via /promote.
+ *
+ * `siteKey` is the specific permission the command needs (e.g.
+ * `kick_user`, `ban_user`). Threading it through means a user with
+ * just `kick_user` can boot people but not ban them — granular
+ * matrix grants pass straight through.
  */
-async function callerCanModerateRoom(ctx: CommandContext): Promise<boolean> {
-  if (isAdminRole(ctx.user.role)) return true;
+async function callerCanModerateRoom(
+  ctx: CommandContext,
+  siteKey: PermissionKey,
+): Promise<boolean> {
+  if (await hasPermission(ctx.user, siteKey, ctx.db)) return true;
   const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
   if (!room) return false;
   if (room.ownerId === ctx.user.id) return true;
@@ -97,11 +114,16 @@ async function callerCanModerateRoom(ctx: CommandContext): Promise<boolean> {
 }
 
 /**
- * Stricter - only the room owner (or a site admin) can manage room roles.
- * A room mod can /kick or /mute but can't promote others to mod.
+ * Stricter - only the room owner (or someone with the site-level
+ * permission) can manage room roles. A room mod can /kick or /mute
+ * but can't promote others to mod (that requires room ownership or
+ * the matrix-granted equivalent).
  */
-async function callerOwnsRoom(ctx: CommandContext): Promise<boolean> {
-  if (isAdminRole(ctx.user.role)) return true;
+async function callerOwnsRoom(
+  ctx: CommandContext,
+  siteKey: PermissionKey,
+): Promise<boolean> {
+  if (await hasPermission(ctx.user, siteKey, ctx.db)) return true;
   const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
   if (!room) return false;
   if (room.ownerId === ctx.user.id) return true;
@@ -129,7 +151,7 @@ export const kickCommand: CommandHandler = {
     },
   ],
   async run(ctx) {
-    if (!(await callerCanModerateRoom(ctx))) {
+    if (!(await callerCanModerateRoom(ctx, "kick_user"))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /kick.");
     }
     const [name, ...reasonParts] = ctx.args;
@@ -214,7 +236,7 @@ export const muteCommand: CommandHandler = {
     },
   ],
   async run(ctx) {
-    if (!(await callerCanModerateRoom(ctx))) {
+    if (!(await callerCanModerateRoom(ctx, "mute_user"))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /mute.");
     }
     const [name, durationStr, ...reasonParts] = ctx.args;
@@ -273,7 +295,7 @@ export const unmuteCommand: CommandHandler = {
   usage: "/unmute <username>",
   description: "Lift a /mute on a user in the current room.",
   async run(ctx) {
-    if (!(await callerCanModerateRoom(ctx))) {
+    if (!(await callerCanModerateRoom(ctx, "unmute_user"))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /unmute.");
     }
     const name = ctx.argsText.trim();
@@ -306,7 +328,10 @@ export const promoteCommand: CommandHandler = {
   usage: "/promote <username>",
   description: "Promote a user to room mod (room owner only).",
   async run(ctx) {
-    if (!(await callerOwnsRoom(ctx))) {
+    // Site-key `edit_any_room_metadata` covers admins managing any
+    // room's roster — the legacy admin shortcut in `callerOwnsRoom`
+    // routes through it. Room-owner check stays local (hardcoded).
+    if (!(await callerOwnsRoom(ctx, "edit_any_room_metadata"))) {
       return notice(ctx, "PERM", "Only the room owner (or a site admin) can promote room mods.");
     }
     const name = ctx.argsText.trim();
@@ -352,7 +377,7 @@ export const demoteCommand: CommandHandler = {
   usage: "/demote <username>",
   description: "Demote a room mod back to member (room owner only).",
   async run(ctx) {
-    if (!(await callerOwnsRoom(ctx))) {
+    if (!(await callerOwnsRoom(ctx, "edit_any_room_metadata"))) {
       return notice(ctx, "PERM", "Only the room owner (or a site admin) can demote room mods.");
     }
     const name = ctx.argsText.trim();
@@ -390,10 +415,20 @@ export const promoteAdminCommand: CommandHandler = {
   aliases: ["sysop"],
   usage: "/promoteadmin <username>",
   description: "Promote a user to site admin (admin only).",
-  permission: "admin",
+  permission: "grant_admin_role",
   async run(ctx) {
     const name = ctx.argsText.trim();
     if (!name) return notice(ctx, "EMPTY", "Usage: /promoteadmin <username>");
+    // Role-hierarchy gate. The granular `grant_admin_role` permission
+    // makes the command callable, but the matrix-bypass-the-hierarchy
+    // attack ("a user-tier account with grant_admin_role promotes
+    // itself to admin via an alt") is blocked by requiring the actor
+    // to already hold at least the role they're granting. Mirrors
+    // plan.md's hardcoded role-hierarchy exception applied to the
+    // grant side.
+    if (roleRank(ctx.user.role) < roleRank("admin")) {
+      return notice(ctx, "RANK", "Only an admin or higher can grant the admin tier.");
+    }
     const target = await findUserByName(ctx, name);
     if (!target) return;  // findUserByName emitted the appropriate notice.
     if (isAdminRole(target.role)) return notice(ctx, "ALREADY", `${target.username} is already a site admin.`);
@@ -418,10 +453,18 @@ export const demoteAdminCommand: CommandHandler = {
   aliases: ["unsysop"],
   usage: "/demoteadmin <username>",
   description: "Demote a site admin to user (admin only). The keymaster cannot be demoted.",
-  permission: "admin",
+  permission: "revoke_admin_role",
   async run(ctx) {
     const name = ctx.argsText.trim();
     if (!name) return notice(ctx, "EMPTY", "Usage: /demoteadmin <username>");
+    // Role-hierarchy gate. Same reasoning as /promoteadmin's: the
+    // granular permission key makes the command callable, but the
+    // hardcoded hierarchy refuses an actor below the target's tier
+    // from demoting them. Means a user-tier account with
+    // revoke_admin_role can't demote actual admins.
+    if (roleRank(ctx.user.role) < roleRank("admin")) {
+      return notice(ctx, "RANK", "Only an admin or higher can revoke the admin tier.");
+    }
     const target = await findUserByName(ctx, name);
     if (!target) return;  // findUserByName emitted the appropriate notice.
     // /demoteadmin only handles plain admins. Master admins must be
@@ -483,7 +526,7 @@ export const banCommand: CommandHandler = {
     },
   ],
   async run(ctx) {
-    if (!(await callerCanModerateRoom(ctx))) {
+    if (!(await callerCanModerateRoom(ctx, "ban_user"))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /ban.");
     }
     const [name, maybeDur, ...rest] = ctx.args;
@@ -581,7 +624,7 @@ export const unbanCommand: CommandHandler = {
   usage: "/unban <username>",
   description: "Lift a /ban from the current room.",
   async run(ctx) {
-    if (!(await callerCanModerateRoom(ctx))) {
+    if (!(await callerCanModerateRoom(ctx, "unban_user"))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /unban.");
     }
     const name = ctx.argsText.trim();
@@ -634,7 +677,7 @@ export const announceCommand: CommandHandler = {
     // Sitewide variant - recognised by leading "all " (case-insensitive).
     const allMatch = /^all\s+(.+)/i.exec(argsText);
     if (allMatch) {
-      if (!isAdminRole(ctx.user.role)) {
+      if (!(await hasPermission(ctx.user, "announce_sitewide", ctx.db))) {
         return notice(ctx, "PERM", "/announce all is admin-only. Drop 'all' to announce in the current room.");
       }
       const body = allMatch[1]!.trim();
@@ -656,7 +699,7 @@ export const announceCommand: CommandHandler = {
     }
 
     // Current-room variant - owner/mod/admin only.
-    if (!(await callerCanModerateRoom(ctx))) {
+    if (!(await callerCanModerateRoom(ctx, "announce_room"))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /announce.");
     }
     await addMessage(ctx, { kind: "announce", body: argsText });

@@ -658,7 +658,12 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
         // The server returns role:"masteradmin" for the very first registrant
         // (bootstrap path). Trust the server response so the Admin button
         // appears immediately without requiring a page reload.
-        setMe({ id: j.id, username: j.username, role: j.role ?? "user" });
+        setMe({
+          id: j.id,
+          username: j.username,
+          role: j.role ?? "user",
+          permissions: Array.isArray(j.permissions) ? j.permissions : [],
+        });
       } else {
         const res = await fetch("/auth/login", {
           method: "POST",
@@ -678,7 +683,12 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
         if (typeof j.sessionToken === "string") setSessionToken(j.sessionToken);
         // See the register branch above for the same rationale.
         markLoginIntent();
-        setMe({ id: j.id, username: j.username, role: j.role });
+        setMe({
+          id: j.id,
+          username: j.username,
+          role: j.role,
+          permissions: Array.isArray(j.permissions) ? j.permissions : [],
+        });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "error");

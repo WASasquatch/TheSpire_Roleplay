@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
-import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
-import { isAdminRole, isMasterAdminRole, type ClientToServerEvents, type ServerToClientEvents } from "@thekeep/shared";
-import { characters, messages, userEarning, users } from "../db/schema.js";
+import { roleRank, type ClientToServerEvents, type ServerToClientEvents } from "@thekeep/shared";
+import { hasPermission } from "../auth/permissions.js";
+import { characters, messages, sessions, userEarning, users } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
 import { canonicalizeNameForLookup, loweredSpaceCanonical, substringNameInsensitive } from "../lib/nameLookup.js";
@@ -358,13 +359,28 @@ export async function registerUsersRoutes(
   });
 
   /** Admin: same shape as /users plus email/role/disabled state. */
-  app.get<{ Querystring: { q?: string; offset?: string; limit?: string } }>("/admin/users", async (req, reply) => {
+  app.get<{ Querystring: { q?: string; offset?: string; limit?: string; ip?: string } }>("/admin/users", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
+    if (!me || !(await hasPermission(me, "view_user_directory_secure", db))) { reply.code(403); return { error: "admin only" }; }
 
     const q = (req.query.q ?? "").trim().toLowerCase();
     const offset = Math.max(0, parseInt(req.query.offset ?? "0", 10) || 0);
     const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit ?? "100", 10) || 100));
+    // Optional IP filter — when set, scopes the result to every user
+    // who has at least one session row from this IP. Used by the
+    // UsersTab's "alts on this IP" click affordance so an admin can
+    // pivot from one user's IP chip to every other account that
+    // shares it. Empty string = no filter.
+    const ipFilter = (req.query.ip ?? "").trim();
+    const ipScopedUserIds = ipFilter
+      ? new Set(
+          (await db
+            .select({ userId: sessions.userId })
+            .from(sessions)
+            .where(eq(sessions.ip, ipFilter)))
+            .map((r) => r.userId),
+        )
+      : null;
 
     // Admin search includes email + disabled accounts (for moderation review).
     // `q` is escaped for SQL LIKE wildcards so an admin pasting a literal
@@ -378,6 +394,14 @@ export async function registerUsersRoutes(
             sql`lower(${users.email}) LIKE ${"%" + escapedQ + "%"} ESCAPE '\\'`,
           )
         : undefined,
+      // The IP filter narrows to a deliberately-targeted set; when no
+      // ip arg is supplied we leave this branch as undefined so the
+      // and() collapses to the unfiltered query.
+      ipScopedUserIds && ipScopedUserIds.size > 0
+        ? inArray(users.id, [...ipScopedUserIds])
+        : ipScopedUserIds // empty set → match nothing
+          ? sql`1 = 0`
+          : undefined,
     );
 
     // Total count + page in two queries — was: SELECT all, sort in
@@ -426,6 +450,80 @@ export async function registerUsersRoutes(
       charsByUser.set(c.userId, list);
     }
 
+    // Per-user IP aggregation. Pulls every session row (with non-null
+    // IP) for users in the current page, sorted newest-first; we then
+    // dedupe by IP and keep the top 5 per user. SQLite doesn't have a
+    // clean per-group LIMIT so the dedup happens in app code — at
+    // page sizes of ≤100 users with bounded session counts, the
+    // result-set is tiny and the in-memory reduce is cheap.
+    //
+    // The same query also seeds the IP→user-set lookup we use for
+    // alt-count: every distinct (ip, userId) pair the admin's page
+    // touches. For alt-count we also pull session rows OUTSIDE the
+    // page so an IP shared with a user not in the current view still
+    // surfaces (otherwise an admin viewing a single user would always
+    // see alts=0 for that user's IPs, which would be misleading).
+    const RECENT_IPS_PER_USER = 5;
+    interface RecentIp { ip: string; lastSeenAt: number; altCount: number }
+    const recentIpsByUser = new Map<string, RecentIp[]>();
+    if (ids.length > 0) {
+      // Step 1: pull recent (ip, last-seen) pairs for the page's users.
+      const pageSessionRows = await db
+        .select({
+          userId: sessions.userId,
+          ip: sessions.ip,
+          createdAt: sessions.createdAt,
+        })
+        .from(sessions)
+        .where(and(
+          inArray(sessions.userId, ids),
+          sql`${sessions.ip} IS NOT NULL`,
+        ))
+        .orderBy(desc(sessions.createdAt));
+
+      // Dedup per user keeping the most recent timestamp per IP.
+      const perUser = new Map<string, Map<string, number>>();
+      for (const r of pageSessionRows) {
+        const ip = r.ip!;
+        const ts = +r.createdAt;
+        const m = perUser.get(r.userId) ?? new Map<string, number>();
+        if (!m.has(ip)) m.set(ip, ts); // first write wins (already newest-first ordered)
+        perUser.set(r.userId, m);
+      }
+
+      // Step 2: gather every distinct IP across the page so we can
+      // resolve alt-count for each in a single grouped query.
+      const distinctIps = new Set<string>();
+      for (const m of perUser.values()) for (const ip of m.keys()) distinctIps.add(ip);
+
+      const altCountByIp = new Map<string, number>();
+      if (distinctIps.size > 0) {
+        const ipRows = await db
+          .select({
+            ip: sessions.ip,
+            userCount: sql<number>`count(distinct ${sessions.userId})`,
+          })
+          .from(sessions)
+          .where(inArray(sessions.ip, [...distinctIps]))
+          .groupBy(sessions.ip);
+        for (const r of ipRows) {
+          if (r.ip) altCountByIp.set(r.ip, r.userCount);
+        }
+      }
+
+      // Step 3: stitch the per-user IP lists with alt-count + truncation.
+      for (const [userId, m] of perUser.entries()) {
+        const arr: RecentIp[] = [];
+        for (const [ip, ts] of m.entries()) {
+          // alt count = total accounts on this IP minus the user themselves.
+          const total = altCountByIp.get(ip) ?? 1;
+          arr.push({ ip, lastSeenAt: ts, altCount: Math.max(0, total - 1) });
+        }
+        arr.sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+        recentIpsByUser.set(userId, arr.slice(0, RECENT_IPS_PER_USER));
+      }
+    }
+
     const sockets = await io.fetchSockets();
     const onlineUserIds = new Set<string>();
     for (const s of sockets) {
@@ -454,6 +552,11 @@ export async function registerUsersRoutes(
         name: c.name,
         deleted: c.deletedAt != null,
       })),
+      // Up to 5 distinct IPs the user has logged in from, newest-first,
+      // each with the count of OTHER accounts that have also used the
+      // same IP. Used by the UsersTab to spot ban-evasion or shared-
+      // device patterns at a glance.
+      recentIps: recentIpsByUser.get(u.id) ?? [],
     }));
 
     return { users: page, total, offset, limit };
@@ -478,8 +581,19 @@ export async function registerUsersRoutes(
    */
   app.patch<{ Params: { id: string }; Body: unknown }>("/admin/users/:id", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
-    const masterOnly = isMasterAdminRole(me.role);
+    if (!me || !(await hasPermission(me, "edit_user_basic", db))) { reply.code(403); return { error: "admin only" }; }
+    // Per-field permission resolution. `edit_user_basic` is the
+    // baseline gate above; sensitive fields each carry their own
+    // key so an install can let an admin manage usernames + role
+    // without also handing them the email or disable buttons.
+    const canEditEmail = await hasPermission(me, "edit_user_email", db);
+    const canDisableEnable = (await hasPermission(me, "disable_user", db))
+      && (await hasPermission(me, "enable_user", db));
+    // Masteradmin promotion / demotion is hardcoded masteradmin-only
+    // (per the plan's hardcoded-exceptions list) — there is NO
+    // catalog key for it, so a misclick on the matrix can't grant
+    // it. We check for the underlying tier here.
+    const canTouchMasteradminTier = me.role === "masteradmin";
     const { id } = req.params;
     if (id === me.id) { reply.code(400); return { error: "use the profile editor for your own account" }; }
     const target = (await db.select().from(users).where(eq(users.id, id)).limit(1))[0];
@@ -506,22 +620,35 @@ export async function registerUsersRoutes(
       disabled: z.boolean().optional(),
     }).parse(req.body);
 
-    // Master-only field gates. We reject EARLY (before any write) so a
-    // plain admin's accidental form submit doesn't half-apply.
-    if (!masterOnly) {
-      if (body.email !== undefined) {
-        reply.code(403); return { error: "master admin only: changing user emails" };
-      }
-      if (body.disabled !== undefined) {
-        reply.code(403); return { error: "master admin only: enabling/disabling accounts" };
-      }
-      // Role transitions that touch the masteradmin tier are master-only
-      // — both promotion TO it and demotion FROM it. Without the latter
-      // guard, a plain admin could quietly demote the master who
-      // appointed them.
-      if (body.role === "masteradmin" || target.role === "masteradmin") {
-        reply.code(403); return { error: "master admin only: changing the masteradmin role" };
-      }
+    // Per-field gates. Reject EARLY (before any write) so a half-
+    // permissioned admin's form submit doesn't half-apply. Each
+    // field carries its own permission key so the matrix can hand
+    // out narrow grants (e.g. "edit usernames only", "enable/disable
+    // accounts only") without giving up the others.
+    if (body.email !== undefined && !canEditEmail) {
+      reply.code(403); return { error: "missing permission: edit_user_email" };
+    }
+    if (body.disabled !== undefined && !canDisableEnable) {
+      reply.code(403); return { error: "missing permission: disable_user / enable_user" };
+    }
+    // Role transitions that touch the masteradmin tier are
+    // hardcoded masteradmin-only (per plan.md's hardcoded exceptions).
+    // No catalog key — putting it on the matrix would let a misclick
+    // strand the install with no top-tier authority.
+    if ((body.role === "masteradmin" || target.role === "masteradmin") && !canTouchMasteradminTier) {
+      reply.code(403); return { error: "master admin only: changing the masteradmin role" };
+    }
+    // Role-hierarchy gate. The granular `edit_user_basic` key makes
+    // the endpoint callable, but the actor still can't grant a role
+    // higher than their own (matrix-laddering refusal — see plan.md's
+    // hardcoded exceptions). Applies in both directions: setting a
+    // target TO a higher tier and demoting a target FROM a higher
+    // tier are both refused unless the actor outranks the change.
+    if (body.role !== undefined && roleRank(body.role) > roleRank(me.role)) {
+      reply.code(403); return { error: "cannot grant a tier higher than your own" };
+    }
+    if (roleRank(target.role) > roleRank(me.role)) {
+      reply.code(403); return { error: "cannot edit a user who outranks you" };
     }
 
     // Username conflict check (case-insensitive). Email is no longer unique.
@@ -604,7 +731,7 @@ export async function registerUsersRoutes(
    */
   app.patch<{ Params: { id: string }; Body: unknown }>("/admin/users/:id/password", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !isMasterAdminRole(me.role)) { reply.code(403); return { error: "master admin only" }; }
+    if (!me || !(await hasPermission(me, "reset_user_password", db))) { reply.code(403); return { error: "master admin only" }; }
     const { id } = req.params;
     const target = (await db.select().from(users).where(eq(users.id, id)).limit(1))[0];
     if (!target || target.username === "system") { reply.code(404); return { error: "not found" }; }
@@ -642,9 +769,9 @@ export async function registerUsersRoutes(
    */
   app.delete<{ Params: { id: string } }>("/admin/users/:id", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    // Master-only: hard-deleting a user cascades through every FK and
+    // Master-only by default: hard-deleting a user cascades through every FK and
     // is the most destructive single-row action in the system.
-    if (!me || !isMasterAdminRole(me.role)) { reply.code(403); return { error: "master admin only" }; }
+    if (!me || !(await hasPermission(me, "hard_delete_user", db))) { reply.code(403); return { error: "master admin only" }; }
     const { id } = req.params;
     if (id === me.id) { reply.code(400); return { error: "you cannot delete your own account" }; }
     const target = (await db.select().from(users).where(eq(users.id, id)).limit(1))[0];

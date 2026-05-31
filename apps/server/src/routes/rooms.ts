@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { isAdminRole } from "@thekeep/shared";
+import { hasPermission } from "../auth/permissions.js";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import { nanoid } from "nanoid";
@@ -282,6 +282,7 @@ export async function registerRoomsRoutes(
 
     const window = [...olderOrEq.reverse(), ...newer];
 
+    const canSeeOriginalBody = await hasPermission(me, "view_deleted_message_body", db);
     const wire: ChatMessage[] = window.map((m) => ({
       id: m.id,
       roomId: m.kind === "whisper" ? room.id : m.roomId,
@@ -310,12 +311,13 @@ export async function registerRoomsRoutes(
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
       ...(m.rankKey ? { rankKey: m.rankKey } : {}),
       ...(m.tier != null ? { tier: m.tier } : {}),
-      // Site admins (admin / masteradmin) see the original body of a
-      // deleted message attached on a separate `originalBody` field so
-      // they can audit what was hidden. Mods + ordinary viewers get
-      // the row without it; their renderer paints the bare
-      // "[message removed]" placeholder.
-      ...(isAdminRole(me.role) && m.deletedAt ? { originalBody: m.body } : {}),
+      // Site admins (with `view_deleted_message_body`) see the original
+      // body of a deleted message attached on a separate `originalBody`
+      // field so they can audit what was hidden. Mods + ordinary
+      // viewers get the row without it; their renderer paints the bare
+      // "[message removed]" placeholder. The flag is resolved once
+      // above this map so we don't fire a permission lookup per row.
+      ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
     }));
     return { messages: wire };
   });
@@ -395,6 +397,7 @@ export async function registerRoomsRoutes(
     // The DB pull was DESC for the limit boundary; flip to ASC so the
     // client can prepend in place without re-sorting.
     window.reverse();
+    const canSeeOriginalBody = await hasPermission(me, "view_deleted_message_body", db);
     const wire: ChatMessage[] = window.map((m) => ({
       id: m.id,
       // Whispers from other rooms get re-keyed to the requested room so
@@ -425,7 +428,7 @@ export async function registerRoomsRoutes(
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
       ...(m.rankKey ? { rankKey: m.rankKey } : {}),
       ...(m.tier != null ? { tier: m.tier } : {}),
-      ...(isAdminRole(me.role) && m.deletedAt ? { originalBody: m.body } : {}),
+      ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
     }));
     return { messages: wire, hasMore };
   });
@@ -501,10 +504,11 @@ export async function registerRoomsRoutes(
         ))
         .orderBy(asc(messages.createdAt));
 
-      // Capture the role into a local before defining the inner mapper
-      // so TypeScript's null-narrowing (the `if (!me)` guard above) flows
-      // through. Nested closures don't preserve the narrowing on their own.
-      const viewerIsAdmin = isAdminRole(me.role);
+      // Capture the permission resolution into a local before defining
+      // the inner mapper so the async permission lookup runs once
+      // outside the synchronous map. TypeScript's null-narrowing (the
+      // `if (!me)` guard above) flows through to the closure too.
+      const viewerIsAdmin = await hasPermission(me, "view_deleted_message_body", db);
       function rowToWire(m: typeof messages.$inferSelect): ChatMessage {
         return {
           id: m.id,
@@ -676,6 +680,7 @@ export async function registerRoomsRoutes(
       const nonStickyPage = hasMore ? nonStickyRows.slice(0, limit) : nonStickyRows;
       const page = [...stickies, ...nonStickyPage];
 
+      const canSeeOriginalBody = await hasPermission(me, "view_deleted_message_body", db);
       const topics: ChatMessage[] = page.map((m) => ({
         id: m.id,
         roomId: m.roomId,
@@ -704,7 +709,7 @@ export async function registerRoomsRoutes(
         ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
         ...(m.rankKey ? { rankKey: m.rankKey } : {}),
         ...(m.tier != null ? { tier: m.tier } : {}),
-        ...(isAdminRole(me.role) && m.deletedAt ? { originalBody: m.body } : {}),
+        ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
       }));
       return { topics, hasMore };
     },
@@ -755,7 +760,7 @@ export async function registerRoomsRoutes(
       const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
       if (!room) { reply.code(404); return { error: "no room" }; }
       const isOwner = room.ownerId === me.id;
-      if (!(isAdminRole(me.role) || isOwner)) {
+      if (!(isOwner || (await hasPermission(me, "edit_any_room_metadata", db)))) {
         reply.code(403);
         return { error: "admin or room owner only" };
       }
@@ -796,7 +801,7 @@ export async function registerRoomsRoutes(
       const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
       if (!room) { reply.code(404); return { error: "no room" }; }
       const isOwner = room.ownerId === me.id;
-      if (!(isAdminRole(me.role) || isOwner)) {
+      if (!(isOwner || (await hasPermission(me, "edit_any_room_metadata", db)))) {
         reply.code(403);
         return { error: "admin or room owner only" };
       }
@@ -840,7 +845,7 @@ export async function registerRoomsRoutes(
       const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
       if (!room) { reply.code(404); return { error: "no room" }; }
       const isOwner = room.ownerId === me.id;
-      if (!(isAdminRole(me.role) || isOwner)) {
+      if (!(isOwner || (await hasPermission(me, "edit_any_room_metadata", db)))) {
         reply.code(403);
         return { error: "admin or room owner only" };
       }

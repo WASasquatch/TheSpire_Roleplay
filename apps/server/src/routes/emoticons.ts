@@ -6,11 +6,12 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { mkdir, writeFile, unlink } from "node:fs/promises";
-import { isAdminRole } from "@thekeep/shared";
+import { hasPermission } from "../auth/permissions.js";
 import type {
   ClientToServerEvents,
   EmoticonSheet as WireEmoticonSheet,
   ReactionEvent,
+  ReactionRef,
   ReactionSummary,
   ReactionTargetKind,
   ServerToClientEvents,
@@ -19,6 +20,7 @@ import {
   COMMUNITY_EMOTICON_USE_COST,
   EMOTICON_SHEET_CELL_COUNT,
   isEmoticonCellEmpty,
+  lookupUnicodeEmojiName,
 } from "@thekeep/shared";
 import {
   characterEarning,
@@ -180,16 +182,34 @@ async function broadcastReaction(
 /* =====================================================================
  *  Route registration
  * ===================================================================== */
+/** Toggle-reaction body. Exactly one ref shape must be supplied:
+ *   - sheet:    `{ sheetSlug, cellIndex }` for legacy sticker-sheet reactions
+ *   - unicode:  `{ unicodeChar }` for raw-codepoint reactions added via
+ *               the Unicode tab in the picker
+ *  Zod's `.refine` enforces the "exactly one" rule. */
 const toggleReactionBody = z.object({
   targetKind: z.enum(["chat_message", "dm", "forum_post"]),
   targetId: z.string().min(1).max(64),
-  sheetSlug: z.string().min(1).max(64),
-  cellIndex: z.number().int().min(0).max(EMOTICON_SHEET_CELL_COUNT - 1),
+  // Sheet ref — both fields optional individually, presence-validated
+  // together below.
+  sheetSlug: z.string().min(1).max(64).optional(),
+  cellIndex: z.number().int().min(0).max(EMOTICON_SHEET_CELL_COUNT - 1).optional(),
+  // Unicode ref. 16 chars is the catalog ceiling for compound RGI
+  // sequences (ZWJ families etc.); we cap here too so the column
+  // constraint matches the API contract.
+  unicodeChar: z.string().min(1).max(16).optional(),
   /** Identity to react as — null = master handle, otherwise a
    *  character id the caller owns. Mirrors how `chat:input` picks an
    *  identity at send time. */
   asCharacterId: z.string().min(1).max(64).nullable().optional(),
-});
+}).refine(
+  (b) => {
+    const hasSheet = b.sheetSlug !== undefined && b.cellIndex !== undefined;
+    const hasUnicode = b.unicodeChar !== undefined;
+    return hasSheet !== hasUnicode; // exactly one
+  },
+  { message: "supply exactly one of { sheetSlug + cellIndex } or { unicodeChar }" },
+);
 
 const createSheetBody = z.object({
   slug: z.string().min(1).max(40).regex(SLUG_RX, "slug must be 1-40 lowercase letters / digits / hyphens"),
@@ -259,7 +279,9 @@ export async function registerEmoticonRoutes(
   /* ---------- Admin: create sheet ---------- */
   app.post<{ Body: unknown }>("/admin/emoticons/sheets", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
+    if (!me || !(await hasPermission(me, "manage_emoticon_catalog", db))) {
+      reply.code(403); return { error: "forbidden", missing: "manage_emoticon_catalog" };
+    }
 
     let body: z.infer<typeof createSheetBody>;
     try { body = createSheetBody.parse(req.body); }
@@ -304,7 +326,9 @@ export async function registerEmoticonRoutes(
   /* ---------- Admin: update sheet ---------- */
   app.patch<{ Params: { id: string }; Body: unknown }>("/admin/emoticons/sheets/:id", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
+    if (!me || !(await hasPermission(me, "manage_emoticon_catalog", db))) {
+      reply.code(403); return { error: "forbidden", missing: "manage_emoticon_catalog" };
+    }
     const current = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.id, req.params.id)).limit(1))[0];
     if (!current) { reply.code(404); return { error: "not found" }; }
 
@@ -347,7 +371,9 @@ export async function registerEmoticonRoutes(
   /* ---------- Admin: delete sheet ---------- */
   app.delete<{ Params: { id: string } }>("/admin/emoticons/sheets/:id", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
+    if (!me || !(await hasPermission(me, "manage_emoticon_catalog", db))) {
+      reply.code(403); return { error: "forbidden", missing: "manage_emoticon_catalog" };
+    }
     const current = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.id, req.params.id)).limit(1))[0];
     if (!current) { reply.code(404); return { error: "not found" }; }
 
@@ -396,20 +422,34 @@ export async function registerEmoticonRoutes(
     try { body = toggleReactionBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
 
-    // Resolve the sheet (slug → row) and validate the cell isn't
-    // "empty" (those cells aren't pickable). Slug → id mapping is the
-    // wire convention: clients refer to sheets by slug, the DB by id.
-    // Pending and rejected sheets (migration 0151) are NOT reactable —
-    // the picker filters them out, but a client could in principle
-    // know the slug of a friend's pending submission and try to
-    // bypass; reject server-side too.
-    const sheet = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.slug, body.sheetSlug)).limit(1))[0];
-    if (!sheet || sheet.status !== "approved") { reply.code(404); return { error: "emoticon sheet not found" }; }
-    const cells = parseSheetCells(sheet.cells);
-    const label = cells[body.cellIndex] ?? "";
-    if (isEmoticonCellEmpty(label)) {
-      reply.code(400);
-      return { error: "cell is empty and cannot be reacted with" };
+    // Resolve the ref shape. The zod refine above already guaranteed
+    // exactly one is present, so we just branch on which one.
+    let sheet: typeof emoticonSheets.$inferSelect | null = null;
+    let label = "";
+    let ref: ReactionRef;
+    if (body.unicodeChar !== undefined) {
+      // Unicode path. The codepoint string is opaque to us — we
+      // accept anything inside the 16-char cap. Best-effort label
+      // lookup via the catalog for the audit/tooltip surface;
+      // unknown emoji fall through to the raw glyph.
+      ref = { kind: "unicode", char: body.unicodeChar };
+      label = lookupUnicodeEmojiName(body.unicodeChar) ?? body.unicodeChar;
+    } else {
+      // Sheet path. Resolve slug → row, validate the cell isn't
+      // "empty" (those cells aren't pickable). Pending and rejected
+      // sheets (migration 0151) are NOT reactable — the picker
+      // filters them out, but a client could in principle know the
+      // slug of a friend's pending submission and try to bypass;
+      // reject server-side too.
+      sheet = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.slug, body.sheetSlug!)).limit(1))[0] ?? null;
+      if (!sheet || sheet.status !== "approved") { reply.code(404); return { error: "emoticon sheet not found" }; }
+      const cells = parseSheetCells(sheet.cells);
+      label = cells[body.cellIndex!] ?? "";
+      if (isEmoticonCellEmpty(label)) {
+        reply.code(400);
+        return { error: "cell is empty and cannot be reacted with" };
+      }
+      ref = { kind: "sheet", sheetSlug: sheet.slug, cellIndex: body.cellIndex! };
     }
 
     // Authorization on the target. Returns the right HTTP status for
@@ -437,18 +477,30 @@ export async function registerEmoticonRoutes(
     }
 
     // Toggle. The unique index on
-    // (target_kind, target_id, user_id, sheet_id, cell_index) means
-    // there's at most one row matching this user's reaction with
-    // this emoticon on this target. Existing → DELETE; absent → INSERT.
-    const existing = (await db.select({ id: messageReactions.id }).from(messageReactions)
-      .where(and(
-        eq(messageReactions.targetKind, body.targetKind),
-        eq(messageReactions.targetId, body.targetId),
-        eq(messageReactions.userId, me.id),
-        eq(messageReactions.sheetId, sheet.id),
-        eq(messageReactions.cellIndex, body.cellIndex),
-      ))
-      .limit(1))[0];
+    // (target_kind, target_id, user_id, COALESCE(sheet_id||':'||cell_index, unicode_char))
+    // gives us "one user, one emoji, one target" across both ref
+    // shapes. We branch the lookup WHERE clause on which ref this
+    // request carries — the COALESCE expression isn't easy to
+    // re-execute through Drizzle, so we just match the same columns
+    // the application set.
+    const existing = ref.kind === "sheet"
+      ? (await db.select({ id: messageReactions.id }).from(messageReactions)
+          .where(and(
+            eq(messageReactions.targetKind, body.targetKind),
+            eq(messageReactions.targetId, body.targetId),
+            eq(messageReactions.userId, me.id),
+            eq(messageReactions.sheetId, sheet!.id),
+            eq(messageReactions.cellIndex, ref.cellIndex),
+          ))
+          .limit(1))[0]
+      : (await db.select({ id: messageReactions.id }).from(messageReactions)
+          .where(and(
+            eq(messageReactions.targetKind, body.targetKind),
+            eq(messageReactions.targetId, body.targetId),
+            eq(messageReactions.userId, me.id),
+            eq(messageReactions.unicodeChar, ref.char),
+          ))
+          .limit(1))[0];
 
     const now = new Date();
     let op: "add" | "remove";
@@ -463,8 +515,12 @@ export async function registerEmoticonRoutes(
         userId: me.id,
         characterId: actingCharacterId,
         displayName,
-        sheetId: sheet.id,
-        cellIndex: body.cellIndex,
+        // Set the appropriate ref-shape columns and leave the others
+        // null. The COALESCE-based unique index relies on this
+        // mutual-exclusion to dedupe correctly.
+        sheetId: ref.kind === "sheet" ? sheet!.id : null,
+        cellIndex: ref.kind === "sheet" ? ref.cellIndex : null,
+        unicodeChar: ref.kind === "unicode" ? ref.char : null,
         createdAt: now,
       });
       op = "add";
@@ -473,8 +529,7 @@ export async function registerEmoticonRoutes(
     const event: ReactionEvent = {
       targetKind: body.targetKind,
       targetId: body.targetId,
-      sheetSlug: sheet.slug,
-      cellIndex: body.cellIndex,
+      ref,
       label,
       op,
       actor: {
@@ -971,8 +1026,8 @@ export async function registerEmoticonRoutes(
         return { error: "system sheets do not support commerce" };
       }
       const isOwner = sheet.createdByUserId === me.id;
-      const isAdmin = isAdminRole(me.role);
-      if (!isOwner && !isAdmin) {
+      const canAdmin = await hasPermission(me, "manage_emoticon_catalog", db);
+      if (!isOwner && !canAdmin) {
         reply.code(403);
         return { error: "not your sheet" };
       }
@@ -1034,7 +1089,9 @@ export async function registerEmoticonRoutes(
    */
   app.get("/admin/emoticons/submissions", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
+    if (!me || !(await hasPermission(me, "review_emoticon_submissions", db))) {
+      reply.code(403); return { error: "forbidden", missing: "review_emoticon_submissions" };
+    }
     const rows = await db
       .select()
       .from(emoticonSheets)
@@ -1104,7 +1161,9 @@ export async function registerEmoticonRoutes(
     "/admin/emoticons/submissions/:id/approve",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
-      if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
+      if (!me || !(await hasPermission(me, "review_emoticon_submissions", db))) {
+        reply.code(403); return { error: "forbidden", missing: "review_emoticon_submissions" };
+      }
       const row = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.id, req.params.id)).limit(1))[0];
       if (!row) { reply.code(404); return { error: "not found" }; }
       if (row.status !== "pending") {
@@ -1151,7 +1210,9 @@ export async function registerEmoticonRoutes(
     "/admin/emoticons/submissions/:id/reject",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
-      if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
+      if (!me || !(await hasPermission(me, "review_emoticon_submissions", db))) {
+        reply.code(403); return { error: "forbidden", missing: "review_emoticon_submissions" };
+      }
       let body: z.infer<typeof rejectSubmissionBody>;
       try { body = rejectSubmissionBody.parse(req.body ?? {}); }
       catch { reply.code(400); return { error: "invalid body" }; }

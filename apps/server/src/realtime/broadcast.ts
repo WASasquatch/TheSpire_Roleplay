@@ -13,7 +13,6 @@ import {
   clampAvatarCrop,
   DEFAULT_PRESENCE_TEMPLATES,
   extractMentions,
-  isAdminRole,
   renderPresenceTemplate,
 } from "@thekeep/shared";
 import {
@@ -962,13 +961,21 @@ export async function sendRoomBacklogTo(
   // Look the viewer's role up once so the originalBody carve-out below
   // is consistent with the per-socket gating used by the live
   // delete-broadcast path. Single row lookup; cheap relative to the
-  // 50-row messages SELECT it rides alongside.
+  // 50-row messages SELECT it rides alongside. Gates on the granular
+  // `view_deleted_message_body` key so the matrix can hand the carve-
+  // out to a mod tier without minting them as a full admin.
   const viewerRow = (await db
     .select({ role: users.role })
     .from(users)
     .where(eq(users.id, viewerUserId))
     .limit(1))[0];
-  const viewerIsAdmin = !!viewerRow && isAdminRole(viewerRow.role);
+  const viewerIsAdmin = viewerRow
+    ? await (await import("../auth/permissions.js")).hasPermission(
+        { id: viewerUserId, role: viewerRow.role },
+        "view_deleted_message_body",
+        db,
+      )
+    : false;
   // Overfetch by 1 so we can detect "older messages exist" reliably
   // without a separate COUNT query. The 51st row is dropped from the
   // returned backlog (which the client renders as the top of its

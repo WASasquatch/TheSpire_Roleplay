@@ -32,9 +32,10 @@ import type {
   ServerToClientEvents,
   TypingEntry,
 } from "@thekeep/shared";
-import { isAdminRole, type Role } from "@thekeep/shared";
+import { type Role } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import { characterEarning, ignores, userActiveCosmetics, userEarning } from "../db/schema.js";
+import { hasPermission } from "../auth/permissions.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -297,13 +298,19 @@ async function broadcastTyperSet(io: Io, db: Db, roomId: string): Promise<void> 
   for (const s of sockets) {
     const receiverId = (s.data as { userId?: string }).userId;
     if (!receiverId) continue;
-    // Phase 6 — Lurking Master receivers: admins always see the
-    // full set (moderation visibility for harassment reports);
-    // non-admin receivers don't see lurking typers at all. The
-    // role is on the session-user cached at handshake time, so
-    // there's no per-broadcast DB hit for this check.
+    // Phase 6 — Lurking Master receivers: holders of
+    // `view_deleted_message_body` always see the full set (the matrix
+    // ships this admin-by-default but it's a usable proxy for "this
+    // user has moderation visibility"); other receivers don't see
+    // lurking typers at all. We resolve the permission once per socket
+    // here rather than once per broadcast since the receiver loop is
+    // already keyed on the socket.
     const receiverRole = (s.data as { user?: { role?: Role } }).user?.role;
-    const receiverIsAdmin = !!receiverRole && isAdminRole(receiverRole);
+    const receiverIsAdmin = !!receiverRole && (await hasPermission(
+      { id: receiverId, role: receiverRole },
+      "view_deleted_message_body",
+      db,
+    ));
     const visible = allTypers.filter((t) => {
       // The composer hides its own indicator client-side, but keep
       // the wire clean by suppressing on the server too.

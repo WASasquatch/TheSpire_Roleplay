@@ -12,6 +12,7 @@ import type { CommandDoc, RoomOccupant, ThreadCategory } from "@thekeep/shared";
 import { CompleterPopup, type CompletionItem } from "./CompleterPopup.js";
 import { EarningStatsStrip } from "./EarningStatsStrip.js";
 import { EmoticonPickerButton } from "./EmoticonPickerButton.js";
+import { EmoticonTypeahead } from "./EmoticonTypeahead.js";
 import { SynonymPopup } from "./SynonymPopup.js";
 import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
@@ -1505,6 +1506,7 @@ export function Composer({
               toolbar. */}
           <EmoticonPickerButton
             onPick={(slug, idx) => insertAtCursor(`:${slug}:${idx}:`)}
+            onPickUnicode={(char) => insertAtCursor(char)}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none text-keep-muted hover:bg-keep-banner hover:text-keep-text"
           />
           {/* Right-aligned group: character counter + earning strip
@@ -1667,6 +1669,17 @@ export function Composer({
           className="block min-h-[68px] w-full resize-none rounded border border-keep-rule bg-keep-bg px-3 py-2 text-base leading-snug outline-none focus:border-keep-action disabled:cursor-not-allowed disabled:opacity-50 lg:min-h-8 lg:py-1 lg:text-sm"
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
+        />
+        {/* `:emoji-name` typeahead. Renders nothing until the user
+            types `:` at a word boundary. The popup itself is portaled
+            to document.body so it can escape the composer's overflow
+            and float over the message list. Hooks into the same
+            `inputRef` + value/onChange triple already managed
+            above. */}
+        <EmoticonTypeahead
+          textareaRef={inputRef}
+          value={value}
+          onChange={onChange}
         />
       </div>
       {/* Right column. On mobile the ↵ (newline) button stacks compact

@@ -1,7 +1,7 @@
 import { and, eq, or, sql } from "drizzle-orm";
-import { isAdminRole } from "@thekeep/shared";
 import { roomMembers, roomWorldLinks, rooms, worldMembers, worlds } from "../../db/schema.js";
 import { broadcastPresence, broadcastRoomState } from "../../realtime/broadcast.js";
+import { hasPermission } from "../../auth/permissions.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -66,7 +66,8 @@ async function rebroadcastSelfOccupancy(ctx: CommandContext) {
 }
 
 async function callerCanModerateRoom(ctx: CommandContext): Promise<boolean> {
-  if (isAdminRole(ctx.user.role) || ctx.user.role === "mod") return true;
+  // Site-wide override (admin-default seed).
+  if (await hasPermission(ctx.user, "edit_any_room_metadata", ctx.db)) return true;
   const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
   if (!room) return false;
   if (room.ownerId === ctx.user.id) return true;
@@ -197,7 +198,8 @@ export const worldCommand: CommandHandler = {
           : "No world is linked to this room. Pass a slug, e.g. /world join darkrealm.");
       }
       // Same gate as the route: open worlds (or your own) are joinable.
-      if (w.ownerUserId !== ctx.user.id && w.visibility !== "open" && !isAdminRole(ctx.user.role)) {
+      if (w.ownerUserId !== ctx.user.id && w.visibility !== "open"
+          && !(await hasPermission(ctx.user, "edit_others_world", ctx.db))) {
         return notice(ctx, "NOT_OPEN", `"${w.name}" isn't open for community membership.`);
       }
       const existing = (await ctx.db

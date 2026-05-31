@@ -19,7 +19,8 @@ import {
   users,
   worlds,
 } from "../db/schema.js";
-import { COLOR_TOKEN_OR_HEX_RE, CUSTOM_CMD_CSS_MAX_LEN, isAdminRole, isMasterAdminRole, sanitizeCustomCmdCss, type AuditEntry, type Role } from "@thekeep/shared";
+import { COLOR_TOKEN_OR_HEX_RE, CUSTOM_CMD_CSS_MAX_LEN, sanitizeCustomCmdCss, type AuditEntry, type PermissionKey, type Role } from "@thekeep/shared";
+import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import type { Db } from "../db/index.js";
 import type { CommandRegistry } from "../commands/registry.js";
 import {
@@ -31,6 +32,7 @@ import { getSettings, updateSettings } from "../settings.js";
 import { recordAudit } from "../audit.js";
 import { registerAdminEarningRoutes } from "./earning.js";
 import { registerAdminBackupRoutes } from "./backup.js";
+import { registerAdminPermissionRoutes } from "./permissions.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -66,12 +68,22 @@ export async function registerAdminRoutes(
 ): Promise<void> {
   const { db, io, registry, uploadsRoot, getSessionUser } = deps;
 
+  // Authentication-only preHandler. Earlier drafts tried to gate
+  // every /admin/* request on "user holds at least one view_admin_*
+  // key" — convenient as a coarse filter, but it broke matrix-
+  // customized roles that hold only a `manage_*` or `grant_*` key
+  // without a corresponding view-tab key (e.g. a delegate with
+  // `hard_delete_user` alone). The per-route `requirePermission`
+  // checks farther down already enforce the right per-action gate,
+  // so this hook now only confirms the request carries a valid
+  // session and attaches it for downstream handlers; authorization
+  // is the route's job.
   app.addHook("preHandler", async (req, reply) => {
     if (!req.url.startsWith("/admin")) return;
     const user = await getSessionUser(req);
-    if (!user || !isAdminRole(user.role)) {
-      reply.code(403);
-      throw new Error("admin only");
+    if (!user) {
+      reply.code(401);
+      throw new Error("authentication required");
     }
     (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser = user;
   });
@@ -92,19 +104,25 @@ export async function registerAdminRoutes(
   // under /admin/*).
   registerAdminBackupRoutes(app, { db });
 
-  // Helper for the destructive-route gate. Every endpoint behind this
-  // (site settings PUT, branding upload, user disable / role mutations
-  // that touch masteradmin) calls it before doing anything; a plain
-  // `admin` gets a 403 and the route handler returns early.
-  function requireMasterAdmin(req: FastifyRequest, reply: FastifyReply): boolean {
-    const u = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
-    if (!u || !isMasterAdminRole(u.role)) {
-      reply.code(403);
-      reply.send({ error: "master admin only" });
-      return false;
-    }
-    return true;
-  }
+  // Roles & Permissions matrix — Phase 2. Mounts /admin/permissions
+  // GET (matrix snapshot), PATCH /roles (per-role grant flip), PATCH
+  // /users (per-user override upsert / clear), plus the /users/search
+  // typeahead + per-user detail endpoints the By-user sub-tab uses.
+  // Each handler enforces `view_admin_permissions` or
+  // `manage_permissions` internally — both default to masteradmin-only
+  // via the migration seed but are matrix-grantable so a senior admin
+  // can manage the matrix on the masteradmin's behalf.
+  registerAdminPermissionRoutes(app, { db });
+
+  // Per-route granular gate. Each handler that performs a side-effect
+  // or returns sensitive data calls this with the specific
+  // `PermissionKey` it needs; resolution flows through the masteradmin
+  // bypass → user override → role grant → default-deny precedence in
+  // `hasPermission`. Wraps the shared `requireSessionPermission`
+  // helper so call sites in this file don't have to thread `db`
+  // through each call.
+  const requirePermission = (req: FastifyRequest, reply: FastifyReply, key: PermissionKey) =>
+    requireSessionPermission(req, reply, key, db);
 
   /* ---------- site overview (admin dashboard) ----------
    *
@@ -118,7 +136,8 @@ export async function registerAdminRoutes(
    * the older days will undercount — fine for a dashboard, called out so
    * future-us doesn't chase a phantom bug.
    */
-  app.get<{ Querystring: { tzOffsetMin?: string } }>("/admin/overview", async (req) => {
+  app.get<{ Querystring: { tzOffsetMin?: string } }>("/admin/overview", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_admin_overview"))) return;
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
     const since24h = new Date(now - dayMs);
@@ -384,7 +403,8 @@ export async function registerAdminRoutes(
   });
 
   /* ---------- room overview ---------- */
-  app.get("/admin/rooms", async () => {
+  app.get("/admin/rooms", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_admin_rooms"))) return;
     const allRooms = await db.select().from(rooms).orderBy(asc(rooms.name));
     const counts = await db
       .select({ roomId: roomMembers.roomId, n: sql<number>`count(*)` })
@@ -418,7 +438,8 @@ export async function registerAdminRoutes(
     };
   });
 
-  app.get<{ Params: { id: string } }>("/admin/rooms/:id/occupants", async (req) => {
+  app.get<{ Params: { id: string } }>("/admin/rooms/:id/occupants", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_admin_rooms"))) return;
     const { id } = req.params;
     const occupants = await db
       .select({
@@ -447,6 +468,7 @@ export async function registerAdminRoutes(
    * a backdoor.
    */
   app.get<{ Params: { id: string } }>("/admin/rooms/:id/messages", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_room_messages_as_admin"))) return;
     const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
     if (!room) {
       reply.code(404);
@@ -517,6 +539,7 @@ export async function registerAdminRoutes(
   });
 
   app.post<{ Body: unknown }>("/admin/rooms", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "create_system_room"))) return;
     const body = adminRoomCreateBody.parse(req.body);
     const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
     if (body.type === "private" && !body.password) {
@@ -573,6 +596,7 @@ export async function registerAdminRoutes(
   });
 
   app.patch<{ Params: { id: string }; Body: unknown }>("/admin/rooms/:id", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "edit_any_room_metadata"))) return;
     const body = adminRoomPatchBody.parse(req.body);
     const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
     if (!room) { reply.code(404); return { error: "not found" }; }
@@ -674,6 +698,7 @@ export async function registerAdminRoutes(
     minutes: z.number().int().min(1).max(43_200).nullable(),
   });
   app.patch<{ Body: unknown }>("/admin/rooms/expiry/bulk", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "bulk_edit_rooms"))) return;
     const body = adminRoomBulkExpiryBody.parse(req.body);
     const result = await db
       .update(rooms)
@@ -693,6 +718,7 @@ export async function registerAdminRoutes(
    * never read — only removed wholesale).
    */
   app.delete<{ Params: { id: string } }>("/admin/rooms/:id", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "delete_room"))) return;
     const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
     if (!room) {
       reply.code(404);
@@ -916,14 +942,46 @@ export async function registerAdminRoutes(
     };
   }
 
-  app.get("/admin/settings", async () => settingsResponse(await getSettings(db)));
+  app.get("/admin/settings", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_admin_settings"))) return;
+    return settingsResponse(await getSettings(db));
+  });
 
   app.put<{ Body: unknown }>("/admin/settings", async (req, reply) => {
-    // Master-only: this single endpoint backs every Settings,
-    // Branding, and Rules form in the admin panel — every field a
-    // plain admin shouldn't be able to mutate routes through here.
-    if (!requireMasterAdmin(req, reply)) return;
+    // This single endpoint backs every Settings, Branding, and Rules
+    // form in the admin panel. Gating is split by which FIELDS the
+    // patch touches:
+    //
+    //   - If the patch ONLY touches branding fields (site name + URL,
+    //     banner cover CSS, logo color/font/URL, splash welcome HTML,
+    //     SEO meta description, custom head HTML, theme-design map,
+    //     default style key/theme) — `edit_branding` suffices. This
+    //     lets a masteradmin delegate "edit the splash + theming"
+    //     without handing out the broader keymaster role.
+    //
+    //   - Any patch that touches anything else (retention, TTLs,
+    //     caps, registration toggle, rules HTML, etc.) still requires
+    //     `edit_site_settings`.
+    //
+    // BRANDING_FIELDS below is the source of truth for the split. If
+    // you add a new branding-shaped field to the schema, list it
+    // here too. (The audit-coverage script reads from this list via
+    // its TAB_DATA_MAP for the view_admin_branding tab → data
+    // coherence check.)
     const body = settingsBody.parse(req.body);
+    const BRANDING_FIELDS = new Set<string>([
+      "siteName", "siteUrl", "bannerCoverCss",
+      "logoColor", "logoFont", "logoUrl",
+      "welcomeHtml", "metaDescription", "customHeadHtml",
+      "themeDesignMap", "defaultStyleKey", "defaultTheme",
+    ]);
+    const touchedKeys = Object.keys(body).filter(
+      (k) => (body as Record<string, unknown>)[k] !== undefined,
+    );
+    const brandingOnly = touchedKeys.length > 0
+      && touchedKeys.every((k) => BRANDING_FIELDS.has(k));
+    const requiredKey = brandingOnly ? "edit_branding" : "edit_site_settings";
+    if (!(await requirePermission(req, reply, requiredKey))) return;
     const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
     // Drop undefined keys - exactOptionalPropertyTypes refuses `{ x: undefined }`
     // even on optional properties; we want true omission.
@@ -1046,8 +1104,10 @@ export async function registerAdminRoutes(
   }
 
   app.post<{ Body: unknown }>("/admin/upload/logo", async (req, reply) => {
-    // Master-only: logo is branding.
-    if (!requireMasterAdmin(req, reply)) return;
+    // Branding upload — gated on the granular `upload_logo` key
+    // (masteradmin-default but matrix-grantable, same pattern as
+    // `edit_site_settings`).
+    if (!(await requirePermission(req, reply, "upload_logo"))) return;
     let body: z.infer<typeof uploadLogoBody>;
     try { body = uploadLogoBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
@@ -1126,7 +1186,8 @@ export async function registerAdminRoutes(
       .optional(),
   });
 
-  app.get("/admin/custom-commands", async () => {
+  app.get("/admin/custom-commands", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_admin_custom_commands"))) return;
     const cmds = await db.select().from(customCommands).orderBy(asc(customCommands.name));
     const aliases = await db.select().from(customCommandAliases);
     const aliasesByCmd = new Map<string, string[]>();
@@ -1141,6 +1202,7 @@ export async function registerAdminRoutes(
   });
 
   app.post<{ Body: unknown }>("/admin/custom-commands", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_custom_commands"))) return;
     const body = customCommandBody.parse(req.body);
     const conflict = registry.resolve(body.name);
     if (conflict) {
@@ -1194,6 +1256,7 @@ export async function registerAdminRoutes(
   app.patch<{ Params: { id: string }; Body: unknown }>(
     "/admin/custom-commands/:id",
     async (req, reply) => {
+      if (!(await requirePermission(req, reply, "manage_custom_commands"))) return;
       const body = customCommandBody.partial().parse(req.body);
       const existing = (await db
         .select()
@@ -1261,7 +1324,8 @@ export async function registerAdminRoutes(
     },
   );
 
-  app.delete<{ Params: { id: string } }>("/admin/custom-commands/:id", async (req) => {
+  app.delete<{ Params: { id: string } }>("/admin/custom-commands/:id", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_custom_commands"))) return;
     const existing = (await db.select().from(customCommands).where(eq(customCommands.id, req.params.id)).limit(1))[0];
     await db.delete(customCommands).where(eq(customCommands.id, req.params.id));
     await registry.reloadCustom(db);
@@ -1282,7 +1346,8 @@ export async function registerAdminRoutes(
    * any in-flight or accepted titles of that kind, so we surface a count
    * in the GET response so admins can preview the impact.
    */
-  app.get("/admin/title-kinds", async () => {
+  app.get("/admin/title-kinds", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_admin_title_kinds"))) return;
     const kinds = await db.select().from(titleKinds).orderBy(asc(titleKinds.slug));
     const counts = await db
       .select({ kindId: mutualTitles.kindId, n: sql<number>`count(*)` })
@@ -1319,6 +1384,7 @@ export async function registerAdminRoutes(
   });
 
   app.post<{ Body: unknown }>("/admin/title-kinds", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_title_kinds"))) return;
     const parsed = titleKindBody.safeParse(req.body);
     if (!parsed.success) {
       reply.code(400);
@@ -1353,6 +1419,7 @@ export async function registerAdminRoutes(
   });
 
   app.put<{ Params: { id: string }; Body: unknown }>("/admin/title-kinds/:id", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_title_kinds"))) return;
     const parsed = titleKindBody.safeParse(req.body);
     if (!parsed.success) {
       reply.code(400);
@@ -1392,7 +1459,8 @@ export async function registerAdminRoutes(
     return { ok: true };
   });
 
-  app.delete<{ Params: { id: string } }>("/admin/title-kinds/:id", async (req) => {
+  app.delete<{ Params: { id: string } }>("/admin/title-kinds/:id", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "manage_title_kinds"))) return;
     // Cascade by FK: deletes all mutual_titles rows of this kind too.
     await db.delete(titleKinds).where(eq(titleKinds.id, req.params.id));
     return { ok: true };
@@ -1403,16 +1471,39 @@ export async function registerAdminRoutes(
    * Hydrated audit feed. Resolves actor + target user/room display names so
    * the panel renders legibly without N+1 client requests. Optional filters:
    *
-   *   ?action=ban         → exact match
-   *   ?actor=<userId>     → by actor
-   *   ?target=<userId>    → by target user
-   *   ?room=<roomId>      → by target room
-   *   ?limit=200          → cap rows (default 200, max 500)
+   *   ?action=ban             → exact match on a single action
+   *   ?actions=ban,kick,mute  → comma-separated multi-action filter. Used by
+   *                             the AuditTab's category-preset dropdown to
+   *                             scope the feed to e.g. "Permission changes"
+   *                             (which spans four distinct action values).
+   *   ?actor=<userId>         → by actor
+   *   ?target=<userId>        → by target user
+   *   ?room=<roomId>          → by target room
+   *   ?limit=200              → cap rows (default 200, max 500)
    */
-  app.get<{ Querystring: Record<string, string | undefined> }>("/admin/audit", async (req) => {
+  app.get<{ Querystring: Record<string, string | undefined> }>("/admin/audit", async (req, reply) => {
+    // Single key now — `view_admin_audit` covers BOTH the panel tab
+    // visibility AND the data-fetch gate. The previous split between
+    // `view_audit_log` and `view_admin_audit` caused a mismatch: mod
+    // saw the tab but got 403 on the data fetch. Migration 0182
+    // dropped `view_audit_log` from the catalog.
+    if (!(await requirePermission(req, reply, "view_admin_audit"))) return;
     const limit = Math.min(500, parseInt(req.query.limit ?? "200", 10) || 200);
     const conditions = [] as ReturnType<typeof eq>[];
     if (req.query.action) conditions.push(eq(auditLog.action, req.query.action));
+    if (req.query.actions) {
+      // Split + trim + filter empty. Cap at 40 entries so a runaway query
+      // string can't blow the IN list; the largest legitimate preset
+      // (role_changes) currently lists ~9 actions.
+      const actions = req.query.actions
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .slice(0, 40);
+      if (actions.length > 0) {
+        conditions.push(inArray(auditLog.action, actions) as ReturnType<typeof eq>);
+      }
+    }
     if (req.query.actor) conditions.push(eq(auditLog.actorUserId, req.query.actor));
     if (req.query.target) conditions.push(eq(auditLog.targetUserId, req.query.target));
     if (req.query.room) conditions.push(eq(auditLog.targetRoomId, req.query.room));

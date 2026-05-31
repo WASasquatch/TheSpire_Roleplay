@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { isAdminRole } from "@thekeep/shared";
+import { hasPermission } from "../auth/permissions.js";
 import { desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -158,7 +158,9 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
    */
   app.get<{ Querystring: { status?: string; limit?: string } }>("/admin/reports", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
+    if (!me || !(await hasPermission(me, "view_report_queue", db))) {
+      reply.code(403); return { error: "forbidden", missing: "view_report_queue" };
+    }
 
     const status = req.query.status;
     const limit = Math.min(200, parseInt(req.query.limit ?? "100", 10) || 100);
@@ -254,7 +256,9 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
    */
   app.patch<{ Params: { id: string }; Body: unknown }>("/admin/reports/:id", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !isAdminRole(me.role)) { reply.code(403); return { error: "admin only" }; }
+    if (!me || !(await hasPermission(me, "resolve_reports", db))) {
+      reply.code(403); return { error: "forbidden", missing: "resolve_reports" };
+    }
 
     let body;
     try { body = resolveReportBody.parse(req.body); }

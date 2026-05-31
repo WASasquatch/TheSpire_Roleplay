@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ReactionEntry, ReactionTargetKind } from "@thekeep/shared";
+import type { ReactionEntry, ReactionRef, ReactionTargetKind } from "@thekeep/shared";
+import { reactionRefKey } from "@thekeep/shared";
 import { useEmoticons, reactionsKey } from "../state/emoticons.js";
 import { EmoticonSprite } from "./EmoticonSprite.js";
 import { EmoticonPicker } from "./EmoticonPicker.js";
@@ -33,26 +34,32 @@ interface Props {
 /** Hit the reactions toggle endpoint. Shared by ReactionBar (inline
  *  + button) and ReactionAddButton (toolbar standalone) so both code
  *  paths record the same emoticon-pick locally and send the same
- *  server payload. */
+ *  server payload. Accepts a polymorphic ref — `kind: "sheet"` for
+ *  legacy sticker reactions, `kind: "unicode"` for emoji-style ones
+ *  added via the Unicode tab in the picker. */
 export async function toggleReaction(
   targetKind: ReactionTargetKind,
   targetId: string,
-  sheetSlug: string,
-  cellIndex: number,
+  ref: ReactionRef,
   asCharacterId: string | null,
 ): Promise<void> {
   try {
     // Record the pick in the local recents store so the picker's
     // "Recent" row reflects user preference next time it opens.
-    recordEmoticonPick(sheetSlug, cellIndex);
+    // Unicode picks don't have a sheet/cell to record — the picker's
+    // own recents track them separately (or not at all in v1).
+    if (ref.kind === "sheet") {
+      recordEmoticonPick(ref.sheetSlug, ref.cellIndex);
+    }
     await fetch("/reactions/toggle", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         targetKind,
         targetId,
-        sheetSlug,
-        cellIndex,
+        ...(ref.kind === "sheet"
+          ? { sheetSlug: ref.sheetSlug, cellIndex: ref.cellIndex }
+          : { unicodeChar: ref.char }),
         ...(asCharacterId ? { asCharacterId } : {}),
       }),
       credentials: "include",
@@ -105,7 +112,25 @@ export function ReactionAddButton({
           onClose={() => setPickerOpen(false)}
           onPick={(slug, idx) => {
             setPickerOpen(false);
-            void toggleReaction(targetKind, targetId, slug, idx, asCharacterId);
+            void toggleReaction(
+              targetKind,
+              targetId,
+              { kind: "sheet", sheetSlug: slug, cellIndex: idx },
+              asCharacterId,
+            );
+          }}
+          // Unicode reactions go through the same toggle endpoint
+          // with the unicode_char ref shape. The picker defaults to
+          // the Unicode tab when this prop is set, matching the
+          // composer's behavior.
+          onPickUnicode={(char) => {
+            setPickerOpen(false);
+            void toggleReaction(
+              targetKind,
+              targetId,
+              { kind: "unicode", char },
+              asCharacterId,
+            );
           }}
         />
       ) : null}
@@ -161,7 +186,7 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
 
   const entries = cached ?? initialEntries ?? [];
 
-  const toggle = (slug: string, idx: number) => toggleReaction(targetKind, targetId, slug, idx, asCharacterId);
+  const toggle = (ref: ReactionRef) => toggleReaction(targetKind, targetId, ref, asCharacterId);
 
   if (entries.length === 0 && readOnly) return null;
   // When the add button is suppressed (forum surface mounts it inside
@@ -177,9 +202,9 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
     <div className="mt-1 flex flex-wrap items-center gap-1">
       {visible.map((e) => (
         <ReactionChip
-          key={`${e.sheetSlug}:${e.cellIndex}`}
+          key={reactionRefKey(e.ref)}
           entry={e}
-          onClick={() => !readOnly && toggle(e.sheetSlug, e.cellIndex)}
+          onClick={() => !readOnly && toggle(e.ref)}
         />
       ))}
       {overflowCount > 0 ? (
@@ -215,6 +240,37 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
         />
       ) : null}
     </div>
+  );
+}
+
+/* =============================================================
+ *  Reaction glyph — renders either a sheet sprite or a Unicode
+ *  codepoint depending on the entry's ref shape. Reused by the chip,
+ *  the tooltip, and the full-list modal so the rendering posture
+ *  stays consistent.
+ * ============================================================= */
+function ReactionGlyph({ ref, size }: { ref: ReactionRef; size: number }) {
+  if (ref.kind === "sheet") {
+    return <EmoticonSprite sheetSlug={ref.sheetSlug} cellIndex={ref.cellIndex} size={size} />;
+  }
+  // Unicode: a sized span carrying the raw codepoint. `leading-none`
+  // keeps the glyph from inheriting line-height that would push it
+  // off-center inside the chip. `lineHeight: 1` on the inline style
+  // backstops any global CSS that might otherwise re-introduce
+  // vertical offset.
+  return (
+    <span
+      aria-hidden
+      className="inline-flex items-center justify-center leading-none"
+      style={{
+        width: `${size}px`,
+        height: `${size}px`,
+        fontSize: `${Math.round(size * 0.85)}px`,
+        lineHeight: 1,
+      }}
+    >
+      {ref.char}
+    </span>
   );
 }
 
@@ -260,7 +316,11 @@ function ReactionChip({ entry, onClick }: { entry: ReactionEntry; onClick: () =>
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [hovered, setHovered] = useState(false);
   const tooltip = formatReactorsTooltip(entry.reactors, entry.label);
-  const moodClass = animationClassForLabel(entry.label);
+  // Mood class is sheet-label-driven; Unicode reactions don't carry a
+  // sheet animation hint, so they render with no jiggle. Pass the
+  // sheet's label only when the ref is a sheet — empty string for
+  // Unicode is a safe no-op for the animationClassForLabel mapper.
+  const moodClass = animationClassForLabel(entry.ref.kind === "sheet" ? entry.label : "");
   return (
     <>
       <button
@@ -285,7 +345,7 @@ function ReactionChip({ entry, onClick }: { entry: ReactionEntry; onClick: () =>
               (see `.reaction-chip > *` rule in styles.css); the
               chip-level mouseenter/leave drives the tooltip from a
               single source. */}
-          <EmoticonSprite sheetSlug={entry.sheetSlug} cellIndex={entry.cellIndex} size={32} />
+          <ReactionGlyph ref={entry.ref} size={32} />
         </span>
         {/* `key={count}` re-mounts the span on every count change so the
             one-shot pulse animation in styles.css re-triggers without
@@ -382,7 +442,7 @@ function ReactionTooltip({
         transition: "opacity 120ms ease",
       }}
     >
-      <EmoticonSprite sheetSlug={entry.sheetSlug} cellIndex={entry.cellIndex} size={48} />
+      <ReactionGlyph ref={entry.ref} size={48} />
       <div className="text-sm leading-snug">{text}</div>
     </div>,
     document.body,
@@ -406,16 +466,16 @@ function ReactionListModal({ entries, onClose }: { entries: ReactionEntry[]; onC
           ) : (
             <ul className="space-y-3">
               {entries.map((e) => (
-                <li key={`${e.sheetSlug}:${e.cellIndex}`}>
+                <li key={reactionRefKey(e.ref)}>
                   <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-widest text-keep-muted">
-                    <EmoticonSprite sheetSlug={e.sheetSlug} cellIndex={e.cellIndex} size={20} />
+                    <ReactionGlyph ref={e.ref} size={20} />
                     <span>{e.label || "—"}</span>
                     <span className="ml-auto tabular-nums text-keep-text">{e.reactors.length}</span>
                   </div>
                   <ul className="ml-7 space-y-0.5 text-xs">
                     {e.reactors.map((r) => (
                       <li key={r.userId + (r.characterId ?? "")} className="flex items-center gap-2">
-                        <EmoticonSprite sheetSlug={e.sheetSlug} cellIndex={e.cellIndex} size={14} />
+                        <ReactionGlyph ref={e.ref} size={14} />
                         <span>{r.displayName}</span>
                       </li>
                     ))}

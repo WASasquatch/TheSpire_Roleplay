@@ -198,6 +198,7 @@ export function FormattingToolbar({
       <EmoticonPickerButton
         disabled={disabled}
         onPick={(slug, idx) => insertAtCursor(`:${slug}:${idx}:`)}
+        onPickUnicode={(char) => insertAtCursor(char)}
       />
       {maxLength !== undefined ? (
         <CharCount length={value.trimEnd().length} max={maxLength} />

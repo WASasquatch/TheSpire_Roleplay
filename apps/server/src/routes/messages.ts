@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { isAdminRole } from "@thekeep/shared";
+import { hasPermission } from "../auth/permissions.js";
 import type { Role } from "@thekeep/shared";
 import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
@@ -43,11 +43,14 @@ function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMes
   // change.
   //
   // Deleted messages: the visible body is stripped to "" for everyone
-  // (renderer paints "[message removed]"). Site admins (admin /
-  // masteradmin) additionally receive the original body on a separate
-  // `originalBody` field so they can audit what got hidden. Mods +
-  // room-owner mods + ordinary viewers don't get the field — gate is
-  // `viewerIsAdmin`, which the caller computes from `isAdminRole(role)`.
+  // (renderer paints "[message removed]"). Viewers with the
+  // `view_deleted_message_body` permission additionally receive the
+  // original body on a separate `originalBody` field so they can
+  // audit what got hidden. Viewers without the permission don't get
+  // the field — gate is `viewerIsAdmin`, which the caller computes
+  // from `hasPermission(viewer, "view_deleted_message_body")`. (The
+  // parameter name is kept for back-compat; semantics moved to the
+  // catalog key, but every existing call site passes the same boolean.)
   return {
     id: m.id,
     roomId: m.roomId,
@@ -125,8 +128,13 @@ export async function registerMessageRoutes(
     if (!m) { reply.code(404); return { error: "not found" }; }
 
     const isAuthor = m.userId === me.id;
-    const isAdmin = isAdminRole(me.role);
-    if (!isAuthor && !isAdmin) { reply.code(403); return { error: "not yours" }; }
+    // `edit_others_message` covers both the gate for editing someone
+    // else's message AND the grace-window bypass for editing past the
+    // author cap. One permission, one decision. Authors get
+    // unconditional access to their own messages (within the window)
+    // independently.
+    const canEditOthers = await hasPermission(me, "edit_others_message", db);
+    if (!isAuthor && !canEditOthers) { reply.code(403); return { error: "not yours" }; }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
 
     const now = Date.now();
@@ -134,9 +142,10 @@ export async function registerMessageRoutes(
     // Single settings read covers both gates (edit window + size cap)
     // so we don't pay two getSettings round-trips per edit.
     const { maxMessageLength, maxForumPostLength, editGraceMs } = await getSettings(db);
-    // Admins bypass the grace window entirely (a moderation lever for
-    // touch-ups requested by an author after the cap has expired).
-    if (!isAdmin && !forum && now - +m.createdAt > editGraceMs) {
+    // Holders of edit_others_message bypass the grace window entirely
+    // (a moderation lever for touch-ups requested by an author after
+    // the cap has expired).
+    if (!canEditOthers && !forum && now - +m.createdAt > editGraceMs) {
       reply.code(403);
       return { error: `Edit window has closed (${Math.round(editGraceMs / 1000)}s after sending).` };
     }
@@ -214,17 +223,19 @@ export async function registerMessageRoutes(
     if (!m) { reply.code(404); return { error: "not found" }; }
 
     const isAuthor = m.userId === me.id;
-    const isMod = me.role === "mod" || isAdminRole(me.role);
-    if (!isAuthor && !isMod) { reply.code(403); return { error: "not yours" }; }
+    // `delete_others_message` covers both gate + grace-window bypass
+    // for moderators. Same shape as the edit path above.
+    const canDeleteOthers = await hasPermission(me, "delete_others_message", db);
+    if (!isAuthor && !canDeleteOthers) { reply.code(403); return { error: "not yours" }; }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
 
     const now = Date.now();
     const forum = await isForumMessage(db, m.roomId);
-    // Mods/admins bypass the grace window entirely; authors only get
-    // the bypass in forum rooms (and in flat-chat rooms within the
-    // admin-configured grace window).
+    // Holders of `delete_others_message` bypass the grace window
+    // entirely; authors only get the bypass in forum rooms (and in
+    // flat-chat rooms within the admin-configured grace window).
     const { editGraceMs } = await getSettings(db);
-    if (!isMod && !forum && now - +m.createdAt > editGraceMs) {
+    if (!canDeleteOthers && !forum && now - +m.createdAt > editGraceMs) {
       reply.code(403);
       return { error: `Delete window has closed (${Math.round(editGraceMs / 1000)}s after sending).` };
     }
@@ -285,7 +296,12 @@ export async function registerMessageRoutes(
     for (const s of roomSockets) {
       const uid = (s.data as { userId?: string }).userId ?? "";
       const role = roles.get(uid) ?? "user";
-      s.emit("message:update", isAdminRole(role as Role) ? adminWire : plainWire);
+      // Reveal `originalBody` only to viewers with the
+      // `view_deleted_message_body` permission. The per-viewer check
+      // is per-socket so granting / revoking the permission in the
+      // matrix takes effect on the next fanout without code changes.
+      const canSeeOriginal = await hasPermission({ id: uid, role: role as Role }, "view_deleted_message_body", db);
+      s.emit("message:update", canSeeOriginal ? adminWire : plainWire);
     }
     // Cross-room whisper overlay: fan the delete out to the recipient
     // even when they're viewing from another room. Same shape as the
@@ -306,7 +322,8 @@ export async function registerMessageRoutes(
           .from(users)
           .where(eq(users.id, toId))
           .limit(1))[0]?.role ?? "user";
-        const wire = isAdminRole(recipRole as Role) ? adminWire : plainWire;
+        const canSeeOriginal = await hasPermission({ id: toId, role: recipRole as Role }, "view_deleted_message_body", db);
+        const wire = canSeeOriginal ? adminWire : plainWire;
         for (const s of recipientSockets) s.emit("message:update", wire);
       }
     }
@@ -342,8 +359,11 @@ export async function registerMessageRoutes(
     if (!forum) { reply.code(400); return { error: "Locking applies only to forum-mode rooms." }; }
 
     const isAuthor = m.userId === me.id;
-    const isMod = me.role === "mod" || isAdminRole(me.role);
-    if (!isAuthor && !isMod) { reply.code(403); return { error: "not yours" }; }
+    // Authors can lock their own topic; mods/admins with the
+    // appropriate permission lock or unlock any topic.
+    const key = parsed.locked ? "lock_forum_topic" : "unlock_forum_topic";
+    const canModerate = await hasPermission(me, key, db);
+    if (!isAuthor && !canModerate) { reply.code(403); return { error: "not yours" }; }
 
     const lockedAt = parsed.locked ? new Date() : null;
     await db
@@ -371,7 +391,7 @@ export async function registerMessageRoutes(
   app.patch<{ Params: { id: string }; Body: unknown }>("/messages/:id/sticky", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
-    if (!isAdminRole(me.role)) { reply.code(403); return { error: "admins only" }; }
+    if (!(await hasPermission(me, "pin_forum_topic", db))) { reply.code(403); return { error: "admins only" }; }
 
     let parsed;
     try { parsed = stickyBody.parse(req.body); }

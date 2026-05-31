@@ -5,7 +5,7 @@ import type {
   ReactionEvent,
   ReactionTargetKind,
 } from "@thekeep/shared";
-import { isEmoticonCellEmpty } from "@thekeep/shared";
+import { isEmoticonCellEmpty, reactionRefKey } from "@thekeep/shared";
 
 /**
  * Cached emoticon catalog + live reaction state. One zustand store
@@ -94,16 +94,17 @@ function mergeReactionEvent(
   event: ReactionEvent,
   viewerUserId: string | null,
 ): ReactionEntry[] {
-  const idx = current.findIndex(
-    (e) => e.sheetSlug === event.sheetSlug && e.cellIndex === event.cellIndex,
-  );
+  // Match by normalized ref key — same string the server's COALESCE
+  // unique index uses — so the merge correctly identifies the same
+  // emoji across the two ref shapes.
+  const eventKey = reactionRefKey(event.ref);
+  const idx = current.findIndex((e) => reactionRefKey(e.ref) === eventKey);
   if (event.op === "add") {
     if (idx === -1) {
       return [
         ...current,
         {
-          sheetSlug: event.sheetSlug,
-          cellIndex: event.cellIndex,
+          ref: event.ref,
           label: event.label,
           reactors: [event.actor],
           viewerReacted: viewerUserId === event.actor.userId,

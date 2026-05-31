@@ -12,11 +12,17 @@ import { EmoticonPicker } from "./EmoticonPicker.js";
  */
 export function EmoticonPickerButton({
   onPick,
+  onPickUnicode,
   disabled,
   className = "inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded border border-transparent px-1 text-xs leading-none hover:border-keep-rule hover:bg-keep-banner/40 disabled:opacity-40",
   title = "Insert emoticon",
 }: {
   onPick: (sheetSlug: string, cellIndex: number) => void;
+  /** Optional — when provided the picker surfaces a Unicode tab and
+   *  this callback receives the raw character (e.g. "😀") for
+   *  insertion at the caret. Call sites that only support sheet-based
+   *  tokens omit it. */
+  onPickUnicode?: (char: string) => void;
   // `boolean | undefined` (not `disabled?: boolean`) so callers using
   // exactOptionalPropertyTypes can forward an optional outer prop
   // without tripping the strict assignability check.
@@ -55,6 +61,14 @@ export function EmoticonPickerButton({
             setOpen(false);
             onPick(slug, idx);
           }}
+          {...(onPickUnicode
+            ? {
+                onPickUnicode: (char: string) => {
+                  setOpen(false);
+                  onPickUnicode(char);
+                },
+              }
+            : {})}
         />
       ) : null}
     </>

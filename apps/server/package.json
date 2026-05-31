@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:push": "node scripts/apply-migrations.mjs",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "permissions:check": "tsx scripts/check-permissions.ts",
+    "permissions:audit": "tsx scripts/audit-permission-coverage.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",

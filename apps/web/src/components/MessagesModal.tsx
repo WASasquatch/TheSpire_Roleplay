@@ -7,6 +7,7 @@ import type {
   InboxIdentityCount,
 } from "@thekeep/shared";
 import { cropStyleFor } from "../lib/avatarCrop.js";
+import { EmoticonTypeahead } from "./EmoticonTypeahead.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { useChat } from "../state/store.js";
 import { readError, withIdentityQuery } from "../lib/http.js";
@@ -2187,6 +2188,13 @@ function ThreadPane({
               // drafts scroll internally instead of crowding the
               // conversation above.
               style={{ minHeight: `${AUTO_GROW_MIN_PX}px`, maxHeight: `${AUTO_GROW_MAX_PX}px` }}
+            />
+            {/* `:emoji-name` typeahead. Same shape as the main composer's
+                — see EmoticonTypeahead for the full contract. */}
+            <EmoticonTypeahead
+              textareaRef={dmInputRef}
+              value={draft}
+              onChange={setDraft}
             />
           </div>
           <button

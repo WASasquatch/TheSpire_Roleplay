@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { isAdminRole } from "@thekeep/shared";
+import { hasPermission } from "../auth/permissions.js";
 import type {
   PrivateStoryStub,
   Role,
@@ -418,7 +418,12 @@ async function viewerMayRead(
   | { ok: false; missing: true }
 > {
   const isOwner = viewerUserId != null && story.authorUserId === viewerUserId;
-  const isAdmin = viewerRole != null && isAdminRole(viewerRole);
+  // Admin-style view of other authors' draft content. Defaults to
+  // admin-only via the seed; matrix-grantable so a moderator without
+  // full admin can still triage queued reports.
+  const isAdmin = viewerUserId != null && viewerRole != null && db
+    ? await hasPermission({ id: viewerUserId, role: viewerRole }, "view_others_scriptorium_drafts", db)
+    : false;
 
   if (isOwner || isAdmin) return { ok: true };
 
@@ -679,7 +684,11 @@ async function effectiveStoryPermissions(
       manageCodex: true, manageCollaborators: true, publish: true, deleteStory: true,
     };
   }
-  if (viewerRole && isAdminRole(viewerRole)) {
+  // Admin override grants the full collaborator-role bundle. Uses
+  // `edit_others_scriptorium_content` since this gates write permissions
+  // across the story (chapters, codex, collaborators, etc.).
+  if (viewerUserId && viewerRole
+      && (await hasPermission({ id: viewerUserId, role: viewerRole }, "edit_others_scriptorium_content", db))) {
     return {
       role: "admin",
       readDrafts: true, editChapters: true, addChapters: true,
@@ -809,7 +818,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
   ): Promise<StoryDetail> {
     const card = await toCard(db, s);
     const isAuthor = !!me && me.id === s.authorUserId;
-    const isAdmin = !!me && isAdminRole(me.role);
+    const isAdmin = !!me && (await hasPermission(me, "view_others_scriptorium_drafts", db));
     // Collaborators with `readDrafts` (all active roles do) see drafts
     // alongside published chapters, same as the author + admin path.
     const perm = me ? await effectiveStoryPermissions(db, s, me.id, me.role) : null;
@@ -1120,7 +1129,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     if (!me) { reply.code(401); return { error: "auth" }; }
     const s = (await db.select().from(stories).where(eq(stories.id, req.params.id)).limit(1))[0];
     if (!s) { reply.code(404); return { error: "not found" }; }
-    if (s.authorUserId !== me.id && !isAdminRole(me.role)) {
+    if (s.authorUserId !== me.id && !(await hasPermission(me, "edit_others_scriptorium_content", db))) {
       reply.code(403);
       return { error: "not yours" };
     }
@@ -1187,7 +1196,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     if (!me) { reply.code(401); return { error: "auth" }; }
     const s = (await db.select().from(stories).where(eq(stories.id, req.params.id)).limit(1))[0];
     if (!s) { reply.code(404); return { error: "not found" }; }
-    if (s.authorUserId !== me.id && !isAdminRole(me.role)) {
+    if (s.authorUserId !== me.id && !(await hasPermission(me, "admin_delete_story", db))) {
       reply.code(403);
       return { error: "not yours" };
     }
@@ -1265,7 +1274,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       .limit(1))[0];
     if (!c) { reply.code(404); return { error: "not found" }; }
     const isAuthor = !!me && me.id === s.authorUserId;
-    const isAdmin = !!me && isAdminRole(me.role);
+    const isAdmin = !!me && (await hasPermission(me, "view_others_scriptorium_drafts", db));
     // Collaborators with readDrafts (any active role) see drafts too.
     const perm = me ? await effectiveStoryPermissions(db, s, me.id, me.role) : null;
     const canSeeDrafts = isAuthor || isAdmin || (perm?.readDrafts ?? false);
@@ -1797,7 +1806,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     }
 
     const isAuthor = !!me && s.authorUserId === me.id;
-    const isAdmin = !!me && isAdminRole(me.role);
+    const isAdmin = !!me && (await hasPermission(me, "edit_others_scriptorium_content", db));
 
     // Fetch all reviews, filter visibility in post since hidden-by-author
     // reviews stay visible to (a) the author, (b) the reviewer, (c) admins.
@@ -1947,11 +1956,12 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
         .where(and(eq(storyReviews.id, req.params.rid), eq(storyReviews.storyId, s.id)))
         .limit(1))[0];
       if (!r) { reply.code(404); return { error: "not found" }; }
-      if (r.reviewerUserId !== me.id && !isAdminRole(me.role)) {
+      const canAdminEdit = await hasPermission(me, "edit_others_scriptorium_content", db);
+      if (r.reviewerUserId !== me.id && !canAdminEdit) {
         reply.code(403);
         return { error: "not yours" };
       }
-      if (!isAdminRole(me.role)) {
+      if (!canAdminEdit) {
         const graceMs = r.editGraceExpiresAt ? +r.editGraceExpiresAt : 0;
         if (Date.now() > graceMs) {
           reply.code(409);
@@ -1998,7 +2008,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       .where(and(eq(storyReviews.id, req.params.rid), eq(storyReviews.storyId, s.id)))
       .limit(1))[0];
     if (!r) { reply.code(404); return { error: "not found" }; }
-    if (r.reviewerUserId !== me.id && !isAdminRole(me.role)) {
+    if (r.reviewerUserId !== me.id && !(await hasPermission(me, "edit_others_scriptorium_content", db))) {
       reply.code(403);
       return { error: "not yours" };
     }
@@ -2018,7 +2028,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       if (!me) { reply.code(401); return { error: "auth" }; }
       const s = (await db.select().from(stories).where(eq(stories.id, req.params.id)).limit(1))[0];
       if (!s) { reply.code(404); return { error: "not found" }; }
-      if (s.authorUserId !== me.id && !isAdminRole(me.role)) {
+      if (s.authorUserId !== me.id && !(await hasPermission(me, "edit_others_scriptorium_content", db))) {
         reply.code(403);
         return { error: "only the story author or an admin can moderate reviews" };
       }
@@ -2122,7 +2132,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
         reply.code(404);
         return { error: "not found" };
       }
-      if (r.replyerUserId !== me.id && !isAdminRole(me.role)) {
+      if (r.replyerUserId !== me.id && !(await hasPermission(me, "edit_others_scriptorium_content", db))) {
         reply.code(403);
         return { error: "not yours" };
       }
@@ -2295,7 +2305,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       return { error: "not found" };
     }
     const isAuthor = !!me && me.id === s.authorUserId;
-    const isAdmin = !!me && isAdminRole(me.role);
+    const isAdmin = !!me && (await hasPermission(me, "view_others_scriptorium_drafts", db));
     const rows = await db
       .select()
       .from(storyEntities)
@@ -2478,7 +2488,8 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     const s = (await db.select().from(stories).where(eq(stories.id, req.params.id)).limit(1))[0];
     if (!s) { reply.code(404); return { error: "not found" }; }
     const perm = await effectiveStoryPermissions(db, s, me.id, me.role);
-    if (!perm.readDrafts && s.authorUserId !== me.id && !isAdminRole(me.role)) {
+    if (!perm.readDrafts && s.authorUserId !== me.id
+        && !(await hasPermission(me, "view_others_scriptorium_drafts", db))) {
       reply.code(403);
       return { error: "forbidden" };
     }
@@ -3036,9 +3047,9 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     "/admin/scriptorium/reports",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
-      if (!me || !isAdminRole(me.role)) {
+      if (!me || !(await hasPermission(me, "view_report_queue", db))) {
         reply.code(403);
-        return { error: "admin only" };
+        return { error: "forbidden", missing: "view_report_queue" };
       }
       const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "50", 10) || 50));
       const conds: ReturnType<typeof eq>[] = [];
@@ -3112,9 +3123,9 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     "/admin/scriptorium/reports/:rid",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
-      if (!me || !isAdminRole(me.role)) {
+      if (!me || !(await hasPermission(me, "resolve_reports", db))) {
         reply.code(403);
-        return { error: "admin only" };
+        return { error: "forbidden", missing: "resolve_reports" };
       }
       const schema = z.object({
         status: z.enum(["reviewed", "dismissed"]),
@@ -3162,9 +3173,9 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     "/admin/scriptorium/stories/:id/force-rate",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
-      if (!me || !isAdminRole(me.role)) {
+      if (!me || !(await hasPermission(me, "admin_force_story_rating", db))) {
         reply.code(403);
-        return { error: "admin only" };
+        return { error: "forbidden", missing: "admin_force_story_rating" };
       }
       const schema = z.object({
         rating: ratingEnum,
@@ -3197,9 +3208,9 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     "/admin/scriptorium/stories/:id/hide",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
-      if (!me || !isAdminRole(me.role)) {
+      if (!me || !(await hasPermission(me, "admin_hide_story", db))) {
         reply.code(403);
-        return { error: "admin only" };
+        return { error: "forbidden", missing: "admin_hide_story" };
       }
       const s = (await db.select().from(stories).where(eq(stories.id, req.params.id)).limit(1))[0];
       if (!s) { reply.code(404); return { error: "not found" }; }
@@ -3225,9 +3236,9 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     "/admin/scriptorium/stories/:id",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
-      if (!me || !isAdminRole(me.role)) {
+      if (!me || !(await hasPermission(me, "admin_delete_story", db))) {
         reply.code(403);
-        return { error: "admin only" };
+        return { error: "forbidden", missing: "admin_delete_story" };
       }
       const s = (await db.select().from(stories).where(eq(stories.id, req.params.id)).limit(1))[0];
       if (!s) { reply.code(404); return { error: "not found" }; }

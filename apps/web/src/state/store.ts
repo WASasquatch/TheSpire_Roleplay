@@ -3,6 +3,7 @@ import type {
   ChatMessage,
   DirectConversationSummary,
   DirectMessage,
+  PermissionKey,
   ProfileView,
   Role,
   RoomOccupant,
@@ -16,6 +17,14 @@ export interface AuthMe {
   id: string;
   username: string;
   role: Role;
+  /** Resolved permission set the server reports for this user (Phase
+   *  2 granular permissions). Used by UI gates as the canonical
+   *  source of truth — `me.permissions.includes("manage_emoticon_catalog")`
+   *  beats `isAdminRole(me.role)` because it folds in per-user
+   *  overrides + matrix role-grant edits without needing a re-login.
+   *  Refreshes on the same /auth/me 60s poll the rest of the payload
+   *  rides. */
+  permissions: PermissionKey[];
 }
 
 /**

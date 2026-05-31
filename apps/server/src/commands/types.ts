@@ -6,7 +6,7 @@ import type {
 import type { Db } from "../db/index.js";
 import type { CommandRegistry } from "./registry.js";
 
-import type { Role } from "@thekeep/shared";
+import type { PermissionKey, Role } from "@thekeep/shared";
 
 export interface SessionUser {
   id: string;
@@ -88,8 +88,13 @@ export interface CommandHandler {
   description?: string;
   /** subcommand reference, surfaced by /help <name> in the modal */
   subcommands?: readonly SubcommandDoc[];
-  /** restricts who can run it */
-  permission?: Role;
+  /** Restricts who can run it. Checked via the new
+   *  `hasPermission(user, key)` resolver in `auth/permissions.ts`,
+   *  which respects per-role grants AND per-user overrides AND the
+   *  masteradmin bypass. The dispatcher calls this for the gate at
+   *  `dispatch.ts:321`; handlers can also call `hasPermission`
+   *  directly for finer-grained checks inside their `run`. */
+  permission?: PermissionKey;
   run(ctx: CommandContext): CommandResult;
   /**
    * Opt-in inline expansion. When set, the registry includes this

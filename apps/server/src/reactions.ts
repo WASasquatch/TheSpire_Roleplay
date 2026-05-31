@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
-import type { ReactionEntry, ReactionTargetKind } from "@thekeep/shared";
-import { EMOTICON_SHEET_CELL_COUNT } from "@thekeep/shared";
+import type { ReactionEntry, ReactionRef, ReactionTargetKind } from "@thekeep/shared";
+import { EMOTICON_SHEET_CELL_COUNT, lookupUnicodeEmojiName, reactionRefKey } from "@thekeep/shared";
 import { emoticonSheets, messageReactions } from "./db/schema.js";
 import type { Db } from "./db/index.js";
 
@@ -51,36 +51,56 @@ export async function loadReactionsForTargets(
       displayName: messageReactions.displayName,
       sheetId: messageReactions.sheetId,
       cellIndex: messageReactions.cellIndex,
+      unicodeChar: messageReactions.unicodeChar,
       createdAt: messageReactions.createdAt,
     })
     .from(messageReactions)
     .where(and(eq(messageReactions.targetKind, kind), inArray(messageReactions.targetId, targetIds)))
     .orderBy(asc(messageReactions.createdAt));
   if (rows.length === 0) return out;
-  const sheetIds = [...new Set(rows.map((r) => r.sheetId))];
-  const sheetRows = await db
-    .select({ id: emoticonSheets.id, slug: emoticonSheets.slug, cells: emoticonSheets.cells })
-    .from(emoticonSheets)
-    .where(inArray(emoticonSheets.id, sheetIds));
-  const sheetBySheetId = new Map(sheetRows.map((s) => [s.id, { slug: s.slug, cells: parseSheetCells(s.cells) }]));
+  // Batched sheet lookup — only fires when at least one row is a
+  // sheet-kind reaction. Unicode-only payloads don't need the
+  // sheet table at all.
+  const sheetIds = [...new Set(rows.map((r) => r.sheetId).filter((v): v is string => v != null))];
+  const sheetBySheetId = new Map<string, { slug: string; cells: string[] }>();
+  if (sheetIds.length > 0) {
+    const sheetRows = await db
+      .select({ id: emoticonSheets.id, slug: emoticonSheets.slug, cells: emoticonSheets.cells })
+      .from(emoticonSheets)
+      .where(inArray(emoticonSheets.id, sheetIds));
+    for (const s of sheetRows) sheetBySheetId.set(s.id, { slug: s.slug, cells: parseSheetCells(s.cells) });
+  }
 
-  // Group key combines targetId + sheetSlug + cellIndex. Within a
-  // group, reactors are accumulated in createdAt-asc order (the ORDER
-  // BY above is the source of that ordering).
-  function key(targetId: string, slug: string, cell: number): string {
-    return `${targetId}|${slug}|${cell}`;
+  // Group key combines targetId + normalized ref key. The ref key
+  // matches what the server's COALESCE unique index uses so the
+  // grouping and the DB-level dedupe agree on what "same emoji"
+  // means across both ref shapes.
+  function groupKey(targetId: string, ref: ReactionRef): string {
+    return `${targetId}|${reactionRefKey(ref)}`;
   }
   const grouped = new Map<string, ReactionEntry>();
   for (const r of rows) {
-    const sheet = sheetBySheetId.get(r.sheetId);
-    if (!sheet) continue; // Cascaded out from under us; skip orphan.
-    const label = sheet.cells[r.cellIndex] ?? "";
-    const k = key(r.targetId, sheet.slug, r.cellIndex);
+    // Resolve the ref shape. Server already enforces "exactly one"
+    // at the toggle-route level; defensive `else` here skips
+    // malformed rows so a manual DB edit can't crash the loader.
+    let ref: ReactionRef;
+    let label: string;
+    if (r.unicodeChar != null) {
+      ref = { kind: "unicode", char: r.unicodeChar };
+      label = lookupUnicodeEmojiName(r.unicodeChar) ?? r.unicodeChar;
+    } else if (r.sheetId != null && r.cellIndex != null) {
+      const sheet = sheetBySheetId.get(r.sheetId);
+      if (!sheet) continue; // Cascaded out; skip orphan.
+      ref = { kind: "sheet", sheetSlug: sheet.slug, cellIndex: r.cellIndex };
+      label = sheet.cells[r.cellIndex] ?? "";
+    } else {
+      continue;
+    }
+    const k = groupKey(r.targetId, ref);
     let entry = grouped.get(k);
     if (!entry) {
       entry = {
-        sheetSlug: sheet.slug,
-        cellIndex: r.cellIndex,
+        ref,
         label,
         reactors: [],
         viewerReacted: false,

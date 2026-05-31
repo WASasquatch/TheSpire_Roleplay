@@ -13,7 +13,6 @@ import {
   CONTENT_WARNINGS,
   DEFAULT_THEME,
   WORLD_PAGE_DEPTH_CAP,
-  isAdminRole,
 } from "@thekeep/shared";
 import {
   addWorldCollaborator,
@@ -292,7 +291,8 @@ function WorldMetaEditor({
   const me = useChat((s) => s.me);
   const myId = me?.id ?? null;
   const canManageCollaborators =
-    (!!myId && myId === w.ownerUserId) || (!!me && isAdminRole(me.role));
+    (!!myId && myId === w.ownerUserId)
+    || (!!me && me.permissions.includes("edit_others_world"));
   const [name, setName] = useState(w.name);
   const [slug, setSlug] = useState(w.slug);
   const [description, setDescription] = useState(w.description ?? "");

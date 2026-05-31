@@ -1,0 +1,383 @@
+/**
+ * Permission catalog for the granular role-permission system (Phase 1).
+ *
+ * Each entry below is a code-side gate that previously checked
+ * `isAdminRole(role)` / `isMasterAdminRole(role)` / `roleRank(role) >=
+ * N` directly. After Phase 1 the catalog is the single source of
+ * truth: the server's `hasPermission(user, key)` helper resolves a
+ * permission key against the per-role and per-user grant tables, the
+ * Phase-2 matrix UI lets a masteradmin redistribute keys, and the
+ * client's `me.permissions` array (Phase 2) mirrors the resolved set
+ * for UI gating.
+ *
+ * **Adding a permission:** add it to `PERMISSION_KEYS` (a tuple — the
+ * `as const` is what gives `PermissionKey` its precise type), then to
+ * `PERMISSION_DESCRIPTIONS` (the matrix tooltip copy), then call
+ * `hasPermission(user, "<new_key>")` from the code site, then update
+ * the seed defaults in `apps/server/drizzle/0179_permission_grants.sql`
+ * (or a follow-up migration). The compiler will surface every
+ * missing piece — there's no string-typed back door.
+ *
+ * **Masteradmin bypass** is hardcoded in `hasPermission`; the master-
+ * admin tier has no row in `role_permission_grants` and the matrix
+ * locks their row as "all-on, uneditable" so an accidental misclick
+ * can't strand the install with no one able to grant permissions.
+ */
+
+export const PERMISSION_KEYS = [
+  // ---- chat_moderation ----
+  "kick_user",
+  "ban_user",
+  "unban_user",
+  "mute_user",
+  "unmute_user",
+  "delete_others_message",
+  "edit_others_message",
+  "view_deleted_message_body",
+  "lock_forum_topic",
+  "unlock_forum_topic",
+  "bypass_topic_lock",
+  "pin_forum_topic",
+  "announce_room",
+  "announce_sitewide",
+
+  // ---- room_admin ----
+  "bypass_room_cap",
+  "edit_any_room_metadata",
+  "create_system_room",
+  "bulk_edit_rooms",
+  "delete_room",
+
+  // ---- user_admin ----
+  "grant_admin_role",
+  "revoke_admin_role",
+  "view_user_directory_secure",
+  "edit_user_basic",
+  "edit_user_email",
+  "disable_user",
+  "enable_user",
+  "reset_user_password",
+  "hard_delete_user",
+  "edit_others_character",
+  "view_others_journal",
+  "edit_others_journal",
+
+  // ---- site_admin ----
+  "edit_site_settings",
+  "upload_logo",
+  "manage_custom_commands",
+  "manage_title_kinds",
+  "manage_nav_links",
+  "manage_affiliates",
+  "edit_branding",
+
+  // ---- content_admin ----
+  "manage_emoticon_catalog",
+  "review_emoticon_submissions",
+  "feature_worlds",
+  "edit_others_world",
+  "delete_others_world",
+  "admin_delete_story",
+  "admin_hide_story",
+  "admin_force_story_rating",
+  "edit_others_scriptorium_content",
+  "view_others_scriptorium_drafts",
+
+  // ---- audit_view (non-tab read permissions) ----
+  "view_room_messages_as_admin",
+  "view_report_queue",
+  "resolve_reports",
+
+  // ---- admin_panel_tabs (visibility for each AdminPanel tab) ----
+  "view_admin_overview",
+  "view_admin_users",
+  "view_admin_rooms",
+  "view_admin_audit",
+  "view_admin_reports",
+  "view_admin_earning",
+  "view_admin_emoticons",
+  "view_admin_settings",
+  "view_admin_branding",
+  "view_admin_rules",
+  "view_admin_affiliates",
+  "view_admin_scriptorium",
+  "view_admin_backups",
+  "view_admin_custom_commands",
+  "view_admin_title_kinds",
+  "view_admin_nav_links",
+  "view_admin_permissions",
+
+  // ---- earning_admin ----
+  "view_earning_config",
+  "edit_earning_awards",
+  "edit_earning_sensitive",
+  "grant_earning_award",
+  "manage_ranks",
+  "manage_name_styles",
+  "manage_borders",
+  "manage_cosmetics",
+  "clear_user_cosmetic_override",
+  "manage_flash_sale",
+
+  // ---- backups ----
+  "manage_backups",
+
+  // ---- permission_admin (the matrix itself) ----
+  "manage_permissions",
+] as const;
+
+export type PermissionKey = (typeof PERMISSION_KEYS)[number];
+
+/**
+ * Short human-readable description for each key. The matrix tooltip
+ * pulls from here; admins see this when hovering a column header. Keep
+ * them ≤ ~100 chars so the tooltip stays compact, and write them in
+ * present tense ("Kick a user…", not "Lets you kick…") since they
+ * answer "what does this permission let me do?".
+ *
+ * Adding a key without a description here is a compile error (the
+ * `Record<PermissionKey, string>` signature forces full coverage).
+ */
+export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
+  // chat_moderation
+  kick_user: "Boot a user out of the current room. Same as the /kick command.",
+  ban_user: "Ban a user from a room (with optional duration). Persists in the bans table.",
+  unban_user: "Lift a ban on a user in the current room.",
+  mute_user: "Silence a user in a room for a duration. Same as /mute.",
+  unmute_user: "Lift a mute on a user in the current room.",
+  delete_others_message: "Soft-delete chat messages authored by someone else, regardless of the grace window.",
+  edit_others_message: "Edit chat messages authored by someone else, regardless of the grace window.",
+  view_deleted_message_body: "Read the original body of soft-deleted messages (the `originalBody` audit reveal).",
+  lock_forum_topic: "Close a forum topic to further replies.",
+  unlock_forum_topic: "Re-open a previously locked forum topic.",
+  bypass_topic_lock: "Post a reply in a topic that's already locked (used for moderator verdicts).",
+  pin_forum_topic: "Sticky a forum topic to the top of the topic list.",
+  announce_room: "Send `/announce` in the current room (high-visibility broadcast).",
+  announce_sitewide: "Send `/announce all` to every room. Use sparingly.",
+
+  // room_admin
+  bypass_room_cap: "Skip the per-user max-rooms-owned ceiling on /go and /private.",
+  edit_any_room_metadata: "Edit topic / description / expiry / replyMode of any room, not just ones you own.",
+  create_system_room: "Create a permanent public (system) room via the admin tab.",
+  bulk_edit_rooms: "Bulk-edit room message-expiry settings across many rooms at once.",
+  delete_room: "Delete a non-system room via the admin tab.",
+
+  // user_admin
+  grant_admin_role: "Promote another account to the admin tier. Same as /promoteadmin.",
+  revoke_admin_role: "Demote an admin account back to user. Same as /demoteadmin.",
+  view_user_directory_secure: "View the admin user list (exposes email, IP, last-login).",
+  edit_user_basic: "Edit another user's username and assign role (user / trusted / mod).",
+  edit_user_email: "Change another user's email address.",
+  disable_user: "Soft-disable a user account (blocks login + chat).",
+  enable_user: "Re-enable a previously disabled account.",
+  reset_user_password: "Generate a password reset link for another user.",
+  hard_delete_user: "Permanently delete a user account. Irreversible.",
+  edit_others_character: "Edit characters owned by other users (fix names, clear avatars, etc.).",
+  view_others_journal: "Read private journal entries belonging to other users' characters. PRIVACY SENSITIVE.",
+  edit_others_journal: "Modify or delete other users' journal entries.",
+
+  // site_admin
+  edit_site_settings: "Edit retention, session TTL, content limits, HTML rules, and other site config.",
+  upload_logo: "Upload a replacement banner / logo image.",
+  manage_custom_commands: "Create, edit, or delete admin-authored `!cmd` commands.",
+  manage_title_kinds: "Manage the mutual-title catalog (marriage, partner, etc.).",
+  manage_nav_links: "Manage the banner-navigation link rows.",
+  manage_affiliates: "Create, edit, or delete partner / sponsor / affiliate entries on the splash.",
+  edit_branding: "Edit branding fields: site name + URL, banner cover CSS, logo color/font/URL, splash welcome HTML, SEO meta description, custom head HTML, and the theme-design map.",
+
+  // content_admin
+  manage_emoticon_catalog: "Create, edit, or delete admin emoticon sheets.",
+  review_emoticon_submissions: "Approve or reject community emoticon submissions.",
+  feature_worlds: "Mark a world as `featured` in the catalog.",
+  edit_others_world: "Admin override to edit world metadata + collaborators on worlds you don't own.",
+  delete_others_world: "Admin override to soft-delete worlds you don't own.",
+  admin_delete_story: "Remove a story from the Scriptorium catalog (admin moderation).",
+  admin_hide_story: "Hide a story from public view without deleting it.",
+  admin_force_story_rating: "Override an author's content-rating choice on a story.",
+  edit_others_scriptorium_content: "Admin override on others' stories, chapters, reviews, and replies.",
+  view_others_scriptorium_drafts: "Read other authors' unpublished drafts in the admin queue.",
+
+  // audit_view
+  view_room_messages_as_admin: "Open the admin message scroll-through for a public room.",
+  view_report_queue: "Browse user-filed moderation reports.",
+  resolve_reports: "Mark a report resolved (records to audit log).",
+
+  // admin_panel_tabs (visibility)
+  view_admin_overview: "See the admin Overview tab (counters + sparklines).",
+  view_admin_users: "See the admin Users tab.",
+  view_admin_rooms: "See the admin Rooms tab.",
+  view_admin_audit: "See the admin Audit tab.",
+  view_admin_reports: "See the admin Reports tab.",
+  view_admin_earning: "See the admin Earning tab.",
+  view_admin_emoticons: "See the admin Emoticons tab.",
+  view_admin_settings: "See the admin Site Settings tab.",
+  view_admin_branding: "See the admin Branding tab.",
+  view_admin_rules: "See the admin Rules tab.",
+  view_admin_affiliates: "See the admin Affiliates tab.",
+  view_admin_scriptorium: "See the admin Scriptorium tab.",
+  view_admin_backups: "See the admin Backups tab.",
+  view_admin_custom_commands: "See the admin Custom Commands tab.",
+  view_admin_title_kinds: "See the admin Title Kinds tab.",
+  view_admin_nav_links: "See the admin Nav Links tab.",
+  view_admin_permissions: "See the Roles & Permissions tab (the matrix). Editing requires manage_permissions.",
+
+  // earning_admin
+  view_earning_config: "Read-only access to the earning awards + ranks configuration.",
+  edit_earning_awards: "Edit per-source XP / Currency award amounts and toggles.",
+  edit_earning_sensitive: "Edit the multi-character earn divisor and backfill knobs (sensitive).",
+  grant_earning_award: "Hand out XP or Currency to a target identity via the admin tab.",
+  manage_ranks: "Manage the rank catalog and per-tier definitions.",
+  manage_name_styles: "Manage the equippable name-style catalog.",
+  manage_borders: "Manage rank-tier and freeform border catalogs.",
+  manage_cosmetics: "Manage flair / banner / typing-phrase catalog rows.",
+  clear_user_cosmetic_override: "Force-revert a user's profile banner, typing phrase, or presence templates.",
+  manage_flash_sale: "Configure and run the rotating flash sale.",
+
+  // backups
+  manage_backups: "Create, restore, and delete site backup snapshots.",
+
+  // permission_admin
+  manage_permissions: "Edit the role-permission matrix and per-user overrides (this very system).",
+};
+
+/**
+ * Friendly group label for each permission, used by the matrix UI to
+ * draw the column-header section bars. Mirrors the grouping in
+ * `PERMISSION_KEYS` above.
+ */
+export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
+  // chat_moderation
+  kick_user: "chat_moderation",
+  ban_user: "chat_moderation",
+  unban_user: "chat_moderation",
+  mute_user: "chat_moderation",
+  unmute_user: "chat_moderation",
+  delete_others_message: "chat_moderation",
+  edit_others_message: "chat_moderation",
+  view_deleted_message_body: "chat_moderation",
+  lock_forum_topic: "chat_moderation",
+  unlock_forum_topic: "chat_moderation",
+  bypass_topic_lock: "chat_moderation",
+  pin_forum_topic: "chat_moderation",
+  announce_room: "chat_moderation",
+  announce_sitewide: "chat_moderation",
+
+  // room_admin
+  bypass_room_cap: "room_admin",
+  edit_any_room_metadata: "room_admin",
+  create_system_room: "room_admin",
+  bulk_edit_rooms: "room_admin",
+  delete_room: "room_admin",
+
+  // user_admin
+  grant_admin_role: "user_admin",
+  revoke_admin_role: "user_admin",
+  view_user_directory_secure: "user_admin",
+  edit_user_basic: "user_admin",
+  edit_user_email: "user_admin",
+  disable_user: "user_admin",
+  enable_user: "user_admin",
+  reset_user_password: "user_admin",
+  hard_delete_user: "user_admin",
+  edit_others_character: "user_admin",
+  view_others_journal: "user_admin",
+  edit_others_journal: "user_admin",
+
+  // site_admin
+  edit_site_settings: "site_admin",
+  upload_logo: "site_admin",
+  manage_custom_commands: "site_admin",
+  manage_title_kinds: "site_admin",
+  manage_nav_links: "site_admin",
+  manage_affiliates: "site_admin",
+  edit_branding: "site_admin",
+
+  // content_admin
+  manage_emoticon_catalog: "content_admin",
+  review_emoticon_submissions: "content_admin",
+  feature_worlds: "content_admin",
+  edit_others_world: "content_admin",
+  delete_others_world: "content_admin",
+  admin_delete_story: "content_admin",
+  admin_hide_story: "content_admin",
+  admin_force_story_rating: "content_admin",
+  edit_others_scriptorium_content: "content_admin",
+  view_others_scriptorium_drafts: "content_admin",
+
+  // audit_view
+  view_room_messages_as_admin: "audit_view",
+  view_report_queue: "audit_view",
+  resolve_reports: "audit_view",
+
+  // admin_panel_tabs
+  view_admin_overview: "admin_panel_tabs",
+  view_admin_users: "admin_panel_tabs",
+  view_admin_rooms: "admin_panel_tabs",
+  view_admin_audit: "admin_panel_tabs",
+  view_admin_reports: "admin_panel_tabs",
+  view_admin_earning: "admin_panel_tabs",
+  view_admin_emoticons: "admin_panel_tabs",
+  view_admin_settings: "admin_panel_tabs",
+  view_admin_branding: "admin_panel_tabs",
+  view_admin_rules: "admin_panel_tabs",
+  view_admin_affiliates: "admin_panel_tabs",
+  view_admin_scriptorium: "admin_panel_tabs",
+  view_admin_backups: "admin_panel_tabs",
+  view_admin_custom_commands: "admin_panel_tabs",
+  view_admin_title_kinds: "admin_panel_tabs",
+  view_admin_nav_links: "admin_panel_tabs",
+  view_admin_permissions: "admin_panel_tabs",
+
+  // earning_admin
+  view_earning_config: "earning_admin",
+  edit_earning_awards: "earning_admin",
+  edit_earning_sensitive: "earning_admin",
+  grant_earning_award: "earning_admin",
+  manage_ranks: "earning_admin",
+  manage_name_styles: "earning_admin",
+  manage_borders: "earning_admin",
+  manage_cosmetics: "earning_admin",
+  clear_user_cosmetic_override: "earning_admin",
+  manage_flash_sale: "earning_admin",
+
+  // backups
+  manage_backups: "backups",
+
+  // permission_admin
+  manage_permissions: "permission_admin",
+};
+
+export type PermissionGroup =
+  | "chat_moderation"
+  | "room_admin"
+  | "user_admin"
+  | "site_admin"
+  | "content_admin"
+  | "audit_view"
+  | "admin_panel_tabs"
+  | "earning_admin"
+  | "backups"
+  | "permission_admin";
+
+/**
+ * Keys flagged in the matrix UI with a yellow "privacy-sensitive"
+ * chip. Toggling them on should be a deliberate decision, not a
+ * casual click. The set is intentionally small — broad flags would
+ * desensitize the warning.
+ */
+export const PRIVACY_SENSITIVE_KEYS: ReadonlySet<PermissionKey> = new Set<PermissionKey>([
+  "view_user_directory_secure",
+  "view_others_journal",
+  "view_deleted_message_body",
+  "view_others_scriptorium_drafts",
+]);
+
+/**
+ * Type-guard: is `s` a recognized permission key? Useful at server
+ * boundaries (the matrix PATCH endpoint, audit-log filter parsing)
+ * so unknown strings don't sneak into the cache as if they were
+ * canonical.
+ */
+export function isPermissionKey(s: string): s is PermissionKey {
+  return (PERMISSION_KEYS as readonly string[]).includes(s);
+}

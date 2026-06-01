@@ -378,6 +378,27 @@ export const characters = sqliteTable(
     lifetimeForumReplies: integer("lifetime_forum_replies")
       .notNull()
       .default(0),
+    /**
+     * Per-character opt-in for Direct Messenger. When false, the
+     * character is hidden from:
+     *   - friend-request lookups + typeahead
+     *   - DM recipient pickers
+     *   - new conversation creation (existing friends cannot start a
+     *     new DM thread with this character; existing threads stay
+     *     readable but new sends are gated, see route checks)
+     *
+     * Existing friendships are NOT removed when the toggle flips off —
+     * the friend just can't reach this character via DM anymore. Flipping
+     * it back on restores reachability with no further action needed.
+     *
+     * Migration 0183 added this column with a backfill: any character
+     * with prior friendships or DM conversations was migrated to
+     * `true`; everyone else (and every newly-created character) is
+     * `false` by default. New characters are opt-in.
+     */
+    directMessengerEnabled: integer("direct_messenger_enabled", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
     deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),

@@ -136,6 +136,16 @@ const updateBody = z.object({
   publicProfileBgUrl: httpUrl.nullable().optional(),
   /** Display mode for `publicProfileBgUrl`. See PublicProfileBgMode in @thekeep/shared. */
   publicProfileBgMode: z.enum(["cover", "contain", "tile", "stretch"]).optional(),
+  /**
+   * Per-character Direct Messenger opt-in. Defaults to false at
+   * character-creation; existing characters with prior friendships /
+   * conversations were backfilled to true by migration 0183. Editing
+   * this from the profile editor flips the visibility of this
+   * character to friend-request lookups and DM recipient pickers
+   * across the whole site — see characters.directMessengerEnabled
+   * column comment for the gate semantics.
+   */
+  directMessengerEnabled: z.boolean().optional(),
 });
 
 const masterUpdateBody = z.object({
@@ -325,6 +335,9 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
             : {}),
           ...(body.publicProfileBgMode !== undefined
             ? { publicProfileBgMode: body.publicProfileBgMode }
+            : {}),
+          ...(body.directMessengerEnabled !== undefined
+            ? { directMessengerEnabled: body.directMessengerEnabled }
             : {}),
           updatedAt: new Date(),
         })

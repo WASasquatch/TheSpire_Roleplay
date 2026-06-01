@@ -20,6 +20,7 @@ import {
   COMMUNITY_EMOTICON_USE_COST,
   EMOTICON_SHEET_CELL_COUNT,
   isEmoticonCellEmpty,
+  lookupUnicodeEmojiCharByName,
   lookupUnicodeEmojiName,
 } from "@thekeep/shared";
 import {
@@ -196,8 +197,14 @@ const toggleReactionBody = z.object({
   cellIndex: z.number().int().min(0).max(EMOTICON_SHEET_CELL_COUNT - 1).optional(),
   // Unicode ref. 16 chars is the catalog ceiling for compound RGI
   // sequences (ZWJ families etc.); we cap here too so the column
-  // constraint matches the API contract.
-  unicodeChar: z.string().min(1).max(16).optional(),
+  // constraint matches the API contract. The `.refine` rejects
+  // whitespace-only strings — `z.string().min(1)` only checks
+  // length, so a single " " or a lone zero-width joiner used to
+  // sneak through and render as a blank chip on the client.
+  unicodeChar: z.string().min(1).max(16).refine(
+    (s) => s.trim() !== "",
+    { message: "unicodeChar must contain a visible codepoint" },
+  ).optional(),
   /** Identity to react as — null = master handle, otherwise a
    *  character id the caller owns. Mirrors how `chat:input` picks an
    *  identity at send time. */
@@ -428,12 +435,17 @@ export async function registerEmoticonRoutes(
     let label = "";
     let ref: ReactionRef;
     if (body.unicodeChar !== undefined) {
-      // Unicode path. The codepoint string is opaque to us — we
-      // accept anything inside the 16-char cap. Best-effort label
-      // lookup via the catalog for the audit/tooltip surface;
-      // unknown emoji fall through to the raw glyph.
-      ref = { kind: "unicode", char: body.unicodeChar };
-      label = lookupUnicodeEmojiName(body.unicodeChar) ?? body.unicodeChar;
+      // Unicode path. Normalize the incoming value through the
+      // name→char reverse lookup first. The picker has been sending
+      // the codepoint correctly for a while, but an older client
+      // path stored the catalog NAME ("100") in place of the
+      // codepoint ("💯") — guarding here makes the route resilient
+      // to any stale client + retroactively repairs a re-toggle of
+      // an old broken row. Anything not in the curated catalog
+      // (free-form OS-picker paste) falls through unchanged.
+      const normalizedChar = lookupUnicodeEmojiCharByName(body.unicodeChar) ?? body.unicodeChar;
+      ref = { kind: "unicode", char: normalizedChar };
+      label = lookupUnicodeEmojiName(normalizedChar) ?? normalizedChar;
     } else {
       // Sheet path. Resolve slug → row, validate the cell isn't
       // "empty" (those cells aren't pickable). Pending and rejected

@@ -68,6 +68,16 @@ export interface FriendListEntry {
    *  no-op (legacy centered-cover behavior). */
   avatarCrop: AvatarCrop;
   online: boolean;
+  /**
+   * False when this friend is a character-pinned identity whose owner
+   * has flipped the per-character Direct Messenger toggle OFF. The
+   * friendship row stays — we don't delete history when someone goes
+   * opt-out — but the client uses this flag to grey-out the "Message"
+   * action and surface a "DM unavailable" badge. Master-pinned
+   * friendships are always reachable (master DM toggle is a separate
+   * preference handled elsewhere), so this is `true` for them.
+   */
+  recipientDmEnabled: boolean;
 }
 
 export interface FriendRequestEntry {
@@ -170,6 +180,10 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     // Character matches. Pull all live characters with this name,
     // joined to their owners for the disambiguator label. Caller's
     // own characters are excluded — friending yourself is silly.
+    // Characters with `direct_messenger_enabled = false` are filtered
+    // out at the SQL layer so a user looking up a name doesn't even
+    // see them as a possible recipient (matches the spec: opt-in
+    // characters are not friend-requestable).
     const charRows = await db
       .select({
         id: characters.id,
@@ -184,6 +198,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
         eqNameInsensitive(characters.name, name),
         isNull(characters.deletedAt),
         isNull(users.disabledAt),
+        eq(characters.directMessengerEnabled, true),
       ));
     for (const c of charRows) {
       if (c.userId === me.id) continue;
@@ -270,6 +285,11 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
       const c = o.characterId ? charById.get(o.characterId) : null;
       const usingChar = !!(c && !c.deletedAt);
       const displayName = usingChar ? c!.name : (u?.username ?? "(unknown)");
+      // Character-pinned friendships inherit the character's current
+      // Direct Messenger opt-in state. Master-pinned friendships are
+      // always reachable (the per-user DM preference is handled by a
+      // separate gate further down the send path).
+      const recipientDmEnabled = usingChar ? !!c!.directMessengerEnabled : true;
       // Character-pinned rows must NOT fall back to the master's
       // avatar — that fallback leaks the OOC owner's portrait into
       // the friends rail for any character whose own avatar slot is
@@ -298,6 +318,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
         avatarUrl,
         avatarCrop,
         online: online.has(o.userId),
+        recipientDmEnabled,
       };
     });
 
@@ -359,6 +380,13 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
         if (!charRow || charRow.userId !== userRow.id || charRow.deletedAt) {
           reply.code(404); return { error: "no_target_character" };
         }
+        // Direct Messenger opt-in gate: a character whose owner has
+        // toggled DM off is not friend-requestable. Same 404 shape as
+        // a missing character so an attacker can't probe the opt-in
+        // state by spamming requests at known character ids.
+        if (!charRow.directMessengerEnabled) {
+          reply.code(404); return { error: "no_target_character" };
+        }
         targetIdentity = { userId: userRow.id, characterId: charRow.id };
         targetDisplay = charRow.name;
       } else {
@@ -385,7 +413,9 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
           .from(characters)
           .where(eqNameInsensitive(characters.name, username))
           .limit(1))[0];
-        if (charRow && !charRow.deletedAt) {
+        // Same DM opt-in filter as the explicit path: a character with
+        // DM off is treated as "not found" for the name-based lookup.
+        if (charRow && !charRow.deletedAt && charRow.directMessengerEnabled) {
           targetIdentity = { userId: charRow.userId, characterId: charRow.id };
           targetDisplay = charRow.name;
         }

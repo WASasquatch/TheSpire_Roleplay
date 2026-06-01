@@ -1158,7 +1158,14 @@ function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
         </span>
       ) : null}
       {shown && video ? (
-        <span className="mt-1 block w-full max-w-[95vw] md:max-w-[480px]">
+        // Sizing rules per device/orientation:
+        //   - Phone in portrait: `w-full` fills the chat column (which
+        //     is the screen). Full-screen-on-mobile-portrait.
+        //   - Phone in landscape: cap at 854px (16:9 → 480p height).
+        //     `max-md:landscape:` scopes this to below-md + landscape
+        //     so it doesn't also catch iPads in landscape.
+        //   - Desktop / tablet: cap at 1280px (16:9 → 720p height).
+        <span className="mt-1 block w-full max-md:landscape:max-w-[854px] md:max-w-[1280px]">
           {/*
             16:9 aspect via `aspect-video` keeps the iframe shape regardless
             of how wide the chat column is. `referrerPolicy=

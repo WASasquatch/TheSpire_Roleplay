@@ -1,6 +1,11 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { ReactionEntry, ReactionRef, ReactionTargetKind } from "@thekeep/shared";
-import { EMOTICON_SHEET_CELL_COUNT, lookupUnicodeEmojiName, reactionRefKey } from "@thekeep/shared";
+import {
+  EMOTICON_SHEET_CELL_COUNT,
+  lookupUnicodeEmojiCharByName,
+  lookupUnicodeEmojiName,
+  reactionRefKey,
+} from "@thekeep/shared";
 import { emoticonSheets, messageReactions } from "./db/schema.js";
 import type { Db } from "./db/index.js";
 
@@ -85,9 +90,29 @@ export async function loadReactionsForTargets(
     // malformed rows so a manual DB edit can't crash the loader.
     let ref: ReactionRef;
     let label: string;
-    if (r.unicodeChar != null) {
-      ref = { kind: "unicode", char: r.unicodeChar };
-      label = lookupUnicodeEmojiName(r.unicodeChar) ?? r.unicodeChar;
+    // Empty / whitespace `unicodeChar` rows render as blank chips on
+    // the client — they slipped past the route validation at some
+    // point (likely a pre-rename catalog path that wrote the
+    // shorthand name field by mistake; can also be a manual DB edit).
+    // Treat them as if `unicodeChar` were NULL so the loader either
+    // falls through to the sheet branch (rare; would imply both
+    // columns set) or skips the row entirely.
+    const cleanedUnicode = typeof r.unicodeChar === "string" && r.unicodeChar.trim() !== ""
+      ? r.unicodeChar
+      : null;
+    if (cleanedUnicode != null) {
+      // Repair legacy rows where an older picker / typeahead path
+      // mistakenly stored the catalog NAME ("100", "smile") in
+      // `unicode_char` instead of the actual codepoint ("💯",
+      // "😄"). The reverse-lookup only matches exact catalog names,
+      // so a free-form codepoint paste like "🦄" (which isn't in the
+      // curated catalog) still falls through unchanged. New writes
+      // go through the route's `unicodeChar` validation which is
+      // also normalized below, so this branch only carries weight
+      // for old rows.
+      const repaired = lookupUnicodeEmojiCharByName(cleanedUnicode) ?? cleanedUnicode;
+      ref = { kind: "unicode", char: repaired };
+      label = lookupUnicodeEmojiName(repaired) ?? repaired;
     } else if (r.sheetId != null && r.cellIndex != null) {
       const sheet = sheetBySheetId.get(r.sheetId);
       if (!sheet) continue; // Cascaded out; skip orphan.

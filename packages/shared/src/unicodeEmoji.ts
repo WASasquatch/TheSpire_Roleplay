@@ -732,3 +732,20 @@ const UNICODE_EMOJI_NAME_BY_CHAR: ReadonlyMap<string, string> = (() => {
 export function lookupUnicodeEmojiName(char: string): string | null {
   return UNICODE_EMOJI_NAME_BY_CHAR.get(char) ?? null;
 }
+
+/** Name → char lookup. Used to repair reaction rows where an older
+ *  picker / typeahead path mistakenly stored the catalog NAME
+ *  ("100", "smile") in the unicode_char column instead of the actual
+ *  codepoint ("💯", "😄"). The server's reaction loader runs the
+ *  stored value through this and falls through to the original
+ *  string when the lookup misses — so OS-emoji-picker paste of a
+ *  codepoint outside the curated catalog still renders. */
+const UNICODE_EMOJI_CHAR_BY_NAME: ReadonlyMap<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const e of UNICODE_EMOJI_FLAT) m.set(e.name, e.char);
+  return m;
+})();
+
+export function lookupUnicodeEmojiCharByName(name: string): string | null {
+  return UNICODE_EMOJI_CHAR_BY_NAME.get(name) ?? null;
+}

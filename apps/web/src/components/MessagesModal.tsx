@@ -66,6 +66,14 @@ interface FriendListEntry {
   /** Server-resolved zoom/pan for `avatarUrl`. */
   avatarCrop: AvatarCrop;
   online: boolean;
+  /** False when this friend is a character-pinned identity whose
+   *  owner has toggled the per-character Direct Messenger opt-in off.
+   *  The row stays in the list (existing friendships aren't deleted)
+   *  but the "Message" action greys out + a small "DM off" badge
+   *  surfaces so the player knows why. Master-pinned friendships are
+   *  always true. Defaults to true if missing for forward-compat with
+   *  older server responses. */
+  recipientDmEnabled?: boolean;
 }
 
 interface FriendRequestEntry {
@@ -544,6 +552,12 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
       avatarUrl: f.avatarUrl,
       avatarCrop: f.avatarCrop,
       online: f.online,
+      // Inherited from the server's per-row resolution. `false` means
+      // the friend's character has Direct Messenger toggled off; the
+      // row stays in the list (existing relationship), but starting
+      // a new DM thread is gated. Defaults true so older response
+      // shapes without the field stay reachable.
+      recipientDmEnabled: f.recipientDmEnabled ?? true,
       conv: convByOther.get(identityKey(f.userId, f.characterId)) ?? null,
     }))
     .sort(dmRowOrder);
@@ -1298,11 +1312,19 @@ function UserRow({
     avatarCrop: AvatarCrop;
     online: boolean;
     conv: DirectConversationSummary | null;
+    /** When false, this row is a friend whose character has Direct
+     *  Messenger opted out. The row still renders so the player can
+     *  see the relationship + the history, but the thread-open click
+     *  surfaces a hint and is visually de-emphasized. Optional + true
+     *  by default so older row shapes (non-friend conv rows, etc.)
+     *  don't get downgraded. */
+    recipientDmEnabled?: boolean;
   };
   active: boolean;
   onSelect: () => void;
   onRemove?: () => void;
 }) {
+  const dmAvailable = row.recipientDmEnabled !== false;
   const unread = (row.conv?.unreadCount ?? 0) > 0;
   // Three visual states, applied in priority order: selection wins
   // (the user is already looking at this thread, so the unread halo
@@ -1341,7 +1363,17 @@ function UserRow({
               (unread ? "font-semibold text-keep-text" : "text-keep-muted")
             }
           >
-            {row.conv?.lastMessagePreview ?? `@${row.handle}`}
+            {dmAvailable ? (
+              row.conv?.lastMessagePreview ?? `@${row.handle}`
+            ) : (
+              // Subtle hint that this character can no longer be
+              // reached — the friendship row stays so a player can
+              // still see the relationship + history, but the next
+              // send is gated server-side. Italic-muted contrast
+              // matches other "informational, not actionable" rail
+              // copy in the modal.
+              <span className="italic text-keep-muted">@{row.handle} · DM unavailable</span>
+            )}
           </span>
         </span>
       </button>

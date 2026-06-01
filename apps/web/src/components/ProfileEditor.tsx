@@ -149,6 +149,15 @@ interface CharacterRow {
   publicProfileBgUrl?: string | null;
   /** "cover" | "contain" | "tile" | "stretch" — display strategy for `publicProfileBgUrl`. */
   publicProfileBgMode?: string | null;
+  /**
+   * Per-character Direct Messenger opt-in (migration 0183). When
+   * false, this character is filtered out of friend-request lookups
+   * and DM recipient pickers — existing friends + conversations are
+   * preserved but cannot start a new DM thread with this identity.
+   * Brand-new characters default to false; existing characters with
+   * prior friendships / conversations were migrated to true.
+   */
+  directMessengerEnabled?: boolean;
 }
 
 type Target = { kind: "master" } | { kind: "character"; id: string };
@@ -253,6 +262,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
   // enforces this too); the UI mirrors that by disabling the Public box.
   const [isPublic, setIsPublic] = useState<boolean>(true);
   const [isNsfw, setIsNsfw] = useState<boolean>(false);
+  // Per-character Direct Messenger opt-in (character targets only).
+  // The master target ignores this state. Default false to match the
+  // schema and the "new characters opt-in" policy; the loader below
+  // resets to the persisted value when switching into a character.
+  const [directMessengerEnabled, setDirectMessengerEnabled] = useState<boolean>(false);
   // Public-profile backdrop image + display mode. Painted on the
   // profile modal's backdrop (the area outside the modal card) for
   // any viewer of /p/<this identity>. Null URL = no override (modal
@@ -479,6 +493,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           setUserStyleKey(typeof c.styleKey === "string" ? c.styleKey : null);
           setIsPublic(c.isPublic ?? true);
           setIsNsfw(c.isNsfw ?? false);
+          // Default to false so a server response missing the field
+          // (older shape) reads as "opt-out" — matches the new
+          // characters policy.
+          setDirectMessengerEnabled(!!c.directMessengerEnabled);
           setPublicProfileBgUrl(typeof c.publicProfileBgUrl === "string" ? c.publicProfileBgUrl : "");
           setPublicProfileBgMode(
             c.publicProfileBgMode === "contain" || c.publicProfileBgMode === "tile" || c.publicProfileBgMode === "stretch"
@@ -635,6 +653,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             // every save (NOT NULL column with a default).
             publicProfileBgUrl: publicProfileBgUrl.trim() === "" ? null : publicProfileBgUrl.trim(),
             publicProfileBgMode,
+            // Per-character Direct Messenger opt-in. Flipping this
+            // changes who can friend-request / DM this character; see
+            // the toggle row in the Privacy tab for the UI affordance.
+            directMessengerEnabled,
           }),
         });
         if (!r.ok) throw new Error(await readError(r));
@@ -659,6 +681,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                   isNsfw,
                   publicProfileBgUrl: publicProfileBgUrl.trim() === "" ? null : publicProfileBgUrl.trim(),
                   publicProfileBgMode,
+                  directMessengerEnabled,
                 }
               : c,
           ),
@@ -1674,6 +1697,12 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                   onChangeNsfw={setIsNsfw}
                   kind={isCharacter ? "character" : "master"}
                 />
+                {isCharacter ? (
+                  <CharacterDmOptInRow
+                    enabled={directMessengerEnabled}
+                    onChange={setDirectMessengerEnabled}
+                  />
+                ) : null}
                 {!isCharacter ? (
                   <NotificationsRow
                     pref={notifyPref}
@@ -3146,6 +3175,48 @@ function SoundRow({
           <span className="block text-keep-text">Announcements (alert)</span>
           <span className="block text-[10px] text-keep-muted">
             Plays on admin announcements and other system events.
+          </span>
+        </span>
+      </label>
+    </fieldset>
+  );
+}
+
+/**
+ * Character-only Direct Messenger opt-in toggle. New characters
+ * default to OFF — friend-add lookups and DM recipient pickers
+ * filter them out — and the player has to deliberately turn it on
+ * here for the character to appear as a contactable identity. The
+ * copy below leans on plain language so the consequence is obvious:
+ * existing friendships stick around, but new reach attempts can't
+ * land while the switch is off.
+ */
+function CharacterDmOptInRow({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">
+        Direct Messenger
+      </legend>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => onChange(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="font-semibold">Reachable as this character</span>
+          <span className="block text-[10px] text-keep-muted">
+            When on, other players can friend-request this character by name and start a DM
+            thread with this identity. When off, this character is hidden from friend lookup
+            and DM recipient pickers; existing friends and conversation history stay
+            untouched, but new messages can't reach this character until you re-enable it.
           </span>
         </span>
       </label>

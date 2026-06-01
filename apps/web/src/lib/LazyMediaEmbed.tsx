@@ -139,8 +139,18 @@ export function LazyMediaEmbed({
     </span>
   );
 
+  // Wrapper sizing: images carry their own intrinsic dimensions, so
+  // `inline-block` (shrink-to-content) is the right wrapper for the
+  // image case. Iframes have a tiny default intrinsic size (300x150)
+  // and rely on the caller's `w-full aspect-video` class to be sized
+  // properly — so for iframes the wrapper has to stretch (`block`)
+  // and inherit width sizing from the caller's class so `w-full` on
+  // the iframe resolves to the parent's actual width, not zero.
+  const wrapperClass = kind === "iframe"
+    ? `block ${className ?? ""}`
+    : "inline-block";
   return (
-    <span ref={wrapperRef} className="inline-block">
+    <span ref={wrapperRef} className={wrapperClass} style={kind === "iframe" ? style : undefined}>
       {attached
         ? kind === "img"
           ? (
@@ -161,8 +171,10 @@ export function LazyMediaEmbed({
               {...(iframeReferrerPolicy ? { referrerPolicy: iframeReferrerPolicy } : {})}
               {...(iframeAllow ? { allow: iframeAllow } : {})}
               allowFullScreen={!!iframeAllowFullScreen}
-              className={className}
-              style={style}
+              // The wrapper already carries the caller's class, so the
+              // iframe just needs to fill that wrapper. `block` strips
+              // the iframe's default inline-baseline whitespace gap.
+              className="block h-full w-full border-0"
             />
           )
         : placeholder}

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReactionEntry, ReactionRef, ReactionTargetKind } from "@thekeep/shared";
-import { reactionRefKey } from "@thekeep/shared";
+import { lookupUnicodeEmojiCharByName, reactionRefKey } from "@thekeep/shared";
 import { useEmoticons, reactionsKey } from "../state/emoticons.js";
 import { EmoticonSprite } from "./EmoticonSprite.js";
 import { EmoticonPicker } from "./EmoticonPicker.js";
@@ -255,35 +255,176 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
  *  the tooltip, and the full-list modal so the rendering posture
  *  stays consistent.
  * ============================================================= */
-function ReactionGlyph({ ref, size }: { ref: ReactionRef | null | undefined; size: number }) {
+/**
+ * Loose runtime shape ReactionGlyph accepts. We can't strictly use
+ * `ReactionEntry` because the server sometimes ships LEGACY entries
+ * that don't carry a `ref` at all — instead they put `sheetSlug` +
+ * `cellIndex` (sheet shape) or `char` (Unicode shape) directly on
+ * the entry. The recovery pipeline below reads any combination of
+ * fields that's present.
+ */
+type ReactionGlyphInput = {
+  ref?: ReactionRef | null;
+  label?: string;
+  /** Legacy flat-shape sheet ref — pre-discriminated-union schema. */
+  sheetSlug?: string;
+  cellIndex?: number;
+  /** Legacy flat-shape Unicode ref. */
+  char?: string;
+};
+
+function ReactionGlyph({
+  entry,
+  size,
+}: {
+  entry: ReactionGlyphInput;
+  size: number;
+}) {
+  const ref = entry.ref;
+  const fallbackLabel = entry.label;
   // Defensive: a malformed entry (legacy wire shape, mid-flight
-  // socket payload) renders as nothing rather than crashing the
-  // whole MessageList. The defensive guards mirror those in
+  // socket payload) renders the fallback chip rather than crashing
+  // the whole MessageList. The defensive guards mirror those in
   // `reactionRefKey` / `isUnicodeReaction` over in shared.
-  if (!ref || typeof ref !== "object") return null;
-  if (ref.kind === "sheet") {
-    return <EmoticonSprite sheetSlug={ref.sheetSlug} cellIndex={ref.cellIndex} size={size} />;
+  function renderFallbackText(text: string): React.ReactElement {
+    // Auto-shrink the font when the fallback is long-ish text (cell
+    // labels can be "100", "blush", etc.) so it actually fits inside
+    // the chip's sprite slot. Each char shaves a couple px off the
+    // font size, floored at ~9px.
+    const fontSize = Math.max(9, Math.round(size * 0.85) - Math.max(0, text.length - 2) * 3);
+    return (
+      <span
+        aria-hidden
+        className="inline-flex items-center justify-center font-action leading-none"
+        style={{
+          width: `${size}px`,
+          height: `${size}px`,
+          fontSize: `${fontSize}px`,
+          lineHeight: 1,
+        }}
+      >
+        {text}
+      </span>
+    );
   }
-  if (ref.kind !== "unicode") return null;
-  // Unicode: a sized span carrying the raw codepoint. `leading-none`
-  // keeps the glyph from inheriting line-height that would push it
-  // off-center inside the chip. `lineHeight: 1` on the inline style
-  // backstops any global CSS that might otherwise re-introduce
-  // vertical offset.
-  return (
-    <span
-      aria-hidden
-      className="inline-flex items-center justify-center leading-none"
-      style={{
-        width: `${size}px`,
-        height: `${size}px`,
-        fontSize: `${Math.round(size * 0.85)}px`,
-        lineHeight: 1,
-      }}
-    >
-      {ref.char}
-    </span>
+
+  // Recover the sheet slug/cellIndex from either the new ref shape
+  // OR the legacy flat shape that older server code still ships.
+  const resolvedSheetSlug =
+    ref && typeof ref === "object" && ref.kind === "sheet"
+      ? ref.sheetSlug
+      : typeof entry.sheetSlug === "string" && typeof entry.cellIndex === "number"
+        ? entry.sheetSlug
+        : null;
+  const resolvedCellIndex =
+    ref && typeof ref === "object" && ref.kind === "sheet"
+      ? ref.cellIndex
+      : typeof entry.sheetSlug === "string" && typeof entry.cellIndex === "number"
+        ? entry.cellIndex
+        : null;
+  // Subscribe to catalog updates so a sheet sprite swaps in the
+  // moment the catalog hydrates (a freshly-loaded chat page can
+  // render reaction chips before `/emoticons` resolves). Selector
+  // returns undefined when this isn't a sheet ref, so unrelated ref
+  // shapes don't churn the component.
+  const sheetCatalog = useEmoticons((s) =>
+    resolvedSheetSlug ? s.getSheetBySlug(resolvedSheetSlug) : undefined,
   );
+
+  // Aggressive last-resort recovery: derive the visible emoji from
+  // whichever field carries usable signal. Tries, in order:
+  //   1. ref.char as a literal codepoint
+  //   2. ref.char interpreted as a catalog name (legacy bad rows)
+  //   3. fallbackLabel interpreted as a catalog name
+  // If none resolves, fall through to the text fallback.
+  function resolveUnicodeChar(): string | null {
+    const candidates = [
+      typeof ref === "object" && ref && "char" in ref ? (ref as { char?: unknown }).char : undefined,
+      // Legacy flat-shape Unicode field on the entry itself.
+      entry.char,
+      fallbackLabel,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate !== "string") continue;
+      const t = candidate.trim();
+      if (t === "") continue;
+      // If this is a catalog name we recognize, the lookup returns
+      // the codepoint. Otherwise treat the value as a possible
+      // codepoint paste (e.g. an OS emoji picker entry that's not
+      // in our curated catalog) and use it directly.
+      const looked = lookupUnicodeEmojiCharByName(t);
+      if (looked) return looked;
+      // Heuristic: a string that's all ASCII printable is almost
+      // certainly a name (and not a codepoint we want to render
+      // literally). Skip to the next candidate so we can try the
+      // label instead of rendering ugly text.
+      const allAscii = /^[\x20-\x7E]+$/.test(t);
+      if (!allAscii) return t;
+    }
+    return null;
+  }
+
+  // Sheet path: if we recovered a slug + cellIndex from EITHER the
+  // new ref shape OR the legacy flat fields on the entry, render
+  // through EmoticonSprite. The sprite has its own faint-placeholder
+  // fallback while the catalog loads (the subscription above forces
+  // a re-render the moment /emoticons resolves), which beats showing
+  // the cell label as text.
+  if (resolvedSheetSlug !== null && resolvedCellIndex !== null) {
+    void sheetCatalog;
+    return (
+      <EmoticonSprite
+        sheetSlug={resolvedSheetSlug}
+        cellIndex={resolvedCellIndex}
+        size={size}
+      />
+    );
+  }
+  if (!ref || typeof ref !== "object") {
+    const recovered = resolveUnicodeChar();
+    if (recovered) return renderUnicodeGlyph(recovered);
+    return renderFallbackText(fallbackLabel?.trim() || "?");
+  }
+  // Unicode path (or any not-sheet ref we should treat as Unicode).
+  // Run the same recovery pipeline as the missing-ref branch above:
+  // try the char field, then the label, before giving up.
+  const recoveredFromUnicode = resolveUnicodeChar();
+  if (recoveredFromUnicode) return renderUnicodeGlyph(recoveredFromUnicode);
+  return renderFallbackText(fallbackLabel?.trim() || "?");
+
+  // Render the bare Unicode codepoint inside a sized + emoji-fonted
+  // span. Hoisted into a helper because both the recovered-from-ref
+  // and recovered-from-label branches above need to produce the
+  // same markup.
+  function renderUnicodeGlyph(glyph: string): React.ReactElement {
+    return (
+      <span
+        aria-hidden
+        className="inline-flex items-center justify-center leading-none"
+        style={{
+          width: `${size}px`,
+          height: `${size}px`,
+          fontSize: `${Math.round(size * 0.85)}px`,
+          lineHeight: 1,
+          // Force the browser through its color-emoji fallback chain.
+          // Without an explicit family here, the chip inherits whatever
+          // font-family the chip ancestor uses (often a serif/sans
+          // chosen for prose), and on some Linux + Windows setups the
+          // browser sticks with that family and renders missing glyphs
+          // as a blank box instead of falling through to a system emoji
+          // font. Listing the major color-emoji families up front +
+          // ending with the CSS `emoji` generic gives every desktop /
+          // mobile platform a known-good route to a real glyph.
+          fontFamily:
+            '"Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", ' +
+            '"Noto Color Emoji", "Twemoji Mozilla", "EmojiOne Color", ' +
+            '"Android Emoji", emoji, sans-serif',
+        }}
+      >
+        {glyph}
+      </span>
+    );
+  }
 }
 
 /* =============================================================
@@ -362,7 +503,7 @@ function ReactionChip({ entry, onClick }: { entry: ReactionEntry; onClick: () =>
               (see `.reaction-chip > *` rule in styles.css); the
               chip-level mouseenter/leave drives the tooltip from a
               single source. */}
-          <ReactionGlyph ref={entry.ref} size={32} />
+          <ReactionGlyph entry={entry} size={32} />
         </span>
         {/* `key={count}` re-mounts the span on every count change so the
             one-shot pulse animation in styles.css re-triggers without
@@ -459,7 +600,7 @@ function ReactionTooltip({
         transition: "opacity 120ms ease",
       }}
     >
-      <ReactionGlyph ref={entry.ref} size={48} />
+      <ReactionGlyph entry={entry} size={48} />
       <div className="text-sm leading-snug">{text}</div>
     </div>,
     document.body,
@@ -485,14 +626,14 @@ function ReactionListModal({ entries, onClose }: { entries: ReactionEntry[]; onC
               {entries.map((e) => (
                 <li key={reactionRefKey(e.ref)}>
                   <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-widest text-keep-muted">
-                    <ReactionGlyph ref={e.ref} size={20} />
+                    <ReactionGlyph entry={e} size={20} />
                     <span>{e.label || "—"}</span>
                     <span className="ml-auto tabular-nums text-keep-text">{e.reactors.length}</span>
                   </div>
                   <ul className="ml-7 space-y-0.5 text-xs">
                     {e.reactors.map((r) => (
                       <li key={r.userId + (r.characterId ?? "")} className="flex items-center gap-2">
-                        <ReactionGlyph ref={e.ref} size={14} />
+                        <ReactionGlyph entry={e} size={14} />
                         <span>{r.displayName}</span>
                       </li>
                     ))}

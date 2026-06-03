@@ -3,7 +3,7 @@ import { addSystemMessage } from "../../realtime/broadcast.js";
 import { resolveDisplayName } from "../../auth/session.js";
 import { characters, friends, users } from "../../db/schema.js";
 import { eqIdentity, type Identity } from "../../auth/identity.js";
-import { formatAmbiguousNotice, resolveIdentityArg } from "../identityArg.js";
+import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 /**
@@ -27,7 +27,7 @@ async function resolveIdentityByName(
     return null;
   }
   if (resolution.kind === "ambiguous") {
-    notice(ctx, "FRIEND_AMBIGUOUS", formatAmbiguousNotice(raw, resolution.matches));
+    emitAmbiguousIdentityModal(ctx, raw, resolution.matches);
     return null;
   }
   return {

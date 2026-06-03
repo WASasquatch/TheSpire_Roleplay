@@ -663,6 +663,8 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           username: j.username,
           role: j.role ?? "user",
           permissions: Array.isArray(j.permissions) ? j.permissions : [],
+          incognitoMode: j.incognitoMode === true,
+          incognitoAlias: typeof j.incognitoAlias === "string" ? j.incognitoAlias : null,
         });
       } else {
         const res = await fetch("/auth/login", {
@@ -688,6 +690,8 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           username: j.username,
           role: j.role,
           permissions: Array.isArray(j.permissions) ? j.permissions : [],
+          incognitoMode: j.incognitoMode === true,
+          incognitoAlias: typeof j.incognitoAlias === "string" ? j.incognitoAlias : null,
         });
       }
     } catch (err) {
@@ -949,6 +953,27 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             ? mode === "login" ? "Logging in..." : "Registering..."
             : mode === "login" ? "Log in" : "Register"}
         </button>
+
+        {/* Rules link — register-mode only. Opens the public /rules
+            page in a new tab so the half-filled registration form
+            isn't lost when the visitor wants to read the rules
+            before agreeing to the disclaimer above. The page is
+            served without auth (see App.tsx's onRulesPage branch +
+            server/src/index.ts's apiPrefixes exclusion). */}
+        {mode === "register" ? (
+          <p className="text-center text-[11px] text-keep-muted">
+            By registering you agree to{" "}
+            <a
+              href="/rules"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2 hover:text-keep-action"
+            >
+              the house rules
+            </a>
+            .
+          </p>
+        ) : null}
       </form>
     </SplashShell>
   );

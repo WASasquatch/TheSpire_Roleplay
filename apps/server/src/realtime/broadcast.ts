@@ -33,7 +33,6 @@ import {
   userOwnedNameStyles,
   userEarning,
   users,
-  worldMembers,
   worlds,
 } from "../db/schema.js";
 import { inArray } from "drizzle-orm";
@@ -163,6 +162,38 @@ export async function addMessage(
       replyToId: ctx.replyContext.replyToId,
       replyToDisplayName: ctx.replyContext.replyToDisplayName,
       replyToBodySnippet: ctx.replyContext.replyToBodySnippet,
+    };
+  }
+
+  // Incognito author rewrite. A moderator who's gone incognito
+  // (the /incognito command flipped users.incognito_mode = true)
+  // sends every non-system chat line as a server-system line under
+  // their incognito_alias (default "System"). Other participants
+  // see what looks like a server announcement; only the audit log
+  // retains the real author. The /incognito command's own system
+  // broadcasts (kind === "system") pass through untouched — they're
+  // already correctly attributed.
+  //
+  // Reply metadata is stripped because system lines don't render
+  // reply tags and the reply target itself could leak "the mod
+  // replied to message X" — informative even without their name.
+  if (ctx.user.incognitoMode && payload.kind !== "system") {
+    // Strip reply metadata via destructure rather than `= undefined`
+    // assignment — exactOptionalPropertyTypes treats the latter as a
+    // type error because the field shape is `string`, not
+    // `string | undefined`. Building the new payload without the keys
+    // gets us a strict-clean object.
+    const {
+      replyToId: _replyToId,
+      replyToDisplayName: _replyToDisplayName,
+      replyToBodySnippet: _replyToBodySnippet,
+      ...rest
+    } = payload;
+    void _replyToId; void _replyToDisplayName; void _replyToBodySnippet;
+    payload = {
+      ...rest,
+      kind: "system",
+      displayNameOverride: ctx.user.incognitoAlias ?? "System",
     };
   }
 
@@ -1265,6 +1296,11 @@ async function joinRoomBody(
     await broadcastPresence(io, db, prevId);
     const stillThere = await userHasSocketInRoom(io, user.id, prevId);
     if (stillThere || isInBootGrace()) continue;
+    // Incognito gate: room transitions stay silent for an incognito
+    // moderator — the whole point is they can drift across rooms
+    // without trace. Their "X has left the chat" line already
+    // broadcast at the moment they went incognito.
+    if (user.incognitoMode) continue;
     const prevRoom = (await db.select().from(rooms).where(eq(rooms.id, prevId)).limit(1))[0];
     if (!prevRoom || prevRoom.replyMode === "nested") continue;
     await addSystemMessage(io, db, prevId, renderPresenceTemplate(
@@ -1387,7 +1423,11 @@ async function joinRoomBody(
   const otherSocketHere = await userHasSocketInRoom(io, user.id, roomId, socket.id);
   const isForumRoom = room.replyMode === "nested";
   const isRoomSwitch = priorRooms.length > 0;
-  const baseGate = !otherIdentitySocketHere && !isInBootGrace() && !isForumRoom;
+  // Incognito gate folds into baseGate: ANY enter/connect broadcast
+  // is suppressed while the user is in incognito mode. Pair with the
+  // suppress on the leave path above so the moderator can hop rooms
+  // entirely silently.
+  const baseGate = !otherIdentitySocketHere && !isInBootGrace() && !isForumRoom && !user.incognitoMode;
   if (loginIntent && !isRoomSwitch && baseGate && !isReconnect) {
     await addSystemMessage(io, db, roomId, renderPresenceTemplate(
       sessionConnectTemplate,
@@ -1752,6 +1792,15 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   for (const r of raws) {
     const u = userById.get(r.userId);
     if (!u) continue;
+    // Incognito filter: users with `incognitoMode = true` are
+    // observation-tool moderators who chose to vanish from every
+    // userlist. They still appear in the per-room socket set (so
+    // socket events reach them and they can read chat normally)
+    // but they don't surface in this presence list at all. The
+    // /incognito command broadcasts the visible leave-message
+    // before flipping the bit, so other participants saw them
+    // "leave" already.
+    if (u.incognitoMode) continue;
     // `tabCharId === undefined` → no per-tab override yet, fall back
     // to the DB-default active character. `null` → explicit OOC.
     // A string → /char-switched on this socket.
@@ -1767,7 +1816,12 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   // socket wins — a ghost only surfaces when the identity has no
   // live presence.
   for (const g of ghosts) {
-    if (!userById.has(g.userId)) continue;
+    const user = userById.get(g.userId);
+    if (!user) continue;
+    // Same incognito filter for the idle-ghost re-introduction
+    // path — a moderator who went incognito just before their last
+    // live socket dropped shouldn't reappear as an "(idle)" row.
+    if (user.incognitoMode) continue;
     const key = `${g.userId}::${g.characterId ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -1795,46 +1849,13 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     );
   const roleByUser = new Map(memberRows.map((m) => [m.userId, m.role]));
 
-  // Primary-world lookup for the userlist's grouping. One query joining
-  // world_members → worlds, filtered to is_primary = 1 + the active users.
-  // The map keys on userId so the render loop can attach a LinkedWorldRef
-  // (or leave it null for unaffiliated users).
-  const primaryWorldRows = await db
-    .select({
-      userId: worldMembers.userId,
-      worldId: worlds.id,
-      slug: worlds.slug,
-      name: worlds.name,
-      ownerUserId: worlds.ownerUserId,
-    })
-    .from(worldMembers)
-    .innerJoin(worlds, eq(worlds.id, worldMembers.worldId))
-    .where(and(
-      eq(worldMembers.isPrimary, 1),
-      sql`${worldMembers.userId} IN (${sql.join(userIds.map((u) => sql`${u}`), sql`, `)})`,
-    ));
-  // Owner-username lookup for primary worlds (so the userlist banner can
-  // show "by <owner>"). Resolved once per distinct owner across the batch.
-  const ownerIds = [...new Set(primaryWorldRows.map((r) => r.ownerUserId))];
-  const ownerUsernameById = new Map<string, string>();
-  if (ownerIds.length) {
-    const ownerRows = await db
-      .select({ id: users.id, username: users.username })
-      .from(users)
-      .where(sql`${users.id} IN (${sql.join(ownerIds.map((u) => sql`${u}`), sql`, `)})`);
-    for (const o of ownerRows) ownerUsernameById.set(o.id, o.username);
-  }
-  const primaryWorldByUser = new Map<string, LinkedWorldRef>(
-    primaryWorldRows.map((r) => [
-      r.userId,
-      {
-        id: r.worldId,
-        slug: r.slug,
-        name: r.name,
-        ownerUsername: ownerUsernameById.get(r.ownerUserId) ?? "(deleted user)",
-      },
-    ]),
-  );
+  // Primary-world resolution was removed in migration 0187. With
+  // per-identity memberships there's no single "primary" badge to
+  // attach to the userlist row, and the world-bucket grouping that
+  // ran off of it was the surface that publicly linked a character
+  // back to their master's world affiliation. Occupant payloads no
+  // longer carry `primaryWorld`; the world's own member list is the
+  // source of truth for "who's affiliated with this world."
 
   // Earning — batched rank lookup for sigil rendering. We pull the
   // denormalized (rankKey, tier) from user_earning for every user in
@@ -2153,7 +2174,6 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
       // Reading the master column here would smear a /mood set on
       // Character A onto Character B / OOC.
       mood: getMood(u.id, id.characterId),
-      primaryWorld: primaryWorldByUser.get(u.id) ?? null,
       // Per-user toggle. When `showRankInUserlist` is off, the
       // broadcast omits the rank fields entirely (renders as
       // null/null on the wire) so the UserNameTag falls back to the

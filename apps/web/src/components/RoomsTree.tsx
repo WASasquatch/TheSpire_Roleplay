@@ -321,11 +321,14 @@ function RoomGroup({
     && Date.now() - lastNonEmptyRef.current.at < FLICKER_GUARD_MS
       ? lastNonEmptyRef.current.list
       : room.occupants;
-  // Group occupants by primary world. Unaffiliated bucket keys "_none" so
-  // it sorts to the end deterministically. Within a world, sort by display
-  // name; world buckets sort by world name; "_none" is always last.
-  const groups = groupByPrimaryWorld(displayedOccupants);
-  const showHeaders = groups.length > 1; // a single bucket is just a flat list
+  // Per migration 0187 the userlist no longer groups by primary
+  // world — primary-world is gone now that memberships are
+  // per-identity, and the grouping was the surface that leaked
+  // characters back to their master's affiliations. The userlist is
+  // a flat alphabetical list sorted by display name.
+  const sortedOccupants = [...displayedOccupants].sort((a, b) =>
+    a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()),
+  );
   // Active theme drives the legibility nudge that keeps the staff
   // icons readable against the rail bg — even on a custom palette
   // where the natural slot color would land too close to the chat
@@ -389,36 +392,13 @@ function RoomGroup({
         <div className="px-5 pb-2 text-[11px] italic text-keep-muted lg:pb-1">empty</div>
       ) : (
         <ul className="pb-1">
-          {groups.map((g) => (
-            <li key={g.world?.id ?? "_none"}>
-              {showHeaders ? (
-                g.world ? (
-                  <button
-                    type="button"
-                    onClick={() => onWorldClick(g.world!.id)}
-                    title={`Open ${g.world.name} (by ${g.world.ownerUsername})`}
-                    // py-1.5 mobile / py-0.5 desktop. Section banding via
-                    // muted/25 - same pattern used for hover highlights.
-                    className="flex w-full items-baseline justify-between bg-keep-muted/25 px-3 py-1.5 text-left text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-muted/40 lg:py-0.5"
-                  >
-                    <span className="truncate">{g.world.name}</span>
-                    <span className="ml-2 shrink-0">{g.users.length}</span>
-                  </button>
-                ) : (
-                  <div className="bg-keep-muted/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-keep-muted/70 lg:py-0.5">
-                    Unaffiliated
-                    <span className="ml-2">{g.users.length}</span>
-                  </div>
-                )
-              ) : null}
-              <ul>
-                {g.users.map((o) => {
-                  // Composite key — a single account voicing two
-                  // different characters in two tabs renders as two
-                  // occupant rows (one per identity). Keying on userId
-                  // alone would dup-React-key in that case.
-                  const chip = resolveStaffChip(o, theme);
-                  return (
+          {sortedOccupants.map((o) => {
+            // Composite key — a single account voicing two different
+            // characters in two tabs renders as two occupant rows
+            // (one per identity). Keying on userId alone would
+            // dup-React-key in that case.
+            const chip = resolveStaffChip(o, theme);
+            return (
                     <li
                       key={`${o.userId}:${o.characterId ?? ""}`}
                       // Idle ghosts (tab closed / refreshed within the
@@ -532,49 +512,18 @@ function RoomGroup({
                         </span>
                       ) : null}
                     </li>
-                  );
-                })}
-              </ul>
-            </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </li>
   );
 }
 
-interface OccupantGroup {
-  /** Null = the unaffiliated bucket. */
-  world: { id: string; slug: string; name: string; ownerUsername: string } | null;
-  users: RoomOccupant[];
-}
-
-/**
- * Bucket occupants by their primary world. World buckets sort by world name;
- * the unaffiliated bucket always lands at the end. Within a bucket, sort by
- * display name (case-insensitive) so the list is stable as users come and go.
- */
-function groupByPrimaryWorld(occupants: RoomOccupant[]): OccupantGroup[] {
-  const buckets = new Map<string, OccupantGroup>();
-  for (const o of occupants) {
-    const key = o.primaryWorld?.id ?? "_none";
-    let g = buckets.get(key);
-    if (!g) {
-      g = { world: o.primaryWorld ?? null, users: [] };
-      buckets.set(key, g);
-    }
-    g.users.push(o);
-  }
-  for (const g of buckets.values()) {
-    g.users.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
-  }
-  return [...buckets.values()].sort((a, b) => {
-    if (!a.world && !b.world) return 0;
-    if (!a.world) return 1;
-    if (!b.world) return -1;
-    return a.world.name.toLowerCase().localeCompare(b.world.name.toLowerCase());
-  });
-}
+// groupByPrimaryWorld + OccupantGroup were retired in migration
+// 0187 alongside the per-master primary-world concept. The userlist
+// is now a flat alphabetical list (see sortedOccupants in
+// RoomEntry above).
 
 interface StaffChip {
   /** Accessible name for the SVG icon (announced by screen readers). */
@@ -615,21 +564,23 @@ interface StaffChip {
  * the bg gets nudged toward legibility before the icon paints.
  */
 function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
-  // Site-level staff icons (masteradmin / admin / site-mod) are
-  // suppressed on character rows. The account-role is a property of
-  // the MASTER account; surfacing it on a character voice tells the
-  // room "this character belongs to a staff account," which is
-  // exactly the OOC ↔ character partition that's supposed to stay
-  // private. Per the project contract, characters are their own
-  // accounts as far as the public view is concerned — anyone who
-  // wants to claim their staff badge can voice the master to do so.
+  // EVERY staff/role badge is suppressed on character rows — they go
+  // fully incognito so an admin/mod can RP without the public
+  // signaling "this character belongs to staff" or "this character's
+  // master owns this room." The OOC ↔ character partition is meant
+  // to be one-way: master surfaces own all role info, character
+  // surfaces own none.
   //
-  // Per-room badges (`o.role`) stay independent because they're
-  // already keyed per-identity-in-room: a character voicing a room
-  // they moderate has legitimately earned the room-mod chip in
-  // THIS room.
+  // This includes the per-room owner/mod badges. They're keyed on
+  // user_id (the master), not per-identity, so a masteradmin owning
+  // OOC Lobby would otherwise tag THEIR character row with a Room
+  // owner chip — exactly the giveaway we're trying to avoid. Anyone
+  // who wants to claim their staff or room-mod badge can voice the
+  // master to do so.
   const isMasterRow = o.characterId === null;
-  if (isMasterRow && o.accountRole === "masteradmin") {
+  if (!isMasterRow) return null;
+
+  if (o.accountRole === "masteradmin") {
     return {
       label: "Master admin",
       Icon: MasterAdminIcon,
@@ -638,7 +589,7 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
         "Master admin — site-wide authority including settings, branding, and account management.",
     };
   }
-  if (isMasterRow && o.accountRole === "admin") {
+  if (o.accountRole === "admin") {
     return {
       label: "Admin",
       Icon: AdminIcon,
@@ -646,14 +597,14 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
       title: "Site admin — site-wide moderation across every room.",
     };
   }
-  // Site-mod badge: master row only (same reasoning). Per-room
-  // owner / mod still show on character rows since they're earned
-  // per-identity, not site-wide.
-  const showSiteMod = isMasterRow && o.accountRole === "mod";
-  if (showSiteMod || o.role === "mod" || o.role === "owner") {
+  // Site-mod beats per-room badges in label / tooltip if both apply
+  // (a site-mod who also owns the room reads as "Site moderator"
+  // since that's the broader authority).
+  const isSiteMod = o.accountRole === "mod";
+  if (isSiteMod || o.role === "mod" || o.role === "owner") {
     return {
       label:
-        showSiteMod
+        isSiteMod
           ? "Site moderator"
           : o.role === "owner"
           ? "Room owner"
@@ -661,7 +612,7 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
       Icon: ModIcon,
       color: legibleAgainstBg(theme.system, theme.bg),
       title:
-        showSiteMod
+        isSiteMod
           ? "Site moderator — moderation across every room."
           : o.role === "owner"
           ? "Room owner — moderation authority in this room."

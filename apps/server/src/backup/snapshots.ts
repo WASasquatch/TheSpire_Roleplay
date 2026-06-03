@@ -10,13 +10,19 @@
  *
  * Filename convention:
  *
- *   <kind>-<trigger>-<iso-utc-ts>.<ext>
+ *   <kind>-<trigger>-<iso-utc-ts>.zip
  *
  *   kind     : "full" | "content"
  *   trigger  : "manual" | "pre-full-import" | "pre-content-import"
  *   iso-utc  : 2026-05-19T14-32-11Z (colons replaced with dashes so the
  *              filename is filesystem-safe on Windows volumes too)
- *   ext      : "sqlite" for full snapshots, "json" for content
+ *
+ * Both kinds use a `.zip` envelope (format v3+) so the database
+ * payload AND the `/data/uploads/` tree travel together — restoring on
+ * a fresh host gets the emoticon sheets, logo images, and rank sigil
+ * PNGs alongside the database rows that reference them. The inner
+ * layout differs per kind (`content.json` vs `database.sqlite`); the
+ * outer extension is uniform.
  *
  * Retention: keep the last MAX_PER_KIND of each {kind, trigger}
  * combination. FIFO rotation by mtime. We don't trim by total size —
@@ -74,9 +80,8 @@ type Trigger = "manual" | "pre_full_import" | "pre_content_import";
 export function newSnapshotPath(kind: Kind, trigger: Trigger, at: Date = new Date()): string {
   const dir = ensureDir();
   const iso = at.toISOString().replace(/[:.]/g, "-");
-  const ext = kind === "full" ? "sqlite" : "json";
   const triggerSlug = trigger.replace(/_/g, "-");
-  return join(dir, `${kind}-${triggerSlug}-${iso}.${ext}`);
+  return join(dir, `${kind}-${triggerSlug}-${iso}.zip`);
 }
 
 /**
@@ -88,11 +93,13 @@ export function newSnapshotPath(kind: Kind, trigger: Trigger, at: Date = new Dat
 export function parseSnapshotFilename(
   filename: string,
 ): { kind: Kind; trigger: Trigger; createdAt: number } | null {
-  // Pattern: <kind>-<trigger-slug>-<iso>.<ext>
+  // Pattern: <kind>-<trigger-slug>-<iso>.zip
   // Trigger slug uses dashes, e.g. "pre-full-import"; we capture
   // the kind and the rest, then split the trigger off the leading
-  // segment of the rest.
-  const m = filename.match(/^(full|content)-([\w-]+?)-(\d{4}-\d{2}-\d{2}T[\d-]+Z)\.(sqlite|json)$/);
+  // segment of the rest. Format v3+ uses a uniform `.zip` extension
+  // for both kinds (the database payload + `/uploads/` tree are
+  // bundled together in the envelope).
+  const m = filename.match(/^(full|content)-([\w-]+?)-(\d{4}-\d{2}-\d{2}T[\d-]+Z)\.zip$/);
   if (!m) return null;
   const [, kindRaw, triggerSlug, isoStamp] = m;
   const kind = kindRaw as Kind;

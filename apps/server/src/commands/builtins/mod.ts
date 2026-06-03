@@ -11,7 +11,7 @@ import {
 } from "../../realtime/broadcast.js";
 import { formatDuration, parseDuration } from "../duration.js";
 import { recordAudit } from "../../audit.js";
-import { formatAmbiguousNotice, resolveIdentityArg } from "../identityArg.js";
+import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -42,7 +42,7 @@ async function findUserByName(ctx: CommandContext, name: string) {
     return undefined;
   }
   if (resolution.kind === "ambiguous") {
-    notice(ctx, "MOD_AMBIGUOUS", formatAmbiguousNotice(name, resolution.matches));
+    emitAmbiguousIdentityModal(ctx, name, resolution.matches);
     return undefined;
   }
   const row = (await ctx.db

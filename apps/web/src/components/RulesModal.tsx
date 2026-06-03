@@ -27,7 +27,7 @@ export function RulesModal({ onClose }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/rules", { credentials: "include" })
+    fetch("/api/rules", { credentials: "include" })
       .then(async (r) => {
         if (!r.ok) throw new Error(`status ${r.status}`);
         return r.json() as Promise<RulesPayload>;

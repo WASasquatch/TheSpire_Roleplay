@@ -64,12 +64,12 @@ export interface RoomOccupant {
   accountRole: Role;
   /** Free-text current mood/expression set via /mood. Null when unset. */
   mood: string | null;
-  /**
-   * The user's primary world membership, if any. Drives userlist grouping:
-   * occupants with the same primaryWorld.id band together under a section
-   * header. Null = unaffiliated.
-   */
-  primaryWorld: LinkedWorldRef | null;
+  // primaryWorld was retired in migration 0187 — with per-identity
+  // world memberships the cross-identity "primary world" badge
+  // became meaningless, and the userlist grouping it drove was the
+  // surface that visibly linked characters to their master's world
+  // affiliation. The world's own member list is now the source of
+  // truth for "who's in this world."
   /**
    * Earning — the occupant's current rank/tier on the relevant pool.
    * Drives the inline sigil rendered next to the display name in the

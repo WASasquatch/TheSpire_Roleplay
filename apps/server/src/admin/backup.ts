@@ -1,6 +1,7 @@
 /**
- * Admin Backups routes — produces and consumes full-DB + content
- * snapshots.
+ * Admin Backups routes — produces and consumes ZIP-envelope backups
+ * (format v3+) that bundle the database payload AND the entire
+ * `/data/uploads/` tree.
  *
  * Mounted under /admin/backup. Every endpoint is masteradmin-only
  * (the destructive-restore semantics make this stricter than the
@@ -8,31 +9,40 @@
  *
  * Endpoint shapes:
  *
- *   POST   /admin/backup/content/create       → produces a content JSON
- *                                                snapshot, saves it under
+ *   POST   /admin/backup/content/create       → packs a content snapshot
+ *                                                (content.json + uploads/),
+ *                                                saves it as .zip under
  *                                                /data/backups/, returns its
  *                                                BackupSnapshotEntry.
- *   POST   /admin/backup/full/create          → VACUUM INTO a fresh .sqlite,
- *                                                same metadata response.
- *   POST   /admin/backup/content/inspect      → JSON body = uploaded doc;
- *                                                returns ContentImportDiff
- *                                                so the admin can preview.
- *   POST   /admin/backup/content/import       → JSON body = doc; takes a
- *                                                pre-import auto-snapshot,
- *                                                applies the document
- *                                                transactionally.
- *   POST   /admin/backup/full/inspect         → octet-stream body = .sqlite;
+ *   POST   /admin/backup/full/create          → VACUUM INTO + packs into a
+ *                                                .zip with database.sqlite +
+ *                                                uploads/. Same metadata
+ *                                                response.
+ *   POST   /admin/backup/content/inspect      → octet-stream body = uploaded
+ *                                                .zip; returns
+ *                                                ContentBackupInspectReport so
+ *                                                the admin can preview the
+ *                                                per-table diff + bundled
+ *                                                uploads counts.
+ *   POST   /admin/backup/content/import       → octet-stream body = .zip;
+ *                                                takes a pre-import auto-
+ *                                                snapshot, applies the
+ *                                                document transactionally,
+ *                                                then atomically syncs the
+ *                                                uploads tree into /data/uploads/.
+ *   POST   /admin/backup/full/inspect         → octet-stream body = .zip;
  *                                                streams to a temp file,
- *                                                returns FullBackupInspectReport.
- *   POST   /admin/backup/full/import          → octet-stream body = .sqlite;
+ *                                                peeks the envelope, returns
+ *                                                FullBackupInspectReport.
+ *   POST   /admin/backup/full/import          → octet-stream body = .zip;
  *                                                pre-import snapshot, stages
- *                                                pending restore, queues
- *                                                process exit. Body must be
- *                                                the result of a recent
- *                                                /full/inspect that confirmed
- *                                                ok=true — we re-inspect the
- *                                                staged file too as a safety
- *                                                step.
+ *                                                pending DB + pending uploads,
+ *                                                queues process exit. Body
+ *                                                must be the result of a
+ *                                                recent /full/inspect that
+ *                                                confirmed ok=true — we
+ *                                                re-inspect the staged file
+ *                                                too as a safety step.
  *   GET    /admin/backup/snapshots            → list every snapshot in
  *                                                /data/backups/.
  *   GET    /admin/backup/snapshots/:id        → stream the snapshot back
@@ -46,13 +56,12 @@
  * exported / imported / removed which snapshot.
  */
 
-import { createWriteStream, existsSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, statSync, unlinkSync } from "node:fs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   BACKUP_FORMAT_VERSION,
-  type BackupContentDocument,
   type BackupSnapshotEntry,
-  type ContentImportDiff,
+  type ContentBackupInspectReport,
   type FullBackupInspectReport,
   type PermissionKey,
   type Role,
@@ -63,18 +72,23 @@ import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import { recordAudit } from "../audit.js";
 import { exportContent, importContent, diffContent } from "../backup/content.js";
 import {
-  archiveFullUpload,
+  archiveUpload,
   createFullSnapshot,
   inspectFullBackup,
   newUploadTempPath,
   stagePendingRestore,
 } from "../backup/full.js";
 import {
+  packContentArchive,
+  peekArchive,
+  readContentDocument,
+  syncUploadsFromArchive,
+} from "../backup/archive.js";
+import {
   createSnapshotReadStream,
   deleteSnapshot,
   listSnapshots,
   newSnapshotPath,
-  parseSnapshotFilename,
   pruneSnapshots,
 } from "../backup/snapshots.js";
 import { getStatus, updateMessage, withLock } from "../backup/state.js";
@@ -88,39 +102,49 @@ type ReqWithSession = FastifyRequest & { sessionUser?: SessionUserCtx };
 
 /**
  * One-time content-type parser registration. Fastify routes that
- * accept a raw .sqlite upload need this so they get the
- * IncomingMessage stream as `req.body` instead of Fastify's default
- * JSON parser choking on the binary. Registered at the app level
- * because Fastify's parser registry is per-instance global. Guarded
- * by `hasContentTypeParser` so a double-call from a future second
- * call site (e.g. if we ever split this function) is a no-op
- * instead of a throw.
+ * accept a raw .zip upload need this so they get the IncomingMessage
+ * stream as `req.body` instead of Fastify's default JSON parser
+ * choking on the binary. Registered at the app level because
+ * Fastify's parser registry is per-instance global. Guarded by
+ * `hasContentTypeParser` so a double-call from a future second call
+ * site is a no-op instead of a throw.
+ *
+ * Both `application/octet-stream` and `application/zip` route here —
+ * browsers vary on which content-type they send for a File picked
+ * via <input type="file" accept=".zip"> depending on the OS mime
+ * registry, so we accept either.
  */
-function ensureOctetStreamParser(app: FastifyInstance): void {
-  if (app.hasContentTypeParser("application/octet-stream")) return;
-  app.addContentTypeParser("application/octet-stream", (_req, payload, done) => {
-    // Pass the raw stream through; the route handler streams it to
-    // disk via fs.createWriteStream + pipe.
+function ensureBinaryParsers(app: FastifyInstance): void {
+  const pass = (_req: FastifyRequest, payload: NodeJS.ReadableStream, done: (err: Error | null, body?: unknown) => void) => {
     done(null, payload);
-  });
+  };
+  if (!app.hasContentTypeParser("application/octet-stream")) {
+    app.addContentTypeParser("application/octet-stream", pass);
+  }
+  if (!app.hasContentTypeParser("application/zip")) {
+    app.addContentTypeParser("application/zip", pass);
+  }
+  if (!app.hasContentTypeParser("application/x-zip-compressed")) {
+    // Some Windows browsers report this legacy type for .zip files.
+    app.addContentTypeParser("application/x-zip-compressed", pass);
+  }
 }
 
 /**
- * Body-size caps. SQLite databases for an active install can run
- * hundreds of MB; allow up to 2 GB for full-DB uploads. Content JSON
- * is small (under ~5 MB even for a thoroughly admin-edited install),
- * but allow a generous 50 MB so a fat custom_commands.template or
- * site_settings.rulesHtml doesn't get truncated.
+ * Body-size caps. The ZIP envelope holds the full database payload
+ * (the .sqlite for a full backup runs into hundreds of MB on busy
+ * installs) AND every uploaded image. Allow 4 GB for both kinds —
+ * the same cap covers both because v3 content backups now carry
+ * upload binaries too, not just the JSON table dump.
  */
-const FULL_BACKUP_BODY_LIMIT = 2 * 1024 * 1024 * 1024;
-const CONTENT_BACKUP_BODY_LIMIT = 50 * 1024 * 1024;
+const BACKUP_BODY_LIMIT = 4 * 1024 * 1024 * 1024;
 
 export function registerAdminBackupRoutes(
   app: FastifyInstance,
-  deps: { db: Db },
+  deps: { db: Db; uploadsRoot: string },
 ): void {
-  const { db } = deps;
-  ensureOctetStreamParser(app);
+  const { db, uploadsRoot } = deps;
+  ensureBinaryParsers(app);
 
   // Granular permission gate. All backup endpoints are routed through
   // `manage_backups` (masteradmin-default but matrix-grantable — the
@@ -149,12 +173,20 @@ export function registerAdminBackupRoutes(
     const locked = await withLock("content_export", "Exporting content snapshot…", async () => {
       const doc = exportContent(sqliteHandle);
       const path = newSnapshotPath("content", "manual");
-      writeFileSync(path, JSON.stringify(doc, null, 2), "utf8");
+      const result = await packContentArchive({
+        document: doc,
+        uploadsRoot,
+        destPath: path,
+      });
       pruneSnapshots();
       await recordAudit(db, {
         actorUserId: actor.id,
         action: "backup_create",
-        metadata: { kind: "content", filename: pathBasename(path) },
+        metadata: {
+          kind: "content",
+          filename: pathBasename(path),
+          uploadsFileCount: result.uploadsFileCount,
+        },
       });
       return entryFor(path, "content", "manual");
     });
@@ -168,14 +200,13 @@ export function registerAdminBackupRoutes(
   app.post("/admin/backup/full/create", async (req, reply) => {
     if (!(await requirePermission(req as ReqWithSession, reply))) return;
     const actor = (req as ReqWithSession).sessionUser!;
-    const locked = await withLock("full_export", "Running VACUUM INTO (snapshot copy)…", async () => {
-      const { path, sizeBytes } = await createFullSnapshot("manual");
-      void sizeBytes;
+    const locked = await withLock("full_export", "Running VACUUM INTO + packing uploads…", async () => {
+      const { path, uploadsFileCount } = await createFullSnapshot("manual", uploadsRoot);
       pruneSnapshots();
       await recordAudit(db, {
         actorUserId: actor.id,
         action: "backup_create",
-        metadata: { kind: "full", filename: pathBasename(path) },
+        metadata: { kind: "full", filename: pathBasename(path), uploadsFileCount },
       });
       return entryFor(path, "full", "manual");
     });
@@ -188,39 +219,95 @@ export function registerAdminBackupRoutes(
 
   /* ---------- inspect (preview a candidate import) ---------- */
 
-  app.post<{ Body: BackupContentDocument }>(
-    "/admin/backup/content/inspect",
-    { bodyLimit: CONTENT_BACKUP_BODY_LIMIT },
-    async (req, reply) => {
-      if (!(await requirePermission(req as ReqWithSession, reply))) return;
-      const doc = req.body;
-      if (!doc || doc.kind !== "content") {
-        reply.code(400);
-        return { error: "not a content backup" };
-      }
-      if (doc.version !== BACKUP_FORMAT_VERSION) {
-        reply.code(409);
-        return {
-          error: "format version mismatch",
-          message: `Backup was created with format v${doc.version}; this server only understands v${BACKUP_FORMAT_VERSION}.`,
-          uploadedVersion: doc.version,
-          serverVersion: BACKUP_FORMAT_VERSION,
-        };
-      }
-      const diff: ContentImportDiff = diffContent(sqliteHandle, doc);
-      return diff;
-    },
-  );
-
   app.post(
-    "/admin/backup/full/inspect",
-    { bodyLimit: FULL_BACKUP_BODY_LIMIT },
+    "/admin/backup/content/inspect",
+    { bodyLimit: BACKUP_BODY_LIMIT },
     async (req, reply) => {
       if (!(await requirePermission(req as ReqWithSession, reply))) return;
       const stream = req.body as NodeJS.ReadableStream;
       if (!stream || typeof (stream as { pipe?: unknown }).pipe !== "function") {
         reply.code(400);
-        return { error: "expected octet-stream body" };
+        return { error: "expected octet-stream/zip body" };
+      }
+      const locked = await withLock("content_import", "Receiving + inspecting content archive…", async () => {
+        const tempPath = newUploadTempPath();
+        try {
+          await streamToFile(stream, tempPath);
+          updateMessage("Validating uploaded ZIP envelope…");
+          let peek;
+          try {
+            peek = await peekArchive(tempPath);
+          } catch {
+            if (existsSync(tempPath)) unlinkSync(tempPath);
+            return { error400: { error: "not a valid backup archive" } } as const;
+          }
+          if (peek.kind !== "content") {
+            if (existsSync(tempPath)) unlinkSync(tempPath);
+            return {
+              error400: {
+                error: "wrong kind",
+                message: "This archive is a full-DB backup, not a content backup. Use the full DB panel.",
+              },
+            } as const;
+          }
+          const doc = await readContentDocument(tempPath);
+          if (doc.version !== BACKUP_FORMAT_VERSION) {
+            if (existsSync(tempPath)) unlinkSync(tempPath);
+            return {
+              error409: {
+                error: "format version mismatch",
+                message: `Backup was created with format v${doc.version}; this server only understands v${BACKUP_FORMAT_VERSION}.`,
+                uploadedVersion: doc.version,
+                serverVersion: BACKUP_FORMAT_VERSION,
+              },
+            } as const;
+          }
+          const diff = diffContent(sqliteHandle, doc);
+          const report: ContentBackupInspectReport = {
+            ok: true,
+            sizeBytes: peek.archiveBytes,
+            diff,
+            uploadsFileCount: peek.uploadsFileCount,
+            uploadsBytes: peek.uploadsBytes,
+          };
+          // Successful inspect → archive the upload into snapshots so
+          // the admin can keep / re-inspect it without uploading again.
+          const archived = archiveUpload(tempPath, "content");
+          pruneSnapshots();
+          return {
+            okReport: { ...report, archivedId: pathBasename(archived) },
+          } as const;
+        } catch (err) {
+          if (existsSync(tempPath)) unlinkSync(tempPath);
+          throw err;
+        }
+      });
+      if (!locked.ok) {
+        reply.code(409);
+        return { error: "busy", busy: locked.busy };
+      }
+      const v = locked.value;
+      if ("error400" in v) {
+        reply.code(400);
+        return v.error400;
+      }
+      if ("error409" in v) {
+        reply.code(409);
+        return v.error409;
+      }
+      return v.okReport;
+    },
+  );
+
+  app.post(
+    "/admin/backup/full/inspect",
+    { bodyLimit: BACKUP_BODY_LIMIT },
+    async (req, reply) => {
+      if (!(await requirePermission(req as ReqWithSession, reply))) return;
+      const stream = req.body as NodeJS.ReadableStream;
+      if (!stream || typeof (stream as { pipe?: unknown }).pipe !== "function") {
+        reply.code(400);
+        return { error: "expected octet-stream/zip body" };
       }
       // Inspect is read-only on the live DB, but it competes with
       // import for the same /data/backups/ slots (archives the
@@ -231,10 +318,10 @@ export function registerAdminBackupRoutes(
         const tempPath = newUploadTempPath();
         try {
           await streamToFile(stream, tempPath);
-          updateMessage("Validating uploaded SQLite file…");
-          const report: FullBackupInspectReport = inspectFullBackup(tempPath);
+          updateMessage("Validating uploaded backup archive…");
+          const report: FullBackupInspectReport = await inspectFullBackup(tempPath);
           if (report.ok) {
-            const archived = archiveFullUpload(tempPath);
+            const archived = archiveUpload(tempPath, "full");
             pruneSnapshots();
             return { ...report, archivedId: pathBasename(archived) } as FullBackupInspectReport & { archivedId?: string };
           }
@@ -255,99 +342,147 @@ export function registerAdminBackupRoutes(
 
   /* ---------- import (apply) ---------- */
 
-  app.post<{ Body: BackupContentDocument }>(
-    "/admin/backup/content/import",
-    { bodyLimit: CONTENT_BACKUP_BODY_LIMIT },
-    async (req, reply) => {
-      if (!(await requirePermission(req as ReqWithSession, reply))) return;
-      const actor = (req as ReqWithSession).sessionUser!;
-      const doc = req.body;
-      if (!doc || doc.kind !== "content") {
-        reply.code(400);
-        return { error: "not a content backup" };
-      }
-      if (doc.version !== BACKUP_FORMAT_VERSION) {
-        reply.code(409);
-        return {
-          error: "format version mismatch",
-          message: `Backup was created with format v${doc.version}; this server only understands v${BACKUP_FORMAT_VERSION}.`,
-          uploadedVersion: doc.version,
-          serverVersion: BACKUP_FORMAT_VERSION,
-        };
-      }
-      const locked = await withLock("content_import", "Importing content backup…", async () => {
-        // Refuse if the source install is on migrations we don't have.
-        const diff = diffContent(sqliteHandle, doc);
-        if (diff.missingMigrations.length > 0) {
-          return {
-            error409: {
-              error: "schema behind",
-              message: "Target install is missing migrations the backup expects",
-              missingMigrations: diff.missingMigrations,
-            },
-          };
-        }
-        // Pre-import safety snapshot of CURRENT content (so a botched
-        // import is one click away from undo).
-        updateMessage("Saving pre-import safety snapshot…");
-        const safetyDoc = exportContent(sqliteHandle);
-        const safetyPath = newSnapshotPath("content", "pre_content_import");
-        writeFileSync(safetyPath, JSON.stringify(safetyDoc, null, 2), "utf8");
-        // Apply.
-        updateMessage("Applying content upserts…");
-        const result = importContent(sqliteHandle, doc, actor.id);
-        pruneSnapshots();
-        await recordAudit(db, {
-          actorUserId: actor.id,
-          action: "backup_import",
-          metadata: {
-            kind: "content",
-            preSnapshot: pathBasename(safetyPath),
-            inserted: result.inserted,
-            updated: result.updated,
-            unchanged: result.unchanged,
-          },
-        });
-        return {
-          okResult: {
-            ok: true as const,
-            ...result,
-            preSnapshotId: pathBasename(safetyPath),
-          },
-        };
-      });
-      if (!locked.ok) {
-        reply.code(409);
-        return { error: "busy", busy: locked.busy };
-      }
-      if (locked.value.error409) {
-        reply.code(409);
-        return locked.value.error409;
-      }
-      return locked.value.okResult;
-    },
-  );
-
   app.post(
-    "/admin/backup/full/import",
-    { bodyLimit: FULL_BACKUP_BODY_LIMIT },
+    "/admin/backup/content/import",
+    { bodyLimit: BACKUP_BODY_LIMIT },
     async (req, reply) => {
       if (!(await requirePermission(req as ReqWithSession, reply))) return;
       const actor = (req as ReqWithSession).sessionUser!;
       const stream = req.body as NodeJS.ReadableStream;
       if (!stream || typeof (stream as { pipe?: unknown }).pipe !== "function") {
         reply.code(400);
-        return { error: "expected octet-stream body" };
+        return { error: "expected octet-stream/zip body" };
       }
-      const locked = await withLock("full_import", "Receiving uploaded database…", async () => {
+      const locked = await withLock("content_import", "Receiving content archive…", async () => {
         const tempPath = newUploadTempPath();
         try {
           await streamToFile(stream, tempPath);
-          updateMessage("Validating uploaded SQLite file…");
-          const report = inspectFullBackup(tempPath);
+          updateMessage("Validating uploaded ZIP envelope…");
+          let peek;
+          try {
+            peek = await peekArchive(tempPath);
+          } catch {
+            if (existsSync(tempPath)) unlinkSync(tempPath);
+            return { error400: { error: "not a valid backup archive" } } as const;
+          }
+          if (peek.kind !== "content") {
+            if (existsSync(tempPath)) unlinkSync(tempPath);
+            return {
+              error400: { error: "wrong kind", message: "This archive is a full-DB backup, not a content backup." },
+            } as const;
+          }
+          const doc = await readContentDocument(tempPath);
+          if (doc.version !== BACKUP_FORMAT_VERSION) {
+            if (existsSync(tempPath)) unlinkSync(tempPath);
+            return {
+              error409: {
+                error: "format version mismatch",
+                message: `Backup was created with format v${doc.version}; this server only understands v${BACKUP_FORMAT_VERSION}.`,
+                uploadedVersion: doc.version,
+                serverVersion: BACKUP_FORMAT_VERSION,
+              },
+            } as const;
+          }
+          // Refuse if the source install is on migrations we don't have.
+          const diff = diffContent(sqliteHandle, doc);
+          if (diff.missingMigrations.length > 0) {
+            if (existsSync(tempPath)) unlinkSync(tempPath);
+            return {
+              error409: {
+                error: "schema behind",
+                message: "Target install is missing migrations the backup expects",
+                missingMigrations: diff.missingMigrations,
+              },
+            } as const;
+          }
+          // Pre-import safety snapshot of CURRENT content + uploads
+          // (so a botched import is one click away from undo).
+          updateMessage("Saving pre-import safety snapshot…");
+          const safetyDoc = exportContent(sqliteHandle);
+          const safetyPath = newSnapshotPath("content", "pre_content_import");
+          await packContentArchive({
+            document: safetyDoc,
+            uploadsRoot,
+            destPath: safetyPath,
+          });
+          // Apply the DB mirror restore.
+          updateMessage("Applying content row replays…");
+          const result = importContent(sqliteHandle, doc, actor.id);
+          // Sync the uploads tree from the archive into the live
+          // uploads root. Atomic via staging-dir + rename swap; if it
+          // throws, the DB import already committed but the rollback
+          // is "import the safety snapshot" which carries the prior
+          // uploads tree too.
+          updateMessage("Syncing uploads tree…");
+          const uploadsSync = await syncUploadsFromArchive({
+            zipPath: tempPath,
+            uploadsRoot,
+          });
+          // Consume the upload.
+          try { if (existsSync(tempPath)) unlinkSync(tempPath); } catch { /* nothing */ }
+          pruneSnapshots();
+          await recordAudit(db, {
+            actorUserId: actor.id,
+            action: "backup_import",
+            metadata: {
+              kind: "content",
+              preSnapshot: pathBasename(safetyPath),
+              inserted: result.inserted,
+              updated: result.updated,
+              unchanged: result.unchanged,
+              uploadsRestored: uploadsSync.fileCount,
+            },
+          });
+          return {
+            okResult: {
+              ok: true as const,
+              ...result,
+              uploadsRestored: uploadsSync.fileCount,
+              preSnapshotId: pathBasename(safetyPath),
+            },
+          } as const;
+        } catch (err) {
+          try { if (existsSync(tempPath)) unlinkSync(tempPath); } catch { /* nothing */ }
+          throw err;
+        }
+      });
+      if (!locked.ok) {
+        reply.code(409);
+        return { error: "busy", busy: locked.busy };
+      }
+      const v = locked.value;
+      if ("error400" in v) {
+        reply.code(400);
+        return v.error400;
+      }
+      if ("error409" in v) {
+        reply.code(409);
+        return v.error409;
+      }
+      return v.okResult;
+    },
+  );
+
+  app.post(
+    "/admin/backup/full/import",
+    { bodyLimit: BACKUP_BODY_LIMIT },
+    async (req, reply) => {
+      if (!(await requirePermission(req as ReqWithSession, reply))) return;
+      const actor = (req as ReqWithSession).sessionUser!;
+      const stream = req.body as NodeJS.ReadableStream;
+      if (!stream || typeof (stream as { pipe?: unknown }).pipe !== "function") {
+        reply.code(400);
+        return { error: "expected octet-stream/zip body" };
+      }
+      const locked = await withLock("full_import", "Receiving uploaded archive…", async () => {
+        const tempPath = newUploadTempPath();
+        try {
+          await streamToFile(stream, tempPath);
+          updateMessage("Validating uploaded backup archive…");
+          const report = await inspectFullBackup(tempPath);
           if (!report.ok) {
             if (existsSync(tempPath)) unlinkSync(tempPath);
-            return { error400: { error: "not a valid sqlite backup" } } as const;
+            return { error400: { error: "not a valid full backup archive" } } as const;
           }
           if (report.missingMigrations.length > 0) {
             if (existsSync(tempPath)) unlinkSync(tempPath);
@@ -359,15 +494,16 @@ export function registerAdminBackupRoutes(
               },
             } as const;
           }
-          // Pre-restore safety snapshot of the LIVE DB. Done BEFORE
-          // staging the pending restore so a crash between these
-          // two steps still leaves the safety copy behind.
+          // Pre-restore safety snapshot of the LIVE DB + uploads. Done
+          // BEFORE staging the pending restore so a crash between
+          // these two steps still leaves the safety copy behind.
           updateMessage("Saving pre-restore safety snapshot…");
-          const safety = await createFullSnapshot("pre_full_import");
-          // Stage the upload as the pending restore. The container
-          // entry script will swap it into place on next boot.
-          updateMessage("Staging pending restore for boot swap…");
-          const staged = stagePendingRestore(tempPath);
+          const safety = await createFullSnapshot("pre_full_import", uploadsRoot);
+          // Stage the upload as the pending restore (extracts the
+          // inner .sqlite and the uploads tree into their respective
+          // pending slots and unlinks the upload zip).
+          updateMessage("Staging pending DB + uploads for boot swap…");
+          const staged = await stagePendingRestore(tempPath, uploadsRoot);
           await recordAudit(db, {
             actorUserId: actor.id,
             action: "backup_import",
@@ -375,12 +511,15 @@ export function registerAdminBackupRoutes(
               kind: "full",
               preSnapshot: pathBasename(safety.path),
               stagedAt: staged.stagedAt,
+              stagedUploadsAt: staged.stagedUploadsAt,
+              uploadsRestored: staged.uploadsFileCount,
             },
           });
           return {
             okResult: {
               ok: true as const,
               preSnapshotId: pathBasename(safety.path),
+              uploadsRestored: staged.uploadsFileCount,
               message: "Restore staged. The server will restart momentarily; refresh in ~30 seconds.",
             },
           } as const;
@@ -437,9 +576,9 @@ export function registerAdminBackupRoutes(
         reply.code(404);
         return { error: "snapshot not found" };
       }
-      const meta = parseSnapshotFilename(req.params.id);
-      const contentType = meta?.kind === "content" ? "application/json" : "application/octet-stream";
-      reply.header("content-type", contentType);
+      // Every snapshot is a .zip in v3+ — both kinds share one mime
+      // so the download Content-Type doesn't depend on the kind.
+      reply.header("content-type", "application/zip");
       reply.header("content-length", String(streamInfo.sizeBytes));
       reply.header(
         "content-disposition",
@@ -522,4 +661,3 @@ function streamToFile(stream: NodeJS.ReadableStream, destPath: string): Promise<
     stream.pipe(out);
   });
 }
-

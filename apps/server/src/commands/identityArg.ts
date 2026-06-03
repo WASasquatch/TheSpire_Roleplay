@@ -41,6 +41,7 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import { characters, users } from "../db/schema.js";
+import type { CommandContext } from "./types.js";
 
 /** Token recognizer literals — the only two prefixes we accept. */
 const USER_TOKEN_PREFIX = "@id:";
@@ -258,19 +259,29 @@ async function resolveByName(db: Db, raw: string): Promise<ResolveResult> {
 }
 
 /**
- * Render an ambiguous-result notice body for chat. Used by every
- * command's resolver-failure branch so the disambig copy stays
- * consistent across surfaces.
+ * Surface an ambiguous-identity disambiguation prompt via the
+ * persistent info modal. Every command that resolves an identity arg
+ * (`/whois`, `/whisper`, `/ignore`, `/friends`, `/mod ...`) calls this
+ * when the user-typed name maps to more than one identity — the user
+ * needs to read the candidate list carefully, pick the right token,
+ * and re-run with that exact token. The 6-second toast was too short
+ * for that workflow.
  *
- * Example output for `/whisper Jagger`:
- *   `"Jagger" matched 2 identities. Re-run with one of:
- *     • Jagger (E D Erin) — @cid:abc123
+ * The body is one bullet per candidate with the resolved `@cid:` /
+ * `@id:` token at the end, ready to copy verbatim into the re-run.
+ *
+ * Example modal body for `/whisper Jagger`:
+ *   `  • Jagger (E D Erin) — @cid:abc123
  *     • Jagger (Sigrid) — @cid:def456`
+ *
+ * The title carries the count + typed-name context so the modal
+ * header is self-describing without the body needing to repeat it.
  */
-export function formatAmbiguousNotice(
+export function emitAmbiguousIdentityModal(
+  ctx: CommandContext,
   typedName: string,
   matches: ResolvedTarget[],
-): string {
+): void {
   const lines = matches.map((m) => {
     // For master rows the masterUsername IS the displayName; skip the
     // redundant parenthesized label there.
@@ -279,5 +290,9 @@ export function formatAmbiguousNotice(
       : m.displayName;
     return `  • ${label} — ${formatTokenFor(m)}`;
   });
-  return `"${typedName}" matched ${matches.length} identities. Re-run with one of:\n${lines.join("\n")}`;
+  ctx.socket.emit("ui:hint", {
+    kind: "open-info-modal",
+    title: `"${typedName}" matched ${matches.length} identities`,
+    body: `Re-run with one of:\n${lines.join("\n")}`,
+  });
 }

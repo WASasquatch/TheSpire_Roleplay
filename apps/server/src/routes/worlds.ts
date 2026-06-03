@@ -6,37 +6,51 @@ import { z } from "zod";
 import type {
   Role,
   Theme,
+  WorldApplicationEntry,
+  WorldApplicationList,
+  WorldApplicationStatus,
   WorldCatalogEntry,
   WorldCatalogPage,
   WorldDetail,
   WorldGenre,
+  WorldJoinMode,
   WorldMemberRef,
   WorldMembership,
   WorldPacing,
   WorldPage,
   WorldStatus,
   WorldSummary,
+  WorldVibeAxisKey,
+  WorldVibeStats,
   WorldVisibility,
 } from "@thekeep/shared";
 import {
   CONTENT_WARNINGS,
+  WORLD_APP_ANSWER_MAX_LEN,
+  WORLD_APP_MAX_QUESTIONS,
+  WORLD_APP_QUESTION_MAX_LEN,
+  WORLD_APP_REVIEW_NOTE_MAX_LEN,
   WORLD_PAGE_DEPTH_CAP,
+  WORLD_VIBE_AXES,
   deriveSlug,
   normalizeTheme,
   parseTagList,
   serializeTagList,
 } from "@thekeep/shared";
 import {
+  characters,
   roomMembers,
   roomWorldLinks,
   rooms,
   users,
+  worldApplications,
   worldCollaborators,
   worldMembers,
   worldPages,
   worlds,
 } from "../db/schema.js";
 import { sanitizeBio } from "../auth/html.js";
+import { resolveIdentityArg } from "../commands/identityArg.js";
 import { getSessionUser } from "./auth.js";
 import { getSettings } from "../settings.js";
 import { broadcastPresence, broadcastRoomState } from "../realtime/broadcast.js";
@@ -96,6 +110,35 @@ const httpUrl = z.string().min(1).max(2000).refine(
   { message: "coverImageUrl must use http or https" },
 );
 
+/**
+ * Vibe-stat axis Zod schema. 0..100 inclusive integer, OR null to
+ * clear an axis back to "unset". The shape mirrors WorldVibeStats —
+ * every axis key is optional in the request body; only the keys the
+ * author actually touched are sent over the wire.
+ */
+const vibeStatValue = z.union([
+  z.number().int().min(0).max(100),
+  z.null(),
+]);
+const vibeStatsSchema = z.object({
+  combat: vibeStatValue.optional(),
+  magic: vibeStatValue.optional(),
+  technology: vibeStatValue.optional(),
+  romance: vibeStatValue.optional(),
+  politics: vibeStatValue.optional(),
+  mystery: vibeStatValue.optional(),
+  horror: vibeStatValue.optional(),
+  exploration: vibeStatValue.optional(),
+}).strict();
+
+const joinModeEnum = z.enum(["open", "application", "invite-only"]);
+
+/** Application question list: max 5 entries, each 1..280 chars. */
+const applicationQuestionsSchema = z
+  .array(z.string().min(1).max(WORLD_APP_QUESTION_MAX_LEN))
+  .max(WORLD_APP_MAX_QUESTIONS)
+  .transform((arr) => arr.map((s) => s.trim()).filter((s) => s.length > 0));
+
 const createWorldBody = z.object({
   name: z.string().min(1).max(120),
   slug: z.string().max(60).optional(),
@@ -113,6 +156,9 @@ const createWorldBody = z.object({
   status: statusEnum.optional(),
   coverImageUrl: httpUrl.nullable().optional(),
   pacing: pacingEnum.nullable().optional(),
+  vibeStats: vibeStatsSchema.optional(),
+  joinMode: joinModeEnum.optional(),
+  applicationQuestions: applicationQuestionsSchema.optional(),
 }).strict();
 
 // Theme is a free-form object passed to normalizeTheme on the way in. We
@@ -130,7 +176,33 @@ const updateWorldBody = z.object({
   status: statusEnum.optional(),
   coverImageUrl: httpUrl.nullable().optional(),
   pacing: pacingEnum.nullable().optional(),
+  vibeStats: vibeStatsSchema.optional(),
+  joinMode: joinModeEnum.optional(),
+  applicationQuestions: applicationQuestionsSchema.optional(),
 }).strict();
+
+/**
+ * Per-axis min/max query param schema. Catalog passes `min_combat=40&
+ * max_combat=80` and the route uses these to clip the catalog to
+ * worlds whose tuned value sits in the closed interval. NULL stat
+ * columns are EXCLUDED from filtered results — once any range is
+ * applied, "unset" worlds drop out, since the user is filtering by
+ * vibe and "no opinion" doesn't match.
+ *
+ * Zod coerce-then-range so `?min_combat=` (empty string) falls
+ * through as undefined rather than NaN.
+ */
+const optInt0to100 = z.preprocess(
+  (v) => (v === "" || v === undefined ? undefined : v),
+  z.coerce.number().int().min(0).max(100).optional(),
+);
+
+const vibeRangeQueryShape = Object.fromEntries(
+  WORLD_VIBE_AXES.flatMap((a) => [
+    [`min_${a.key}`, optInt0to100],
+    [`max_${a.key}`, optInt0to100],
+  ]),
+) as Record<string, typeof optInt0to100>;
 
 const catalogQuery = z.object({
   q: z.string().max(120).optional(),
@@ -149,10 +221,23 @@ const catalogQuery = z.object({
   status: statusEnum.optional(),
   page: z.coerce.number().int().min(0).max(1000).optional(),
   pageSize: z.coerce.number().int().min(1).max(50).optional(),
+  ...vibeRangeQueryShape,
 }).strict();
 
-const setPrimaryWorldBody = z.object({
-  worldId: z.string().nullable(),
+const submitApplicationBody = z.object({
+  /**
+   * Free-text answers, one per question in the world's current
+   * question list (same length). The route validates length match
+   * AGAINST the live world row so a stale form can't smuggle extra
+   * answers in.
+   */
+  answers: z.array(z.string().max(WORLD_APP_ANSWER_MAX_LEN)).max(WORLD_APP_MAX_QUESTIONS),
+}).strict();
+
+const reviewApplicationBody = z.object({
+  action: z.enum(["approve", "reject"]),
+  /** Optional author note shown to the applicant on the terminal-state row. */
+  reviewNote: z.string().max(WORLD_APP_REVIEW_NOTE_MAX_LEN).nullable().optional(),
 }).strict();
 
 const createPageBody = z.object({
@@ -217,44 +302,83 @@ async function memberListFor(db: Db, worldId: string): Promise<WorldMemberRef[]>
   // Privacy filter: only members whose master profile is BOTH public
   // and not NSFW make the list. A user who flipped their profile to
   // private explicitly opted out of being publicly affiliated, so they
-  // shouldn't appear in any world's member gallery either. The world
-  // page is itself public for any non-private world, so a private user
-  // appearing here would expose the affiliation to anonymous viewers
-  // they never consented to.
+  // shouldn't appear in any world's member gallery either — including
+  // their characters' affiliations, since exposing those publicly
+  // would chain back to the master.
+  //
+  // Per migration 0187 each row is an identity-level membership, so
+  // the same userId can appear twice (OOC + one or more characters).
+  // We left-join `characters` on the (nullable) character_id; non-null
+  // rows surface the character's name + avatar, null rows show the
+  // master's. Soft-deleted characters (deletedAt set) drop out via
+  // the join condition.
   const rows = await db
     .select({
       userId: worldMembers.userId,
+      characterId: worldMembers.characterId,
       joinedAt: worldMembers.joinedAt,
-      isPrimary: worldMembers.isPrimary,
       username: users.username,
-      avatarUrl: users.avatarUrl,
-      avatarZoom: users.avatarZoom,
-      avatarOffsetX: users.avatarOffsetX,
-      avatarOffsetY: users.avatarOffsetY,
+      masterAvatarUrl: users.avatarUrl,
+      masterAvatarZoom: users.avatarZoom,
+      masterAvatarOffsetX: users.avatarOffsetX,
+      masterAvatarOffsetY: users.avatarOffsetY,
+      characterName: characters.name,
+      characterAvatarUrl: characters.avatarUrl,
+      characterAvatarZoom: characters.avatarZoom,
+      characterAvatarOffsetX: characters.avatarOffsetX,
+      characterAvatarOffsetY: characters.avatarOffsetY,
+      characterDeletedAt: characters.deletedAt,
     })
     .from(worldMembers)
     .innerJoin(users, eq(users.id, worldMembers.userId))
+    .leftJoin(characters, eq(characters.id, worldMembers.characterId))
     .where(and(
       eq(worldMembers.worldId, worldId),
       eq(users.isPublic, true),
       eq(users.isNsfw, false),
     ))
-    .orderBy(desc(worldMembers.isPrimary), asc(worldMembers.joinedAt));
-  return rows.map((r) => ({
-    userId: r.userId,
-    username: r.username,
-    avatarUrl: r.avatarUrl ?? null,
-    // Ship the owner-picked crop alongside the URL so the world
-    // member gallery's MemberAvatar can render the focal point the
-    // owner picked rather than centered-cover-defaults.
-    avatarCrop: {
-      zoom: r.avatarZoom,
-      offsetX: r.avatarOffsetX,
-      offsetY: r.avatarOffsetY,
-    },
-    joinedAt: +r.joinedAt,
-    isPrimary: !!r.isPrimary,
-  }));
+    .orderBy(asc(worldMembers.joinedAt));
+  // Filter out memberships whose character row is soft-deleted (the
+  // FK cascade only fires on hard delete; soft-delete leaves the
+  // character row in place with deletedAt set). The membership row
+  // is meaningless once the character no longer exists publicly.
+  const visible = rows.filter((r) => r.characterId === null || r.characterDeletedAt === null);
+  return visible.map((r) => {
+    const isCharacter = r.characterId !== null;
+    return {
+      userId: r.userId,
+      username: r.username,
+      characterId: r.characterId,
+      displayName: isCharacter ? (r.characterName ?? r.username) : r.username,
+      // OOC ↔ character partition: NEVER fall back to the master's
+      // avatar on a character row. A character with no portrait
+      // renders as initials of their OWN display name — surfacing
+      // the master's avatar would expose the link "this character
+      // belongs to that master," which is exactly the leak the
+      // identity partition is supposed to prevent.
+      //
+      // Crop columns on `characters` are NOT NULL with defaults
+      // (1.0 zoom, 50/50 offsets), so when the leftJoin's column
+      // types widen to allow null we just coalesce back to those
+      // schema-level defaults — never to the master's crop, even
+      // when the character row has no avatar set.
+      avatarUrl: isCharacter
+        ? (r.characterAvatarUrl ?? null)
+        : (r.masterAvatarUrl ?? null),
+      avatarCrop: isCharacter
+        ? {
+            zoom: r.characterAvatarZoom ?? 1,
+            offsetX: r.characterAvatarOffsetX ?? 50,
+            offsetY: r.characterAvatarOffsetY ?? 50,
+          }
+        : {
+            zoom: r.masterAvatarZoom,
+            offsetX: r.masterAvatarOffsetX,
+            offsetY: r.masterAvatarOffsetY,
+          },
+      joinedAt: +r.joinedAt,
+    };
+  });
 }
 
 /** Parse the `theme` JSON column. Stored as TEXT to keep SQLite happy. */
@@ -262,6 +386,110 @@ function parseStoredTheme(raw: string | null): Theme | null {
   if (!raw) return null;
   try { return normalizeTheme(JSON.parse(raw)); }
   catch { return null; }
+}
+
+/**
+ * Read the eight vibe-stat columns off a `worlds` row into the
+ * wire-shape bag. Null values pass through (renderer treats them as
+ * "unset" / muted dash).
+ */
+function vibeStatsFromRow(w: typeof worlds.$inferSelect): WorldVibeStats {
+  return {
+    combat: w.statCombat,
+    magic: w.statMagic,
+    technology: w.statTechnology,
+    romance: w.statRomance,
+    politics: w.statPolitics,
+    mystery: w.statMystery,
+    horror: w.statHorror,
+    exploration: w.statExploration,
+  };
+}
+
+/**
+ * Parse the JSON-stored application question list. Empty array is
+ * legal (an application with no Q&A captures just intent-to-join);
+ * a corrupt JSON value falls back to empty so the rest of the world
+ * payload still renders.
+ */
+function parseApplicationQuestions(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((s): s is string => typeof s === "string");
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Wire-shape projection for a `world_applications` row joined with
+ * applicant + reviewer usernames + avatar.
+ */
+type AppRow = typeof worldApplications.$inferSelect;
+async function applicationToWire(
+  db: Db,
+  row: AppRow,
+  /** The world's current question list — snapshot in the row's
+   *  answers length, but the questions themselves are read live so
+   *  the owner sees the prompts that the user actually saw at submit
+   *  time (we don't snapshot questions today; future hardening). */
+  questionsAtSubmit: string[],
+): Promise<WorldApplicationEntry> {
+  // Pull master + (optional) character info in two cheap point
+  // lookups. Owner-facing display surfaces the IDENTITY name (the
+  // character's display name when present, the master's username
+  // for OOC), with the master shown for accountability.
+  const applicant = (await db
+    .select({ username: users.username, avatarUrl: users.avatarUrl })
+    .from(users)
+    .where(eq(users.id, row.applicantUserId))
+    .limit(1))[0];
+  const character = row.characterId
+    ? (await db
+        .select({ name: characters.name, avatarUrl: characters.avatarUrl })
+        .from(characters)
+        .where(eq(characters.id, row.characterId))
+        .limit(1))[0]
+    : null;
+  const reviewer = row.reviewedByUserId
+    ? (await db
+        .select({ username: users.username })
+        .from(users)
+        .where(eq(users.id, row.reviewedByUserId))
+        .limit(1))[0]
+    : null;
+  let answers: string[] = [];
+  try {
+    const parsed = JSON.parse(row.answersJson);
+    if (Array.isArray(parsed)) answers = parsed.filter((s): s is string => typeof s === "string");
+  } catch { /* fall through to empty */ }
+  const masterUsername = applicant?.username ?? "(deleted user)";
+  return {
+    id: row.id,
+    worldId: row.worldId,
+    applicantUserId: row.applicantUserId,
+    applicantUsername: masterUsername,
+    applicantCharacterId: row.characterId,
+    applicantDisplayName: row.characterId !== null
+      ? (character?.name ?? masterUsername)
+      : masterUsername,
+    // Same OOC ↔ character partition as the gallery: a character
+    // application never falls back to the master's avatar. The
+    // owner's review pane renders initials of the character's
+    // display name when no portrait is set.
+    applicantAvatarUrl: row.characterId !== null
+      ? (character?.avatarUrl ?? null)
+      : (applicant?.avatarUrl ?? null),
+    questions: questionsAtSubmit,
+    answers,
+    status: row.status as WorldApplicationStatus,
+    submittedAt: +row.submittedAt,
+    reviewedAt: row.reviewedAt ? +row.reviewedAt : null,
+    reviewedByUserId: row.reviewedByUserId ?? null,
+    reviewedByUsername: reviewer?.username ?? null,
+    reviewNote: row.reviewNote ?? null,
+  };
 }
 
 async function toSummary(db: Db, w: typeof worlds.$inferSelect): Promise<WorldSummary> {
@@ -284,6 +512,9 @@ async function toSummary(db: Db, w: typeof worlds.$inferSelect): Promise<WorldSu
     status: (w.status ?? "active") as WorldStatus,
     coverImageUrl: w.coverImageUrl ?? null,
     pacing: (w.pacing ?? null) as WorldPacing | null,
+    vibeStats: vibeStatsFromRow(w),
+    joinMode: (w.joinMode ?? "open") as WorldJoinMode,
+    applicationQuestions: parseApplicationQuestions(w.applicationQuestionsJson),
     createdAt: +w.createdAt,
     updatedAt: +w.updatedAt,
   };
@@ -310,6 +541,8 @@ async function toCatalogEntry(db: Db, w: typeof worlds.$inferSelect): Promise<Wo
     status: (w.status ?? "active") as WorldStatus,
     coverImageUrl: w.coverImageUrl ?? null,
     pacing: (w.pacing ?? null) as WorldPacing | null,
+    vibeStats: vibeStatsFromRow(w),
+    joinMode: (w.joinMode ?? "open") as WorldJoinMode,
     updatedAt: +w.updatedAt,
   };
 }
@@ -578,6 +811,36 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
         conds.push(sql`(',' || lower(${worlds.contentWarnings}) || ',') NOT LIKE ${needle}`);
       }
     }
+    // Vibe-stat range filters. For each axis the user constrained, the
+    // world's tuned value must sit inside the [min, max] closed
+    // interval — AND the column must be non-null. "Unset" worlds drop
+    // out of any filtered view because "no opinion" doesn't satisfy a
+    // specific user constraint; with NO filter applied (the default),
+    // unset worlds remain visible because no `conds.push` runs.
+    // Each axis maps to its DB column via a small lookup table.
+    // Typed as `SqliteColumnLike` (a structural alias for "anything
+    // SQL template literals will accept as a column") because the
+    // eight columns have distinct drizzle name-literal types and
+    // can't all fit one `typeof worlds.statCombat` slot.
+    const STAT_COLS = {
+      combat: worlds.statCombat,
+      magic: worlds.statMagic,
+      technology: worlds.statTechnology,
+      romance: worlds.statRomance,
+      politics: worlds.statPolitics,
+      mystery: worlds.statMystery,
+      horror: worlds.statHorror,
+      exploration: worlds.statExploration,
+    } as const;
+    for (const axis of WORLD_VIBE_AXES) {
+      const min = (q as Record<string, unknown>)[`min_${axis.key}`] as number | undefined;
+      const max = (q as Record<string, unknown>)[`max_${axis.key}`] as number | undefined;
+      if (min === undefined && max === undefined) continue;
+      const col = STAT_COLS[axis.key];
+      conds.push(sql`${col} IS NOT NULL`);
+      if (min !== undefined) conds.push(sql`${col} >= ${min}`);
+      if (max !== undefined) conds.push(sql`${col} <= ${max}`);
+    }
     const whereExpr = and(...conds);
     const totalRow = (await db
       .select({ n: sql<number>`count(*)` })
@@ -641,6 +904,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     }
 
     const id = nanoid();
+    const vs = body.vibeStats;
     await db.insert(worlds).values({
       id,
       ownerUserId: me.id,
@@ -654,6 +918,16 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       status: initialStatus,
       coverImageUrl: body.coverImageUrl ?? null,
       pacing: body.pacing ?? null,
+      statCombat: vs?.combat ?? null,
+      statMagic: vs?.magic ?? null,
+      statTechnology: vs?.technology ?? null,
+      statRomance: vs?.romance ?? null,
+      statPolitics: vs?.politics ?? null,
+      statMystery: vs?.mystery ?? null,
+      statHorror: vs?.horror ?? null,
+      statExploration: vs?.exploration ?? null,
+      joinMode: body.joinMode ?? "open",
+      applicationQuestionsJson: JSON.stringify(body.applicationQuestions ?? []),
     });
     const created = (await db.select().from(worlds).where(eq(worlds.id, id)).limit(1))[0]!;
     reply.code(201);
@@ -697,7 +971,15 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       .where(eq(worldPages.worldId, w.id))
       .orderBy(asc(worldPages.sortOrder), asc(worldPages.createdAt));
     const members = await memberListFor(db, w.id);
-    const viewerMember = me ? members.find((m) => m.userId === me.id) ?? null : null;
+    // viewerIsMember asks "is the viewer's CURRENT identity a member
+    // of this world?" Other identities of the same master may also be
+    // members; this flag only reflects the face the viewer is wearing
+    // right now (which is what drives the catalog button + the world
+    // page's Join/Leave affordance).
+    const viewerCharId: string | null = me?.activeCharacterId ?? null;
+    const viewerMember = me
+      ? members.find((m) => m.userId === me.id && m.characterId === viewerCharId) ?? null
+      : null;
     // Collaborator surface. Always loaded so the client can show the
     // wiki-editor's owner-only "Collaborators" panel without a second
     // round trip. Non-owners get the same list — handy for "who else
@@ -706,15 +988,46 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     const collaborators = await collaboratorListFor(db, w.id);
     const viewerIsOwner = !!me && w.ownerUserId === me.id;
     const viewerCanEdit = await canEditWorld(db, w, me?.id ?? null, me?.role ?? null);
+    // Pull the viewer's most recent application against this world,
+    // if any, so the client can drive the Apply/Pending/Rejected
+    // button state from a single fetch. Owners look at the editor's
+    // full Applications pane instead, so we skip this work for them
+    // (the field stays null on the owner's view).
+    let viewerApplication: WorldApplicationEntry | null = null;
+    if (me && !viewerIsOwner) {
+      // Per-identity lookup: an applicant's most recent application
+      // for the IDENTITY they're currently voicing. Other identities
+      // of the same master have their own application histories
+      // (each can apply once at a time per world).
+      const appRow = (await db
+        .select()
+        .from(worldApplications)
+        .where(and(
+          eq(worldApplications.worldId, w.id),
+          eq(worldApplications.applicantUserId, me.id),
+          viewerCharId === null
+            ? sql`${worldApplications.characterId} IS NULL`
+            : eq(worldApplications.characterId, viewerCharId),
+        ))
+        .orderBy(desc(worldApplications.submittedAt))
+        .limit(1))[0];
+      if (appRow) {
+        viewerApplication = await applicationToWire(
+          db,
+          appRow,
+          parseApplicationQuestions(w.applicationQuestionsJson),
+        );
+      }
+    }
     const detail: WorldDetail = {
       world: await toSummary(db, w),
       pages: pages.map(pageRowToWire),
       members,
       viewerIsMember: viewerMember !== null,
-      viewerPrimary: !!viewerMember?.isPrimary,
       viewerIsOwner,
       viewerCanEdit,
       collaborators,
+      viewerApplication,
     };
     return detail;
   });
@@ -827,6 +1140,25 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       update.coverImageUrl = body.coverImageUrl ?? null;
     }
     if (body.pacing !== undefined) update.pacing = body.pacing ?? null;
+    if (body.vibeStats !== undefined) {
+      // Only the axes the body actually carries get updated. An axis
+      // sent as `null` clears it; an absent axis is left alone. This
+      // lets the editor's per-slider "reset" button clear ONE axis
+      // without touching the others.
+      const vs = body.vibeStats;
+      if ("combat" in vs) update.statCombat = vs.combat ?? null;
+      if ("magic" in vs) update.statMagic = vs.magic ?? null;
+      if ("technology" in vs) update.statTechnology = vs.technology ?? null;
+      if ("romance" in vs) update.statRomance = vs.romance ?? null;
+      if ("politics" in vs) update.statPolitics = vs.politics ?? null;
+      if ("mystery" in vs) update.statMystery = vs.mystery ?? null;
+      if ("horror" in vs) update.statHorror = vs.horror ?? null;
+      if ("exploration" in vs) update.statExploration = vs.exploration ?? null;
+    }
+    if (body.joinMode !== undefined) update.joinMode = body.joinMode;
+    if (body.applicationQuestions !== undefined) {
+      update.applicationQuestionsJson = JSON.stringify(body.applicationQuestions);
+    }
     if (body.slug !== undefined) {
       const slug = body.slug.toLowerCase();
       if (!SLUG_RX.test(slug)) { reply.code(400); return { error: "slug must be 1-60 lowercase letters, numbers, hyphens" }; }
@@ -1081,106 +1413,186 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     return { ok: true };
   });
 
-  /* ---------- Join a world (members table) ---------- */
+  /* ---------- Join a world as the current identity ---------- *
+   *
+   * Joining is per-identity (migration 0187): the membership row
+   * carries the caller's currently-voiced character_id (or null for
+   * OOC). Avery can be in Halcyon City without dragging the master's
+   * OOC face — or the master's other characters — along.
+   *
+   * Owners can join their own world as any of their identities;
+   * admins with edit_others_world can join any world. Everyone else
+   * needs visibility="open" AND joinMode="open".
+   */
   app.post<{ Params: { idOrSlug: string } }>("/worlds/:idOrSlug/members", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
     const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
     if (!w) { reply.code(404); return { error: "not found" }; }
-    // Owners are implicitly members of their own world for surfacing purposes,
-    // but they can still explicitly "join" to get an explicit membership row
-    // (and the option to set the world as their primary). All other users
-    // need the world to be open.
-    if (w.ownerUserId !== me.id && w.visibility !== "open"
-        && !(await hasPermission(me, "edit_others_world", db))) {
-      reply.code(403);
-      return { error: "this world isn't open for community membership" };
+    const isOwner = w.ownerUserId === me.id;
+    const isAdmin = !isOwner && (await hasPermission(me, "edit_others_world", db));
+    if (!isOwner && !isAdmin) {
+      if (w.visibility !== "open") {
+        reply.code(403);
+        return { error: "this world isn't open for community membership" };
+      }
+      const joinMode = (w.joinMode ?? "open") as WorldJoinMode;
+      if (joinMode === "invite-only") {
+        reply.code(403);
+        return { error: "this world is invite-only; ask the owner to add you" };
+      }
+      if (joinMode === "application") {
+        reply.code(403);
+        return { error: "this world requires an application; use the Apply button" };
+      }
     }
+    const charId = me.activeCharacterId;
     const existing = (await db
       .select()
       .from(worldMembers)
-      .where(and(eq(worldMembers.worldId, w.id), eq(worldMembers.userId, me.id)))
+      .where(and(
+        eq(worldMembers.worldId, w.id),
+        eq(worldMembers.userId, me.id),
+        charId === null
+          ? sql`${worldMembers.characterId} IS NULL`
+          : eq(worldMembers.characterId, charId),
+      ))
       .limit(1))[0];
     if (existing) {
-      // Idempotent: already a member is success, not an error.
+      // Idempotent: this identity is already a member.
       return { ok: true, alreadyMember: true };
     }
     await db.insert(worldMembers).values({
       worldId: w.id,
       userId: me.id,
-      isPrimary: 0,
+      characterId: charId,
     });
     await rebroadcastUserOccupancy(io, db, me.id);
     return { ok: true };
   });
 
-  /* ---------- Leave a world ---------- */
+  /* ---------- Owner-invited member ----------
+   * Direct owner-side membership add. Unlike `POST /members` (which
+   * registers the CALLER as a member), this endpoint registers a NAMED
+   * target identity that the owner picked. The two paths sit together
+   * because they hit the same `worldMembers` table, but the auth model
+   * and identity resolution differ — invites are owner/admin only and
+   * the target comes from a free-form name OR an unambiguous identity
+   * token (`@id:` / `@cid:`) the same shared resolver every other
+   * identity-keyed command uses.
+   *
+   * Per-identity contract preserved: if the target token addresses a
+   * specific character (`@cid:`), the membership row is bound to that
+   * character; addressing a master (`@id:` or a bare master name)
+   * inserts an OOC membership with `characterId = null`. The owner can
+   * invite both a master AND any of their characters separately — same
+   * as the catalog Join flow — by re-running the invite with each
+   * identity token.
+   *
+   * Useful for ALL three join modes:
+   *   - invite-only: the ONLY way anyone gets in besides the owner.
+   *   - application: shortcut for "I already trust this person; skip
+   *     the queue."
+   *   - open: an explicit pre-add for someone who hasn't found the
+   *     world yet but the owner wants them seated.
+   */
+  app.post<{ Params: { idOrSlug: string }; Body: unknown }>(
+    "/worlds/:idOrSlug/invites",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
+      if (!w) { reply.code(404); return { error: "not found" }; }
+      const isOwner = w.ownerUserId === me.id;
+      const isAdmin = !isOwner && (await hasPermission(me, "edit_others_world", db));
+      if (!isOwner && !isAdmin) {
+        reply.code(403); return { error: "owner only" };
+      }
+      const body = z.object({ target: z.string().min(1).max(120) }).safeParse(req.body);
+      if (!body.success) { reply.code(400); return { error: "invalid body" }; }
+      const resolution = await resolveIdentityArg(db, body.data.target);
+      if (resolution.kind === "none") {
+        reply.code(404); return { error: `no user or character matched "${body.data.target}"` };
+      }
+      if (resolution.kind === "ambiguous") {
+        // Surface the disambiguation candidates so the owner can re-run
+        // with the right token. Same shape `emitAmbiguousIdentityModal`
+        // uses on the chat side, just over HTTP.
+        reply.code(409);
+        return {
+          error: `"${body.data.target}" matches ${resolution.matches.length} identities — re-run with a specific token`,
+          candidates: resolution.matches.map((m) => ({
+            displayName: m.displayName,
+            masterUsername: m.masterUsername,
+            characterId: m.characterId,
+            userId: m.userId,
+            token: m.characterId ? `@cid:${m.characterId}` : `@id:${m.userId}`,
+          })),
+        };
+      }
+      const target = resolution.target;
+      const targetCharId = target.characterId;
+      // Idempotent on (worldId, userId, characterId). Mirrors the
+      // same triple-key membership shape `POST /members` uses, so
+      // re-inviting an identity that's already in returns success
+      // instead of a duplicate-row error.
+      const existing = (await db
+        .select()
+        .from(worldMembers)
+        .where(and(
+          eq(worldMembers.worldId, w.id),
+          eq(worldMembers.userId, target.userId),
+          targetCharId === null
+            ? sql`${worldMembers.characterId} IS NULL`
+            : eq(worldMembers.characterId, targetCharId),
+        ))
+        .limit(1))[0];
+      if (existing) {
+        return { ok: true, alreadyMember: true, displayName: target.displayName };
+      }
+      await db.insert(worldMembers).values({
+        worldId: w.id,
+        userId: target.userId,
+        characterId: targetCharId,
+      });
+      // Re-broadcast the target's occupancy so any user-list watching
+      // them picks up the new world-membership chip immediately, same
+      // as the self-join path.
+      await rebroadcastUserOccupancy(io, db, target.userId);
+      return { ok: true, displayName: target.displayName };
+    },
+  );
+
+  /* ---------- Leave a world as the current identity ---------- */
   app.delete<{ Params: { idOrSlug: string } }>("/worlds/:idOrSlug/members", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
     const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
     if (!w) { reply.code(404); return { error: "not found" }; }
+    const charId = me.activeCharacterId;
     const r = await db
       .delete(worldMembers)
-      .where(and(eq(worldMembers.worldId, w.id), eq(worldMembers.userId, me.id)));
+      .where(and(
+        eq(worldMembers.worldId, w.id),
+        eq(worldMembers.userId, me.id),
+        charId === null
+          ? sql`${worldMembers.characterId} IS NULL`
+          : eq(worldMembers.characterId, charId),
+      ));
     if (r.changes === 0) return { ok: true, alreadyAbsent: true };
     await rebroadcastUserOccupancy(io, db, me.id);
     return { ok: true };
   });
 
   /**
-   * Set (or clear) the caller's primary world. Pass `worldId: null` to clear.
-   * Enforces the at-most-one-primary invariant client-side too: we unset any
-   * existing primary in a single transaction before flipping the new one on.
-   */
-  app.put<{ Body: unknown }>("/me/primary-world", async (req, reply) => {
-    const me = await getSessionUser(req, db);
-    if (!me) { reply.code(401); return { error: "auth" }; }
-
-    let body;
-    try { body = setPrimaryWorldBody.parse(req.body); }
-    catch { reply.code(400); return { error: "invalid body" }; }
-
-    if (body.worldId === null) {
-      await db
-        .update(worldMembers)
-        .set({ isPrimary: 0 })
-        .where(and(eq(worldMembers.userId, me.id), eq(worldMembers.isPrimary, 1)));
-      await rebroadcastUserOccupancy(io, db, me.id);
-      return { ok: true };
-    }
-
-    const targetWorldId: string = body.worldId;
-
-    // Must be a current member to be primary.
-    const m = (await db
-      .select()
-      .from(worldMembers)
-      .where(and(eq(worldMembers.userId, me.id), eq(worldMembers.worldId, targetWorldId)))
-      .limit(1))[0];
-    if (!m) {
-      reply.code(400);
-      return { error: "you must join the world before making it your primary" };
-    }
-    // Single transaction: clear any other primaries, then set this one.
-    db.transaction((tx) => {
-      tx.update(worldMembers)
-        .set({ isPrimary: 0 })
-        .where(and(eq(worldMembers.userId, me.id), eq(worldMembers.isPrimary, 1)))
-        .run();
-      tx.update(worldMembers)
-        .set({ isPrimary: 1 })
-        .where(and(eq(worldMembers.userId, me.id), eq(worldMembers.worldId, targetWorldId)))
-        .run();
-    });
-    await rebroadcastUserOccupancy(io, db, me.id);
-    return { ok: true };
-  });
-
-  /**
-   * Caller's world memberships. Used by the WorldsList modal ("Worlds I've
-   * joined") and the profile modal ("Member of <World>"). Sorted with the
-   * primary first (if any), then by join date.
+   * Caller's world memberships across every identity. Used by the
+   * WorldsList modal ("Worlds I've joined") and by the catalog's
+   * Joined-indicator pre-fetch.
+   *
+   * Each row carries the identity that joined (`characterId` null =
+   * OOC, non-null = the character) plus a resolved `identityDisplayName`
+   * so the My Worlds list can render "as Avery — Halcyon City" without
+   * a second lookup. Soft-deleted characters drop out.
    */
   app.get("/me/worlds/memberships", async (req, reply) => {
     const me = await getSessionUser(req, db);
@@ -1188,23 +1600,30 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     const rows = await db
       .select({
         worldId: worldMembers.worldId,
+        characterId: worldMembers.characterId,
         joinedAt: worldMembers.joinedAt,
-        isPrimary: worldMembers.isPrimary,
         worldSlug: worlds.slug,
         worldName: worlds.name,
         ownerUserId: worlds.ownerUserId,
+        characterName: characters.name,
+        characterDeletedAt: characters.deletedAt,
       })
       .from(worldMembers)
       .innerJoin(worlds, eq(worlds.id, worldMembers.worldId))
+      .leftJoin(characters, eq(characters.id, worldMembers.characterId))
       .where(eq(worldMembers.userId, me.id))
-      .orderBy(desc(worldMembers.isPrimary), asc(worldMembers.joinedAt));
+      .orderBy(asc(worldMembers.joinedAt));
+    const visible = rows.filter((r) => r.characterId === null || r.characterDeletedAt === null);
     const memberships: WorldMembership[] = await Promise.all(
-      rows.map(async (r) => ({
+      visible.map(async (r) => ({
         worldId: r.worldId,
         worldSlug: r.worldSlug,
         worldName: r.worldName,
         ownerUsername: await loadOwnerUsername(db, r.ownerUserId),
-        isPrimary: !!r.isPrimary,
+        characterId: r.characterId,
+        identityDisplayName: r.characterId !== null
+          ? (r.characterName ?? me.username)
+          : me.username,
         joinedAt: +r.joinedAt,
       })),
     );
@@ -1234,42 +1653,400 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     // ({ private: true } stub for anonymous), which over-hid public
     // worlds the splash was already advertising. Now the gate is per
     // row, scoped to the privacy of each world individually.
+    // Per-identity filter via query string: `?characterId=<id>` filters
+    // to that character's memberships; `?characterId=ooc` returns the
+    // master's OOC memberships only; omit the param to return ALL
+    // identities. The profile modal scopes the request to whichever
+    // identity it's rendering — character profile passes the character
+    // id, master profile passes "ooc".
+    const q = req.query as { characterId?: string } | undefined;
+    const filterChar = q?.characterId;
     const rows = await db
       .select({
         worldId: worldMembers.worldId,
+        characterId: worldMembers.characterId,
         joinedAt: worldMembers.joinedAt,
-        isPrimary: worldMembers.isPrimary,
         worldSlug: worlds.slug,
         worldName: worlds.name,
         visibility: worlds.visibility,
         ownerUserId: worlds.ownerUserId,
+        ownerUsername: users.username,
+        characterName: characters.name,
+        characterDeletedAt: characters.deletedAt,
       })
       .from(worldMembers)
       .innerJoin(worlds, eq(worlds.id, worldMembers.worldId))
+      .innerJoin(users, eq(users.id, worlds.ownerUserId))
+      .leftJoin(characters, eq(characters.id, worldMembers.characterId))
       .where(eq(worldMembers.userId, req.params.userId))
-      .orderBy(desc(worldMembers.isPrimary), asc(worldMembers.joinedAt));
+      .orderBy(asc(worldMembers.joinedAt));
     // Pre-resolve admin override once; the per-row predicate stays
     // synchronous and we avoid 1+N permission lookups on a list filter.
     const meCanSeePrivateAsAdmin = !!me && (await hasPermission(me, "edit_others_world", db));
+    // Master username for the OOC identity label. Resolved once.
+    const targetMaster = (await db
+      .select({ username: users.username })
+      .from(users)
+      .where(eq(users.id, req.params.userId))
+      .limit(1))[0];
+    const targetMasterUsername = targetMaster?.username ?? "(deleted user)";
     const filtered = rows.filter((r) => {
+      // Drop soft-deleted character rows.
+      if (r.characterId !== null && r.characterDeletedAt !== null) return false;
+      // Identity filter.
+      if (filterChar === "ooc" && r.characterId !== null) return false;
+      if (filterChar && filterChar !== "ooc" && r.characterId !== filterChar) return false;
+      // Private-world visibility gate (unchanged from v2).
       if (r.visibility !== "private") return true;
-      // Private worlds: visible only if the viewer is the world's
-      // owner or a site admin. Anonymous viewers (me === null) and
-      // unrelated logged-in viewers fall through to false.
       return !!me && (meCanSeePrivateAsAdmin || r.ownerUserId === me.id);
     });
-    const memberships: WorldMembership[] = await Promise.all(
-      filtered.map(async (r) => ({
-        worldId: r.worldId,
-        worldSlug: r.worldSlug,
-        worldName: r.worldName,
-        ownerUsername: await loadOwnerUsername(db, r.ownerUserId),
-        isPrimary: !!r.isPrimary,
-        joinedAt: +r.joinedAt,
-      })),
-    );
+    const memberships: WorldMembership[] = filtered.map((r) => ({
+      worldId: r.worldId,
+      worldSlug: r.worldSlug,
+      worldName: r.worldName,
+      ownerUsername: r.ownerUsername,
+      characterId: r.characterId,
+      identityDisplayName: r.characterId !== null
+        ? (r.characterName ?? targetMasterUsername)
+        : targetMasterUsername,
+      joinedAt: +r.joinedAt,
+    }));
     return { memberships };
   });
+
+  /* =========================================================
+   *  Application routes — joinMode === "application" flow
+   *
+   *  POST   /worlds/:idOrSlug/applications        — applicant submits
+   *  GET    /worlds/:idOrSlug/applications        — owner lists (pending + recent)
+   *  PATCH  /worlds/:idOrSlug/applications/:appId — owner approves / rejects
+   *  DELETE /worlds/:idOrSlug/applications/:appId — applicant withdraws their own
+   * ========================================================= */
+
+  // Applicant submits an application. Refused when:
+  //   * world doesn't exist / viewer can't see it
+  //   * world's joinMode isn't "application"
+  //   * answers.length doesn't match the world's current question
+  //     count (stale form / tampered request)
+  //   * applicant already has a pending application on this world
+  //   * applicant is already a member (use Leave first to re-join via app)
+  //   * applicant is the world's owner (owners join via the Join button)
+  app.post<{ Params: { idOrSlug: string }; Body: unknown }>(
+    "/worlds/:idOrSlug/applications",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
+      if (!w) { reply.code(404); return { error: "not found" }; }
+      if ((w.joinMode ?? "open") !== "application") {
+        reply.code(400);
+        return { error: "this world doesn't accept applications" };
+      }
+      if (w.ownerUserId === me.id) {
+        reply.code(400);
+        return { error: "owners don't apply to their own worlds" };
+      }
+      // Per-identity scope: the applying face is the caller's
+      // currently-voiced character (or OOC if no character is
+      // active). Other identities of the same master have their
+      // own membership / application state — they don't block
+      // this one and approving this one doesn't auto-join them.
+      const applicantCharId = me.activeCharacterId;
+      const identityMatch = applicantCharId === null
+        ? sql`${worldMembers.characterId} IS NULL`
+        : eq(worldMembers.characterId, applicantCharId);
+      const alreadyMember = (await db
+        .select({ userId: worldMembers.userId })
+        .from(worldMembers)
+        .where(and(
+          eq(worldMembers.worldId, w.id),
+          eq(worldMembers.userId, me.id),
+          identityMatch,
+        ))
+        .limit(1))[0];
+      if (alreadyMember) {
+        reply.code(409);
+        return { error: "you're already a member of this world (as this identity)" };
+      }
+      let body;
+      try { body = submitApplicationBody.parse(req.body); }
+      catch { reply.code(400); return { error: "invalid body" }; }
+      const questions = parseApplicationQuestions(w.applicationQuestionsJson);
+      if (body.answers.length !== questions.length) {
+        reply.code(400);
+        return {
+          error: "answer count doesn't match the world's questions; reload the form",
+        };
+      }
+      const appIdentityMatch = applicantCharId === null
+        ? sql`${worldApplications.characterId} IS NULL`
+        : eq(worldApplications.characterId, applicantCharId);
+      // Single-pending guard PER IDENTITY — the partial unique index
+      // enforces this at the DB layer too, but checking first lets
+      // us return a friendlier 409 with the existing pending
+      // application id.
+      const existingPending = (await db
+        .select()
+        .from(worldApplications)
+        .where(and(
+          eq(worldApplications.worldId, w.id),
+          eq(worldApplications.applicantUserId, me.id),
+          appIdentityMatch,
+          eq(worldApplications.status, "pending"),
+        ))
+        .limit(1))[0];
+      if (existingPending) {
+        reply.code(409);
+        return {
+          error: "you already have a pending application for this world (as this identity)",
+          applicationId: existingPending.id,
+        };
+      }
+      const appId = nanoid();
+      try {
+        await db.insert(worldApplications).values({
+          id: appId,
+          worldId: w.id,
+          applicantUserId: me.id,
+          characterId: applicantCharId,
+          answersJson: JSON.stringify(body.answers.map((s) => s.trim())),
+          status: "pending",
+        });
+      } catch (err) {
+        // Two simultaneous submits can race past the pre-check above
+        // and collide on the partial unique index. Convert the raw
+        // SQLite error into the same friendly 409 the pre-check would
+        // have returned, so the client never sees a 500.
+        const msg = (err as { message?: string } | null)?.message ?? "";
+        if (/UNIQUE constraint failed/i.test(msg)) {
+          const existing = (await db
+            .select({ id: worldApplications.id })
+            .from(worldApplications)
+            .where(and(
+              eq(worldApplications.worldId, w.id),
+              eq(worldApplications.applicantUserId, me.id),
+              appIdentityMatch,
+              eq(worldApplications.status, "pending"),
+            ))
+            .limit(1))[0];
+          reply.code(409);
+          return {
+            error: "you already have a pending application for this world (as this identity)",
+            applicationId: existing?.id,
+          };
+        }
+        throw err;
+      }
+      const row = (await db
+        .select()
+        .from(worldApplications)
+        .where(eq(worldApplications.id, appId))
+        .limit(1))[0]!;
+      const wire = await applicationToWire(db, row, questions);
+      reply.code(201);
+      return { ok: true, application: wire };
+    },
+  );
+
+  // Owner lists pending applications + a small tail of recently-
+  // terminal rows for spot-checking. Permission: world owner OR
+  // edit_others_world (admin).
+  app.get<{ Params: { idOrSlug: string } }>(
+    "/worlds/:idOrSlug/applications",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
+      if (!w) { reply.code(404); return { error: "not found" }; }
+      const isOwner = w.ownerUserId === me.id;
+      const isAdmin = !isOwner && (await hasPermission(me, "edit_others_world", db));
+      if (!isOwner && !isAdmin) { reply.code(403); return { error: "owner only" }; }
+      const questions = parseApplicationQuestions(w.applicationQuestionsJson);
+      const pendingRows = await db
+        .select()
+        .from(worldApplications)
+        .where(and(
+          eq(worldApplications.worldId, w.id),
+          eq(worldApplications.status, "pending"),
+        ))
+        .orderBy(asc(worldApplications.submittedAt));
+      const recentRows = await db
+        .select()
+        .from(worldApplications)
+        .where(and(
+          eq(worldApplications.worldId, w.id),
+          ne(worldApplications.status, "pending"),
+        ))
+        .orderBy(desc(worldApplications.reviewedAt))
+        .limit(20);
+      const payload: WorldApplicationList = {
+        pending: await Promise.all(pendingRows.map((r) => applicationToWire(db, r, questions))),
+        recent: await Promise.all(recentRows.map((r) => applicationToWire(db, r, questions))),
+      };
+      return payload;
+    },
+  );
+
+  // Owner approves or rejects an application. Approve auto-adds the
+  // applicant to world_members in the same transaction; reject stamps
+  // the optional review note and leaves the user free to re-apply.
+  app.patch<{ Params: { idOrSlug: string; appId: string }; Body: unknown }>(
+    "/worlds/:idOrSlug/applications/:appId",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
+      if (!w) { reply.code(404); return { error: "not found" }; }
+      const isOwner = w.ownerUserId === me.id;
+      const isAdmin = !isOwner && (await hasPermission(me, "edit_others_world", db));
+      if (!isOwner && !isAdmin) { reply.code(403); return { error: "owner only" }; }
+      let body;
+      try { body = reviewApplicationBody.parse(req.body); }
+      catch { reply.code(400); return { error: "invalid body" }; }
+      const app = (await db
+        .select()
+        .from(worldApplications)
+        .where(and(
+          eq(worldApplications.id, req.params.appId),
+          eq(worldApplications.worldId, w.id),
+        ))
+        .limit(1))[0];
+      if (!app) { reply.code(404); return { error: "application not found" }; }
+      if (app.status !== "pending") {
+        reply.code(409);
+        return { error: `application already ${app.status}` };
+      }
+      const nextStatus: WorldApplicationStatus =
+        body.action === "approve" ? "approved" : "rejected";
+      // Approve = stamp the row AND insert the membership in one
+      // transaction so a partial approve (status flipped but no
+      // membership row) is impossible.
+      //
+      // The UPDATE's WHERE includes `status = 'pending'` so a
+      // concurrent reviewer can't flip an already-decided row. We
+      // detect a lost race via `changes === 0` and skip the
+      // membership insert — otherwise a T1=approve / T2=reject race
+      // could leave the applicant added as a member while the app
+      // row reads "rejected." The pre-transaction check above is
+      // still useful (early friendly 409 in the common case), but
+      // the in-transaction guard is the actual safety net.
+      let lostRace = false;
+      db.transaction((tx) => {
+        const updated = tx.update(worldApplications)
+          .set({
+            status: nextStatus,
+            reviewedAt: new Date(),
+            reviewedByUserId: me.id,
+            reviewNote: body.reviewNote ?? null,
+          })
+          .where(and(
+            eq(worldApplications.id, app.id),
+            eq(worldApplications.status, "pending"),
+          ))
+          .run();
+        if (updated.changes === 0) {
+          lostRace = true;
+          return;
+        }
+        if (nextStatus === "approved") {
+          // Approval binds to the APPLYING IDENTITY: the membership
+          // row carries the application's characterId (null = OOC).
+          // Other identities of the same master are NOT auto-joined
+          // — they have their own application paths.
+          //
+          // ON CONFLICT DO NOTHING — if the (world, user, identity)
+          // membership row already exists (admin tooling seeded it,
+          // or a parallel approve raced through), the status flip
+          // above is the only side-effect we need. Drizzle doesn't
+          // model expression-conflict targets, so we lean on the
+          // unique index by passing the table-level columns; the
+          // expression index does the actual NULL collapsing.
+          tx.insert(worldMembers)
+            .values({
+              worldId: w.id,
+              userId: app.applicantUserId,
+              characterId: app.characterId,
+            })
+            .onConflictDoNothing()
+            .run();
+        }
+      });
+      if (lostRace) {
+        // Re-read so the 409 carries the actual current status.
+        const current = (await db
+          .select({ status: worldApplications.status })
+          .from(worldApplications)
+          .where(eq(worldApplications.id, app.id))
+          .limit(1))[0];
+        reply.code(409);
+        return { error: `application already ${current?.status ?? "decided"}` };
+      }
+      if (nextStatus === "approved") {
+        await rebroadcastUserOccupancy(io, db, app.applicantUserId);
+      }
+      const refreshed = (await db
+        .select()
+        .from(worldApplications)
+        .where(eq(worldApplications.id, app.id))
+        .limit(1))[0]!;
+      const wire = await applicationToWire(
+        db,
+        refreshed,
+        parseApplicationQuestions(w.applicationQuestionsJson),
+      );
+      return { ok: true, application: wire };
+    },
+  );
+
+  // Applicant withdraws their own pending application. Owners CANNOT
+  // withdraw on behalf of an applicant — they reject instead (which
+  // preserves the audit signal "owner declined" vs "applicant changed
+  // their mind").
+  app.delete<{ Params: { idOrSlug: string; appId: string } }>(
+    "/worlds/:idOrSlug/applications/:appId",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
+      if (!w) { reply.code(404); return { error: "not found" }; }
+      const app = (await db
+        .select()
+        .from(worldApplications)
+        .where(and(
+          eq(worldApplications.id, req.params.appId),
+          eq(worldApplications.worldId, w.id),
+        ))
+        .limit(1))[0];
+      if (!app) { reply.code(404); return { error: "application not found" }; }
+      if (app.applicantUserId !== me.id) {
+        reply.code(403);
+        return { error: "only the applicant can withdraw their application" };
+      }
+      if (app.status !== "pending") {
+        reply.code(409);
+        return { error: `application already ${app.status}` };
+      }
+      // Same race guard as approve/reject: only flip to "withdrawn"
+      // when the row is still pending. Detects an owner who reviewed
+      // between the user's pre-check and the actual write.
+      const r = await db
+        .update(worldApplications)
+        .set({
+          status: "withdrawn",
+          reviewedAt: new Date(),
+          reviewedByUserId: me.id,
+        })
+        .where(and(
+          eq(worldApplications.id, app.id),
+          eq(worldApplications.status, "pending"),
+        ));
+      if (r.changes === 0) {
+        reply.code(409);
+        return { error: "application was decided by the owner before you withdrew" };
+      }
+      return { ok: true };
+    },
+  );
 }
 
 // Suppress an unused-imports lint flag - FastifyRequest is used implicitly

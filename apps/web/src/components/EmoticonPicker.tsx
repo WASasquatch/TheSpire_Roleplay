@@ -138,19 +138,32 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
       // gets `maxHeight` clamped to whichever direction has more
       // headroom, so it never spills past the viewport — internal
       // scroll handles overflow.
-      const roomBelow = window.innerHeight - ar.bottom - gap - margin;
-      const roomAbove = ar.top - gap - margin;
-      // Prefer below when there's enough room (or even comparable
-      // room); fall back to above only when below is materially
-      // smaller — keeps the picker anchored where the eye expects
-      // a dropdown.
-      const placeBelow = roomBelow >= 200 || roomBelow >= roomAbove;
-      // Two clamps: a floor at 200 so the panel is always usable, and
-      // a ceiling at PANEL_MAX_HEIGHT so a tall viewport doesn't
-      // produce a panel that swallows half the chat behind it.
+      const roomBelow = Math.max(0, window.innerHeight - ar.bottom - gap - margin);
+      const roomAbove = Math.max(0, ar.top - gap - margin);
+      // Prefer opening below the trigger when there's a comfortable
+      // 200+px of room there — that's the dropdown UX users expect.
+      // Otherwise flip to above when above has the room. When neither
+      // side clears the comfort threshold, pick whichever side has
+      // MORE room so the panel still fits on-screen. Critically, we
+      // never blindly stay below when below is too short to hold the
+      // panel — that was the off-screen overflow this fixes.
+      const placeBelow =
+        roomBelow >= 200
+          ? true
+          : roomAbove >= 200
+          ? false
+          : roomBelow >= roomAbove;
+      // Clamp to the chosen side's ACTUAL available room. The previous
+      // implementation enforced a 200px floor here, which overrode the
+      // viewport constraint and pushed the bottom of the panel
+      // off-screen when the trigger sat near the viewport edge.
+      // Internal scroll keeps the panel usable even in a small slice —
+      // the side-flip above already guarantees we picked the larger
+      // direction, so this clamp just respects what's actually
+      // available.
       const maxHeight = Math.min(
         PANEL_MAX_HEIGHT,
-        Math.max(200, placeBelow ? roomBelow : roomAbove),
+        placeBelow ? roomBelow : roomAbove,
       );
       const top = placeBelow ? ar.bottom + gap : Math.max(margin, ar.top - gap - maxHeight);
       let left = ar.left + ar.width / 2 - width / 2;
@@ -161,11 +174,24 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
       setPos({ top, left, width, maxHeight, placeBelow });
     }
     layout();
+    // Resize stays — a window resize legitimately changes the
+    // viewport bounds, and the picker needs to reflow inside the
+    // new frame.
+    //
+    // Scroll is INTENTIONALLY NOT tracked: chat panels reflow as
+    // new messages arrive, which scrolls the anchor button under
+    // a stationary picker. If we re-ran layout() on every scroll
+    // event, the picker would chase the anchor mid-click — the
+    // user goes to tap an emoji, a new message arrives, the chat
+    // scrolls, the anchor button moves, the picker re-anchors to
+    // the new position, and the click lands on a different cell
+    // (or empty space) than what was under the cursor. Pinning
+    // the picker to its initial computed position for the rest
+    // of its lifetime keeps the target stable; click-away dismiss
+    // still works because mousedown outside the panel closes it.
     window.addEventListener("resize", layout);
-    window.addEventListener("scroll", layout, true);
     return () => {
       window.removeEventListener("resize", layout);
-      window.removeEventListener("scroll", layout, true);
     };
   }, [anchor]);
 

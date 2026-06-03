@@ -21,6 +21,21 @@ export interface SessionUser {
   awayMessage: string | null;
   /** Free-text mood/expression snapshotted onto outgoing messages; null = none. */
   currentMood: string | null;
+  /**
+   * Incognito (ghost) mode flag — when true, the user is hidden from
+   * userlists, room transitions don't broadcast, and any chat
+   * message they send renders as a system line under
+   * `incognitoAlias` instead of their identity. Persisted on the
+   * `users` row; the /incognito command toggles it. See
+   * `apps/server/src/commands/builtins/incognito.ts`.
+   */
+  incognitoMode: boolean;
+  /** Alias used on system-line message attribution when incognito.
+   *  Null → use the literal "System". */
+  incognitoAlias: string | null;
+  /** Custom leave / return message templates. Null → server-default phrasing. */
+  incognitoExitMessage: string | null;
+  incognitoReturnMessage: string | null;
 }
 
 export interface CommandContext {

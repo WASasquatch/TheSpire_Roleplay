@@ -141,7 +141,21 @@ export interface ClientToServerEvents {
    * typing phrase cosmetic ("Embers smolder…" instead of "is
    * typing…") on top of this same wire.
    */
-  "chat:typing": (payload: { roomId: string }) => void;
+  "chat:typing": (payload: {
+    roomId: string;
+    /**
+     * Per-tab identity claim, same shape and semantics as
+     * `chat:input.asCharacterId`. Without this, the server resolves
+     * the typer's name off the closure-captured `user.displayName`,
+     * which reflects whichever identity any other handler (a sibling
+     * tab's `me:switch-character`, the DB default at handshake) most
+     * recently wrote. That leaks a user's current character into the
+     * typing indicator of a tab that is actually composing on OOC.
+     * String = character, null = OOC/master, omitted = legacy fallback
+     * to socket.data.tabCharId.
+     */
+    asCharacterId?: string | null;
+  }) => void;
 }
 
 /** Events emitted by the server → client. */
@@ -515,6 +529,19 @@ export type UiHint =
   | { kind: "clear-room-messages" }
   /** Open the user's bookmarks modal (manages saved chat messages). */
   | { kind: "open-bookmarks" }
+  /**
+   * Open a persistent info-display modal with a server-provided title
+   * and multi-line body. Used by commands that return structured
+   * informational content (e.g. `/list`, `/find`) — the data is too
+   * long for the auto-dismissing toast and the user typically wants
+   * to scan / re-scan it instead of catching it in passing.
+   *
+   * `body` is rendered with whitespace preserved + monospace font so
+   * the server's bullet-list formatting (leading spaces, aligned
+   * columns) stays intact. Caller-side, build it the same way you'd
+   * build an `error:notice` message — one line per row, `\n`-joined.
+   */
+  | { kind: "open-info-modal"; title: string; body: string }
   /**
    * Open the Earnings dashboard. Optional `tab` lands the user on a
    * specific section (Overview, Activity, Name Styles, Borders,

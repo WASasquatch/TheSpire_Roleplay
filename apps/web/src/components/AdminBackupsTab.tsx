@@ -5,13 +5,15 @@
  * outer AdminPanel hides this tab from plain admins; the server also
  * 403s every endpoint, so a URL-guessing admin can't sneak in):
  *
- *   1. Full database — Create+download a fresh .sqlite snapshot;
- *      upload + import a candidate .sqlite (with a confirmation
- *      modal once we've inspected it).
+ *   1. Full database — Create+download a fresh .zip snapshot
+ *      bundling database.sqlite + the entire /uploads/ tree; upload
+ *      + import a candidate .zip (with a confirmation modal once
+ *      we've inspected it).
  *
- *   2. Content backup — Create+download a JSON document of every
- *      admin-customizable table; upload + import a candidate JSON
- *      (with a per-table diff preview before confirm).
+ *   2. Content backup — Create+download a .zip snapshot bundling
+ *      content.json (every exportable table) + the /uploads/ tree;
+ *      upload + import a candidate .zip (with a per-table diff
+ *      preview before confirm).
  *
  *   3. Snapshots — Listing of every artifact in /data/backups/,
  *      with download + delete actions. Auto-snapshots taken
@@ -21,14 +23,18 @@
  * Everything destructive (Import) takes a pre-import snapshot
  * automatically — the server side handles that — so a botched
  * restore is one Snapshots-tab click away from undo.
+ *
+ * Format note: every artifact (download or upload) is a v3+ ZIP
+ * envelope that bundles the database payload AND the uploads tree.
+ * Earlier formats (.sqlite / .json on disk, no uploads bundled)
+ * are not supported by this UI or the server routes.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
-  BackupContentDocument,
   BackupOperationStatus,
   BackupSnapshotEntry,
-  ContentImportDiff,
+  ContentBackupInspectReport,
   ContentImportDiffEntry,
   FullBackupInspectReport,
 } from "@thekeep/shared";
@@ -39,11 +45,13 @@ interface ContentImportResult {
   inserted: number;
   updated: number;
   unchanged: number;
+  uploadsRestored: number;
   preSnapshotId: string;
 }
 interface FullImportResult {
   ok: true;
   preSnapshotId: string;
+  uploadsRestored: number;
   message: string;
 }
 
@@ -200,8 +208,10 @@ export function AdminBackupsTab() {
         <h3 className="font-action text-lg">Backups</h3>
         <p className="text-xs text-keep-muted">
           Snapshot the database (full file) or the admin-customizable content (items, name styles, ranks, border frames,
-          custom commands, settings, system rooms + worlds). Restore on this install or import on a fresh one. Every
-          destructive import auto-saves a pre-restore safety snapshot so undo is one click away.
+          custom commands, settings, system rooms + worlds). Every snapshot is a ZIP that bundles the database payload
+          AND every uploaded image (emoticon sheets, logos, rank sigil + border PNGs), so restoring on a fresh host
+          comes up with everything intact. Each destructive import auto-saves a pre-restore safety snapshot so undo is
+          one click away.
         </p>
       </header>
 
@@ -272,13 +282,13 @@ function FullDbPanel({
   async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    onBusy("Uploading + inspecting database…");
+    onBusy("Uploading + inspecting archive…");
     onError("");
     try {
       const res = await fetch("/admin/backup/full/inspect", {
         method: "POST",
         credentials: "include",
-        headers: { "content-type": "application/octet-stream" },
+        headers: { "content-type": "application/zip" },
         body: f,
       });
       if (res.status === 409) {
@@ -317,15 +327,15 @@ function FullDbPanel({
     }
     // eslint-disable-next-line no-alert
     if (!window.confirm(
-      "Replacing the live database with this backup will sign every user out, drop unsaved changes, and restart the server. A pre-restore safety snapshot will be taken automatically. Continue?",
+      "Replacing the live database AND the uploads tree with this backup will sign every user out, drop unsaved changes, and restart the server. A pre-restore safety snapshot will be taken automatically. Continue?",
     )) return;
-    onBusy("Importing full database — the server will restart…");
+    onBusy("Importing full archive — the server will restart…");
     onError("");
     try {
       const res = await fetch("/admin/backup/full/import", {
         method: "POST",
         credentials: "include",
-        headers: { "content-type": "application/octet-stream" },
+        headers: { "content-type": "application/zip" },
         body: report.__file,
       });
       if (res.status === 409) {
@@ -346,7 +356,7 @@ function FullDbPanel({
       // Don't refresh — the server is about to exit. Just surface
       // the message; the page will become unreachable for ~30s.
       onError("");
-      onBusy(`${result.message} (Pre-restore snapshot: ${result.preSnapshotId})`);
+      onBusy(`${result.message} (${result.uploadsRestored} upload file(s) staged. Pre-restore snapshot: ${result.preSnapshotId})`);
       setReport(null);
       // After a short window, force a reload so the admin lands on
       // the restored install.
@@ -362,7 +372,7 @@ function FullDbPanel({
       <header className="flex items-baseline justify-between gap-2">
         <h4 className="font-action text-sm">Full database snapshot</h4>
         <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-          .sqlite — everything: users, messages, earning, cosmetics
+          .zip — database.sqlite + uploads/ (everything: users, messages, earning, cosmetics, all images)
         </span>
       </header>
       <div className="flex flex-wrap items-center gap-2">
@@ -375,11 +385,11 @@ function FullDbPanel({
           Create + download
         </button>
         <label className="rounded border border-keep-rule px-3 py-1 text-sm text-keep-text hover:bg-keep-banner cursor-pointer">
-          Upload .sqlite to inspect…
+          Upload .zip to inspect…
           <input
             ref={fileInputRef}
             type="file"
-            accept=".sqlite,application/octet-stream"
+            accept=".zip,application/zip"
             className="hidden"
             onChange={(e) => void onFileChosen(e)}
             disabled={busy}
@@ -395,8 +405,8 @@ function FullDbPanel({
           </div>
           {!report.ok ? (
             <p className="text-keep-accent">
-              File failed validation — not a SQLite database, or not from a Spire install (missing the
-              <span className="ml-1 font-mono">users.system</span> sentinel row that every Spire install seeds).
+              File failed validation — not a valid backup archive, or the inner database isn't from a Spire install
+              (missing the <span className="font-mono">users.system</span> sentinel row that every Spire install seeds).
             </p>
           ) : (
             <>
@@ -405,6 +415,11 @@ function FullDbPanel({
                 <li>Characters: <span className="font-mono">{report.counts.characters.toLocaleString()}</span></li>
                 <li>Messages: <span className="font-mono">{report.counts.messages.toLocaleString()}</span></li>
                 <li>Rooms: <span className="font-mono">{report.counts.rooms.toLocaleString()}</span></li>
+                <li className="col-span-2 pt-1 border-t border-keep-rule/40">
+                  Bundled uploads:{" "}
+                  <span className="font-mono">{report.uploadsFileCount.toLocaleString()}</span> file(s),{" "}
+                  <span className="font-mono">{formatBytes(report.uploadsBytes)}</span>
+                </li>
               </ul>
               {report.missingMigrations.length > 0 ? (
                 <p className="text-keep-accent">
@@ -424,7 +439,7 @@ function FullDbPanel({
                   disabled={busy || report.missingMigrations.length > 0}
                   className="rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-sm text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
                 >
-                  Import (replaces live DB, restarts server)
+                  Import (replaces live DB + uploads, restarts server)
                 </button>
                 <button
                   type="button"
@@ -460,37 +475,35 @@ function ContentPanel({
   onBusy: (msg: string | null) => void;
   busy: boolean;
 }) {
-  const [diff, setDiff] = useState<(ContentImportDiff & { __doc?: BackupContentDocument }) | null>(null);
+  const [report, setReport] = useState<(ContentBackupInspectReport & { __file?: File }) | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    onBusy("Inspecting uploaded content document…");
+    onBusy("Uploading + inspecting content archive…");
     onError("");
     try {
-      const text = await f.text();
-      let doc: BackupContentDocument;
-      try {
-        doc = JSON.parse(text) as BackupContentDocument;
-      } catch {
-        throw new Error("not a valid JSON document");
-      }
-      if (doc.kind !== "content") {
-        throw new Error("file is not a content backup");
-      }
       const res = await fetch("/admin/backup/content/inspect", {
         method: "POST",
         credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(doc),
+        headers: { "content-type": "application/zip" },
+        body: f,
       });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error || `inspect failed: ${res.status}`);
+      if (res.status === 409) {
+        const body = (await res.json().catch(() => ({}))) as { busy?: BackupOperationStatus; error?: string; message?: string };
+        if (body.busy?.currentOperation) {
+          onError(`Another backup operation is in progress (${body.busy.currentOperation.kind}). Wait for it to finish.`);
+          return;
+        }
+        throw new Error(body.message || body.error || "inspect refused");
       }
-      const d = (await res.json()) as ContentImportDiff;
-      setDiff({ ...d, __doc: doc });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+        throw new Error(body.message || body.error || `inspect failed: ${res.status}`);
+      }
+      const r = (await res.json()) as ContentBackupInspectReport;
+      setReport({ ...r, __file: f });
     } catch (err) {
       onError((err as Error).message);
     } finally {
@@ -500,7 +513,8 @@ function ContentPanel({
   }
 
   async function commitImport() {
-    if (!diff || !diff.__doc) return;
+    if (!report || !report.__file) return;
+    const diff = report.diff;
     if (diff.missingMigrations.length > 0) {
       onError(
         `Cannot import — this install is missing ${diff.missingMigrations.length} migration(s) the backup expects. Deploy first.`,
@@ -514,14 +528,14 @@ function ContentPanel({
       }),
       { add: 0, wipe: 0 },
     );
-    // v2 import is a DESTRUCTIVE MIRROR RESTORE — every table in
-    // the document gets wiped on the target before the source rows
-    // are inserted. Spell that out in the confirm so the admin
-    // isn't surprised when their live users get replaced by the
-    // backup's snapshot.
+    // Mirror restore: every table in the document gets wiped on the
+    // target before the source rows are inserted, AND the uploads
+    // tree is replaced wholesale. Spell that out in the confirm so
+    // the admin isn't surprised when their live users get replaced
+    // by the backup's snapshot.
     // eslint-disable-next-line no-alert
     if (!window.confirm(
-      `MIRROR RESTORE: this will DELETE ${totals.wipe.toLocaleString()} row(s) currently on this install and REPLACE them with ${totals.add.toLocaleString()} row(s) from the backup, across ${diff.entries.length} tables. A pre-import safety snapshot will be saved automatically so you can roll back if needed. Continue?`,
+      `MIRROR RESTORE: this will DELETE ${totals.wipe.toLocaleString()} row(s) currently on this install and REPLACE them with ${totals.add.toLocaleString()} row(s) from the backup, across ${diff.entries.length} tables. It will also REPLACE the live uploads tree with the ${report.uploadsFileCount.toLocaleString()} file(s) bundled in the archive. A pre-import safety snapshot will be saved automatically so you can roll back if needed. Continue?`,
     )) return;
     onBusy("Importing content backup…");
     onError("");
@@ -529,8 +543,8 @@ function ContentPanel({
       const res = await fetch("/admin/backup/content/import", {
         method: "POST",
         credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(diff.__doc),
+        headers: { "content-type": "application/zip" },
+        body: report.__file,
       });
       if (res.status === 409) {
         const body = (await res.json().catch(() => ({}))) as { busy?: BackupOperationStatus; error?: string; message?: string };
@@ -547,8 +561,8 @@ function ContentPanel({
       }
       const result = (await res.json()) as ContentImportResult;
       onError("");
-      onBusy(`Imported: ${result.inserted} added, ${result.updated} updated, ${result.unchanged} unchanged. Pre-import snapshot: ${result.preSnapshotId}`);
-      setDiff(null);
+      onBusy(`Imported: ${result.inserted} row(s) added, ${result.uploadsRestored} upload file(s) restored. Pre-import snapshot: ${result.preSnapshotId}`);
+      setReport(null);
       await onImported();
       // Clear the success line after a few seconds so the panel
       // doesn't get stuck looking busy.
@@ -562,9 +576,9 @@ function ContentPanel({
   return (
     <section className="rounded border border-keep-rule bg-keep-bg/40 p-3 space-y-3">
       <header className="flex items-baseline justify-between gap-2">
-        <h4 className="font-action text-sm">Content backup (JSON mirror)</h4>
+        <h4 className="font-action text-sm">Content backup (ZIP envelope)</h4>
         <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-          .json — full data mirror: users, characters, rooms, messages, items, configuration
+          .zip — content.json (every exportable table) + uploads/ (every uploaded image)
         </span>
       </header>
       <div className="flex flex-wrap items-center gap-2">
@@ -577,11 +591,11 @@ function ContentPanel({
           Create + download
         </button>
         <label className="rounded border border-keep-rule px-3 py-1 text-sm text-keep-text hover:bg-keep-banner cursor-pointer">
-          Upload .json to inspect…
+          Upload .zip to inspect…
           <input
             ref={fileInputRef}
             type="file"
-            accept=".json,application/json"
+            accept=".zip,application/zip"
             className="hidden"
             onChange={(e) => void onFileChosen(e)}
             disabled={busy}
@@ -589,18 +603,26 @@ function ContentPanel({
         </label>
       </div>
 
-      {diff ? (
+      {report ? (
         <div className="space-y-2 rounded border border-keep-rule/60 bg-keep-banner/30 p-3 text-xs">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <span className="font-semibold">Inspect report</span>
-            <span className="text-keep-muted">format v{diff.uploadedVersion} → server v{diff.serverVersion}</span>
+            <span className="text-keep-muted">
+              format v{report.diff.uploadedVersion} → server v{report.diff.serverVersion} · {formatBytes(report.sizeBytes)}
+            </span>
           </div>
-          {diff.missingMigrations.length > 0 ? (
+          {report.diff.missingMigrations.length > 0 ? (
             <p className="text-keep-accent">
-              ⚠ This install is missing {diff.missingMigrations.length} migration(s) the backup expects:
-              <span className="ml-1 font-mono break-all">{diff.missingMigrations.slice(0, 3).join(", ")}{diff.missingMigrations.length > 3 ? "…" : ""}</span>
+              ⚠ This install is missing {report.diff.missingMigrations.length} migration(s) the backup expects:
+              <span className="ml-1 font-mono break-all">{report.diff.missingMigrations.slice(0, 3).join(", ")}{report.diff.missingMigrations.length > 3 ? "…" : ""}</span>
             </p>
           ) : null}
+          <p className="text-keep-muted">
+            Bundled uploads:{" "}
+            <span className="font-mono text-keep-text">{report.uploadsFileCount.toLocaleString()}</span> file(s),{" "}
+            <span className="font-mono text-keep-text">{formatBytes(report.uploadsBytes)}</span>
+            {" "}— will replace the live <span className="font-mono">/uploads/</span> tree on import.
+          </p>
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-keep-rule/60 text-[10px] uppercase tracking-widest text-keep-muted">
@@ -610,7 +632,7 @@ function ContentPanel({
               </tr>
             </thead>
             <tbody>
-              {diff.entries.map((e: ContentImportDiffEntry) => (
+              {report.diff.entries.map((e: ContentImportDiffEntry) => (
                 <tr key={e.table} className="border-b border-keep-rule/30">
                   <td className="py-1 pr-2 font-mono">{e.table}</td>
                   <td className="py-1 px-2 text-right font-mono">{e.toAdd || ""}</td>
@@ -620,20 +642,20 @@ function ContentPanel({
             </tbody>
           </table>
           <p className="text-keep-muted">
-            Content backup is a <b className="text-keep-text">mirror restore</b> — every table the document carries gets wiped on this install and replaced with the source rows. Tables not in the document are left untouched. A pre-import safety snapshot is saved automatically so you can roll back.
+            Content backup is a <b className="text-keep-text">mirror restore</b> — every table the document carries gets wiped on this install and replaced with the source rows, and the entire <span className="font-mono">/uploads/</span> tree is replaced with the archive's. Tables not in the document are left untouched. A pre-import safety snapshot is saved automatically so you can roll back.
           </p>
           <div className="flex flex-wrap gap-2 pt-1">
             <button
               type="button"
               onClick={() => void commitImport()}
-              disabled={busy || diff.missingMigrations.length > 0}
+              disabled={busy || report.diff.missingMigrations.length > 0}
               className="rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-sm text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
             >
               Import (mirror restore)
             </button>
             <button
               type="button"
-              onClick={() => setDiff(null)}
+              onClick={() => setReport(null)}
               disabled={busy}
               className="rounded border border-keep-rule px-3 py-1 text-sm text-keep-muted hover:bg-keep-banner"
             >

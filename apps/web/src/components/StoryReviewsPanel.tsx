@@ -278,7 +278,15 @@ function ReviewCard({
   }
 
   const authorName = review.reviewer.characterName ?? review.reviewer.masterUsername;
-  const authorAvatar = review.reviewer.characterAvatarUrl ?? review.reviewer.masterAvatarUrl;
+  // OOC ↔ character partition: a review posted under a character
+  // voice never falls back to the master's avatar — initials of the
+  // character's name render instead. The character name above DOES
+  // cleanly fall back to the master username because the master
+  // username IS the OOC display name (no leak); the avatar would
+  // leak the actual master face.
+  const authorAvatar = review.reviewer.characterName
+    ? (review.reviewer.characterAvatarUrl ?? null)
+    : (review.reviewer.masterAvatarUrl ?? null);
 
   return (
     <li
@@ -598,7 +606,12 @@ function ReplyRow({
   }
 
   const name = reply.replyer.characterName ?? reply.replyer.masterUsername;
-  const avatar = reply.replyer.characterAvatarUrl ?? reply.replyer.masterAvatarUrl;
+  // OOC ↔ character partition (see authorAvatar above): replies
+  // posted under a character voice render initials when the
+  // character has no portrait — never the master's avatar.
+  const avatar = reply.replyer.characterName
+    ? (reply.replyer.characterAvatarUrl ?? null)
+    : (reply.replyer.masterAvatarUrl ?? null);
 
   return (
     <li>

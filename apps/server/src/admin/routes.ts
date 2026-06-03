@@ -21,6 +21,7 @@ import {
 } from "../db/schema.js";
 import { COLOR_TOKEN_OR_HEX_RE, CUSTOM_CMD_CSS_MAX_LEN, sanitizeCustomCmdCss, type AuditEntry, type PermissionKey, type Role } from "@thekeep/shared";
 import { requireSessionPermission } from "../auth/requireSessionPermission.js";
+import { CRASH_LOG_PATH, readRecentCrashes } from "../crashLog.js";
 import type { Db } from "../db/index.js";
 import type { CommandRegistry } from "../commands/registry.js";
 import {
@@ -102,7 +103,7 @@ export async function registerAdminRoutes(
   // because the destructive-restore paths warrant stricter access
   // than the plain-`admin` preHandler check that gates everything
   // under /admin/*).
-  registerAdminBackupRoutes(app, { db });
+  registerAdminBackupRoutes(app, { db, uploadsRoot });
 
   // Roles & Permissions matrix — Phase 2. Mounts /admin/permissions
   // GET (matrix snapshot), PATCH /roles (per-role grant flip), PATCH
@@ -136,6 +137,44 @@ export async function registerAdminRoutes(
    * the older days will undercount — fine for a dashboard, called out so
    * future-us doesn't chase a phantom bug.
    */
+  /* ---------- crash diagnostics ----------
+   *
+   * Reads the durable crash log from /data so an admin can see what
+   * killed past starts even after Fly's "10 restarts → purged logs"
+   * cycle. Sources: process-level uncaughtException / unhandledRejection
+   * handlers (apps/server/src/crashLog.ts) AND the migration runner
+   * (apps/server/scripts/apply-migrations.mjs). Both write the same
+   * JSONL format to /data/crash-log.jsonl which this endpoint reads.
+   *
+   * Masteradmin-only: this surface lets you see the raw output of
+   * every crash on the host, which can include error strings carrying
+   * env-var values or DB row content. The `view_admin_overview`
+   * permission is the closest existing key but isn't strict enough
+   * for operational-secret-adjacent data, so we hard-gate on role.
+   *
+   * Off-server fallback: `node apps/server/scripts/print-crashes.mjs`
+   * does the same dump from the command line (run via `fly ssh
+   * console` when the server itself is down).
+   */
+  app.get<{ Querystring: { limit?: string } }>("/admin/diagnostics/crashes", async (req, reply) => {
+    const me = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
+    if (!me || me.role !== "masteradmin") {
+      reply.code(403);
+      return { error: "forbidden", message: "masteradmin only" };
+    }
+    const rawLimit = req.query.limit;
+    const limit = Math.max(1, Math.min(500, parseInt(rawLimit ?? "100", 10) || 100));
+    const crashes = readRecentCrashes(limit);
+    return {
+      crashes,
+      logPath: CRASH_LOG_PATH,
+      // Tells the caller "if this is empty AND you expected entries,
+      // make sure the volume is mounted at the right place." Helps
+      // distinguish "no crashes" from "log file missing."
+      totalReturned: crashes.length,
+    };
+  });
+
   app.get<{ Querystring: { tzOffsetMin?: string } }>("/admin/overview", async (req, reply) => {
     if (!(await requirePermission(req, reply, "view_admin_overview"))) return;
     const now = Date.now();
@@ -859,14 +898,21 @@ export async function registerAdminRoutes(
     maxBioLength: z.number().int().min(1000).max(200_000).optional(),
     /** Master switch for /auth/register. */
     registrationOpen: z.boolean().optional(),
-    /** HTML rendered above the splash login form. Sanitized on save. 50KB cap. */
-    welcomeHtml: z.string().max(50_000).optional(),
-    /** HTML body of the Rules modal. Sanitized on save. 50KB cap. */
-    rulesHtml: z.string().max(50_000).optional(),
-    /** HTML body of the privacy/safety notice in the Rules modal. Sanitized on save. 10KB cap. */
-    securityNoticeHtml: z.string().max(10_000).optional(),
-    /** HTML body of the registration disclaimer. Sanitized on save. 20KB cap. */
-    registerDisclaimerHtml: z.string().max(20_000).optional(),
+    // Long-form HTML fields. Caps tuned for "fully comprehensive rules,
+    // ToS, and privacy disclosure" — admins shouldn't bump against these
+    // for any realistic document. Each is independently capped so a
+    // huge rules doc doesn't lock the admin out of editing the smaller
+    // welcome blurb (or vice versa). Sanitizer (sanitizeBio) has no
+    // length limit of its own; Fastify's bodyLimit (12MB) is the
+    // outer guard rail.
+    /** HTML rendered above the splash login form. Sanitized on save. */
+    welcomeHtml: z.string().max(500_000).optional(),
+    /** HTML body of the Rules modal AND the /rules public page. Sanitized on save. */
+    rulesHtml: z.string().max(1_000_000).optional(),
+    /** HTML body of the privacy/safety notice in the Rules modal AND on /rules. Sanitized on save. */
+    securityNoticeHtml: z.string().max(500_000).optional(),
+    /** HTML body of the registration disclaimer (effectively the ToS). Sanitized on save. */
+    registerDisclaimerHtml: z.string().max(500_000).optional(),
     /** Plain-text SEO description (meta description, OG, Twitter card). 500-char cap. */
     metaDescription: z.string().max(500).optional(),
     /**

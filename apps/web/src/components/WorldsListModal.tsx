@@ -43,21 +43,9 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
   }
   useEffect(() => { load(); }, []);
 
-  async function setPrimary(worldId: string | null) {
-    setError(null);
-    try {
-      const r = await fetch("/me/primary-world", {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ worldId }),
-      });
-      if (!r.ok) throw new Error(await readError(r));
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "save failed");
-    }
-  }
+  // setPrimary was removed in migration 0187 — primary-world is gone
+  // alongside the userlist's world-bucket grouping that used to make
+  // a "headline affiliation" meaningful.
 
   async function leave(worldId: string, name: string) {
     if (!window.confirm(`Leave "${name}"? You can re-join from the world catalog any time.`)) return;
@@ -201,17 +189,28 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
               </h3>
               <ul className="space-y-2">
                 {joinedOnly.map((m) => (
-                  <li key={m.worldId} className="rounded border border-keep-rule/60 bg-keep-bg p-3">
+                  <li
+                    key={`${m.worldId}:${m.characterId ?? ""}`}
+                    className="rounded border border-keep-rule/60 bg-keep-bg p-3"
+                  >
                     <header className="flex items-baseline justify-between gap-2">
                       <div className="min-w-0">
                         <span className="font-semibold">{m.worldName}</span>
                         <span className="ml-2 text-[11px] text-keep-muted">/{m.worldSlug}</span>
                         <span className="ml-2 text-[11px] text-keep-muted">by {m.ownerUsername}</span>
-                        {m.isPrimary ? (
-                          <span className="ml-2 rounded bg-keep-action/20 px-1 text-[10px] uppercase tracking-widest text-keep-action">
-                            primary
-                          </span>
-                        ) : null}
+                        {/* Identity badge — characters and OOC each
+                            join independently per migration 0187, so
+                            the same world can appear twice (or more)
+                            in this list. The pill makes which face
+                            joined explicit. */}
+                        <span
+                          className="ml-2 rounded border border-keep-rule bg-keep-banner/60 px-1 text-[10px] uppercase tracking-widest text-keep-muted"
+                          title={m.characterId !== null
+                            ? `Joined as your character ${m.identityDisplayName}`
+                            : "Joined as OOC (your master account)"}
+                        >
+                          as {m.characterId !== null ? m.identityDisplayName : "OOC"}
+                        </span>
                       </div>
                       <div className="shrink-0 text-[10px] text-keep-muted">
                         joined {new Date(m.joinedAt).toLocaleDateString()}
@@ -225,25 +224,6 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
                       >
                         View
                       </button>
-                      {m.isPrimary ? (
-                        <button
-                          type="button"
-                          onClick={() => setPrimary(null)}
-                          title="Stop using this as your primary world (you'll appear unaffiliated in the userlist)."
-                          className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
-                        >
-                          Unset primary
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setPrimary(m.worldId)}
-                          title="Use this as your primary world (groups you with other members in the userlist)."
-                          className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80"
-                        >
-                          Set as primary
-                        </button>
-                      )}
                       <button
                         type="button"
                         onClick={() => leave(m.worldId, m.worldName)}

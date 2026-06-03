@@ -404,7 +404,14 @@ function ReactionGlyph({
         style={{
           width: `${size}px`,
           height: `${size}px`,
-          fontSize: `${Math.round(size * 0.85)}px`,
+          // 0.72 (down from 0.85) brings the rendered emoji glyph into
+          // visual parity with sticker sprites in the same chip. Emoji
+          // fonts paint nearly the full em-box, while sticker PNGs are
+          // exported with ~15-25% of transparent padding around the art
+          // — so a glyph at 85% of the container was reading noticeably
+          // BIGGER than a sprite at 100%, exactly the opposite of what
+          // a side-by-side chip row should show.
+          fontSize: `${Math.round(size * 0.72)}px`,
           lineHeight: 1,
           // Force the browser through its color-emoji fallback chain.
           // Without an explicit family here, the chip inherits whatever

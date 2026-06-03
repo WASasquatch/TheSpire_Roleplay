@@ -40,6 +40,7 @@ export const PERMISSION_KEYS = [
   "pin_forum_topic",
   "announce_room",
   "announce_sitewide",
+  "use_ghost_mode",
 
   // ---- room_admin ----
   "bypass_room_cap",
@@ -154,6 +155,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   pin_forum_topic: "Sticky a forum topic to the top of the topic list.",
   announce_room: "Send `/announce` in the current room (high-visibility broadcast).",
   announce_sitewide: "Send `/announce all` to every room. Use sparingly.",
+  use_ghost_mode: "Use /incognito (or /ghost) to disappear from the userlist and observe rooms unnoticed.",
 
   // room_admin
   bypass_room_cap: "Skip the per-user max-rooms-owned ceiling on /go and /private.",
@@ -261,6 +263,7 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   pin_forum_topic: "chat_moderation",
   announce_room: "chat_moderation",
   announce_sitewide: "chat_moderation",
+  use_ghost_mode: "chat_moderation",
 
   // room_admin
   bypass_room_cap: "room_admin",

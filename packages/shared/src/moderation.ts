@@ -65,7 +65,10 @@ export type AuditAction =
   | "role_permission_grant"     // a permission was granted to a role in the matrix
   | "role_permission_revoke"    // a permission was revoked from a role in the matrix
   | "user_permission_override_set"   // a per-user override was set (grant or revoke)
-  | "user_permission_override_clear"; // a per-user override was removed (falls back to role grant)
+  | "user_permission_override_clear" // a per-user override was removed (falls back to role grant)
+  // Incognito ("ghost") mode toggles (Phase 11 — staff observation)
+  | "incognito_enter"
+  | "incognito_exit";
 
 /**
  * Preset action groups for the AuditTab's category dropdown. Each
@@ -89,7 +92,7 @@ export const AUDIT_ACTION_GROUPS: Record<string, { label: string; actions: reado
   },
   moderation: {
     label: "Moderation",
-    actions: ["kick", "mute", "unmute", "ban", "unban", "announce"],
+    actions: ["kick", "mute", "unmute", "ban", "unban", "announce", "incognito_enter", "incognito_exit"],
   },
   role_changes: {
     label: "Role changes",

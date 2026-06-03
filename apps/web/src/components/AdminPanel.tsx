@@ -1747,7 +1747,7 @@ function BrandingTab() {
           value={draft.welcomeHtml}
           onChange={(e) => setDraft({ ...draft, welcomeHtml: e.target.value })}
           rows={6}
-          maxLength={50_000}
+          maxLength={500_000}
           placeholder="<p>Welcome to <b>The Spire</b> - a roleplay-focused chat sanctuary.</p>&#10;<p>Sign in to enter, or register a new account.</p>"
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
@@ -2100,13 +2100,14 @@ function RulesTab() {
           value={rulesHtml}
           onChange={(e) => setRulesHtml(e.target.value)}
           rows={14}
-          maxLength={50_000}
+          maxLength={1_000_000}
           placeholder="<h3>House Rules</h3><ol><li>...</li></ol>"
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
           Free-form RP house rules. Defaults seed an 8-point baseline covering
-          consent, godmodding, OOC/IC separation, and reporting.
+          consent, godmodding, OOC/IC separation, and reporting. Cap is 1MB
+          of HTML &mdash; enough for a fully comprehensive multi-section ruleset.
         </p>
       </fieldset>
 
@@ -2116,14 +2117,15 @@ function RulesTab() {
           value={securityHtml}
           onChange={(e) => setSecurityHtml(e.target.value)}
           rows={8}
-          maxLength={10_000}
+          maxLength={500_000}
           placeholder="<h3>Privacy &amp; Safety</h3><p>...</p>"
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
           Shown alongside the rules. Defaults explain the privacy contract:
           admins cannot read private/whispered messages, so users should
-          self-govern and report problems with screenshots.
+          self-govern and report problems with screenshots. 500KB cap fits a
+          full privacy disclosure with ample headroom.
         </p>
       </fieldset>
 
@@ -2133,7 +2135,7 @@ function RulesTab() {
           value={disclaimerHtml}
           onChange={(e) => setDisclaimerHtml(e.target.value)}
           rows={10}
-          maxLength={20_000}
+          maxLength={500_000}
           placeholder="<p>This is a free-form roleplay chat...</p>"
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
@@ -2141,6 +2143,7 @@ function RulesTab() {
           Rendered above the registration form on the splash. Users must tick
           an "I agree" checkbox before <code>/auth/register</code> succeeds.
           Empty disclaimer = no checkbox shown (registration unblocked).
+          500KB cap fits a full Terms-of-Service document.
         </p>
       </fieldset>
 
@@ -2150,7 +2153,7 @@ function RulesTab() {
           value={welcomeHtml}
           onChange={(e) => setWelcomeHtml(e.target.value)}
           rows={10}
-          maxLength={50_000}
+          maxLength={500_000}
           placeholder="<h3>Welcome to The Spire</h3><p>Quick orientation...</p>"
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />

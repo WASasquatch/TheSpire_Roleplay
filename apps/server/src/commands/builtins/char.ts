@@ -240,10 +240,25 @@ export const charCommand: CommandHandler = {
           .from(characters)
           .where(and(eq(characters.userId, ctx.user.id), isNull(characters.deletedAt)));
         const names = list.map((c) => c.name).sort();
-        const body = names.length
-          ? `Your characters: ${names.join(", ")}`
-          : "You have no characters yet. Create one with /char create <name>.";
-        ctx.socket.emit("error:notice", { code: "CHAR_LIST", message: body });
+        // Reference content the user might want to read or copy
+        // (especially with many characters) — persistent modal beats
+        // the 6-second toast.
+        if (names.length === 0) {
+          ctx.socket.emit("ui:hint", {
+            kind: "open-info-modal",
+            title: "Your characters",
+            body: "You have no characters yet.\nCreate one with /char create <name>.",
+          });
+        } else {
+          // One name per line so long lists stay scannable. Toast
+          // mode used a comma-joined single line; the modal can
+          // afford to spread out.
+          ctx.socket.emit("ui:hint", {
+            kind: "open-info-modal",
+            title: `Your characters (${names.length})`,
+            body: names.map((n) => `  ${n}`).join("\n"),
+          });
+        }
         return;
       }
       default:

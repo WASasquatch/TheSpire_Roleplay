@@ -1,18 +1,27 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   Theme,
+  WorldApplicationEntry,
+  WorldApplicationList,
   WorldDetail,
   WorldGenre,
+  WorldJoinMode,
   WorldPacing,
   WorldPage,
   WorldStatus,
+  WorldVibeAxisKey,
+  WorldVibeStats,
   WorldVisibility,
 } from "@thekeep/shared";
 import {
   CANONICAL_TAGS,
   CONTENT_WARNINGS,
   DEFAULT_THEME,
+  WORLD_APP_MAX_QUESTIONS,
+  WORLD_APP_QUESTION_MAX_LEN,
+  WORLD_APP_REVIEW_NOTE_MAX_LEN,
   WORLD_PAGE_DEPTH_CAP,
+  WORLD_VIBE_AXES,
 } from "@thekeep/shared";
 import {
   addWorldCollaborator,
@@ -22,7 +31,7 @@ import {
   type WorldTreeNode,
 } from "../lib/worlds.js";
 import { readError } from "../lib/http.js";
-import { themeStyle } from "../lib/theme.js";
+import { ActiveThemeContext, themeStyle, useActiveTheme } from "../lib/theme.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { CloseButton } from "./CloseButton.js";
@@ -101,9 +110,12 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
   // Scope the world's theme to this modal only - styleOverride flows down
   // through CSS vars so all the keep-* tailwind colors inside this card use
   // the world author's palette without leaking into the chat behind us.
+  const viewerTheme = useActiveTheme();
+  const scopedTheme = detail?.world.theme ?? viewerTheme;
   const modalStyle = detail?.world.theme ? themeStyle(detail.world.theme) : undefined;
   return (
     <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
+      <ActiveThemeContext.Provider value={scopedTheme}>
       <div
         style={modalStyle}
         className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg text-keep-text`}
@@ -204,6 +216,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
           </div>
         )}
       </div>
+      </ActiveThemeContext.Provider>
     </Modal>
   );
 }
@@ -310,6 +323,14 @@ function WorldMetaEditor({
   const [cws, setCws] = useState<string[]>(w.contentWarnings);
   const [coverImageUrl, setCoverImageUrl] = useState(w.coverImageUrl ?? "");
   const [pacing, setPacing] = useState<WorldPacing | "">(w.pacing ?? "");
+  // Vibe stats — eight 0..100 axes; null means "author hasn't tuned
+  // this axis". State stays as a partial bag so per-axis "clear"
+  // doesn't disturb other axes.
+  const [vibeStats, setVibeStats] = useState<WorldVibeStats>(w.vibeStats);
+  // Application gating: joinMode + the question list. Empty list is
+  // legal (an application with no Q&A captures just intent).
+  const [joinMode, setJoinMode] = useState<WorldJoinMode>(w.joinMode);
+  const [applicationQuestions, setApplicationQuestions] = useState<string[]>(w.applicationQuestions);
   // Status: owners pick `active` or `archived`; the `featured` slot is
   // admin-only (the server silently downgrades any attempt to
   // self-promote). We surface `featured` here read-only so an admin
@@ -362,6 +383,25 @@ function WorldMetaEditor({
       if (coverNext !== (w.coverImageUrl ?? null)) body.coverImageUrl = coverNext;
       const pacingNext = (pacing === "" ? null : pacing) as WorldPacing | null;
       if (pacingNext !== (w.pacing ?? null)) body.pacing = pacingNext;
+      // Vibe stats: emit only the axes that actually changed. Empty
+      // object = no axes touched, skip the field entirely so we
+      // don't write "vibeStats: {}" which serializes to a no-op
+      // request body but eats a round trip.
+      const vibeDelta: Partial<WorldVibeStats> = {};
+      for (const axis of WORLD_VIBE_AXES) {
+        if (vibeStats[axis.key] !== w.vibeStats[axis.key]) {
+          vibeDelta[axis.key] = vibeStats[axis.key];
+        }
+      }
+      if (Object.keys(vibeDelta).length > 0) body.vibeStats = vibeDelta;
+      if (joinMode !== w.joinMode) body.joinMode = joinMode;
+      // JSON.stringify comparison so questions containing spaces (or
+      // pairs like ["a b","c"] vs ["a","b c"] that join to the same
+      // string) can never false-match. Keeps the diff honest at the
+      // cost of one stringify per save.
+      if (JSON.stringify(applicationQuestions) !== JSON.stringify(w.applicationQuestions)) {
+        body.applicationQuestions = applicationQuestions;
+      }
       if (Object.keys(body).length === 0) { setBusy(false); return; }
       const r = await fetch(`/worlds/${worldId}`, {
         method: "PATCH",
@@ -596,6 +636,147 @@ function WorldMetaEditor({
             Featured status is admin-curated only; owners can move between Active and Archived.
           </span>
         </label>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 space-y-3">
+        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">
+          Vibe stats
+        </legend>
+        <p className="text-[11px] text-keep-muted">
+          Tune what the play in this world feels like. Each axis is 0&ndash;100 and shows as a bar on your
+          catalog card. Leave an axis unset (clear it) if your setting has nothing to say about it &mdash; the
+          card hides the bar instead of showing a tiny "0%".
+        </p>
+        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {WORLD_VIBE_AXES.map((axis) => {
+            const value = vibeStats[axis.key];
+            return (
+              <li key={axis.key} className="space-y-1">
+                <div className="flex items-baseline justify-between gap-2">
+                  <label
+                    className="text-keep-text"
+                    htmlFor={`vibe-${axis.key}`}
+                    title={axis.desc}
+                  >
+                    {axis.label}
+                  </label>
+                  {/* Live percentage readout doubles as a typeable
+                      number input — handy when you want an exact
+                      value (e.g. 73) without nudging the slider one
+                      tick at a time. Empty string clears the axis;
+                      out-of-range values clamp to 0..100. */}
+                  <div className="flex items-baseline gap-1 text-[10px] text-keep-muted">
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={value ?? ""}
+                      placeholder="unset"
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw === "") {
+                          setVibeStats({ ...vibeStats, [axis.key]: null });
+                          return;
+                        }
+                        const v = parseInt(raw, 10);
+                        if (Number.isNaN(v)) return;
+                        const clamped = Math.max(0, Math.min(100, v));
+                        setVibeStats({ ...vibeStats, [axis.key]: clamped });
+                      }}
+                      aria-label={`${axis.label} percentage`}
+                      className="w-12 rounded border border-keep-rule bg-keep-bg px-1 py-0 text-right tabular-nums text-keep-text outline-none focus:border-keep-action"
+                    />
+                    <span>%</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    id={`vibe-${axis.key}`}
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={value ?? 0}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      setVibeStats({ ...vibeStats, [axis.key]: v });
+                    }}
+                    className="flex-1"
+                  />
+                  {value !== null ? (
+                    <button
+                      type="button"
+                      onClick={() => setVibeStats({ ...vibeStats, [axis.key]: null })}
+                      className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+                      title="Clear this axis"
+                    >
+                      clear
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setVibeStats({ ...vibeStats, [axis.key]: 50 })}
+                      className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+                      title="Set this axis to 50%"
+                    >
+                      set
+                    </button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 space-y-3">
+        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">
+          Membership
+        </legend>
+        <label className="block">
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Join mode</span>
+          <select
+            value={joinMode}
+            onChange={(e) => setJoinMode(e.target.value as WorldJoinMode)}
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+          >
+            <option value="open">Open &mdash; one-click Join from the catalog</option>
+            <option value="application">Application &mdash; people apply, you approve / reject</option>
+            <option value="invite-only">Invite-only &mdash; only you can add members</option>
+          </select>
+          <span className="mt-0.5 block text-[10px] text-keep-muted">
+            Independent of visibility &mdash; a private world can still take applications from people you share the link with.
+          </span>
+        </label>
+
+        {/* Mode-specific clarification on HOW people get in.
+            Especially important for "invite-only": without this
+            line, owners pick the mode and then have no idea how to
+            actually seat anyone. */}
+        {joinMode === "invite-only" ? (
+          <div className="rounded border border-keep-action/40 bg-keep-action/10 p-2 text-[11px] text-keep-muted">
+            <span className="font-semibold text-keep-action">Invite-only:</span>{" "}
+            the catalog Join button is disabled for everyone. The only way someone becomes a member is if you add them directly using the search field below. Switch to <em>Application</em> if you want would-be members to apply for review instead.
+          </div>
+        ) : null}
+
+        {joinMode === "application" ? (
+          <ApplicationQuestionsEditor
+            questions={applicationQuestions}
+            onChange={setApplicationQuestions}
+          />
+        ) : null}
+
+        {joinMode === "application" && (myId === w.ownerUserId || canManageCollaborators) ? (
+          <PendingApplicationsPanel worldId={worldId} onChanged={onSaved} />
+        ) : null}
+
+        {/* Direct invite panel. Available in every join mode (the
+            owner may want to pre-seat someone on an open world too)
+            but visually emphasized when invite-only is the active
+            mode via the hint above. */}
+        {(myId === w.ownerUserId || canManageCollaborators) ? (
+          <InviteMemberPanel worldId={worldId} onInvited={onSaved} />
+        ) : null}
       </fieldset>
 
       <fieldset className="rounded border border-keep-rule p-3">
@@ -1085,5 +1266,488 @@ function collectDescendants(pages: WorldPage[], rootId: string): Set<string> {
   }
   walk(rootId);
   return out;
+}
+
+/* ------------------------------------------------------------ *
+ *  InviteMemberPanel — owner directly adds a named identity to
+ *  the world. Search-and-select shape: typing into the input
+ *  hits `/users?q=...` debounced, results enumerate each
+ *  identity (master OOC row + every character) so an owner can
+ *  pick exactly which face of an account to seat. Click → POST
+ *  /worlds/:id/invites with the corresponding `@id:` / `@cid:`
+ *  token, which the server's `resolveIdentityArg` recognizes
+ *  without any name-collision ambiguity.
+ *
+ *  Identity disambiguation is essential here: two different
+ *  master accounts CAN have a character with the same name, so
+ *  free-text name-typing would force the server to return an
+ *  ambiguous-candidates list and the owner to redo the dance.
+ *  Picking from search results sidesteps that entirely — every
+ *  row in the dropdown carries the unambiguous token.
+ * ------------------------------------------------------------ */
+
+interface InviteSearchRow {
+  /** The identity being offered. `@id:<userId>` for the master
+   *  OOC row, `@cid:<characterId>` for a character row. */
+  token: string;
+  /** Display label rendered as the row's primary text. */
+  label: string;
+  /** Sublabel — "OOC" for master rows, the master's username for
+   *  character rows so owners can tell two Jaggers apart. */
+  sublabel: string;
+  /** Live online state from the directory; surfaced as a tiny
+   *  dot so an owner has some signal whether the invitee will
+   *  see the membership immediately. */
+  online: boolean;
+}
+
+function InviteMemberPanel({
+  worldId,
+  onInvited,
+}: {
+  worldId: string;
+  /** Called after a successful invite so the parent can refresh
+   *  the member gallery. */
+  onInvited: () => Promise<void> | void;
+}) {
+  const [query, setQuery] = useState("");
+  const [rows, setRows] = useState<InviteSearchRow[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [inviting, setInviting] = useState<string | null>(null);
+  // Successful invites get a one-line "Invited <name>" confirmation
+  // that auto-clears after a few seconds — same UX as a toast but
+  // anchored to the panel so the owner can see it next to the row
+  // they just acted on.
+  const [lastInvited, setLastInvited] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const reqIdRef = useRef(0);
+
+  // Debounced live search. The server-side `/users?q=` is the same
+  // endpoint the @-mention autocomplete uses, so we don't ship a
+  // dedicated invite-search route.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setRows([]);
+      return;
+    }
+    const myReq = ++reqIdRef.current;
+    setSearching(true);
+    const handle = window.setTimeout(() => {
+      fetch(`/users?q=${encodeURIComponent(q)}&limit=10`, { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (myReq !== reqIdRef.current) return;
+          if (!j || !Array.isArray(j.users)) { setRows([]); return; }
+          const lc = q.toLowerCase();
+          const out: InviteSearchRow[] = [];
+          for (const u of j.users as Array<{
+            userId: string;
+            username: string;
+            online: boolean;
+            characters?: Array<{ id: string; name: string }>;
+          }>) {
+            // Master OOC row — match if the username contains the
+            // query. Substring (not prefix) so typing the middle of
+            // a long handle still surfaces it.
+            if (u.username.toLowerCase().includes(lc)) {
+              out.push({
+                token: `@id:${u.userId}`,
+                label: u.username,
+                sublabel: "OOC (master account)",
+                online: u.online,
+              });
+            }
+            for (const c of u.characters ?? []) {
+              if (!c.name.toLowerCase().includes(lc)) continue;
+              out.push({
+                token: `@cid:${c.id}`,
+                label: c.name,
+                // Master parenthetical disambiguates same-named
+                // characters across accounts — the whole point of
+                // doing this through tokens.
+                sublabel: `Character · ${u.username}`,
+                online: u.online,
+              });
+            }
+          }
+          setRows(out);
+        })
+        .catch(() => { if (myReq === reqIdRef.current) setRows([]); })
+        .finally(() => { if (myReq === reqIdRef.current) setSearching(false); });
+    }, 180);
+    return () => window.clearTimeout(handle);
+  }, [query]);
+
+  async function invite(row: InviteSearchRow) {
+    setInviting(row.token);
+    setError(null);
+    try {
+      const r = await fetch(`/worlds/${worldId}/invites`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: row.token }),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      const data = (await r.json()) as { ok: true; displayName?: string; alreadyMember?: boolean };
+      const name = data.displayName ?? row.label;
+      setLastInvited(data.alreadyMember ? `${name} is already a member` : `Invited ${name}`);
+      // Auto-clear the confirmation so a string of invites doesn't
+      // leave a stale row on screen.
+      window.setTimeout(() => setLastInvited(null), 4_000);
+      await onInvited();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "invite failed");
+    } finally {
+      setInviting(null);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded border border-keep-rule/60 bg-keep-banner/30 p-2">
+      <span className="text-[10px] uppercase tracking-widest text-keep-muted">
+        Invite a member
+      </span>
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search by username or character name…"
+        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+        aria-label="Search for a user or character to invite"
+      />
+      {error ? (
+        <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-1.5 text-[11px] text-keep-accent">
+          {error}
+        </div>
+      ) : null}
+      {lastInvited ? (
+        <div className="rounded border border-keep-action/40 bg-keep-action/10 p-1.5 text-[11px] text-keep-action">
+          {lastInvited}
+        </div>
+      ) : null}
+      {query.trim().length < 2 ? (
+        <p className="text-[11px] italic text-keep-muted">
+          Type at least two letters. Each identity (the OOC handle plus every character on that account) shows up as its own row so you can pick exactly which face joins.
+        </p>
+      ) : searching && rows.length === 0 ? (
+        <p className="text-[11px] italic text-keep-muted">Searching…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-[11px] italic text-keep-muted">No matches.</p>
+      ) : (
+        <ul className="divide-y divide-keep-rule/40 overflow-hidden rounded border border-keep-rule/40">
+          {rows.map((row) => (
+            <li key={row.token} className="flex items-center gap-2 bg-keep-bg/40 px-2 py-1">
+              <span
+                aria-hidden
+                title={row.online ? "Online now" : "Offline"}
+                className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
+                  row.online ? "bg-keep-action" : "bg-keep-muted/50"
+                }`}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-keep-text">{row.label}</div>
+                <div className="truncate text-[10px] text-keep-muted">{row.sublabel}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void invite(row)}
+                disabled={inviting !== null}
+                className="shrink-0 rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/30 disabled:opacity-50"
+              >
+                {inviting === row.token ? "…" : "Invite"}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ *
+ *  ApplicationQuestionsEditor — author tunes the 0..5 prompt list
+ * ------------------------------------------------------------ */
+
+function ApplicationQuestionsEditor({
+  questions,
+  onChange,
+}: {
+  questions: string[];
+  onChange: (next: string[]) => void;
+}) {
+  function setAt(i: number, v: string) {
+    const next = [...questions];
+    next[i] = v;
+    onChange(next);
+  }
+  function add() {
+    if (questions.length >= WORLD_APP_MAX_QUESTIONS) return;
+    onChange([...questions, ""]);
+  }
+  function removeAt(i: number) {
+    onChange(questions.filter((_, j) => j !== i));
+  }
+  function move(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= questions.length) return;
+    const next = [...questions];
+    [next[i], next[j]] = [next[j]!, next[i]!];
+    onChange(next);
+  }
+  return (
+    <div className="space-y-2 rounded border border-keep-rule/60 bg-keep-banner/30 p-2">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">
+          Questions ({questions.length} / {WORLD_APP_MAX_QUESTIONS})
+        </span>
+        <button
+          type="button"
+          onClick={add}
+          disabled={questions.length >= WORLD_APP_MAX_QUESTIONS}
+          className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0 text-[10px] hover:bg-keep-banner disabled:opacity-50"
+        >
+          + add
+        </button>
+      </div>
+      {questions.length === 0 ? (
+        <p className="text-[11px] italic text-keep-muted">
+          No questions &mdash; applicants will submit just their intent to join. Add a question or two to gather
+          context (RP experience, character concept, schedule, etc.).
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {questions.map((q, i) => (
+            <li key={i} className="flex gap-1">
+              <span className="shrink-0 pt-1 text-[10px] tabular-nums text-keep-muted">{i + 1}.</span>
+              <input
+                type="text"
+                value={q}
+                maxLength={WORLD_APP_QUESTION_MAX_LEN}
+                placeholder="e.g. Tell us about your character concept."
+                onChange={(e) => setAt(i, e.target.value)}
+                className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+              />
+              <div className="flex shrink-0 flex-col gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => move(i, -1)}
+                  disabled={i === 0}
+                  className="rounded border border-keep-rule bg-keep-bg px-1 text-[8px] hover:bg-keep-banner disabled:opacity-30"
+                  title="Move up"
+                >▲</button>
+                <button
+                  type="button"
+                  onClick={() => move(i, 1)}
+                  disabled={i === questions.length - 1}
+                  className="rounded border border-keep-rule bg-keep-bg px-1 text-[8px] hover:bg-keep-banner disabled:opacity-30"
+                  title="Move down"
+                >▼</button>
+              </div>
+              <button
+                type="button"
+                onClick={() => removeAt(i)}
+                className="rounded border border-keep-accent/40 bg-keep-bg px-1.5 py-0 text-[10px] text-keep-accent hover:bg-keep-accent/10"
+                title="Remove this question"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ *
+ *  PendingApplicationsPanel — owner reviews + approves / rejects
+ * ------------------------------------------------------------ */
+
+function PendingApplicationsPanel({
+  worldId,
+  onChanged,
+}: {
+  worldId: string;
+  /** Called after a successful approve/reject so the parent can
+   *  refresh members list (approved applicant joined). */
+  onChanged: () => Promise<void> | void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [list, setList] = useState<WorldApplicationList | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState<string | null>(null);
+  const [showRecent, setShowRecent] = useState(false);
+  // Per-application review note draft. Local state so a typed note
+  // doesn't vanish when the list refreshes after another action.
+  const [notes, setNotes] = useState<Record<string, string>>({});
+
+  async function refresh() {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(`/worlds/${worldId}/applications`, { credentials: "include" });
+      if (!r.ok) throw new Error(await readError(r));
+      const data = (await r.json()) as WorldApplicationList;
+      setList(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "load failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void refresh(); }, [worldId]);
+
+  async function review(app: WorldApplicationEntry, action: "approve" | "reject") {
+    setReviewing(app.id);
+    setError(null);
+    try {
+      const body = {
+        action,
+        reviewNote: notes[app.id]?.trim() || null,
+      };
+      const r = await fetch(
+        `/worlds/${worldId}/applications/${encodeURIComponent(app.id)}`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      if (!r.ok) throw new Error(await readError(r));
+      // Clear the per-app note draft after submit, refresh the
+      // list, and re-broadcast member info up to the parent.
+      setNotes((m) => { const next = { ...m }; delete next[app.id]; return next; });
+      await refresh();
+      await onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "review failed");
+    } finally {
+      setReviewing(null);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded border border-keep-rule/60 bg-keep-banner/30 p-2">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">
+          Pending applications {list ? `(${list.pending.length})` : ""}
+        </span>
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          disabled={loading}
+          className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0 text-[10px] hover:bg-keep-banner disabled:opacity-50"
+        >
+          {loading ? "refreshing…" : "refresh"}
+        </button>
+      </div>
+      {error ? (
+        <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-1.5 text-[11px] text-keep-accent">
+          {error}
+        </div>
+      ) : null}
+      {loading && !list ? (
+        <p className="text-[11px] italic text-keep-muted">Loading applications…</p>
+      ) : list && list.pending.length === 0 ? (
+        <p className="text-[11px] italic text-keep-muted">No pending applications.</p>
+      ) : list ? (
+        <ul className="space-y-2">
+          {list.pending.map((app) => (
+            <li key={app.id} className="rounded border border-keep-rule bg-keep-bg p-2">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="font-semibold text-keep-text">{app.applicantUsername}</span>
+                <span className="text-[10px] text-keep-muted">
+                  {new Date(app.submittedAt).toLocaleString()}
+                </span>
+              </div>
+              {app.questions.length === 0 ? (
+                <p className="mt-1 text-[11px] italic text-keep-muted">
+                  No questions &mdash; applicant submitted just their intent to join.
+                </p>
+              ) : (
+                <ul className="mt-1 space-y-1">
+                  {app.questions.map((q, i) => (
+                    <li key={i} className="rounded border border-keep-rule/40 bg-keep-banner/30 p-1.5">
+                      <div className="text-[10px] uppercase tracking-widest text-keep-muted">{q}</div>
+                      <div className="mt-0.5 whitespace-pre-wrap text-[12px] text-keep-text">
+                        {app.answers[i] || <span className="italic text-keep-muted">(empty)</span>}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mt-2 space-y-1">
+                <textarea
+                  rows={2}
+                  value={notes[app.id] ?? ""}
+                  maxLength={WORLD_APP_REVIEW_NOTE_MAX_LEN}
+                  placeholder="Optional note for the applicant (shown on approve / reject)…"
+                  onChange={(e) => setNotes((m) => ({ ...m, [app.id]: e.target.value }))}
+                  className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-[11px] outline-none focus:border-keep-action"
+                />
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => void review(app, "approve")}
+                    disabled={reviewing === app.id}
+                    className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-[11px] text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+                  >
+                    {reviewing === app.id ? "…" : "Approve"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void review(app, "reject")}
+                    disabled={reviewing === app.id}
+                    className="rounded border border-keep-accent/60 bg-keep-accent/10 px-2 py-0.5 text-[11px] text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {list && list.recent.length > 0 ? (
+        <details
+          open={showRecent}
+          onToggle={(e) => setShowRecent((e.currentTarget as HTMLDetailsElement).open)}
+        >
+          <summary className="cursor-pointer text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">
+            Recent decisions ({list.recent.length})
+          </summary>
+          <ul className="mt-1 space-y-1">
+            {list.recent.map((app) => (
+              <li
+                key={app.id}
+                className="flex flex-wrap items-baseline gap-2 rounded border border-keep-rule/40 bg-keep-banner/20 p-1.5 text-[11px]"
+              >
+                <span className="font-semibold">{app.applicantUsername}</span>
+                <span className={
+                  app.status === "approved"
+                    ? "text-keep-action"
+                    : app.status === "rejected"
+                    ? "text-keep-accent"
+                    : "text-keep-muted"
+                }>
+                  {app.status}
+                </span>
+                <span className="text-[10px] text-keep-muted">
+                  {app.reviewedAt ? new Date(app.reviewedAt).toLocaleString() : ""}
+                </span>
+                {app.reviewNote ? (
+                  <span className="basis-full italic text-keep-muted">“{app.reviewNote}”</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
 }
 

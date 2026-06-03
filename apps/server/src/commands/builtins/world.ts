@@ -99,17 +99,19 @@ async function findOwnWorld(ctx: CommandContext, slug: string) {
  *                         to link someone else's open world.)
  * /world unlink         - room owner/mod/admin removes the link
  * /world catalog        - opens the world catalog modal
- * /world join [slug]    - join an open world (or the room's linked world
- *                         if no slug). Doesn't change room access;
- *                         affiliates you with the world for userlist
- *                         grouping + profile.
- * /world leave [slug]   - leave a world membership.
- * /world primary [slug] - set this world as your primary affiliation
- *                         (clears primary if no slug).
+ * /world join [slug]    - join an open world (or the room's linked
+ *                         world if no slug) AS THE CURRENT IDENTITY
+ *                         (master OOC or active character). Per
+ *                         migration 0187, characters and OOC have
+ *                         independent memberships.
+ * /world leave [slug]   - leave a world AS THE CURRENT IDENTITY.
+ *
+ * /world primary was retired in 0187 along with userlist world-bucket
+ * grouping — primary world no longer means anything cross-identity.
  */
 export const worldCommand: CommandHandler = {
   name: "world",
-  usage: "/world | /world <slug> | /world view <slug> | /world link <slug> | /world unlink | /world catalog | /world join [slug] | /world leave [slug] | /world primary [slug]",
+  usage: "/world | /world <slug> | /world view <slug> | /world link <slug> | /world unlink | /world catalog | /world join [slug] | /world leave [slug]",
   description: "Show, link, or join a world (wiki). Pass a slug to open any visible world directly.",
   subcommands: [
     { verb: "(no args)", usage: "/world", description: "Open the linked world's wiki, if any." },
@@ -118,9 +120,8 @@ export const worldCommand: CommandHandler = {
     { verb: "link", usage: "/world link <slug>", description: "Link one of YOUR worlds to this room. (Owner/mod/admin only.)" },
     { verb: "unlink", usage: "/world unlink", description: "Remove the linked world. (Owner/mod/admin only.)" },
     { verb: "catalog", usage: "/world catalog", description: "Browse the world catalog (open worlds usable in any room)." },
-    { verb: "join", usage: "/world join [slug]", description: "Join an open world (or the room's linked world)." },
-    { verb: "leave", usage: "/world leave [slug]", description: "Leave a world (or the room's linked world)." },
-    { verb: "primary", usage: "/world primary [slug]", description: "Set your primary world (clears primary if no slug)." },
+    { verb: "join", usage: "/world join [slug]", description: "Join an open world as your current identity." },
+    { verb: "leave", usage: "/world leave [slug]", description: "Leave a world as your current identity." },
   ],
   async run(ctx) {
     const [sub, ...rest] = ctx.args;
@@ -202,17 +203,33 @@ export const worldCommand: CommandHandler = {
           && !(await hasPermission(ctx.user, "edit_others_world", ctx.db))) {
         return notice(ctx, "NOT_OPEN", `"${w.name}" isn't open for community membership.`);
       }
+      // Per-identity (migration 0187): the joining face is whatever
+      // character the user is currently voicing, or OOC. The Apply
+      // path (joinMode = "application") is handled in the catalog
+      // UI, not the slash command.
+      const charId = ctx.user.activeCharacterId;
+      const identityMatch = charId === null
+        ? sql`${worldMembers.characterId} IS NULL`
+        : eq(worldMembers.characterId, charId);
       const existing = (await ctx.db
         .select()
         .from(worldMembers)
-        .where(and(eq(worldMembers.worldId, w.id), eq(worldMembers.userId, ctx.user.id)))
+        .where(and(
+          eq(worldMembers.worldId, w.id),
+          eq(worldMembers.userId, ctx.user.id),
+          identityMatch,
+        ))
         .limit(1))[0];
       if (existing) {
-        return notice(ctx, "ALREADY_MEMBER", `You're already a member of "${w.name}".`);
+        return notice(ctx, "ALREADY_MEMBER", `You're already a member of "${w.name}" (as this identity).`);
       }
-      await ctx.db.insert(worldMembers).values({ worldId: w.id, userId: ctx.user.id, isPrimary: 0 });
+      await ctx.db.insert(worldMembers).values({
+        worldId: w.id,
+        userId: ctx.user.id,
+        characterId: charId,
+      });
       await rebroadcastSelfOccupancy(ctx);
-      return notice(ctx, "JOINED", `Joined "${w.name}". /world primary ${w.slug} to display it in the userlist.`);
+      return notice(ctx, "JOINED", `Joined "${w.name}".`);
     }
 
     if (subLower === "leave") {
@@ -223,52 +240,28 @@ export const worldCommand: CommandHandler = {
           ? `No visible world with slug "${slug}".`
           : "No world is linked to this room. Pass a slug, e.g. /world leave darkrealm.");
       }
+      const charId = ctx.user.activeCharacterId;
+      const identityMatch = charId === null
+        ? sql`${worldMembers.characterId} IS NULL`
+        : eq(worldMembers.characterId, charId);
       const r = await ctx.db
         .delete(worldMembers)
-        .where(and(eq(worldMembers.worldId, w.id), eq(worldMembers.userId, ctx.user.id)));
+        .where(and(
+          eq(worldMembers.worldId, w.id),
+          eq(worldMembers.userId, ctx.user.id),
+          identityMatch,
+        ));
       if (r.changes === 0) {
-        return notice(ctx, "NOT_MEMBER", `You're not a member of "${w.name}".`);
+        return notice(ctx, "NOT_MEMBER", `You're not a member of "${w.name}" (as this identity).`);
       }
       await rebroadcastSelfOccupancy(ctx);
       return notice(ctx, "LEFT", `Left "${w.name}".`);
     }
 
-    if (subLower === "primary") {
-      const slug = rest.join(" ").trim();
-      // No slug = clear primary (matches the PUT /me/primary-world {worldId: null} contract).
-      if (!slug) {
-        await ctx.db
-          .update(worldMembers)
-          .set({ isPrimary: 0 })
-          .where(and(eq(worldMembers.userId, ctx.user.id), eq(worldMembers.isPrimary, 1)));
-        await rebroadcastSelfOccupancy(ctx);
-        return notice(ctx, "PRIMARY_CLEARED", "Primary world cleared.");
-      }
-      const w = await resolveWorldForMembership(ctx, slug);
-      if (!w) return notice(ctx, "NO_WORLD", `No visible world with slug "${slug}".`);
-      const m = (await ctx.db
-        .select()
-        .from(worldMembers)
-        .where(and(eq(worldMembers.worldId, w.id), eq(worldMembers.userId, ctx.user.id)))
-        .limit(1))[0];
-      if (!m) {
-        return notice(ctx, "NOT_MEMBER", `Join "${w.name}" first: /world join ${w.slug}.`);
-      }
-      // Single transaction: clear other primaries, set this one. Mirrors
-      // the route handler so the partial unique index can't trip us up.
-      ctx.db.transaction((tx) => {
-        tx.update(worldMembers)
-          .set({ isPrimary: 0 })
-          .where(and(eq(worldMembers.userId, ctx.user.id), eq(worldMembers.isPrimary, 1)))
-          .run();
-        tx.update(worldMembers)
-          .set({ isPrimary: 1 })
-          .where(and(eq(worldMembers.userId, ctx.user.id), eq(worldMembers.worldId, w.id)))
-          .run();
-      });
-      await rebroadcastSelfOccupancy(ctx);
-      return notice(ctx, "PRIMARY_SET", `"${w.name}" is now your primary world.`);
-    }
+    // `/world primary` was retired in migration 0187 — primary world
+    // is no longer a thing now that memberships are per-identity. The
+    // userlist no longer groups by world; visit the world's own page
+    // to see its member list.
 
     // Slug shortcut: any unknown first arg is tried as a world slug. Lets
     // users type `/world darkrealm` instead of `/world view darkrealm`

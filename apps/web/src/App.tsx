@@ -8,6 +8,7 @@ import { Banner } from "./components/Banner.js";
 import { Composer } from "./components/Composer.js";
 import { TypingIndicator } from "./components/TypingIndicator.js";
 import { HelpModal } from "./components/HelpModal.js";
+import { InfoModal } from "./components/InfoModal.js";
 import { MessageList } from "./components/MessageList.js";
 import { MutualPrompts } from "./components/MutualPrompts.js";
 import { StoryInvitePrompts } from "./components/StoryInvitePrompts.js";
@@ -19,6 +20,8 @@ import { RoomPasswordModal } from "./components/RoomPasswordModal.js";
 import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
 import { MessagesModal } from "./components/MessagesModal.js";
 import { RulesModal } from "./components/RulesModal.js";
+import { RulesPage } from "./components/RulesPage.js";
+import { isRulesUrl, navigateAwayFromRules } from "./lib/rulesUrl.js";
 import { EarningDashboard } from "./components/EarningDashboard.js";
 import { EarningRibbon } from "./components/EarningRibbon.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
@@ -108,6 +111,8 @@ export function App() {
               username: string;
               role: Role;
               permissions: PermissionKey[];
+              incognitoMode?: boolean;
+              incognitoAlias?: string | null;
               version?: string;
               updateMessage?: string | null;
             }>)
@@ -140,6 +145,8 @@ export function App() {
             username: j.username,
             role: j.role,
             permissions: j.permissions ?? [],
+            incognitoMode: j.incognitoMode ?? false,
+            incognitoAlias: j.incognitoAlias ?? null,
           });
           // Detect a post-deploy version drift on the very first probe.
           // If the user opened this tab before a deploy, the bundle they
@@ -237,6 +244,8 @@ export function App() {
           username: string;
           role: Role;
           permissions?: PermissionKey[];
+          incognitoMode?: boolean;
+          incognitoAlias?: string | null;
           version?: string;
           updateMessage?: string | null;
         };
@@ -252,11 +261,15 @@ export function App() {
         // has changed.
         if (Array.isArray(j.permissions)) {
           const cur = useChat.getState().me;
+          const nextIncognitoMode = j.incognitoMode ?? false;
+          const nextIncognitoAlias = j.incognitoAlias ?? null;
           const changed =
             !cur
             || cur.id !== j.id
             || cur.username !== j.username
             || cur.role !== j.role
+            || cur.incognitoMode !== nextIncognitoMode
+            || cur.incognitoAlias !== nextIncognitoAlias
             || !samePermissions(cur.permissions, j.permissions);
           if (changed) {
             setMe({
@@ -264,6 +277,8 @@ export function App() {
               username: j.username,
               role: j.role,
               permissions: j.permissions,
+              incognitoMode: nextIncognitoMode,
+              incognitoAlias: nextIncognitoAlias,
             });
           }
         }
@@ -327,6 +342,20 @@ export function App() {
   const [arrivedViaDeepLink, setArrivedViaDeepLink] = useState<boolean>(() => {
     return parseProfileFromUrl() !== null || parseWorldFromUrl() !== null;
   });
+
+  // Public-rules-page route detection. Drives an early-return branch
+  // below that renders RulesPage regardless of auth state, so a
+  // registration-form visitor following the "Read the rules" link
+  // (or any direct visitor to /rules) sees the page without bouncing
+  // through AuthGate first. We track the URL path in state with a
+  // popstate listener so back/forward navigation flips between the
+  // page and whatever the previous route was without a full reload.
+  const [onRulesPage, setOnRulesPage] = useState<boolean>(() => isRulesUrl());
+  useEffect(() => {
+    const onPop = () => setOnRulesPage(isRulesUrl());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   // Mount-time fetch for the deep-link target. Uses HTTP (works whether the
   // viewer is authed or not) so the AuthGate can decide what banner to show
@@ -521,6 +550,24 @@ export function App() {
   const worldStub = pendingPublicWorld?.data && "private" in pendingPublicWorld.data
     ? pendingPublicWorld.data
     : null;
+
+  // Public Rules page — wins over every other branch (deep-link,
+  // splash, AuthGate, chat) because the route is intentionally
+  // available without auth and we don't want any other surface to
+  // intercept it. Back link pops history to "/" so a visitor lands
+  // back on the splash / chat shell depending on auth state.
+  if (onRulesPage) {
+    return (
+      <RulesPage
+        onBack={() => {
+          navigateAwayFromRules();
+          // Manually fire popstate so the path-state above resets
+          // without waiting for a browser-driven navigation event.
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        }}
+      />
+    );
+  }
 
   // Deep-link still resolving — show the standalone shell with a loading
   // indicator so authed users don't see Chat flash for ~100ms before the
@@ -956,6 +1003,10 @@ function Chat() {
   const [openItem, setOpenItem] = useState<ItemZoomEntry | null>(null);
   const [helpOpen, setHelpOpen] = useState<{ filter?: string } | null>(null);
   const [usersOpen, setUsersOpen] = useState<{ query?: string } | null>(null);
+  // Server-emitted info modal — server commands like /list and /find
+  // populate this with a title + multi-line body that the user can
+  // read at leisure (toast is too transient for list output).
+  const [infoOpen, setInfoOpen] = useState<{ title: string; body: string } | null>(null);
   /**
    * Unified Messages modal toggle. Replaces the older split-up trio
    * (FriendsModal + DmListModal + DmFloatingPanel). The Tools
@@ -1907,6 +1958,9 @@ function Chat() {
         case "open-bookmarks":
           setBookmarksOpen(true);
           break;
+        case "open-info-modal":
+          setInfoOpen({ title: h.title, body: h.body });
+          break;
         case "open-earning":
           // Build the open-spec from the hint. Empty object = open at
           // the default Overview tab (the "Your Earning" tools-panel
@@ -2766,6 +2820,25 @@ function Chat() {
   const room = currentRoomId ? rooms[currentRoomId] : undefined;
   const messages = currentRoomId ? messagesByRoom[currentRoomId] ?? [] : [];
   const occ = currentRoomId ? occupants[currentRoomId] ?? [] : [];
+  // Per-room banner dismissals. Keyed by (roomId, kind) in
+  // localStorage; the stored value is the world id or topic text the
+  // user dismissed, so the banner reappears automatically when the
+  // admin changes either one (a fresh value won't match the stored
+  // dismissal). World banners are dismissed per world rather than
+  // per room so the same affiliation across linked rooms stays
+  // dismissed once.
+  const linkedWorldId = room?.linkedWorld?.id ?? null;
+  const roomTopic = room?.topic ?? null;
+  const [worldBannerDismissed, dismissWorldBanner] = useRoomBannerDismissal(
+    currentRoomId,
+    "world",
+    linkedWorldId,
+  );
+  const [topicBannerDismissed, dismissTopicBanner] = useRoomBannerDismissal(
+    currentRoomId,
+    "topic",
+    roomTopic,
+  );
   // Resolve activeTopicId → the actual topic message so the composer can
   // render the "Replying to" indicator. We look it up by id in the room's
   // buffer; null when the id isn't present (paged out, deleted, or no
@@ -2860,25 +2933,55 @@ function Chat() {
         {...(hasAnyAdminAccess ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
       <StaleVersionBanner />
+      <IncognitoBanner />
       {/* Earning — persistent rank-up ribbon. Only renders when the
           user has unacknowledged rank-ups. Tucked under the version
           banner so deploy nags still take precedence. */}
       <EarningRibbon onOpenEarning={() => setEarningOpen({})} />
-      {room?.linkedWorld ? (
-        <button
-          type="button"
-          onClick={() => setWorldViewerId(room.linkedWorld!.id)}
-          className="keep-notice keep-notice-accent flex w-full items-center justify-center gap-2 px-4 py-1 text-xs text-keep-action hover:brightness-110"
-          title="Open this room's linked world"
-        >
-          <span className="uppercase tracking-widest">World</span>
-          <span className="font-semibold normal-case tracking-normal">{room.linkedWorld.name}</span>
-          <span className="text-[10px] text-keep-muted">by {room.linkedWorld.ownerUsername}</span>
-        </button>
+      {room?.linkedWorld && !worldBannerDismissed ? (
+        <div className="keep-notice keep-notice-accent relative flex w-full items-center justify-center pr-10">
+          <button
+            type="button"
+            onClick={() => setWorldViewerId(room.linkedWorld!.id)}
+            className="flex flex-1 items-center justify-center gap-2 px-4 py-1 text-xs text-keep-action hover:brightness-110"
+            title="Open this room's linked world"
+          >
+            <span className="uppercase tracking-widest">World</span>
+            <span className="font-semibold normal-case tracking-normal">{room.linkedWorld.name}</span>
+            <span className="text-[10px] text-keep-muted">by {room.linkedWorld.ownerUsername}</span>
+          </button>
+          {/* Dismiss × — absolutely positioned so it doesn't push the
+              centered label off-axis. Reserved right-side padding on
+              the wrapper (`pr-10`) keeps the chip clear of the label
+              even at narrow widths, and the chip itself sits inside
+              `right-2` so it has breathing room from the viewport
+              edge. Accent-tinted background + outline so the
+              affordance reads as "interactive control" against the
+              banner's own accent surface. stopPropagation keeps the
+              dismiss click from also opening the world viewer. */}
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); dismissWorldBanner(); }}
+            title="Hide this world banner. It'll come back if the room's linked world changes."
+            aria-label="Hide world banner"
+            className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded border border-keep-action/40 bg-keep-action/20 text-[11px] leading-none text-keep-action hover:border-keep-action hover:bg-keep-action/40"
+          >
+            ×
+          </button>
+        </div>
       ) : null}
-      {room?.topic ? (
-        <div className="keep-notice px-4 py-1 text-center text-sm italic text-keep-muted">
+      {room?.topic && !topicBannerDismissed ? (
+        <div className="keep-notice relative px-4 py-1 pr-10 text-center text-sm italic text-keep-muted">
           {room.topic}
+          <button
+            type="button"
+            onClick={dismissTopicBanner}
+            title="Hide this room's topic banner. It'll come back if the topic changes."
+            aria-label="Hide topic banner"
+            className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded border border-keep-accent/40 bg-keep-accent/20 text-[11px] not-italic leading-none text-keep-accent hover:border-keep-accent hover:bg-keep-accent/40"
+          >
+            ×
+          </button>
         </div>
       ) : null}
       {room?.messageExpiryMinutes && room.messageExpiryMinutes > 0 ? (
@@ -3384,6 +3487,13 @@ function Chat() {
           onJumpToMessage={jumpToMessage}
         />
       ) : null}
+      {infoOpen ? (
+        <InfoModal
+          title={infoOpen.title}
+          body={infoOpen.body}
+          onClose={() => setInfoOpen(null)}
+        />
+      ) : null}
       {worldsListOpen ? (
         <WorldsListModal
           onClose={() => setWorldsListOpen(false)}
@@ -3495,6 +3605,63 @@ function Chat() {
   );
 }
 
+/**
+ * Per-room banner-dismissal memory. Keyed on (roomId, kind) in
+ * localStorage; the stored value is the exact world id or topic text
+ * the user dismissed, so the banner reappears automatically when the
+ * admin edits either one (a fresh value won't match the stored
+ * dismissal). When the user leaves the room and comes back the
+ * decision persists — sessionStorage would lose it on refresh, which
+ * we explicitly don't want for chrome the user has actively hidden.
+ *
+ * Returns `[dismissed, dismiss]` — `dismissed` is true only when
+ * `currentValue` is present AND matches the cached value, so a null
+ * `currentValue` (no world linked, no topic set) never reads as
+ * dismissed and rendering the banner conditionally on
+ * `value && !dismissed` is correct.
+ */
+function useRoomBannerDismissal(
+  roomId: string | null,
+  kind: "world" | "topic",
+  currentValue: string | null,
+): readonly [boolean, () => void] {
+  const storageKey = roomId ? `tk:dismissed:room-${kind}:${roomId}` : null;
+  const [stored, setStored] = useState<string | null>(() => {
+    if (!storageKey) return null;
+    try {
+      if (typeof localStorage === "undefined") return null;
+      return localStorage.getItem(storageKey);
+    } catch {
+      return null;
+    }
+  });
+  // Re-read on roomId change so navigating between rooms picks up
+  // each room's own dismissal independently.
+  useEffect(() => {
+    if (!storageKey) {
+      setStored(null);
+      return;
+    }
+    try {
+      setStored(typeof localStorage !== "undefined" ? localStorage.getItem(storageKey) : null);
+    } catch {
+      setStored(null);
+    }
+  }, [storageKey]);
+  const dismissed = !!currentValue && stored === currentValue;
+  const dismiss = useCallback(() => {
+    if (!storageKey || !currentValue) return;
+    try {
+      if (typeof localStorage !== "undefined") localStorage.setItem(storageKey, currentValue);
+    } catch {
+      // Quota or private-mode — best effort; the dismissal still
+      // sticks for the current session via the React state below.
+    }
+    setStored(currentValue);
+  }, [storageKey, currentValue]);
+  return [dismissed, dismiss] as const;
+}
+
 /** Display the per-room expiry window in the most natural unit. Pure helper. */
 function formatExpiry(mins: number): string {
   if (mins >= 1440 && mins % 1440 === 0) {
@@ -3532,6 +3699,43 @@ function Toast({ notice, onDismiss }: { notice: { code: string; message: string 
  * on. The 60s /auth/me poll keeps the comparison fresh, so a deploy
  * surfaces this within a minute of landing.
  */
+/**
+ * Standing reminder rendered while the viewer is incognito. Without
+ * this, a mod who toggles /incognito and then forgets has no signal
+ * that everyone else is treating them as gone — they might type a
+ * normal chat line expecting their name on it and instead drop a
+ * "System" message into the room. The banner sits directly under the
+ * deploy notice so it shares the same eye-line as other "site state"
+ * affordances. One-click exit via "Leave" fires /incognito which
+ * toggles the flag back off.
+ */
+function IncognitoBanner() {
+  const incognitoMode = useChat((s) => s.me?.incognitoMode);
+  const incognitoAlias = useChat((s) => s.me?.incognitoAlias);
+  const currentRoomId = useChat((s) => s.currentRoomId);
+  if (!incognitoMode) return null;
+  const alias = incognitoAlias ?? "System";
+  return (
+    <div className="keep-notice keep-notice-accent flex flex-wrap items-center justify-center gap-2 px-3 py-1 text-xs">
+      <span aria-hidden>👻</span>
+      <span>
+        You're incognito as <b>{alias}</b>. The userlist hides you and your messages render as system lines.
+      </span>
+      <button
+        type="button"
+        onClick={() => {
+          if (!currentRoomId) return;
+          getSocket().emit("chat:input", { roomId: currentRoomId, text: "/incognito" });
+        }}
+        disabled={!currentRoomId}
+        className="keep-button rounded border border-keep-action bg-keep-action/20 px-2 py-0.5 text-xs font-semibold text-keep-action hover:bg-keep-action/30 disabled:opacity-50"
+      >
+        Leave
+      </button>
+    </div>
+  );
+}
+
 function StaleVersionBanner() {
   const staleVersion = useChat((s) => s.staleVersion);
   const staleUpdateMessage = useChat((s) => s.staleUpdateMessage);

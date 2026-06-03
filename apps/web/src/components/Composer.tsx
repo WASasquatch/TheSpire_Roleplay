@@ -1614,7 +1614,11 @@ export function Composer({
             const now = Date.now();
             if (now - lastTypingEmitAtRef.current < 2_000) return;
             lastTypingEmitAtRef.current = now;
-            getSocket().emit("chat:typing", { roomId });
+            // Send the per-tab identity claim alongside the pulse so the
+            // server uses THIS tab's voicing for the indicator instead
+            // of falling back to whichever identity a sibling tab last
+            // wrote into the shared session.
+            getSocket().emit("chat:typing", { roomId, asCharacterId: activeCharacterId });
           }}
           onKeyUp={syncCaret}
           onClick={syncCaret}

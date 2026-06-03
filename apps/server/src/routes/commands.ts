@@ -4,6 +4,8 @@ import type { CommandDoc, SubcommandDocWire } from "@thekeep/shared";
 import type { CommandRegistry } from "../commands/registry.js";
 import { customCommandAliases, customCommands, titleKinds } from "../db/schema.js";
 import type { Db } from "../db/index.js";
+import { getSessionUser } from "./auth.js";
+import { hasPermission } from "../auth/permissions.js";
 
 /**
  * GET /commands - what the help modal renders.
@@ -11,15 +13,34 @@ import type { Db } from "../db/index.js";
  * Returns every built-in command (with subcommand info if declared) plus
  * every enabled custom command. Custom commands are flagged with
  * `isCustom: true` so the UI can group/badge them.
+ *
+ * Permission-gated commands (those that declare a `permission` field
+ * on the handler — currently /promoteadmin, /demoteadmin, /incognito)
+ * are dropped from the response for callers who don't hold that
+ * permission. The dispatcher gates execution independently, but
+ * filtering here keeps non-permitted users from seeing the command
+ * exists in /help — useful for the incognito case specifically, since
+ * the whole point is mods/admins observing without their tools being
+ * visible to regular users.
  */
 export async function registerCommandsRoutes(
   app: FastifyInstance,
   db: Db,
   registry: CommandRegistry,
 ): Promise<void> {
-  app.get("/commands", async () => {
+  app.get("/commands", async (req) => {
+    const me = await getSessionUser(req, db);
     const builtins = registry.listCanonical();
-    const builtinDocs: CommandDoc[] = builtins.map((c) => ({
+    // Filter out commands the caller can't run. Anonymous viewers
+    // (no session) drop every permission-gated command.
+    const visibleBuiltins = [];
+    for (const c of builtins) {
+      if (c.permission) {
+        if (!me || !(await hasPermission(me, c.permission, db))) continue;
+      }
+      visibleBuiltins.push(c);
+    }
+    const builtinDocs: CommandDoc[] = visibleBuiltins.map((c) => ({
       name: c.name,
       aliases: [...(c.aliases ?? [])],
       usage: c.usage ?? `/${c.name}`,

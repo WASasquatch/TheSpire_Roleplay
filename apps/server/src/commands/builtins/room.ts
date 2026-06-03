@@ -439,12 +439,16 @@ export const describeCommand: CommandHandler = {
     const txt = ctx.argsText.trim();
 
     // No args → show the current description to the caller only.
+    // Up to 5000 chars of long-form prose — surfaced via the
+    // persistent info modal so the user can read at leisure
+    // (the auto-dismissing toast can't display 5000 chars).
     if (!txt) {
       const r = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
       const desc = r?.description ?? null;
-      ctx.socket.emit("error:notice", {
-        code: "DESCRIBE",
-        message: desc ? `Description:\n${desc}` : "(no description set)",
+      ctx.socket.emit("ui:hint", {
+        kind: "open-info-modal",
+        title: `Room description - ${r?.name ?? "this room"}`,
+        body: desc ?? "(no description set)",
       });
       return;
     }

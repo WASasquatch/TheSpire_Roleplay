@@ -302,6 +302,11 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       username: body.username,
       role,
       permissions,
+      // Fresh signups always start non-incognito; mirror the same
+      // wire shape /auth/me uses so the client can set me.incognitoMode
+      // off the register response without a second probe.
+      incognitoMode: false,
+      incognitoAlias: null,
       sessionToken,
       ...(isFirstUser ? { bootstrap: true } : {}),
     };
@@ -337,7 +342,18 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, u.id));
     const sessionToken = await issueSession(db, u.id, req);
     const permissions = await permissionsFor({ id: u.id, role: u.role }, db);
-    return { id: u.id, username: u.username, role: u.role, permissions, sessionToken };
+    return {
+      id: u.id,
+      username: u.username,
+      role: u.role,
+      permissions,
+      // Incognito state survives logout, so a moderator who toggled
+      // /incognito before signing out reappears as hidden on the
+      // next login without having to re-toggle.
+      incognitoMode: u.incognitoMode,
+      incognitoAlias: u.incognitoAlias,
+      sessionToken,
+    };
   });
 
   app.post("/auth/logout", async (req) => {
@@ -408,11 +424,25 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     // Refreshes on the same 60s poll, so a matrix edit lands on the
     // affected user's tab within a minute.
     const permissions = await permissionsFor({ id: user.id, role: user.role }, db);
+    // Incognito mode + alias mirrored to the client so the chat
+    // banner can show "You're incognito as <alias>" and the
+    // ToolPanel button can flip between "Go Incognito" / "Leave
+    // Incognito" without an extra round-trip.
+    const incognitoRow = (await db
+      .select({
+        incognitoMode: users.incognitoMode,
+        incognitoAlias: users.incognitoAlias,
+      })
+      .from(users)
+      .where(eq(users.id, user.id))
+      .limit(1))[0];
     return {
       id: user.id,
       username: user.username,
       role: user.role,
       permissions,
+      incognitoMode: incognitoRow?.incognitoMode ?? false,
+      incognitoAlias: incognitoRow?.incognitoAlias ?? null,
       version: VERSION,
       updateMessage,
     };
@@ -460,7 +490,7 @@ export function readBearerToken(req: FastifyRequest): string | null {
 export async function getSessionUser(
   req: FastifyRequest,
   db: Db,
-): Promise<{ id: string; username: string; role: Role } | null> {
+): Promise<{ id: string; username: string; role: Role; activeCharacterId: string | null } | null> {
   const sid = readBearerToken(req);
   if (!sid) return null;
   const row = (await db.select().from(sessions).where(eq(sessions.id, sid)).limit(1))[0];
@@ -470,7 +500,17 @@ export async function getSessionUser(
   }
   const u = (await db.select().from(users).where(eq(users.id, row.userId)).limit(1))[0];
   if (!u || u.disabledAt) return null;
-  return { id: u.id, username: u.username, role: u.role };
+  return {
+    id: u.id,
+    username: u.username,
+    role: u.role,
+    // Surfacing the currently-voiced character so HTTP routes that
+    // act per-identity (world join/apply, etc.) can branch without
+    // a second DB hit. Per-tab socket overrides keep this DB column
+    // synced on identity switches; HTTP requests reflect whatever
+    // the last socket sync wrote.
+    activeCharacterId: u.activeCharacterId,
+  };
 }
 
 /** Look up the userId for a session id (used by the websocket auth handshake). */

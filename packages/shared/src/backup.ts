@@ -37,8 +37,27 @@
  * silent corruption is impossible — the user gets a clear "this
  * backup was made by an older build, re-export to migrate" message
  * instead.
+ *
+ * v3 (current): both kinds are wrapped in a ZIP envelope that
+ * carries the database payload AND the full `/data/uploads/` tree
+ * (emoticon sheets, logo images, rank sigil + border PNGs). v2 and
+ * earlier shipped only the database row referencing `/uploads/...`
+ * URLs, which left every uploaded image orphaned on restore. The
+ * envelope is the same shape for both kinds; the inner database
+ * payload differs:
+ *   - content: `content.json` (a BackupContentDocument)
+ *   - full:    `database.sqlite` (a VACUUM-INTO snapshot)
+ * Plus, for both: `uploads/**` mirroring the live uploads root.
  */
-export const BACKUP_FORMAT_VERSION = 2;
+export const BACKUP_FORMAT_VERSION = 3;
+
+/**
+ * Filenames inside the ZIP envelope. Stable — restore code matches
+ * on these literal paths.
+ */
+export const BACKUP_ZIP_CONTENT_JSON = "content.json";
+export const BACKUP_ZIP_DATABASE_SQLITE = "database.sqlite";
+export const BACKUP_ZIP_UPLOADS_PREFIX = "uploads/";
 
 /** Header common to both content + full backups. */
 export interface BackupHeader {
@@ -157,7 +176,7 @@ export interface ContentImportDiff {
 export interface FullBackupInspectReport {
   /** Magic-byte validated; we know this is a SQLite file. */
   ok: boolean;
-  /** File size in bytes. */
+  /** File size in bytes (the outer .zip envelope). */
   sizeBytes: number;
   /** Migrations recorded in the uploaded file's `_migrations` table. */
   schemaMigrations: string[];
@@ -172,6 +191,34 @@ export interface FullBackupInspectReport {
     messages: number;
     rooms: number;
   };
+  /**
+   * Number of files bundled under `uploads/` in the ZIP envelope.
+   * Zero is legal (an install with no uploaded emoticons/logos/ranks)
+   * but rare. Surfaced so the admin can sanity-check that the archive
+   * actually carries the assets they expect.
+   */
+  uploadsFileCount: number;
+  /** Total bytes of all `uploads/**` entries (uncompressed). */
+  uploadsBytes: number;
+}
+
+/**
+ * Inspect report returned by /admin/backup/content/inspect after the
+ * admin uploads a candidate content .zip. Wraps the existing per-table
+ * diff with the same uploads-bundle headline numbers the full inspect
+ * carries.
+ */
+export interface ContentBackupInspectReport {
+  /** True when content.json parsed + the format version matched. */
+  ok: boolean;
+  /** Size of the outer .zip envelope. */
+  sizeBytes: number;
+  /** Per-table diff (unchanged from v2). */
+  diff: ContentImportDiff;
+  /** Files bundled under `uploads/` in the ZIP envelope. */
+  uploadsFileCount: number;
+  /** Total bytes of all `uploads/**` entries (uncompressed). */
+  uploadsBytes: number;
 }
 
 /* ============================================================
@@ -225,7 +272,7 @@ export interface BackupSnapshotEntry {
   sizeBytes: number;
   /** Epoch ms of file mtime / creation. */
   createdAt: number;
-  /** "full" → .sqlite; "content" → .json. */
+  /** "full" → database.sqlite + uploads/; "content" → content.json + uploads/. Both wrapped in a .zip envelope. */
   kind: "full" | "content";
   /**
    * Why the snapshot exists. Drives client labelling so the admin

@@ -81,8 +81,14 @@ ENTRYPOINT ["/sbin/tini", "--"]
 #      silently corrupt it. The restore is one-shot: after the
 #      rename, the marker file no longer exists, so a subsequent
 #      benign restart can't loop the swap.
+#   2b. If the same restore also staged a pending uploads tree
+#       (.thekeep-pending-uploads/), swap it over the canonical
+#       /data/uploads directory. Done in the SAME step as the .sqlite
+#       swap so the post-boot DB rows reference the post-boot upload
+#       files. Order matters relative to step 3 only — the migrations
+#       runner doesn't touch uploads, so either order works there.
 #   3. Run pending migrations against the (possibly just-restored)
 #      DB. apply-migrations.mjs is fast on a fully-applied DB (one
 #      SELECT per file) so the overhead is negligible.
 #   4. Exec the server.
-CMD ["sh", "-c", "mkdir -p /data && if [ -f /data/.thekeep-pending-restore.sqlite ]; then echo '[boot] applying pending full-DB restore'; rm -f /data/thekeep.sqlite /data/thekeep.sqlite-wal /data/thekeep.sqlite-shm; mv /data/.thekeep-pending-restore.sqlite /data/thekeep.sqlite; fi && node apps/server/scripts/apply-migrations.mjs && exec pnpm --filter @thekeep/server run start"]
+CMD ["sh", "-c", "mkdir -p /data && if [ -f /data/.thekeep-pending-restore.sqlite ]; then echo '[boot] applying pending full-DB restore'; rm -f /data/thekeep.sqlite /data/thekeep.sqlite-wal /data/thekeep.sqlite-shm; mv /data/.thekeep-pending-restore.sqlite /data/thekeep.sqlite; fi && if [ -d /data/.thekeep-pending-uploads ]; then echo '[boot] applying pending uploads tree'; rm -rf /data/uploads; mv /data/.thekeep-pending-uploads /data/uploads; fi && node apps/server/scripts/apply-migrations.mjs && exec pnpm --filter @thekeep/server run start"]

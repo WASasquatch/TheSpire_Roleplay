@@ -32,6 +32,7 @@
  * wrapping element so the selector prefix has something to bind to.
  */
 import DOMPurify from "dompurify";
+import { legibleAgainstBg } from "@thekeep/shared";
 import { scopeAndNonceStyleBlocks } from "./cssScope.js";
 import { parseVideoEmbed } from "./markdown.js";
 
@@ -87,4 +88,48 @@ export function sanitizeUserHtml(html: string): string {
     FORCE_BODY: true,
   });
   return scopeAndNonceStyleBlocks(purified, `.${USER_HTML_SCOPE_CLASS}`);
+}
+
+/**
+ * Rewrite every literal `#rrggbb` / `#rgb` value inside `color:` /
+ * `background-color:` / `background:` declarations so it meets a WCAG
+ * legibility floor against `themeBg`. Applied after {@link sanitizeUserHtml}
+ * on surfaces that scope a non-document theme (world pages, profile
+ * bios viewed in the OWNER's palette, story reader). Without this pass,
+ * a writer who picked deep navy text against their light Parchment
+ * editor reads fine on Parchment but disappears against a dark world's
+ * navy bg — the original hex round-trips unchanged through the editor
+ * → DB → render pipeline.
+ *
+ * Two-pass scope:
+ *   1. Inline `style="…"` attributes — the common case (rich-text
+ *      pickers, copy-pasted spans). Walked via a small regex over
+ *      `style` attributes that touches only `color:` / `background*:`
+ *      declarations, leaves everything else (font-size, margin,
+ *      transform, gradients) untouched.
+ *   2. `<style>…</style>` block bodies — we already scope/nonce them in
+ *      sanitizeUserHtml. Same color-keyword regex runs against the CSS
+ *      body. CSS variables (`var(--keep-text)`), `rgb(...)`, `hsl(...)`,
+ *      and named colors are left alone — they either resolve through
+ *      the scoped theme already or aren't safe to nudge without a full
+ *      parser.
+ *
+ * Pure string transform. Memoize against [html, themeBg] in the caller
+ * so the regex pass doesn't run on every render.
+ *
+ * `themeBg` must be a `#rrggbb` hex; pass null/undefined to skip the
+ * pass entirely (the caller is on the document theme; chat shell
+ * already nudges per-message via resolveMessageColor).
+ */
+export function legibleHtmlColors(html: string, themeBg: string | null | undefined): string {
+  if (!themeBg) return html;
+  if (!/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(themeBg)) return html;
+  // Match `color: #abc[def]` / `background-color: #abc[def]` /
+  // `background: …` followed by a hex literal. The replace is per-occurrence,
+  // so multiple declarations in the same style attribute each get nudged.
+  const COLOR_DECL_RE = /(color\s*:\s*|background-color\s*:\s*|background\s*:\s*[^;"}]*?)(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3})\b/gi;
+  return html.replace(COLOR_DECL_RE, (_match, prefix: string, hex: string) => {
+    const nudged = legibleAgainstBg(hex, themeBg);
+    return `${prefix}${nudged}`;
+  });
 }

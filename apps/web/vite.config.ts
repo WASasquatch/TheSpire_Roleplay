@@ -24,7 +24,12 @@ export default defineConfig({
       "/health": "http://localhost:3001",
       "/users": "http://localhost:3001",
       "/site": "http://localhost:3001",
-      "/rules": "http://localhost:3001",
+      // `/rules` is NOT proxied — it's a public SPA route rendering the
+      // RulesPage component. The JSON endpoint moved to `/api/rules`
+      // (covered by the `/api` proxy below). Keeping `/rules` here
+      // would forward dev-mode page navigations to the backend, which
+      // no longer serves that path and returns a 404 JSON payload.
+      "/api": "http://localhost:3001",
       "/thesaurus": "http://localhost:3001",
       "/earning": "http://localhost:3001",
       "/mentions": "http://localhost:3001",

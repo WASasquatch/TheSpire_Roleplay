@@ -4,7 +4,7 @@ import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileC
 import { matchThemePreset, resolveScriptoriumAuthorTier, roleRank } from "@thekeep/shared";
 import { getSettings, parseUserThemeJson } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
-import { formatAmbiguousNotice, resolveIdentityArg } from "../identityArg.js";
+import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -1035,10 +1035,7 @@ export const whoisCommand: CommandHandler = {
       return;
     }
     if (resolution.kind === "ambiguous") {
-      ctx.socket.emit("error:notice", {
-        code: "WHOIS_AMBIGUOUS",
-        message: formatAmbiguousNotice(target, resolution.matches),
-      });
+      emitAmbiguousIdentityModal(ctx, target, resolution.matches);
       return;
     }
     // Unique: fetch the profile through the same id-keyed path the

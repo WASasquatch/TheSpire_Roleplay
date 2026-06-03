@@ -25,6 +25,19 @@ export interface AuthMe {
    *  Refreshes on the same /auth/me 60s poll the rest of the payload
    *  rides. */
   permissions: PermissionKey[];
+  /**
+   * Persistent incognito ("ghost") mode flag. When true the user is
+   * hidden from userlists, room enter/leave is silent, and any chat
+   * line they send renders as a system message under `incognitoAlias`
+   * instead of their identity. Toggled by /incognito (gated on
+   * `use_ghost_mode`). The ToolPanel uses this to flip the menu item
+   * between "Go Incognito" and "Leave Incognito", and the chat shell
+   * uses it to render the standing "you're hidden" banner.
+   */
+  incognitoMode: boolean;
+  /** Display name shown on outgoing system lines while incognito.
+   *  Null → server falls back to the literal "System". */
+  incognitoAlias: string | null;
 }
 
 /**

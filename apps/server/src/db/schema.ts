@@ -241,6 +241,37 @@ export const users = sqliteTable(
     awaySince: integer("away_since", { mode: "timestamp_ms" }),
     /** Free-text current mood/expression (e.g. "angry", "wounded"). Null = no mood set. Capped at 32 chars; rendered as a chip next to the user's name on outgoing messages. */
     currentMood: text("current_mood"),
+    /**
+     * Incognito (ghost) mode — moderator observation tool. When true,
+     * the user is removed from the userlist on every room they're in,
+     * room transitions don't broadcast leave/join, and any chat
+     * message they send renders as a system line under their
+     * `incognitoAlias` instead of their identity.
+     *
+     * Persisted on the user row (not per-session) so a tab refresh
+     * or network blip doesn't pop them back into visibility mid-
+     * investigation. Requires the `use_ghost_mode` permission to
+     * toggle. Migration 0188.
+     */
+    incognitoMode: integer("incognito_mode", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Display name used for chat lines posted while incognito. Null
+     * → render as the literal "System" so an incognito moderator's
+     * messages are visually indistinguishable from server-generated
+     * system events. Customisable via `/incognito <alias>`.
+     */
+    incognitoAlias: text("incognito_alias"),
+    /**
+     * Custom leave-message broadcast at the moment the user goes
+     * incognito. Null → use a default phrasing built from their
+     * display name. Editable via `/incognito exit <text>`.
+     */
+    incognitoExitMessage: text("incognito_exit_message"),
+    /**
+     * Custom return-message broadcast at the moment the user leaves
+     * incognito. Null → default. Editable via `/incognito return <text>`.
+     */
+    incognitoReturnMessage: text("incognito_return_message"),
     /** FK to characters.id - nullable means "show master profile" */
     activeCharacterId: text("active_character_id"),
     /**
@@ -1431,6 +1462,49 @@ export const worlds = sqliteTable(
     pacing: text("pacing", {
       enum: ["freeform", "drop-in", "casual", "slice-of-life", "structured", "long-form"],
     }),
+    /**
+     * Vibe-stat axes — author-tuned 0..100 integers that describe how
+     * the world FEELS along eight orthogonal dimensions. Catalog
+     * filters key on these, and world cards render them as horizontal
+     * bars. Null = "author hasn't tuned this axis"; the renderer
+     * shows a muted "—" instead of a 0% bar so the visual difference
+     * between "deliberately none of this" and "not yet set" is clear.
+     *
+     * The axis list is INTENTIONALLY FIXED so cross-world comparison
+     * (the whole point of catalog filtering) stays meaningful. Adding
+     * or removing an axis is a schema change.
+     */
+    statCombat: integer("stat_combat"),
+    statMagic: integer("stat_magic"),
+    statTechnology: integer("stat_technology"),
+    statRomance: integer("stat_romance"),
+    statPolitics: integer("stat_politics"),
+    statMystery: integer("stat_mystery"),
+    statHorror: integer("stat_horror"),
+    statExploration: integer("stat_exploration"),
+    /**
+     * Membership join gate, orthogonal to `visibility`:
+     *   - "open": anyone who can see the world can join with one click
+     *   - "application": joining requires owner-approved application
+     *     (see `world_applications` + `application_questions_json`)
+     *   - "invite-only": only the owner can add members (no Join /
+     *     Apply button surfaces in the catalog)
+     * Defaults to "open" so legacy rows keep their pre-feature
+     * behavior — the visibility="open" check that gated joining
+     * before this column existed still applies via the route layer.
+     */
+    joinMode: text("join_mode", { enum: ["open", "application", "invite-only"] })
+      .notNull()
+      .default("open"),
+    /**
+     * JSON array of question prompt strings (max 5, each 1..280
+     * chars). The applicant's `answers_json` lines up by position.
+     * Empty array is legal — an open-question-set application just
+     * captures the applicant's intent to join with no Q&A. The
+     * column itself defaults to "[]" so the JSON-parse path never
+     * sees null.
+     */
+    applicationQuestionsJson: text("application_questions_json").notNull().default("[]"),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
   },
@@ -1439,6 +1513,65 @@ export const worlds = sqliteTable(
     visibilityIdx: index("worlds_visibility_idx").on(t.visibility, t.updatedAt),
     genreIdx: index("worlds_genre_idx").on(t.genre),
     statusIdx: index("worlds_status_idx").on(t.status),
+  }),
+);
+
+/**
+ * World membership applications — created when a user clicks "Apply"
+ * on a world whose `joinMode = "application"`. Row lifecycle:
+ *
+ *   pending → approved   (owner clicks Approve; user is auto-added
+ *                         to world_members as part of the same
+ *                         transaction)
+ *   pending → rejected   (owner clicks Reject, optional review_note)
+ *   pending → withdrawn  (applicant cancels their own pending app)
+ *
+ * Terminal-state rows (approved / rejected / withdrawn) stay as an
+ * audit trail; a partial unique index in migration 0186 enforces "at
+ * most one PENDING application per (world, applicant)" without
+ * blocking a fresh re-apply after a reject or withdraw.
+ *
+ * Answers ride as a JSON array of strings keyed by question position
+ * at the time of submission. Later edits to the world's questions
+ * don't retroactively shorten or lengthen existing answers — what
+ * the applicant wrote stays what the owner sees.
+ */
+export const worldApplications = sqliteTable(
+  "world_applications",
+  {
+    id: id(),
+    worldId: text("world_id")
+      .notNull()
+      .references(() => worlds.id, { onDelete: "cascade" }),
+    applicantUserId: text("applicant_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * Identity the application was filed under: null = master OOC,
+     * non-null = a specific character of `applicantUserId`. The
+     * pending-uniqueness index keys on (world, applicant_user_id,
+     * COALESCE(character_id, '')) so the same master can apply as
+     * OOC AND as each character independently. Added in 0187.
+     */
+    characterId: text("character_id").references(() => characters.id, { onDelete: "cascade" }),
+    answersJson: text("answers_json").notNull().default("[]"),
+    status: text("status", { enum: ["pending", "approved", "rejected", "withdrawn"] })
+      .notNull()
+      .default("pending"),
+    submittedAt: ts("submitted_at"),
+    reviewedAt: integer("reviewed_at", { mode: "timestamp_ms" }),
+    reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    reviewNote: text("review_note"),
+  },
+  (t) => ({
+    worldStatusIdx: index("world_applications_world_status_idx").on(t.worldId, t.status),
+    applicantIdx: index("world_applications_applicant_idx").on(t.applicantUserId, t.status),
+    // The "at most one pending per (world, applicant, identity)"
+    // partial unique index lives in the migration only — drizzle's
+    // typed builder doesn't model partial-expression indexes. The
+    // runtime invariant is enforced both by that index AND by the
+    // route layer (which queries for an existing pending row before
+    // insert and converts UNIQUE-constraint races into 409s).
   }),
 );
 
@@ -1490,13 +1623,28 @@ export const roomWorldLinks = sqliteTable(
 );
 
 /**
- * User → world membership. A user can belong to many worlds, and at most
- * one membership per user is `isPrimary`. Primary membership drives the
- * userlist grouping (everyone with the same primary world bands together).
+ * Identity → world membership. A user (master account) can hold
+ * memberships under multiple identities — their OOC face AND each
+ * character — and each identity's membership is independent. Avery
+ * can be in Halcyon City without dragging the master's OOC or
+ * Sigrid along.
  *
- * Joining is gated by world.visibility = "open" in the route layer; the
- * table itself doesn't enforce that, so admin tooling can still seed
- * memberships for private/public worlds if needed.
+ * Identity key: `character_id` distinguishes per-character rows
+ * (non-null) from the OOC row (null). The unique index
+ * `world_members_identity_uq` (migration 0187) uses
+ * COALESCE(character_id, '') so the NULL slot still participates in
+ * the "at most one per (world, user, identity)" enforcement.
+ *
+ * Joining is gated by world.visibility + world.joinMode at the
+ * route layer; the table itself doesn't enforce those, so admin
+ * tooling can still seed memberships for private/invite-only
+ * worlds if needed.
+ *
+ * Note: the per-master "isPrimary" concept was retired in migration
+ * 0187 — with per-identity membership it became meaningless, and
+ * the userlist's primary-world grouping was the surface that
+ * actually leaked "this character's master is in X" by way of
+ * grouping a character row under the master's primary world.
  */
 export const worldMembers = sqliteTable(
   "world_members",
@@ -1507,16 +1655,22 @@ export const worldMembers = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * Null = the master's OOC face joined.
+     * Non-null = a specific character joined; the FK cascade-deletes
+     * the membership if the character is hard-deleted.
+     */
+    characterId: text("character_id").references(() => characters.id, { onDelete: "cascade" }),
     joinedAt: ts("joined_at"),
-    /** stored as 0/1 in SQLite. */
-    isPrimary: integer("is_primary").notNull().default(0),
+    // Identity-uniqueness lives in the migration via an expression
+    // index on COALESCE(character_id, ''). Drizzle's typed builder
+    // doesn't model expression-unique indexes, so the migration is
+    // the source of truth.
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.worldId, t.userId] }),
     userIdx: index("world_members_user_idx").on(t.userId),
-    // The actual "at most one primary per user" is enforced via a partial
-    // unique index in the migration (drizzle's typed builder doesn't expose
-    // partial indexes, so the migration is the source of truth).
+    worldIdx: index("world_members_world_idx").on(t.worldId),
+    characterIdx: index("world_members_character_idx").on(t.characterId),
   }),
 );
 

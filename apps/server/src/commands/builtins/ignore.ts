@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { ignores, users } from "../../db/schema.js";
-import { formatAmbiguousNotice, resolveIdentityArg, type ResolvedTarget } from "../identityArg.js";
+import { emitAmbiguousIdentityModal, resolveIdentityArg, type ResolvedTarget } from "../identityArg.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -32,7 +32,7 @@ async function resolveIgnoreTarget(
     return null;
   }
   if (resolution.kind === "ambiguous") {
-    notice(ctx, "IGNORE_AMBIGUOUS", formatAmbiguousNotice(raw, resolution.matches));
+    emitAmbiguousIdentityModal(ctx, raw, resolution.matches);
     return null;
   }
   return resolution.target;

@@ -682,7 +682,11 @@ async function fetchDisplayInfo(
         userId: r.userId,
         characterId: r.characterId,
         displayName: r.characterName,
-        avatarUrl: r.characterAvatar ?? r.masterAvatar ?? null,
+        // OOC ↔ character partition: NEVER fall back to the master
+        // avatar on a character-scoped row. A character with no
+        // portrait renders as initials; surfacing the master's face
+        // would expose "this character belongs to that master."
+        avatarUrl: r.characterAvatar ?? null,
         borderRankKey: r.selectedBorderRankKey ?? null,
         freeformBorderKey: r.selectedFreeformBorderKey ?? null,
         freeformBorderConfigJson: freeformByChar.get(r.characterId) ?? null,

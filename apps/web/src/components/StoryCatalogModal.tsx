@@ -667,7 +667,14 @@ function StoryCardTile({
   edit?: { onClick: () => void };
 }) {
   const authorName = card.author.characterName ?? card.author.masterUsername;
-  const authorAvatar = card.author.characterAvatarUrl ?? card.author.masterAvatarUrl;
+  // OOC ↔ character partition: a story attributed to a character
+  // voice never falls back to the master's avatar. Initials of the
+  // character's display name render when no character portrait is
+  // set; the master's face is only shown when the story itself is
+  // attributed to the master (no characterName on the card).
+  const authorAvatar = card.author.characterName
+    ? (card.author.characterAvatarUrl ?? null)
+    : (card.author.masterAvatarUrl ?? null);
   // NC-17 cards in the anonymous catalog get a lock overlay + a
   // hover tooltip explaining why; clicking still fires `onOpen` so
   // the parent can route to the login prompt. `useChat.me` is the

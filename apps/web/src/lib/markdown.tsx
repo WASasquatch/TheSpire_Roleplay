@@ -141,12 +141,57 @@ function findAsteriskClose(text: string, start: number, delim: "*" | "**" | "***
 }
 
 const URL_RE = /^https?:\/\/[^\s<>"]+/;
-const TRAILING_PUNCT_RE = /[.,;:!?)\]'"]+$/;
+
+/**
+ * Standard trailing punctuation that's almost never URL-meaningful —
+ * stripped unconditionally so a URL at the end of a sentence
+ * (`see https://example.com.`) doesn't eat the period.
+ *
+ * `)` is handled separately because it's both common in URLs
+ * (Wikipedia disambiguation: `/wiki/Cusp_(astrology)`, MDN reference
+ * pages: `/Window/innerWidth)`, etc.) AND a common wrapping
+ * character (`see (https://example.com)`). The simple "always strip"
+ * rule lops the closing paren off legitimate URLs; we walk the URL
+ * backward instead and only strip `)` when there are more `)` than
+ * `(` in the string — i.e. when the trailing paren is part of the
+ * surrounding prose rather than the URL itself.
+ */
+const STD_TRAILING_PUNCT = ".,;:!?]'\"";
 
 function trimTrailingPunct(url: string): { url: string; trailing: string } {
-  const m = url.match(TRAILING_PUNCT_RE);
-  if (!m) return { url, trailing: "" };
-  return { url: url.slice(0, -m[0].length), trailing: m[0] };
+  let cutFromEnd = 0;
+  while (cutFromEnd < url.length) {
+    const idx = url.length - cutFromEnd - 1;
+    const ch = url[idx];
+    if (!ch) break;
+    if (STD_TRAILING_PUNCT.includes(ch)) {
+      cutFromEnd++;
+      continue;
+    }
+    if (ch === ")") {
+      // Count parens in the URL up to AND INCLUDING this `)`. If the
+      // closes still outnumber the opens, this `)` is wrapping prose
+      // (e.g. `see (https://x.com)`); strip it. Otherwise it's a
+      // balanced paren that belongs to the URL — keep it and stop.
+      const head = url.slice(0, idx + 1);
+      let opens = 0;
+      let closes = 0;
+      for (const c of head) {
+        if (c === "(") opens++;
+        else if (c === ")") closes++;
+      }
+      if (closes > opens) {
+        cutFromEnd++;
+        continue;
+      }
+    }
+    break;
+  }
+  if (cutFromEnd === 0) return { url, trailing: "" };
+  return {
+    url: url.slice(0, -cutFromEnd),
+    trailing: url.slice(-cutFromEnd),
+  };
 }
 
 /**
@@ -284,6 +329,21 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
 }
 
 /**
+ * Sticky regex matching a single Unicode emoji "grapheme" — a base
+ * pictographic codepoint, optionally followed by a variation selector
+ * (U+FE0F) or skin-tone modifier, optionally extended with any number
+ * of ZWJ continuation segments. Covers single emoji (😀), variation-
+ * selected presentation (#\uFE0F⃣ → `#` + VS16), skin-toned (👍🏽), and ZWJ
+ * sequences (👨\u200D👩\u200D👧 → family).
+ *
+ * Sticky `y` flag lets tryToken anchor the match at the current
+ * cursor without slicing the input — set `lastIndex = i` and call
+ * `exec` once. Module-scoped so we don't re-compile per call.
+ */
+const EMOJI_AT_RE =
+  /\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?)*/uy;
+
+/**
  * Markdown-significant characters that a leading backslash can escape.
  * Covers every delimiter `tryToken` would otherwise consume — asterisk,
  * underscore, tilde, pipe, backtick, the link/image brackets, the HTML
@@ -374,6 +434,28 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
       return {
         end: i + m[0].length,
         node: <InlineEmoticon slug={slug} cellIndex={idx} />,
+      };
+    }
+  }
+
+  // Inline Unicode emoji — wrap a base pictographic codepoint
+  // (plus any variation selector / skin-tone modifier / ZWJ
+  // continuation segments) in a hover-zoom span so users can read
+  // the glyph at a larger size without copying it out. Mirrors the
+  // sticker `.inline-emoticon` hover affordance for parity between
+  // the two emoji surfaces.
+  //
+  // Cheap-reject the ASCII fast path before running the unicode
+  // regex: all interesting emoji sit at codepoint >= U+2000, so
+  // anything below that is just text and skips the test entirely.
+  const code = text.codePointAt(i);
+  if (code !== undefined && code >= 0x2000) {
+    EMOJI_AT_RE.lastIndex = i;
+    const em = EMOJI_AT_RE.exec(text);
+    if (em && em.index === i && em[0].length > 0) {
+      return {
+        end: i + em[0].length,
+        node: <InlineEmoji glyph={em[0]} />,
       };
     }
   }
@@ -899,6 +981,57 @@ function renderMentionButton(
 
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:\?[^\s]*)?(?:#[^\s]*)?$/i;
 
+/**
+ * Known image-CDN subdomains where every URL serves a direct media
+ * file regardless of path extension. Twitter's media CDN
+ * (`pbs.twimg.com`) is the canonical example — its URLs use opaque
+ * media ids with the format encoded in the query string
+ * (`?format=jpg&name=small`), so the extension regex above misses
+ * them entirely. Each of these subdomains is the CDN host, not the
+ * main site domain (we don't want `twitter.com/user` to look like an
+ * image — only `pbs.twimg.com/media/...` does).
+ *
+ * Matching ANY URL on these hosts as "probably an image" is safe
+ * because:
+ *   1. The render is opt-in — the user has to click "Show image" to
+ *      load it, so a false positive just shows an inert button.
+ *   2. These hosts only serve media; even if the specific path turns
+ *      out to be HTML or a different content type, the <img> would
+ *      simply 404 / broken-image and the chat doesn't break.
+ */
+const IMAGE_HOST_RE =
+  /^https:\/\/(?:pbs\.twimg\.com|i\.imgur\.com|i\.redd\.it|preview\.redd\.it|media\.tenor\.com)\//i;
+
+/**
+ * Generic "image format encoded in the query string" detector. Catches
+ * URLs like `https://host/media/abc?format=jpg` regardless of the
+ * hostname — handy for the long tail of CDNs that hash their paths
+ * but stamp the format in a query param. Mirrors the extension list
+ * above so adding a new format upstream stays a one-line change.
+ */
+const IMAGE_QUERY_FORMAT_RE = /[?&]format=(?:png|jpe?g|gif|webp|avif)\b/i;
+
+/**
+ * "Does this URL probably point at an image we should offer to
+ * preview?" — three signals, any of which is enough:
+ *   1. Path ends in a known image extension (most cases).
+ *   2. Hostname is a known image-only CDN (Twitter media, etc.).
+ *   3. Query string explicitly names an image format.
+ *
+ * Used by UrlOrMedia to decide whether to render the "Show image"
+ * toggle next to the link. False positives cost the user nothing
+ * (button is inert until clicked, then either loads or shows a
+ * broken-image icon); false negatives cost the user a missed inline
+ * preview, so we bias toward returning true.
+ */
+function looksLikeImageUrl(url: string): boolean {
+  return (
+    IMAGE_EXT_RE.test(url) ||
+    IMAGE_HOST_RE.test(url) ||
+    IMAGE_QUERY_FORMAT_RE.test(url)
+  );
+}
+
 interface VideoEmbed {
   /** Which provider this URL belongs to — drives the iframe title for a11y. */
   provider: "youtube" | "vimeo";
@@ -1088,7 +1221,7 @@ interface UrlOrMediaProps {
  */
 function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
   const [shown, setShown] = useState(false);
-  const looksLikeImage = forceImage || IMAGE_EXT_RE.test(url);
+  const looksLikeImage = forceImage || looksLikeImageUrl(url);
   // Skip video detection when the URL is already claimed by an image — saves
   // a URL-parse on every chat line, and respects `forceImage` from `![](...)`.
   const video = !looksLikeImage ? parseVideoEmbed(url) : null;
@@ -1228,6 +1361,21 @@ function InlineEmoticon({ slug, cellIndex }: { slug: string; cellIndex: number }
   return (
     <span className="inline-emoticon" title={label || undefined}>
       <EmoticonSprite sheetSlug={slug} cellIndex={cellIndex} size={24} />
+    </span>
+  );
+}
+
+/* =============================================================
+ *  InlineEmoji — wraps a Unicode emoji grapheme so the shared
+ *  `.inline-emoji` CSS can apply the same hover-zoom affordance
+ *  sticker emoticons get. Without this, raw Unicode emoji fell
+ *  through as plain text nodes and stayed tiny + un-zoomable,
+ *  which made small or detailed glyphs hard to read inline.
+ * ============================================================= */
+function InlineEmoji({ glyph }: { glyph: string }) {
+  return (
+    <span className="inline-emoji" aria-label={glyph}>
+      {glyph}
     </span>
   );
 }

@@ -14,6 +14,7 @@ import { splitMentions } from "../lib/mentions.js";
 import { extractMentions } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { ReactionAddButton, ReactionBar } from "./ReactionBar.js";
+import { MessageVisibilityGate } from "./MessageVisibilityGate.js";
 import { useMentionsCache, requestMentionResolve } from "../state/mentions.js";
 import { readError } from "../lib/http.js";
 
@@ -746,7 +747,13 @@ function FlatMessageView({
         </div>
       ) : null}
       {messages.map((m) => (
-        <Fragment key={m.id}>{lineFor(m)}</Fragment>
+        // Each message rides through a viewport-aware gate that
+        // unmounts the line's heavy DOM (embeds, sprite images,
+        // bordered avatars, name-style decorations) when scrolled
+        // far away — Discord-style. The gate's outer div holds a
+        // measured-height placeholder while unmounted so scroll
+        // position never jumps.
+        <MessageVisibilityGate key={m.id}>{lineFor(m)}</MessageVisibilityGate>
       ))}
     </div>
   );
@@ -2881,7 +2888,19 @@ function Line({
         </div>
       );
       break;
-    case "system":
+    case "system": {
+      // A system line whose `displayName` is the literal "system" is
+      // a genuine server-authored notice (joins/parts, /describe,
+      // /scene-end, etc.) — rendered bare. When displayName is
+      // anything else, it's a user-supplied alias the server kept on
+      // the row: today that's the `/incognito <alias>` rewrite, where
+      // a moderator's outgoing chat lines are stored as kind=system
+      // with their alias as the author. Surface the alias as a
+      // `[alias]` prefix so other participants can tell the
+      // attributed system speech apart from real server output.
+      const systemAlias = msg.displayName && msg.displayName !== "system"
+        ? msg.displayName
+        : null;
       lineEl = (
         // whitespace-pre-wrap preserves the newlines that /describe authors
         // use to format multi-paragraph world descriptions; ordinary system
@@ -2890,10 +2909,15 @@ function Line({
         // these from chat lines, and descriptions carry their own
         // `[Description]:` prefix when delivered on join.
         <div className="italic text-keep-system">
-          {time}<span className="whitespace-pre-wrap">{renderedBody}</span>
+          {time}
+          {systemAlias ? (
+            <span className="mr-1 font-semibold not-italic">[{systemAlias}]</span>
+          ) : null}
+          <span className="whitespace-pre-wrap">{renderedBody}</span>
         </div>
       );
       break;
+    }
     case "announce":
       lineEl = (
         <div className="font-bold text-keep-accent">
@@ -3316,7 +3340,16 @@ function OwnControls({ msg, onStartEdit }: { msg: ChatMessage; onStartEdit: () =
     // state out of this component means the absolute-positioned
     // controls dock that surrounds these buttons can never again
     // squeeze the edit textarea into the narrow strip on the right.
-    <span className="inline-flex gap-1">
+    //
+    // `md:invisible md:group-hover:visible md:group-focus-within:visible`
+    // matches every other action button on the row (Bookmark,
+    // chatReact, ModControls, Report) — on desktop the controls
+    // appear only when the message row is hovered or keyboard-
+    // focused, so they don't permanently obscure long message
+    // bodies that span the full chat width. Mobile keeps the
+    // controls always-on for tap-discoverability (no `invisible`
+    // applied at the base breakpoint).
+    <span className="inline-flex gap-1 md:invisible md:group-hover:visible md:group-focus-within:visible">
       <button
         type="button"
         onClick={onStartEdit}

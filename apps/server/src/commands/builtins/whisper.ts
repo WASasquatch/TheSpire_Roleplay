@@ -4,7 +4,7 @@ import type { ChatMessage } from "@thekeep/shared";
 import { characters, ignores, messages, users } from "../../db/schema.js";
 import { pushTriggers } from "../../realtime/broadcast.js";
 import { stripFirstToken } from "../parser.js";
-import { formatAmbiguousNotice, resolveIdentityArg } from "../identityArg.js";
+import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -61,7 +61,7 @@ export const whisperCommand: CommandHandler = {
       return;
     }
     if (resolution.kind === "ambiguous") {
-      notice(ctx, "WHISPER_AMBIGUOUS", formatAmbiguousNotice(targetName, resolution.matches));
+      emitAmbiguousIdentityModal(ctx, targetName, resolution.matches);
       return;
     }
     const targetUserId = resolution.target.userId;
@@ -83,21 +83,16 @@ export const whisperCommand: CommandHandler = {
       return;
     }
 
-    // Resolve target's display name. When the resolver hit a character
-    // token, prefer the character's name explicitly — that's the
-    // identity the caller addressed. Otherwise fall back to the
-    // target's currently-active character, then the master username.
-    let targetDisplayName = target.username;
-    if (resolution.target.characterId) {
-      targetDisplayName = resolution.target.displayName;
-    } else if (target.activeCharacterId) {
-      const c = (await ctx.db
-        .select()
-        .from(characters)
-        .where(eq(characters.id, target.activeCharacterId))
-        .limit(1))[0];
-      if (c && !c.deletedAt) targetDisplayName = c.name;
-    }
+    // Use the identity the caller actually addressed. `resolution.target.displayName`
+    // is the character name when the caller passed `@cid:` (or typed a character
+    // name) and the master username when they passed `@id:` (or typed a master
+    // handle). Falling back to the target's *current* active character — the
+    // previous behavior here — silently rewrote a click on the OOC handle as a
+    // whisper to whichever character that user happened to be voicing right
+    // now, which is exactly the leak the identity-token system was added to
+    // prevent. The actual message delivery still routes by `target.id`
+    // regardless of which identity name decorates the line.
+    const targetDisplayName = resolution.target.displayName;
 
     // Effective sender color. When in-character, prefer the active
     // character's own chat_color so a whisper from Char A renders in

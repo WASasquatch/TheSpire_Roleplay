@@ -177,6 +177,16 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
     onCommand("/char clear");
     setIdentityOpen(false);
   }
+  function toggleIncognito() {
+    onCommand("/incognito");
+    setIdentityOpen(false);
+  }
+  // Permission-gated incognito affordance. Only mods/admins with
+  // `use_ghost_mode` see the button at all — regular users can't
+  // even discover the feature exists, which is the privacy contract
+  // the staff-observation tool was designed around.
+  const canIncognito = !!me?.permissions.includes("use_ghost_mode");
+  const incognitoMode = !!me?.incognitoMode;
 
   // Esc closes the drawer when it's open. Registering only while open keeps
   // global key behavior unchanged when the drawer is dismissed.
@@ -397,6 +407,9 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
             onSwitch={switchCharacter}
             onLeave={leaveCharacter}
             inCharacter={!!activeCharacterId}
+            canIncognito={canIncognito}
+            incognitoMode={incognitoMode}
+            onToggleIncognito={toggleIncognito}
           />
         </div>
         <button
@@ -495,6 +508,9 @@ function IdentityButton({
   onSwitch,
   onLeave,
   inCharacter,
+  canIncognito,
+  incognitoMode,
+  onToggleIncognito,
 }: {
   masterName: string | null;
   activeCharacterName: string | null;
@@ -506,6 +522,14 @@ function IdentityButton({
   onSwitch: (name: string) => void;
   onLeave: () => void;
   inCharacter: boolean;
+  /** True only for users holding the `use_ghost_mode` permission.
+   *  When false the incognito row is omitted entirely so regular
+   *  users can't even discover the affordance exists. */
+  canIncognito: boolean;
+  /** Mirrors `me.incognitoMode` — flips the button label between
+   *  "Go Incognito" and "Leave Incognito" without a refetch. */
+  incognitoMode: boolean;
+  onToggleIncognito: () => void;
 }) {
   const buttonLabel = inCharacter
     ? activeCharacterName ?? "Active character"
@@ -575,6 +599,28 @@ function IdentityButton({
                 className="flex w-full items-center justify-center gap-1 border-t border-keep-rule bg-keep-accent/10 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-keep-accent hover:bg-keep-accent/20 lg:py-1"
               >
                 ← Leave Character (OOC)
+              </button>
+            ) : null}
+            {/* Incognito ("ghost") mode toggle. Only renders for users
+                holding the `use_ghost_mode` permission. Lives below
+                "Leave Character" because it's a staff-observation
+                tool, not a routine identity switch — keeps it visually
+                separate from the regular character roster above. */}
+            {canIncognito ? (
+              <button
+                type="button"
+                onClick={onToggleIncognito}
+                title={incognitoMode
+                  ? "Reveal yourself — the room sees you join again."
+                  : "Disappear from userlists and observe rooms unseen. Mod/admin only."}
+                className={`flex w-full items-center justify-center gap-1 border-t border-keep-rule px-3 py-2 text-xs font-semibold uppercase tracking-widest lg:py-1 ${
+                  incognitoMode
+                    ? "bg-keep-action/20 text-keep-action hover:bg-keep-action/30"
+                    : "bg-keep-bg text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+                }`}
+              >
+                <span aria-hidden>👻</span>
+                <span>{incognitoMode ? "Leave Incognito" : "Go Incognito"}</span>
               </button>
             ) : null}
           </div>

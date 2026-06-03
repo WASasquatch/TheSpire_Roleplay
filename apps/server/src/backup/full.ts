@@ -1,41 +1,60 @@
 /**
- * Full-database snapshot — atomic SQLite file copy.
+ * Full-database snapshot — atomic SQLite copy bundled with the
+ * uploads tree inside a ZIP envelope (format v3+).
  *
  * Two operations:
  *
- *   createFullSnapshot(trigger): runs `VACUUM INTO '<path>'` to
- *       produce a consistent copy of the live database in a single
- *       atomic SQL statement. The result is a plain SQLite file
- *       that the admin can download, archive, or upload back to
- *       another install. VACUUM INTO also rebuilds the page layout
- *       in the copy, so the snapshot is the smallest possible
- *       representation of the data (no fragmentation, no free pages).
+ *   createFullSnapshot(trigger, uploadsRoot): runs `VACUUM INTO` to
+ *       produce a consistent .sqlite copy of the live database in a
+ *       single atomic SQL statement, then packs that .sqlite plus
+ *       the entire `/data/uploads/` tree into a single .zip archive
+ *       at /data/backups/. VACUUM INTO also rebuilds the page
+ *       layout, so the inner .sqlite is the smallest possible
+ *       representation of the data; ZIP deflate then compresses
+ *       further. The temp .sqlite is unlinked after packing.
  *
- *   stagePendingRestore(uploadPath): validates the uploaded file is
- *       a SQLite database with the expected schema migrations, then
- *       renames it into the canonical "pending restore" slot. The
- *       container entry script (Dockerfile CMD) checks for this slot
- *       on next boot and swaps it into place before
- *       apply-migrations.mjs runs.
+ *   inspectFullBackup(uploadZipPath, uploadsRoot): peeks at an
+ *       uploaded .zip without committing to a restore. Validates
+ *       the ZIP envelope, extracts the inner .sqlite to a temp slot,
+ *       opens it read-only to validate magic + the users.system
+ *       sentinel, reads row counts + migrations. Returns a
+ *       FullBackupInspectReport that also surfaces the bundled
+ *       uploads count + bytes so the admin can sanity-check.
  *
- * Why the boot-swap pattern instead of hot-swapping the better-
- * sqlite3 handle in-process: better-sqlite3 holds a long-lived
- * file descriptor + WAL pointer; swapping the file under it would
- * leave the existing handle reading stale pages and the WAL would
- * be against the wrong file. Restarting the process is the only
- * reliable way to land a different DB file. Fly auto-restarts
- * exited machines, so the route returns 200, the server exits,
- * and the new container boots into the restored DB.
+ *   stagePendingRestore(uploadZipPath, uploadsRoot): extracts the
+ *       inner .sqlite into the canonical "pending restore" slot
+ *       AND extracts the uploads tree into the canonical
+ *       "pending uploads" slot. The container entry script
+ *       (Dockerfile CMD) checks for both on next boot and swaps
+ *       them into place before apply-migrations.mjs runs.
+ *
+ * Why the boot-swap pattern instead of hot-swapping in-process:
+ * better-sqlite3 holds a long-lived file descriptor + WAL pointer;
+ * swapping the file under it would leave the existing handle reading
+ * stale pages and the WAL would be against the wrong file.
+ * Restarting the process is the only reliable way to land a
+ * different DB file. Fly auto-restarts exited machines, so the
+ * route returns 200, the server exits, and the new container boots
+ * into the restored DB + restored uploads.
  */
 
-import { existsSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import Database from "better-sqlite3";
 import type { FullBackupInspectReport } from "@thekeep/shared";
 import { sqliteHandle, sqlitePath } from "../db/index.js";
-import { moveIntoSnapshots, newSnapshotPath } from "./snapshots.js";
+import {
+  extractFullDatabase,
+  extractUploadsTo,
+  newFullDbTempPath,
+  packFullArchive,
+  peekArchive,
+  pendingUploadsPath,
+} from "./archive.js";
+import { backupsDir, moveIntoSnapshots, newSnapshotPath } from "./snapshots.js";
 
 /**
  * Path to the "pending restore" file. When this file exists at
@@ -60,26 +79,42 @@ const WORKER_PATH = fileURLToPath(new URL("./full-worker.mjs", import.meta.url))
 
 /**
  * Run `VACUUM INTO` against the live DB to produce a consistent
- * snapshot at the given path. The target must not already exist —
- * VACUUM INTO refuses to overwrite, which is the safety we want
- * (we deliberately mint a fresh filename via newSnapshotPath).
+ * SQLite copy at a temp path, then pack that copy plus the live
+ * uploads tree into the .zip archive at the snapshot destination.
+ * The temp .sqlite is unlinked after packing.
  *
- * Runs the VACUUM INTO call inside a worker thread so the main Node
+ * The VACUUM INTO call runs inside a worker thread so the main Node
  * event loop stays unblocked. On a multi-hundred-MB DB the VACUUM
  * can take seconds; doing it on the main thread would freeze chat
  * for everyone the snapshot's duration. The worker holds its OWN
  * read-only better-sqlite3 handle on the same file — SQLite's WAL
  * mode lets readers proceed alongside the VACUUM's writer.
  *
- * Returns the absolute path + size of the new snapshot.
+ * Returns the absolute path + size of the new snapshot .zip.
  */
 export async function createFullSnapshot(
   trigger: "manual" | "pre_full_import" | "pre_content_import",
-): Promise<{ path: string; sizeBytes: number }> {
+  uploadsRoot: string,
+): Promise<{ path: string; sizeBytes: number; uploadsFileCount: number; uploadsBytes: number }> {
   const dest = newSnapshotPath("full", trigger);
-  await runVacuumWorker(sqlitePath, dest);
-  const sizeBytes = statSync(dest).size;
-  return { path: dest, sizeBytes };
+  const tempDbPath = newFullDbTempPath(backupsDir());
+  // Defensive: VACUUM INTO refuses to overwrite, but we just minted
+  // a fresh random temp name so it shouldn't already exist anyway.
+  if (existsSync(tempDbPath)) unlinkSync(tempDbPath);
+
+  await runVacuumWorker(sqlitePath, tempDbPath);
+  // packFullArchive unlinks tempDbPath after packing.
+  const result = await packFullArchive({
+    sourceDbPath: tempDbPath,
+    uploadsRoot,
+    destPath: dest,
+  });
+  return {
+    path: dest,
+    sizeBytes: result.sizeBytes,
+    uploadsFileCount: result.uploadsFileCount,
+    uploadsBytes: result.uploadsBytes,
+  };
 }
 
 /**
@@ -87,7 +122,7 @@ export async function createFullSnapshot(
  * Rejects on worker error, non-zero exit, or an explicit
  * `{ ok: false }` message. Cleans up partially-written destination
  * files on failure so a crashed worker doesn't leave a corrupt
- * .sqlite stub in the snapshots directory.
+ * .sqlite stub.
  */
 function runVacuumWorker(sourcePath: string, destPath: string): Promise<void> {
   return new Promise((resolveP, rejectP) => {
@@ -120,25 +155,55 @@ function runVacuumWorker(sourcePath: string, destPath: string): Promise<void> {
 }
 
 /**
- * Inspect an uploaded .sqlite file without committing to a restore.
- * Opens the file read-only, validates magic + the `_migrations`
- * table, reads row counts for the headline tables. Lets the admin
- * sanity-check the upload (right install? right time period?)
- * before clicking Confirm.
+ * Inspect an uploaded .zip backup without committing to a restore.
+ * Validates the envelope, extracts the inner database.sqlite to a
+ * temp path, opens it read-only to check schema-shape + row counts.
  *
- * Returns `{ ok: false }` on any open/validation failure — the
- * caller surfaces that to the admin as "this doesn't look like a
- * valid SQLite backup."
+ * Returns `{ ok: false, ...empty }` on any open/validation failure —
+ * the caller surfaces that to the admin as "this doesn't look like a
+ * valid Spire backup archive."
  */
-export function inspectFullBackup(uploadPath: string): FullBackupInspectReport {
+export async function inspectFullBackup(
+  uploadZipPath: string,
+): Promise<FullBackupInspectReport> {
+  const empty: FullBackupInspectReport = {
+    ok: false,
+    sizeBytes: 0,
+    schemaMigrations: [],
+    missingMigrations: [],
+    extraMigrationsOnServer: [],
+    counts: { users: 0, characters: 0, messages: 0, rooms: 0 },
+    uploadsFileCount: 0,
+    uploadsBytes: 0,
+  };
+
+  let peek: Awaited<ReturnType<typeof peekArchive>>;
+  try {
+    peek = await peekArchive(uploadZipPath);
+  } catch {
+    return empty;
+  }
+  if (peek.kind !== "full") {
+    // Wrong kind — the inspect call should route to the content
+    // inspector instead. Returning ok:false surfaces that.
+    return { ...empty, sizeBytes: peek.archiveBytes };
+  }
+
+  // Extract the inner .sqlite to a sibling temp slot for read-only
+  // inspection. We never open it in-place from the archive — JSZip
+  // doesn't expose the entry as a seekable file descriptor.
+  const tempInnerDb = join(dirname(uploadZipPath), `.inspect-inner-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.sqlite`);
+  try {
+    await extractFullDatabase({ zipPath: uploadZipPath, destDbPath: tempInnerDb });
+  } catch {
+    return { ...empty, sizeBytes: peek.archiveBytes };
+  }
+
   let candidate: Database.Database | null = null;
   try {
-    const sizeBytes = statSync(uploadPath).size;
     // Open read-only so a hostile upload can't trigger writes during
     // open (e.g. WAL replay onto an attacker-controlled file).
-    candidate = new Database(uploadPath, { readonly: true, fileMustExist: true });
-    // Basic sanity: query the schema. Any throw here means it's not
-    // a SQLite DB at all (different magic) or it's corrupt.
+    candidate = new Database(tempInnerDb, { readonly: true, fileMustExist: true });
     candidate.prepare("SELECT name FROM sqlite_master LIMIT 1").all();
 
     // Schema-shape sanity: refuse a SQLite file that doesn't look
@@ -155,19 +220,9 @@ export function inspectFullBackup(uploadPath: string): FullBackupInspectReport {
       .prepare(`SELECT id FROM "users" WHERE id = 'system' LIMIT 1`)
       .get() as { id: string } | undefined;
     if (!sentinel) {
-      return {
-        ok: false,
-        sizeBytes,
-        schemaMigrations: [],
-        missingMigrations: [],
-        extraMigrationsOnServer: [],
-        counts: { users: 0, characters: 0, messages: 0, rooms: 0 },
-      };
+      return { ...empty, sizeBytes: peek.archiveBytes, uploadsFileCount: peek.uploadsFileCount, uploadsBytes: peek.uploadsBytes };
     }
 
-    // Migration list. Empty if the upload predates the migrations
-    // table — we still allow inspect to succeed; the import gate
-    // will refuse on the missingMigrations side.
     let candidateMigrations: string[] = [];
     try {
       const rows = candidate
@@ -179,7 +234,6 @@ export function inspectFullBackup(uploadPath: string): FullBackupInspectReport {
     }
     const candidateSet = new Set(candidateMigrations);
 
-    // Live migration list for the diff.
     let liveMigrations: string[] = [];
     try {
       const rows = sqliteHandle
@@ -194,9 +248,6 @@ export function inspectFullBackup(uploadPath: string): FullBackupInspectReport {
     const missingMigrations = candidateMigrations.filter((m) => !liveSet.has(m));
     const extraMigrationsOnServer = liveMigrations.filter((m) => !candidateSet.has(m));
 
-    // Row counts — wrap each in try/catch so a backup made from an
-    // older schema (without one of these tables) still reports a
-    // sensible inspect rather than failing outright.
     const counts = {
       users: safeCount(candidate, "users"),
       characters: safeCount(candidate, "characters"),
@@ -206,23 +257,20 @@ export function inspectFullBackup(uploadPath: string): FullBackupInspectReport {
 
     return {
       ok: true,
-      sizeBytes,
+      sizeBytes: peek.archiveBytes,
       schemaMigrations: candidateMigrations,
       missingMigrations,
       extraMigrationsOnServer,
       counts,
+      uploadsFileCount: peek.uploadsFileCount,
+      uploadsBytes: peek.uploadsBytes,
     };
   } catch {
-    return {
-      ok: false,
-      sizeBytes: 0,
-      schemaMigrations: [],
-      missingMigrations: [],
-      extraMigrationsOnServer: [],
-      counts: { users: 0, characters: 0, messages: 0, rooms: 0 },
-    };
+    return { ...empty, sizeBytes: peek.archiveBytes };
   } finally {
     try { candidate?.close(); } catch { /* nothing useful to do */ }
+    try { if (existsSync(tempInnerDb)) unlinkSync(tempInnerDb); }
+    catch { /* nothing useful to do */ }
   }
 }
 
@@ -236,54 +284,113 @@ function safeCount(db: Database.Database, table: string): number {
 }
 
 /**
- * Stage an uploaded SQLite file as the pending restore. On next
- * container boot the entry script will rename it over the canonical
- * sqlite path before the server starts. Caller is expected to:
+ * Stage an uploaded .zip archive as the pending full restore. On next
+ * container boot the entry script renames the staged .sqlite over the
+ * canonical sqlite path AND swaps the staged uploads tree over the
+ * canonical uploads root before the server starts. Caller is expected
+ * to:
  *
- *   1. Take a pre-restore safety snapshot of the LIVE DB FIRST
- *      (via createFullSnapshot("pre_full_import")) and stash the
- *      path in the audit log so a botched restore is one click
- *      away from undo.
+ *   1. Take a pre-restore safety snapshot of the LIVE DB+uploads
+ *      FIRST (via createFullSnapshot("pre_full_import", uploadsRoot))
+ *      and stash the path in the audit log so a botched restore is
+ *      one click away from undo.
  *   2. Validate the upload via inspectFullBackup first.
  *   3. Call this function to commit the restore.
- *   4. Return 200 to the admin and exit the process so the
- *      container restarts.
+ *   4. Return 200 to the admin and exit the process so the container
+ *      restarts.
  *
- * Implementation: rename the upload to the .pending-restore slot.
- * Rename is atomic within the same filesystem (which /data is). If
- * the pending slot already holds a previous attempt, we overwrite
- * it — only the LATEST staged upload survives, which matches the
- * "click Import again with a different file" expectation.
+ * Implementation — two-phase to avoid the "DB swap but no uploads
+ * swap" half-restore failure mode:
+ *   Phase 1 (extract both to TEMP slots):
+ *     - Extract database.sqlite to a sibling temp file.
+ *     - Extract uploads/** to a sibling temp directory.
+ *     If either phase-1 step throws, both temp slots are cleaned up
+ *     and the pending slots are left untouched (and the operator
+ *     sees the error). Crucially, the pending slots are NOT written
+ *     until both extractions have completed successfully.
+ *   Phase 2 (atomically swap temps into pending slots):
+ *     - Rename temp .sqlite into the pending-restore slot.
+ *     - Rename temp uploads dir into the pending-uploads slot.
+ *     These are same-filesystem renames so each is atomic. The
+ *     ordering means a crash between the two leaves the pending
+ *     .sqlite written but no pending uploads — which the boot
+ *     script handles fine: the .sqlite gets swapped, uploads stay
+ *     untouched (mismatched but recoverable via the safety
+ *     snapshot the caller took first). The phase-1 design makes
+ *     this last-mile crash window vanishingly small.
+ *   Cleanup: the source .zip upload is consumed at the end.
  */
-export function stagePendingRestore(uploadPath: string): { stagedAt: string } {
-  const dest = pendingRestorePath();
-  // Always explicit unlink-then-rename. POSIX rename(2) overwrites
-  // by default; Windows fs.renameSync does not (it throws EEXIST).
-  // The explicit unlink keeps the behavior identical across hosts
-  // and survives a leftover pending file from a previous attempt
-  // the admin abandoned without restarting.
-  if (existsSync(dest)) unlinkSync(dest);
-  renameSync(uploadPath, dest);
-  return { stagedAt: dest };
+export async function stagePendingRestore(
+  uploadZipPath: string,
+  uploadsRoot: string,
+): Promise<{ stagedAt: string; stagedUploadsAt: string; uploadsFileCount: number }> {
+  const dbDest = pendingRestorePath();
+  const uploadsDest = pendingUploadsPath(uploadsRoot);
+  mkdirSync(dirname(dbDest), { recursive: true });
+  mkdirSync(dirname(uploadsDest), { recursive: true });
+
+  const tag = randomBytes(4).toString("hex");
+  const tempDb = join(dirname(dbDest), `.thekeep-pending-restore.${tag}.sqlite.staging`);
+  const tempUploads = join(dirname(uploadsDest), `.thekeep-pending-uploads.${tag}.staging`);
+
+  // Phase 1 — extract both to temp slots.
+  let uploadsFileCount = 0;
+  try {
+    await extractFullDatabase({ zipPath: uploadZipPath, destDbPath: tempDb });
+    const result = await extractUploadsTo({ zipPath: uploadZipPath, destRoot: tempUploads });
+    uploadsFileCount = result.fileCount;
+  } catch (err) {
+    try { if (existsSync(tempDb)) unlinkSync(tempDb); } catch { /* nothing */ }
+    try { if (existsSync(tempUploads)) rmSync(tempUploads, { recursive: true, force: true }); } catch { /* nothing */ }
+    throw err;
+  }
+
+  // Phase 2 — swap temps into the pending slots. POSIX rename(2)
+  // overwrites by default; Windows fs.renameSync does not (throws
+  // EEXIST). Explicit unlink/rmSync keeps behavior identical across
+  // hosts and survives a leftover pending slot from a previous
+  // attempt the admin abandoned without restarting.
+  if (existsSync(dbDest)) unlinkSync(dbDest);
+  renameSync(tempDb, dbDest);
+  if (existsSync(uploadsDest)) rmSync(uploadsDest, { recursive: true, force: true });
+  renameSync(tempUploads, uploadsDest);
+
+  // The upload .zip is consumed — it's been split into the pending
+  // .sqlite + pending uploads dir. Leaving it around would clutter
+  // /data with duplicated bytes.
+  try { unlinkSync(uploadZipPath); } catch { /* nothing useful to do */ }
+
+  return {
+    stagedAt: dbDest,
+    stagedUploadsAt: uploadsDest,
+    uploadsFileCount,
+  };
 }
 
 /**
- * Path for a temp file used during a full-DB upload — sits next to
- * the snapshots so the rename-into-place into the pending slot is
+ * Path for a temp file used during a backup .zip upload — sits next
+ * to the snapshots so the rename-into-place into the pending slot is
  * an atomic move on the same filesystem. The filename includes a
  * random suffix so concurrent admin attempts don't clobber each
  * other.
  */
 export function newUploadTempPath(): string {
   const rand = Math.random().toString(36).slice(2, 10);
-  return join(dirname(sqlitePath), `.thekeep-upload-${rand}.sqlite`);
+  return join(dirname(sqlitePath), `.thekeep-upload-${rand}.zip`);
 }
 
 /**
  * Move a completed snapshot upload into the snapshots directory so
  * the admin can download/inspect it later (e.g. after they decide
  * NOT to commit to the restore). Returns the new absolute path.
+ * The renamed file keeps the .zip extension via the canonical
+ * snapshot filename convention.
+ *
+ * `kind` is required because the same call site handles uploads of
+ * both content and full archives — mis-classifying mixes the two
+ * kinds in the Snapshots panel and breaks the bucket display.
  */
-export function archiveFullUpload(tempPath: string): string {
-  return moveIntoSnapshots(tempPath, "full", "manual");
+export function archiveUpload(tempPath: string, kind: "full" | "content"): string {
+  return moveIntoSnapshots(tempPath, kind, "manual");
 }
+

@@ -58,5 +58,9 @@ export async function loadSessionUser(db: Db, userId: string): Promise<SessionUs
     chatColor: u.chatColor,
     awayMessage: u.awayMessage,
     currentMood: u.currentMood,
+    incognitoMode: u.incognitoMode,
+    incognitoAlias: u.incognitoAlias,
+    incognitoExitMessage: u.incognitoExitMessage,
+    incognitoReturnMessage: u.incognitoReturnMessage,
   };
 }

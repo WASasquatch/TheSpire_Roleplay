@@ -1,3 +1,17 @@
+// Crash diagnostics must install BEFORE any other import that could
+// throw at module-eval time, so a top-level import error still
+// lands in the persistent crash log. The module is import-only side
+// effects free; the side-effecting `installCrashHandlers()` call
+// below binds the process handlers.
+import {
+  installCrashHandlers,
+  recordBootFailure,
+  recordBootStart,
+  recordBootSuccess,
+} from "./crashLog.js";
+installCrashHandlers();
+recordBootStart();
+
 import "dotenv/config";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -142,7 +156,23 @@ async function main() {
   // raw → ~10.7MB encoded) doesn't bounce off 413. Every other route
   // is well under 1MB; the global cap is fine to keep loose since
   // each route still imposes its own zod max where it matters.
-  const app = Fastify({ loggerInstance: log, bodyLimit: 12 * 1024 * 1024 });
+  //
+  // trustProxy: true makes `req.ip` honor `X-Forwarded-For` so we
+  // record the real client public IP instead of the proxy's
+  // RFC1918 hop address. The server runs behind Fly.io's edge
+  // proxy (and, in any reasonable deploy, some other reverse
+  // proxy); without this every user gets logged under the same
+  // 172.16.x.x internal address and the per-IP rate limiter
+  // collapses everyone into one bucket. Safe to leave on for
+  // Fly because the machine's listening port is only reachable
+  // through the edge proxy — there's no path for a direct client
+  // to spoof X-Forwarded-For. Local dev has no proxy hop at all,
+  // so `req.ip` cleanly falls back to the socket remote address.
+  const app = Fastify({
+    loggerInstance: log,
+    bodyLimit: 12 * 1024 * 1024,
+    trustProxy: true,
+  });
   await app.register(cookie, { secret: SESSION_SECRET });
   // CORS is only useful when the web bundle is served from a different origin
   // (the dev setup, where Vite is on :5173 and the API is on :3001). In prod
@@ -405,10 +435,18 @@ async function main() {
   });
 
   /**
-   * Public rules endpoint - returns the admin-configured house rules and the
-   * privacy/safety notice. Public so the splash screen could surface them too.
+   * Public rules JSON endpoint — returns the admin-configured house
+   * rules and the privacy/safety notice.
+   *
+   * Path moved from `/rules` to `/api/rules` in this revision because
+   * the `/rules` path is now a public SPA route rendering a dedicated
+   * landing page (so a not-yet-registered visitor can read the rules
+   * before signing up). The page route fetches THIS endpoint for its
+   * content; the rename keeps the JSON endpoint and the page URL on
+   * distinct slots so the SPA-shell catchall doesn't accidentally
+   * serve HTML in response to a fetch.
    */
-  app.get("/rules", publicLimit, async () => {
+  app.get("/api/rules", publicLimit, async () => {
     const s = await getSettings(db);
     return {
       rulesHtml: s.rulesHtml,
@@ -868,7 +906,7 @@ async function main() {
      * this guards against a misbehaving / hostile client.
      */
     let lastTypingPulseAt = 0;
-    socket.on("chat:typing", (payload) => {
+    socket.on("chat:typing", async (payload) => {
       const now = Date.now();
       if (now - lastTypingPulseAt < 1_500) return;
       lastTypingPulseAt = now;
@@ -876,11 +914,42 @@ async function main() {
       // typing in a room you can't see has no signal value and
       // would let a stale tab pollute another room's indicator.
       if (!socket.rooms.has(`room:${payload.roomId}`)) return;
+      // Resolve the typer's identity from the per-tab claim — same
+      // pattern as chat:input. Without this, the indicator pulled
+      // identity off the closure-captured `user.displayName`, which
+      // a sibling tab's /char-switch could rewrite mid-conversation;
+      // a tab actually composing on OOC would still emit pulses
+      // labeled with the user's character. The claim is validated
+      // against the user's own characters; an invalid or omitted
+      // claim falls back to socket.data.tabCharId, then user.activeCharacterId.
+      let typingCharId: string | null = user.activeCharacterId;
+      const claim = payload.asCharacterId;
+      if (typeof claim === "string") {
+        const c = (await db
+          .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters)
+          .where(eq(characters.id, claim))
+          .limit(1))[0];
+        if (c && c.userId === user.id && !c.deletedAt) {
+          typingCharId = c.id;
+        } else {
+          const tabCharId = (socket.data as { tabCharId?: string | null }).tabCharId;
+          if (tabCharId !== undefined) typingCharId = tabCharId;
+        }
+      } else if (claim === null) {
+        typingCharId = null;
+      } else {
+        const tabCharId = (socket.data as { tabCharId?: string | null }).tabCharId;
+        if (tabCharId !== undefined) typingCharId = tabCharId;
+      }
+      const typingDisplayName = typingCharId === user.activeCharacterId
+        ? user.displayName
+        : await resolveDisplayName(db, user.id, typingCharId);
       markTyping(io, db, {
         roomId: payload.roomId,
         userId: user.id,
-        displayName: user.displayName,
-        characterId: user.activeCharacterId ?? null,
+        displayName: typingDisplayName,
+        characterId: typingCharId,
       });
     });
 
@@ -1439,7 +1508,11 @@ async function main() {
           reply.code(404);
           return reply.send({ error: "not found" });
         }
-        const apiPrefixes = ["/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/messages", "/reports", "/push", "/affiliates", "/worlds", "/me", "/health", "/users", "/site", "/rules", "/socket.io", "/thesaurus"];
+        // `/rules` is intentionally NOT in this list — it's now a public
+        // SPA route rendering a dedicated rules page. The JSON endpoint
+        // moved to `/api/rules` (in the list below) so the SPA shell
+        // doesn't shadow it.
+        const apiPrefixes = ["/api", "/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/messages", "/reports", "/push", "/affiliates", "/worlds", "/me", "/health", "/users", "/site", "/socket.io", "/thesaurus"];
         if (apiPrefixes.some((p) => req.url === p || req.url.startsWith(p + "/") || req.url.startsWith(p + "?"))) {
           reply.code(404);
           return reply.send({ error: "not found" });
@@ -1461,6 +1534,9 @@ async function main() {
 
   await app.listen({ port: PORT, host: "0.0.0.0" });
   log.info({ port: PORT, mode: IS_PROD ? "production" : "development" }, "The Spire server up");
+  // Durable boot-ok marker. Survives the Fly log purge so a future
+  // "what was the last successful boot?" question has an answer.
+  recordBootSuccess({ port: PORT, mode: IS_PROD ? "production" : "development" });
 }
 
 /**
@@ -1496,6 +1572,11 @@ function recordRoomPwFailure(userId: string, now: number): void {
 }
 
 main().catch((err) => {
+  // Persistent boot-fail entry on the /data volume so even when Fly
+  // purges the in-memory log scrollback (after 10 restarts), the
+  // last error survives. The pino log goes to stdout too in case a
+  // human is watching live.
+  recordBootFailure(err);
   log.error({ err }, "fatal");
   process.exit(1);
 });

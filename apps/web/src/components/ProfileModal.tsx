@@ -944,7 +944,17 @@ function ProfileBody({
                 </Section>
               ) : null}
 
-              <WorldsSection userId={profile.profile.userId} onOpenWorld={onOpenWorld} />
+              {/* Per migration 0187 the Worlds section is scoped to
+                  the IDENTITY being viewed: a character profile
+                  shows only that character's memberships, a master
+                  profile shows only the master's OOC memberships.
+                  This closes the leak where character profiles
+                  previously displayed the master's world list. */}
+              <WorldsSection
+                userId={profile.profile.userId}
+                identityFilter={profile.kind === "character" ? profile.profile.id : "ooc"}
+                onOpenWorld={onOpenWorld}
+              />
 
 
               {statEntries.length > 0 ? (
@@ -1599,27 +1609,28 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 /**
- * World memberships for the profile being viewed. Lazily fetched per-profile;
- * renders nothing while loading and nothing if the user has no visible
- * memberships (private worlds the viewer can't see are filtered server-side).
- * The primary membership gets a small "primary" chip so visitors can tell at
- * a glance which world this user identifies with most.
+ * World memberships for the profile being viewed. Per migration 0187
+ * the section is identity-scoped: a master profile passes
+ * `identityFilter="ooc"` so it only shows the master's OOC
+ * memberships; a character profile passes the character id and only
+ * that character's memberships render. The "isPrimary" chip was
+ * retired alongside the per-master primary-world concept.
  */
-function WorldsSection({ userId, onOpenWorld }: { userId: string; onOpenWorld: ((slug: string) => void) | undefined }) {
-  // Membership list. Loading state is `null`; once the fetch lands
-  // it's an array (possibly empty — anonymous viewer looking at a
-  // user whose memberships are all in private worlds, or just a
-  // user with no world memberships at all). Empty array renders
-  // nothing so the section doesn't show an awkward "Worlds:" with
-  // no chips. The server now filters per-row: public/open worlds
-  // are always visible; private worlds are gated to owner/admin, so
-  // anonymous viewers still see the user's public memberships —
-  // matching the public-world surfacing that's already on the
-  // splash.
+function WorldsSection({
+  userId,
+  identityFilter,
+  onOpenWorld,
+}: {
+  userId: string;
+  /** "ooc" for the master profile, a character id for a character profile. */
+  identityFilter: string;
+  onOpenWorld: ((slug: string) => void) | undefined;
+}) {
   const [memberships, setMemberships] = useState<WorldMembership[] | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/users/${encodeURIComponent(userId)}/world-memberships`, { credentials: "include" })
+    const qs = new URLSearchParams({ characterId: identityFilter }).toString();
+    fetch(`/users/${encodeURIComponent(userId)}/world-memberships?${qs}`, { credentials: "include" })
       .then((r) => (r.ok ? (r.json() as Promise<{ memberships?: WorldMembership[] }>) : null))
       .then((j) => {
         if (cancelled || !j) return;
@@ -1627,32 +1638,23 @@ function WorldsSection({ userId, onOpenWorld }: { userId: string; onOpenWorld: (
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [userId, identityFilter]);
   if (memberships === null) return null;
   if (memberships.length === 0) return null;
   return (
     <Section title="Worlds">
       <ul className="flex flex-wrap gap-1.5 text-sm">
         {memberships.map((m) => {
-          const chipClass = `rounded border px-2 py-0.5 ${
-            m.isPrimary
-              ? "border-keep-action/50 bg-keep-action/10"
-              : "border-keep-rule/60 bg-keep-panel/60"
-          }`;
-          const title = `Open ${m.worldName} (by ${m.ownerUsername}${m.isPrimary ? ", primary" : ""})`;
+          const chipClass = "rounded border border-keep-rule/60 bg-keep-panel/60 px-2 py-0.5";
+          const title = `Open ${m.worldName} (by ${m.ownerUsername})`;
           const inner = (
             <>
               <span className="font-medium">{m.worldName}</span>
               <span className="ml-1 text-[10px] text-keep-muted">/{m.worldSlug}</span>
-              {m.isPrimary ? (
-                <span className="ml-1 rounded bg-keep-action/20 px-1 text-[9px] uppercase tracking-widest text-keep-action">
-                  primary
-                </span>
-              ) : null}
             </>
           );
           return (
-            <li key={m.worldId}>
+            <li key={`${m.worldId}:${m.characterId ?? ""}`}>
               {onOpenWorld ? (
                 <button
                   type="button"
@@ -1663,7 +1665,7 @@ function WorldsSection({ userId, onOpenWorld }: { userId: string; onOpenWorld: (
                   {inner}
                 </button>
               ) : (
-                <span className={chipClass} title={`by ${m.ownerUsername}${m.isPrimary ? " (primary)" : ""}`}>
+                <span className={chipClass} title={`by ${m.ownerUsername}`}>
                   {inner}
                 </span>
               )}

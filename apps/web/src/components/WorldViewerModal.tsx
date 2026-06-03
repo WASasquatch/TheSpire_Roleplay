@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
+import { legibleHtmlColors, sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import type { WorldDetail, WorldMemberRef, WorldPage } from "@thekeep/shared";
 import { cropStyleFor } from "../lib/avatarCrop.js";
 import { buildWorldTree, parseWorldFromUrl, syncWorldUrl, worldShareUrl, type WorldTreeNode } from "../lib/worlds.js";
 import { readError } from "../lib/http.js";
-import { themeStyle } from "../lib/theme.js";
+import { ActiveThemeContext, themeStyle, useActiveTheme } from "../lib/theme.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { CloseButton } from "./CloseButton.js";
 
@@ -107,21 +107,10 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
     } catch (e) { setError(e instanceof Error ? e.message : "leave failed"); }
     finally { setBusy(false); }
   }
-  async function setPrimary(makePrimary: boolean) {
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await fetch("/me/primary-world", {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ worldId: makePrimary ? worldId : null }),
-      });
-      if (!r.ok) throw new Error(await readError(r));
-      await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "save failed"); }
-    finally { setBusy(false); }
-  }
+  // setPrimary was removed alongside the primary-world feature in
+  // migration 0187 — per-identity memberships made a cross-identity
+  // primary signal meaningless. Memberships still exist, just without
+  // the "this one is your headline affiliation" flag.
 
   const tree = useMemo(() => (detail ? buildWorldTree(detail.pages) : []), [detail]);
   const selectedPage = detail?.pages.find((p) => p.id === selectedPageId) ?? null;
@@ -148,9 +137,21 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
   // Scope the world's theme to this modal only via CSS-var override on the
   // card root. Falls back to the viewer's chat theme when the author hasn't
   // set one (theme === null).
+  const viewerTheme = useActiveTheme();
+  const scopedTheme = detail?.world.theme ?? viewerTheme;
   const modalStyle = detail?.world.theme ? themeStyle(detail.world.theme) : undefined;
   return (
     <Modal onClose={onClose} variant="mobile-fullscreen" zIndex={50}>
+      {/* Republish the scoped theme on React context so descendant
+          components calling `useActiveTheme()` (resolveMessageColor,
+          legibility passes on user HTML, mention chips, etc.) measure
+          contrast against the world's bg instead of the viewer's
+          document-level chat theme. Without the provider the CSS vars
+          flipped correctly but the React-context-driven legibility
+          nudges still computed against the WRONG background, so user-
+          picked colors that read fine on light Parchment chat went
+          invisible on a dark navy world. */}
+      <ActiveThemeContext.Provider value={scopedTheme}>
       <div
         style={modalStyle}
         className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
@@ -183,7 +184,6 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
                 busy={busy}
                 onJoin={join}
                 onLeave={leave}
-                onSetPrimary={setPrimary}
               />
             ) : null}
             {/* Edit button only shows when the viewer can actually edit
@@ -248,6 +248,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
           </div>
         ) : null}
       </div>
+      </ActiveThemeContext.Provider>
     </Modal>
   );
 }
@@ -288,6 +289,15 @@ function ViewerTree({
 }
 
 function PageView({ page, description }: { page: WorldPage | null; description: string | null }) {
+  // The viewer context here is already the world's scoped theme (the
+  // modal wraps PageView in <ActiveThemeContext.Provider>), so `bg`
+  // is the actual background user-styled text is painted against —
+  // which is what legibleHtmlColors needs to compute its nudges.
+  const themeBg = useActiveTheme().bg;
+  const safeHtml = useMemo(() => {
+    if (!page || !page.bodyHtml.trim()) return "";
+    return legibleHtmlColors(sanitizeUserHtml(page.bodyHtml), themeBg);
+  }, [page?.bodyHtml, themeBg]);
   if (!page) {
     return (
       <div className="prose prose-sm max-w-none text-sm">
@@ -305,7 +315,7 @@ function PageView({ page, description }: { page: WorldPage | null; description: 
       {page.bodyHtml.trim() ? (
         <div
           className={`prose prose-sm max-w-none text-sm leading-relaxed [&_a]:text-keep-action [&_blockquote]:border-l-2 [&_blockquote]:border-keep-rule [&_blockquote]:pl-3 [&_h3]:font-action [&_h4]:font-action [&_h5]:font-action [&_h6]:font-action [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 ${USER_HTML_SCOPE_CLASS}`}
-          dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(page.bodyHtml) }}
+          dangerouslySetInnerHTML={{ __html: safeHtml }}
         />
       ) : (
         <p className="italic text-keep-muted">This page is empty.</p>
@@ -362,20 +372,19 @@ function MemberGallery({ members }: { members: WorldMemberRef[] }) {
 
 function MemberAvatar({ member }: { member: WorldMemberRef }) {
   const [errored, setErrored] = useState(false);
-  const title = `${member.username}${member.isPrimary ? " (primary affiliation)" : ""}`;
+  // Display the identity that joined: character name when present
+  // (with master in parens for accountability), master username for
+  // OOC memberships.
+  const title = member.characterId !== null
+    ? `${member.displayName} (${member.username})`
+    : member.displayName;
   // Shared crop resolver — see `lib/avatarCrop`. Default crop maps to
   // `undefined` so the legacy centered-cover render is byte-identical.
   const cropStyle = cropStyleFor(member.avatarCrop);
   return (
     <span
       title={title}
-      // Outer wrapper is sized + relative for the primary-ring overlay.
-      // Inner span carries the rounded clip so the photo / initials get
-      // masked to a circle. Primary members get an accent ring so the
-      // owner / core members read as such at a glance.
-      className={`relative inline-block h-10 w-10 shrink-0 rounded-full ${
-        member.isPrimary ? "ring-2 ring-keep-action ring-offset-1 ring-offset-keep-banner" : ""
-      }`}
+      className="relative inline-block h-10 w-10 shrink-0 rounded-full"
     >
       <span className="absolute inset-0 overflow-hidden rounded-full border border-keep-rule bg-keep-bg">
         {member.avatarUrl && !errored ? (
@@ -390,7 +399,7 @@ function MemberAvatar({ member }: { member: WorldMemberRef }) {
           />
         ) : (
           <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-keep-muted">
-            {member.username.slice(0, 2).toUpperCase()}
+            {member.displayName.slice(0, 2).toUpperCase()}
           </span>
         )}
       </span>
@@ -399,25 +408,24 @@ function MemberAvatar({ member }: { member: WorldMemberRef }) {
 }
 
 /**
- * Membership action chips for the viewer header. Visible buttons depend on
- * the world's visibility + the viewer's current membership state:
+ * Membership action chips for the viewer header. Per migration 0187
+ * primary-world is gone, so the controls are just Join and Leave
+ * scoped to the viewer's CURRENT identity:
  *   - non-member + open world → "Join"
- *   - member, not primary    → "Set as primary" + "Leave"
- *   - member, is primary     → "Unset primary" + "Leave"
- *   - non-member + private/public → no controls (you can't join those)
+ *   - current identity is a member → "Leave"
+ *   - non-member + private/public → no controls (visibility is unchanged
+ *     and there's no apply-from-viewer here; the catalog handles Apply)
  */
 function MembershipControls({
   detail,
   busy,
   onJoin,
   onLeave,
-  onSetPrimary,
 }: {
   detail: WorldDetail;
   busy: boolean;
   onJoin: () => void;
   onLeave: () => void;
-  onSetPrimary: (makePrimary: boolean) => void;
 }) {
   const isOpen = detail.world.visibility === "open";
   if (!detail.viewerIsMember) {
@@ -427,7 +435,7 @@ function MembershipControls({
         type="button"
         onClick={onJoin}
         disabled={busy}
-        title="Join this world to declare an affiliation. Doesn't change your room access."
+        title="Join this world as your current identity. Doesn't change room access."
         className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
       >
         Join
@@ -435,36 +443,13 @@ function MembershipControls({
     );
   }
   return (
-    <>
-      {detail.viewerPrimary ? (
-        <button
-          type="button"
-          onClick={() => onSetPrimary(false)}
-          disabled={busy}
-          title="Stop using this world as your primary. You'll appear unaffiliated in chat userlists."
-          className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner disabled:opacity-50"
-        >
-          Unset primary
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={() => onSetPrimary(true)}
-          disabled={busy}
-          title="Use this world as your primary affiliation. Groups you with other members in chat userlists."
-          className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
-        >
-          Set as primary
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={onLeave}
-        disabled={busy}
-        className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-sm text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
-      >
-        Leave
-      </button>
-    </>
+    <button
+      type="button"
+      onClick={onLeave}
+      disabled={busy}
+      className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-sm text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
+    >
+      Leave
+    </button>
   );
 }

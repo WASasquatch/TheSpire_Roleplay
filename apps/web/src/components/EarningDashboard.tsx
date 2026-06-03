@@ -291,11 +291,29 @@ function OverviewTab({ snapshot, flashSale, onNavigate }: {
   // user's own portrait instead of a stand-in initials chip (which
   // makes the ring blend into its own backdrop and reads as
   // "inset"). Same source the Borders tab uses.
+  //
+  // CRITICAL: the lookup MUST filter on (userId, characterId) tuple,
+  // not just userId. The occupants cache holds one row per
+  // (userId, characterId) tuple — a master with three open tabs
+  // voicing OOC, character A, and character B has THREE rows
+  // matching `o.userId === me.id`. Iterating `Object.values(...)`
+  // without the characterId filter returns the FIRST tuple that
+  // happens to land first in the rooms map, which is non-
+  // deterministic. That manifested as: a user shopping on OOC
+  // (Darkest Thoughts) with another tab parked as Sister_Rosalina
+  // (character) seeing Sister_Rosalina's portrait painted onto the
+  // OOC dashboard's border previews — and the purchase actually
+  // charged from OOC, so the visual identity didn't match the wallet
+  // the buy was hitting. Refreshing the tab cleared the cross-tab
+  // state and the lookup landed on the right row. Now scoped to
+  // (me.id, activeCharacterId) so the lookup ONLY matches the
+  // identity this tab is currently voicing.
   const me = useChat((s) => s.me);
+  const activeCharacterId = useChat((s) => s.activeCharacterId);
   const viewerAvatarUrl = useChat((s) => {
     if (!me) return null;
     for (const list of Object.values(s.occupants)) {
-      const row = list.find((o) => o.userId === me.id);
+      const row = list.find((o) => o.userId === me.id && o.characterId === activeCharacterId);
       if (row?.avatarUrl) return row.avatarUrl;
     }
     return null;
@@ -1784,11 +1802,16 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
   // frame — not an initials chip stand-in. Falls back to null when
   // the user has no occupant row in any open room yet, in which
   // case the BorderedAvatar shows initials.
+  //
+  // Scoped to (me.id, activeCharacterId) so a sibling tab voicing a
+  // different identity can't poison this lookup — see the long-form
+  // comment on the dashboard hero's `viewerAvatarUrl` for the full
+  // failure mode this guards against.
   const me = useChat((s) => s.me);
   const viewerAvatarUrl = useChat((s) => {
     if (!me) return null;
     for (const list of Object.values(s.occupants)) {
-      const row = list.find((o) => o.userId === me.id);
+      const row = list.find((o) => o.userId === me.id && o.characterId === activeCharacterId);
       if (row?.avatarUrl) return row.avatarUrl;
     }
     return null;

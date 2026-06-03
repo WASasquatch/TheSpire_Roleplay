@@ -1612,11 +1612,17 @@ function FreeformBordersSection() {
   // cache so previews show their actual portrait inside the frame.
   // Same lookup BordersTab uses for the user-facing preview. Falls
   // back to null (BorderedAvatar then shows the initials chip).
+  //
+  // Scoped to (me.id, activeCharacterId) so a sibling tab voicing a
+  // different identity can't poison this lookup — picking up a
+  // character row's portrait while the admin is reviewing borders on
+  // OOC would paint the wrong face into the preview frame.
   const me = useChat((s) => s.me);
+  const activeCharacterId = useChat((s) => s.activeCharacterId);
   const previewAvatarUrl = useChat((s) => {
     if (!me) return null;
     for (const list of Object.values(s.occupants)) {
-      const row = list.find((o) => o.userId === me.id);
+      const row = list.find((o) => o.userId === me.id && o.characterId === activeCharacterId);
       if (row?.avatarUrl) return row.avatarUrl;
     }
     return null;
@@ -1869,12 +1875,15 @@ function FreeformBorderEditor({
     setDraft({ ...draft, [k]: v });
   }
   // Pull the admin's own avatar for the live preview — same source
-  // as the section's grid previews.
+  // as the section's grid previews. Scoped to (me.id, activeCharacterId)
+  // for the same cross-tab leak rationale as the freeform-borders
+  // preview above.
   const me = useChat((s) => s.me);
+  const activeCharacterId = useChat((s) => s.activeCharacterId);
   const previewAvatarUrl = useChat((s) => {
     if (!me) return null;
     for (const list of Object.values(s.occupants)) {
-      const row = list.find((o) => o.userId === me.id);
+      const row = list.find((o) => o.userId === me.id && o.characterId === activeCharacterId);
       if (row?.avatarUrl) return row.avatarUrl;
     }
     return null;

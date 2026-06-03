@@ -507,7 +507,7 @@ export const banCommand: CommandHandler = {
   name: "ban",
   aliases: ["banish"],
   usage: "/ban <username> [duration] [reason]",
-  description: "Ban a user from the current room. Mod/owner/admin only.",
+  description: "Banish a user from the current room. Owner/admin only — room mods can /kick or /mute, but only the room owner can permanently bar someone.",
   subcommands: [
     {
       verb: "<username>",
@@ -526,8 +526,15 @@ export const banCommand: CommandHandler = {
     },
   ],
   async run(ctx) {
-    if (!(await callerCanModerateRoom(ctx, "ban_user"))) {
-      return notice(ctx, "PERM", "Only room owner/mod or a site admin can /ban.");
+    // Owner-or-sitewide-only. Room mods are intentionally NOT allowed
+    // to ban — banishment is a permanent escalation that revokes the
+    // user's ability to even enter the room, and the room owner should
+    // be the only local authority who gets to make that call. Room
+    // mods can /kick (temporary ejection) and /mute (silenced but
+    // still present) — those cover the day-to-day moderation surface
+    // without handing out the "you can never come back" lever.
+    if (!(await callerOwnsRoom(ctx, "ban_user"))) {
+      return notice(ctx, "PERM", "Only the room owner or a site admin can /ban. Room mods can /kick or /mute instead.");
     }
     const [name, maybeDur, ...rest] = ctx.args;
     if (!name) return notice(ctx, "EMPTY", "Usage: /ban <username> [duration] [reason]");
@@ -622,10 +629,14 @@ export const unbanCommand: CommandHandler = {
   name: "unban",
   aliases: ["pardon"],
   usage: "/unban <username>",
-  description: "Lift a /ban from the current room.",
+  description: "Lift a /ban from the current room. Owner/admin only — pairs with /ban, which room mods can't issue.",
   async run(ctx) {
-    if (!(await callerCanModerateRoom(ctx, "unban_user"))) {
-      return notice(ctx, "PERM", "Only room owner/mod or a site admin can /unban.");
+    // Symmetric to /ban — only the room owner (or a site-perm holder)
+    // can lift a ban. A room mod who could /unban but not /ban would
+    // be able to override an owner's permanent ban decision, which
+    // defeats the purpose of restricting /ban to the owner.
+    if (!(await callerOwnsRoom(ctx, "unban_user"))) {
+      return notice(ctx, "PERM", "Only the room owner or a site admin can /unban.");
     }
     const name = ctx.argsText.trim();
     if (!name) return notice(ctx, "EMPTY", "Usage: /unban <username>");

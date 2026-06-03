@@ -1,6 +1,37 @@
 import { eq } from "drizzle-orm";
 import { users } from "../../db/schema.js";
 import { addSystemMessage, broadcastPresence } from "../../realtime/broadcast.js";
+import type { CommandContext as Ctx } from "../types.js";
+
+/**
+ * Every room the toggling user currently has a live socket in.
+ * Going incognito has to land a presence refresh on each of those
+ * rooms simultaneously — broadcasting only on `ctx.roomId` (the room
+ * where /incognito was typed) left every other room the user is
+ * present in showing them as visible until the next /rooms poll
+ * (20s). For a feature whose contract is "global invisible, no trace"
+ * a 20-second leak window on every other tab the moderator had open
+ * is way too much, so we walk the user's sockets up front and refresh
+ * each room they're currently joined to.
+ *
+ * Returns the unique set of roomIds — sockets can repeat the same
+ * room when the user has multiple tabs on it, so we dedupe before
+ * iterating. Includes `ctx.roomId` even if no live socket is in it
+ * (defensive: the command was issued from that room, so there must
+ * have been a socket there at dispatch time, but if it's already
+ * gone by the time we walk we still want to fire the broadcast).
+ */
+async function roomsUserIsIn(ctx: Ctx): Promise<string[]> {
+  const sockets = await ctx.io.fetchSockets();
+  const roomIds = new Set<string>([ctx.roomId]);
+  for (const s of sockets) {
+    if ((s.data as { userId?: string }).userId !== ctx.user.id) continue;
+    for (const r of s.rooms) {
+      if (r.startsWith("room:")) roomIds.add(r.slice(5));
+    }
+  }
+  return [...roomIds];
+}
 import { recordAudit } from "../../audit.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
@@ -108,8 +139,17 @@ async function enterIncognito(ctx: CommandContext, opts: { aliasOverride?: strin
   // client now surfaces as a `[Name]` prefix — leaking the mod's
   // identity on the very line that's supposed to disguise it.
   const exitLine = fresh.incognitoExitMessage ?? defaultExitMessage(realDisplayName);
+  // Exit line goes ONLY to ctx.roomId — that's the room the mod was
+  // visible in when they typed the command, so other participants
+  // see one coherent "X has left the chat." The OTHER rooms the
+  // mod has tabs in get a silent presence refresh (no exit message)
+  // so the leaving moderator doesn't accidentally light up every
+  // room with a leave broadcast.
   await addSystemMessage(ctx.io, ctx.db, ctx.roomId, exitLine);
-  await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
+  const rooms = await roomsUserIsIn(ctx);
+  for (const rid of rooms) {
+    await broadcastPresence(ctx.io, ctx.db, rid);
+  }
 
   await recordAudit(ctx.db, {
     actorUserId: ctx.user.id,
@@ -151,7 +191,14 @@ async function leaveIncognito(ctx: CommandContext): Promise<void> {
   // persisted displayName as the bare "system" sentinel so the
   // client doesn't render this as `[Name] X has joined the chat.`.
   await addSystemMessage(ctx.io, ctx.db, ctx.roomId, returnLine);
-  await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
+  // Symmetric to enterIncognito: refresh the userlist in every room
+  // the moderator has a live socket in, so they reappear immediately
+  // everywhere instead of waiting on the 20s /rooms poll for the
+  // rooms beyond ctx.roomId.
+  const rooms = await roomsUserIsIn(ctx);
+  for (const rid of rooms) {
+    await broadcastPresence(ctx.io, ctx.db, rid);
+  }
 
   await recordAudit(ctx.db, {
     actorUserId: ctx.user.id,

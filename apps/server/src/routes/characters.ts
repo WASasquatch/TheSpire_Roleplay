@@ -1,5 +1,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { parseTagList, serializeTagList } from "@thekeep/shared";
+import {
+  CHARACTER_ATTRIBUTES_MAX,
+  CHARACTER_ATTRIBUTE_LABEL_MAX,
+  CHARACTER_ATTRIBUTE_VALUE_MAX,
+  CHARACTER_ATTRIBUTE_VALUE_MIN,
+  parseTagList,
+  serializeTagList,
+} from "@thekeep/shared";
 import { hasPermission } from "../auth/permissions.js";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -55,6 +62,61 @@ const themeSchema = z.object({
   system: z.string().regex(HEX_RX),
 }).strict();
 
+// Vibe axes: bipolar 0..100 or null (unset). Each shared axis key
+// gets its own optional+nullable number slot. Listing the axes
+// explicitly here (rather than reflecting off CHARACTER_VIBE_AXES
+// dynamically) keeps the Zod inference clean — z.object built from a
+// computed record loses the per-key type info — and adding a new axis
+// is still a two-touch change (shared catalog + this object), which is
+// the right tradeoff for a security-relevant validator.
+// Unknown axis keys are dropped by `.strict()` rather than echoed back
+// to storage.
+const vibeAxisValue = z.number().int().min(0).max(100).nullable();
+const vibeSchema = z.object({
+  combat:   vibeAxisValue.optional(),
+  cunning:  vibeAxisValue.optional(),
+  warmth:   vibeAxisValue.optional(),
+  order:    vibeAxisValue.optional(),
+  caution:  vibeAxisValue.optional(),
+  outlook:  vibeAxisValue.optional(),
+  social:   vibeAxisValue.optional(),
+  boldness: vibeAxisValue.optional(),
+}).strict().optional();
+
+// Each attribute row: client-generated id + a labeled integer stat
+// clamped to its own [min, max] bound. Negative-friendly bounds
+// (-9999..9999) so D&D-style ability-score modifiers (-5..+5) and
+// debuff numbers don't have to wedge into a positive-only schema.
+// Server validates the per-row coherence (min <= value <= max);
+// out-of-band rows get rejected so the renderer never has to defend
+// against a value falling outside its own bar's range.
+const attributeRowSchema = z.object({
+  id: z.string().min(1).max(60),
+  label: z.string().min(1).max(CHARACTER_ATTRIBUTE_LABEL_MAX),
+  value: z.number().int().min(CHARACTER_ATTRIBUTE_VALUE_MIN).max(CHARACTER_ATTRIBUTE_VALUE_MAX),
+  min: z.number().int().min(CHARACTER_ATTRIBUTE_VALUE_MIN).max(CHARACTER_ATTRIBUTE_VALUE_MAX),
+  max: z.number().int().min(CHARACTER_ATTRIBUTE_VALUE_MIN).max(CHARACTER_ATTRIBUTE_VALUE_MAX),
+}).strict().refine(
+  (r) => r.min <= r.max && r.value >= r.min && r.value <= r.max,
+  { message: "value must satisfy min <= value <= max" },
+);
+
+// Visibility map mirrors the shared `CharacterStatsVisibility` shape —
+// each known field is an optional boolean (undefined = show by default,
+// false = hide on the rendered profile, true = show).
+const visibilitySchema = z.object({
+  age: z.boolean().optional(),
+  race: z.boolean().optional(),
+  gender: z.boolean().optional(),
+  height: z.boolean().optional(),
+  weight: z.boolean().optional(),
+  alignment: z.boolean().optional(),
+  occupation: z.boolean().optional(),
+  custom: z.boolean().optional(),
+  vibe: z.boolean().optional(),
+  attributes: z.boolean().optional(),
+}).strict().optional();
+
 const statsSchema = z.object({
   age: z.string().max(40).optional(),
   race: z.string().max(40).optional(),
@@ -64,6 +126,21 @@ const statsSchema = z.object({
   alignment: z.string().max(40).optional(),
   occupation: z.string().max(80).optional(),
   custom: z.record(z.string().max(40), z.string().max(200)).optional(),
+  vibe: vibeSchema,
+  attributes: z.array(attributeRowSchema)
+    .max(CHARACTER_ATTRIBUTES_MAX)
+    .refine(
+      // Stable client-side id keys: two rows sharing one would cause
+      // React-key collisions on the renderer side AND let a duplicate
+      // post quietly overwrite an older row's data on re-save (since
+      // the editor finds rows by id). Reject the whole save rather
+      // than silently dedupe — a duplicate is a real bug somewhere
+      // upstream and the operator wants to see the 400.
+      (rows) => new Set(rows.map((r) => r.id)).size === rows.length,
+      { message: "attribute row ids must be unique" },
+    )
+    .optional(),
+  visibility: visibilitySchema,
 }).strict();
 
 // Restrict avatarUrl to http(s) - z.string().url() also allows

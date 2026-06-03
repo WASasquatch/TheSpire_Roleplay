@@ -143,11 +143,35 @@ export async function registerUsersRoutes(
     // Online lookup happens up-front so the alphabetical-online sort
     // and the "messages" sort can both reference the set without two
     // separate fetchSockets() round trips.
+    //
+    // Incognito moderators are stripped from the online set so the
+    // directory + mention autocomplete + friends list all report them
+    // as offline. The incognito feature's contract is "global invisible
+    // — no trace"; surfacing them with an online dot here would directly
+    // contradict that. We could resolve this with a per-user DB lookup
+    // for every socket, but the cardinality is small (typical staff
+    // on at one time is < 5) and a single batched SELECT keeps it cheap
+    // even at scale: one query enumerates incognito users, then we
+    // subtract those ids from the socket-derived set.
     const sockets = await io.fetchSockets();
-    const onlineUserIds = new Set<string>();
+    const rawOnlineUserIds = new Set<string>();
     for (const s of sockets) {
       const uid = (s.data as { userId?: string }).userId;
-      if (uid) onlineUserIds.add(uid);
+      if (uid) rawOnlineUserIds.add(uid);
+    }
+    let onlineUserIds = rawOnlineUserIds;
+    if (rawOnlineUserIds.size > 0) {
+      const incognitoRows = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(
+          eq(users.incognitoMode, true),
+          sql`${users.id} IN (${sql.join([...rawOnlineUserIds].map((u) => sql`${u}`), sql`, `)})`,
+        ));
+      if (incognitoRows.length > 0) {
+        const incognitoSet = new Set(incognitoRows.map((r) => r.id));
+        onlineUserIds = new Set([...rawOnlineUserIds].filter((id) => !incognitoSet.has(id)));
+      }
     }
 
     if (matchedUserIds.length === 0) return { users: [], total: 0, offset, limit };

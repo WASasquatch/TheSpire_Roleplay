@@ -154,7 +154,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
       <ActiveThemeContext.Provider value={scopedTheme}>
       <div
         style={modalStyle}
-        className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
+        className={`${MODAL_CARD_CONTENT} keep-frame keep-frame--reading bg-keep-bg text-keep-text lg:rounded`}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-keep-rule bg-keep-banner px-4 py-2">

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { AvatarCrop, CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
-import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, DEFAULT_THEME, clampAvatarCrop, isDarkPalette, isDefaultAvatarCrop, normalizeTheme } from "@thekeep/shared";
+import type { AvatarCrop, CharacterAttribute, CharacterJournalEntry, CharacterPortrait, CharacterStats, CharacterStatsVisibility, CharacterVibeAxisKey, ProfileCollectionEntry, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
+import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, CHARACTER_ATTRIBUTES_MAX, CHARACTER_ATTRIBUTE_LABEL_MAX, CHARACTER_ATTRIBUTE_VALUE_MAX, CHARACTER_ATTRIBUTE_VALUE_MIN, CHARACTER_VIBE_AXES, DEFAULT_THEME, clampAvatarCrop, isDarkPalette, isDefaultAvatarCrop, normalizeTheme } from "@thekeep/shared";
 import { applyStyle } from "../lib/ornaments/index.js";
 import { applyTheme } from "../lib/theme.js";
 import { GENDER_OPTIONS, type Gender } from "../lib/gender.js";
@@ -162,7 +162,8 @@ interface CharacterRow {
 
 type Target = { kind: "master" } | { kind: "character"; id: string };
 
-const STAT_FIELDS: Array<{ key: keyof CharacterStats; label: string }> = [
+type ClassicStatField = "age" | "race" | "gender" | "height" | "weight" | "alignment" | "occupation";
+const STAT_FIELDS: Array<{ key: ClassicStatField; label: string }> = [
   { key: "age", label: "Age" },
   { key: "race", label: "Race" },
   { key: "gender", label: "Gender" },
@@ -628,13 +629,45 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
           disableThesaurus,
         });
       } else {
+        // Attribute-row sanitizer. The editor lets the user type
+        // mid-stream (cross-field clamp moved to onBlur so typing
+        // stays smooth), so a Save click that fires before the
+        // user blurs the input could ship a row with min > max
+        // or value outside [min, max] — the schema would 400 the
+        // whole stats body and the surface error wouldn't point at
+        // the bad row. Same goes for rows the owner started but
+        // never named: empty labels fail `z.string().min(1)`.
+        //
+        // We do BOTH fixes here before send so the payload is
+        // always server-valid:
+        //   1. Drop rows whose trimmed label is empty (clearly
+        //      unfinished, not intended content).
+        //   2. Re-apply the cross-field clamp on the surviving
+        //      rows so anything the user typed but didn't blur
+        //      out of still lands as a coherent (min, value, max).
+        const cleanStats = stats.attributes
+          ? (() => {
+              const kept = stats.attributes
+                .filter((r) => r.label.trim().length > 0)
+                .map((r) => {
+                  const next = { ...r };
+                  if (next.min > next.max) next.max = next.min;
+                  if (next.value < next.min) next.value = next.min;
+                  if (next.value > next.max) next.value = next.max;
+                  return next;
+                });
+              const { attributes: _drop, ...rest } = stats;
+              void _drop;
+              return kept.length > 0 ? { ...rest, attributes: kept } : rest;
+            })()
+          : stats;
         const r = await fetch(`/characters/${target.id}`, {
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             bioHtml,
-            stats,
+            stats: cleanStats,
             avatarUrl: avatarUrl.trim() || null,
             avatarCrop,
             includeAvatarInGallery,
@@ -1345,44 +1378,62 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                   </span>
                 </label>
                 {isCharacter ? (
-                  <fieldset className="rounded border border-keep-rule p-3">
-                    <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Stats</legend>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {STAT_FIELDS.map(({ key, label }) => (
-                        <label key={key} className="block text-xs">
-                          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{label}</span>
-                          {key === "gender" ? (
-                            <select
-                              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
-                              value={(stats.gender as string) ?? ""}
-                              onChange={(e) =>
-                                setStats((s) => {
-                                  const next = { ...s };
-                                  if (e.target.value) next.gender = e.target.value;
-                                  else delete next.gender;
-                                  return next;
-                                })
-                              }
-                            >
-                              <option value="">-</option>
-                              {GENDER_OPTIONS.filter((o) => o.value !== "undisclosed").map((o) => (
-                                <option key={o.value} value={o.value}>{o.label}</option>
-                              ))}
-                            </select>
-                          ) : (
-                            <input
-                              type="text"
-                              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
-                              value={(stats[key] as string) ?? ""}
-                              onChange={(e) =>
-                                setStats((s) => ({ ...s, [key]: e.target.value || undefined }))
-                              }
-                            />
-                          )}
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
+                  <>
+                    <fieldset className="rounded border border-keep-rule p-3">
+                      <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Stats</legend>
+                      <p className="mb-2 text-[10px] text-keep-muted">
+                        Click the eye next to a field to hide it on your public profile. The value stays saved either way.
+                      </p>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {STAT_FIELDS.map(({ key, label }) => {
+                          const hidden = stats.visibility?.[key] === false;
+                          return (
+                            <div key={key} className="block text-xs">
+                              <div className="mb-1 flex items-center justify-between gap-1">
+                                <span className="uppercase tracking-widest text-keep-muted">{label}</span>
+                                <VisibilityToggle
+                                  hidden={hidden}
+                                  onToggle={() => setStats((s) => toggleVisibility(s, key))}
+                                  label={label}
+                                />
+                              </div>
+                              {key === "gender" ? (
+                                <select
+                                  className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+                                  value={(stats.gender as string) ?? ""}
+                                  onChange={(e) =>
+                                    setStats((s) => {
+                                      const next = { ...s };
+                                      if (e.target.value) next.gender = e.target.value;
+                                      else delete next.gender;
+                                      return next;
+                                    })
+                                  }
+                                >
+                                  <option value="">-</option>
+                                  {GENDER_OPTIONS.filter((o) => o.value !== "undisclosed").map((o) => (
+                                    <option key={o.value} value={o.value}>{o.label}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <input
+                                  type="text"
+                                  className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+                                  value={(stats[key] as string) ?? ""}
+                                  onChange={(e) =>
+                                    setStats((s) => ({ ...s, [key]: e.target.value || undefined }))
+                                  }
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+
+                    <VibeAxesEditor stats={stats} onChange={setStats} />
+                    <AttributesEditor stats={stats} onChange={setStats} />
+                  </>
                 ) : null}
               </div>
             ) : null}
@@ -2948,6 +2999,388 @@ function Field({
  * literal "#000000" would freeze the inheritance even when the upstream
  * color changes later.
  */
+/**
+ * Flip a single field's visibility flag on a stats object. Undefined
+ * (default = show) and explicit `true` both round-trip to `false`; an
+ * existing `false` round-trips back to undefined so the saved blob
+ * doesn't accumulate redundant `: true` entries on every flip. The
+ * field stays in the stats blob regardless — visibility only affects
+ * the rendered profile, not the persisted value.
+ */
+function toggleVisibility(stats: CharacterStats, key: keyof CharacterStatsVisibility): CharacterStats {
+  const current = stats.visibility?.[key];
+  const next: CharacterStatsVisibility = { ...stats.visibility };
+  if (current === false) delete next[key];
+  else next[key] = false;
+  // exactOptionalPropertyTypes: drop the key entirely when there are no
+  // active overrides instead of assigning undefined, so the saved blob
+  // doesn't carry an empty `visibility: {}` object.
+  const { visibility: _, ...rest } = stats;
+  void _;
+  return Object.keys(next).length > 0 ? { ...rest, visibility: next } : rest;
+}
+
+/**
+ * Tiny eye / eye-slash button used inline next to a stats field label.
+ * Pure cosmetic affordance — the actual visibility toggling is owned
+ * by the parent's `onToggle` so the button stays stateless and
+ * reusable across all the editor sections that want a show/hide
+ * indicator (classic fields, the Vibe section header, the Attributes
+ * section header).
+ */
+function VisibilityToggle({
+  hidden,
+  onToggle,
+  label,
+}: {
+  hidden: boolean;
+  onToggle: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={hidden ? `Show "${label}" on your profile` : `Hide "${label}" from your profile (value stays saved)`}
+      aria-label={hidden ? `Show ${label}` : `Hide ${label}`}
+      className={`shrink-0 rounded px-1 text-[11px] leading-none transition-colors ${
+        hidden
+          ? "text-keep-muted/50 hover:text-keep-action"
+          : "text-keep-action hover:text-keep-muted"
+      }`}
+    >
+      {hidden ? "🙈" : "👁"}
+    </button>
+  );
+}
+
+/**
+ * Vibe-axes editor — eight bipolar 0..100 sliders that paint the
+ * "what kind of character is this at a glance" read. Each axis can
+ * be UNSET (null), in which case it doesn't render on the profile;
+ * the editor still shows the slider with a "Not set — drag to set"
+ * label so the owner can opt the axis in.
+ *
+ * Distinct from World vibe axes (magnitude); each end of the axis
+ * has its own label and the dot sits between them. Section-level
+ * visibility toggle lives in the legend so the owner can hide the
+ * whole vibe block without clearing each axis individually.
+ */
+function VibeAxesEditor({
+  stats,
+  onChange,
+}: {
+  stats: CharacterStats;
+  onChange: (next: CharacterStats | ((prev: CharacterStats) => CharacterStats)) => void;
+}) {
+  const sectionHidden = stats.visibility?.vibe === false;
+  function setAxis(key: CharacterVibeAxisKey, value: number | null) {
+    onChange((prev) => {
+      const nextVibe = { ...(prev.vibe ?? {}) };
+      if (value === null) delete nextVibe[key];
+      else nextVibe[key] = value;
+      const { vibe: _, ...rest } = prev;
+      void _;
+      return Object.keys(nextVibe).length > 0 ? { ...rest, vibe: nextVibe } : rest;
+    });
+  }
+  return (
+    <fieldset className="rounded border border-keep-rule p-3">
+      <legend className="flex items-center gap-2 px-1 text-xs uppercase tracking-widest text-keep-muted">
+        Vibe
+        <VisibilityToggle
+          hidden={sectionHidden}
+          onToggle={() => onChange((s) => toggleVisibility(s, "vibe"))}
+          label="Vibe"
+        />
+      </legend>
+      <p className="mb-3 text-[10px] text-keep-muted">
+        Where does your character sit on each of these traits? Drag a slider to set the axis; unset axes don't show on your profile.
+      </p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {CHARACTER_VIBE_AXES.map((axis) => {
+          const value = stats.vibe?.[axis.key] ?? null;
+          const isSet = value !== null;
+          return (
+            <div key={axis.key} className="rounded border border-keep-rule/40 bg-keep-banner/20 p-2">
+              <div className="mb-1 flex items-baseline justify-between gap-2 text-[11px]">
+                <span className="font-semibold text-keep-text">{axis.lowLabel}</span>
+                <span className="text-keep-muted">{isSet ? `${value}` : "Not set"}</span>
+                <span className="font-semibold text-keep-text">{axis.highLabel}</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={isSet ? (value as number) : 50}
+                onChange={(e) => setAxis(axis.key, parseInt(e.target.value, 10))}
+                className="w-full"
+                aria-label={`${axis.lowLabel} to ${axis.highLabel}`}
+              />
+              {isSet ? (
+                <button
+                  type="button"
+                  onClick={() => setAxis(axis.key, null)}
+                  className="mt-1 text-[10px] text-keep-muted hover:text-keep-accent"
+                >
+                  Clear axis
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAxis(axis.key, 50)}
+                  className="mt-1 text-[10px] text-keep-muted hover:text-keep-action"
+                >
+                  Set this axis
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+/**
+ * Attributes editor — a freeform numeric stat block. Each row is a
+ * label + value + per-row min/max bounds so a D&D-style "STR 14"
+ * (min 1, max 20) and an HP gauge (min 0, max whatever) can coexist
+ * on the same character without sharing scales.
+ *
+ * Server caps the array at {@link CHARACTER_ATTRIBUTES_MAX}; the
+ * Add button disables when that ceiling is reached. Row id is a
+ * stable client-side `nanoid`-ish key so React doesn't thrash on
+ * reorder; the server preserves whatever shape the client sent.
+ */
+function AttributesEditor({
+  stats,
+  onChange,
+}: {
+  stats: CharacterStats;
+  onChange: (next: CharacterStats | ((prev: CharacterStats) => CharacterStats)) => void;
+}) {
+  const sectionHidden = stats.visibility?.attributes === false;
+  const rows = stats.attributes ?? [];
+  const canAdd = rows.length < CHARACTER_ATTRIBUTES_MAX;
+  function update(idx: number, patch: Partial<CharacterAttribute>) {
+    // Mid-typing path: apply the patch verbatim, no cross-field
+    // clamp. Auto-clamping on every keystroke produced surprising
+    // state when a user typed "55" intending "550" — the "55"
+    // cascade dragged value+max along with min and the next digit
+    // landed on the cascaded state instead of the original. The
+    // clamp now runs on blur (see `clampRow` below) and again on
+    // save (`sanitizeAttributesForSave`), so the smooth-typing UX
+    // doesn't sacrifice the "save body is always server-valid"
+    // contract.
+    onChange((prev) => {
+      const next = [...(prev.attributes ?? [])];
+      const row = next[idx];
+      if (!row) return prev;
+      next[idx] = { ...row, ...patch };
+      return { ...prev, attributes: next };
+    });
+  }
+  // Field-leave path: snap any cross-field inconsistency the user
+  // typed (min > max, value outside [min, max]) into a stable
+  // configuration. Same three-step resolution `update` used to run
+  // on every keystroke, but bound to onBlur so it doesn't interrupt
+  // typing. Idempotent on rows that are already valid.
+  function clampRow(idx: number) {
+    onChange((prev) => {
+      const cur = prev.attributes ?? [];
+      const row = cur[idx];
+      if (!row) return prev;
+      const next = [...cur];
+      const merged = { ...row };
+      if (merged.min > merged.max) merged.max = merged.min;
+      if (merged.value < merged.min) merged.value = merged.min;
+      if (merged.value > merged.max) merged.value = merged.max;
+      // Skip the state write entirely when nothing moved — keeps
+      // useless re-renders out of the tree.
+      if (
+        merged.min === row.min &&
+        merged.max === row.max &&
+        merged.value === row.value
+      ) {
+        return prev;
+      }
+      next[idx] = merged;
+      return { ...prev, attributes: next };
+    });
+  }
+  function remove(idx: number) {
+    onChange((prev) => {
+      const next = [...(prev.attributes ?? [])];
+      next.splice(idx, 1);
+      const { attributes: _, ...rest } = prev;
+      void _;
+      return next.length > 0 ? { ...rest, attributes: next } : rest;
+    });
+  }
+  function reorder(idx: number, dir: -1 | 1) {
+    // Pure swap with the neighbor in the requested direction. Out-of-
+    // bounds (first row up, last row down) is a no-op; the buttons
+    // disable at the ends so this guard is belt-and-suspenders.
+    onChange((prev) => {
+      const cur = prev.attributes ?? [];
+      const target = idx + dir;
+      if (target < 0 || target >= cur.length) return prev;
+      const next = [...cur];
+      const a = next[idx];
+      const b = next[target];
+      if (!a || !b) return prev;
+      next[idx] = b;
+      next[target] = a;
+      return { ...prev, attributes: next };
+    });
+  }
+  function add() {
+    onChange((prev) => {
+      const rows = prev.attributes ?? [];
+      if (rows.length >= CHARACTER_ATTRIBUTES_MAX) return prev;
+      const id = `attr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const next: CharacterAttribute = { id, label: "", value: 10, min: 0, max: 20 };
+      return { ...prev, attributes: [...rows, next] };
+    });
+  }
+  return (
+    <fieldset className="rounded border border-keep-rule p-3">
+      <legend className="flex items-center gap-2 px-1 text-xs uppercase tracking-widest text-keep-muted">
+        Attributes
+        <VisibilityToggle
+          hidden={sectionHidden}
+          onToggle={() => onChange((s) => toggleVisibility(s, "attributes"))}
+          label="Attributes"
+        />
+      </legend>
+      <p className="mb-3 text-[10px] text-keep-muted">
+        Numeric stat block — D&D ability scores ("STR 14"), HP, or any custom attributes you want next to your profile. Each row sets its own min / max so different stat systems can live side by side.
+      </p>
+      {rows.length === 0 ? (
+        <p className="mb-2 text-[11px] italic text-keep-muted">
+          No attributes yet. Add one to start a stat block.
+        </p>
+      ) : (
+        <ul className="mb-2 space-y-2">
+          {rows.map((row, idx) => (
+            <li
+              key={row.id}
+              className="grid grid-cols-[1fr_60px_60px_60px_auto] items-end gap-2 rounded border border-keep-rule/40 bg-keep-banner/20 p-2 text-[11px]"
+            >
+              <label className="block">
+                <span className="mb-1 block uppercase tracking-widest text-keep-muted">Label</span>
+                <input
+                  type="text"
+                  maxLength={CHARACTER_ATTRIBUTE_LABEL_MAX}
+                  placeholder="e.g. STR"
+                  value={row.label}
+                  onChange={(e) => update(idx, { label: e.target.value })}
+                  className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block uppercase tracking-widest text-keep-muted">Min</span>
+                <input
+                  type="number"
+                  min={CHARACTER_ATTRIBUTE_VALUE_MIN}
+                  max={CHARACTER_ATTRIBUTE_VALUE_MAX}
+                  value={row.min}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (Number.isNaN(v)) return;
+                    update(idx, { min: v });
+                  }}
+                  onBlur={() => clampRow(idx)}
+                  className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block uppercase tracking-widest text-keep-muted">Value</span>
+                <input
+                  type="number"
+                  min={row.min}
+                  max={row.max}
+                  value={row.value}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (Number.isNaN(v)) return;
+                    update(idx, { value: v });
+                  }}
+                  onBlur={() => clampRow(idx)}
+                  className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block uppercase tracking-widest text-keep-muted">Max</span>
+                <input
+                  type="number"
+                  min={CHARACTER_ATTRIBUTE_VALUE_MIN}
+                  max={CHARACTER_ATTRIBUTE_VALUE_MAX}
+                  value={row.max}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (Number.isNaN(v)) return;
+                    update(idx, { max: v });
+                  }}
+                  onBlur={() => clampRow(idx)}
+                  className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+                />
+              </label>
+              <div className="flex flex-col gap-1">
+                {/* Up / down reorder. Disabled at the ends so the
+                    layout is stable; mouse + keyboard can both move
+                    a row. Tab-friendly: buttons are sequential next
+                    to the row's fields. */}
+                <div className="flex gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => reorder(idx, -1)}
+                    disabled={idx === 0}
+                    title="Move this attribute up"
+                    aria-label={`Move ${row.label || "row"} up`}
+                    className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text disabled:opacity-30"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => reorder(idx, 1)}
+                    disabled={idx === rows.length - 1}
+                    title="Move this attribute down"
+                    aria-label={`Move ${row.label || "row"} down`}
+                    className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text disabled:opacity-30"
+                  >
+                    ▼
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => remove(idx)}
+                  title="Remove this attribute"
+                  aria-label={`Remove ${row.label || "row"}`}
+                  className="rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-keep-accent hover:bg-keep-accent/25"
+                >
+                  ✕
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        onClick={add}
+        disabled={!canAdd}
+        className="rounded border border-keep-action/40 bg-keep-action/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/25 disabled:opacity-40"
+      >
+        + Add attribute {canAdd ? "" : `(max ${CHARACTER_ATTRIBUTES_MAX})`}
+      </button>
+    </fieldset>
+  );
+}
+
 function ChatColorRow({
   scope,
   value,

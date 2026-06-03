@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
-import { isAdminRole, isDarkPalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
-import type { CharacterPortrait, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
+import { CHARACTER_VIBE_AXES, isAdminRole, isDarkPalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
+import type { CharacterAttribute, CharacterPortrait, CharacterVibeAxisKey, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
 import { buildOrnamentStyle } from "../lib/ornaments/index.js";
 import { BorderedAvatar } from "./BorderedAvatar.js";
@@ -105,9 +105,27 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   const [gateAccepted, setGateAccepted] = useState(false);
   const gated = requiresGate && !gateAccepted;
 
+  // Visibility-gate bypass for the rendered profile. Two viewer
+  // classes get the full stats regardless of the owner's hide flags:
+  //   - The owner themselves, so the editor + viewer surfaces don't
+  //     disagree on what they own. Without this, an owner toggling
+  //     a field 🙈 in the editor would see the field vanish from
+  //     their own profile view too, which reads as data loss rather
+  //     than a visibility tweak.
+  //   - Site admins (mod+), since the owner contract is "hide from
+  //     strangers, not from staff" — see the docstring on
+  //     `CharacterStats.visibility` in shared/profile.ts.
+  // The detection runs lazily via useChat below; the helper short-
+  // circuits to "no bypass" when nobody's signed in (anonymous
+  // viewers always see the gated set).
+  const myId = useChat((s) => s.me?.id ?? null);
+  const myRole = useChat((s) => s.me?.role ?? null);
+  const bypassVisibility =
+    (myId !== null && myId === profile.profile.userId) ||
+    (myRole !== null && roleRank(myRole) >= roleRank("mod"));
   // Stat entries that actually have a value - empty fields are dropped so
   // a half-filled character doesn't show a row of dashes.
-  const statEntries = stats ? collectStatEntries(stats) : [];
+  const statEntries = stats ? collectStatEntries(stats, bypassVisibility) : [];
   // Portraits live on the character profile only — master profiles don't
   // carry a gallery, so master views fall back to length 0. The blank
   // check counts them as "filled out" so a character with only gallery
@@ -274,6 +292,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
             links={links}
             journal={journal}
             statEntries={statEntries}
+            bypassVisibility={bypassVisibility}
             isCompletelyBlank={isCompletelyBlank}
             onClose={onClose}
             onWhisper={onWhisper}
@@ -356,6 +375,7 @@ function ProfileBody({
   links,
   journal,
   statEntries,
+  bypassVisibility,
   isCompletelyBlank,
   onClose,
   onWhisper,
@@ -371,12 +391,31 @@ function ProfileBody({
   bio: string;
   avatar: string | null;
   createdAt: number;
-  stats: { age?: string; race?: string; gender?: string; height?: string; weight?: string; alignment?: string; occupation?: string; custom?: Record<string, string> } | null;
+  stats: {
+    age?: string;
+    race?: string;
+    gender?: string;
+    height?: string;
+    weight?: string;
+    alignment?: string;
+    occupation?: string;
+    custom?: Record<string, string>;
+    vibe?: Partial<Record<CharacterVibeAxisKey, number | null>>;
+    attributes?: CharacterAttribute[];
+    visibility?: {
+      age?: boolean; race?: boolean; gender?: boolean; height?: boolean;
+      weight?: boolean; alignment?: boolean; occupation?: boolean;
+      custom?: boolean; vibe?: boolean; attributes?: boolean;
+    };
+  } | null;
   gender: Gender;
   titles: ProfileView["profile"]["titles"];
   links: ProfileLink[];
   journal: NonNullable<Extract<ProfileView, { kind: "character" }>["profile"]["journalEntries"]>;
   statEntries: Array<[string, string]>;
+  /** True when the viewer is the profile owner or a mod+ admin viewer
+   *  — those classes see all sections regardless of `visibility`. */
+  bypassVisibility: boolean;
   isCompletelyBlank: boolean;
   onClose: () => void;
   // `| undefined` (rather than `?:`) so callers can spread the value
@@ -972,6 +1011,15 @@ function ProfileBody({
                   </dl>
                 </Section>
               ) : null}
+
+              {/* Vibe bars + numeric attribute sheet. Both derive from the
+                  same `stats` blob the classic rows above use, with
+                  visibility honored at collection time so a hidden section
+                  short-circuits to an empty list and the section header
+                  never renders. Owners + mod-tier viewers bypass the gate
+                  per the docstring contract on CharacterStats.visibility. */}
+              <VibeSection stats={stats} bypassVisibility={bypassVisibility} />
+              <AttributesSection stats={stats} bypassVisibility={bypassVisibility} />
 
               {/* Activity counters — lifetime totals computed server-side
                   at fetch time. Scoped per identity: character profile
@@ -1720,13 +1768,22 @@ const CANONICAL_STAT_ORDER = [
   "occupation",
 ] as const;
 
-function collectStatEntries(stats: NonNullable<ReturnType<typeof statsFromProfile>>): Array<[string, string]> {
+function collectStatEntries(
+  stats: NonNullable<ReturnType<typeof statsFromProfile>>,
+  bypassVisibility: boolean,
+): Array<[string, string]> {
   const out: Array<[string, string]> = [];
+  const vis = stats.visibility ?? {};
   for (const k of CANONICAL_STAT_ORDER) {
+    if (!bypassVisibility && vis[k] === false) continue;
     const v = stats[k];
     if (typeof v === "string" && v.trim()) out.push([k, v]);
   }
-  if (stats.custom) {
+  // Custom block is gated as a whole — the owner can hide every
+  // free-form row at once via `visibility.custom = false` without
+  // having to delete each entry. Visibility takes effect at render
+  // time only; the saved blob still carries the data.
+  if (stats.custom && (bypassVisibility || vis.custom !== false)) {
     for (const [k, v] of Object.entries(stats.custom)) {
       if (typeof v === "string" && v.trim()) out.push([k, v]);
     }
@@ -1734,6 +1791,149 @@ function collectStatEntries(stats: NonNullable<ReturnType<typeof statsFromProfil
   return out;
 }
 
+/**
+ * Return the vibe axes the renderer should paint, in catalog order.
+ * Drops axes with no value (null / undefined) and short-circuits to
+ * an empty array when the section is gated off via
+ * `visibility.vibe = false`. Each returned tuple carries the axis
+ * metadata so the renderer doesn't have to re-look it up.
+ */
+function collectVibeAxes(
+  stats: NonNullable<ReturnType<typeof statsFromProfile>>,
+  bypassVisibility: boolean,
+): Array<{ key: CharacterVibeAxisKey; lowLabel: string; highLabel: string; value: number }> {
+  if (!bypassVisibility && stats.visibility?.vibe === false) return [];
+  const vibe = stats.vibe;
+  if (!vibe) return [];
+  const out: Array<{ key: CharacterVibeAxisKey; lowLabel: string; highLabel: string; value: number }> = [];
+  for (const axis of CHARACTER_VIBE_AXES) {
+    const v = vibe[axis.key];
+    if (typeof v !== "number") continue;
+    // Defensive clamp to [0, 100] before the renderer uses it as a
+    // `left: ${value}%` offset. The Zod schema bounds new writes, but
+    // any pre-validator data already in the column could in theory
+    // carry an out-of-range value — clamping keeps the dot on the
+    // track instead of pushing it off either edge.
+    const clamped = Math.max(0, Math.min(100, v));
+    out.push({ key: axis.key, lowLabel: axis.lowLabel, highLabel: axis.highLabel, value: clamped });
+  }
+  return out;
+}
+
+/** Visible attribute rows, in stored order. Empty when section is hidden. */
+function collectAttributes(
+  stats: NonNullable<ReturnType<typeof statsFromProfile>>,
+  bypassVisibility: boolean,
+): CharacterAttribute[] {
+  if (!bypassVisibility && stats.visibility?.attributes === false) return [];
+  return stats.attributes ?? [];
+}
+
 function statsFromProfile(p: ProfileView) {
   return p.kind === "character" ? p.profile.stats : null;
+}
+
+/**
+ * Personality vibe block — eight bipolar bars (low label ◄ dot ►
+ * high label). Each bar's dot sits at the stored 0..100 value as a
+ * % offset along the track; unset axes are dropped at collection
+ * time so the bar list only carries axes the owner explicitly
+ * opted in to. Renders nothing when the owner hid the section or
+ * never set any axis.
+ */
+function VibeSection({
+  stats,
+  bypassVisibility,
+}: {
+  stats: NonNullable<ReturnType<typeof statsFromProfile>> | null;
+  bypassVisibility: boolean;
+}) {
+  if (!stats) return null;
+  const axes = collectVibeAxes(stats, bypassVisibility);
+  if (axes.length === 0) return null;
+  return (
+    <Section title="Vibe">
+      <ul className="space-y-2">
+        {axes.map((axis) => (
+          <li key={axis.key} className="text-xs">
+            <div className="mb-1 flex items-baseline justify-between gap-2">
+              <span className="font-semibold text-keep-text/85">{axis.lowLabel}</span>
+              <span className="font-semibold text-keep-text/85">{axis.highLabel}</span>
+            </div>
+            {/* The bar is a flat track plus an absolutely-positioned
+                dot. -translate-x-1/2 centers the dot on its computed
+                left%, so 0 / 50 / 100 all read as "at the start /
+                middle / end" without the dot clipping the track edge. */}
+            <div className="relative h-1.5 w-full rounded-full bg-keep-rule/40">
+              <span
+                className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-keep-action/60 bg-keep-action shadow"
+                style={{ left: `${axis.value}%` }}
+                aria-label={`${axis.value} between ${axis.lowLabel} and ${axis.highLabel}`}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+/**
+ * Numeric attribute sheet — D&D ability scores, HP gauges, or any
+ * custom labeled stats the owner added. Each row paints the label
+ * on the left, the number on the right, and a fill-bar underneath
+ * showing where the value sits within its own [min, max] range. The
+ * per-row range keeps a "STR 14 (1-20)" bar from sharing scale with
+ * a "HP 75 (0-200)" bar — different stat systems live side by side
+ * without distorting each other.
+ */
+function AttributesSection({
+  stats,
+  bypassVisibility,
+}: {
+  stats: NonNullable<ReturnType<typeof statsFromProfile>> | null;
+  bypassVisibility: boolean;
+}) {
+  if (!stats) return null;
+  const rows = collectAttributes(stats, bypassVisibility);
+  if (rows.length === 0) return null;
+  return (
+    <Section title="Attributes">
+      <ul className="space-y-2">
+        {rows.map((row) => {
+          // Defensive against a stored row whose min/max somehow ended
+          // up equal — division would NaN. The server schema's
+          // `min <= value <= max` guard prevents that for new saves,
+          // but old data could in theory carry the degenerate case.
+          // Pin to 100% in that case so the bar still paints something
+          // legible rather than a blank track.
+          const span = row.max - row.min;
+          const pct = span > 0
+            ? Math.max(0, Math.min(100, ((row.value - row.min) / span) * 100))
+            : 100;
+          return (
+            <li key={row.id} className="text-xs">
+              <div className="mb-1 flex items-baseline justify-between gap-2">
+                <span className="font-semibold uppercase tracking-widest text-keep-text/85">
+                  {row.label || "—"}
+                </span>
+                <span className="text-keep-muted tabular-nums">
+                  {row.value}
+                  <span className="ml-1 text-[10px] text-keep-muted/70">
+                    ({row.min}–{row.max})
+                  </span>
+                </span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-keep-rule/40">
+                <div
+                  className="h-full rounded-full bg-keep-action"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </Section>
+  );
 }

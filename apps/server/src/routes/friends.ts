@@ -273,11 +273,28 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
       : [];
     const charById = new Map(charRows.map((c) => [c.id, c]));
 
+    // Incognito moderators are subtracted from the online set so the
+    // friends list doesn't light up a dot next to them. Same global-
+    // invisibility contract the userlist + /users endpoint honor.
     const allSockets = await io.fetchSockets();
-    const online = new Set<string>();
+    const rawOnline = new Set<string>();
     for (const s of allSockets) {
       const uid = (s.data as { userId?: string }).userId;
-      if (uid) online.add(uid);
+      if (uid) rawOnline.add(uid);
+    }
+    let online = rawOnline;
+    if (rawOnline.size > 0) {
+      const incognitoRows = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(
+          eq(users.incognitoMode, true),
+          sql`${users.id} IN (${sql.join([...rawOnline].map((u) => sql`${u}`), sql`, `)})`,
+        ));
+      if (incognitoRows.length > 0) {
+        const hide = new Set(incognitoRows.map((r) => r.id));
+        online = new Set([...rawOnline].filter((id) => !hide.has(id)));
+      }
     }
 
     const entries: FriendListEntry[] = otherIdentities.map((o) => {

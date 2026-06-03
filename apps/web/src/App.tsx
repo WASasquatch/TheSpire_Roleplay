@@ -1706,9 +1706,37 @@ function Chat() {
     });
     socket.on("presence:update", ({ roomId, occupants }) => {
       setOccupants(roomId, occupants);
+      // Push the fresh occupants straight into the rail's roomsTree
+      // state too. RoomsTree reads `room.occupants` from this prop, not
+      // from useChat.occupants, so without this direct write the rail
+      // would keep showing the stale userlist until the /rooms refetch
+      // triggered by the version bump below landed (~200–500ms). That
+      // delay was visible whenever someone entered, left, or — most
+      // pointedly — went incognito: their chat-side leave broadcast
+      // fired instantly, but their userlist row lingered until the
+      // refetch caught up. Mirror the server-side sort so the rail's
+      // ordering matches what the /rooms response would have brought
+      // in, and avoid touching rooms unrelated to this update so any
+      // independent edits to other rows survive.
+      setRoomsTree((prev) => {
+        const idx = prev.findIndex((r) => r.id === roomId);
+        if (idx < 0) return prev;
+        const next = prev.slice();
+        next[idx] = {
+          ...prev[idx]!,
+          occupants: [...occupants].sort((a, b) =>
+            a.displayName.localeCompare(b.displayName),
+          ),
+        };
+        return next;
+      });
       // Presence changes in our current room mean other rooms might have
       // changed too (e.g. another user just left a room to join ours), and
       // /char switch broadcasts presence - refetch the active theme too.
+      // The /rooms refetch the version bump triggers is now a backstop,
+      // not the primary update path — it corrects for anything the
+      // direct write above couldn't see (a brand-new room the rail
+      // doesn't know about yet, etc.).
       setRoomsTreeVersion((v) => v + 1);
       setThemeVersion((v) => v + 1);
       // The friends modal pulls fresh data on every open, so we no
@@ -3194,6 +3222,7 @@ function Chat() {
         <RoomsTree
           rooms={roomsTree}
           currentRoomId={currentRoomId}
+          selfUserId={me?.id ?? null}
           activeCharacterId={activeCharacterId}
           activeCharacterName={activeCharacterName}
           onIconClick={onIconClick}

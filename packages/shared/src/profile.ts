@@ -9,7 +9,112 @@ export interface CharacterStats {
   occupation?: string;
   /** Free-form key/value extras, max 20 entries, each value <= 200 chars (validated server-side). */
   custom?: Record<string, string>;
+  /**
+   * Personality vibe — eight bipolar axes painted as "low label ◄
+   * dot ► high label" bars on the profile. Each value is 0..100 or
+   * null (unset, doesn't render). The axis catalog is fixed
+   * server-side ({@link CHARACTER_VIBE_AXES}); unknown keys are
+   * dropped on save so a future axis rename can't strand a row.
+   *
+   * Distinct from Worlds' {@link WorldVibeStats}: World axes are
+   * MAGNITUDE (50 = "moderate amount of magic"); character axes are
+   * BIPOLAR (50 = neutral between two opposing traits, 0 = fully one
+   * end, 100 = fully the other). The renderer needs the dual labels
+   * to read correctly.
+   */
+  vibe?: Partial<Record<CharacterVibeAxisKey, number | null>>;
+  /**
+   * Numeric attribute sheet — D&D-style ability scores ("STR 14"),
+   * HP / SP, any-RPG attribute system. Each row is a user-defined
+   * label plus a value clamped to a per-row min/max. Capped at 20
+   * rows server-side; labels <= 40 chars; values / bounds are
+   * integers in [-9999, 9999] to allow negatives (modifiers,
+   * temporary debuffs) without making the input gymnastics
+   * uncomfortable.
+   *
+   * `id` is a stable client-generated key so React can render the
+   * list without thrashing on reorder; server preserves whatever the
+   * client sent. Reordering / removal is purely client-side editing.
+   */
+  attributes?: CharacterAttribute[];
+  /**
+   * Per-section render gate. Lets the owner type a value once and
+   * later hide it from the public profile without losing the data
+   * (so "I don't want strangers seeing my weight" doesn't force
+   * them to delete + re-enter on the next round). Default behavior
+   * (key omitted or undefined) is SHOW. A `false` value hides that
+   * section from the profile renderer; the editor still surfaces it
+   * so the owner can flip it back on. Hiding takes effect at render
+   * time only — admins still see the full stats via the admin user
+   * detail panel.
+   */
+  visibility?: CharacterStatsVisibility;
 }
+
+/** One row of the {@link CharacterStats.attributes} numeric attribute sheet. */
+export interface CharacterAttribute {
+  id: string;
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+}
+
+/** Render-gate map on `CharacterStats.visibility`. Omitted / undefined keys default to "show". */
+export interface CharacterStatsVisibility {
+  age?: boolean;
+  race?: boolean;
+  gender?: boolean;
+  height?: boolean;
+  weight?: boolean;
+  alignment?: boolean;
+  occupation?: boolean;
+  custom?: boolean;
+  vibe?: boolean;
+  attributes?: boolean;
+}
+
+/**
+ * Character vibe axis catalog. Each axis is bipolar — `lowLabel` is
+ * at 0, `highLabel` at 100, with the dot rendered at the stored value.
+ * Order is the display order on the profile + the editor.
+ *
+ * Adding an axis: drop it here. Existing rows that don't have a value
+ * for the new axis simply skip its bar; no migration. Removing an
+ * axis: drop the key here AND clean up the data on the next stats
+ * write (the server schema's `.passthrough()` is intentionally
+ * absent so stale axis keys get dropped automatically).
+ */
+export const CHARACTER_VIBE_AXES = [
+  { key: "combat",     lowLabel: "Pacifist",   highLabel: "Combat" },
+  { key: "cunning",    lowLabel: "Honest",     highLabel: "Cunning" },
+  { key: "warmth",     lowLabel: "Cold",       highLabel: "Warm" },
+  { key: "order",      lowLabel: "Chaos",      highLabel: "Order" },
+  { key: "caution",    lowLabel: "Reckless",   highLabel: "Cautious" },
+  // `outlook` / `social` carry neutral storage keys because both ends
+  // of the axis are descriptors (Cynical/Idealistic, Reserved/Outgoing)
+  // and neither is a clear "more of X" representative the way
+  // `combat` or `warmth` is.
+  { key: "outlook",    lowLabel: "Cynical",    highLabel: "Idealistic" },
+  { key: "social",     lowLabel: "Reserved",   highLabel: "Outgoing" },
+  // `boldness` is named after the HIGH end (Risqué reads as boldness
+  // in the sexual / social-provocation register). Earlier draft used
+  // `modesty` here — that named the axis after the LOW end and broke
+  // the high-label-as-key convention every other concrete axis above
+  // follows. Storage-key change only; the rendered labels stay
+  // `Modest ↔ Risqué`.
+  { key: "boldness",   lowLabel: "Modest",     highLabel: "Risqué" },
+] as const satisfies ReadonlyArray<{ key: string; lowLabel: string; highLabel: string }>;
+
+export type CharacterVibeAxisKey = typeof CHARACTER_VIBE_AXES[number]["key"];
+
+/** Server-enforced cap on the {@link CharacterStats.attributes} array length. */
+export const CHARACTER_ATTRIBUTES_MAX = 20;
+/** Server-enforced cap on a {@link CharacterAttribute.label} length. */
+export const CHARACTER_ATTRIBUTE_LABEL_MAX = 40;
+/** Server-enforced bounds on `value` / `min` / `max` of a {@link CharacterAttribute}. */
+export const CHARACTER_ATTRIBUTE_VALUE_MIN = -9999;
+export const CHARACTER_ATTRIBUTE_VALUE_MAX = 9999;
 
 import type { Theme } from "./theme.js";
 

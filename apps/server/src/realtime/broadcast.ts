@@ -1640,6 +1640,12 @@ async function loadLinkedWorld(db: Db, roomId: string): Promise<LinkedWorldRef |
  * touches `user`, in either direction.
  */
 async function pingWatchers(io: Io, db: Db, user: SessionUser): Promise<void> {
+  // Incognito gate. An incognito moderator coming online (login, reconnect,
+  // /char-switch, etc.) is supposed to leave no trace — friends receiving
+  // a "☆ X is online" system line in their current room would directly
+  // out the moderator's presence. Same rationale as the userlist
+  // suppression in currentOccupants.
+  if (user.incognitoMode) return;
   const rows = await db
     .select({
       otherUserId: sql<string>`CASE WHEN ${friends.frienderUserId} = ${user.id} THEN ${friends.friendedUserId} ELSE ${friends.frienderUserId} END`,

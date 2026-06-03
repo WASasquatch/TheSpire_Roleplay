@@ -1415,8 +1415,11 @@
  * @tailwindcss/typography plugin, so the `prose` class is otherwise
  * a no-op. Scoped to `.prose` so it only kicks in where opted into.
  *
- * Allowed bio tags (mirror sanitizeBio): b, i, u, em, strong, a,
- * img, br, p, ul/ol/li, blockquote, hr, h3-h6, span style=color.
+ * `sanitizeBio` keeps a permissive tag set (allowedTags:false with a
+ * deny-list filter), so authors can drop in h1/h2 on admin surfaces
+ * like the public rules page. Tailwind preflight resets every
+ * heading to inherit font-size + font-weight, so without this block
+ * an admin's `<h1>House Rules</h1>` looked identical to body copy.
  */
 .prose p,
 .prose ul,
@@ -1429,6 +1432,8 @@
 .prose ul:first-child,
 .prose ol:first-child,
 .prose blockquote:first-child,
+.prose h1:first-child,
+.prose h2:first-child,
 .prose h3:first-child,
 .prose h4:first-child,
 .prose h5:first-child,
@@ -1441,11 +1446,18 @@
 .prose blockquote:last-child {
   margin-bottom: 0;
 }
-.prose h3, .prose h4, .prose h5, .prose h6 {
+.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
   margin: 1em 0 0.4em;
   font-weight: 600;
   line-height: 1.25;
 }
+/* Heading scale tuned so an h1 reads as a document title, h2 as a
+ * section header, and h3 down stay reasonable as sub-sections inside
+ * a short-form admin page. The em-based sizing means a `prose-sm`
+ * container still scales the headings down proportionally — they
+ * stay distinct from body copy without overwhelming the column. */
+.prose h1 { font-size: 1.75em; }
+.prose h2 { font-size: 1.4em; }
 .prose h3 { font-size: 1.15em; }
 .prose h4 { font-size: 1.05em; }
 .prose h5, .prose h6 { font-size: 1em; }
@@ -2153,6 +2165,45 @@ aside.margin-note {
   background-color: transparent !important;
   background-image: none !important;
   box-shadow: none !important;
+}
+
+/* Documentary-reading variant — used on the World viewer / editor
+ * and any future surface where user-authored text needs to stay
+ * legible against whatever palette the author picked.
+ *
+ * The three design-key keep-frame rules above paint with
+ * `--keep-panel` instead of `--keep-bg` (medieval / modern) or
+ * with `rgb(var(--keep-panel) / 0.5)` plus a backdrop blur
+ * (scifi), and layer a textured `::before` over the top
+ * (medieval parchment, scifi cyber grid). That's the right look
+ * for chat shells where the user is glancing at messages, but on
+ * a long-form reading surface it breaks the legibility contract:
+ *   1. `legibleThemePalette` nudges the foreground slots against
+ *      `theme.bg`, not `theme.panel`, so a text that just barely
+ *      meets 4.5:1 against the bg can fall below 3:1 against the
+ *      actual panel surface — text reads as smoke against a brown
+ *      modal.
+ *   2. scifi's 50% transparency + blur lets the chat behind the
+ *      modal bleed through, mixing the surface color with whatever
+ *      ambient chat content sits underneath. Contrast is then
+ *      computed against a surface the renderer doesn't actually
+ *      know.
+ *
+ * `.keep-frame--reading` forces the frame to render as an opaque
+ * `--keep-bg` surface, kills the backdrop blur, and suppresses the
+ * design-key's texture `::before`. The border / shadow stays so
+ * the modal still reads as a card — just with the bg the
+ * legibility nudge was computed against. */
+.keep-frame.keep-frame--reading,
+[data-theme-style] .keep-frame.keep-frame--reading {
+  background-color: rgb(var(--keep-bg)) !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.keep-frame.keep-frame--reading::before,
+[data-theme-style] .keep-frame.keep-frame--reading::before {
+  display: none !important;
 }
 
 /* ============================================================

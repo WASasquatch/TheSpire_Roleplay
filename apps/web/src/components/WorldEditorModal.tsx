@@ -118,7 +118,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
       <ActiveThemeContext.Provider value={scopedTheme}>
       <div
         style={modalStyle}
-        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg text-keep-text`}
+        className={`${MODAL_CARD_CONTENT} keep-frame keep-frame--reading rounded bg-keep-bg text-keep-text`}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">

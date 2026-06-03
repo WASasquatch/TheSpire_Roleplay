@@ -43,6 +43,18 @@ function loadRailWidth(): number {
 interface Props {
   rooms: RoomWithOccupants[];
   currentRoomId: string | null;
+  /**
+   * Viewer's own userId. Threaded through to the per-room flicker
+   * guard so it can tell a legitimately-empty list (the viewer was
+   * the only person here and just left, switched away, or went
+   * incognito) apart from a transient server-side race in
+   * `currentOccupants`. Without this signal the guard treated every
+   * fresh empty as a race and kept the viewer's stale row in the
+   * rail for the full 1200ms guard window — which manifested as
+   * "I'm still in my own userlist after /incognito" until the cache
+   * timed out. Null while the user isn't signed in.
+   */
+  selfUserId: string | null;
   /** When set, the Tools panel's identity dropdown adopts an in-character label + "Leave Character" row. */
   activeCharacterId?: string | null;
   /** Display name of the active character — used by the identity button label. */
@@ -93,6 +105,7 @@ const RAIL_FONT_EM = ["1.15em", "1.3em", "1.5em", "1.75em"] as const;
 export function RoomsTree({
   rooms,
   currentRoomId,
+  selfUserId,
   activeCharacterId,
   activeCharacterName,
   onIconClick,
@@ -252,6 +265,7 @@ export function RoomsTree({
                 key={r.id}
                 room={r}
                 isCurrent={r.id === currentRoomId}
+                selfUserId={selfUserId}
                 onIconClick={onIconClick}
                 onNameClick={onNameClick}
                 onRoomClick={onRoomClick}
@@ -277,6 +291,7 @@ export function RoomsTree({
 function RoomGroup({
   room,
   isCurrent,
+  selfUserId,
   onIconClick,
   onNameClick,
   onRoomClick,
@@ -284,6 +299,7 @@ function RoomGroup({
 }: {
   room: RoomWithOccupants;
   isCurrent: boolean;
+  selfUserId: string | null;
   onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
   onNameClick: (userId: string, displayName: string, characterId?: string | null) => void;
   onRoomClick: (roomId: string) => void;
@@ -315,9 +331,24 @@ function RoomGroup({
   if (room.occupants.length > 0) {
     lastNonEmptyRef.current = { list: room.occupants, at: Date.now() };
   }
+  // Skip the cache fallback when the cached list contained only the
+  // viewing user. A fresh empty list in that case is legitimate (self
+  // left the room, switched away, or — the case this branch was added
+  // for — went incognito) and bridging it back to the cached self-row
+  // produced the visible bug where the user stayed in their own
+  // userlist for the full 1200ms guard window after /incognito until
+  // the cache timed out. The server-race the guard was originally
+  // built for involves OTHER users transiently dropping out of
+  // `currentOccupants`; those still get the cache, so the original
+  // anti-flicker behavior is preserved.
+  const cachedHasOnlySelf =
+    selfUserId != null
+    && lastNonEmptyRef.current.list.length > 0
+    && lastNonEmptyRef.current.list.every((o) => o.userId === selfUserId);
   const displayedOccupants =
     room.occupants.length === 0
     && lastNonEmptyRef.current.list.length > 0
+    && !cachedHasOnlySelf
     && Date.now() - lastNonEmptyRef.current.at < FLICKER_GUARD_MS
       ? lastNonEmptyRef.current.list
       : room.occupants;

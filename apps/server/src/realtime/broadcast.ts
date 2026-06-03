@@ -1051,6 +1051,7 @@ export async function sendRoomBacklogTo(
       color: m.color,
       createdAt: +m.createdAt,
       ...(m.toUserId ? { toUserId: m.toUserId } : {}),
+      ...(m.toCharacterId ? { toCharacterId: m.toCharacterId } : {}),
       ...(m.toDisplayName ? { toDisplayName: m.toDisplayName } : {}),
       ...(m.replyToId ? { replyToId: m.replyToId } : {}),
       ...(m.replyToDisplayName ? { replyToDisplayName: m.replyToDisplayName } : {}),

@@ -1473,6 +1473,14 @@ async function main() {
       // page is safe to render to unauthenticated visitors.
       app.get("/scriptorium", publicLimit, serveSplash);
       app.get("/scriptorium/@:handle/:slug", publicLimit, serveSplash);
+      // Public Rules page — same anonymous-safe SPA route pattern. The
+      // not-found handler's `apiPrefixes` block intentionally OMITS
+      // `/rules` so the JSON moved to `/api/rules` doesn't get shadowed,
+      // but that change alone left `/rules` hitting `setNotFoundHandler`
+      // and rendering the themed 404 ("Lost the path") instead of
+      // booting the React app. Add the explicit handler here alongside
+      // the other deep-link routes so the SPA shell actually serves.
+      app.get("/rules", publicLimit, serveSplash);
 
       await app.register(fastifyStatic, {
         root: webDistPath,

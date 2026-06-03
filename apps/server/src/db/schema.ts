@@ -581,6 +581,21 @@ export const messages = sqliteTable(
     toUserId: text("to_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    /**
+     * Per-identity whisper pin — the recipient's character id at send
+     * time. Set when the resolution pointed at a specific character
+     * (`@cid:` token or character-name lookup); null when the whisper
+     * was addressed at the master / OOC handle. Added in migration
+     * 0189 to close a per-identity click-leak: without this snapshot
+     * the FE could only fill the continuation `/whisper` with the
+     * master id, re-routing a thread that was opened to a character
+     * back to the master account.
+     *
+     * NOT a FK — same rationale as `toUserId` not being a hard FK on
+     * users in the strict sense: a soft-deleted character shouldn't
+     * cascade-mangle the whisper row. Kept as plain text.
+     */
+    toCharacterId: text("to_character_id"),
     /** Snapshot of the recipient's display name at send time (whispers only). */
     toDisplayName: text("to_display_name"),
     /** Id of the message this one is a reply to. Not a FK - if the parent is deleted we still keep the dangling id and render gracefully. */

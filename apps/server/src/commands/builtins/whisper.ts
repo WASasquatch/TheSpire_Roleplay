@@ -113,6 +113,13 @@ export const whisperCommand: CommandHandler = {
 
     const id = nanoid();
     const now = new Date();
+    // Per-identity recipient pin: when the resolver matched a character
+    // (either via `@cid:` token or character-name lookup), we record
+    // that character id so a click on the recipient name in chat can
+    // build the matching `@cid:` token on the continuation /whisper.
+    // Master / OOC-addressed whispers store null here and the click
+    // path uses `@id:<userId>`. See migration 0189 for the rationale.
+    const targetCharacterId = resolution.target.characterId;
     await ctx.db.insert(messages).values({
       id,
       roomId: ctx.roomId,
@@ -122,6 +129,7 @@ export const whisperCommand: CommandHandler = {
       kind: "whisper",
       body,
       toUserId: target.id,
+      toCharacterId: targetCharacterId,
       toDisplayName: targetDisplayName,
       color: senderColor,
     });
@@ -137,6 +145,7 @@ export const whisperCommand: CommandHandler = {
       color: senderColor,
       createdAt: +now,
       toUserId: target.id,
+      ...(targetCharacterId ? { toCharacterId: targetCharacterId } : {}),
       toDisplayName: targetDisplayName,
     };
 

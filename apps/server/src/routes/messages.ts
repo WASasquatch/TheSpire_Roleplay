@@ -62,6 +62,7 @@ function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMes
     color: m.color,
     createdAt: +m.createdAt,
     ...(m.toUserId ? { toUserId: m.toUserId } : {}),
+    ...(m.toCharacterId ? { toCharacterId: m.toCharacterId } : {}),
     ...(m.toDisplayName ? { toDisplayName: m.toDisplayName } : {}),
     ...(m.replyToId ? { replyToId: m.replyToId } : {}),
     ...(m.replyToDisplayName ? { replyToDisplayName: m.replyToDisplayName } : {}),

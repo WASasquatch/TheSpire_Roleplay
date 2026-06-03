@@ -876,39 +876,16 @@ function ProfileBody({
               </div>
             ) : null}
           </div>
-          {/* Desktop vibe sidecar — absolute-centered in the hero
-              band so it sits visually between the avatar/name on
-              the left and the rank lockup on the right regardless
-              of either's width. Pinning it via `left-1/2
-              -translate-x-1/2` lets the surrounding flex layout
-              keep its natural left/right balance (flex-1 on the
-              name column, ml-auto on the rank cluster) without us
-              having to reshape the row into three equal columns.
-              `w-[min(360px,24vw)]` caps the slot so 8 axes read
-              cleanly on a 1080p modal without dominating the
-              hero; pointer-events stays default so the bars
-              remain interactive. Hidden below lg — mobile keeps
-              the vibe in the body stack so it doesn't squeeze
-              the hero on small screens. Empty vibe (axes unset
-              or hidden) returns null from VibeSection and the
-              wrapper paints nothing, so the hero reads exactly
-              as before. */}
-          <div
-            className="pointer-events-none absolute left-1/2 top-1/2 hidden w-[min(360px,24vw)] -translate-x-1/2 -translate-y-1/2 lg:block"
-            aria-hidden={false}
-          >
-            <div className="pointer-events-auto">
-              <VibeSection
-                stats={stats}
-                bypassVisibility={bypassVisibility}
-                variant="compact"
-              />
-            </div>
-          </div>
           {/* Desktop rank lockup — pushed to the right edge of the
               hero (ml-auto). Sigil at xl (64px), title at text-xl.
               Hidden below lg so mobile renders the inline variant
-              that lives under the name. */}
+              that lives under the name. (The vibe lived in an
+              absolute-positioned sidecar here in an earlier draft —
+              the absolute box didn't constrain the bars cleanly and
+              produced overflow on wider viewports; the vibe now
+              lives in the body section as a responsive multi-column
+              grid so the same data renders at every size without
+              fighting the hero's flex layout.) */}
           {earning?.rankKey && earning.tier != null ? (
             <div className="ml-auto hidden items-center gap-3 lg:flex">
               <RankSigil rankKey={earning.rankKey} tier={earning.tier} size="xl" />
@@ -1047,14 +1024,12 @@ function ProfileBody({
                   short-circuits to an empty list and the section header
                   never renders. Owners + mod-tier viewers bypass the gate
                   per the docstring contract on CharacterStats.visibility.
-                  The vibe block hides below lg only because the desktop
-                  hero already renders a compact sidecar variant beside
-                  the rank lockup — see the hero block above. Below lg
-                  the hero stacks vertically so the body version takes
-                  over and uses the full content column width. */}
-              <div className="lg:hidden">
-                <VibeSection stats={stats} bypassVisibility={bypassVisibility} />
-              </div>
+                  Vibe renders at every viewport — VibeSection itself
+                  switches the axis grid from 1 column on phones to 2
+                  on tablets to 3 on desktops so the eight axes use the
+                  available horizontal real estate without each bar
+                  spanning the whole modal. */}
+              <VibeSection stats={stats} bypassVisibility={bypassVisibility} />
               <AttributesSection stats={stats} bypassVisibility={bypassVisibility} />
 
               {/* Activity counters — lifetime totals computed server-side
@@ -1880,75 +1855,64 @@ function statsFromProfile(p: ProfileView) {
 function VibeSection({
   stats,
   bypassVisibility,
-  variant = "section",
 }: {
   stats: NonNullable<ReturnType<typeof statsFromProfile>> | null;
   bypassVisibility: boolean;
-  /**
-   * "section" — full-width body block wrapped in the standard
-   * `<Section title="Vibe">` chrome. Used at sub-lg viewports where
-   * the profile stacks vertically and the bars want all the column
-   * width they can get.
-   *
-   * "compact" — header-mounted variant. Drops the Section wrapper +
-   * VIBE heading, halves the row spacing, and shrinks the end-label
-   * text so eight axes can read cleanly inside the ~400px sidecar
-   * slot beside the rank lockup. Same data, same dot placement;
-   * just sized to live next to a chip instead of below the avatar.
-   */
-  variant?: "section" | "compact";
 }) {
   if (!stats) return null;
   const axes = collectVibeAxes(stats, bypassVisibility);
   if (axes.length === 0) return null;
-  const list = (
-    <ul className={variant === "compact" ? "space-y-1.5" : "space-y-2"}>
-      {axes.map((axis) => (
-        <li key={axis.key} className="text-xs">
-          <div className="mb-1 flex items-baseline justify-between gap-2">
-            <span className="font-semibold text-keep-text/85">{axis.lowLabel}</span>
-            <span className="font-semibold text-keep-text/85">{axis.highLabel}</span>
-          </div>
-          {/* The bar is a flat track plus an absolutely-positioned
-              dot. -translate-x-1/2 centers the dot on its computed
-              left%, so 0 / 50 / 100 all read as "at the start /
-              middle / end" without the dot clipping the track edge.
-              Compact variant only trims row spacing (space-y above),
-              not the bar geometry itself — earlier draft shrank the
-              track + dot too, which made the sidecar read as a row
-              of tally marks rather than a sentence of sliders. */}
-          <div className="relative h-1.5 w-full rounded-full bg-keep-rule/40">
-            {/* Accent glow under the dot. A 60px-wide horizontal
-                linear gradient with solid accent in the middle and
-                transparent fades on each end — gives the dot a
-                soft "this region of the axis" highlight that reads
-                even at a glance, without coloring the whole bar
-                (which would lose the position signal). Stops at
-                25% / 75% leave ~15px of solid color on each side
-                of the dot with a ~15px fade-out beyond. Painted
-                before the dot in source order so the dot sits on
-                top. */}
-            <span
-              aria-hidden
-              className="pointer-events-none absolute top-1/2 h-1.5 w-[60px] -translate-x-1/2 -translate-y-1/2 rounded-full"
-              style={{
-                left: `${axis.value}%`,
-                background:
-                  "linear-gradient(90deg, rgb(var(--keep-action) / 0) 0%, rgb(var(--keep-action) / 0.85) 25%, rgb(var(--keep-action) / 0.85) 75%, rgb(var(--keep-action) / 0) 100%)",
-              }}
-            />
-            <span
-              className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-keep-action/60 bg-keep-action shadow"
-              style={{ left: `${axis.value}%` }}
-              aria-label={`${axis.value} between ${axis.lowLabel} and ${axis.highLabel}`}
-            />
-          </div>
-        </li>
-      ))}
-    </ul>
+  return (
+    <Section title="Vibe">
+      {/* Responsive grid: each axis is a self-contained tile (label /
+          bar / label) and the grid flows them into 1 column on
+          phones, 2 on tablets, and 3 on desktops so the eight axes
+          use the available width instead of stretching one bar across
+          the whole modal. `gap-x-5` keeps the columns visually
+          separated; `gap-y-3` matches the existing Section's vertical
+          rhythm. */}
+      <ul className="grid grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+        {axes.map((axis) => (
+          <li key={axis.key} className="text-xs">
+            <div className="mb-1 flex items-baseline justify-between gap-2">
+              <span className="font-semibold text-keep-text/85">{axis.lowLabel}</span>
+              <span className="font-semibold text-keep-text/85">{axis.highLabel}</span>
+            </div>
+            {/* The bar is a flat track plus an absolutely-positioned
+                dot. -translate-x-1/2 centers the dot on its computed
+                left%, so 0 / 50 / 100 all read as "at the start /
+                middle / end" without the dot clipping the track edge. */}
+            <div className="relative h-1.5 w-full rounded-full bg-keep-rule/40">
+              {/* Accent glow under the dot. A 60px-wide horizontal
+                  linear gradient with solid accent in the middle and
+                  transparent fades on each end — gives the dot a
+                  soft "this region of the axis" highlight that reads
+                  even at a glance, without coloring the whole bar
+                  (which would lose the position signal). Stops at
+                  25% / 75% leave ~15px of solid color on each side
+                  of the dot with a ~15px fade-out beyond. Painted
+                  before the dot in source order so the dot sits on
+                  top. */}
+              <span
+                aria-hidden
+                className="pointer-events-none absolute top-1/2 h-1.5 w-[60px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+                style={{
+                  left: `${axis.value}%`,
+                  background:
+                    "linear-gradient(90deg, rgb(var(--keep-action) / 0) 0%, rgb(var(--keep-action) / 0.85) 25%, rgb(var(--keep-action) / 0.85) 75%, rgb(var(--keep-action) / 0) 100%)",
+                }}
+              />
+              <span
+                className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-keep-action/60 bg-keep-action shadow"
+                style={{ left: `${axis.value}%` }}
+                aria-label={`${axis.value} between ${axis.lowLabel} and ${axis.highLabel}`}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Section>
   );
-  if (variant === "compact") return list;
-  return <Section title="Vibe">{list}</Section>;
 }
 
 /**

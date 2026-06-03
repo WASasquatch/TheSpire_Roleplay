@@ -2965,6 +2965,14 @@ function Line({
       //   - name → pre-fill composer with /whisper <name> (continue/reply)
       const toUserId = msg.toUserId;
       const toName = msg.toDisplayName;
+      // Per-identity recipient pin (migration 0189). When the original
+      // whisper was addressed at a CHARACTER (`@cid:` resolution),
+      // this carries the character id so the continuation `/whisper`
+      // built from a click here addresses the SAME character — not
+      // the master account. Older rows pre-0189 have no snapshot
+      // here; the click falls back to `@id:<userId>` (legacy behavior)
+      // which is correct for OOC-addressed whispers anyway.
+      const toCharacterId = msg.toCharacterId ?? null;
       const recipientTag =
         toUserId && toName ? (
           <UserNameTag
@@ -2972,8 +2980,8 @@ function Line({
             gender="undisclosed"
             color={null}
             italic={isRecipientAdmin}
-            onIconClick={() => onIconClick(toUserId, toName)}
-            onNameClick={() => onNameClick(toUserId, toName)}
+            onIconClick={() => onIconClick(toUserId, toName, toCharacterId)}
+            onNameClick={() => onNameClick(toUserId, toName, toCharacterId)}
             hideIcon
           />
         ) : (

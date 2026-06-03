@@ -28,6 +28,17 @@ export interface ChatMessage {
   createdAt: number;
   /** present when kind === "whisper" - recipient's userId */
   toUserId?: string;
+  /**
+   * Recipient's character id at send time (whispers only). Set when
+   * the whisper was addressed at a specific character (`@cid:` token
+   * or character-name lookup); absent / undefined when the whisper
+   * was addressed at the master / OOC handle. Lets the FE build the
+   * matching `@cid:<id>` continuation token on a recipient-name
+   * click — without it, the next /whisper falls back to `@id:<userId>`
+   * and re-routes a character thread back to the master account.
+   * Added in migration 0189.
+   */
+  toCharacterId?: string | null;
   /** present when kind === "whisper" - recipient display name snapshotted at send time */
   toDisplayName?: string;
   /** Id of the message this one replies to. Absent on non-replies. */

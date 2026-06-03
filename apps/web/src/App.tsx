@@ -3226,8 +3226,17 @@ function Chat() {
           activeCharacterId={activeCharacterId}
           activeCharacterName={activeCharacterName}
           onIconClick={onIconClick}
-          onNameClick={(uid, dn) => {
-            onNameClick(uid, dn);
+          onNameClick={(uid, dn, cid) => {
+            // Forward characterId verbatim — a rail click on a
+            // CHARACTER row would otherwise lose its identity here
+            // and downstream `identityArgFor` would fall back to
+            // `@id:<userId>`, routing the whisper to the master
+            // instead of the character the user actually clicked.
+            // That was a real per-identity leak: a rail click on
+            // Sister_Rosalina ended up addressing The_Darkest_Thoughts
+            // (her master account) because this wrapper dropped the
+            // characterId argument.
+            onNameClick(uid, dn, cid);
             setRailOpen(false); // mobile: close drawer after picking
           }}
           onRoomClick={(rid) => {

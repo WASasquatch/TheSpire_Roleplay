@@ -89,6 +89,8 @@ import { registerReportRoutes } from "./routes/reports.js";
 import { registerPushRoutes } from "./routes/push.js";
 import { initPush } from "./push.js";
 import { registerCommandsRoutes } from "./routes/commands.js";
+import { registerAnnouncementsRoutes } from "./routes/announcements.js";
+import { startAnnouncementScheduler } from "./admin/announcements.js";
 import { registerNavLinkRoutes } from "./routes/nav-links.js";
 import { registerRoomsRoutes } from "./routes/rooms.js";
 import { registerEarningRoutes } from "./routes/earning.js";
@@ -296,6 +298,10 @@ async function main() {
   const baseApp = app as unknown as FastifyInstance;
   await registerAuthRoutes(baseApp, db);
   await registerCommandsRoutes(baseApp, db, registry);
+  // Public marquee banners — unauthenticated; the splash + chat
+  // shell paint these for every viewer. Admin CRUD lives behind
+  // /admin/announcements/* via the admin route module.
+  await registerAnnouncementsRoutes(baseApp, db);
   await registerNavLinkRoutes(baseApp, db, async (req) => {
     const u = await getSessionUser(req, db);
     if (!u) return false;
@@ -1542,6 +1548,12 @@ async function main() {
 
   await app.listen({ port: PORT, host: "0.0.0.0" });
   log.info({ port: PORT, mode: IS_PROD ? "production" : "development" }, "The Spire server up");
+  // Launch the announcement scheduler AFTER `app.listen` so any
+  // crash during the read/dispatch path doesn't block boot. The
+  // tick is idempotent so a double-call (dev hot-reload) won't
+  // stack timers; the started timer captures `db` + `io` by
+  // closure so its lifetime is the process's.
+  startAnnouncementScheduler({ db, io });
   // Durable boot-ok marker. Survives the Fly log purge so a future
   // "what was the last successful boot?" question has an answer.
   recordBootSuccess({ port: PORT, mode: IS_PROD ? "production" : "development" });

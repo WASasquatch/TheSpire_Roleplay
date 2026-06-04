@@ -7,6 +7,7 @@ import { StyledName } from "./StyledName.js";
 import { UserNameTag } from "./UserNameTag.js";
 import type { Gender } from "../lib/gender.js";
 import { parseInline, renderForumBody, solitaryEmoticonToken } from "../lib/markdown.js";
+import { sanitizeUserHtml } from "../lib/userHtml.js";
 import { EmoticonSprite } from "./EmoticonSprite.js";
 import { useEmoticons } from "../state/emoticons.js";
 import { handlePlainTextCopy } from "../lib/chatCopy.js";
@@ -2999,13 +3000,42 @@ function Line({
       );
       break;
     }
-    case "announce":
-      lineEl = (
-        <div className="font-bold text-keep-accent">
+    case "announce": {
+      // Two render paths for announce lines:
+      //   - Manual in-chat `/announce <text>` → plain text + inline
+      //     markdown via `renderedBody`, same as it's always been.
+      //   - Scheduled announcement (announce-tab cronjob) →
+      //     `msg.bodyHtml` carries server-sanitized HTML the admin
+      //     authored as Markdown or HTML, painted via
+      //     `dangerouslySetInnerHTML` after a defense-in-depth pass
+      //     through `sanitizeUserHtml`. Lets admin-scheduled banners
+      //     keep their links / lists / bold spans instead of
+      //     degrading to escaped text on the in-chat surface.
+      //
+      // Color: scheduled announces can carry a `msg.color` snapshot
+      // (theme token or hex) the admin picked in the editor; when
+      // set we override the default action-accent text. The
+      // `resolveMessageColor` nudge handles theme tokens and
+      // legibility-nudges literal hex against the viewer's current
+      // bg, same as it does for chat lines.
+      const announceColor = bodyColor;
+      const announceStyle = announceColor ? { color: announceColor } : undefined;
+      lineEl = msg.bodyHtml ? (
+        <div className="font-bold text-keep-accent" style={announceStyle}>
+          {time}
+          <span aria-hidden>📣 </span>
+          <span
+            className="prose prose-sm inline max-w-none [&_p]:m-0 [&_p]:inline [&_a]:underline [&_a]:underline-offset-2"
+            dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(msg.bodyHtml) }}
+          />
+        </div>
+      ) : (
+        <div className="font-bold text-keep-accent" style={announceStyle}>
           {time}<span className="whitespace-pre-wrap">📣 {renderedBody}</span>
         </div>
       );
       break;
+    }
     case "scene":
       lineEl = (
         // Tinted banner that visually breaks the timeline. Distinct from

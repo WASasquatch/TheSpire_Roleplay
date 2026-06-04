@@ -21,6 +21,7 @@ import { AdminBackupsTab } from "./AdminBackupsTab.js";
 import { AdminScriptoriumTab } from "./AdminScriptoriumTab.js";
 import { AdminEmoticonsTab } from "./AdminEmoticonsTab.js";
 import { AdminPermissionsTab } from "./AdminPermissionsTab.js";
+import { AdminAnnouncementsTab } from "./AdminAnnouncementsTab.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
@@ -34,7 +35,7 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "scriptorium" | "emoticons" | "audit" | "backups" | "permissions";
+type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "scriptorium" | "emoticons" | "audit" | "backups" | "permissions" | "announcements";
 
 /** Tab grouping for the strip's section dividers. Each tab carries
  *  the id of the group it belongs to; the render walks the list
@@ -91,6 +92,10 @@ const TAB_ITEMS: ReadonlyArray<{
   { id: "scriptorium", label: "Scriptorium", group: "content" },
   { id: "commands", label: "Commands", group: "content" },
   { id: "titles", label: "Titles", group: "content" },
+  // Two distinct manage keys feed this tab — banner curation vs.
+  // cronjob scheduling — but they share one viewer permission so
+  // either delegate can land here without a separate route.
+  { id: "announcements", label: "Announcements", group: "content", permission: "view_admin_announcements" },
 
   // ----- Site configuration: install-level chrome -----
   { id: "settings", label: "Settings", group: "siteconfig", permission: "view_admin_settings" },
@@ -425,6 +430,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             {tab === "audit" ? <AuditTab /> : null}
             {tab === "backups" && canSeeTab("view_admin_backups") ? <AdminBackupsTab /> : null}
             {tab === "permissions" && canSeeTab("view_admin_permissions") ? <AdminPermissionsTab /> : null}
+            {tab === "announcements" && canSeeTab("view_admin_announcements") ? <AdminAnnouncementsTab /> : null}
           </div>
         </AdminShellContext.Provider>
 

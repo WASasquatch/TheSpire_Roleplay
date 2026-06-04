@@ -1736,21 +1736,27 @@ function ThreadPane({
     s.pendingFriendRequests.find((r) => r.userId === otherUserId),
   );
   const removePendingFriendRequest = useChat((s) => s.removePendingFriendRequest);
-  // Viewer's own zoom/pan for THIS thread's pinned identity, pulled
-  // from any room's live occupant cache where the viewer is currently
-  // present. Used to crop the viewer's own DM bubble avatars. Falls
-  // through to null (default crop) when the viewer isn't in any room
-  // at the moment — same graceful-degradation pattern the chat-line
-  // path uses for offline senders.
-  const myAvatarCrop = useChat((s) => {
-    if (!meId) return null;
+  // Viewer's own zoom/pan + url for THIS thread's pinned identity,
+  // pulled from any room's live occupant cache where the viewer is
+  // currently present. Both fields come from the SAME live source so
+  // they always agree — without that pairing, the bubble was
+  // rendering the snapshot URL frozen at send time under the LIVE
+  // crop, so an avatar change re-cropped the OLD picture (sized for
+  // the new picture's framing). Falls through to null (default crop
+  // / snapshot fallback) when the viewer isn't in any room at the
+  // moment — same graceful-degradation pattern the chat-line path
+  // uses for offline senders.
+  const myAvatarOverride = useChat((s) => {
+    if (!meId) return { url: null as string | null, crop: null as AvatarCrop | null };
     const matchChar = myCharacterId ?? null;
     for (const list of Object.values(s.occupants)) {
       const row = list.find((o) => o.userId === meId && o.characterId === matchChar);
-      if (row) return row.avatarCrop;
+      if (row) return { url: row.avatarUrl, crop: row.avatarCrop };
     }
-    return null;
+    return { url: null as string | null, crop: null as AvatarCrop | null };
   });
+  const myAvatarUrl = myAvatarOverride.url;
+  const myAvatarCrop = myAvatarOverride.crop;
 
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -2084,7 +2090,9 @@ function ThreadPane({
                 key={m.id}
                 msg={m}
                 isMine={m.senderId === meId}
+                otherUrl={conversation?.otherAvatarUrl ?? null}
                 otherCrop={conversation?.otherAvatarCrop ?? null}
+                myUrl={myAvatarUrl}
                 myCrop={myAvatarCrop}
                 {...(onOpenProfile ? { onOpenProfile } : {})}
               />
@@ -2242,17 +2250,41 @@ function ThreadPane({
   );
 }
 
-function DmRow({ msg, isMine, otherCrop, myCrop, onOpenProfile }: {
+function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile }: {
   msg: DirectMessage;
   isMine: boolean;
+  /** Live avatar URL for the OTHER party (from the conversation row).
+   *  Paired with `otherCrop` so URL + crop come from the same
+   *  refreshed source; without that pairing the message bubble
+   *  rendered the SNAPSHOT URL (frozen at send time) under the LIVE
+   *  crop, so an avatar change re-cropped the old picture. Null
+   *  falls back to the snapshot. */
+  otherUrl: string | null;
   /** Live crop for the OTHER party's avatar (from the conversation row). */
   otherCrop: AvatarCrop | null;
+  /** Live avatar URL for the VIEWER on this thread's pinned identity.
+   *  Same pairing rationale as `otherUrl` — falls back to the
+   *  snapshot when the viewer isn't in any room (no live source). */
+  myUrl: string | null;
   /** Live crop for the VIEWER's avatar on this thread's pinned identity.
    *  Pulled from the live occupant cache by the parent ThreadPane.
    *  Null = viewer isn't in any room right now, default crop renders. */
   myCrop: AvatarCrop | null;
   onOpenProfile?: (displayName: string) => void;
 }) {
+  // Prefer the live (URL, crop) pair so an avatar change shows the
+  // new image with its matching crop. Falls back to the snapshot
+  // URL + null crop when the live source isn't available (sender
+  // offline + not pinned to the conv). Both fields always come from
+  // ONE source per side — never crossed.
+  const liveOther = otherUrl !== null;
+  const liveMine = myUrl !== null;
+  const renderUrlOther = liveOther ? otherUrl : msg.avatarUrl;
+  const renderCropOther = liveOther ? otherCrop : null;
+  const renderUrlMine = liveMine ? myUrl : msg.avatarUrl;
+  const renderCropMine = liveMine ? myCrop : null;
+  const renderUrl = isMine ? renderUrlMine : renderUrlOther;
+  const renderCrop = isMine ? renderCropMine : renderCropOther;
   // Tap-to-reveal timestamp footer. DMs hide their send time by default
   // to keep threads visually clean; tapping a bubble surfaces the full
   // date+time underneath. Toggling again hides it. Clicks on inline
@@ -2330,10 +2362,10 @@ function DmRow({ msg, isMine, otherCrop, myCrop, onOpenProfile }: {
             className="shrink-0 rounded-full hover:opacity-90"
             title={`View ${msg.displayName}'s profile`}
           >
-            <Avatar url={msg.avatarUrl} name={msg.displayName} size={28} crop={otherCrop} />
+            <Avatar url={renderUrl} name={msg.displayName} size={28} crop={renderCrop} />
           </button>
         ) : (
-          <Avatar url={msg.avatarUrl} name={msg.displayName} size={28} crop={isMine ? myCrop : otherCrop} />
+          <Avatar url={renderUrl} name={msg.displayName} size={28} crop={renderCrop} />
         )}
         <div
           onClick={toggleTime}

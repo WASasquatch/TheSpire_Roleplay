@@ -107,6 +107,15 @@ export const PERMISSION_KEYS = [
   "view_admin_title_kinds",
   "view_admin_nav_links",
   "view_admin_permissions",
+  "view_admin_announcements",
+
+  // ---- announcements ----
+  // Two independently-grantable manage keys feed the same Announcements
+  // admin tab. A site lead might delegate marquee curation to a
+  // community manager while keeping the scheduler (which actually
+  // runs `/announce` cronjobs server-wide) for senior admins only.
+  "manage_banner_announcements",
+  "manage_scheduled_announcements",
 
   // ---- earning_admin ----
   "view_earning_config",
@@ -222,6 +231,11 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   view_admin_title_kinds: "See the admin Title Kinds tab.",
   view_admin_nav_links: "See the admin Nav Links tab.",
   view_admin_permissions: "See the Roles & Permissions tab (the matrix). Editing requires manage_permissions.",
+  view_admin_announcements: "See the admin Announcements tab. Editing requires manage_banner_announcements and/or manage_scheduled_announcements.",
+
+  // announcements
+  manage_banner_announcements: "Create, edit, or delete the rotating chat-top banner announcements (HTML/Markdown).",
+  manage_scheduled_announcements: "Schedule one-shot or recurring `/announce` cronjobs (HTML/Markdown, custom color).",
 
   // earning_admin
   view_earning_config: "Read-only access to the earning awards + ranks configuration.",
@@ -330,6 +344,11 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   view_admin_title_kinds: "admin_panel_tabs",
   view_admin_nav_links: "admin_panel_tabs",
   view_admin_permissions: "admin_panel_tabs",
+  view_admin_announcements: "admin_panel_tabs",
+
+  // announcements
+  manage_banner_announcements: "site_admin",
+  manage_scheduled_announcements: "site_admin",
 
   // earning_admin
   view_earning_config: "earning_admin",

@@ -61,6 +61,16 @@ export interface ChatMessage {
    * predate migration 0190.
    */
   sceneImageUrl?: string | null;
+  /**
+   * Trusted-HTML body for scheduled `/announce` lines (migration
+   * 0191). When set, the announce renderer paints it via
+   * `dangerouslySetInnerHTML` (after a defense-in-depth sanitizer
+   * pass) so admin-authored markup — links, lists, bold spans —
+   * renders cleanly instead of as escaped text. Manual in-chat
+   * `/announce` keeps this null and falls through to the existing
+   * inline-markdown render pipeline.
+   */
+  bodyHtml?: string | null;
   /** Set when the author edited the message inside the grace window. Epoch ms. */
   editedAt?: number | null;
   /** Set when the author deleted the message inside the grace window. Renderer shows "[message removed]". */

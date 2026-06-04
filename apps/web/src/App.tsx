@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, PermissionKey, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, WorldDetail } from "@thekeep/shared";
-import { DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
+import { DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, legibleAgainstBg, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
 import { SplashLanding } from "./components/SplashLanding.js";
@@ -24,6 +24,8 @@ import { RulesPage } from "./components/RulesPage.js";
 import { isRulesUrl, navigateAwayFromRules } from "./lib/rulesUrl.js";
 import { EarningDashboard } from "./components/EarningDashboard.js";
 import { EarningRibbon } from "./components/EarningRibbon.js";
+import { BannerMarquee } from "./components/BannerMarquee.js";
+import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanners.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
 import { ThreadModal } from "./components/ThreadModal.js";
 import { UsersModal } from "./components/UsersModal.js";
@@ -38,7 +40,7 @@ import { WelcomeModal } from "./components/WelcomeModal.js";
 import { getSocket, disconnect as disconnectSocket, hasSessionBeenAnnounced, loadTabCharacter, markLoginIntent, rememberTabCharacter, rememberTabRoom } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
-import { ActiveThemeContext, applyFontPrefs, applyTheme, resolveSplashTheme, splashBgUrl, themeStyle, type UiFontScale } from "./lib/theme.js";
+import { ActiveThemeContext, applyFontPrefs, applyTheme, resolveSplashTheme, splashBgUrl, themeStyle, useActiveTheme, type UiFontScale } from "./lib/theme.js";
 import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
 import { fire as fireNotification, permission as notifPermission, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
@@ -2981,6 +2983,7 @@ function Chat() {
         onOpenWorlds={() => setWorldCatalogOpen(true)}
         {...(hasAnyAdminAccess ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
+      <BannerMarquee />
       <StaleVersionBanner />
       <IncognitoBanner />
       {/* Earning — persistent rank-up ribbon. Only renders when the
@@ -3799,26 +3802,83 @@ function StaleVersionBanner() {
   const staleVersion = useChat((s) => s.staleVersion);
   const staleUpdateMessage = useChat((s) => s.staleUpdateMessage);
   const siteName = useChat((s) => s.branding.siteName);
+  // Persistent close — keyed by the specific stale-version string so a
+  // viewer who dismisses "please update to 0.20.4" still re-sees the
+  // banner when 0.20.5 ships. The key joins the version into the
+  // dismissed-set entry so a future stale version triggers a fresh
+  // notification automatically.
+  const dismissKey = staleVersion ? `stale-version:${staleVersion}` : "stale-version";
+  const dismissed = useDismissed(dismissKey);
+  // Sample the active theme so the banner can render against a known
+  // opaque background and nudge its text colors for WCAG contrast —
+  // the same posture chat text and profile cards use. The default
+  // `.keep-notice-accent` chrome paints the strip at low alpha so the
+  // chat shell's bg image (Spire artwork under the glass theme,
+  // splash backdrop, or a user's `publicProfileBgUrl` when wired into
+  // the shell) bleeds through and turns the text unreadable on any
+  // bright patch of the underlying art. Forcing an opaque panel
+  // background + a contrast-nudged text color gives every theme +
+  // background combo a guaranteed legibility floor.
+  const theme = useActiveTheme();
   if (!staleVersion) return null;
+  if (dismissed) return null;
+  const bgHex = theme.panel;
+  const textHex = legibleAgainstBg(theme.text, bgHex, 4.5);
+  const mutedHex = legibleAgainstBg(theme.muted, bgHex, 3.0);
+  const actionHex = legibleAgainstBg(theme.action, bgHex, 4.5);
   return (
-    <div className="keep-notice keep-notice-accent flex flex-wrap items-center justify-center gap-2 px-3 py-1.5 text-xs">
+    <div
+      // Inline `backgroundColor` defeats the `.keep-notice-accent`
+      // rule's translucent action tint AND every theme-style override
+      // (glass's 0.20 alpha + backdrop-blur in particular). The
+      // accent character carries on the border-bottom rule below;
+      // visually the strip still reads as "the action-colored
+      // notification bar," but the text now has a solid bg to land on.
+      style={{
+        backgroundColor: bgHex,
+        color: textHex,
+        borderBottom: `2px solid ${actionHex}`,
+      }}
+      className="flex flex-wrap items-center justify-center gap-2 px-3 py-1.5 text-xs"
+    >
       <span>
         You're running <b>{siteName} {VERSION}</b>. The current version is <b>{staleVersion}</b>.
         {/* Admin-authored release note from `remote-deploy.sh
-            --update-msg "..."`. Italicized + muted so it reads as
-            secondary context next to the version lines. Falls back
-            silently when the deploy didn't carry a note. */}
+            --update-msg "..."`. Italicized + muted-but-still-legible
+            so it reads as secondary context without disappearing into
+            the panel bg. Falls back silently when the deploy didn't
+            carry a note. */}
         {staleUpdateMessage ? (
-          <> <em className="text-keep-muted">{staleUpdateMessage}</em></>
+          <> <em style={{ color: mutedHex }}>{staleUpdateMessage}</em></>
         ) : null}
         {" "}Please refresh to update.
       </span>
       <button
         type="button"
         onClick={() => window.location.reload()}
-        className="keep-button rounded border border-keep-action bg-keep-action/20 px-2 py-0.5 text-xs font-semibold text-keep-action hover:bg-keep-action/30"
+        // Inline color overrides so the Refresh button reads as the
+        // call-to-action even on themes whose `--keep-action` lost
+        // contrast against the panel bg above.
+        style={{
+          color: actionHex,
+          borderColor: actionHex,
+        }}
+        className="keep-button rounded border bg-transparent px-2 py-0.5 text-xs font-semibold hover:bg-keep-action/15"
       >
         Refresh
+      </button>
+      {/* Persistent close — the version-keyed dismiss stays in effect
+          until a newer stale version arrives, at which point the
+          banner re-shows with the new key. */}
+      <button
+        type="button"
+        onClick={() => dismissPersisted(dismissKey)}
+        title="Dismiss until a newer version is announced"
+        aria-label="Dismiss update banner"
+        style={{ color: textHex }}
+        className="shrink-0 rounded px-1 text-base leading-none opacity-60 hover:opacity-100"
+      >
+        ×
       </button>
     </div>
   );

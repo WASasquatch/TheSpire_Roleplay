@@ -68,7 +68,14 @@ export type AuditAction =
   | "user_permission_override_clear" // a per-user override was removed (falls back to role grant)
   // Incognito ("ghost") mode toggles (Phase 11 — staff observation)
   | "incognito_enter"
-  | "incognito_exit";
+  | "incognito_exit"
+  // Announcements (banner marquee + scheduled /announce cronjobs)
+  | "announcement_banner_create"
+  | "announcement_banner_update"
+  | "announcement_banner_delete"
+  | "scheduled_announcement_create"
+  | "scheduled_announcement_update"
+  | "scheduled_announcement_delete";
 
 /**
  * Preset action groups for the AuditTab's category dropdown. Each

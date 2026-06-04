@@ -1,4 +1,6 @@
+export * from "./announcement.js";
 export * from "./backup.js";
+export * from "./markdownToHtml.js";
 export * from "./bookmark.js";
 export * from "./codemask.js";
 export * from "./customCmdCss.js";

@@ -299,6 +299,14 @@ export interface ServerToClientEvents {
     incognitoAlias: string | null;
   }) => void;
   /**
+   * Marquee banner catalog changed (admin added / edited / toggled /
+   * deleted a row). Carries no payload — clients refetch the public
+   * `GET /announcements/banners` endpoint on receipt so any
+   * permission-gated filtering happens at the source. Fanned to every
+   * connected socket because banners are sitewide chrome.
+   */
+  "announcements:banners-changed": () => void;
+  /**
    * A new DM landed in a conversation the recipient socket is part
    * of. Server emits to every live socket of BOTH participants on
    * every send so the friends rail and any open DM panels light up

@@ -375,9 +375,18 @@ function commonVars(roomId: string): Record<string, string> {
  * The capture group is the bare name (no leading `!`). Used both server-
  * side in `expandInlineCommands` and indirectly mirrored by the composer
  * trigger detector (which has its own caret-aware variant).
+ *
+ * Arg class accepts letters, digits, `+`, `-`, and `.` so dice
+ * modifiers (`!roll:1d20+5`, `!roll:2d6-1`) survive intact. Without
+ * `+/-` the inline form silently truncated arg to `1d20` and dropped
+ * the modifier, leaving the `+5` as plain text after the rendered
+ * roll — exactly the failure mode an initiative+damage scene
+ * surfaced. The `.` is included for future decimal-friendly args; no
+ * builtin uses it today but adding it costs nothing and matches how
+ * `parseFloat`-shaped command args are usually written.
  */
 const INLINE_TRIGGER_RE =
-  /(?<prefix>^|[^\w!])!(?<name>[a-z][a-z0-9_-]{0,31})(?::(?<arg>[A-Za-z0-9]+))?/gi;
+  /(?<prefix>^|[^\w!])!(?<name>[a-z][a-z0-9_-]{0,31})(?::(?<arg>[A-Za-z0-9+\-.]+))?/gi;
 
 /**
  * Expand every `!name[:arg]` token in a chat-message body using the

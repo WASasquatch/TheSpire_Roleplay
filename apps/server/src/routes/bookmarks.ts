@@ -110,6 +110,7 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
         ...(m.color ? { color: m.color } : {}),
         ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
         ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
+        ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
       };
       out.push({
         id: r.id,

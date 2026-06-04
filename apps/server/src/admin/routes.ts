@@ -34,6 +34,7 @@ import { recordAudit } from "../audit.js";
 import { registerAdminEarningRoutes } from "./earning.js";
 import { registerAdminBackupRoutes } from "./backup.js";
 import { registerAdminPermissionRoutes } from "./permissions.js";
+import { registerAdminAnnouncementRoutes } from "./announcements.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -114,6 +115,12 @@ export async function registerAdminRoutes(
   // via the migration seed but are matrix-grantable so a senior admin
   // can manage the matrix on the masteradmin's behalf.
   registerAdminPermissionRoutes(app, { db });
+
+  // Announcements — admin Banners + Scheduled CRUD. The scheduler
+  // tick that fires due rows is launched separately at boot via
+  // `startAnnouncementScheduler` in apps/server/src/index.ts so it
+  // runs once per process, not once per route registration.
+  await registerAdminAnnouncementRoutes(app, { db, io });
 
   // Per-route granular gate. Each handler that performs a side-effect
   // or returns sensitive data calls this with the specific

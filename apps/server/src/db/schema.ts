@@ -618,6 +618,17 @@ export const messages = sqliteTable(
      */
     sceneImageUrl: text("scene_image_url"),
     /**
+     * Trusted-HTML body for scheduled-/announce lines (migration 0191).
+     * The chat markdown pipeline still owns regular chat — when this
+     * column is non-null, the announce-kind renderer paints it via
+     * `dangerouslySetInnerHTML` (after the same sanitizer the bio
+     * pipeline uses) so an admin who scheduled a banner with links /
+     * lists / bold spans gets formatting fidelity. Manual in-chat
+     * `/announce` keeps this NULL and falls through to the inline-
+     * markdown render path.
+     */
+    bodyHtml: text("body_html"),
+    /**
      * Thread category bucket — only meaningful for top-level messages in
      * a nested-mode room. Replies inherit their parent's bucket
      * implicitly via the thread the client groups. FK is SET NULL so
@@ -3398,3 +3409,75 @@ export const userPermissionOverrides = sqliteTable(
 export type DbRolePermissionGrant = typeof rolePermissionGrants.$inferSelect;
 export type DbUserPermissionOverride = typeof userPermissionOverrides.$inferSelect;
 export type DbIdentityPetCollection = typeof identityPetCollection.$inferSelect;
+
+/* ---------- announcements ---------- *
+ *
+ * Two surfaces share one admin tab:
+ *
+ *   `announcementBanners` — admin-curated rows the chat shell rotates
+ *   through in a fade-marquee at the top of the viewport. Body is
+ *   sanitized HTML (Markdown is converted client-side at save time
+ *   and stored as HTML so the read path is one shape).
+ *
+ *   `scheduledAnnouncements` — cron-like rows the server's scheduler
+ *   tick fires through the `/announce` code path. Each row carries
+ *   either a one-shot `runAt` or a recurring `intervalMs` parsed from
+ *   the admin's human-readable spec (`1d8h`, `3h`, `30m`, an ISO
+ *   datetime). `lastRunAt` / `nextRunAt` are bookkeeping: the
+ *   scheduler reads enabled rows with `nextRunAt <= now`, fires, then
+ *   advances `nextRunAt = now + intervalMs` for recurring or disables
+ *   the row entirely for one-shots.
+ */
+export const announcementBanners = sqliteTable(
+  "announcement_banners",
+  {
+    id: id(),
+    bodyHtml: text("body_html").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    enabledIdx: index("announcement_banners_enabled_idx").on(t.enabled, t.sortOrder, t.createdAt),
+  }),
+);
+
+export const scheduledAnnouncements = sqliteTable(
+  "scheduled_announcements",
+  {
+    id: id(),
+    /** The raw human-readable spec the admin typed, persisted verbatim
+     *  so the editor can re-show exactly what they saved without
+     *  round-tripping through the parser. */
+    scheduleSpec: text("schedule_spec").notNull(),
+    kind: text("kind", { enum: ["interval", "oneShot"] }).notNull(),
+    intervalMs: integer("interval_ms"),
+    runAt: integer("run_at"),
+    lastRunAt: integer("last_run_at"),
+    /** Cached "when does this fire next?" so the tick loop can read
+     *  enabled rows with `nextRunAt <= now` instead of recomputing on
+     *  every fetch. NULL for completed one-shots and disabled rows. */
+    nextRunAt: integer("next_run_at"),
+    bodyHtml: text("body_html").notNull(),
+    bodyMarkdown: text("body_markdown").notNull(),
+    /** Color override applied to the emitted `kind = 'announce'`
+     *  message — either NULL, a `#rrggbb` hex literal, or a
+     *  `theme:<slot>` token. Same shape custom commands use. */
+    color: text("color"),
+    /** NULL = sitewide (broadcasts to every room); otherwise the
+     *  specific room id. */
+    targetRoomId: text("target_room_id").references(() => rooms.id, { onDelete: "cascade" }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    nextRunIdx: index("scheduled_announcements_next_run_idx").on(t.enabled, t.nextRunAt),
+  }),
+);
+
+export type DbAnnouncementBanner = typeof announcementBanners.$inferSelect;
+export type DbScheduledAnnouncement = typeof scheduledAnnouncements.$inferSelect;

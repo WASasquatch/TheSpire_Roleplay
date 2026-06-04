@@ -922,6 +922,60 @@ export function setGhostSweepIo(io: Io): void {
   sweepIo = io;
 }
 
+/**
+ * Persist + broadcast a server-fired chat line without going through
+ * the slash-command dispatcher (no socket, no inline-cmd expansion,
+ * no incognito rewrite). Used by the announcement scheduler, which
+ * needs `addMessage`-shaped behavior — a real row in `messages`, a
+ * filtered emit to the room, color/bodyHtml snapshots on the wire —
+ * but doesn't have a `CommandContext`. Skips the award + push
+ * pipelines (those are pegged to user activity, not server cronjobs).
+ *
+ * The `bodyHtml` parameter is the trusted-HTML variant the renderer
+ * uses for marquee-quality formatting on scheduled announces; the
+ * `body` slot still carries the plain markdown so search /
+ * notifications / bookmarks have a readable text snippet.
+ */
+export async function addMessageDirect(opts: {
+  db: Db;
+  io: Io;
+  roomId: string;
+  userId: string;
+  displayName: string;
+  kind: "announce" | "system";
+  body: string;
+  bodyHtml?: string | null;
+  color?: string | null;
+}): Promise<void> {
+  const { db, io, roomId, userId, displayName, kind, body, bodyHtml, color } = opts;
+  const id = nanoid();
+  const now = new Date();
+  await db.insert(messages).values({
+    id,
+    roomId,
+    userId,
+    characterId: null,
+    displayName,
+    kind,
+    body,
+    bodyHtml: bodyHtml ?? null,
+    color: color ?? null,
+  });
+  const wire: ChatMessage = {
+    id,
+    roomId,
+    userId,
+    characterId: null,
+    displayName,
+    kind,
+    body,
+    color: color ?? null,
+    createdAt: +now,
+    ...(bodyHtml ? { bodyHtml } : {}),
+  };
+  io.to(`room:${roomId}`).emit("message:new", wire);
+}
+
 /** Server-authored system message (no associated user/character). */
 export async function addSystemMessage(
   io: Io,
@@ -1093,6 +1147,7 @@ export async function sendRoomBacklogTo(
       ...(m.isSticky ? { isSticky: true } : {}),
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
       ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
+      ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
       ...(m.rankKey ? { rankKey: m.rankKey } : {}),
       ...(m.tier != null ? { tier: m.tier } : {}),
       ...(m.senderInlineAvatarEnabled ? { senderInlineAvatarEnabled: true } : {}),

@@ -101,8 +101,26 @@ export class CommandRegistry {
   async reloadCustom(db: Db): Promise<void> {
     for (const name of this.customNames) this.byName.delete(name);
     this.customNames.clear();
-    this.inlineByName.clear();
-    this.inlineCanonicalNames.clear();
+    // Drop ONLY custom inline entries — builtin inlines (`!roll`,
+    // `!dice`) were registered once at boot and aren't re-added by
+    // this path, so a blanket clear killed them silently. The bug
+    // manifested as "every custom-command admin edit makes `!roll`
+    // stop expanding" — the inline form rendered as literal text
+    // until the next server restart. We walk the map by entry and
+    // delete only the rows whose `builtin: false` flag marks them
+    // as coming from the DB. The matching canonical-name set is
+    // filtered the same way.
+    const inlineToDelete: string[] = [];
+    for (const [name, entry] of this.inlineByName) {
+      if (!entry.builtin) inlineToDelete.push(name);
+    }
+    for (const name of inlineToDelete) this.inlineByName.delete(name);
+    const canonicalToDelete: string[] = [];
+    for (const name of this.inlineCanonicalNames) {
+      const entry = this.inlineByName.get(name);
+      if (!entry || !entry.builtin) canonicalToDelete.push(name);
+    }
+    for (const name of canonicalToDelete) this.inlineCanonicalNames.delete(name);
 
     const cmds = await db.select().from(customCommands);
     if (cmds.length === 0) return;

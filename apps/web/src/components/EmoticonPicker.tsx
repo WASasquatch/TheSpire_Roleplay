@@ -34,6 +34,19 @@ const PANEL_WIDTH = 380;
  *  comfortably with a mouse wheel or trackpad. Tall viewports still
  *  benefit because the panel WON'T cover most of the chat behind it. */
 const PANEL_MAX_HEIGHT = 500;
+/** Lower bound on the picker's height when the viewport can fit it.
+ *  Sized so the body grid always has room for at least two full rows
+ *  of cells AFTER the toolbar (~50), recent strip (~120), and search
+ *  bar (~40) take their slice. Without this floor a picker opened
+ *  against the latest chat message — where roomAbove can be ~200px
+ *  and roomBelow is whatever's left between the message and the
+ *  composer — clamped to that tiny slice and the user saw the search
+ *  field plus a single emoji row, with the rest of the grid scrolled
+ *  off below the panel. The layout below allows the panel to overlap
+ *  the anchor when both sides are tighter than this; covering the
+ *  button the user just clicked is fine since the click already
+ *  opened the picker. */
+const PANEL_MIN_USABLE_HEIGHT = 360;
 
 /** sessionStorage key for the "don't ask again this session" toggle on
  *  the community-emoticon spend confirmation. Sets the user up so a
@@ -114,8 +127,8 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
   });
 
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxHeight: number; placeBelow: boolean }>({
-    top: 0, left: 0, width: PANEL_WIDTH, maxHeight: PANEL_MAX_HEIGHT, placeBelow: true,
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; height: number; placeBelow: boolean }>({
+    top: 0, left: 0, width: PANEL_WIDTH, height: PANEL_MAX_HEIGHT, placeBelow: true,
   });
   const [spendError, setSpendError] = useState<string | null>(null);
 
@@ -135,43 +148,61 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
       const width = Math.min(PANEL_WIDTH, window.innerWidth - 2 * margin);
       // Compute the available vertical room in both directions FIRST,
       // independent of the panel's intrinsic content height. The panel
-      // gets `maxHeight` clamped to whichever direction has more
-      // headroom, so it never spills past the viewport — internal
-      // scroll handles overflow.
+      // gets an explicit height (not just a ceiling) so the body's
+      // `flex-1 overflow-y-auto` has a fixed parent to grow into and
+      // internal scroll actually engages on long grids — the Unicode
+      // tab in particular needs that or the cells just spill past the
+      // visible area.
       const roomBelow = Math.max(0, window.innerHeight - ar.bottom - gap - margin);
       const roomAbove = Math.max(0, ar.top - gap - margin);
-      // Prefer opening below the trigger when there's a comfortable
-      // 200+px of room there — that's the dropdown UX users expect.
-      // Otherwise flip to above when above has the room. When neither
-      // side clears the comfort threshold, pick whichever side has
-      // MORE room so the panel still fits on-screen. Critically, we
-      // never blindly stay below when below is too short to hold the
-      // panel — that was the off-screen overflow this fixes.
+      // Largest height the viewport can possibly host (one shared cap
+      // for either side; the panel can overlap the anchor below).
+      const viewportMax = Math.max(0, window.innerHeight - 2 * margin);
+      // Prefer opening below when below has comfortable room; flip to
+      // above when above does; otherwise pick the side with more room
+      // and accept that the panel will likely overlap the anchor.
       const placeBelow =
-        roomBelow >= 200
+        roomBelow >= PANEL_MIN_USABLE_HEIGHT
           ? true
-          : roomAbove >= 200
+          : roomAbove >= PANEL_MIN_USABLE_HEIGHT
           ? false
           : roomBelow >= roomAbove;
-      // Clamp to the chosen side's ACTUAL available room. The previous
-      // implementation enforced a 200px floor here, which overrode the
-      // viewport constraint and pushed the bottom of the panel
-      // off-screen when the trigger sat near the viewport edge.
-      // Internal scroll keeps the panel usable even in a small slice —
-      // the side-flip above already guarantees we picked the larger
-      // direction, so this clamp just respects what's actually
-      // available.
-      const maxHeight = Math.min(
+      // Target height: prefer the larger of (the chosen side's room,
+      // the comfort floor) so a tight slice doesn't squash the body
+      // down to one row of cells. Capped at the panel ceiling and at
+      // the viewport so we never clip off-screen. When the floor
+      // exceeds the chosen side's room, the position math below shifts
+      // the panel until it fits — which means it overlaps the anchor
+      // button. That tradeoff is fine: the user just clicked that
+      // button to open the picker, so re-covering it doesn't hide
+      // anything they were trying to keep visible.
+      const height = Math.min(
         PANEL_MAX_HEIGHT,
-        placeBelow ? roomBelow : roomAbove,
+        viewportMax,
+        Math.max(placeBelow ? roomBelow : roomAbove, PANEL_MIN_USABLE_HEIGHT),
       );
-      const top = placeBelow ? ar.bottom + gap : Math.max(margin, ar.top - gap - maxHeight);
+      let top: number;
+      if (placeBelow) {
+        top = ar.bottom + gap;
+        // If the panel would spill past the viewport bottom, shift it
+        // up — even into the anchor's row — so the entire panel sits
+        // on-screen and stays usable.
+        const overflowBottom = top + height - (window.innerHeight - margin);
+        if (overflowBottom > 0) top -= overflowBottom;
+        top = Math.max(top, margin);
+      } else {
+        top = ar.top - gap - height;
+        // Same clamp going the other way: if the comfort floor would
+        // push the top above the viewport, snap it to the top margin
+        // (and let the panel cover part of the anchor below).
+        top = Math.max(top, margin);
+      }
       let left = ar.left + ar.width / 2 - width / 2;
       const minLeft = margin;
       const maxLeft = window.innerWidth - width - margin;
       if (left < minLeft) left = minLeft;
       if (left > maxLeft) left = Math.max(minLeft, maxLeft);
-      setPos({ top, left, width, maxHeight, placeBelow });
+      setPos({ top, left, width, height, placeBelow });
     }
     layout();
     // Resize stays — a window resize legitimately changes the
@@ -292,7 +323,13 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
         top: pos.top,
         left: pos.left,
         width: pos.width,
-        maxHeight: pos.maxHeight,
+        // Explicit height (not maxHeight) so the body's `flex-1
+        // overflow-y-auto` has a fixed parent to expand into. With
+        // only `maxHeight` set the panel sized to its intrinsic
+        // content, so a tight `pos.height` left the Unicode grid
+        // collapsed to a single visible row even when the layout
+        // had earmarked more space for it.
+        height: pos.height,
         transformOrigin: pos.placeBelow ? "top center" : "bottom center",
       }}
       onMouseDown={(e) => e.stopPropagation()}

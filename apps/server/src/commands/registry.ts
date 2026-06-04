@@ -31,12 +31,15 @@ export interface InlineCommandEntry {
   builtin: boolean;
   /** Snapshotted CSS to apply to the rendered span. Always null for
    *  builtin inlines; for custom commands it carries whatever the admin
-   *  saved on the row (sanitized). The dispatcher does NOT currently
-   *  weave this into the host message body since the inline output
-   *  rides as plain text spliced into a chat message of its own kind;
-   *  reserved for a future styling pass that wraps the marker in a
-   *  span with this style applied. */
+   *  saved on the row (sanitized). */
   css: string | null;
+  /** Snapshotted color — either a `#rrggbb` hex literal or a
+   *  `theme:<slot>` token. Always null for builtin inlines (they
+   *  inherit the chat's normal coloring); for custom commands it
+   *  mirrors the value the admin set on the `/cmd` form. Rides through
+   *  the verification marker so the inline chip renders in the same
+   *  color as the standalone `/cmd` output. */
+  color: string | null;
   /** Render the inline replacement text. `args` is whatever the user
    *  typed after a `:` delimiter (`!roll:3d6` → `"3d6"`; bare `!roll`
    *  → `""`). Returning null tells the dispatcher to leave the original
@@ -83,6 +86,7 @@ export class CommandRegistry {
         canonicalName: handler.name.toLowerCase(),
         builtin: true,
         css: null,
+        color: null,
         render: (args, user, roomId) => inlineFn(args, user, roomId),
       };
       this.inlineByName.set(handler.name.toLowerCase(), entry);
@@ -143,6 +147,14 @@ export class CommandRegistry {
           canonicalName: handler.name,
           builtin: false,
           css,
+          // Carry the admin's color onto inline expansions too. Without
+          // this the inline `!check` chip rendered as plain inherited
+          // text even though the admin set `color: theme:system` on
+          // the standalone `/check` form — only the standalone path
+          // was applying it. The marker carries the snapshotted value
+          // through to the FE which resolves theme tokens + nudges
+          // hex against the viewer's theme bg.
+          color: c.color ?? null,
           render: (_args, user, roomId) =>
             renderTemplateWithVars(inlineBody, {
               name: user.displayName,
@@ -424,12 +436,14 @@ export function expandInlineCommands(
           // Build the replacement so the captured prefix character isn't
           // dropped (it's part of the match), and wrap the body in
           // verification markers so the client paints the ✓ tooltip.
-          // `entry.css` rides through the marker (URI-encoded) so the
-          // renderer can apply the command's sanitized style to the
-          // spliced span — without this an admin's `font-style: italic`
-          // CSS only fired on the standalone `/cmd` form, not on the
-          // inline `!cmd` form.
-          return prefix + markVerified(entry.canonicalName, rendered, entry.css);
+          // Both `entry.css` AND `entry.color` ride through the marker
+          // (URI-encoded) so the renderer can apply the command's
+          // sanitized style AND its admin-picked color to the spliced
+          // span — without color in the marker the inline form fell
+          // through to whatever the surrounding chat line was painted
+          // in, even when the standalone `/cmd` rendered in a distinct
+          // theme color.
+          return prefix + markVerified(entry.canonicalName, rendered, entry.css, entry.color);
         },
       );
     })

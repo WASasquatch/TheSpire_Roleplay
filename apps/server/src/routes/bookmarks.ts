@@ -109,6 +109,7 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
         // the bookmarks viewer.
         ...(m.color ? { color: m.color } : {}),
         ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+        ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
       };
       out.push({
         id: r.id,

@@ -95,6 +95,13 @@ export async function addMessage(
      * kind.
      */
     cmdCss?: string | null;
+    /**
+     * Optional hero image URL for `kind: "scene"` banners. Validated
+     * by the /scene handler before this call lands — addMessage
+     * persists it verbatim. Ignored on every other kind so a stray
+     * caller can't paint an image onto a /me line.
+     */
+    sceneImageUrl?: string | null;
   },
 ): Promise<void> {
   // Inline-command expansion. The body may carry user-authored
@@ -351,6 +358,12 @@ export async function addMessage(
     // for `kind: "cmd"` rows; left null on every other kind even when the
     // caller forgot to omit it.
     cmdCss: payload.kind === "cmd" ? (payload.cmdCss ?? null) : null,
+    // Scene hero image — gated to `kind: "scene"` for the same reason
+    // cmdCss is gated to "cmd": a stray caller on a /me line shouldn't
+    // be able to paint a hero image into chat. Validation already ran
+    // upstream (scene.ts validateSceneImageUrl) before this column
+    // receives a non-null value.
+    sceneImageUrl: payload.kind === "scene" ? (payload.sceneImageUrl ?? null) : null,
     rankKey: rankKeySnapshot,
     tier: tierSnapshot,
     senderInlineAvatarEnabled: inlineAvatarEnabledSnapshot,
@@ -401,6 +414,9 @@ export async function addMessage(
     // minimal for other kinds (a stray null would be harmless but adds
     // noise to every chat line).
     ...(payload.kind === "cmd" && payload.cmdCss ? { cmdCss: payload.cmdCss } : {}),
+    // Same posture for sceneImageUrl — only attached when this is a
+    // scene row that actually carried an image.
+    ...(payload.kind === "scene" && payload.sceneImageUrl ? { sceneImageUrl: payload.sceneImageUrl } : {}),
     // Rank snapshot — only attach when present so the wire stays
     // light for unranked authors.
     ...(rankKeySnapshot ? { rankKey: rankKeySnapshot } : {}),
@@ -616,7 +632,16 @@ async function emitFiltered(
 /** Whisper / OOC keep their own theming; only say + me carry author color. */
 function colorForKind(kind: MessageKind, color: string | null): string | null {
   if (color == null) return null;
-  if (kind === "say" || kind === "me") return color;
+  // `cmd` kind carries the admin-picked color from the custom command's
+  // row (or, when the admin left it null, the sender's chat color
+  // flowed through `baseColor` upstream). The earlier allow-list omitted
+  // `cmd` and stripped both, so an admin who set `color: theme:system`
+  // on `/check` watched their output render as plain `text-keep-text`
+  // (white on dark themes) instead of the system color. Now passes
+  // through so the wire payload + DB row both keep the snapshotted
+  // color and the renderer's `resolveMessageColor` can turn the
+  // `theme:<slot>` token into the matching CSS variable.
+  if (kind === "say" || kind === "me" || kind === "cmd") return color;
   return null;
 }
 
@@ -1067,6 +1092,7 @@ export async function sendRoomBacklogTo(
       ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
       ...(m.isSticky ? { isSticky: true } : {}),
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+      ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
       ...(m.rankKey ? { rankKey: m.rankKey } : {}),
       ...(m.tier != null ? { tier: m.tier } : {}),
       ...(m.senderInlineAvatarEnabled ? { senderInlineAvatarEnabled: true } : {}),

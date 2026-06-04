@@ -51,6 +51,16 @@ export interface ChatMessage {
   moodSnapshot?: string | null;
   /** For `kind === "npc"` only: the master username of the user who voiced this NPC. */
   npcVoicedBy?: string | null;
+  /**
+   * Optional hero image for `kind === "scene"` banners. Set by
+   * `/scene <title> | <url>` and frozen at send time. The renderer
+   * paints it centered under the (enlarged) scene title with rounded
+   * corners; the whole banner is click-to-collapse so a viewer who
+   * wants the timeline back can tap once to shrink to the title only.
+   * Absent on every non-scene row and on legacy scene rows that
+   * predate migration 0190.
+   */
+  sceneImageUrl?: string | null;
   /** Set when the author edited the message inside the grace window. Epoch ms. */
   editedAt?: number | null;
   /** Set when the author deleted the message inside the grace window. Renderer shows "[message removed]". */

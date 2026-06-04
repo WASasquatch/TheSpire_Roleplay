@@ -48,10 +48,10 @@ const VMARK_SEPARATOR = "⁣";
 
 /** Inline-marker span pattern — duplicated from ./inlineMark.ts so this
  *  module has zero internal dependencies. If the bracket choice (or the
- *  optional `|encoded-css` payload) changes in inlineMark.ts, this regex
- *  needs to follow. */
+ *  optional `|encoded-css(|encoded-color)?` payload) changes in
+ *  inlineMark.ts, this regex needs to follow. */
 const LOCAL_VMARK_SPAN_RE =
-  /⁣⟦cmd:[A-Za-z0-9_-]{1,32}(?:\|[^⟧]*)?⟧⁣[\s\S]*?⁣⟦\/cmd⟧⁣/g;
+  /⁣⟦cmd:[A-Za-z0-9_-]{1,32}(?:\|[^|⟧]*(?:\|[^⟧]*)?)?⟧⁣[\s\S]*?⁣⟦\/cmd⟧⁣/g;
 
 export function splitOnCode(body: string): CodeMaskSegment[] {
   const out: CodeMaskSegment[] = [];

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { legibleHtmlColors, sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
+import { legibleHtmlColors, sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import type { WorldDetail, WorldMemberRef, WorldPage } from "@thekeep/shared";
 import { cropStyleFor } from "../lib/avatarCrop.js";
 import { buildWorldTree, parseWorldFromUrl, syncWorldUrl, worldShareUrl, type WorldTreeNode } from "../lib/worlds.js";
@@ -85,6 +85,17 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
     load();
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [worldId]);
+
+  // Belt-and-suspenders cleanup for the page-author's `<style>` blocks
+  // — same posture as ProfileModal's unmount sweep. The portal-and-
+  // dangerouslySetInnerHTML pipeline normally cleans up its own
+  // styles on unmount, but a reported transition from the public
+  // deep-link viewer back to the login modal showed page CSS bleeding
+  // into the next mount. Sweeping orphans on close guarantees nothing
+  // marker-tagged survives the world view's teardown.
+  useEffect(() => {
+    return () => { sweepOrphanedUserBioStyles(); };
+  }, []);
 
   async function join() {
     setBusy(true);

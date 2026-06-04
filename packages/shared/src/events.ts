@@ -285,6 +285,20 @@ export interface ServerToClientEvents {
     activeCharacterName: string | null;
   }) => void;
   /**
+   * Sent to EVERY live socket the user owns after a `/incognito`
+   * command flips the mode bit or changes the alias. Lets the menu
+   * label ("Go Incognito" vs "Leave Incognito") and the "You are
+   * in incognito mode" chat banner update the moment the toggle
+   * lands, without the 60-second lag of waiting on the next
+   * `/auth/me` poll to notice. Fanned to all tabs (not just the
+   * caller) because incognito is a user-global flag — a sibling
+   * tab observing the same account needs the same affordances.
+   */
+  "me:incognito-update": (payload: {
+    incognitoMode: boolean;
+    incognitoAlias: string | null;
+  }) => void;
+  /**
    * A new DM landed in a conversation the recipient socket is part
    * of. Server emits to every live socket of BOTH participants on
    * every send so the friends rail and any open DM panels light up

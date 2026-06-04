@@ -100,7 +100,23 @@ export function escapeHtmlAttr(text: string): string {
  * the 155-char rule of thumb Google honors).
  */
 function stripToText(html: string, maxChars = 155): string {
+  // FIRST pass: drop entire tag bodies for tags whose CONTENT is NOT
+  // user-visible prose. `<style>` is the load-bearing case — bio
+  // sanitization keeps custom CSS for theming, so without this step
+  // a 2000-char `.section { … }` block in a user's bio leaked into
+  // the og:description verbatim and Discord/Slack cards showed raw
+  // CSS in place of a bio excerpt. `<script>` would normally be
+  // dropped by the bio sanitizer entirely, but we belt-and-suspenders
+  // it here in case any pre-sanitizer data still carries one. The
+  // `<iframe>` rule is for the YouTube embed shortcut sanitizeBio
+  // allows — its `src` URL would otherwise blob into the snippet.
+  // SECOND pass: drop all remaining tag MARKERS so attributes and
+  // intentional prose markup don't leak. The body text of `<p>`,
+  // `<span>`, etc. survives this pass.
   const stripped = html
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
+    .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe\s*>/gi, " ")
     .replace(/<[^>]*>/g, " ")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
@@ -114,6 +130,20 @@ function stripToText(html: string, maxChars = 155): string {
   const slice = stripped.slice(0, maxChars);
   const lastSpace = slice.lastIndexOf(" ");
   return (lastSpace > 0 ? slice.slice(0, lastSpace) : slice).trim() + "…";
+}
+
+/**
+ * Format a join date for the statistical profile OG snippet ("…since
+ * March 2025"). Month-precision so the snippet stays compact and we
+ * don't seed a precise account-creation timestamp into search-result
+ * link previews. Returns "" if the input isn't a usable date — the
+ * caller falls back to a date-less variant of the description.
+ */
+function formatJoinDate(input: Date | number | null | undefined): string {
+  if (input == null) return "";
+  const date = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "long" });
 }
 
 /**
@@ -568,7 +598,17 @@ async function resolveRouteMeta(
   // ---- Profile: /p/:name or /u/:name ----
   // Try master account first; fall back to character lookup so
   // `/p/<characterName>` resolves too. Both gates require isPublic &&
-  // !isNsfw before any name or bio escapes into OG.
+  // !isNsfw before the name escapes into OG.
+  //
+  // Description is deliberately STATISTICAL (join date for users, a
+  // canned line for characters) rather than bio-derived: even on
+  // isPublic+!isNsfw rows, the bio is free-form user-authored content
+  // that can carry adult subject matter, slurs, or doxxing material the
+  // owner is fine showing in-app but didn't intend to seed into Discord
+  // / Slack / Twitter / search-result link previews. Keeping the OG
+  // snippet to facts the system itself owns means a profile share
+  // surfaces "<name> joined on <date>" rather than potentially leaking
+  // a sensitive bio excerpt.
   const profileMatch = pathname.match(/^\/(?:p|u)\/([^/]+)\/?$/);
   if (profileMatch) {
     const name = decodeURIComponent(profileMatch[1]!);
@@ -576,7 +616,7 @@ async function resolveRouteMeta(
       const userRow = (await db
         .select({
           username: users.username,
-          bioHtml: users.bioHtml,
+          createdAt: users.createdAt,
         })
         .from(users)
         .where(and(
@@ -586,10 +626,13 @@ async function resolveRouteMeta(
         ))
         .limit(1))[0];
       if (userRow) {
-        const bio = stripToText(userRow.bioHtml);
+        const joined = formatJoinDate(userRow.createdAt);
+        const description = joined
+          ? `${userRow.username} has been roleplaying on ${siteName} since ${joined}.`
+          : `${userRow.username} is a roleplayer on ${siteName}.`;
         return {
           title: `${userRow.username} - Roleplay Profile · ${siteName}`,
-          description: bio || `${userRow.username}'s roleplay profile on ${siteName}. Read their bio, browse characters, and start a scene.`,
+          description,
           keywords: `${userRow.username}, roleplay profile, character, ${DEFAULT_KEYWORDS}`,
           canonicalUrl: `${origin}/p/${encodeURIComponent(userRow.username.toLowerCase())}`,
         };
@@ -597,7 +640,6 @@ async function resolveRouteMeta(
       const charRow = (await db
         .select({
           name: characters.name,
-          bioHtml: characters.bioHtml,
         })
         .from(characters)
         .where(and(
@@ -608,10 +650,9 @@ async function resolveRouteMeta(
         ))
         .limit(1))[0];
       if (charRow) {
-        const bio = stripToText(charRow.bioHtml);
         return {
           title: `${charRow.name} - Roleplay Character · ${siteName}`,
-          description: bio || `${charRow.name} is a roleplay character on ${siteName}. Read their bio and find them in chat.`,
+          description: `${charRow.name} is a roleplay character on ${siteName}. Find them in chat to start a scene.`,
           keywords: `${charRow.name}, roleplay character, ${DEFAULT_KEYWORDS}`,
           canonicalUrl: `${origin}/p/${encodeURIComponent(charRow.name.toLowerCase())}`,
         };

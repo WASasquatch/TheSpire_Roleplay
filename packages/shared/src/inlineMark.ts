@@ -42,14 +42,27 @@ export const VMARK_START_SUFFIX = "⟧⁣";
 export const VMARK_END = "⁣⟦/cmd⟧⁣";
 
 /** Pattern that matches BOTH the start and end tags (with or without a CSS
- *  payload after the name). Used to scrub user input. */
+ *  / color payload after the name). Used to scrub user input. */
 export const VMARK_ANY_RE =
-  /⁣⟦\/?cmd(?::[A-Za-z0-9_-]{1,32}(?:\|[^⟧]*)?)?⟧⁣/g;
+  /⁣⟦\/?cmd(?::[A-Za-z0-9_-]{1,32}(?:\|[^|⟧]*(?:\|[^⟧]*)?)?)?⟧⁣/g;
 
-/** Pattern that captures a complete verified span: start + name + (optional
- *  URI-encoded css) + content + end. */
+/**
+ * Pattern that captures a complete verified span: start + name + (optional
+ * URI-encoded css) + (optional URI-encoded color) + content + end.
+ *
+ * The two payload slots are independently optional and separated by `|`,
+ * so callers see four legal start-tag shapes:
+ *   - `⟦cmd:NAME⟧`           — bare (no css, no color)
+ *   - `⟦cmd:NAME|css⟧`       — css only
+ *   - `⟦cmd:NAME|css|color⟧` — both
+ *   - `⟦cmd:NAME||color⟧`    — color only (empty css slot)
+ * The css group's `[^|⟧]*` deliberately disallows `|` inside the value
+ * so the parser can find the boundary between css and color without
+ * any ambiguity. URI-encoding the inputs upstream guarantees that
+ * constraint holds (any literal `|` in the source is escaped to `%7C`).
+ */
 export const VMARK_SPAN_RE =
-  /⁣⟦cmd:(?<name>[A-Za-z0-9_-]{1,32})(?:\|(?<css>[^⟧]*))?⟧⁣(?<content>[\s\S]*?)⁣⟦\/cmd⟧⁣/g;
+  /⁣⟦cmd:(?<name>[A-Za-z0-9_-]{1,32})(?:\|(?<css>[^|⟧]*)(?:\|(?<color>[^⟧]*))?)?⟧⁣(?<content>[\s\S]*?)⁣⟦\/cmd⟧⁣/g;
 
 /**
  * Wrap a single expansion in verification markers. `name` is sanitized
@@ -58,14 +71,38 @@ export const VMARK_SPAN_RE =
  * command names here, but the regex above expects this shape).
  *
  * `css` is the sanitized CSS declaration list to apply to the rendered
- * span, or null/undefined to emit a bare marker. Caller is responsible
- * for having already run the input through `sanitizeCustomCmdCss`;
- * this helper does NOT re-validate.
+ * span. Caller is responsible for having already run the input through
+ * `sanitizeCustomCmdCss`; this helper does NOT re-validate.
+ *
+ * `color` is the snapshotted color from the command row — either a
+ * `#rrggbb` hex literal or a `theme:<slot>` token. Passed verbatim
+ * through the marker so the renderer can resolve it the same way it
+ * resolves `msg.color` on a standalone `/cmd` line (turning a theme
+ * token into a CSS variable, or nudging a hex against the viewer's
+ * theme bg for legibility).
+ *
+ * Both `css` and `color` are independently optional — passing only one
+ * is fine.
  */
-export function markVerified(name: string, content: string, css?: string | null): string {
+export function markVerified(
+  name: string,
+  content: string,
+  css?: string | null,
+  color?: string | null,
+): string {
   const safeName = name.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32) || "cmd";
-  const cssPart = css && css.trim() ? `|${encodeURIComponent(css.trim())}` : "";
-  return `${VMARK_START_PREFIX}${safeName}${cssPart}${VMARK_START_SUFFIX}${content}${VMARK_END}`;
+  const cssTrim = css && css.trim() ? css.trim() : "";
+  const colorTrim = color && color.trim() ? color.trim() : "";
+  // Pre-encode both payloads so the `|` separator literal can't appear
+  // inside either slot. Empty css with a non-empty color emits an
+  // explicit empty slot (`||color`) so the regex still aligns the
+  // pieces correctly.
+  let payload = "";
+  if (cssTrim || colorTrim) {
+    payload = `|${encodeURIComponent(cssTrim)}`;
+    if (colorTrim) payload += `|${encodeURIComponent(colorTrim)}`;
+  }
+  return `${VMARK_START_PREFIX}${safeName}${payload}${VMARK_START_SUFFIX}${content}${VMARK_END}`;
 }
 
 /**

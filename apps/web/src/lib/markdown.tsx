@@ -1,5 +1,5 @@
 import { Fragment, useState, type ReactNode } from "react";
-import { customCmdCssToStyle, splitOnCode, VMARK_SPAN_RE } from "@thekeep/shared";
+import { customCmdCssToStyle, resolveMessageColor, splitOnCode, VMARK_SPAN_RE } from "@thekeep/shared";
 import { splitMentions } from "./mentions.js";
 import { useActiveTheme } from "./theme.js";
 import { useEmoticons } from "../state/emoticons.js";
@@ -377,22 +377,28 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
     if (m && m.index === 0) {
       const name = m.groups?.name ?? "cmd";
       const content = m.groups?.content ?? "";
-      // Optional CSS payload: URI-encoded on the wire (so the `|`
-      // separator and `⟧` close-bracket can never appear inside the
-      // value). decodeURIComponent can throw on a malformed payload
-      // (an inline marker the user managed to forge before the server's
-      // strip pass, or a corrupt round-trip); fall back to no CSS in
-      // that case rather than losing the whole verified span.
+      // Optional CSS + color payloads: URI-encoded on the wire (so the
+      // `|` separator and `⟧` close-bracket can never appear inside
+      // either value). decodeURIComponent can throw on a malformed
+      // payload (an inline marker the user managed to forge before the
+      // server's strip pass, or a corrupt round-trip); fall back to
+      // null in that case rather than losing the whole verified span.
       let css: string | null = null;
       const rawCss = m.groups?.css;
       if (rawCss) {
         try { css = decodeURIComponent(rawCss); }
         catch { css = null; }
       }
+      let color: string | null = null;
+      const rawColor = m.groups?.color;
+      if (rawColor) {
+        try { color = decodeURIComponent(rawColor); }
+        catch { color = null; }
+      }
       return {
         end: i + m[0].length,
         node: (
-          <VerifiedInline cmd={name} css={css}>
+          <VerifiedInline cmd={name} css={css} color={color}>
             {parseInline(content, depth + 1)}
           </VerifiedInline>
         ),
@@ -733,6 +739,7 @@ export function parseInline(text: string, depth: number = 0): ReactNode[] {
 function VerifiedInline({
   cmd,
   css,
+  color,
   children,
 }: {
   cmd: string;
@@ -742,6 +749,15 @@ function VerifiedInline({
    *  per-command palette an admin sees on the standalone `/cmd` form
    *  also fires when the command is spliced inline via `!cmd`. */
   css: string | null;
+  /** Optional admin-picked color from the `/cmd` form — either a
+   *  `#rrggbb` hex literal or a `theme:<slot>` token. Resolved through
+   *  the same `resolveMessageColor` the standalone `cmd` kind uses, so
+   *  a `theme:system` token becomes the system-slot CSS variable on
+   *  both surfaces and a stored hex gets the legibility nudge against
+   *  the viewer's theme bg. Null when the admin left the color unset
+   *  (chip inherits the surrounding chat line's color, same as the
+   *  standalone form would). */
+  color: string | null;
   children: ReactNode;
 }) {
   // Read the viewer's theme so an admin-picked color inside the CSS
@@ -752,11 +768,20 @@ function VerifiedInline({
   // approximately `theme.bg`.
   const themeBg = useActiveTheme().bg;
   const inlineStyle = customCmdCssToStyle(css, themeBg);
+  const resolvedColor = resolveMessageColor(color, themeBg);
+  // The color slot wins over any `color` declaration the user CSS
+  // might have set — `color` is the admin's explicit "this command is
+  // this color" pick, while `css` is the broader style declaration;
+  // an admin who set both intends the color slot to take precedence
+  // on each render path the same way the standalone form does.
+  const finalStyle = resolvedColor
+    ? { ...(inlineStyle ?? {}), color: resolvedColor }
+    : inlineStyle;
   return (
     <span
       className="rounded bg-keep-system-100/40 px-0.5 ring-1 ring-inset ring-keep-system/40"
       title={`Verified: ran the /${cmd} command`}
-      style={inlineStyle ?? undefined}
+      style={finalStyle ?? undefined}
     >
       {children}
       <span aria-hidden className="ml-0.5 align-super text-[0.7em] text-keep-system">✓</span>

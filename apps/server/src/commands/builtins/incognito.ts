@@ -93,6 +93,15 @@ function defaultReturnMessage(displayName: string): string {
 /**
  * Update the user's incognito fields and re-fetch so subsequent
  * dispatch ticks see the updated state. Returns the fresh row.
+ *
+ * Also fans a `me:incognito-update` socket event out to EVERY live
+ * socket the user owns (current tab + any sibling tabs), so the
+ * "Go Incognito / Leave Incognito" menu label and the "You are in
+ * incognito mode" chat banner flip immediately on every surface
+ * without waiting on the /auth/me poll (60-second cadence) to
+ * eventually notice. Before this, the visible UI lagged the actual
+ * server state by up to a minute, which read as "the command didn't
+ * land" and led mods to re-issue it.
  */
 async function patchUser(
   ctx: CommandContext,
@@ -115,6 +124,19 @@ async function patchUser(
     cached.incognitoAlias = fresh.incognitoAlias;
     cached.incognitoExitMessage = fresh.incognitoExitMessage;
     cached.incognitoReturnMessage = fresh.incognitoReturnMessage;
+  }
+  // Push the new state to every live socket the user owns so each
+  // tab's `me.incognitoMode` / `me.incognitoAlias` updates the
+  // moment the toggle / alias change lands, not on the next
+  // /auth/me poll. The handler on the client side updates the
+  // chat store directly — same posture as `me:character-update`.
+  const allSockets = await ctx.io.fetchSockets();
+  for (const s of allSockets) {
+    if ((s.data as { userId?: string }).userId !== ctx.user.id) continue;
+    s.emit("me:incognito-update", {
+      incognitoMode: fresh.incognitoMode,
+      incognitoAlias: fresh.incognitoAlias,
+    });
   }
   return fresh;
 }

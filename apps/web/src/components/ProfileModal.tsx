@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
+import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import { CHARACTER_VIBE_AXES, isAdminRole, isDarkPalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
 import type { CharacterAttribute, CharacterPortrait, CharacterVibeAxisKey, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
@@ -176,6 +176,22 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   // unreadable" failure mode.
   const bgLuminance = useBgLuminance(profileBgUrl || null);
 
+  // Belt-and-suspenders cleanup for the writer's `<style>` blocks.
+  // The bio container is portaled to <body> via <Modal>, and React's
+  // normal teardown removes it (and the scoped `<style>` tags inside)
+  // when this component unmounts. But a "the profile's custom CSS
+  // bled into the login modal after closing the public profile"
+  // report pinned a path where a leftover block was still being
+  // matched against the next mounted tree — likely a Strict-mode
+  // double-mount or the SPA route swap destroying and recreating the
+  // host shell on the same tick. Running the sweep here on unmount
+  // (after React's own removal) guarantees that no marker-tagged
+  // user-bio stylesheet survives the close, regardless of which
+  // surface comes up next.
+  useEffect(() => {
+    return () => { sweepOrphanedUserBioStyles(); };
+  }, []);
+
   // Scoped CSS-var overrides applied to the modal card.
   //
   // Always-on contract (independent of profile BG image): fully opaque
@@ -233,6 +249,31 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
       {...(backdropStyle ? { backdropStyle } : {})}
       {...(zIndex !== undefined ? { zIndex } : {})}
     >
+      {/* Layout-transparent wrapper that hosts the owner-design
+          attributes. Every `[data-theme-style="…"] .keep-frame`,
+          `… .keep-panel`, `… .keep-button`, etc. rule in styles.css
+          uses a DESCENDANT combinator, so the card-as-keep-frame can
+          only get those design treatments via an ANCESTOR carrying
+          the attribute. In overlay mode (chat mounted) the viewer's
+          `applyStyle` writes the attribute onto `<html>` and the
+          modal card coincidentally matches via that ancestor — with
+          the VIEWER's design, not the owner's. On a deep-link
+          refresh the standalone shell is rendered (Chat never
+          mounts, `applyStyle` never runs), `<html>` carries no
+          attribute, and the card lost every design treatment ("the
+          custom theme isn't applied correctly after refresh").
+          Stamping the attributes on this contents-wrapper fixes both
+          cases: the card is now a descendant of an element carrying
+          the OWNER's style, so the rules engage with the correct
+          values regardless of what `<html>` is wearing. `contents`
+          collapses the wrapper out of layout so the card's
+          MODAL_CARD_CONTENT sizing measures against the modal
+          backdrop directly, exactly as before. */}
+      <div
+        data-theme-style={ownerOrnaments.styleKey}
+        {...(profileBgUrl ? { "data-profile-bg": "1" } : {})}
+        className="contents"
+      >
       <div
         // Inline-style override scopes the theme to this card only. The
         // explicit bg/color use rgb(var()) because the variables now hold
@@ -267,8 +308,6 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
           ...legibilityVars,
           ...(profileBgUrl ? {} : { backgroundColor: "rgb(var(--keep-bg))" }),
         }}
-        data-theme-style={ownerOrnaments.styleKey}
-        data-profile-bg={profileBgUrl ? "1" : undefined}
         className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
         onClick={(e) => e.stopPropagation()}
       >
@@ -303,6 +342,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
             activeCharacterAction={activeCharacterAction}
           />
         )}
+      </div>
       </div>
     </Modal>
   );
@@ -649,6 +689,24 @@ function ProfileBody({
               >
                 {genderGlyph(gender).icon}
               </span>
+              {/* Desktop rank — sits inline with the name (lg+) with a
+                  pipe separator. Mobile keeps its own dedicated rank
+                  lockup row below the name (the `lg:hidden` block
+                  further down); the right-edge desktop lockup that
+                  used to live next to the close button was retired
+                  in favor of this inline placement. Flex-wrap on the
+                  parent lets the rank chip drop to the next line if
+                  the name + meta line gets long. */}
+              {earning?.rankKey && earning.tier != null ? (
+                <div className="hidden items-center gap-1.5 lg:flex">
+                  <span aria-hidden className="text-keep-muted/60">|</span>
+                  <RankSigil rankKey={earning.rankKey} tier={earning.tier} size="md" />
+                  <span className="font-action text-sm uppercase tracking-widest text-keep-text">
+                    {earning.rankName ?? earning.rankKey}
+                    {earning.tierLabel ? <span className="ml-1 text-keep-muted">{earning.tierLabel}</span> : null}
+                  </span>
+                </div>
+              ) : null}
             </div>
             {/* Earning chips (desktop). Live on their own row below the
                 name so they never split across rows (XP on the name
@@ -876,30 +934,20 @@ function ProfileBody({
               </div>
             ) : null}
           </div>
-          {/* Desktop rank lockup — pushed to the right edge of the
-              hero (ml-auto). Sigil at xl (64px), title at text-xl.
-              Hidden below lg so mobile renders the inline variant
-              that lives under the name. (The vibe lived in an
-              absolute-positioned sidecar here in an earlier draft —
-              the absolute box didn't constrain the bars cleanly and
-              produced overflow on wider viewports; the vibe now
-              lives in the body section as a responsive multi-column
-              grid so the same data renders at every size without
-              fighting the hero's flex layout.) */}
-          {earning?.rankKey && earning.tier != null ? (
-            <div className="ml-auto hidden items-center gap-3 lg:flex">
-              <RankSigil rankKey={earning.rankKey} tier={earning.tier} size="xl" />
-              <span className="font-action text-xl uppercase tracking-widest text-keep-text">
-                {earning.rankName ?? earning.rankKey}
-                {earning.tierLabel ? <span className="ml-2 text-keep-muted">{earning.tierLabel}</span> : null}
-              </span>
-            </div>
-          ) : null}
+          {/* Disposition used to live as a header sidecar here; it
+              now lives in the body as a 25%-width right-side column
+              beside the Stats / Activity block, so the hero stays
+              focused on identity + rank and the personality bars get
+              their own deliberate column of vertical space. Mobile
+              and desktop both render the body version. The `ml-auto`
+              that this slot used to enforce is gone too — the rank
+              inline above already pushes the close button right via
+              its own flex math. */}
           {/* `self-start` anchors the close affordance to the top of
               the vertically-centered hero so the hero text can ride
               the avatar's midline without dragging the close button
               with it. */}
-          <CloseButton onClick={onClose} className="ml-2 self-start" />
+          <CloseButton onClick={onClose} className="ml-auto self-start" />
         </div>
         {/* Mobile action bar — full-width segmented row pinned to the
             bottom of the hero band on phones. Each visible button
@@ -1002,82 +1050,102 @@ function ProfileBody({
               />
 
 
-              {statEntries.length > 0 ? (
-                <Section title="Stats">
-                  <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
-                    {statEntries.map(([k, v]) => (
-                      <div
-                        key={k}
-                        className="flex justify-between gap-3 border-b border-keep-rule/40 py-1"
-                      >
-                        <dt className="text-sm uppercase tracking-widest text-keep-text/80">{k}</dt>
-                        <dd className="truncate text-right text-sm">{v}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </Section>
-              ) : null}
+              {/* Two-column body block: Stats / Attributes / Activity
+                  share a 3/4-width left column, Disposition takes the
+                  remaining 1/4 on the right. Below lg the grid
+                  collapses and everything stacks in source order
+                  (Stats → Attributes → Activity → Disposition). The
+                  left column owns its own `mb-5` rhythm via the
+                  Section component; the grid `gap-x-5` separates the
+                  two columns on desktop without doubling padding. */}
+              <div className="mb-5 grid grid-cols-1 gap-x-5 lg:grid-cols-4">
+                <div className="lg:col-span-3">
+                  {statEntries.length > 0 ? (
+                    <Section title="Stats">
+                      <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
+                        {statEntries.map(([k, v]) => (
+                          <div
+                            key={k}
+                            className="flex justify-between gap-3 border-b border-keep-rule/40 py-1"
+                          >
+                            <dt className="text-sm uppercase tracking-widest text-keep-text/80">{k}</dt>
+                            <dd className="truncate text-right text-sm">{v}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </Section>
+                  ) : null}
 
-              {/* Vibe bars + numeric attribute sheet. Both derive from the
-                  same `stats` blob the classic rows above use, with
-                  visibility honored at collection time so a hidden section
-                  short-circuits to an empty list and the section header
-                  never renders. Owners + mod-tier viewers bypass the gate
-                  per the docstring contract on CharacterStats.visibility.
-                  Vibe renders at every viewport — VibeSection itself
-                  switches the axis grid from 1 column on phones to 2
-                  on tablets to 3 on desktops so the eight axes use the
-                  available horizontal real estate without each bar
-                  spanning the whole modal. */}
-              <VibeSection stats={stats} bypassVisibility={bypassVisibility} />
-              <AttributesSection stats={stats} bypassVisibility={bypassVisibility} />
+                  <AttributesSection stats={stats} bypassVisibility={bypassVisibility} />
 
-              {/* Activity counters — lifetime totals computed server-side
-                  at fetch time. Scoped per identity: character profile
-                  shows that character's posts; master profile shows
-                  everything authored under the user account. Zero is a
-                  legitimate value (brand-new account, never posted) so
-                  the section always renders rather than hiding when
-                  totals are 0 — "0 posts" IS information.
+                  {/* Activity counters — lifetime totals computed server-side
+                      at fetch time. Scoped per identity: character profile
+                      shows that character's posts; master profile shows
+                      everything authored under the user account. Zero is a
+                      legitimate value (brand-new account, never posted) so
+                      the section always renders rather than hiding when
+                      totals are 0 — "0 posts" IS information.
 
-                  Per-metric privacy: when the user has the matching
-                  hide-flag set on /me/profile, the server returns null
-                  for that field and we render "private" instead of the
-                  number. The tile still renders so the user's intent
-                  ("I am opting out") is visible to viewers — silently
-                  hiding the whole tile would read as "they never
-                  posted any forum topics" which is a different claim. */}
-              <Section title="Activity">
-                <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
-                  {[
-                    { key: "chat", label: "Chat messages", value: profile.profile.metrics.chatMessages },
-                    { key: "topics", label: "Forum topics", value: profile.profile.metrics.forumTopics },
-                    { key: "replies", label: "Forum replies", value: profile.profile.metrics.forumReplies },
-                  ].map((m) => {
-                    const isPrivate = m.value === null;
-                    return (
-                      <div
-                        key={m.key}
-                        className="flex flex-col items-center gap-0.5 rounded border border-keep-rule/40 bg-keep-bg/40 px-2 py-1.5"
-                      >
-                        <dd
-                          className={
-                            isPrivate
-                              ? "text-sm uppercase tracking-widest text-keep-muted"
-                              : "font-action text-xl tabular-nums text-keep-text"
-                          }
-                          title={isPrivate ? `${m.label} hidden by user` : undefined}
-                        >
-                          {isPrivate ? "private" : m.value!.toLocaleString()}
-                        </dd>
-                        <dt className="text-xs uppercase tracking-widest text-keep-text/80">
-                          {m.label}
-                        </dt>
-                      </div>
-                    );
-                  })}
-                </dl>
-              </Section>
+                      Per-metric privacy: when the user has the matching
+                      hide-flag set on /me/profile, the server returns null
+                      for that field and we render "private" instead of the
+                      number. The tile still renders so the user's intent
+                      ("I am opting out") is visible to viewers — silently
+                      hiding the whole tile would read as "they never
+                      posted any forum topics" which is a different claim. */}
+                  <Section title="Activity">
+                    <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
+                      {[
+                        { key: "chat", label: "Chat messages", value: profile.profile.metrics.chatMessages },
+                        { key: "topics", label: "Forum topics", value: profile.profile.metrics.forumTopics },
+                        { key: "replies", label: "Forum replies", value: profile.profile.metrics.forumReplies },
+                      ].map((m) => {
+                        const isPrivate = m.value === null;
+                        return (
+                          <div
+                            key={m.key}
+                            className="flex flex-col items-center gap-0.5 rounded border border-keep-rule/40 bg-keep-bg/40 px-2 py-1.5"
+                          >
+                            <dd
+                              className={
+                                isPrivate
+                                  ? "text-sm uppercase tracking-widest text-keep-muted"
+                                  : "font-action text-xl tabular-nums text-keep-text"
+                              }
+                              title={isPrivate ? `${m.label} hidden by user` : undefined}
+                            >
+                              {isPrivate ? "private" : m.value!.toLocaleString()}
+                            </dd>
+                            <dt className="text-xs uppercase tracking-widest text-keep-text/80">
+                              {m.label}
+                            </dt>
+                          </div>
+                        );
+                      })}
+                    </dl>
+                  </Section>
+                </div>
+
+                {/* Disposition column — 25% on desktop, full-width
+                    stacked below on mobile. Hidden entirely when the
+                    character has no visible axes; wrapping in the
+                    standard Section gives it the same header rhythm
+                    as Stats/Activity. VibeSection's compact variant
+                    drops its own Section chrome (so we don't
+                    double-nest) and lays out axes in a single
+                    column. */}
+                {stats && collectVibeAxes(stats, bypassVisibility).length > 0 ? (
+                  <div className="lg:col-span-1">
+                    <Section title="Disposition">
+                      <VibeSection
+                        stats={stats}
+                        bypassVisibility={bypassVisibility}
+                        variant="compact"
+                      />
+                    </Section>
+                  </div>
+                ) : null}
+              </div>
 
               {links.length > 0 ? (
                 <Section title="Links">
@@ -1855,64 +1923,79 @@ function statsFromProfile(p: ProfileView) {
 function VibeSection({
   stats,
   bypassVisibility,
+  variant = "section",
 }: {
   stats: NonNullable<ReturnType<typeof statsFromProfile>> | null;
   bypassVisibility: boolean;
+  /**
+   * "section" — body block wrapped in the standard
+   * `<Section title="Vibe">` chrome. Mobile-friendly grid that
+   * scales from 1 → 2 columns as the viewport widens.
+   *
+   * "compact" — hero-sidecar variant. Drops the Section wrapper +
+   * VIBE heading, locks the inner grid to 2 columns regardless of
+   * viewport (the parent slot is a fixed 380px wide at lg+, so
+   * responsive breakpoints would over-fit), and tightens the row
+   * spacing so 4 rows of 2 axes ride the avatar's vertical
+   * footprint. Same bar/dot/glow geometry.
+   */
+  variant?: "section" | "compact";
 }) {
   if (!stats) return null;
   const axes = collectVibeAxes(stats, bypassVisibility);
   if (axes.length === 0) return null;
-  return (
-    <Section title="Vibe">
-      {/* Responsive grid: each axis is a self-contained tile (label /
-          bar / label) and the grid flows them into 1 column on
-          phones, 2 on tablets, and 3 on desktops so the eight axes
-          use the available width instead of stretching one bar across
-          the whole modal. `gap-x-5` keeps the columns visually
-          separated; `gap-y-3` matches the existing Section's vertical
-          rhythm. */}
-      <ul className="grid grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
-        {axes.map((axis) => (
-          <li key={axis.key} className="text-xs">
-            <div className="mb-1 flex items-baseline justify-between gap-2">
-              <span className="font-semibold text-keep-text/85">{axis.lowLabel}</span>
-              <span className="font-semibold text-keep-text/85">{axis.highLabel}</span>
-            </div>
-            {/* The bar is a flat track plus an absolutely-positioned
-                dot. -translate-x-1/2 centers the dot on its computed
-                left%, so 0 / 50 / 100 all read as "at the start /
-                middle / end" without the dot clipping the track edge. */}
-            <div className="relative h-1.5 w-full rounded-full bg-keep-rule/40">
-              {/* Accent glow under the dot. A 60px-wide horizontal
-                  linear gradient with solid accent in the middle and
-                  transparent fades on each end — gives the dot a
-                  soft "this region of the axis" highlight that reads
-                  even at a glance, without coloring the whole bar
-                  (which would lose the position signal). Stops at
-                  25% / 75% leave ~15px of solid color on each side
-                  of the dot with a ~15px fade-out beyond. Painted
-                  before the dot in source order so the dot sits on
-                  top. */}
-              <span
-                aria-hidden
-                className="pointer-events-none absolute top-1/2 h-1.5 w-[60px] -translate-x-1/2 -translate-y-1/2 rounded-full"
-                style={{
-                  left: `${axis.value}%`,
-                  background:
-                    "linear-gradient(90deg, rgb(var(--keep-action) / 0) 0%, rgb(var(--keep-action) / 0.85) 25%, rgb(var(--keep-action) / 0.85) 75%, rgb(var(--keep-action) / 0) 100%)",
-                }}
-              />
-              <span
-                className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-keep-action/60 bg-keep-action shadow"
-                style={{ left: `${axis.value}%` }}
-                aria-label={`${axis.value} between ${axis.lowLabel} and ${axis.highLabel}`}
-              />
-            </div>
-          </li>
-        ))}
-      </ul>
-    </Section>
+  const gridClass =
+    variant === "compact"
+      ? // Single column: used inside the body's Disposition column
+        // (1/4 of the modal width on desktop), where a 2-col grid
+        // would cram label-bar-label into ~120px each. Vertical
+        // stack of 8 axes fits cleanly beside the 3/4-width Stats
+        // column without dead space.
+        "grid grid-cols-1 gap-y-2"
+      : "grid grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2";
+  const list = (
+    <ul className={gridClass}>
+      {axes.map((axis) => (
+        <li key={axis.key} className={variant === "compact" ? "text-[11px]" : "text-xs"}>
+          <div className="mb-0.5 flex items-baseline justify-between gap-2">
+            <span className="font-semibold text-keep-text/85">{axis.lowLabel}</span>
+            <span className="font-semibold text-keep-text/85">{axis.highLabel}</span>
+          </div>
+          {/* The bar is a flat track plus an absolutely-positioned
+              dot. -translate-x-1/2 centers the dot on its computed
+              left%, so 0 / 50 / 100 all read as "at the start /
+              middle / end" without the dot clipping the track edge. */}
+          <div className="relative h-1.5 w-full rounded-full bg-keep-rule/40">
+            {/* Accent glow under the dot. A 60px-wide horizontal
+                linear gradient with solid accent in the middle and
+                transparent fades on each end — gives the dot a
+                soft "this region of the axis" highlight that reads
+                even at a glance, without coloring the whole bar
+                (which would lose the position signal). Stops at
+                25% / 75% leave ~15px of solid color on each side
+                of the dot with a ~15px fade-out beyond. Painted
+                before the dot in source order so the dot sits on
+                top. */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 h-1.5 w-[60px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{
+                left: `${axis.value}%`,
+                background:
+                  "linear-gradient(90deg, rgb(var(--keep-action) / 0) 0%, rgb(var(--keep-action) / 0.85) 25%, rgb(var(--keep-action) / 0.85) 75%, rgb(var(--keep-action) / 0) 100%)",
+              }}
+            />
+            <span
+              className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-keep-action/60 bg-keep-action shadow"
+              style={{ left: `${axis.value}%` }}
+              aria-label={`${axis.value} between ${axis.lowLabel} and ${axis.highLabel}`}
+            />
+          </div>
+        </li>
+      ))}
+    </ul>
   );
+  return variant === "compact" ? list : <Section title="Vibe">{list}</Section>;
 }
 
 /**

@@ -609,6 +609,15 @@ export const messages = sqliteTable(
     /** For /npc messages, the master username of the user who voiced this NPC (accountability tag rendered next to the NPC name). */
     npcVoicedBy: text("npc_voiced_by"),
     /**
+     * Optional hero image for `/scene <title> | <url>` banners.
+     * Frozen at send time so a later edit to whatever the URL points
+     * at doesn't restyle history. Validated server-side as an
+     * http(s) URL with a 500-char cap (same posture as the avatar
+     * validator). NULL on every non-scene row and on legacy scene
+     * rows that predate migration 0190.
+     */
+    sceneImageUrl: text("scene_image_url"),
+    /**
      * Thread category bucket — only meaningful for top-level messages in
      * a nested-mode room. Replies inherit their parent's bucket
      * implicitly via the thread the client groups. FK is SET NULL so

@@ -33,8 +33,39 @@
  */
 import DOMPurify from "dompurify";
 import { legibleAgainstBg } from "@thekeep/shared";
-import { scopeAndNonceStyleBlocks } from "./cssScope.js";
+import { scopeAndNonceStyleBlocks, USER_HTML_STYLE_MARKER } from "./cssScope.js";
 import { parseVideoEmbed } from "./markdown.js";
+
+/**
+ * Re-export the marker that `scopeAndNonceStyleBlocks` stamps onto
+ * every user-bio `<style>` tag, so consumers that want to defensively
+ * purge orphaned bio styles on unmount can query them by attribute
+ * without reaching into `./cssScope.js`. Pair with the host modal's
+ * cleanup effect — see {@link sweepOrphanedUserBioStyles}.
+ */
+export { USER_HTML_STYLE_MARKER };
+
+/**
+ * Sweep the document for every user-bio `<style>` block this surface
+ * has rendered, and remove them. Belt-and-suspenders cleanup for the
+ * "the profile's custom CSS bled into the next page" complaint: React
+ * normally unmounts the portaled bio container on close and the
+ * styles go with it, but in a few transitions (Strict-mode double
+ * mount, SPA route swap that destroys + recreates the host shell on
+ * the same tick) a leftover block was being parsed against the new
+ * tree before the GC pass caught up. Calling this from the host
+ * modal's effect cleanup guarantees nothing survives the close.
+ *
+ * Safe to call any time — operates only on tags carrying our marker,
+ * which {@link sanitizeUserHtml} stamps; server-rendered chrome
+ * `<style>` tags (the inline JSON-LD nonce path, the 404 splash) do
+ * NOT carry it and pass through untouched.
+ */
+export function sweepOrphanedUserBioStyles(): void {
+  if (typeof document === "undefined") return;
+  const orphaned = document.querySelectorAll(`style[${USER_HTML_STYLE_MARKER}]`);
+  for (let i = 0; i < orphaned.length; i++) orphaned[i]!.remove();
+}
 
 /**
  * Custom `<youtube>https://youtu.be/ID</youtube>` shortcut tag. Replaced

@@ -26,6 +26,20 @@
 import { CSP_NONCE } from "./cspNonce.js";
 
 /**
+ * Marker attribute stamped on every user-bio `<style>` block by
+ * {@link scopeAndNonceStyleBlocks}. Lets the host modal sweep for
+ * orphaned bio styles on unmount as a belt-and-suspenders cleanup
+ * (React's portal teardown should remove them automatically, but a
+ * report of "the profile's custom CSS leaked into the login modal
+ * after closing the public profile view" pinned down a path where a
+ * leftover block was still parsed against the new tree). Anyone
+ * rendering scoped user HTML that wants the same cleanup just queries
+ * the document for `style[${USER_HTML_STYLE_MARKER}]` and removes
+ * them when their owning surface unmounts.
+ */
+export const USER_HTML_STYLE_MARKER = "data-tk-user-bio-style";
+
+/**
  * Scope every `<style>` block inside `html` to `scopeClass`, and stamp
  * the current request's CSP nonce on each so the browser doesn't
  * reject the inline stylesheet under our strict `style-src` policy.
@@ -48,9 +62,13 @@ export function scopeAndNonceStyleBlocks(html: string, scopeClass: string): stri
     // render step. Without this stamp, the browser silently drops the
     // block and the writer's CSS never applies — exactly the
     // "custom CSS doesn't work" symptom.
-    const safeAttrs = attrs.replace(/\bnonce\s*=\s*("[^"]*"|'[^']*'|\S+)/gi, "").trim();
+    const safeAttrs = attrs.replace(/\bnonce\s*=\s*("[^"]*"|'[^']*'|\S+)/gi, "")
+      // Defense against an upstream block that pre-stamped the marker:
+      // we want exactly ONE marker attribute on the tag.
+      .replace(new RegExp(`\\s*${USER_HTML_STYLE_MARKER}\\s*=\\s*("[^"]*"|'[^']*'|\\S+)`, "gi"), "")
+      .trim();
     const nonceAttr = nonce ? ` nonce="${escapeAttr(nonce)}"` : "";
-    return `<style${safeAttrs ? ` ${safeAttrs}` : ""}${nonceAttr}>${scoped}</style>`;
+    return `<style${safeAttrs ? ` ${safeAttrs}` : ""}${nonceAttr} ${USER_HTML_STYLE_MARKER}="1">${scoped}</style>`;
   });
 }
 

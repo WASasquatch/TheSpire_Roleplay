@@ -2050,6 +2050,26 @@ function Chat() {
     });
 
     /**
+     * Incognito state push — fired by the server whenever the user's
+     * `/incognito` command flips the mode bit or changes the alias.
+     * Updates `me.incognitoMode` / `me.incognitoAlias` in the store
+     * synchronously so the menu's "Go Incognito" / "Leave Incognito"
+     * label and the "You are in incognito mode" chat banner flip the
+     * moment the toggle lands. Without this, those surfaces only
+     * resync on the next /auth/me poll (60s), which read as the
+     * command silently failing and led mods to re-issue it.
+     */
+    socket.on("me:incognito-update", ({ incognitoMode: nextMode, incognitoAlias: nextAlias }: {
+      incognitoMode: boolean;
+      incognitoAlias: string | null;
+    }) => {
+      const cur = useChat.getState().me;
+      if (!cur) return;
+      if (cur.incognitoMode === nextMode && cur.incognitoAlias === nextAlias) return;
+      setMe({ ...cur, incognitoMode: nextMode, incognitoAlias: nextAlias });
+    });
+
+    /**
      * DM live updates. `dm:new` covers both inbound and outbound
      * (the server fans every send to both participants' sockets),
      * so the local store-update path is uniform regardless of
@@ -2367,6 +2387,7 @@ function Chat() {
       socket.off("ui:hint");
       socket.off("mutual:settled");
       socket.off("me:character-update");
+      socket.off("me:incognito-update");
       socket.off("dm:new");
       socket.off("dm:update");
       socket.off("dm:read");

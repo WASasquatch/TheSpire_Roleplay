@@ -2165,6 +2165,87 @@ function PostToolbar({
  * but renders as a normal toolbar button without the absolute floating
  * wrapper the flat-chat variant uses.
  */
+
+/**
+ * `/scene <title> [| <url>]` banner. Bare scenes render exactly as the
+ * old inline JSX did — just a tinted strip with the theatre mask and
+ * the rendered title. Scenes that snapshot an image URL render the
+ * title at a larger text size with the image centered below, rounded
+ * corners, capped at 20rem tall so a portrait poster doesn't blow out
+ * the timeline. Clicking the banner toggles collapsed mode: the image
+ * disappears and the banner reads as the title-only variant, so a
+ * viewer who's scrolled back through a long scene can tap once to
+ * reclaim vertical space without losing the chapter marker.
+ *
+ * State is local-only — the toggle is per-viewer and per-mount, not
+ * shared across tabs or persisted across reloads. That matches user
+ * intent: "collapse" is a personal "I've already looked at the
+ * image" gesture, not a director decision.
+ */
+function SceneBanner({
+  renderedBody,
+  imageUrl,
+}: {
+  renderedBody: ReactNode;
+  imageUrl: string | null;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const hasImage = !!imageUrl;
+  return (
+    <div
+      // Click the banner to collapse/expand when there's an image.
+      // Without an image the click handler is omitted so the banner
+      // stays a non-interactive timeline marker (matches the
+      // pre-image behavior — no "click me" cursor, no pointer
+      // affordance changes on hover).
+      {...(hasImage
+        ? {
+            onClick: () => setCollapsed((c) => !c),
+            role: "button" as const,
+            tabIndex: 0,
+            onKeyDown: (e: React.KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setCollapsed((c) => !c);
+              }
+            },
+            "aria-expanded": !collapsed,
+            title: collapsed ? "Click to expand the scene image" : "Click to collapse the scene image",
+          }
+        : {})}
+      className={`my-1 rounded border-y border-keep-action/40 bg-keep-action/10 px-3 py-2 text-center font-action italic text-keep-action${
+        hasImage ? " cursor-pointer transition hover:bg-keep-action/15" : ""
+      }`}
+    >
+      {/* Title at chat-text-plus-two so the scene marker reads more
+          like a chapter heading than a regular line. Larger only —
+          color, italic, and the theatre-mask glyph come from the
+          banner wrapper. */}
+      <div className="whitespace-pre-wrap text-base leading-tight sm:text-lg">
+        🎭 {renderedBody}
+      </div>
+      {hasImage && !collapsed ? (
+        <img
+          src={imageUrl}
+          alt=""
+          // `block mx-auto` centers the image even when shorter than
+          // the banner. `max-h-80` caps a tall poster at ~320px so a
+          // portrait scene image doesn't dominate the timeline.
+          // `object-contain` preserves aspect; rounded corners +
+          // soft shadow match the banner's chat-card feel. On image
+          // load failure we hide the element so the banner falls
+          // back to title-only instead of showing a broken-image
+          // glyph in the middle of the chat.
+          className="mx-auto mt-2 block max-h-80 max-w-full rounded-lg object-contain shadow"
+          loading="lazy"
+          draggable={false}
+          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function InlineBookmark({ msg }: { msg: ChatMessage }) {
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState("");
@@ -2929,9 +3010,9 @@ function Line({
       lineEl = (
         // Tinted banner that visually breaks the timeline. Distinct from
         // announce (red, sitewide) and system (muted, joins/parts).
-        <div className="my-1 rounded border-y border-keep-action/40 bg-keep-action/10 px-3 py-1 text-center font-action italic text-keep-action">
-          <span className="whitespace-pre-wrap">🎭 {renderedBody}</span>
-        </div>
+        // SceneBanner handles the optional hero image + collapse toggle
+        // so this case stays declarative.
+        <SceneBanner renderedBody={renderedBody} imageUrl={msg.sceneImageUrl ?? null} />
       );
       break;
     case "npc":

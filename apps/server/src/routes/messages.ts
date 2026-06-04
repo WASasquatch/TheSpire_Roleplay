@@ -78,6 +78,7 @@ function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMes
     ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
     ...(m.isSticky ? { isSticky: true } : {}),
     ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+    ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
     ...(m.rankKey ? { rankKey: m.rankKey } : {}),
     ...(m.tier != null ? { tier: m.tier } : {}),
     ...(m.senderInlineAvatarEnabled ? { senderInlineAvatarEnabled: true } : {}),

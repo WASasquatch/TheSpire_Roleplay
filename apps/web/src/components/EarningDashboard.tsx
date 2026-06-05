@@ -2499,6 +2499,12 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
   // wide (one ownership ledger row covers all the user's
   // identities); only the EQUIPPED toggle is per-identity.
   const activeCharacterId = useChat((s) => s.activeCharacterId);
+  // Used by the profile-flair buy cards to deep-link the buyer to
+  // Edit Profile → Flair where they actually configure the purchase.
+  // Without the deep-link they had to find the editor and the right
+  // tab manually, and the post-purchase pointer copy was too quiet
+  // to land.
+  const openEditor = useChat((s) => s.openEditor);
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -3028,9 +3034,14 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
             row={profileVisitorsRow}
             sale={profileVisitorsSale}
             owned={profileVisitorsOwned}
-            ownedCopy="You can show your visitor count on your profile and read the breakdown from Edit Profile → Flair."
+            ownedCopy="Show your visitor count on your profile and read the member / external breakdown."
             buyDisabled={busy || activeWallet < profileVisitorsSale.effectivePrice}
             onBuy={() => void doBuyProfileVisitors()}
+            onOpenConfig={() => openEditor({
+              mode: activeCharacterId ? "character" : "master",
+              characterId: activeCharacterId,
+              initialTab: "flair",
+            })}
           />
         ) : null}
 
@@ -3039,9 +3050,14 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
             row={profileMarqueeRow}
             sale={profileMarqueeSale}
             owned={profileMarqueeOwned}
-            ownedCopy="Configure your rotating quotes from Edit Profile → Flair. Up to 10 lines, Markdown supported."
+            ownedCopy="Configure your rotating quotes. Up to 10 lines, Markdown supported."
             buyDisabled={busy || activeWallet < profileMarqueeSale.effectivePrice}
             onBuy={() => void doBuyProfileMarquee()}
+            onOpenConfig={() => openEditor({
+              mode: activeCharacterId ? "character" : "master",
+              characterId: activeCharacterId,
+              initialTab: "flair",
+            })}
           />
         ) : null}
       </div>
@@ -3064,6 +3080,7 @@ function ProfileFlairBuyCard({
   ownedCopy,
   buyDisabled,
   onBuy,
+  onOpenConfig,
 }: {
   row: { key: string; name: string; description: string; cost: number };
   sale: ReturnType<typeof flashSalePriceFor>;
@@ -3071,6 +3088,14 @@ function ProfileFlairBuyCard({
   ownedCopy: string;
   buyDisabled: boolean;
   onBuy: () => void;
+  /**
+   * Optional deep-link to Edit Profile → Flair, the actual home of
+   * this flair's configuration. When supplied, the owned-state card
+   * surfaces a visible button instead of a `text-[10px] italic muted`
+   * caption that buyers used to miss entirely (and report the
+   * feature as broken).
+   */
+  onOpenConfig?: () => void;
 }) {
   return (
     <section data-shop-row={row.key} className="flex flex-col rounded border border-keep-rule bg-keep-bg/40 p-3">
@@ -3106,7 +3131,19 @@ function ProfileFlairBuyCard({
         )}
       </header>
       {owned ? (
-        <p className="mt-2 text-[10px] italic text-keep-muted">{ownedCopy}</p>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded border border-keep-action/30 bg-keep-action/5 p-2">
+          <p className="flex-1 text-xs text-keep-text">{ownedCopy}</p>
+          {onOpenConfig ? (
+            <button
+              type="button"
+              onClick={onOpenConfig}
+              title="Open Edit Profile and jump to the Flair tab where this is configured."
+              className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs font-semibold text-keep-action hover:bg-keep-action/25"
+            >
+              Configure in Edit Profile → Flair
+            </button>
+          ) : null}
+        </div>
       ) : null}
     </section>
   );

@@ -172,6 +172,100 @@ function buildUrl(characterId: string | null): string {
     : "/me/profile-flair";
 }
 
+/**
+ * Standalone "Show visitors counter on public profile" toggle for
+ * the Privacy tab — mirrors the checkbox in {@link ProfileFlairEditor}
+ * so users who instinctively look for visibility toggles under
+ * Privacy find it there too. Self-saving: fires PUT
+ * `/me/profile-flair` immediately on change.
+ *
+ * Renders nothing when the viewer doesn't own
+ * `flair_profile_visitors` for the given identity, so it doesn't
+ * clutter the privacy tab for accounts that haven't bought the
+ * flair. The actual count breakdown stays on the Flair tab — this
+ * row is just the public-visibility switch.
+ */
+export function VisitorsVisibilityToggleRow({ characterId }: { characterId: string | null }) {
+  const [ownsFlair, setOwnsFlair] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoaded(false);
+    setError(null);
+    fetch(buildUrl(characterId), { credentials: "include" })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(await readError(r));
+        return (await r.json()) as { visitors: ProfileVisitorOwnerSummary };
+      })
+      .then((j) => {
+        if (cancelled) return;
+        setOwnsFlair(j.visitors.ownsFlair);
+        setVisible(j.visitors.visible);
+        setLoaded(true);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Load failed.");
+        setLoaded(true);
+      });
+    return () => { cancelled = true; };
+  }, [characterId]);
+
+  async function save(next: boolean) {
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await fetch(buildUrl(characterId), {
+        method: "PUT",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ showVisitorsCount: next }),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed.");
+      // Revert the optimistic flip so the checkbox stays honest.
+      setVisible(!next);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Hidden when the user doesn't own the flair — the row is a
+  // visibility control, not a purchase prompt. The shop already
+  // does that job.
+  if (!loaded || !ownsFlair) return null;
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-3">
+      <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
+        Visitor counter
+      </legend>
+      <label className="flex items-center gap-2 text-xs">
+        <input
+          type="checkbox"
+          checked={visible}
+          disabled={saving}
+          onChange={(e) => {
+            const next = e.target.checked;
+            setVisible(next);
+            void save(next);
+          }}
+        />
+        <span>Show the visitor counter on my public profile.</span>
+      </label>
+      <p className="mt-1 text-[10px] italic text-keep-muted">
+        When off, only you see the member / external breakdown in Edit Profile → Flair.
+      </p>
+      {error ? <p className="mt-1 text-xs text-keep-accent">{error}</p> : null}
+    </fieldset>
+  );
+}
+
 function QuotesEditor({
   value,
   onChange,

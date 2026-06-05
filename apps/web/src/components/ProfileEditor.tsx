@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { AvatarCrop, CharacterAttribute, CharacterJournalEntry, CharacterPortrait, CharacterStats, CharacterStatsVisibility, CharacterVibeAxisKey, ProfileCollectionEntry, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
 import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, CHARACTER_ATTRIBUTES_MAX, CHARACTER_ATTRIBUTE_LABEL_MAX, CHARACTER_ATTRIBUTE_VALUE_MAX, CHARACTER_ATTRIBUTE_VALUE_MIN, CHARACTER_VIBE_AXES, DEFAULT_THEME, clampAvatarCrop, isDarkPalette, isDefaultAvatarCrop, normalizeTheme } from "@thekeep/shared";
 import { applyStyle } from "../lib/ornaments/index.js";
-import { ProfileFlairEditor } from "./ProfileFlairEditor.js";
+import { ProfileFlairEditor, VisitorsVisibilityToggleRow } from "./ProfileFlairEditor.js";
 import { applyTheme } from "../lib/theme.js";
 import { GENDER_OPTIONS, type Gender } from "../lib/gender.js";
 import {
@@ -35,6 +35,13 @@ interface Props {
   /** Initial selection. The user can switch via the dropdown. */
   mode: "master" | "character";
   characterId: string | null;
+  /**
+   * Optional initial tab. Threads through from `editor.initialTab` in
+   * the chat store so a deep-link can land on a non-default tab —
+   * e.g. the shop's "Configure in Edit Profile → Flair" CTA. Defaults
+   * to "description" when omitted.
+   */
+  initialTab?: "description" | "profile" | "appearance" | "privacy" | "links" | "gallery" | "flair" | "journal";
   onClose: () => void;
   /**
    * Fires after every successful save so the parent can re-fetch the active
@@ -188,7 +195,7 @@ const STAT_FIELDS: Array<{ key: ClassicStatField; label: string }> = [
  * `messages.displayName` is snapshotted at send time and renaming would leave
  * a fragmented history.
  */
-export function ProfileEditor({ mode: initialMode, characterId: initialCharId, onClose, onSaved, adminContext }: Props) {
+export function ProfileEditor({ mode: initialMode, characterId: initialCharId, initialTab, onClose, onSaved, adminContext }: Props) {
   const isAdminEdit = !!adminContext;
   const [target, setTarget] = useState<Target>(
     // Admin mode locks the target to the supplied character — no
@@ -337,7 +344,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
     | "gallery"
     | "flair"
     | "journal";
-  const [activeTab, setActiveTab] = useState<EditorTab>("description");
+  const [activeTab, setActiveTab] = useState<EditorTab>(initialTab ?? "description");
 
   // Journal is character-only (the schema's character_journal_entries
   // table is character-attached). If the user is on the Journal tab
@@ -1791,6 +1798,18 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
                     /earning/me/settings), so it doesn't ride the
                     profile form's Save button. */}
                 {!isCharacter ? <CurrencyPrivacyRow /> : null}
+                {/* Visitor-counter public-display toggle, mirrored
+                    from Edit Profile → Flair so users hunting for
+                    visibility switches under Privacy find it here
+                    too. Renders nothing when the active identity
+                    doesn't own `flair_profile_visitors`, so it
+                    doesn't clutter for non-buyers. The actual
+                    member / external count breakdown stays on the
+                    Flair tab. */}
+                <VisitorsVisibilityToggleRow
+                  characterId={target.kind === "character" ? target.id : null}
+                />
+
                 {/* Rank-visibility toggles + metric privacy. Both
                     are per-master-account preferences; characters
                     don't have separate versions, so we gate the

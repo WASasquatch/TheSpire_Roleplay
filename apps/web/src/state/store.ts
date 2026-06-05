@@ -528,12 +528,22 @@ interface ChatState {
         mode: "master" | "character";
         characterId: string | null;
         adminContext?: { ownerUserId: string; ownerUsername: string };
+        /**
+         * Optional tab the editor opens on. Used by deep-links from
+         * surfaces that want the user to land on a specific tab —
+         * e.g. the Earning shop's "Configure in Edit Profile → Flair"
+         * pointer after buying a profile-customization flair lands on
+         * "flair", and the Direct Messenger / Profile back-link could
+         * land on "privacy". Omit for the default "description" tab.
+         */
+        initialTab?: "description" | "profile" | "appearance" | "privacy" | "links" | "gallery" | "flair" | "journal";
       }
     | null;
   openEditor: (target: {
     mode: "master" | "character";
     characterId: string | null;
     adminContext?: { ownerUserId: string; ownerUsername: string };
+    initialTab?: "description" | "profile" | "appearance" | "privacy" | "links" | "gallery" | "flair" | "journal";
   }) => void;
   closeEditor: () => void;
 

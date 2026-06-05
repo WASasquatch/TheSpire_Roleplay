@@ -3502,6 +3502,10 @@ function Chat() {
           // endpoints. Conditional spread is exactOptionalPropertyTypes-
           // friendly — we don't pass `undefined` through.
           {...(editor.adminContext ? { adminContext: editor.adminContext } : {})}
+          // Optional initial tab from the editor open-state — lets
+          // deep-links like the shop's flair-buy CTA land on the
+          // Flair tab instead of the default Description.
+          {...(editor.initialTab ? { initialTab: editor.initialTab } : {})}
           onClose={() => {
             closeEditor();
             setThemeVersion((v) => v + 1);

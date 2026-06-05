@@ -145,7 +145,16 @@ export function ProfileVisitorsChip({ profileName, characterId }: ProfileNamePro
     void load();
     return () => { cancelled = true; };
   }, [profileName, characterId]);
-  if (!stats || stats.total === 0) return null;
+  // Render the chip even at zero so the owner has visible
+  // confirmation that the flair is on and counting. Previously the
+  // chip self-hid at total=0, which was indistinguishable from
+  // "feature not working" — owners viewing their own profile (whose
+  // self-views don't count) saw nothing after buying + enabling and
+  // assumed the purchase was broken. The visibility gate above
+  // (`j.visible`) is what hides the chip from non-owners when the
+  // owner has disabled public display; a returned-but-empty stats
+  // object means "it's on, just nobody else has been here yet."
+  if (!stats) return null;
   return (
     <span
       className="inline-flex items-center gap-1 rounded border border-keep-rule/60 bg-keep-bg/40 px-1.5 py-0.5 text-[11px] text-keep-muted"

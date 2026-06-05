@@ -1731,6 +1731,8 @@ export function formatLedgerReason(reason: string): string {
       // ("Purchase: flair_typing_phrase").
       if (reason === "purchase_flair_profile_banner") return "Purchase: Custom Profile Banner";
       if (reason === "purchase_flair_typing_phrase") return "Purchase: Custom Typing Phrase";
+      if (reason === "purchase_flair_profile_visitors") return "Purchase: Profile Visitor Counter";
+      if (reason === "purchase_flair_profile_marquee") return "Purchase: Profile Quote Marquee";
       if (reason === "purchase_flair_reaction_sheet") return "Reaction sheet submission";
       // Reaction submission refund (Phase 3). Two parallel reasons:
       // the debit at submission time, the credit-back on rejection.

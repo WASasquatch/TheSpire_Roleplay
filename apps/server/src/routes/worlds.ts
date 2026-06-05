@@ -54,6 +54,7 @@ import { resolveIdentityArg } from "../commands/identityArg.js";
 import { getSessionUser } from "./auth.js";
 import { getSettings } from "../settings.js";
 import { broadcastPresence, broadcastRoomState } from "../realtime/broadcast.js";
+import { pushToUser } from "../push.js";
 import type { Db } from "../db/index.js";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
@@ -1434,16 +1435,22 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     if (!isOwner && !isAdmin) {
       if (w.visibility !== "open") {
         reply.code(403);
-        return { error: "this world isn't open for community membership" };
+        return { error: "this world isn't open for community membership", code: "NOT_OPEN" };
       }
       const joinMode = (w.joinMode ?? "open") as WorldJoinMode;
       if (joinMode === "invite-only") {
         reply.code(403);
-        return { error: "this world is invite-only; ask the owner to add you" };
+        return {
+          error: "this world is invite-only; ask the owner to add you",
+          code: "INVITE_ONLY",
+        };
       }
       if (joinMode === "application") {
         reply.code(403);
-        return { error: "this world requires an application; use the Apply button" };
+        return {
+          error: "this world requires an application; use the Apply button",
+          code: "APPLICATION_REQUIRED",
+        };
       }
     }
     const charId = me.activeCharacterId;
@@ -1559,6 +1566,17 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       // them picks up the new world-membership chip immediately, same
       // as the self-join path.
       await rebroadcastUserOccupancy(io, db, target.userId);
+      // Fire-and-forget web-push to the invitee. Without this, the
+      // direct-add flow was completely silent — the invitee only
+      // discovered the membership by stumbling on the member list,
+      // which made invite-only worlds borderline unusable. Matches
+      // the whisper / mention push posture in `broadcast.pushTriggers`:
+      // generic copy, scoped tag so repeats coalesce, never throws.
+      pushToUser(db, target.userId, {
+        title: "Added to a world",
+        body: `${me.username} added you to ${w.name}.`,
+        tag: `world-invite-${w.id}`,
+      }).catch(() => {});
       return { ok: true, displayName: target.displayName };
     },
   );

@@ -10,6 +10,7 @@ import { parseInline, renderForumBody, solitaryEmoticonToken } from "../lib/mark
 import { sanitizeUserHtml } from "../lib/userHtml.js";
 import { renderUiRouteChipsInHtml } from "@thekeep/shared";
 import { handleUiRouteClickInHtml } from "../lib/uiRouteOpen.js";
+import { hydrateDynamicUiRouteChips } from "../lib/hydrateDynamicUiRouteChips.js";
 import { EmoticonSprite } from "./EmoticonSprite.js";
 import { useEmoticons } from "../state/emoticons.js";
 import { handlePlainTextCopy } from "../lib/chatCopy.js";
@@ -2405,6 +2406,37 @@ function InlineBookmark({ msg }: { msg: ChatMessage }) {
   );
 }
 
+/* =============================================================
+ *  AnnounceHtmlBody — wraps the scheduled-announce `bodyHtml`
+ *  render so the dynamic UI-route chip hydrator (e.g. for the
+ *  {scriptorium:latest:story} chip) can post-process the painted
+ *  HTML. Without this wrapper the render loop for messages has
+ *  no place to host a per-message `useEffect`, since the loop
+ *  body isn't itself a component.
+ *
+ *  The wrapper re-runs hydration whenever the HTML changes — an
+ *  admin editing a scheduled announce + the server re-pushing it
+ *  flips `html` and the dynamic chip resolves against the new
+ *  body. The shared cache + in-flight coalescing in `latestStory`
+ *  makes the per-message cost negligible.
+ * ============================================================= */
+function AnnounceHtmlBody({ html }: { html: string }) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    return hydrateDynamicUiRouteChips(el);
+  }, [html]);
+  return (
+    <span
+      ref={ref}
+      className="prose prose-sm inline max-w-none [&_p]:m-0 [&_p]:inline [&_a]:underline [&_a]:underline-offset-2"
+      onClick={handleUiRouteClickInHtml}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
 /**
  * Inline report button. Mirrors `ReportButton` (POST /reports with an
  * optional reason prompt) but as a toolbar pill instead of the
@@ -3035,11 +3067,7 @@ function Line({
         <div className="font-bold text-keep-accent" style={announceStyle}>
           {time}
           <span aria-hidden>📣 </span>
-          <span
-            className="prose prose-sm inline max-w-none [&_p]:m-0 [&_p]:inline [&_a]:underline [&_a]:underline-offset-2"
-            onClick={handleUiRouteClickInHtml}
-            dangerouslySetInnerHTML={{ __html: announceHtml }}
-          />
+          <AnnounceHtmlBody html={announceHtml} />
         </div>
       ) : (
         <div className="font-bold text-keep-accent" style={announceStyle}>

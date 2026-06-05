@@ -325,9 +325,8 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode }> = [
     body: (
       <>
         <P>
-          You and every character you make get a profile page. Other users
-          see it by clicking your name. The bio is the big text area where
-          you describe yourself or your character.
+          You and every character you make get a profile page. Other users see it by clicking your
+          name. The bio is the big text area where you describe yourself or your character.
         </P>
 
         <Heading>Open your editor</Heading>
@@ -338,22 +337,21 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode }> = [
 
         <Heading>What the tabs do</Heading>
         <Bullets>
-          <li><b>Description</b> - the bio. The main thing visitors read.</li>
-          <li><b>Profile</b> - your name, picture (avatar), gender, and character stats like age and race.</li>
-          <li><b>Appearance</b> - colors and fonts.</li>
-          <li><b>Privacy</b> - who can see the profile, on/off switches for sounds and notifications, and whether to allow DMs.</li>
-          <li><b>Links</b> - little chips you can add at the top of the profile (Discord, Twitter, etc.).</li>
-          <li><b>Gallery</b> - extra pictures for a character.</li>
-          <li><b>Journal</b> - in-character diary entries for a character.</li>
+          <li><b>Description</b> is the bio. The main thing visitors read.</li>
+          <li><b>Profile</b> is your name, picture, gender, and character stats like age and race.</li>
+          <li><b>Appearance</b> is colors and fonts.</li>
+          <li><b>Privacy</b> is who can see the profile, on/off switches for sounds and notifications, and whether to allow DMs.</li>
+          <li><b>Links</b> are little chips at the top of the profile (Discord, Twitter, and so on).</li>
+          <li><b>Gallery</b> is extra pictures for a character.</li>
+          <li><b>Journal</b> is in-character diary entries for a character.</li>
         </Bullets>
 
         <Heading>Writing the bio</Heading>
         <P>
-          The bio is plain text by default. Hit <b>Save</b> when you're
-          done. If you'd like more control, you can also use a small set
-          of HTML tags to add headings, lists, links, tables, and so on.
-          The <b>Formatting</b> tab in this Help has the full list of
-          what's allowed, with an example you can copy.
+          The bio is plain text by default. Hit <b>Save</b> when you are done. If you would like
+          more control, you can also use a small set of HTML tags to add headings, lists, links,
+          tables, and so on. The <b>Formatting</b> tab in this Help has the full list of what is
+          allowed, with an example you can copy.
         </P>
 
         <Heading>A simple example</Heading>
@@ -375,16 +373,72 @@ foot of the mountains. Speaks little. Watches everything.</p>
 </details>`}</pre>
 
         <Tip>
-          The bio editor doesn't save by itself. Hit <b>Save</b> before
-          switching characters, or you'll lose your edits.
+          The bio editor does not save by itself. Hit <b>Save</b> before switching characters, or
+          you will lose your edits.
         </Tip>
+
+        <Heading>Avatar zoom and crop</Heading>
+        <P>
+          When you pick a profile picture in the <b>Profile</b> tab, a small framing tool appears
+          right below the image URL. Drag the picture around inside the circle and adjust the zoom
+          slider to control how it crops. Your framing follows you everywhere your avatar shows
+          up, including chat lines, member lists, and the world member gallery.
+        </P>
+
+        <Heading>Vibe sliders, attributes, and section visibility (characters)</Heading>
+        <P>
+          Characters get a few extra panels in the editor:
+        </P>
+        <Bullets>
+          <li>
+            <b>Vibe sliders</b> are eight personality dials, things like Pacifist to Combat or
+            Cold to Warm. Set them to give visitors a quick read on who your character is. Leave
+            them at the middle and the panel hides on the profile.
+          </li>
+          <li>
+            <b>Attributes</b> are any numeric stats you want, like STR 14 or HP 45, with your own
+            labels and ranges. Use them or skip them. Nothing forces a system on you.
+          </li>
+          <li>
+            <b>Section visibility</b> lets you hide individual fields (age, race, height, and so
+            on) or whole sections (Vibe, Attributes, Gallery) from public view while keeping them
+            saved in your editor.
+          </li>
+        </Bullets>
+
+        <Heading>Flair extras (purchases from the shop)</Heading>
+        <P>
+          Three optional bits of flair live in the <b>Profile Flair</b> editor. Each one is bought
+          once with Currency from the shop and then stays available on every profile under that
+          identity.
+        </P>
+        <Bullets>
+          <li>
+            <b>Quote marquee</b> is a rotating strip of up to <b>ten</b> quotes between the
+            profile header and bio. Add and reorder them in the flair editor.
+          </li>
+          <li>
+            <b>Visitor counter</b> shows how many people have viewed the profile, split between
+            signed-in and anonymous viewers. Turn it on in the flair editor after purchase.
+          </li>
+          <li>
+            <b>Typing phrase</b> customizes what others see when you are typing, like "is crafting
+            a response" instead of the default "is typing."
+          </li>
+        </Bullets>
+
+        <Heading>Lifetime post counts</Heading>
+        <P>
+          Your profile shows your total-ever chat messages, forum posts, and replies you have
+          posted. These only go up. Deleting a message does not reduce the count, so the totals
+          are a long-term picture of how much you have written, not a snapshot.
+        </P>
 
         <Heading>Visibility and NSFW</Heading>
         <P>
-          In the <b>Privacy</b> tab you can mark the profile as public
-          (anyone can read it) or only visible when signed in. The{" "}
-          <b>NSFW</b> checkbox hides the profile behind a content warning
-          and limits it to signed-in viewers.
+          In the <b>Privacy</b> tab you can mark the profile as public (anyone can read it) or
+          only visible when signed in. The <b>NSFW</b> checkbox hides the profile behind a content
+          warning and limits it to signed-in viewers.
         </P>
       </>
     ),
@@ -480,6 +534,15 @@ foot of the mountains. Speaks little. Watches everything.</p>
           under <b>Recent</b>.
         </P>
 
+        <Heading>One inbox per identity</Heading>
+        <P>
+          DMs follow whichever identity you are currently playing. Sending a message while a
+          character is active starts a conversation between that character and the recipient's
+          active identity. Switching back to your master account changes which inbox you see, and
+          the messages your character sent are not visible there. If you have a long-running OOC
+          conversation with someone, drop your character before opening it.
+        </P>
+
         <Heading>Turn off DMs</Heading>
         <P>
           If you'd rather not receive DMs at all, open your profile editor,
@@ -564,56 +627,159 @@ foot of the mountains. Speaks little. Watches everything.</p>
   },
 
   {
+    id: "worlds-vibe",
+    title: "Worlds: vibe stats and catalog filters",
+    body: (
+      <>
+        <P>
+          Every world can carry a set of <b>vibe stats</b>: eight sliders that show, at a glance,
+          what kind of setting it is. The sliders are Combat, Magic, Tech, Romance, Politics,
+          Mystery, Horror, and Exploration. Each one goes from quiet to dominant.
+        </P>
+        <Heading>Setting them as the author</Heading>
+        <P>
+          In the world editor, open the <b>Vibe</b> panel and drag the sliders. A high Romance
+          and low Combat says "this is a slow drama, not a battlefield." Leaving sliders at zero
+          is fine. The vibes show up on your world's page.
+        </P>
+        <Heading>Reading them as a player</Heading>
+        <P>
+          In the <b>World Catalog</b>, the filter row lets you narrow worlds by vibe. Looking for
+          high-magic, low-tech, mystery-forward settings? Drag those sliders up and the catalog
+          hides anything that does not match. You can clear filters with one click.
+        </P>
+        <Tip>
+          Vibes are a hint, not a contract. They give new visitors a feel for tone before they
+          read the lore.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
     id: "worlds-join",
     title: "Worlds: joining one (declare your affiliation)",
     body: (
       <>
         <P>
-          You can <b>join</b> any <b>open</b> world to declare that your character is from there.
-          Joining is purely an affiliation - it doesn't change which rooms you can enter or what
-          you can do. You can join as many worlds as you like.
+          You can <b>join</b> a world to say your character belongs there. Joining is just an
+          affiliation. It does not change which rooms you can enter or what you can do.
         </P>
-        <Heading>What joining gets you</Heading>
+        <Heading>Three kinds of doors</Heading>
         <Bullets>
-          <li>The world appears under <b>Worlds</b> on your profile, so visitors can see your affiliations.</li>
-          <li>You can mark <b>one</b> world as your <b>primary</b> - that's the one used to group you with other members in chat userlists.</li>
-          <li>The world's owner sees you in their member list (a small "by us" signal that their setting has reach).</li>
+          <li>
+            <b>Open</b> worlds let anyone join with one click.
+          </li>
+          <li>
+            <b>Application</b> worlds ask you to answer a few questions first. The world's author
+            reviews your answers and approves or declines. If declined, you can apply again later.
+          </li>
+          <li>
+            <b>Invite-only</b> worlds are added to by the author directly. There is no public join
+            button. If you would like in, message the author.
+          </li>
         </Bullets>
-        <Heading>Three ways to join</Heading>
+        <Heading>How to join</Heading>
         <Steps>
           <li>
-            <b>From the catalog</b>: Tools drawer &rarr; <b>World Catalog</b>, then click <b>Join</b> on a row.
+            <b>From the catalog</b>: Tools drawer, then <b>World Catalog</b>. Click <b>Join</b> on
+            an open world, or <b>Apply</b> on an application world. The form opens with the
+            author's questions; fill in what you can and submit.
           </li>
           <li>
-            <b>From the world viewer</b>: open any open world, click the <b>Join</b> chip in the header.
+            <b>From the world viewer</b>: the chip in the header reads <b>Join</b>, <b>Apply</b>,
+            <b>Application pending</b>, or <b>Invite-only</b> depending on what the world allows.
           </li>
           <li>
-            <b>By command</b>: <K>/world join {`<slug>`}</K>, or just <K>/world join</K> to join the
-            world that's currently linked to the room you're in.
+            <b>By command</b>: <K>/world join {`<slug>`}</K> joins an open world. On an application
+            world the same command opens the world viewer with the application form on top of it.
+            On an invite-only world you get a quick notice explaining the world is invite-only.
           </li>
         </Steps>
-        <Heading>Set a primary world</Heading>
+        <Heading>One membership per identity</Heading>
         <P>
-          Joining is silent until you mark a world as primary. To do that:
+          Your master account and each of your characters keep their own world memberships.
+          Switching to a character changes which worlds show up under your name. If you want a
+          character to belong to a world, switch to them first, then join. Approving an application
+          adds only the identity that applied, not your whole roster.
         </P>
-        <Bullets>
-          <li><b>From My Worlds</b>: in the "Worlds I've joined" section, click <b>Set as primary</b> next to the world.</li>
-          <li><b>From the world viewer</b>: <b>Set as primary</b> chip in the header.</li>
-          <li><b>By command</b>: <K>/world primary {`<slug>`}</K>. Run <K>/world primary</K> with no slug to clear it.</li>
-        </Bullets>
+        <Heading>Application timing</Heading>
         <P>
-          Only one world can be primary at a time - setting a new one automatically demotes the
-          previous. Userlists in chat re-sort the moment you change it.
+          After you submit an application, the world's card shows <b>Application pending</b> and
+          you wait on the author's review. You can <b>withdraw</b> a pending application from the
+          catalog card to free yourself up to try again later. There is no automatic deadline; the
+          author reviews when they can.
         </P>
         <Heading>Leaving a world</Heading>
         <P>
-          Click <b>Leave</b> in the viewer, or use <K>/world leave {`<slug>`}</K>. Your membership
-          goes away; you can re-join any time.
+          Click <b>Leave</b> in the viewer, or use <K>/world leave {`<slug>`}</K>. The membership
+          for that identity goes away; you can re-join later if the world allows it.
         </P>
         <Tip>
-          Joining and primary are independent of room access. You can sit in a world's room
-          without ever joining the world - and you can join a world without ever visiting one of
-          its rooms. They serve different purposes.
+          Joining is independent of room access. You can sit in a world's room without ever joining
+          the world, and you can join a world without ever visiting one of its rooms. They serve
+          different purposes.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "worlds-application",
+    title: "Worlds: joining an application-gated world",
+    body: (
+      <>
+        <P>
+          Some worlds ask you to apply before joining. The author reviews your application and
+          decides. This guide walks through the whole flow.
+        </P>
+        <Heading>Find and apply</Heading>
+        <Steps>
+          <li>Open the <b>World Catalog</b> from the Tools drawer.</li>
+          <li>
+            Worlds that take applications show an <b>Apply</b> button instead of <b>Join</b>.
+          </li>
+          <li>
+            Click <b>Apply</b>. A form opens with the author's questions, up to five of them.
+            Answers can be a couple of pages each.
+          </li>
+          <li>Fill in what you can and submit.</li>
+        </Steps>
+        <P>
+          If the world has no questions, the form is short and you can submit it as-is.
+        </P>
+        <P>
+          The slash command works too: <K>/world join {`<slug>`}</K> on an application world opens
+          the same form on top of the world viewer.
+        </P>
+        <Heading>After you submit</Heading>
+        <P>
+          The world's card switches to <b>Application pending</b>. The author sees your answers in
+          their world's review panel alongside everyone else who has applied recently. You can
+          <b>withdraw</b> a pending application from the catalog card if you want to step back and
+          apply again later with stronger answers.
+        </P>
+        <Heading>Approved</Heading>
+        <P>
+          The card switches to <b>Joined</b>. Whichever identity you applied as is added to the
+          world's members. Set the world as your primary in the world viewer if you want it to
+          group you in chat userlists.
+        </P>
+        <Heading>Declined</Heading>
+        <P>
+          The card shows the decline along with any note the author left. You can apply again
+          later. Treat the note as feedback rather than a final word.
+        </P>
+        <Heading>One application per identity</Heading>
+        <P>
+          Applications follow your identity. If you applied as a character, only that character is
+          added on approval. To bring a different character into the same world, switch to them
+          first and apply separately.
+        </P>
+        <Tip>
+          The application is the only public path into an application-gated world; there is no
+          backdoor through the catalog or the viewer. If the author asks for context that you do
+          not want to write publicly, the catalog also lets you send them a DM first.
         </Tip>
       </>
     ),
@@ -648,14 +814,14 @@ foot of the mountains. Speaks little. Watches everything.</p>
         </Steps>
         <Heading>Attach someone else's world</Heading>
         <P>
-          You can only do this when their world is <b>open</b>. The slash command intentionally
-          rejects cross-author linking - you go through the catalog UI instead, which is the
-          gating point:
+          You can only do this when their world is set to <b>open</b> visibility, so it shows up in
+          the catalog. The slash command intentionally rejects cross-author linking; you go through
+          the catalog instead, which is the gating point:
         </P>
         <Steps>
-          <li>Open <b>Tools</b> drawer &rarr; <b>World Catalog</b>.</li>
+          <li>Open <b>Tools</b> drawer, then <b>World Catalog</b>.</li>
           <li>
-            Find the world. The row has a <b>Use in this room</b> button if you're in a room you
+            Find the world. The row has a <b>Use in this room</b> button if you are in a room you
             can mod.
           </li>
           <li>Click it. The banner appears in the room.</li>
@@ -663,26 +829,66 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <Heading>Detach</Heading>
         <P>
           <K>/world unlink</K> removes the current attachment (owner/mod/admin only). Replacing one
-          world with another is a single step - <K>/world link {`<other-slug>`}</K> overwrites
+          world with another is a single step: <K>/world link {`<other-slug>`}</K> overwrites
           whatever was there.
         </P>
         <Heading>What attachment doesn't do</Heading>
         <Bullets>
-          <li>It doesn't auto-join visitors to the world. They have to opt in themselves.</li>
-          <li>It doesn't restrict who can talk in the room. Room access is set independently (public/private).</li>
-          <li>It doesn't share editing rights. Only the world's owner can edit pages.</li>
+          <li>It does not auto-join visitors to the world. They have to opt in themselves.</li>
+          <li>It does not change who can talk in the room. Room access is set independently (public/private).</li>
+          <li>
+            It does not hand out edit rights. Only the world's author can edit pages, plus anyone
+            the author has added as a <b>collaborator</b>. See the World collaborators guide.
+          </li>
         </Bullets>
         <Heading>Mention a world inline with @world:slug</Heading>
         <P>
           You can drop a clickable world chip into any chat message by typing{" "}
-          <K>@world:{`<slug>`}</K> - for example <K>@world:ironreach</K>. It renders as a
-          highlighted pill; clicking it opens the world viewer for everyone who clicks it.
-          Useful for "looking for RP in @world:ironreach tonight" without having to attach the
-          world to the room.
+          <K>@world:{`<slug>`}</K>, for example <K>@world:ironreach</K>. It renders as a
+          highlighted pill; clicking it opens the world viewer for everyone who clicks. Useful for
+          "looking for RP in @world:ironreach tonight" without having to attach the world to the
+          room.
         </P>
         <Tip>
-          Mentioning a world doesn't notify anyone (unlike <K>@username</K>) and doesn't change
-          your or the room's affiliation. It's pure linkage.
+          Mentioning a world does not notify anyone (unlike <K>@username</K>) and does not change
+          your or the room's affiliation. It is pure linkage.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "worlds-collaborators",
+    title: "Worlds: inviting collaborators",
+    body: (
+      <>
+        <P>
+          A world has one author, but the author can invite <b>collaborators</b> to help build it.
+          Collaborators show up alongside the author in the world's settings.
+        </P>
+        <Heading>Adding a collaborator</Heading>
+        <Steps>
+          <li>Open the world editor and pick the <b>Collaborators</b> panel.</li>
+          <li>Add someone by name. They are added immediately. There is no acceptance step.</li>
+        </Steps>
+        <Heading>What collaborators can do</Heading>
+        <Bullets>
+          <li>Edit any page in the world.</li>
+          <li>See pages they have access to even if those pages are otherwise hidden in private mode.</li>
+          <li>
+            They cannot change world-level settings like visibility, join mode, or deletion. Those
+            stay with the author.
+          </li>
+        </Bullets>
+        <Heading>Removing a collaborator</Heading>
+        <P>
+          In the same panel, remove anyone you no longer want editing. Their existing edits stay;
+          only their access ends.
+        </P>
+        <Tip>
+          Collaboration is per-identity. Invite the master account if you want the person to keep
+          collaborating no matter which character they are playing. Invite a specific character if
+          you want only that character's voice in your world's notes.
         </Tip>
       </>
     ),
@@ -726,11 +932,25 @@ foot of the mountains. Speaks little. Watches everything.</p>
             Optionally attach a world: <K>/world link {`<slug>`}</K>.
           </li>
         </Steps>
+        <Heading>Scene banners</Heading>
+        <P>
+          Owners and mods can set a scene with <K>/scene {`<title>`}</K>. A scene banner appears
+          above the chat, like "In the tavern at dusk." End the scene with <K>/scene end</K>.
+        </P>
+        <P>
+          To give the scene a hero image, drop a pipe and an image URL after the title:{" "}
+          <K>/scene The Long Road | https://example.com/road.jpg</K>. The image fills the banner
+          background. Without the pipe, the banner is text only.
+        </P>
         <Heading>Mod tools (owner / mod / admin only)</Heading>
         <P>
           Common ones: <K>/kick</K>, <K>/mute</K>, <K>/ban</K> (with optional duration), <K>/promote</K>{" "}
           to make a member a mod, <K>/demote</K> to take it back. Full reference in the Commands
           tab.
+        </P>
+        <P>
+          Mods and admins also have <K>/incognito</K>, which hides them from the userlist while
+          they observe. See the Incognito mode guide for the full rules.
         </P>
         <Heading>Per-room rendering modes</Heading>
         <P>
@@ -751,9 +971,47 @@ foot of the mountains. Speaks little. Watches everything.</p>
           </li>
         </Bullets>
         <Tip>
-          The rail's per-world groupings (when occupants share a primary world) make crowded rooms
-          easier to skim - clusters of "members of {`<World>`}" stand out from the unaffiliated
-          regulars.
+          A scene banner is just dressing. It does not lock the room down or limit who can post;
+          it sets the stage and everyone keeps writing as usual.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "incognito",
+    title: "Incognito mode (mods and admins)",
+    body: (
+      <>
+        <P>
+          Mods and admins can go invisible while observing a room. Use this when you want to lurk
+          a problem without your presence changing how people behave.
+        </P>
+        <Heading>Turn it on</Heading>
+        <Bullets>
+          <li>
+            <K>/incognito</K> toggles incognito on and off. While on, a quiet badge sits next to
+            your composer so you do not forget.
+          </li>
+          <li>You disappear from the userlist for everyone except other mods and admins.</li>
+          <li>Your typing indicator stops showing. Your read state does not broadcast.</li>
+        </Bullets>
+        <Heading>What still happens</Heading>
+        <Bullets>
+          <li>You can read every message normally.</li>
+          <li>
+            If you post or take a mod action, you become visible again in that moment. Speaking
+            breaks the illusion.
+          </li>
+          <li>
+            DMs you send still go through. The recipient sees them from you as normal.
+          </li>
+        </Bullets>
+        <Heading>Turning it off</Heading>
+        <P>Run <K>/incognito</K> again. Your presence flips back on instantly.</P>
+        <Tip>
+          Incognito is meant for moderation. It is not a way to read a private RP without consent.
+          Use it the way you would a venue manager walking quietly through a busy bar.
         </Tip>
       </>
     ),
@@ -782,6 +1040,40 @@ foot of the mountains. Speaks little. Watches everything.</p>
           Anything you can do from the drawer, you can also do via slash command - the drawer just
           saves you typing.
         </P>
+      </>
+    ),
+  },
+
+  {
+    id: "shortcut-chips",
+    title: "Shortcut chips in chat",
+    body: (
+      <>
+        <P>
+          You can drop a clickable chip into any message that opens a part of The Spire when
+          tapped. Type the shortcut inside curly braces. It renders as a small chip the moment you
+          send.
+        </P>
+        <Heading>What is available</Heading>
+        <Bullets>
+          <li><K>{`{rules}`}</K> opens the rules page.</li>
+          <li><K>{`{help}`}</K> opens this help modal.</li>
+          <li><K>{`{messages}`}</K> opens the Messages inbox.</li>
+          <li><K>{`{earning}`}</K> opens the Earning dashboard.</li>
+          <li><K>{`{shop}`}</K> jumps to the shop.</li>
+          <li><K>{`{scriptorium}`}</K> opens the long-form library.</li>
+          <li><K>{`{scriptorium:latest:story}`}</K> opens the most recently published story.</li>
+        </Bullets>
+        <Heading>Where they work</Heading>
+        <Bullets>
+          <li>Chat messages.</li>
+          <li>Announcements (the banner marquee and scheduled chat lines).</li>
+          <li>Anywhere else text renders the same way as chat.</li>
+        </Bullets>
+        <Tip>
+          Useful for explaining things to a new arrival without making them search a menu. "Have a
+          look at <K>{`{rules}`}</K> when you get a second" lands as a chip they can tap.
+        </Tip>
       </>
     ),
   },
@@ -855,14 +1147,100 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <Heading>Away</Heading>
         <P>
           <K>/away [reason]</K> marks you as away (a small "[away]" tag appears with you).{" "}
-          <K>/away</K> with no reason while already away clears it.
+          <K>/away</K> with no reason while already away clears it. While away, chat sounds are
+          muted on purpose so you do not come back to a queue of pings.
+        </P>
+        <Heading>Typing phrase</Heading>
+        <P>
+          The line others see when you are typing (the default is "is typing") can be customized.
+          The typing phrase is a small Currency purchase from the shop; after you own it, the
+          phrase lives in your Profile Flair editor. Try "is crafting a response," "is sharpening
+          a quill," or whatever fits your character.
         </P>
         <Heading>Scene (room-level)</Heading>
         <P>
-          Owners and mods can set a <b>scene</b> with <K>/scene {`<title>`}</K> - a short banner
-          shown alongside the topic, useful for "we're in the tavern now" framing. <K>/scene end</K>{" "}
-          clears it.
+          Owners and mods can set a <b>scene</b> with <K>/scene {`<title>`}</K>. A short banner
+          shows above the chat, useful for "we are in the tavern now" framing. End it with{" "}
+          <K>/scene end</K>.
         </P>
+        <P>
+          Add a hero image to the scene with a pipe after the title:{" "}
+          <K>/scene The Long Road | https://example.com/road.jpg</K>. The image fills the banner
+          background. Skip the pipe for a text-only banner.
+        </P>
+      </>
+    ),
+  },
+
+  {
+    id: "announcements",
+    title: "Announcements: banner marquee and scheduled posts",
+    body: (
+      <>
+        <P>
+          Admins can publish announcements that reach every room. There are two surfaces and they
+          serve different purposes.
+        </P>
+        <Heading>The banner marquee</Heading>
+        <Bullets>
+          <li>Sits at the very top of chat and rotates through any active banners.</li>
+          <li>Dot indicators below the strip jump between banners directly.</li>
+          <li>Close any banner you have read and you will not see it again. Other people still see it. Dismissal is local to you.</li>
+        </Bullets>
+        <Heading>Scheduled announcements in chat</Heading>
+        <P>
+          Admins can also schedule announcements that post as chat lines into rooms at a specific
+          time. These look like a regular <K>/announce</K> line but the timing is automatic.
+          Scheduled announcements support both one-time fires and recurring schedules, so a
+          weekly Saturday RP roundup can re-fire on its own.
+        </P>
+        <Heading>Manual broadcasts</Heading>
+        <P>
+          Anyone with the right role can use <K>/announce {`<text>`}</K> for a one-shot
+          high-visibility chat line in the current room (or sitewide for admins). This is the
+          manual cousin of the scheduled flow above.
+        </P>
+        <Tip>
+          Admins are the only ones who can post in the banner marquee. If you have something to
+          share with the whole community and want a banner spot, message a mod.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "dice-rolls",
+    title: "Inline dice rolls and modifiers",
+    body: (
+      <>
+        <P>
+          You can roll dice in two places: as its own command with <K>/roll</K>, or in the middle
+          of a sentence with the inline <K>!roll:</K> syntax.
+        </P>
+        <Heading>Inline rolls</Heading>
+        <P>
+          Wrap the expression in <K>!roll:</K> and the dice land where you put them. The body of
+          your message stays intact around them.
+        </P>
+        <Bullets>
+          <li><K>I draw my bow !roll:1d20+5 and the arrow flies.</K></li>
+          <li><K>!roll:2d6</K> for damage.</li>
+          <li><K>!roll:1d100-10</K> if you have a penalty.</li>
+        </Bullets>
+        <P>
+          The modifier can be any positive or negative integer. The result shows the dice rolled
+          and the final number after the modifier is applied.
+        </P>
+        <Heading>Full command</Heading>
+        <P>
+          <K>/roll {`<expression>`}</K> broadcasts a clean roll line to the room with no
+          surrounding text. Useful for combat resolution where you want the result to stand alone.
+        </P>
+        <Tip>
+          If you are running a system that needs visible totals, drop your rolls inline so the
+          conversation reads naturally. If you are calling for a check, use the standalone{" "}
+          <K>/roll</K> so it carries weight.
+        </Tip>
       </>
     ),
   },
@@ -953,11 +1331,30 @@ foot of the mountains. Speaks little. Watches everything.</p>
             you display.
           </li>
           <li>
+            <b>Free-form borders</b> — decorative borders that don't require a rank gate. Sold in
+            the Earning dashboard's <b>Borders</b> tab in their own Free-form section, alongside
+            the rank borders. They have their own effects (phoenix feathers, hearth flame, and
+            so on) and equip independently from rank borders.
+          </li>
+          <li>
             <b>Inline avatar in chat</b> — once bought, your round avatar shows after the
             timestamp on every chat line. It also replaces the gender icon in the userlist as
             the click-target for opening your profile.
           </li>
+          <li>
+            <b>Profile flair</b> — the quote marquee, visitor counter, and typing phrase are all
+            small Currency purchases that customize your profile. See the Building a profile
+            guide for what each one does.
+          </li>
         </Bullets>
+
+        <Heading>Spending on items and community emoticons</Heading>
+        <P>
+          Currency also funds the Item Shop (cookies, plushies, pets, and other collectibles —
+          see the Items guide) and pays creators in the Emoticon Marketplace (one Currency per use
+          of any sheet whose artist has commerce enabled). The shop and the emoticon picker make
+          the cost visible up front so nothing is silent.
+        </P>
 
         <Heading>Privacy</Heading>
         <P>
@@ -1191,10 +1588,95 @@ foot of the mountains. Speaks little. Watches everything.</p>
           </li>
         </Bullets>
 
+        <Heading>Unicode emoji reactions</Heading>
+        <P>
+          Alongside the sticker sheets, you can react with any standard Unicode emoji. Both kinds
+          of reactions sit side by side on the message and group into chips the same way.
+        </P>
+
+        <Heading>Community sheets and the marketplace</Heading>
+        <P>
+          The sticker library is partly user-made. Anyone can submit a sheet for the moderation
+          team to review. Once a sheet is approved, every use of it spends <b>one</b> Currency,
+          which goes to the artist who made the sheet. Authors can toggle commerce on or off per
+          sheet, so some community sheets are free. The picker shows the cost up front so nothing
+          is silent.
+        </P>
+        <P>
+          Submitting a sheet costs a small Currency stake. If your submission is approved, the
+          stake stays spent and you start earning when people use it; if it is declined, the stake
+          is refunded.
+        </P>
+
         <Tip>
           Emoticon tokens (<K>:slug:idx:</K>) don't trigger the <K>:</K> /me action shortcut, so
           a message that starts with an emoticon sends as a normal chat line — no italic action
           framing.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "rules-page",
+    title: "The public rules page",
+    body: (
+      <>
+        <P>
+          The Spire has a public rules page that anyone, signed in or not, can read. It is the
+          official statement of what is welcome here and what is not.
+        </P>
+        <Heading>How to open it</Heading>
+        <Bullets>
+          <li>The Rules link in the site footer.</li>
+          <li>The <K>{`{rules}`}</K> shortcut chip in any message.</li>
+          <li><K>/help</K> opens this modal; the page itself is one click further.</li>
+        </Bullets>
+        <Heading>What lives there</Heading>
+        <Bullets>
+          <li>Community guidelines.</li>
+          <li>Moderation policy.</li>
+          <li>Content rules, including what is off-limits and how content warnings work.</li>
+          <li>Contact information for moderators.</li>
+        </Bullets>
+        <Tip>
+          If a conversation goes sideways and someone is not sure where the line is, link the
+          rules page rather than arguing the case from memory. The whole point is to have one
+          shared reference.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "backups",
+    title: "Portable backups: take your work with you",
+    body: (
+      <>
+        <P>
+          You can download a copy of your own content from The Spire at any time. Backups travel
+          with you. If you ever decide to move on, you take your work with you.
+        </P>
+        <Heading>What is included</Heading>
+        <Bullets>
+          <li>Your master account profile and settings.</li>
+          <li>Every character you have created, including their profiles, galleries, and journals.</li>
+          <li>The world pages you have authored.</li>
+          <li>The stories you have written in the Scriptorium.</li>
+        </Bullets>
+        <Heading>What is not</Heading>
+        <Bullets>
+          <li>Other people's messages to you, since those are theirs.</li>
+          <li>Items, currency balance, and ranks. Those are tied to the live system.</li>
+        </Bullets>
+        <Heading>How to export</Heading>
+        <P>
+          Open the <b>Account</b> section from the Tools drawer and pick the export option. The
+          file downloads to your device. Keep it somewhere safe.
+        </P>
+        <Tip>
+          Backups are a snapshot. If you keep writing after exporting, your live profile pulls
+          ahead of the file. Re-export now and then if you want to stay current.
         </Tip>
       </>
     ),

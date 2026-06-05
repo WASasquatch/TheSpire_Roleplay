@@ -27,6 +27,7 @@ import { EarningRibbon } from "./components/EarningRibbon.js";
 import { BannerMarquee } from "./components/BannerMarquee.js";
 import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanners.js";
 import { onUiRouteOpen } from "./lib/uiRouteOpen.js";
+import { fetchLatestPublishedStory } from "./lib/latestStory.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
 import { ThreadModal } from "./components/ThreadModal.js";
 import { UsersModal } from "./components/UsersModal.js";
@@ -1031,6 +1032,14 @@ function Chat() {
   // immediately so deep-links work pre- and post-login. WorldViewerModal
   // normalizes the URL to the canonical slug after the world detail loads.
   const [worldViewerId, setWorldViewerId] = useState<string | null>(() => parseWorldFromUrl());
+  // Set by the `world-application-prompt` ui:hint (paired with an
+  // `open-world` hint from the `/world join <slug>` slash command).
+  // The id is matched against worldViewerId at viewer mount time —
+  // when they agree, the viewer auto-opens the ApplicationFormModal
+  // on top of itself, mirroring the catalog's Apply path. Cleared
+  // back to null once the viewer is closed so the form doesn't
+  // re-open on a future viewer mount for the same world.
+  const [pendingWorldApplicationId, setPendingWorldApplicationId] = useState<string | null>(null);
   const [worldCatalogOpen, setWorldCatalogOpen] = useState(false);
   // Scriptorium catalog state. Object → open; null → closed. The
   // optional `tab` lets `/scriptorium my` etc. land on a specific tab.
@@ -1076,6 +1085,21 @@ function Chat() {
         // alternative sort later, fork on `t.sort` here.
         setScriptoriumOpen({});
         return;
+      case "nav-scriptorium-latest-story": {
+        // Dynamic chip — resolve the latest published story id at
+        // click time and pop the StoryReader directly to it. The chip
+        // label was already resolved at render via the shared
+        // fetcher; this re-call hits the same TTL cache so there's
+        // no extra round-trip in the common case. Falls back to
+        // opening the catalog (the static `{scriptorium:latest}`
+        // surface) when nothing is published — better than a no-op
+        // click on a chip that already promised a destination.
+        void fetchLatestPublishedStory().then((r) => {
+          if (r?.id) setStoryReader({ storyId: r.id });
+          else setScriptoriumOpen({});
+        });
+        return;
+      }
     }
   }), [openEditor]);
   const [composerText, setComposerText] = useState("");
@@ -1998,6 +2022,13 @@ function Chat() {
           break;
         case "open-world":
           setWorldViewerId(h.worldId);
+          break;
+        case "world-application-prompt":
+          // Paired with an `open-world` hint that just set
+          // worldViewerId. Stash the same id so the viewer's
+          // openApplicationOnMount prop reads true on its first
+          // render and the ApplicationFormModal mounts on top.
+          setPendingWorldApplicationId(h.worldId);
           break;
         case "open-scriptorium":
           setScriptoriumOpen(h.tab ? { tab: h.tab } : {});
@@ -3624,14 +3655,25 @@ function Chat() {
       {worldViewerId ? (
         <WorldViewerModal
           worldId={worldViewerId}
-          onClose={() => setWorldViewerId(null)}
+          onClose={() => {
+            setWorldViewerId(null);
+            // Clear the pending-application latch so a future viewer
+            // open on a different (or even the same) world doesn't
+            // pop the form on mount.
+            setPendingWorldApplicationId(null);
+          }}
+          // True when the `/world join <slug>` slash command emitted
+          // a `world-application-prompt` alongside `open-world`. The
+          // ids must match so a stale prompt from a previous world
+          // doesn't surface on an unrelated viewer open.
+          openApplicationOnMount={pendingWorldApplicationId === worldViewerId}
           // Only owners get the "Edit" button. The server enforces the same
           // check on PATCH/DELETE; this is just for UI affordance. We don't
           // know ownership without inspecting the loaded WorldDetail, so
           // expose the action only when we can plausibly succeed: the viewer
           // is logged in. The editor itself will show an error if they
           // aren't actually the owner.
-          {...(me ? { onEdit: () => { const id = worldViewerId; setWorldViewerId(null); setWorldEditorId(id); } } : {})}
+          {...(me ? { onEdit: () => { const id = worldViewerId; setWorldViewerId(null); setPendingWorldApplicationId(null); setWorldEditorId(id); } } : {})}
         />
       ) : null}
       {worldCatalogOpen ? (

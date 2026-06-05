@@ -1748,6 +1748,16 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     "flair_lurking_master",
     "flair_room_presence",
     "flair_session_presence",
+    // Migration 0192 — profile-customization flairs. Without these
+    // in the allowlist, the catalog row + admin card + ledger
+    // schema all exist but the POST /earning/me/cosmetics/:key/
+    // purchase handler's first gate returns "unknown cosmetic key"
+    // and the Buy button is dead. The downstream handler steps
+    // (cosmetic-row lookup, existing-purchase check keyed off
+    // `purchase_${key}`, wallet charge, ledger insert) are generic
+    // and need no other server changes for these two SKUs.
+    "flair_profile_visitors",
+    "flair_profile_marquee",
   ]);
 
   app.post<{ Params: { key: string }; Body: unknown }>(
@@ -1890,8 +1900,17 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       if (!me) { reply.code(401); return { error: "auth" }; }
       const key = req.params.key;
       if (!TOGGLEABLE_COSMETIC_KEYS.has(key)) {
+        // Distinct from the purchase endpoint's identical-looking
+        // 404 — the equip surface is a narrower allowlist (only
+        // cosmetics with a boolean equip slot belong here). Phrasing
+        // it separately so future "unknown cosmetic key" debugging
+        // doesn't conflate the two paths: a purchase-side miss
+        // means the catalog forgot the SKU, an equip-side miss
+        // means the SKU exists but isn't toggleable (configured via
+        // dedicated PATCH endpoints instead — e.g. the profile
+        // flairs land on /me/profile-flair, not here).
         reply.code(404);
-        return { error: "unknown cosmetic key" };
+        return { error: "cosmetic is not toggleable" };
       }
       const cols = TOGGLE_COLUMNS[key]!;
       let body: z.infer<typeof equipCosmeticBody>;

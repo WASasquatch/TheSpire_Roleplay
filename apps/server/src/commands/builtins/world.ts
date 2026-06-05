@@ -120,7 +120,7 @@ export const worldCommand: CommandHandler = {
     { verb: "link", usage: "/world link <slug>", description: "Link one of YOUR worlds to this room. (Owner/mod/admin only.)" },
     { verb: "unlink", usage: "/world unlink", description: "Remove the linked world. (Owner/mod/admin only.)" },
     { verb: "catalog", usage: "/world catalog", description: "Browse the world catalog (open worlds usable in any room)." },
-    { verb: "join", usage: "/world join [slug]", description: "Join an open world as your current identity." },
+    { verb: "join", usage: "/world join [slug]", description: "Join an open world; opens the application form if the world requires one; tells you if the world is invite-only." },
     { verb: "leave", usage: "/world leave [slug]", description: "Leave a world as your current identity." },
   ],
   async run(ctx) {
@@ -198,15 +198,50 @@ export const worldCommand: CommandHandler = {
           ? `No visible world with slug "${slug}".`
           : "No world is linked to this room. Pass a slug, e.g. /world join darkrealm.");
       }
-      // Same gate as the route: open worlds (or your own) are joinable.
-      if (w.ownerUserId !== ctx.user.id && w.visibility !== "open"
-          && !(await hasPermission(ctx.user, "edit_others_world", ctx.db))) {
-        return notice(ctx, "NOT_OPEN", `"${w.name}" isn't open for community membership.`);
+      const isOwner = w.ownerUserId === ctx.user.id;
+      const isAdmin = !isOwner && (await hasPermission(ctx.user, "edit_others_world", ctx.db));
+      if (!isOwner && !isAdmin) {
+        // Visibility gate first: private / public-with-no-catalog worlds
+        // aren't catalog-joinable. The catalog only ever surfaces
+        // `visibility = "open"` worlds, so the rest of the gating logic
+        // below assumes the world is at least open.
+        if (w.visibility !== "open") {
+          return notice(ctx, "NOT_OPEN", `"${w.name}" isn't open for community membership.`);
+        }
+        // joinMode gate. Pre-0186 worlds default to "open" so the
+        // missing-column fallback below behaves the same as the
+        // legacy slash command did. Application + invite-only worlds
+        // now route to the right UI affordance instead of being
+        // silently joined by the slash-command bypass.
+        const joinMode = (w.joinMode ?? "open");
+        if (joinMode === "invite-only") {
+          return notice(
+            ctx,
+            "INVITE_ONLY",
+            `"${w.name}" is invite-only. The author adds members directly — ask them if you'd like in.`,
+          );
+        }
+        if (joinMode === "application") {
+          // Open the world viewer first so the user can read what
+          // they're applying to, then ask the client to surface the
+          // application form on top of it. Two hints keeps the modal
+          // composition the same as the catalog Apply path (viewer
+          // open + ApplicationFormModal mounted).
+          ctx.socket.emit("ui:hint", { kind: "open-world", worldId: w.id });
+          ctx.socket.emit("ui:hint", {
+            kind: "world-application-prompt",
+            worldId: w.id,
+            worldName: w.name,
+          });
+          return notice(
+            ctx,
+            "APPLICATION_REQUIRED",
+            `"${w.name}" accepts new members by application. Opened the form for you.`,
+          );
+        }
       }
       // Per-identity (migration 0187): the joining face is whatever
-      // character the user is currently voicing, or OOC. The Apply
-      // path (joinMode = "application") is handled in the catalog
-      // UI, not the slash command.
+      // character the user is currently voicing, or OOC.
       const charId = ctx.user.activeCharacterId;
       const identityMatch = charId === null
         ? sql`${worldMembers.characterId} IS NULL`

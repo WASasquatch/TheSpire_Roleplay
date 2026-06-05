@@ -36,10 +36,19 @@
 --     profile" toggle. Independent of ownership: a flair owner who
 --     hasn't toggled it on doesn't surface the counter publicly.
 --
--- Per-identity partition: same posture as `flair_profile_banner` and
--- friends. A character can own + configure these independently from
--- the master, and OOC/master profiles read the user_earning row
--- while character profiles read character_earning.
+-- Per-identity partition: configuration data lives on the earning
+-- rows (master → `user_earning`, character → `character_earning`),
+-- matching the more-recent flair convention used by
+-- `flair_typing_phrase` (typing_phrase), `flair_room_presence`
+-- (room_join_template / room_leave_template), and
+-- `flair_session_presence` (session_connect_template /
+-- session_exit_template). NOTE: `flair_profile_banner` predates
+-- that convention and parks its master URL on `user_active_cosmetics`
+-- instead — that's the OUTLIER. The newer flairs (this one
+-- included) treat the per-identity earning tables as the canonical
+-- home for owner-configured flair payload, with ownership recorded
+-- separately in `earning_ledger`. Each character can own + configure
+-- independently from the master.
 
 -- Visitors log ---------------------------------------------------
 
@@ -80,19 +89,25 @@ CREATE TABLE IF NOT EXISTS profile_views (
 );
 CREATE INDEX IF NOT EXISTS profile_views_profile_idx
   ON profile_views(profile_user_id, profile_character_id);
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS profile_views_day_idx
   ON profile_views(day_bucket);
+--> statement-breakpoint
 
 -- Marquee + visitors columns on the per-identity earning rows -----
 
 ALTER TABLE `user_earning`
   ADD COLUMN `profile_marquee_quotes_json` TEXT;
+--> statement-breakpoint
 ALTER TABLE `user_earning`
   ADD COLUMN `show_profile_visitors_count` INTEGER NOT NULL DEFAULT 0;
+--> statement-breakpoint
 ALTER TABLE `character_earning`
   ADD COLUMN `profile_marquee_quotes_json` TEXT;
+--> statement-breakpoint
 ALTER TABLE `character_earning`
   ADD COLUMN `show_profile_visitors_count` INTEGER NOT NULL DEFAULT 0;
+--> statement-breakpoint
 
 -- Seed the two new Flair catalog rows. Costs are placeholders the
 -- admin can tune via the Flair admin tab — set above the existing
@@ -108,6 +123,7 @@ VALUES
    2000,
    1,
    NULL);
+--> statement-breakpoint
 
 INSERT OR IGNORE INTO `cosmetics`
   (`key`, `name`, `description`, `cost`, `enabled`, `config_json`)

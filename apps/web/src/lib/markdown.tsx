@@ -1,6 +1,7 @@
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { customCmdCssToStyle, resolveMessageColor, resolveUiRoute, splitOnCode, VMARK_SPAN_RE, type UiRoute } from "@thekeep/shared";
 import { openUiRoute } from "./uiRouteOpen.js";
+import { fetchLatestPublishedStory } from "./latestStory.js";
 import { splitMentions } from "./mentions.js";
 import { useActiveTheme } from "./theme.js";
 import { useEmoticons } from "../state/emoticons.js";
@@ -1416,6 +1417,26 @@ export function solitaryEmoticonToken(body: string): { slug: string; cellIndex: 
  *  readers announce the destination clearly.
  * ============================================================= */
 function UiRouteChip({ entry }: { entry: UiRoute }) {
+  // Dynamic-resolved chips fetch their label at mount and re-render
+  // with the resolved title (e.g. "Latest story" → "📖 The Hollow
+  // Hour"). The static `entry.label` is the skeleton shown while the
+  // fetch is in flight, and remains the fallback if the lookup
+  // returns null. The fetcher is shared + memoized so multiple chips
+  // on the same surface coalesce on one request.
+  const [dynamicLabel, setDynamicLabel] = useState<string | null>(null);
+  useEffect(() => {
+    if (entry.target.kind !== "nav-scriptorium-latest-story") return;
+    let cancelled = false;
+    void fetchLatestPublishedStory().then((r) => {
+      if (cancelled) return;
+      if (r?.title) setDynamicLabel(r.title);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [entry.target.kind]);
+
+  const renderedLabel = dynamicLabel ?? entry.label;
   return (
     <button
       type="button"
@@ -1431,7 +1452,7 @@ function UiRouteChip({ entry }: { entry: UiRoute }) {
       className="mx-1.5 inline-flex items-center gap-1 rounded border border-keep-action/50 bg-keep-action/10 px-1 py-0 align-baseline text-[1em] text-keep-action transition hover:border-keep-action hover:bg-keep-action/20"
     >
       {entry.icon ? <span aria-hidden>{entry.icon}</span> : null}
-      <span>{entry.label}</span>
+      <span>{renderedLabel}</span>
     </button>
   );
 }

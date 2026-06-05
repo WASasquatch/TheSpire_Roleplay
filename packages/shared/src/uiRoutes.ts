@@ -62,7 +62,19 @@ export type UiRouteTarget =
   | { kind: "modal-help" }
   | { kind: "modal-profile-own" }
   | { kind: "modal-admin"; tab?: string }
-  | { kind: "nav-scriptorium"; sort?: "latest" };
+  | { kind: "nav-scriptorium"; sort?: "latest" }
+  /**
+   * DYNAMIC chip — the catalog entry's static label is the fallback
+   * shown before / when the lookup fails; the chip's actual label
+   * AND the click target both resolve at render time from the
+   * `/stories/splash?limit=1` endpoint via the shared
+   * `fetchLatestPublishedStory` helper. The renderer special-cases
+   * this kind to render a fetching React component on chat surfaces
+   * and to emit a `data-tk-ui-route-dynamic="latest-story"` marker on
+   * HTML surfaces (banner marquee + scheduled-announce bodies) that
+   * a hydration helper post-processes into the resolved title.
+   */
+  | { kind: "nav-scriptorium-latest-story" };
 
 export interface UiRoute {
   /** Canonical token (lowercase, colon-delimited). Matches what the
@@ -152,6 +164,11 @@ export const UI_ROUTES: ReadonlyArray<UiRoute> = [
   // ----- Scriptorium routes (full-page nav, not modals) -----
   { token: "scriptorium", label: "Scriptorium", icon: "📚", description: "Open the Scriptorium catalog.", target: { kind: "nav-scriptorium" } },
   { token: "scriptorium:latest", label: "Latest in Scriptorium", icon: "📖", description: "Open the Scriptorium catalog sorted newest first.", target: { kind: "nav-scriptorium", sort: "latest" } },
+  // DYNAMIC: chip label + click target resolve at render time from
+  // the latest published story. The static `label` here is the
+  // skeleton shown while the fetch is in flight (and the fallback
+  // when nothing is published yet).
+  { token: "scriptorium:latest:story", label: "Latest story", icon: "📖", description: "Open the most recently published story in the Scriptorium.", target: { kind: "nav-scriptorium-latest-story" } },
 
   // ----- Admin / staff (author-gated; viewer-gated mirrors the admin-panel posture) -----
   { token: "admin", label: "Admin panel", icon: "🛡", description: "Open the admin panel.", authorRole: "admin", viewerRole: "mod", target: { kind: "modal-admin" } },
@@ -316,6 +333,23 @@ function escapeHtml(s: string): string {
  * because the regex only matches bare `{token}` text, not the
  * already-rendered `<button>` markup.
  */
+/**
+ * Marker tag for the post-mount hydration helper. A chip whose target
+ * resolves dynamically (e.g. "latest published story" — title only
+ * known at render time) gets stamped with this attribute so the
+ * helper can scan, fetch the resolved label, and rewrite the chip's
+ * `.tk-ui-route-chip-label` span in place. Static targets return
+ * null → no marker, no hydration, the static label stays as-is.
+ */
+export function dynamicMarkerFor(entry: UiRoute): string | null {
+  switch (entry.target.kind) {
+    case "nav-scriptorium-latest-story":
+      return "latest-story";
+    default:
+      return null;
+  }
+}
+
 export function renderUiRouteChipsInHtml(html: string): string {
   if (!html.includes("{")) return html;
   return html.replace(UI_ROUTE_TOKEN_RE, (raw, capturedToken: string) => {
@@ -326,8 +360,17 @@ export function renderUiRouteChipsInHtml(html: string): string {
     const safeLabel = escapeHtml(entry.label);
     const safeIcon = entry.icon ? `<span aria-hidden="true">${escapeHtml(entry.icon)}</span> ` : "";
     const safeTitle = escapeHtmlAttr(entry.description);
+    // Dynamic-resolved chips (e.g. {scriptorium:latest:story}) carry a
+    // `data-tk-ui-route-dynamic="<marker>"` attribute that the
+    // post-sanitize hydration pass keys on. The static `safeLabel`
+    // above is the pre-resolve skeleton; the hydrator swaps it via
+    // the `.tk-ui-route-chip-label` span.
+    const dynamicMarker = dynamicMarkerFor(entry);
+    const dynamicAttr = dynamicMarker
+      ? ` data-tk-ui-route-dynamic="${escapeHtmlAttr(dynamicMarker)}"`
+      : "";
     return (
-      `<button type="button" data-tk-ui-route="${safeToken}" title="${safeTitle}" aria-label="${safeTitle}"` +
+      `<button type="button" data-tk-ui-route="${safeToken}"${dynamicAttr} title="${safeTitle}" aria-label="${safeTitle}"` +
       // Chip size matches the surrounding text (`text-[1em]`) instead
       // of the previous 0.85em shrink — at chat-line scale the
       // smaller pill read as a footnote, and inside the marquee
@@ -343,7 +386,7 @@ export function renderUiRouteChipsInHtml(html: string): string {
       // surrounding glyphs now that it inherits the body's full
       // font size.
       ` class="tk-ui-route-chip mx-1.5 inline-flex items-center gap-1 rounded border border-keep-action/50 bg-keep-action/10 px-1 py-0 align-baseline text-[1em] text-keep-action transition hover:border-keep-action hover:bg-keep-action/20">` +
-      `${safeIcon}<span>${safeLabel}</span></button>`
+      `${safeIcon}<span class="tk-ui-route-chip-label">${safeLabel}</span></button>`
     );
   });
 }

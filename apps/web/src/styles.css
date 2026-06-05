@@ -387,6 +387,21 @@
    * never blocks clicks even when it floats over the chat. */
   z-index: 20;
   pointer-events: none;
+  /* Bump from the previous text-xs / inherited size — the burst is
+   * already short-lived (~3.2s) AND overlays moving chat content,
+   * so it needs a bigger glyph to register before it fades. 0.875rem
+   * (text-sm) reads cleanly without dominating the toolbar row when
+   * the float is at rest before the animation kicks in. */
+  font-size: 0.875rem;
+  /* Layered shadow keeps the credit legible on every background it
+   * passes over: light themes need the dark drop (high alpha) so the
+   * accent/action color doesn't blow out into the parchment, dark
+   * themes lean on the diffuse outer glow to lift the glyph off the
+   * panel chrome. The 1px hard offset is the readability backbone;
+   * the 0px diffuse is the visibility halo. */
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.7),
+    0 0 6px rgba(0, 0, 0, 0.45);
 }
 @media (prefers-reduced-motion: reduce) {
   .earn-burst {

@@ -7,6 +7,7 @@ import { readError } from "../lib/http.js";
 import { ActiveThemeContext, themeStyle, useActiveTheme } from "../lib/theme.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { CloseButton } from "./CloseButton.js";
+import { ApplicationFormModal } from "./ApplicationFormModal.js";
 
 interface Props {
   worldId: string;
@@ -26,6 +27,15 @@ interface Props {
    * buttons would just produce 401s. Defaults true.
    */
   isAuthenticated?: boolean;
+  /**
+   * When true, mount the ApplicationFormModal on top of the viewer at
+   * open time. Used by the `/world join <slug>` slash-command path:
+   * the server emits `open-world` + `world-application-prompt`, and
+   * App.tsx forwards the second hint as this prop. Without it the
+   * applicant would have to find the Apply button themselves after
+   * the viewer opened.
+   */
+  openApplicationOnMount?: boolean;
 }
 
 /**
@@ -34,7 +44,7 @@ interface Props {
  * sanitized HTML instead of an editor. Public/open worlds are reachable by
  * non-owners; private ones only resolve for the owner.
  */
-export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAuthenticated = true }: Props) {
+export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAuthenticated = true, openApplicationOnMount = false }: Props) {
   const [detail, setDetail] = useState<WorldDetail | null>(initialDetail ?? null);
   const [error, setError] = useState<string | null>(null);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(() => {
@@ -47,6 +57,11 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
     return firstTop?.id ?? null;
   });
   const [busy, setBusy] = useState(false);
+  // Application form overlay. The catalog opens this same component
+  // via its own `applyingTo` state; here we drive it from either the
+  // Apply chip in MembershipControls OR the `openApplicationOnMount`
+  // prop fired from the `/world join` slash-command flow.
+  const [showApplicationForm, setShowApplicationForm] = useState(openApplicationOnMount);
 
   async function load() {
     setError(null);
@@ -195,6 +210,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
                 busy={busy}
                 onJoin={join}
                 onLeave={leave}
+                onApply={() => setShowApplicationForm(true)}
               />
             ) : null}
             {/* Edit button only shows when the viewer can actually edit
@@ -260,6 +276,22 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
         ) : null}
       </div>
       </ActiveThemeContext.Provider>
+      {showApplicationForm && detail ? (
+        <ApplicationFormModal
+          worldId={detail.world.id}
+          worldName={detail.world.name}
+          onClose={() => setShowApplicationForm(false)}
+          onSubmitted={() => {
+            // Close on submit. The viewer's load() refresh isn't
+            // strictly required — the application status doesn't
+            // change membership yet (still pending review), and the
+            // catalog card the user came from will reflect "pending"
+            // on its next mount. Keeping the close-only posture
+            // matches the catalog's Apply flow.
+            setShowApplicationForm(false);
+          }}
+        />
+      ) : null}
     </Modal>
   );
 }
@@ -420,47 +452,98 @@ function MemberAvatar({ member }: { member: WorldMemberRef }) {
 
 /**
  * Membership action chips for the viewer header. Per migration 0187
- * primary-world is gone, so the controls are just Join and Leave
- * scoped to the viewer's CURRENT identity:
- *   - non-member + open world → "Join"
- *   - current identity is a member → "Leave"
- *   - non-member + private/public → no controls (visibility is unchanged
- *     and there's no apply-from-viewer here; the catalog handles Apply)
+ * primary-world is gone, so the controls are just Join / Apply /
+ * Leave scoped to the viewer's CURRENT identity:
+ *   - already a member → "Leave"
+ *   - non-member + visibility="open" + joinMode="open" → "Join"
+ *   - non-member + visibility="open" + joinMode="application" → "Apply" (opens ApplicationFormModal)
+ *   - non-member + visibility="open" + joinMode="invite-only" → static "Invite-only" chip
+ *   - non-member + visibility=private/public → nothing (no public path)
+ *
+ * Application-mode chips reflect any in-flight application: a
+ * pending application disables the button and shows "Application
+ * pending"; a rejected application shows "Reapply" so the user has
+ * an explicit second-chance affordance.
  */
 function MembershipControls({
   detail,
   busy,
   onJoin,
   onLeave,
+  onApply,
 }: {
   detail: WorldDetail;
   busy: boolean;
   onJoin: () => void;
   onLeave: () => void;
+  onApply: () => void;
 }) {
-  const isOpen = detail.world.visibility === "open";
-  if (!detail.viewerIsMember) {
-    if (!isOpen) return null;
+  if (detail.viewerIsMember) {
     return (
       <button
         type="button"
-        onClick={onJoin}
+        onClick={onLeave}
         disabled={busy}
-        title="Join this world as your current identity. Doesn't change room access."
-        className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
+        className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-sm text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
       >
-        Join
+        Leave
       </button>
     );
   }
+  // Non-member branches. Visibility !== "open" means there's no
+  // public path in here at all (private worlds resolve only for the
+  // owner; public ones aren't catalog-joinable). Show nothing.
+  if (detail.world.visibility !== "open") return null;
+  const joinMode = detail.world.joinMode ?? "open";
+  if (joinMode === "invite-only") {
+    // Static informational chip. Looks like a button but isn't one —
+    // there's nothing to do here besides ask the author. Title is
+    // the actionable guidance.
+    return (
+      <span
+        title="The author of this world adds members directly. Message them if you'd like in."
+        className="inline-flex items-center rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs italic text-keep-muted"
+      >
+        Invite-only
+      </span>
+    );
+  }
+  if (joinMode === "application") {
+    const app = detail.viewerApplication;
+    if (app && app.status === "pending") {
+      return (
+        <span
+          title="Your application is waiting on the author."
+          className="inline-flex items-center rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs italic text-keep-muted"
+        >
+          Application pending
+        </span>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={onApply}
+        disabled={busy}
+        title={app && app.status === "rejected"
+          ? "Your last application was declined. You can apply again."
+          : "Send the author an application to join this world."}
+        className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
+      >
+        {app && app.status === "rejected" ? "Reapply" : "Apply"}
+      </button>
+    );
+  }
+  // joinMode === "open" → classic one-click Join, same posture as before.
   return (
     <button
       type="button"
-      onClick={onLeave}
+      onClick={onJoin}
       disabled={busy}
-      className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-sm text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
+      title="Join this world as your current identity. Doesn't change room access."
+      className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
     >
-      Leave
+      Join
     </button>
   );
 }

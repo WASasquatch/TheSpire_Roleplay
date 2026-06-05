@@ -2037,9 +2037,16 @@ function FreeformBorderEditor({
  *  Cosmetics sub-tab
  *
  *  One row per cosmetic; admins edit name / description / cost /
- *  enabled. Currently `inline_avatar` is the only buyable
- *  cosmetic; `rank_border` is a UX placeholder (real per-rank
- *  prices live on rank_tiers.borderCost via the Ranks tab).
+ *  enabled. Current buyable cosmetics: `inline_avatar` plus the
+ *  `flair_*` family — profile_banner, typing_phrase, lurking_master,
+ *  reaction_sheet, room_presence, session_presence, profile_visitors
+ *  (migration 0192), and profile_marquee (migration 0192).
+ *  `rank_border` remains a UX placeholder (real per-rank prices
+ *  live on rank_tiers.borderCost via the Ranks tab). The catalog
+ *  iterates dynamically below, so adding a new flair only needs a
+ *  seed row in the `cosmetics` table + an entry in the purchase
+ *  endpoint's allowlist (see PURCHASABLE_COSMETIC_KEYS in
+ *  apps/server/src/routes/earning.ts).
  * ========================================================= */
 
 function CosmeticsSection() {

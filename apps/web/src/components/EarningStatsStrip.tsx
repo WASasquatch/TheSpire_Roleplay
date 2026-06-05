@@ -223,7 +223,7 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
             .map((b) => (
               <span
                 key={b.id}
-                className="earn-burst pointer-events-none absolute left-1/2 -top-5 -translate-x-1/2 whitespace-nowrap text-xs font-semibold text-keep-accent"
+                className="earn-burst pointer-events-none absolute left-1/2 -top-5 -translate-x-1/2 whitespace-nowrap font-semibold text-keep-accent"
               >
                 +{b.xpDelta.toLocaleString()} XP
               </span>

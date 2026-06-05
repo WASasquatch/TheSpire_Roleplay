@@ -242,10 +242,18 @@ export function applyTheme(theme: Theme): void {
 export type UiFontScale = "small" | "medium" | "large" | "xl";
 
 const FONT_SCALE_PX: Record<UiFontScale, { desktop: number; mobile: number }> = {
-  small:  { desktop: 14, mobile: 12 },
-  medium: { desktop: 16, mobile: 14 },
-  large:  { desktop: 18, mobile: 16 },
-  xl:     { desktop: 20, mobile: 18 },
+  // Mobile tiers run ~2px below desktop across the board. The
+  // previous mobile floor (12px on "small") read as oversized
+  // chrome on actual phones — every utility chip, sidebar label,
+  // and timestamp ate more vertical space than a one-handed
+  // viewport could afford. Pulling each tier down one notch lets
+  // "small" land at a genuinely-compact 10px, "medium" at the
+  // OS-default 13px, and the upper tiers stay readable for users
+  // who explicitly need more.
+  small:  { desktop: 14, mobile: 10 },
+  medium: { desktop: 16, mobile: 13 },
+  large:  { desktop: 18, mobile: 15 },
+  xl:     { desktop: 20, mobile: 17 },
 };
 
 /** CSS media query that flags a viewport as "mobile" for font-scale

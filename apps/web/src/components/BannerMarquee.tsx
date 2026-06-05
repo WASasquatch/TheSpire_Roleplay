@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AnnouncementBanner } from "@thekeep/shared";
 import { legibleAgainstBg, renderUiRouteChipsInHtml } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
@@ -6,6 +6,7 @@ import { sanitizeUserHtml } from "../lib/userHtml.js";
 import { useDismissed, dismiss } from "../lib/dismissedBanners.js";
 import { getSocket } from "../lib/socket.js";
 import { handleUiRouteClickInHtml } from "../lib/uiRouteOpen.js";
+import { hydrateDynamicUiRouteChips } from "../lib/hydrateDynamicUiRouteChips.js";
 
 /**
  * Persistent close key — content-aware. The key is the marquee
@@ -138,6 +139,19 @@ export function BannerMarquee() {
     [banners, activeIdx],
   );
 
+  // Hydrate any dynamic chip (e.g. {scriptorium:latest:story}) AFTER
+  // `dangerouslySetInnerHTML` has put the rendered HTML into the
+  // body div — the chip's static label is the skeleton, the
+  // hydration helper fetches + writes in the real title. Re-runs
+  // when the rendered HTML changes (rotation tick, admin edit) so a
+  // freshly-shown banner with a dynamic chip gets resolved too.
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    return hydrateDynamicUiRouteChips(el);
+  }, [renderedHtml]);
+
   if (dismissed) return null;
   if (banners.length === 0) return null;
 
@@ -171,6 +185,7 @@ export function BannerMarquee() {
           dead center. */}
       <div aria-hidden />
       <div
+        ref={bodyRef}
         // The fade is purely CSS — opacity 1 → 0 → 1 around the
         // index swap. `transition` is inline so it stays tied to
         // FADE_MS without us needing a custom Tailwind config.
@@ -191,13 +206,21 @@ export function BannerMarquee() {
         // just the structural tags lets the chip's margin survive.
         //
         // Width: `max-w-5xl` (1024px) gives the body ~145 chars of
-        // one-line space at `text-sm` before truncation kicks in. The
-        // editor cap (`ANNOUNCEMENT_BANNER_BODY_MAX = 180`) is sized
-        // to leave a small markdown-expansion tolerance past that.
-        // The previous `max-w-3xl` ate ~40% of typical banner text
-        // even when the author stayed well under the announced
+        // one-line space at `text-sm` on desktop before truncation
+        // kicks in. The editor cap (`ANNOUNCEMENT_BANNER_BODY_MAX
+        // = 180`) leaves a small markdown-expansion tolerance past
+        // that. The previous `max-w-3xl` ate ~40% of typical banner
+        // text even when the author stayed well under the announced
         // 4000-char cap — that's the inconsistency this bumps.
-        className="max-w-5xl truncate text-center text-sm leading-snug [&_a]:underline [&_a]:underline-offset-2 [&_li]:m-0 [&_li]:inline [&_li]:before:content-['•'] [&_li]:before:mx-1 [&_ol]:m-0 [&_p]:m-0 [&_p]:inline [&_strong]:font-semibold [&_ul]:m-0 [&_ul]:inline"
+        //
+        // Truncate is `sm:`-prefixed so phones don't lose 90% of the
+        // body to ellipsis; below the `sm` breakpoint (640px) the
+        // strip wraps to as many lines as the body needs. The
+        // controls cell stays vertically centered against the
+        // wrapped block via `items-center` on the grid above, so a
+        // 3-line mobile banner reads as one cohesive strip with the
+        // close button parked beside it.
+        className="max-w-5xl text-center text-sm leading-snug sm:truncate [&_a]:underline [&_a]:underline-offset-2 [&_li]:m-0 [&_li]:inline [&_li]:before:content-['•'] [&_li]:before:mx-1 [&_ol]:m-0 [&_p]:m-0 [&_p]:inline [&_strong]:font-semibold [&_ul]:m-0 [&_ul]:inline"
         // Delegated click handler picks up any `{token}` chip the
         // post-sanitize chip generator stamped into the HTML body.
         // Non-chip clicks fall through to the bar's natural
@@ -210,7 +233,12 @@ export function BannerMarquee() {
           on the grid track. */}
       <div className="flex items-center justify-self-end gap-2">
         {banners.length > 1 ? (
-          <div className="flex items-center gap-1" aria-hidden>
+          // Dots hidden on mobile — h-2 w-2 is too small to tap
+          // reliably on touch, and the wrapped multi-line body
+          // already gives mobile readers the whole banner without
+          // needing to flip between rotations. Auto-rotation still
+          // runs underneath.
+          <div className="hidden items-center gap-1 sm:flex" aria-hidden>
             {banners.map((b, i) => (
               <button
                 key={b.id}

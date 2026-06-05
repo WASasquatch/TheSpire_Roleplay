@@ -535,6 +535,14 @@ export type UiHint =
   /** Open the World Catalog modal (browse open worlds). */
   | { kind: "open-world-catalog" }
   /**
+   * Surface the application form for an application-gated world.
+   * Emitted by `/world join <slug>` when the world's joinMode is
+   * "application". Paired with an `open-world` hint so the viewer
+   * mounts behind the form. Mirrors the catalog Apply path so the
+   * same ApplicationFormModal hosts both entry points.
+   */
+  | { kind: "world-application-prompt"; worldId: string; worldName: string }
+  /**
    * Open the Scriptorium catalog. Tabs:
    *   - "find" (default): browse public stories
    *   - "my":     the caller's own stories (editor entry point)

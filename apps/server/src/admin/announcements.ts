@@ -14,6 +14,7 @@ import {
   COLOR_TOKEN_OR_HEX_RE,
   SCHEDULED_ANNOUNCEMENT_BODY_MAX,
   parseScheduleSpec,
+  validateAuthorUiRouteTokens,
 } from "@thekeep/shared";
 import { announcementBanners, rooms, scheduledAnnouncements, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
@@ -107,6 +108,15 @@ export async function registerAdminAnnouncementRoutes(
     if (!(await requirePermission(req, reply, "manage_banner_announcements"))) return;
     const body = bannerCreateSchema.parse(req.body);
     const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+    // UI route token guard — reject author-gated shortcuts the caller
+    // can't use (e.g. a community manager trying to embed
+    // `{modal:admin}` in a banner). Unknown tokens pass through as
+    // literal text; only KNOWN tokens with insufficient role fail.
+    const tokenCheck = validateAuthorUiRouteTokens(body.bodyHtml, sessionUser.role);
+    if (!tokenCheck.ok) {
+      reply.code(400);
+      return { error: tokenCheck.reason };
+    }
     const id = nanoid();
     const safeHtml = sanitizeBio(body.bodyHtml);
     await db.insert(announcementBanners).values({
@@ -138,6 +148,14 @@ export async function registerAdminAnnouncementRoutes(
       if (!existing) {
         reply.code(404);
         return { error: "not found" };
+      }
+      if (body.bodyHtml !== undefined) {
+        const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+        const tokenCheck = validateAuthorUiRouteTokens(body.bodyHtml, sessionUser.role);
+        if (!tokenCheck.ok) {
+          reply.code(400);
+          return { error: tokenCheck.reason };
+        }
       }
       await db
         .update(announcementBanners)
@@ -222,6 +240,20 @@ export async function registerAdminAnnouncementRoutes(
       }
     }
     const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+    // Validate UI route tokens in BOTH the html + markdown bodies —
+    // the markdown is what the editor round-trips, the html is what
+    // actually broadcasts. A token gated on `admin` rejects when a
+    // mod-level delegate tries to schedule it (banner manager grant
+    // does NOT imply the right to drop an `{modal:admin}` chip into
+    // every room).
+    const bodyTokenCheck = validateAuthorUiRouteTokens(
+      `${body.bodyMarkdown}\n${body.bodyHtml}`,
+      sessionUser.role,
+    );
+    if (!bodyTokenCheck.ok) {
+      reply.code(400);
+      return { error: bodyTokenCheck.reason };
+    }
     const id = nanoid();
     // For interval rows the first fire is one interval AFTER creation
     // (admin's "every 3h" reads as "first ping 3h from now"); a
@@ -287,6 +319,15 @@ export async function registerAdminAnnouncementRoutes(
           ? now + parsed.parsed.intervalMs
           : parsed.parsed.runAt;
         patch.lastRunAt = null;
+      }
+      if (body.bodyHtml !== undefined || body.bodyMarkdown !== undefined) {
+        const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+        const combined = `${body.bodyMarkdown ?? ""}\n${body.bodyHtml ?? ""}`;
+        const tokenCheck = validateAuthorUiRouteTokens(combined, sessionUser.role);
+        if (!tokenCheck.ok) {
+          reply.code(400);
+          return { error: tokenCheck.reason };
+        }
       }
       if (body.bodyHtml !== undefined) patch.bodyHtml = sanitizeBio(body.bodyHtml);
       if (body.bodyMarkdown !== undefined) patch.bodyMarkdown = body.bodyMarkdown;

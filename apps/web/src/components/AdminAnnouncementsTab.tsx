@@ -4,6 +4,7 @@ import {
   COLOR_TOKEN_OR_HEX_RE,
   describeSchedule,
   markdownToHtml,
+  renderUiRouteChipsInHtml,
   parseScheduleSpec,
   resolveMessageColor,
   SCHEDULED_ANNOUNCEMENT_BODY_MAX,
@@ -158,7 +159,7 @@ function BannerSection({ canManage }: { canManage: boolean }) {
                 <td className="px-2 py-2">
                   <div
                     className="prose prose-sm max-w-none"
-                    dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(b.bodyHtml) }}
+                    dangerouslySetInnerHTML={{ __html: renderUiRouteChipsInHtml(sanitizeUserHtml(b.bodyHtml)) }}
                   />
                 </td>
                 <td className="px-2 py-2 text-center tabular-nums">{b.sortOrder}</td>
@@ -224,7 +225,7 @@ function BannerForm({
   // Live HTML preview — runs the markdown converter so an admin
   // typing `**bold**` sees the rendered output. Raw HTML in the
   // input passes through unchanged.
-  const previewHtml = useMemo(() => sanitizeUserHtml(markdownToHtml(body)), [body]);
+  const previewHtml = useMemo(() => renderUiRouteChipsInHtml(sanitizeUserHtml(markdownToHtml(body))), [body]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -482,7 +483,7 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
                       const resolved = resolveMessageColor(r.color, themeBg);
                       return resolved ? { color: resolved } : {};
                     })()}
-                    dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(r.bodyHtml) }}
+                    dangerouslySetInnerHTML={{ __html: renderUiRouteChipsInHtml(sanitizeUserHtml(r.bodyHtml)) }}
                   />
                 </td>
                 <td className="px-2 py-2">
@@ -574,7 +575,7 @@ function ScheduledForm({
     () => (scheduleSpec.trim() ? parseScheduleSpec(scheduleSpec) : null),
     [scheduleSpec],
   );
-  const previewHtml = useMemo(() => sanitizeUserHtml(markdownToHtml(body)), [body]);
+  const previewHtml = useMemo(() => renderUiRouteChipsInHtml(sanitizeUserHtml(markdownToHtml(body))), [body]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();

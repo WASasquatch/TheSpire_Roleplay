@@ -1746,17 +1746,32 @@ function ThreadPane({
   // / snapshot fallback) when the viewer isn't in any room at the
   // moment — same graceful-degradation pattern the chat-line path
   // uses for offline senders.
-  const myAvatarOverride = useChat((s) => {
-    if (!meId) return { url: null as string | null, crop: null as AvatarCrop | null };
+  //
+  // Each selector returns ONE primitive / one persisted reference
+  // (never a fresh object literal). An earlier draft combined both
+  // into a `{ url, crop }` literal and crashed the DM modal with
+  // React's #185 infinite-update error because Zustand's default
+  // `Object.is` comparison saw a new object every render → the
+  // component re-rendered → the selector re-ran → … Two separate
+  // selectors over the same lookup keep the equality check stable.
+  const myAvatarUrl = useChat((s) => {
+    if (!meId) return null;
     const matchChar = myCharacterId ?? null;
     for (const list of Object.values(s.occupants)) {
       const row = list.find((o) => o.userId === meId && o.characterId === matchChar);
-      if (row) return { url: row.avatarUrl, crop: row.avatarCrop };
+      if (row) return row.avatarUrl;
     }
-    return { url: null as string | null, crop: null as AvatarCrop | null };
+    return null;
   });
-  const myAvatarUrl = myAvatarOverride.url;
-  const myAvatarCrop = myAvatarOverride.crop;
+  const myAvatarCrop = useChat((s) => {
+    if (!meId) return null;
+    const matchChar = myCharacterId ?? null;
+    for (const list of Object.values(s.occupants)) {
+      const row = list.find((o) => o.userId === meId && o.characterId === matchChar);
+      if (row) return row.avatarCrop;
+    }
+    return null;
+  });
 
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);

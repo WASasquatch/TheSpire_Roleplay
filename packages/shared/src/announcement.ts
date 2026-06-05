@@ -180,6 +180,19 @@ function formatDurationMs(ms: number): string {
  * Caps applied at the schema layer + the admin form. Bodies above
  * these counts get rejected at save time; the editor surfaces a
  * remaining-chars counter so admins notice before the round-trip.
+ *
+ * `ANNOUNCEMENT_BANNER_BODY_MAX` is sized to the single-line marquee
+ * strip: `max-w-5xl` (1024px) at `text-sm` fits ~145 chars before
+ * truncation; the cap leaves a ~35-char (≈6 word) tolerance for
+ * markdown / chip-token expansion that adds visible chars without
+ * adding source chars, plus a touch of slack for shorter bodies that
+ * end mid-word. A 4000-char cap (the previous value, lifted from
+ * scheduled announces) lied to admins about how much would render —
+ * the editor counted up to 4000 but the bar truncated past line one.
+ *
+ * `SCHEDULED_ANNOUNCEMENT_BODY_MAX` stays generous because scheduled
+ * announces land as `kind: "announce"` chat lines (wrapping is
+ * fine — no single-strip truncation in the chat renderer).
  */
-export const ANNOUNCEMENT_BANNER_BODY_MAX = 4000;
+export const ANNOUNCEMENT_BANNER_BODY_MAX = 180;
 export const SCHEDULED_ANNOUNCEMENT_BODY_MAX = 4000;

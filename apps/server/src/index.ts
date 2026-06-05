@@ -90,6 +90,7 @@ import { registerPushRoutes } from "./routes/push.js";
 import { initPush } from "./push.js";
 import { registerCommandsRoutes } from "./routes/commands.js";
 import { registerAnnouncementsRoutes } from "./routes/announcements.js";
+import { registerProfileFlairRoutes } from "./routes/profileFlair.js";
 import { startAnnouncementScheduler } from "./admin/announcements.js";
 import { registerNavLinkRoutes } from "./routes/nav-links.js";
 import { registerRoomsRoutes } from "./routes/rooms.js";
@@ -302,6 +303,12 @@ async function main() {
   // shell paint these for every viewer. Admin CRUD lives behind
   // /admin/announcements/* via the admin route module.
   await registerAnnouncementsRoutes(baseApp, db);
+  // Profile-flair surfaces: visitor-count tracker + rotating-quote
+  // marquee. View logging is always-on (so equipping the flair has
+  // data the moment it lands); display + owner CRUD are
+  // ownership-gated against the matching identity's earning_ledger
+  // purchase row.
+  await registerProfileFlairRoutes(baseApp, db);
   await registerNavLinkRoutes(baseApp, db, async (req) => {
     const u = await getSessionUser(req, db);
     if (!u) return false;

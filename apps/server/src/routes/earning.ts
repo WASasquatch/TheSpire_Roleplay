@@ -480,6 +480,43 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         eq(earningLedger.ownerId, me.id),
       ))
       .limit(1)).length > 0;
+    // Migration 0192 — profile visitors counter + quote marquee
+    // flairs. Same ownership-lookup shape; the CosmeticsTab card
+    // reads `*Owned` to flip between Buy and Equip CTAs, and the
+    // ProfileEditor Flair tab reads it independently for editor
+    // gating on the matching identity.
+    const profileVisitorsOwnerRows = await db
+      .select({ scope: earningLedger.scope, ownerId: earningLedger.ownerId })
+      .from(earningLedger)
+      .where(and(
+        eq(earningLedger.reason, "purchase_flair_profile_visitors"),
+        or(
+          and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
+          ...(charIds.length > 0
+            ? [and(eq(earningLedger.scope, "character"), inArray(earningLedger.ownerId, charIds))]
+            : []),
+        ),
+      ));
+    const masterOwnsProfileVisitors = profileVisitorsOwnerRows.some((r) => r.scope === "user");
+    const characterProfileVisitorsOwnership = new Set(
+      profileVisitorsOwnerRows.filter((r) => r.scope === "character").map((r) => r.ownerId),
+    );
+    const profileMarqueeOwnerRows = await db
+      .select({ scope: earningLedger.scope, ownerId: earningLedger.ownerId })
+      .from(earningLedger)
+      .where(and(
+        eq(earningLedger.reason, "purchase_flair_profile_marquee"),
+        or(
+          and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
+          ...(charIds.length > 0
+            ? [and(eq(earningLedger.scope, "character"), inArray(earningLedger.ownerId, charIds))]
+            : []),
+        ),
+      ));
+    const masterOwnsProfileMarquee = profileMarqueeOwnerRows.some((r) => r.scope === "user");
+    const characterProfileMarqueeOwnership = new Set(
+      profileMarqueeOwnerRows.filter((r) => r.scope === "character").map((r) => r.ownerId),
+    );
     // Bundle every ENABLED name style on this response so the client
     // can inject the CSS + template lookup map once on app load
     // without a separate /earning/catalog fetch. Disabled rows are
@@ -735,6 +772,12 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         sessionConnectTemplate: masterEarningRow?.sessionConnectTemplate ?? null,
         sessionExitTemplate: masterEarningRow?.sessionExitTemplate ?? null,
         sessionPresenceOwned: masterOwnsSessionPresence,
+        // Migration 0192 — profile flairs. `*Owned` gates the
+        // CosmeticsTab Buy/Equip CTA; the per-identity values + the
+        // editor live on the actual profile-flair endpoints (this
+        // snapshot only carries the ownership flag for the catalog).
+        profileVisitorsOwned: masterOwnsProfileVisitors,
+        profileMarqueeOwned: masterOwnsProfileMarquee,
         // Per-character slots, keyed by character id. Each entry
         // mirrors the master shape. Characters without an earning
         // row get null/false defaults so the client can read them
@@ -755,6 +798,9 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               roomJoinTemplate: r.roomJoinTemplate ?? null,
               roomLeaveTemplate: r.roomLeaveTemplate ?? null,
               roomPresenceOwned: characterRoomPresenceOwnership.has(r.characterId),
+              // Migration 0192 — per-character profile flair ownership.
+              profileVisitorsOwned: characterProfileVisitorsOwnership.has(r.characterId),
+              profileMarqueeOwned: characterProfileMarqueeOwnership.has(r.characterId),
             },
           ]),
         ),

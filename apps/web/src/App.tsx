@@ -26,6 +26,7 @@ import { EarningDashboard } from "./components/EarningDashboard.js";
 import { EarningRibbon } from "./components/EarningRibbon.js";
 import { BannerMarquee } from "./components/BannerMarquee.js";
 import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanners.js";
+import { onUiRouteOpen } from "./lib/uiRouteOpen.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
 import { ThreadModal } from "./components/ThreadModal.js";
 import { UsersModal } from "./components/UsersModal.js";
@@ -1042,6 +1043,41 @@ function Chat() {
   // optional so `/story <slug> chapter <N>` can land on a specific page.
   const [storyReader, setStoryReader] = useState<{ storyId: string; chapterIndex?: number } | null>(null);
   const [navLinksVersion, setNavLinksVersion] = useState(0);
+
+  /**
+   * UI route dispatcher — `{rules}` / `{modal:earning:items:shop}` /
+   * `{scriptorium:latest}` chips dispatched from chat lines, the
+   * banner marquee, or scheduled-announcement bodies route through
+   * a single `tk:open-ui-route` event the shell listens for. The
+   * resolved catalog entry carries a discriminated `target`; the
+   * handler narrows and calls the existing modal setter. Adding a
+   * new route = add one catalog entry + one branch here.
+   */
+  useEffect(() => onUiRouteOpen((detail) => {
+    const t = detail.entry.target;
+    switch (t.kind) {
+      case "modal-earning": {
+        const spec: EarningOpenSpec = {};
+        if (t.tab) spec.tab = t.tab;
+        if (t.itemSubTab) spec.itemSubTab = t.itemSubTab;
+        setEarningOpen(spec);
+        return;
+      }
+      case "modal-rules":     setRulesOpen(true); return;
+      case "modal-messages":  setMessagesOpen(true); return;
+      case "modal-worlds":    setWorldCatalogOpen(true); return;
+      case "modal-help":      setHelpOpen({}); return;
+      case "modal-profile-own": openEditor({ mode: "master", characterId: null }); return;
+      case "modal-admin":      setAdminOpen(true); return;
+      case "nav-scriptorium":
+        // Sort is the catalog's default-newest-first sort, so the
+        // `sort: "latest"` variant doesn't need a query param — it
+        // matches what the catalog already lands on. If we add an
+        // alternative sort later, fork on `t.sort` here.
+        setScriptoriumOpen({});
+        return;
+    }
+  }), [openEditor]);
   const [composerText, setComposerText] = useState("");
   // Per-room cached thread categories. Populated lazily for nested rooms
   // on join; the Composer's category picker reads from this. Stale
@@ -3809,61 +3845,36 @@ function StaleVersionBanner() {
   // notification automatically.
   const dismissKey = staleVersion ? `stale-version:${staleVersion}` : "stale-version";
   const dismissed = useDismissed(dismissKey);
-  // Sample the active theme so the banner can render against a known
-  // opaque background and nudge its text colors for WCAG contrast —
-  // the same posture chat text and profile cards use. The default
-  // `.keep-notice-accent` chrome paints the strip at low alpha so the
-  // chat shell's bg image (Spire artwork under the glass theme,
-  // splash backdrop, or a user's `publicProfileBgUrl` when wired into
-  // the shell) bleeds through and turns the text unreadable on any
-  // bright patch of the underlying art. Forcing an opaque panel
-  // background + a contrast-nudged text color gives every theme +
-  // background combo a guaranteed legibility floor.
+  // The banner itself keeps the original `.keep-notice-accent` chrome
+  // (theme-style-aware accent tint + gradient + border). Only the
+  // optional ADMIN-AUTHORED release-note paragraph needs its color
+  // nudged for legibility — the default `text-keep-muted` washes out
+  // against the accent tint on glass / scifi themes where the chat
+  // shell's bg image bleeds through. We nudge JUST that fragment
+  // against the panel slot (which is what the accent tint blends
+  // over), leaving the rest of the banner's chrome untouched.
   const theme = useActiveTheme();
+  const noteColor = legibleAgainstBg(theme.muted, theme.panel, 3.0);
   if (!staleVersion) return null;
   if (dismissed) return null;
-  const bgHex = theme.panel;
-  const textHex = legibleAgainstBg(theme.text, bgHex, 4.5);
-  const mutedHex = legibleAgainstBg(theme.muted, bgHex, 3.0);
-  const actionHex = legibleAgainstBg(theme.action, bgHex, 4.5);
   return (
-    <div
-      // Inline `backgroundColor` defeats the `.keep-notice-accent`
-      // rule's translucent action tint AND every theme-style override
-      // (glass's 0.20 alpha + backdrop-blur in particular). The
-      // accent character carries on the border-bottom rule below;
-      // visually the strip still reads as "the action-colored
-      // notification bar," but the text now has a solid bg to land on.
-      style={{
-        backgroundColor: bgHex,
-        color: textHex,
-        borderBottom: `2px solid ${actionHex}`,
-      }}
-      className="flex flex-wrap items-center justify-center gap-2 px-3 py-1.5 text-xs"
-    >
+    <div className="keep-notice keep-notice-accent flex flex-wrap items-center justify-center gap-2 px-3 py-1.5 text-xs">
       <span>
         You're running <b>{siteName} {VERSION}</b>. The current version is <b>{staleVersion}</b>.
         {/* Admin-authored release note from `remote-deploy.sh
-            --update-msg "..."`. Italicized + muted-but-still-legible
-            so it reads as secondary context without disappearing into
-            the panel bg. Falls back silently when the deploy didn't
-            carry a note. */}
+            --update-msg "..."`. Italicized + nudged against the
+            panel slot so it reads as secondary context without
+            disappearing into the tint on glass / scifi. Falls back
+            silently when the deploy didn't carry a note. */}
         {staleUpdateMessage ? (
-          <> <em style={{ color: mutedHex }}>{staleUpdateMessage}</em></>
+          <> <em style={{ color: noteColor }}>{staleUpdateMessage}</em></>
         ) : null}
         {" "}Please refresh to update.
       </span>
       <button
         type="button"
         onClick={() => window.location.reload()}
-        // Inline color overrides so the Refresh button reads as the
-        // call-to-action even on themes whose `--keep-action` lost
-        // contrast against the panel bg above.
-        style={{
-          color: actionHex,
-          borderColor: actionHex,
-        }}
-        className="keep-button rounded border bg-transparent px-2 py-0.5 text-xs font-semibold hover:bg-keep-action/15"
+        className="keep-button rounded border border-keep-action bg-keep-action/20 px-2 py-0.5 text-xs font-semibold text-keep-action hover:bg-keep-action/30"
       >
         Refresh
       </button>
@@ -3875,8 +3886,7 @@ function StaleVersionBanner() {
         onClick={() => dismissPersisted(dismissKey)}
         title="Dismiss until a newer version is announced"
         aria-label="Dismiss update banner"
-        style={{ color: textHex }}
-        className="shrink-0 rounded px-1 text-base leading-none opacity-60 hover:opacity-100"
+        className="shrink-0 rounded px-1 text-base leading-none text-keep-muted opacity-60 hover:opacity-100 hover:text-keep-text"
       >
         ×
       </button>

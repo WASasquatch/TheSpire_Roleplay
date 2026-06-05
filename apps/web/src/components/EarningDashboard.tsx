@@ -608,6 +608,8 @@ function FlashSaleCard({
     : pick.key === "flair_reaction_sheet" ? "😀"
     : pick.key === "flair_room_presence" ? "🚪"
     : pick.key === "flair_session_presence" ? "✨"
+    : pick.key === "flair_profile_visitors" ? "👀"
+    : pick.key === "flair_profile_marquee" ? "💭"
     : "🎁";
 
   const preview = kind === "nameStyle" ? (
@@ -2521,8 +2523,16 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
   const lurkingMasterRow = catalog?.cosmetics.find((c) => c.key === "flair_lurking_master");
   const roomPresenceRow = catalog?.cosmetics.find((c) => c.key === "flair_room_presence");
   const sessionPresenceRow = catalog?.cosmetics.find((c) => c.key === "flair_session_presence");
+  // Migration 0192 flairs — same shape as the other catalog rows.
+  // Both surfaces are config-only (no inline preview / equip toggle
+  // here), so the cards use the compact `ProfileFlairBuyCard`
+  // shared at the bottom of this section. Editor lives in the
+  // ProfileEditor Flair tab; this card only handles the purchase.
+  const profileVisitorsRow = catalog?.cosmetics.find((c) => c.key === "flair_profile_visitors");
+  const profileMarqueeRow = catalog?.cosmetics.find((c) => c.key === "flair_profile_marquee");
   if (!inlineAvatarRow && !profileBannerRow && !typingPhraseRow && !reactionSheetRow
-      && !lurkingMasterRow && !roomPresenceRow && !sessionPresenceRow) {
+      && !lurkingMasterRow && !roomPresenceRow && !sessionPresenceRow
+      && !profileVisitorsRow && !profileMarqueeRow) {
     return <p className="text-sm text-keep-muted">No flair available right now.</p>;
   }
 
@@ -2753,6 +2763,55 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     }
   }
 
+  // Migration 0192 — profile flair purchase state. Ownership flows
+  // through the snapshot (set on the matching identity row); the
+  // actual editor + config lives in ProfileEditor → Flair tab,
+  // so the card here is a single "Buy" CTA with a short
+  // description pointing the buyer to the editor for setup.
+  const profileVisitorsOwned = activeCharacterId
+    ? (perCharacterMap[activeCharacterId]?.profileVisitorsOwned ?? false)
+    : (snapshot.activeCosmetics.profileVisitorsOwned ?? false);
+  const profileVisitorsSale = profileVisitorsRow
+    ? flashSalePriceFor(flashSale, "cosmetic", profileVisitorsRow.key, profileVisitorsRow.cost)
+    : null;
+  async function doBuyProfileVisitors() {
+    if (!profileVisitorsRow || !profileVisitorsSale) return;
+    const who = activeCharacterId ? "this character" : "your master account";
+    if (!window.confirm(`Buy "${profileVisitorsRow.name}" for ${profileVisitorsSale.effectivePrice} Currency from ${who}'s pool?`)) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await purchaseCosmetic("flair_profile_visitors", activeCharacterId);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Purchase failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const profileMarqueeOwned = activeCharacterId
+    ? (perCharacterMap[activeCharacterId]?.profileMarqueeOwned ?? false)
+    : (snapshot.activeCosmetics.profileMarqueeOwned ?? false);
+  const profileMarqueeSale = profileMarqueeRow
+    ? flashSalePriceFor(flashSale, "cosmetic", profileMarqueeRow.key, profileMarqueeRow.cost)
+    : null;
+  async function doBuyProfileMarquee() {
+    if (!profileMarqueeRow || !profileMarqueeSale) return;
+    const who = activeCharacterId ? "this character" : "your master account";
+    if (!window.confirm(`Buy "${profileMarqueeRow.name}" for ${profileMarqueeSale.effectivePrice} Currency from ${who}'s pool?`)) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await purchaseCosmetic("flair_profile_marquee", activeCharacterId);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Purchase failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-3">
       {err ? (
@@ -2963,8 +3022,93 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
             ) : null}
           </section>
         ) : null}
+
+        {profileVisitorsRow && profileVisitorsSale ? (
+          <ProfileFlairBuyCard
+            row={profileVisitorsRow}
+            sale={profileVisitorsSale}
+            owned={profileVisitorsOwned}
+            ownedCopy="You can show your visitor count on your profile and read the breakdown from Edit Profile → Flair."
+            buyDisabled={busy || activeWallet < profileVisitorsSale.effectivePrice}
+            onBuy={() => void doBuyProfileVisitors()}
+          />
+        ) : null}
+
+        {profileMarqueeRow && profileMarqueeSale ? (
+          <ProfileFlairBuyCard
+            row={profileMarqueeRow}
+            sale={profileMarqueeSale}
+            owned={profileMarqueeOwned}
+            ownedCopy="Configure your rotating quotes from Edit Profile → Flair. Up to 10 lines, Markdown supported."
+            buyDisabled={busy || activeWallet < profileMarqueeSale.effectivePrice}
+            onBuy={() => void doBuyProfileMarquee()}
+          />
+        ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * Minimal Flair card used by the two profile-customization flairs
+ * (visitors counter + quote marquee) added in migration 0192.
+ * Identical visual posture to the inline-avatar / banner cards but
+ * no inline equip toggle or config form — the actual editor lives
+ * in ProfileEditor → Flair, so this card just owns the Buy CTA +
+ * a one-line "configure it here" pointer for buyers.
+ */
+function ProfileFlairBuyCard({
+  row,
+  sale,
+  owned,
+  ownedCopy,
+  buyDisabled,
+  onBuy,
+}: {
+  row: { key: string; name: string; description: string; cost: number };
+  sale: ReturnType<typeof flashSalePriceFor>;
+  owned: boolean;
+  ownedCopy: string;
+  buyDisabled: boolean;
+  onBuy: () => void;
+}) {
+  return (
+    <section data-shop-row={row.key} className="flex flex-col rounded border border-keep-rule bg-keep-bg/40 p-3">
+      <header className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5 font-semibold">
+            <span className="truncate">{row.name}</span>
+            <SalePip discountPct={sale.discountPct} />
+          </div>
+          {row.description ? (
+            <p className="text-xs text-keep-muted">{row.description}</p>
+          ) : null}
+        </div>
+        {!owned ? (
+          <>
+            <PriceBlock
+              basePrice={row.cost}
+              effectivePrice={sale.effectivePrice}
+              onSale={sale.discountPct != null}
+            />
+            <button
+              type="button"
+              onClick={onBuy}
+              disabled={buyDisabled}
+              title={buyDisabled ? "Not enough Currency, or a purchase is already in flight" : `Buy ${row.name}`}
+              className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
+            >
+              Buy
+            </button>
+          </>
+        ) : (
+          <span className="text-[11px] uppercase tracking-widest text-keep-system">Owned</span>
+        )}
+      </header>
+      {owned ? (
+        <p className="mt-2 text-[10px] italic text-keep-muted">{ownedCopy}</p>
+      ) : null}
+    </section>
   );
 }
 

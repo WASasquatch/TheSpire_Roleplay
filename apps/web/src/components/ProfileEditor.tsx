@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { AvatarCrop, CharacterAttribute, CharacterJournalEntry, CharacterPortrait, CharacterStats, CharacterStatsVisibility, CharacterVibeAxisKey, ProfileCollectionEntry, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
 import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, CHARACTER_ATTRIBUTES_MAX, CHARACTER_ATTRIBUTE_LABEL_MAX, CHARACTER_ATTRIBUTE_VALUE_MAX, CHARACTER_ATTRIBUTE_VALUE_MIN, CHARACTER_VIBE_AXES, DEFAULT_THEME, clampAvatarCrop, isDarkPalette, isDefaultAvatarCrop, normalizeTheme } from "@thekeep/shared";
 import { applyStyle } from "../lib/ornaments/index.js";
+import { ProfileFlairEditor } from "./ProfileFlairEditor.js";
 import { applyTheme } from "../lib/theme.js";
 import { GENDER_OPTIONS, type Gender } from "../lib/gender.js";
 import {
@@ -334,6 +335,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
     | "privacy"
     | "links"
     | "gallery"
+    | "flair"
     | "journal";
   const [activeTab, setActiveTab] = useState<EditorTab>("description");
 
@@ -1210,6 +1212,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             // editor's PortraitGalleryEditor swaps endpoint URLs
             // based on the active target.
             { id: "gallery",     label: "Gallery",     show: true },
+            { id: "flair",       label: "Flair",       show: true },
             { id: "journal",     label: "Journal",     show: isCharacter },
           ];
           const visible = tabs.filter((t) => t.show);
@@ -1840,6 +1843,15 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, o
             {activeTab === "journal" && isCharacter && target.kind === "character" ? (
               <div className="min-h-0 flex-1 overflow-y-auto p-4">
                 <JournalEditor characterId={target.id} />
+              </div>
+            ) : null}
+
+            {/* FLAIR — profile-customization flairs (visitor counter +
+                quote marquee). Self-contained: handles its own fetch,
+                ownership gating, and saves against `/me/profile-flair`. */}
+            {activeTab === "flair" ? (
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                <ProfileFlairEditor characterId={isCharacter && target.kind === "character" ? target.id : null} />
               </div>
             ) : null}
 

@@ -154,6 +154,18 @@ export interface IdentityCosmetics {
   sessionExitTemplate?: string | null;
   /** Whether the master has purchased `flair_session_presence`. */
   sessionPresenceOwned?: boolean;
+  /** Migration 0192 — `flair_profile_visitors` ownership. Gates the
+   *  CosmeticsTab Buy/Equip CTA and the editor's stats panel. The
+   *  actual visibility toggle + view counts live behind
+   *  `/me/profile-flair` (not on the snapshot) so the editor's
+   *  fetched state stays decoupled from the catalog snapshot. */
+  profileVisitorsOwned?: boolean;
+  /** Migration 0192 — `flair_profile_marquee` ownership. Gates the
+   *  CosmeticsTab Buy CTA + the editor's quotes grid. Quote bodies
+   *  live behind `/me/profile-flair`, not on the snapshot, since
+   *  they can be edited frequently and we don't want the snapshot
+   *  payload to bloat with rotating-quote content. */
+  profileMarqueeOwned?: boolean;
 }
 
 export interface ActiveCosmetics extends IdentityCosmetics {

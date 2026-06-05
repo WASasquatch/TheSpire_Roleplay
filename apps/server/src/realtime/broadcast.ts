@@ -14,6 +14,7 @@ import {
   DEFAULT_PRESENCE_TEMPLATES,
   extractMentions,
   renderPresenceTemplate,
+  validateAuthorUiRouteTokens,
 } from "@thekeep/shared";
 import {
   bans,
@@ -131,6 +132,22 @@ export async function addMessage(
       return;
     }
     body = expanded;
+  }
+
+  // UI route token guard — rejects KNOWN tokens that the author's
+  // role can't use (e.g. a regular user trying to drop
+  // `{modal:admin}` into a `/say` so it renders for mods downstream).
+  // Unknown tokens fall through as plain literal text so a roleplay
+  // line like `{nervously}` stays unaffected. Runs after inline-cmd
+  // expansion in case a custom command's template embeds a token —
+  // the post-expansion body is what actually broadcasts.
+  const uiTokenCheck = validateAuthorUiRouteTokens(body, ctx.user.role);
+  if (!uiTokenCheck.ok) {
+    ctx.socket.emit("error:notice", {
+      code: "UI_ROUTE_FORBIDDEN",
+      message: uiTokenCheck.reason,
+    });
+    return;
   }
 
   // Forum-thread auto-binding. When the dispatcher hydrated a reply

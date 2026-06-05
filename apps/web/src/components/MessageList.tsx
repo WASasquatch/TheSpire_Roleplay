@@ -8,6 +8,8 @@ import { UserNameTag } from "./UserNameTag.js";
 import type { Gender } from "../lib/gender.js";
 import { parseInline, renderForumBody, solitaryEmoticonToken } from "../lib/markdown.js";
 import { sanitizeUserHtml } from "../lib/userHtml.js";
+import { renderUiRouteChipsInHtml } from "@thekeep/shared";
+import { handleUiRouteClickInHtml } from "../lib/uiRouteOpen.js";
 import { EmoticonSprite } from "./EmoticonSprite.js";
 import { useEmoticons } from "../state/emoticons.js";
 import { handlePlainTextCopy } from "../lib/chatCopy.js";
@@ -3020,13 +3022,23 @@ function Line({
       // bg, same as it does for chat lines.
       const announceColor = bodyColor;
       const announceStyle = announceColor ? { color: announceColor } : undefined;
+      // Scheduled-announce body — sanitize, then run the UI route
+      // chip generator so `{rules}` / `{modal:earning}` shortcuts in
+      // the saved HTML render as clickable chips. Delegated click
+      // handler picks them up. Manual `/announce <text>` (no
+      // bodyHtml) flows through the regular markdown pipeline which
+      // already handles `{token}` natively via `parseInline`.
+      const announceHtml = msg.bodyHtml
+        ? renderUiRouteChipsInHtml(sanitizeUserHtml(msg.bodyHtml))
+        : "";
       lineEl = msg.bodyHtml ? (
         <div className="font-bold text-keep-accent" style={announceStyle}>
           {time}
           <span aria-hidden>📣 </span>
           <span
             className="prose prose-sm inline max-w-none [&_p]:m-0 [&_p]:inline [&_a]:underline [&_a]:underline-offset-2"
-            dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(msg.bodyHtml) }}
+            onClick={handleUiRouteClickInHtml}
+            dangerouslySetInnerHTML={{ __html: announceHtml }}
           />
         </div>
       ) : (

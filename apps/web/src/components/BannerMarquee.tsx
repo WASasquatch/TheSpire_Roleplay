@@ -1,25 +1,35 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AnnouncementBanner } from "@thekeep/shared";
-import { legibleAgainstBg } from "@thekeep/shared";
+import { legibleAgainstBg, renderUiRouteChipsInHtml } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
 import { sanitizeUserHtml } from "../lib/userHtml.js";
 import { useDismissed, dismiss } from "../lib/dismissedBanners.js";
 import { getSocket } from "../lib/socket.js";
+import { handleUiRouteClickInHtml } from "../lib/uiRouteOpen.js";
 
 /**
- * Persistent close key. One key for the whole bar (not per-banner)
- * because the user's preference here is "I don't want the marquee
- * at the top of my chat" — flipping every individual entry would
- * be tedious for the admin's typical "rotate through a handful at
- * once" use case.
+ * Persistent close key — content-aware. The key is the marquee
+ * namespace joined with a signature of the CURRENT enabled banner
+ * set (each entry's id + updatedAt). When an admin adds, edits, or
+ * removes a banner, the signature changes → key changes → dismissed
+ * lookup misses → the bar re-shows. Closing again only dismisses
+ * THAT specific content set; the next admin change re-shows on its
+ * own without forcing the viewer to manually clear site data.
  *
- * Persists in `tk:dismissedBanners:v1` via lib/dismissedBanners.ts,
- * which keeps a single union set shared with the StaleVersionBanner,
- * the room banner, the earning notifications, and every other
- * close-able surface — wiped together by a future "reset banner
- * dismissals" affordance in user settings.
+ * Mirrors the version-keyed close on the StaleVersionBanner
+ * (`stale-version:0.20.4`) — the viewer's "I've seen this" is
+ * scoped to the artifact they dismissed, not the surface itself.
+ *
+ * The empty-set sentinel keeps the key stable while the initial
+ * fetch is in flight so a transient "no banners" state doesn't get
+ * its own dismiss entry persisted by mistake.
  */
-const DISMISS_KEY = "announcement-marquee";
+const DISMISS_NAMESPACE = "announcement-marquee";
+function buildDismissKey(banners: AnnouncementBanner[]): string {
+  if (banners.length === 0) return `${DISMISS_NAMESPACE}:empty`;
+  const sig = banners.map((b) => `${b.id}@${b.updatedAt}`).sort().join("|");
+  return `${DISMISS_NAMESPACE}:${sig}`;
+}
 
 /** Time between rotations when the catalog has 2+ banners. ~8s reads
  *  long enough to actually parse a sentence-or-two announcement but
@@ -61,11 +71,21 @@ export function BannerMarquee() {
   // viewer could land on a chosen banner and have it advance ~1
   // second later because the existing interval fired mid-jump.
   const [rotationResetKey, setRotationResetKey] = useState(0);
-  const dismissed = useDismissed(DISMISS_KEY);
+  // Compute the content-aware dismiss key from the CURRENT banner
+  // set. Memo'd so every render isn't re-stringifying the signature.
+  const dismissKey = useMemo(() => buildDismissKey(banners), [banners]);
+  const dismissed = useDismissed(dismissKey);
   const theme = useActiveTheme();
 
   useEffect(() => {
-    if (dismissed) return;
+    // ALWAYS fetch — the dismiss-key signature depends on the
+    // current banner set, so we have to load the set BEFORE we can
+    // ask "is this content-set dismissed?" An earlier draft
+    // short-circuited here on `dismissed`, but with a content-aware
+    // key that gates would have left the viewer locked out even
+    // after an admin added a fresh banner. The render branch below
+    // skips the chrome when dismissed; the fetch + state still
+    // run so the key can update when the admin edits the set.
     let cancelled = false;
     async function load() {
       try {
@@ -110,9 +130,16 @@ export function BannerMarquee() {
     return () => window.clearInterval(id);
   }, [banners.length, dismissed, rotationResetKey]);
 
+  // Memo the chip-rendered HTML per active banner so a rotation tick
+  // doesn't re-run sanitize + chip replacement on stable bodies. The
+  // dep set is small (id + bodyHtml) so the swap is cheap.
+  const renderedHtml = useMemo(
+    () => renderUiRouteChipsInHtml(sanitizeUserHtml((banners[activeIdx]?.bodyHtml) ?? "")),
+    [banners, activeIdx],
+  );
+
   if (dismissed) return null;
   if (banners.length === 0) return null;
-  const active = banners[activeIdx] ?? banners[0]!;
 
   // Same legibility computation as StaleVersionBanner — opaque
   // panel bg, text nudged against it, action color for the close
@@ -131,8 +158,18 @@ export function BannerMarquee() {
         color: textHex,
         borderBottom: `2px solid ${actionHex}`,
       }}
-      className="relative flex items-center justify-center gap-3 px-4 py-1.5 text-xs"
+      // 3-column grid keeps the body OPTICALLY centered (between the
+      // empty left column and the right controls column) while
+      // pinning the dot row + close button to the right edge. A
+      // simple flex with `justify-center` would offset the body
+      // leftward once the right controls were added, since they take
+      // their own width out of the centering math.
+      className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-1.5 text-sm"
     >
+      {/* Left spacer — sized symmetrically to the right column via
+          the 1fr-auto-1fr track shape so the auto (body) column lands
+          dead center. */}
+      <div aria-hidden />
       <div
         // The fade is purely CSS — opacity 1 → 0 → 1 around the
         // index swap. `transition` is inline so it stays tied to
@@ -146,50 +183,71 @@ export function BannerMarquee() {
           opacity: fading ? 0 : 1,
           transition: `opacity ${FADE_MS}ms ease-in-out`,
         }}
-        className="max-w-3xl flex-1 truncate text-center text-xs leading-snug [&_*]:m-0 [&_a]:underline [&_a]:underline-offset-2 [&_li]:inline [&_li]:before:content-['•'] [&_li]:before:mx-1 [&_p]:inline [&_strong]:font-semibold [&_ul]:inline"
-        dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(active.bodyHtml) }}
+        // The structural-tag overrides flatten paragraph/list spacing
+        // so multi-paragraph bodies render on one line. We DELIBERATELY
+        // avoid `[&_*]:m-0` here — that wildcard previously stripped
+        // the UI-route chip's own `mx-1.5` breathing-room margin and
+        // left the chip pressed against the surrounding text. Listing
+        // just the structural tags lets the chip's margin survive.
+        //
+        // Width: `max-w-5xl` (1024px) gives the body ~145 chars of
+        // one-line space at `text-sm` before truncation kicks in. The
+        // editor cap (`ANNOUNCEMENT_BANNER_BODY_MAX = 180`) is sized
+        // to leave a small markdown-expansion tolerance past that.
+        // The previous `max-w-3xl` ate ~40% of typical banner text
+        // even when the author stayed well under the announced
+        // 4000-char cap — that's the inconsistency this bumps.
+        className="max-w-5xl truncate text-center text-sm leading-snug [&_a]:underline [&_a]:underline-offset-2 [&_li]:m-0 [&_li]:inline [&_li]:before:content-['•'] [&_li]:before:mx-1 [&_ol]:m-0 [&_p]:m-0 [&_p]:inline [&_strong]:font-semibold [&_ul]:m-0 [&_ul]:inline"
+        // Delegated click handler picks up any `{token}` chip the
+        // post-sanitize chip generator stamped into the HTML body.
+        // Non-chip clicks fall through to the bar's natural
+        // interaction (none, currently).
+        onClick={handleUiRouteClickInHtml}
+        dangerouslySetInnerHTML={{ __html: renderedHtml }}
       />
-      {/* Position indicator chips — only meaningful when there are
-          multiple banners. Clicking one jumps the rotation directly
-          to that banner; the interval continues from there. */}
-      {banners.length > 1 ? (
-        <div className="flex shrink-0 items-center gap-1" aria-hidden>
-          {banners.map((b, i) => (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => {
-                if (i === activeIdx) return;
-                setFading(true);
-                window.setTimeout(() => {
-                  setActiveIdx(i);
-                  setFading(false);
-                  // Bump so the auto-rotation effect tears down +
-                  // restarts its interval; viewer gets the full
-                  // ROTATION_MS on the banner they clicked.
-                  setRotationResetKey((k) => k + 1);
-                }, FADE_MS);
-              }}
-              className="h-1.5 w-1.5 rounded-full transition hover:scale-125"
-              style={{
-                backgroundColor: i === activeIdx ? actionHex : `${actionHex}55`,
-              }}
-              aria-label={`Show announcement ${i + 1} of ${banners.length}`}
-              title={`Show announcement ${i + 1} of ${banners.length}`}
-            />
-          ))}
-        </div>
-      ) : null}
-      <button
-        type="button"
-        onClick={() => dismiss(DISMISS_KEY)}
-        style={{ color: textHex }}
-        className="shrink-0 rounded px-1 text-base leading-none opacity-60 hover:opacity-100"
-        aria-label="Dismiss site announcements"
-        title="Dismiss (stays closed until you clear your site data)"
-      >
-        ×
-      </button>
+      {/* Right controls — dot row (when 2+ banners) + close button,
+          aligned to the right edge of the row via `justify-self-end`
+          on the grid track. */}
+      <div className="flex items-center justify-self-end gap-2">
+        {banners.length > 1 ? (
+          <div className="flex items-center gap-1" aria-hidden>
+            {banners.map((b, i) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => {
+                  if (i === activeIdx) return;
+                  setFading(true);
+                  window.setTimeout(() => {
+                    setActiveIdx(i);
+                    setFading(false);
+                    // Bump so the auto-rotation effect tears down +
+                    // restarts its interval; viewer gets the full
+                    // ROTATION_MS on the banner they clicked.
+                    setRotationResetKey((k) => k + 1);
+                  }, FADE_MS);
+                }}
+                className="h-2 w-2 rounded-full transition hover:scale-125"
+                style={{
+                  backgroundColor: i === activeIdx ? actionHex : `${actionHex}55`,
+                }}
+                aria-label={`Show announcement ${i + 1} of ${banners.length}`}
+                title={`Show announcement ${i + 1} of ${banners.length}`}
+              />
+            ))}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => dismiss(dismissKey)}
+          style={{ color: textHex }}
+          className="rounded px-1 text-lg leading-none opacity-60 hover:opacity-100"
+          aria-label="Dismiss site announcements"
+          title="Dismiss this set. Re-shows when an admin adds or edits a banner."
+        >
+          ×
+        </button>
+      </div>
     </div>
   );
 }

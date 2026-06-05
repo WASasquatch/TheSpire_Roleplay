@@ -40,6 +40,12 @@ export default defineConfig({
       // reaction toggles drop on the floor.
       "/emoticons": "http://localhost:3001",
       "/reactions": "http://localhost:3001",
+      // Public marquee banners endpoint — the chat shell fetches this
+      // unauthenticated to populate the rotating bar. Without the
+      // proxy entry the request hit Vite's SPA fallback and returned
+      // index.html, which parsed as 200 OK with no `banners` field
+      // so the marquee silently never rendered.
+      "/announcements": "http://localhost:3001",
       // Admin-uploaded files (profile BGs, emoticon sheet images,
       // story covers, etc.). Served from disk by fastify-static
       // in prod; the dev proxy needs the same passthrough so an

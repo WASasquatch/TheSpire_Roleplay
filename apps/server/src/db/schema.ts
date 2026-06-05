@@ -2633,6 +2633,26 @@ export const userEarning = sqliteTable("user_earning", {
    */
   sessionConnectTemplate: text("session_connect_template"),
   sessionExitTemplate: text("session_exit_template"),
+  /**
+   * Rotating-quote marquee body (migration 0192). JSON array of
+   * strings (one per quote) capped to 10 entries at the API layer.
+   * Each entry is short-form markdown / basic HTML rendered with
+   * the same sanitizer the announcement marquee uses. Gated on
+   * ownership of `flair_profile_marquee` for the matching identity;
+   * the writable surface (profile editor) checks ownership before
+   * accepting an update, so a direct DB poke is the only way to
+   * smuggle a quote past the purchase gate.
+   */
+  profileMarqueeQuotesJson: text("profile_marquee_quotes_json"),
+  /**
+   * Owner's "show the visitors counter on my public profile" toggle
+   * (migration 0192). Independent of `flair_profile_visitors`
+   * ownership: equipping the flair turns it ON by default, but the
+   * owner can flip it off in settings to keep view metrics private
+   * to themselves while still counting. View LOGGING is always-on
+   * regardless of this toggle.
+   */
+  showProfileVisitorsCount: integer("show_profile_visitors_count", { mode: "boolean" }).notNull().default(false),
   createdAt: ts("created_at"),
   updatedAt: ts("updated_at"),
 });
@@ -2708,9 +2728,55 @@ export const characterEarning = sqliteTable("character_earning", {
    */
   roomJoinTemplate: text("room_join_template"),
   roomLeaveTemplate: text("room_leave_template"),
+  /**
+   * Per-character marquee quotes (migration 0192). Same shape +
+   * gate as the master pool's column. Character-active profiles
+   * read this; OOC/master reads the user_earning row.
+   */
+  profileMarqueeQuotesJson: text("profile_marquee_quotes_json"),
+  /** Per-character visitors-counter display toggle (migration 0192). */
+  showProfileVisitorsCount: integer("show_profile_visitors_count", { mode: "boolean" }).notNull().default(false),
   createdAt: ts("created_at"),
   updatedAt: ts("updated_at"),
 });
+
+/* ---------- profile_views ----------
+ *
+ * Append-only log of one row per unique (viewer, profile, day).
+ * Drives the `flair_profile_visitors` counter — both display + the
+ * owner's stats query. Always logged regardless of whether the
+ * profile owner has equipped the flair, so the moment they buy +
+ * enable it the count is non-zero. Viewer dedupe key is the
+ * viewer's userId for members and an opaque IP+UA hash for
+ * anonymous traffic; the UNIQUE constraint over
+ * (profile, viewer_key, day_bucket) makes a same-day re-view a
+ * silent no-op via `INSERT OR IGNORE`.
+ */
+export const profileViews = sqliteTable(
+  "profile_views",
+  {
+    id: id(),
+    /** Master account that owns the profile being viewed. */
+    profileUserId: text("profile_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Character whose profile is viewed; NULL = master/OOC profile. */
+    profileCharacterId: text("profile_character_id")
+      .references(() => characters.id, { onDelete: "set null" }),
+    /** Signed-in viewer; NULL for anonymous. */
+    viewerUserId: text("viewer_user_id")
+      .references(() => users.id, { onDelete: "set null" }),
+    /** Dedupe key — `userId` for members, ip+UA hash for anon. */
+    viewerKey: text("viewer_key").notNull(),
+    /** UNIX-day integer (floor(ms / 86_400_000)). */
+    dayBucket: integer("day_bucket").notNull(),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    profileIdx: index("profile_views_profile_idx").on(t.profileUserId, t.profileCharacterId),
+    dayIdx: index("profile_views_day_idx").on(t.dayBucket),
+  }),
+);
 
 /* ---------- earning_ledger ----------
  * Append-only audit of every XP / Currency delta on either scope.
@@ -3345,6 +3411,7 @@ export type DbNameStyle = typeof nameStyles.$inferSelect;
 export type DbCosmetic = typeof cosmetics.$inferSelect;
 export type DbUserEarning = typeof userEarning.$inferSelect;
 export type DbCharacterEarning = typeof characterEarning.$inferSelect;
+export type DbProfileView = typeof profileViews.$inferSelect;
 export type DbEarningLedger = typeof earningLedger.$inferSelect;
 export type DbUserOwnedBorder = typeof userOwnedBorders.$inferSelect;
 export type DbUserOwnedNameStyle = typeof userOwnedNameStyles.$inferSelect;

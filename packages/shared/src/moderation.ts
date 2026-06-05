@@ -75,7 +75,10 @@ export type AuditAction =
   | "announcement_banner_delete"
   | "scheduled_announcement_create"
   | "scheduled_announcement_update"
-  | "scheduled_announcement_delete";
+  | "scheduled_announcement_delete"
+  // Profile-customization flairs (migration 0192)
+  | "profile_marquee_update"
+  | "profile_visitors_visibility_update";
 
 /**
  * Preset action groups for the AuditTab's category dropdown. Each

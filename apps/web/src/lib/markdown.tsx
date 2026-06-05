@@ -1,5 +1,6 @@
 import { Fragment, useState, type ReactNode } from "react";
-import { customCmdCssToStyle, resolveMessageColor, splitOnCode, VMARK_SPAN_RE } from "@thekeep/shared";
+import { customCmdCssToStyle, resolveMessageColor, resolveUiRoute, splitOnCode, VMARK_SPAN_RE, type UiRoute } from "@thekeep/shared";
+import { openUiRoute } from "./uiRouteOpen.js";
 import { splitMentions } from "./mentions.js";
 import { useActiveTheme } from "./theme.js";
 import { useEmoticons } from "../state/emoticons.js";
@@ -403,6 +404,29 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
           </VerifiedInline>
         ),
       };
+    }
+  }
+
+  // UI route shortcut chip — `{token}` patterns like `{rules}`,
+  // `{modal:earning}`, `{scriptorium:latest}` get replaced with a
+  // small clickable chip that dispatches a `tk:open-ui-route` event
+  // the chat shell listens for. Unknown tokens (anything matching the
+  // bracket+letter shape but not in the catalog) fall through to the
+  // literal text path so legitimate roleplay usage of `{nervously}` /
+  // `{stage direction}` stays untouched. The author-role gate already
+  // ran server-side, so by the time we're rendering we trust the
+  // viewer can see whatever made it onto the wire.
+  if (text[i] === "{") {
+    const m = /^\{([a-z][a-z0-9-]*(?::[a-z0-9-]+)*)\}/i.exec(text.slice(i));
+    if (m) {
+      const token = m[1]!.toLowerCase();
+      const entry = resolveUiRoute(token);
+      if (entry) {
+        return {
+          end: i + m[0].length,
+          node: <UiRouteChip entry={entry} />,
+        };
+      }
     }
   }
 
@@ -1377,6 +1401,41 @@ export function solitaryEmoticonToken(body: string): { slug: string; cellIndex: 
  *  subscribes to the emoticon store so a sheet hot-swap renders
  *  through to existing message bodies without a refresh.
  * ============================================================= */
+/* =============================================================
+ *  UiRouteChip — inline button for `{rules}` / `{modal:earning}` /
+ *  `{scriptorium:latest}` etc. The catalog entry is resolved before
+ *  this component renders (the parser hands us the resolved entry)
+ *  so we don't re-look-up. Click → `openUiRoute(token)` →
+ *  `tk:open-ui-route` event → Chat shell's listener calls the
+ *  matching modal setter.
+ *
+ *  Visually: a small action-tinted pill that reads like a chat
+ *  callout but stays inline with surrounding prose. The icon (when
+ *  declared on the catalog entry) sits before the label as a
+ *  decorative glyph; aria-label uses the description so screen
+ *  readers announce the destination clearly.
+ * ============================================================= */
+function UiRouteChip({ entry }: { entry: UiRoute }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        // Prevent the click from bubbling to a parent message bubble's
+        // tap-to-reveal-timestamp handler (DM bubbles, scene banners)
+        // — the chip is its own interaction.
+        e.stopPropagation();
+        openUiRoute(entry.token);
+      }}
+      title={entry.description}
+      aria-label={entry.description}
+      className="mx-1.5 inline-flex items-center gap-1 rounded border border-keep-action/50 bg-keep-action/10 px-1 py-0 align-baseline text-[1em] text-keep-action transition hover:border-keep-action hover:bg-keep-action/20"
+    >
+      {entry.icon ? <span aria-hidden>{entry.icon}</span> : null}
+      <span>{entry.label}</span>
+    </button>
+  );
+}
+
 function InlineEmoticon({ slug, cellIndex }: { slug: string; cellIndex: number }) {
   const sheet = useEmoticons((s) => s.sheets.find((sh) => sh.slug === slug));
   if (!sheet || cellIndex < 0 || cellIndex >= sheet.cells.length) {

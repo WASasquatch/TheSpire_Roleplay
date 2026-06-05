@@ -15,6 +15,7 @@ import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { RankSigil } from "./RankSigil.js";
 import { StyledName } from "./StyledName.js";
 import { useChat } from "../state/store.js";
+import { ProfileMarquee, ProfileVisitorsChip, useTrackProfileView } from "./ProfileFlairSurfaces.js";
 
 interface Props {
   profile: ProfileView;
@@ -829,6 +830,14 @@ function ProfileBody({
               ) : null}
               <span aria-hidden>·</span>
               <CopyProfileLink name={name} />
+              {/* Visitor counter — renders only when the owner owns
+                  `flair_profile_visitors` AND has flipped visibility
+                  on. Returns null otherwise, so the meta line is
+                  unchanged for everyone else. */}
+              <ProfileVisitorsChip
+                profileName={isChar ? profile.profile.name : profile.profile.username}
+                characterId={isChar ? profile.profile.id : null}
+              />
             </div>
             {/* Mod-only attribution + id-copy chips. Two gates:
                   - `ownerUsername` is shipped server-side only to
@@ -1004,6 +1013,23 @@ function ProfileBody({
           </div>
         ) : null}
         </div>
+
+        {/* Profile-flair surfaces — the quote marquee (when the
+            owner has flair_profile_marquee + configured quotes)
+            sits between the hero band and the scrolling body so
+            it reads as part of the profile chrome. The visitor
+            chip is intentionally inline in the hero meta further
+            up; this block only owns the wide strip + the side
+            effect of logging the view. */}
+        <ProfileMarquee
+          profileName={isChar ? profile.profile.name : profile.profile.username}
+          characterId={isChar ? profile.profile.id : null}
+        />
+        <ProfileViewTracker
+          profileName={isChar ? profile.profile.name : profile.profile.username}
+          characterId={isChar ? profile.profile.id : null}
+          profileUserId={profile.profile.userId}
+        />
 
         {/* Body - scrolls independently of the hero */}
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
@@ -1825,6 +1851,30 @@ function EmptyProfile({ name, kind }: { name: string; kind: "master" | "characte
  * an explicit OOC gender; characters store theirs in stats.gender (which
  * is free-form text - only normalize the canonical labels).
  */
+/**
+ * View tracker wrapper — wires `useTrackProfileView` from
+ * ProfileFlairSurfaces against the viewer's identity so a self-view
+ * doesn't bump the counter. Pulls the viewer id from the chat store
+ * since ProfileModal already lives inside the same context.
+ */
+function ProfileViewTracker({
+  profileName,
+  characterId,
+  profileUserId,
+}: {
+  profileName: string;
+  characterId: string | null;
+  profileUserId: string;
+}) {
+  const myUserId = useChat((s) => s.me?.id ?? null);
+  useTrackProfileView({
+    profileName,
+    characterId,
+    isSelf: myUserId !== null && myUserId === profileUserId,
+  });
+  return null;
+}
+
 function resolveGender(profile: ProfileView): Gender {
   if (profile.kind === "master") return profile.profile.gender;
   const raw = profile.profile.stats?.gender?.toLowerCase().trim();

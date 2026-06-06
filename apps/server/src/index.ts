@@ -41,6 +41,10 @@ import { dispatchChatInput } from "./realtime/dispatch.js";
 import {
   addSystemMessage,
   broadcastPresence,
+  broadcastTheaterSync,
+  checkpointPlayingTheaters,
+  hydrateTheaterFromDb,
+  persistTheaterCheckpoint,
   expireIfEmpty,
   findCanonicalLanding,
   joinRoom,
@@ -53,6 +57,8 @@ import {
   userIsOnline,
 } from "./realtime/broadcast.js";
 import { clearAllAwayForUser } from "./realtime/awayState.js";
+import { applyControl, parsePlaylist } from "./realtime/theaterState.js";
+import { callerCanEditRoom } from "./auth/roomPermissions.js";
 import { clearAllMoodForUser } from "./realtime/moodState.js";
 import {
   clearTyperEverywhere,
@@ -482,6 +488,19 @@ async function main() {
   // expires stale typer entries and re-broadcasts shrunken sets.
   // Idempotent if called more than once.
   startTypingTracker(io, db);
+
+  // Theater (watch-party) playback resilience. Rehydrate each theater
+  // room's persisted checkpoint so reconnecting clients resync to where
+  // viewers were before this restart (the boot re-anchor treats the
+  // downtime as a pause, not a fast-forward). Then checkpoint actively-
+  // playing rooms every 30s so the persisted position stays fresh while
+  // a long video runs without any control events. `.unref()` so the
+  // timer never keeps the process alive on shutdown.
+  void hydrateTheaterFromDb(db).catch(() => { /* a bad row shouldn't crash boot */ });
+  const THEATER_CHECKPOINT_MS = 30_000;
+  setInterval(() => {
+    void checkpointPlayingTheaters(db).catch(() => { /* swallow; next tick retries */ });
+  }, THEATER_CHECKPOINT_MS).unref();
 
   // Zombie-room sweep. Fires once 60s after boot, long enough that
   // every client that was in a user-created room when the server
@@ -1025,6 +1044,75 @@ async function main() {
       socket.leave(`room:${payload.roomId}`);
       clearTyperFromRoom(io, db, { roomId: payload.roomId, userId: user.id });
       await broadcastPresence(io, db, payload.roomId);
+    });
+
+    /**
+     * Theater (watch-party) playback control. Owner/mod-only: we re-check
+     * the room-edit gate server-side so a viewer can't drive playback by
+     * crafting the event in devtools. Mutates the in-memory live state and
+     * fans the new `theater:sync` out to the whole room.
+     */
+    socket.on("theater:control", async (payload, ack) => {
+      if (!(await checkAndExtendSession())) {
+        ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
+        return;
+      }
+      const { roomId, action } = payload;
+      if (!socket.rooms.has(`room:${roomId}`)) {
+        ack?.({ ok: false, code: "NO_ROOM", message: "You are not in that room." });
+        return;
+      }
+      const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
+      if (!room || !room.theaterMode) {
+        ack?.({ ok: false, code: "NO_THEATER", message: "Theater mode is not on in this room." });
+        return;
+      }
+      if (!(await callerCanEditRoom(db, user, roomId))) {
+        ack?.({ ok: false, code: "PERM", message: "Only the room owner or a mod can control playback." });
+        return;
+      }
+      const playlist = parsePlaylist(room.theaterPlaylist);
+      applyControl(roomId, action, {
+        positionSec: payload.positionSec,
+        index: payload.index,
+        len: playlist.length,
+        loop: room.theaterLoop,
+        now: Date.now(),
+      });
+      await broadcastTheaterSync(io, roomId);
+      // Checkpoint the new playback state so a restart resumes from this
+      // control (a fresh seek/pause survives even a crash 1s later, ahead
+      // of the next 30s sweep).
+      await persistTheaterCheckpoint(db, roomId);
+      ack?.({ ok: true });
+    });
+
+    /**
+     * Floating emoji reaction over the theater video. Open to any occupant
+     * (it's a lightweight cheer, not a control action). Rate-limited per
+     * socket so a hostile client can't flood the room. `side` alternates so
+     * reactions drift up both edges.
+     */
+    let theaterReactTimes: number[] = [];
+    let theaterReactSide: "left" | "right" = "left";
+    socket.on("theater:react", async (payload) => {
+      if (!(await checkAndExtendSession())) return;
+      const { roomId } = payload;
+      if (!socket.rooms.has(`room:${roomId}`)) return;
+      const now = Date.now();
+      theaterReactTimes = theaterReactTimes.filter((t) => t > now - 5_000);
+      if (theaterReactTimes.length >= 12) return; // 12 reactions / 5s
+      theaterReactTimes.push(now);
+      const emoji = (payload.emoji ?? "").trim().slice(0, 8);
+      if (!emoji) return;
+      theaterReactSide = theaterReactSide === "left" ? "right" : "left";
+      io.to(`room:${roomId}`).emit("theater:reaction", {
+        roomId,
+        userId: user.id,
+        displayName: user.displayName,
+        emoji,
+        side: theaterReactSide,
+      });
     });
 
     /**

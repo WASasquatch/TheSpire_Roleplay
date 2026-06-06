@@ -513,6 +513,36 @@ export const rooms = sqliteTable(
       .notNull()
       .default("flat"),
     /**
+     * Theater (synchronized watch-party) CONFIG. Orthogonal to `type`
+     * (a theater can be a public OR private room) - mirrors replyMode as
+     * a presentation mode rather than an access mode.
+     *
+     *   theaterMode      , on/off. When on, the chat renders a video
+     *                      panel above the message list.
+     *   theaterLoop      , end-of-source behavior: "off" stop | "one"
+     *                      repeat current | "all" advance + loop (default).
+     *   theaterPlaylist  , JSON array of TheaterSource ({ id, url, kind,
+     *                      title? }) in play order. Default "[]".
+     *
+     * The LIVE playback position is intentionally absent here - it lives
+     * in realtime/theaterState.ts (in-memory) and ships via `theater:sync`.
+     * Owners/mods edit these via `/theater`.
+     */
+    theaterMode: integer("theater_mode", { mode: "boolean" }).notNull().default(false),
+    theaterLoop: text("theater_loop", { enum: ["off", "one", "all"] })
+      .notNull()
+      .default("all"),
+    theaterPlaylist: text("theater_playlist").notNull().default("[]"),
+    /**
+     * Persisted live-playback CHECKPOINT (JSON: { index, positionSec,
+     * isPlaying, updatedAtMs }) so a server restart resumes near where
+     * viewers were instead of snapping to the start of the playlist.
+     * Null when theater is off / nothing has played yet. Written on each
+     * control + a periodic sweep (NOT per-tick); rehydrated + re-anchored
+     * to boot time on startup. See realtime/theaterState.ts.
+     */
+    theaterPlayback: text("theater_playback"),
+    /**
      * Set when the last live socket leaves a user-created room. The
      * row is kept (settings + name reservation) so a future create
      * with the same lowercased name can resurrect the room with the

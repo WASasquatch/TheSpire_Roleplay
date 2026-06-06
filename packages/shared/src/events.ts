@@ -1,5 +1,6 @@
 import type { ChatMessage } from "./message.js";
 import type { RoomOccupant, RoomSummary } from "./room.js";
+import type { TheaterSync } from "./theater.js";
 import type { IdentityRef, ProfileView } from "./profile.js";
 import type { WatchOnlineEvent } from "./moderation.js";
 import type { DirectMessage } from "./directMessage.js";
@@ -156,6 +157,35 @@ export interface ClientToServerEvents {
      */
     asCharacterId?: string | null;
   }) => void;
+  /**
+   * Theater (watch-party) playback control. Owner/mod-only; the server
+   * re-checks the room-edit gate and silently ignores unauthorized
+   * senders. Mutates the in-memory live playback state and rebroadcasts
+   * `theater:sync` to the room.
+   *
+   *   play / pause      , toggle playback at `positionSec`.
+   *   seek              , jump to `positionSec`.
+   *   next / prev       , step the playlist (honors loop on wrap).
+   *   select            , jump to playlist `index`.
+   *   ended             , the controller's source finished; advance per
+   *                       loop mode. Server debounces by current index so
+   *                       duplicate reports from multiple owners advance
+   *                       only once.
+   */
+  "theater:control": (
+    payload: {
+      roomId: string;
+      action: "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended";
+      positionSec?: number;
+      index?: number;
+    },
+    ack?: AckFn<{ ok: true } | AckError>,
+  ) => void;
+  /**
+   * Fire a floating emoji reaction over the theater video. Any occupant
+   * may send. The server fans it out as `theater:reaction` to the room.
+   */
+  "theater:react": (payload: { roomId: string; emoji: string }) => void;
 }
 
 /** Events emitted by the server → client. */
@@ -486,6 +516,26 @@ export interface ServerToClientEvents {
   "chat:typing:update": (payload: {
     roomId: string;
     typers: TypingEntry[];
+  }) => void;
+  /**
+   * Live theater playback state for the room. Broadcast whenever the
+   * controller changes playback (play/pause/seek/advance) and sent
+   * directly to a socket that just joined / resynced so late arrivals
+   * snap to the current source + position. See TheaterSync for the
+   * drift-extrapolation contract.
+   */
+  "theater:sync": (payload: { roomId: string } & TheaterSync) => void;
+  /**
+   * A floating emoji reaction to render over the theater video. `side`
+   * alternates so reactions drift up the left and right edges (Twitch /
+   * Twitter style). Ephemeral - the client animates it once and drops it.
+   */
+  "theater:reaction": (payload: {
+    roomId: string;
+    userId: string;
+    displayName: string;
+    emoji: string;
+    side: "left" | "right";
   }) => void;
 }
 

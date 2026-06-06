@@ -8,6 +8,7 @@ import type {
   Role,
   RoomOccupant,
   RoomSummary,
+  TheaterSync,
   Theme,
   TypingEntry,
 } from "@thekeep/shared";
@@ -366,6 +367,16 @@ function saveFontStep(n: 0 | 1 | 2 | 3): void {
   } catch { /* quota or privacy mode - silently skip */ }
 }
 
+// Monotonic key source for ephemeral theater reactions. A plain counter
+// (not Date.now) guarantees uniqueness even for reactions that land in
+// the same millisecond, which is the React list-key invariant the float
+// animation relies on.
+let theaterReactionSeq = 0;
+function nextTheaterReactionId(): number {
+  theaterReactionSeq += 1;
+  return theaterReactionSeq;
+}
+
 interface ChatState {
   me: AuthMe | null;
   setMe: (me: AuthMe | null) => void;
@@ -525,6 +536,24 @@ interface ChatState {
    */
   typersByRoom: Record<string, TypingEntry[]>;
   setTypers: (roomId: string, typers: TypingEntry[]) => void;
+
+  /**
+   * Live theater (watch-party) playback state per room, from the
+   * `theater:sync` socket event. The TheaterPanel reads the entry for
+   * the current room and extrapolates the live position from
+   * `serverTimeMs`. Undefined until the room first reports state.
+   */
+  theaterSyncByRoom: Record<string, { roomId: string } & TheaterSync>;
+  setTheaterSync: (sync: { roomId: string } & TheaterSync) => void;
+  /**
+   * Ephemeral floating reactions over the theater video. Appended on
+   * each `theater:reaction` echo and consumed + dropped by the panel
+   * once its float animation finishes. Capped so a room whose panel
+   * isn't mounted can't accumulate unbounded.
+   */
+  theaterReactions: Array<{ id: number; roomId: string; emoji: string; side: "left" | "right"; displayName: string }>;
+  pushTheaterReaction: (r: { roomId: string; emoji: string; side: "left" | "right"; displayName: string }) => void;
+  dropTheaterReaction: (id: number) => void;
 
   notice: { code: string; message: string } | null;
   setNotice: (n: { code: string; message: string } | null) => void;
@@ -1165,6 +1194,21 @@ export const useChat = create<ChatState>((set) => ({
     }),
 
   setRoom: (room) => set((s) => ({ rooms: { ...s.rooms, [room.id]: room } })),
+
+  theaterSyncByRoom: {},
+  setTheaterSync: (sync) =>
+    set((s) => ({ theaterSyncByRoom: { ...s.theaterSyncByRoom, [sync.roomId]: sync } })),
+  theaterReactions: [],
+  pushTheaterReaction: (r) =>
+    set((s) => {
+      const id = nextTheaterReactionId();
+      // Cap at 60 so a room whose panel never mounts (reactions still
+      // arrive over the socket) can't grow this array without bound.
+      const next = [...s.theaterReactions, { id, ...r }];
+      return { theaterReactions: next.length > 60 ? next.slice(next.length - 60) : next };
+    }),
+  dropTheaterReaction: (id) =>
+    set((s) => ({ theaterReactions: s.theaterReactions.filter((r) => r.id !== id) })),
 
   notice: null,
   setNotice: (n) => set({ notice: n }),

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer, Socket } from "socket.io";
 import type {
@@ -47,6 +47,16 @@ import { awardForForum, awardForMessage } from "../earning/award.js";
 import { bumpLifetimeForMessage, classifyMessageForLifetime } from "../lib/lifetimePostCounts.js";
 import { getAway } from "./awayState.js";
 import { getMood } from "./moodState.js";
+import {
+  checkpointFor,
+  getTheater,
+  hydrate as hydrateTheater,
+  parseCheckpoint,
+  parsePlaylist,
+  serializeCheckpoint,
+  theaterRoomIds,
+  theaterSyncPayload,
+} from "./theaterState.js";
 import { loadReactionsForTargets } from "../reactions.js";
 import { readPoolRank } from "../earning/resolver.js";
 import { routeMessage } from "../earning/routing.js";
@@ -1453,6 +1463,14 @@ async function joinRoomBody(
   // socket doesn't see it twice (once in backlog, once via room broadcast).
   await sendRoomBacklogTo(socket, db, roomId, user.id);
 
+  // Theater rooms: snap this socket to the room's live playback state so
+  // a late joiner lands on the current source + position rather than the
+  // playlist's first frame. No-op when nothing has played yet.
+  {
+    const tp = theaterSyncPayload(roomId);
+    if (tp) socket.emit("theater:sync", tp);
+  }
+
   // Room description: fire ONCE per (user, room) over the lifetime of
   // this process. Previously we only suppressed on reconnect-inside-
   // grace, so a long mobile suspension (screen off past the 20s grace)
@@ -1695,7 +1713,74 @@ export async function buildRoomSummary(
     linkedWorld: await loadLinkedWorld(db, room.id),
     messageExpiryMinutes: room.messageExpiryMinutes,
     replyMode: room.replyMode,
+    theaterMode: room.theaterMode,
+    theaterLoop: room.theaterLoop,
+    theaterPlaylist: parsePlaylist(room.theaterPlaylist),
   };
+}
+
+/**
+ * Push the room's LIVE theater playback state to every socket in the
+ * room. Called after a controller action mutates `theaterState`. No-op
+ * when there is no live state yet (nothing has played) - in that case
+ * clients just sit on the playlist's first source, paused at 0.
+ */
+export async function broadcastTheaterSync(io: Io, roomId: string): Promise<void> {
+  const payload = theaterSyncPayload(roomId);
+  if (!payload) return;
+  io.to(`room:${roomId}`).emit("theater:sync", payload);
+}
+
+/**
+ * Persist the room's current (extrapolated) theater playback into
+ * `rooms.theater_playback` so a restart can resume near where viewers
+ * were. Writes NULL when there's no live state (theater off / nothing
+ * played). Called on each control change and by the periodic sweep -
+ * never per playback tick.
+ */
+export async function persistTheaterCheckpoint(db: Db, roomId: string): Promise<void> {
+  const cp = checkpointFor(roomId, Date.now());
+  await db
+    .update(rooms)
+    .set({ theaterPlayback: cp ? serializeCheckpoint(cp) : null })
+    .where(eq(rooms.id, roomId));
+}
+
+/**
+ * Periodic sweep: re-checkpoint every room that's actively PLAYING so
+ * its persisted position stays fresh (within one sweep interval) while
+ * a long video runs without any control events. Paused rooms were
+ * already checkpointed at the moment they paused, so they're skipped.
+ */
+export async function checkpointPlayingTheaters(db: Db): Promise<void> {
+  for (const roomId of theaterRoomIds()) {
+    if (getTheater(roomId)?.isPlaying) {
+      await persistTheaterCheckpoint(db, roomId);
+    }
+  }
+}
+
+/**
+ * Boot rehydration: load persisted checkpoints for every theater-mode
+ * room back into the in-memory map so reconnecting clients resync to the
+ * resumed position. `hydrate` re-anchors the clock to now, treating the
+ * downtime as a pause. Returns how many rooms were restored.
+ */
+export async function hydrateTheaterFromDb(db: Db): Promise<number> {
+  const rows = await db
+    .select({ id: rooms.id, theaterPlayback: rooms.theaterPlayback })
+    .from(rooms)
+    .where(and(eq(rooms.theaterMode, true), isNotNull(rooms.theaterPlayback)));
+  const now = Date.now();
+  let restored = 0;
+  for (const r of rows) {
+    const cp = parseCheckpoint(r.theaterPlayback);
+    if (cp) {
+      hydrateTheater(r.id, cp, now);
+      restored += 1;
+    }
+  }
+  return restored;
 }
 
 export async function broadcastRoomState(
@@ -1849,6 +1934,9 @@ export async function sendRoomStateTo(
   const occupants = await currentOccupants(io, db, roomId);
   socket.emit("room:state", { room: summary, occupants });
   socket.emit("presence:update", { roomId, occupants });
+  // Re-snap to live theater playback on resync (reconnect, tab wake).
+  const tp = theaterSyncPayload(roomId);
+  if (tp) socket.emit("theater:sync", tp);
 }
 
 export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<RoomOccupant[]> {

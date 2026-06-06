@@ -5003,3 +5003,50 @@ aside.margin-note {
   .orb-desc { font-size: 10.5px; max-width: 165px; }
   .orb-content { padding: 0 22px; }
 }
+
+/* ============================================================
+ *  Theater (watch-party) floating reactions.
+ *
+ *  Emoji fired by viewers drift up the left or right edge of the
+ *  video panel and fade out, Twitch / Twitter style. Each reaction
+ *  unmounts itself on `animationend` (the panel calls
+ *  dropTheaterReaction), so the animation only plays once. A small
+ *  per-reaction horizontal wobble (set inline via --theater-wobble)
+ *  keeps a burst of identical emoji from stacking into one column.
+ * ============================================================ */
+/*
+ * Vertical rise is animated on `bottom` (a PERCENTAGE of the video
+ * stage, the positioned ancestor) so a reaction climbs nearly the full
+ * height of the panel no matter how tall the user has dragged it. The
+ * earlier translateY(%) was relative to the emoji's OWN height (~30px),
+ * which is why reactions barely lifted off the bottom. The horizontal
+ * start position + a mid-flight wobble + the duration are randomized
+ * per reaction via inline vars so a burst scatters instead of stacking.
+ */
+@keyframes theaterFloatUp {
+  0%   { bottom: 0%;   opacity: 0;    transform: translateX(0) scale(0.5); }
+  12%  { opacity: 1;                  transform: translateX(0) scale(1); }
+  50%  {               opacity: 0.85; transform: translateX(var(--theater-wobble, 0px)) scale(1.08); }
+  100% { bottom: 92%;  opacity: 0;    transform: translateX(0) scale(0.9); }
+}
+.theater-float {
+  position: absolute;
+  bottom: 0;
+  font-size: 1.9rem;
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  will-change: bottom, transform, opacity;
+  animation: theaterFloatUp var(--theater-dur, 3s) ease-out forwards;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.6));
+}
+
+/* Drag handle for resizing the theater panel's height. The hit strip
+ * is the full-width row; the visible grip is the centered bar that
+ * lights up on hover/drag. */
+.theater-resize-handle { cursor: ns-resize; touch-action: none; }
+.theater-resize-handle:hover .theater-resize-grip,
+.theater-resize-handle:active .theater-resize-grip {
+  background-color: rgb(var(--keep-action) / 0.9);
+}

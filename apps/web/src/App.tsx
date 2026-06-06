@@ -10,6 +10,7 @@ import { TypingIndicator } from "./components/TypingIndicator.js";
 import { HelpModal } from "./components/HelpModal.js";
 import { InfoModal } from "./components/InfoModal.js";
 import { MessageList } from "./components/MessageList.js";
+import { TheaterPanel } from "./components/TheaterPanel.js";
 import { MutualPrompts } from "./components/MutualPrompts.js";
 import { StoryInvitePrompts } from "./components/StoryInvitePrompts.js";
 import { FriendRequestPrompts } from "./components/FriendRequestPrompts.js";
@@ -942,6 +943,8 @@ function Chat() {
   const setKickReason = useChat((s) => s.setKickReason);
   const setRoom = useChat((s) => s.setRoom);
   const setOccupants = useChat((s) => s.setOccupants);
+  const setTheaterSync = useChat((s) => s.setTheaterSync);
+  const pushTheaterReaction = useChat((s) => s.pushTheaterReaction);
   const appendMessage = useChat((s) => s.appendMessage);
   const updateMessage = useChat((s) => s.updateMessage);
   const setMessages = useChat((s) => s.setMessages);
@@ -1831,6 +1834,15 @@ function Chat() {
       // Joining/creating a room means the rooms tree is stale.
       setRoomsTreeVersion((v) => v + 1);
     });
+    // Theater (watch-party) live playback state + floating reactions.
+    // Both just feed the store; the TheaterPanel reads from it and owns
+    // all player/animation behavior.
+    socket.on("theater:sync", (payload) => {
+      setTheaterSync(payload);
+    });
+    socket.on("theater:reaction", ({ roomId, emoji, side, displayName }) => {
+      pushTheaterReaction({ roomId, emoji, side, displayName });
+    });
     socket.on("presence:update", ({ roomId, occupants }) => {
       setOccupants(roomId, occupants);
       // Push the fresh occupants straight into the rail's roomsTree
@@ -2509,6 +2521,8 @@ function Chat() {
     return () => {
       socket.off("room:state");
       socket.off("presence:update");
+      socket.off("theater:sync");
+      socket.off("theater:reaction");
       socket.off("chat:typing:update");
       socket.off("rooms:tree-changed");
       if (treeDebounceId != null) window.clearTimeout(treeDebounceId);
@@ -3068,6 +3082,14 @@ function Chat() {
   );
   // Pin/Unpin visibility. Stricter than canModerate.
   const canPin = !!me && me.permissions.includes("pin_forum_topic");
+  // Theater playback-control gate. Mirrors the server's `callerCanEditRoom`
+  // (room owner / mod, or the site-wide grant): only these drive shared
+  // play/pause/seek. Everyone else's player follows. Derived from the
+  // viewer's own occupant row (per-room role) plus the granular grant.
+  const canControlTheater =
+    !!me &&
+    (me.permissions.includes("edit_any_room_metadata") ||
+      occ.some((o) => o.userId === me.id && (o.role === "owner" || o.role === "mod")));
   // Cross-author edit gate. The moderation lever for author touch-up
   // requests that miss the normal grace window. The server re-checks
   // via `hasPermission(me, "edit_others_message")` on PATCH
@@ -3252,6 +3274,19 @@ function Chat() {
             `min-w-0` lets the flex child shrink to its allocated slot
             and forces descendants to honor their own truncation rules. */}
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {/* Theater (watch-party) video panel. Sits ABOVE the chat but
+              below the banner/marquee/earnings/room-banner stack (those
+              render earlier, outside <main>). Resizable on the vertical;
+              the chat below takes the remaining flex space. Only renders
+              when the room has theater mode on. */}
+          {room?.theaterMode && currentRoomId ? (
+            <TheaterPanel
+              socket={socket}
+              roomId={currentRoomId}
+              room={room}
+              canControl={canControlTheater}
+            />
+          ) : null}
           {/* "Viewing older history" only applies to flat rooms, for
               forum rooms the topic buckets paginate independently and
               there's no single "live" chronological view to return to.

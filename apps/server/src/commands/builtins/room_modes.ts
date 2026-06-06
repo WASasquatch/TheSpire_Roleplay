@@ -1,24 +1,10 @@
 import { and, eq, lt } from "drizzle-orm";
-import { messages, roomMembers, rooms } from "../../db/schema.js";
-import { hasPermission } from "../../auth/permissions.js";
+import { messages, rooms } from "../../db/schema.js";
+import { callerCanEditRoom } from "../../auth/roomPermissions.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
   ctx.socket.emit("error:notice", { code, message });
-}
-
-async function callerCanEditRoom(ctx: CommandContext): Promise<boolean> {
-  // Site-wide override via the matrix-grantable key.
-  if (await hasPermission(ctx.user, "edit_any_room_metadata", ctx.db)) return true;
-  const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
-  if (!room) return false;
-  if (room.ownerId === ctx.user.id) return true;
-  const m = (await ctx.db
-    .select()
-    .from(roomMembers)
-    .where(and(eq(roomMembers.roomId, ctx.roomId), eq(roomMembers.userId, ctx.user.id)))
-    .limit(1))[0];
-  return m?.role === "owner" || m?.role === "mod";
 }
 
 /**
@@ -61,7 +47,7 @@ export const expiryCommand: CommandHandler = {
       return notice(ctx, "EXPIRY", msg);
     }
 
-    if (!(await callerCanEditRoom(ctx))) {
+    if (!(await callerCanEditRoom(ctx.db, ctx.user, ctx.roomId))) {
       return notice(ctx, "PERM", "Only the room owner / mod / admin can change the expiry.");
     }
 
@@ -118,7 +104,7 @@ export const replyModeCommand: CommandHandler = {
     if (arg !== "flat" && arg !== "nested") {
       return notice(ctx, "BAD_REPLYMODE", "Reply mode must be 'flat' or 'nested'.");
     }
-    if (!(await callerCanEditRoom(ctx))) {
+    if (!(await callerCanEditRoom(ctx.db, ctx.user, ctx.roomId))) {
       return notice(ctx, "PERM", "Only the room owner / mod / admin can change the reply mode.");
     }
     if (room.replyMode === arg) {

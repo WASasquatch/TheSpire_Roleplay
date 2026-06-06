@@ -31,6 +31,7 @@ import {
 import { worldCommand, worldsCommand } from "./world.js";
 import { scriptoriumCommand, storyCommand, writeCommand } from "./scriptorium.js";
 import { expiryCommand, replyModeCommand } from "./room_modes.js";
+import { theaterCommand } from "./theater.js";
 import { ignoreCommand, unignoreCommand } from "./ignore.js";
 import { usersCommand } from "./users.js";
 import { bookmarksCommand } from "./bookmarks.js";
@@ -114,6 +115,7 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(scriptoriumCommand);
   reg.registerBuiltin(expiryCommand);
   reg.registerBuiltin(replyModeCommand);
+  reg.registerBuiltin(theaterCommand);
   reg.registerBuiltin(ignoreCommand);
   reg.registerBuiltin(unignoreCommand);
   reg.registerBuiltin(usersCommand);

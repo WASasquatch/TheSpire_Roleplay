@@ -48,6 +48,7 @@ export const PERMISSION_KEYS = [
   "create_system_room",
   "bulk_edit_rooms",
   "delete_room",
+  "use_theater_mode",
 
   // ---- user_admin ----
   "grant_admin_role",
@@ -172,6 +173,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   create_system_room: "Create a permanent public (system) room via the admin tab.",
   bulk_edit_rooms: "Bulk-edit room message-expiry settings across many rooms at once.",
   delete_room: "Delete a non-system room via the admin tab.",
+  use_theater_mode: "Turn on theater (watch-party) mode for a room you own or moderate.",
 
   // user_admin
   grant_admin_role: "Promote another account to the admin tier. Same as /promoteadmin.",
@@ -285,6 +287,7 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   create_system_room: "room_admin",
   bulk_edit_rooms: "room_admin",
   delete_room: "room_admin",
+  use_theater_mode: "room_admin",
 
   // user_admin
   grant_admin_role: "user_admin",

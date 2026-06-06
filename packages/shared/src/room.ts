@@ -7,6 +7,7 @@ export type RoomType = "public" | "private";
 
 import type { LinkedWorldRef } from "./world.js";
 import type { AvatarCrop, Role } from "./profile.js";
+import type { TheaterLoop, TheaterSource } from "./theater.js";
 
 export interface RoomSummary {
   id: string;
@@ -33,6 +34,17 @@ export interface RoomSummary {
    * Owner/mod toggleable.
    */
   replyMode: "flat" | "nested";
+  /**
+   * Theater (synchronized watch-party) CONFIG for this room. When
+   * `theaterMode` is true the chat renders a video panel above the
+   * message list and owners/mods drive shared playback; everyone else
+   * follows. The live playback position is NOT here - it rides the
+   * `theater:sync` socket event (see TheaterSync). These three fields
+   * are owner/mod-toggleable via `/theater` and persisted on the room.
+   */
+  theaterMode: boolean;
+  theaterLoop: TheaterLoop;
+  theaterPlaylist: TheaterSource[];
 }
 
 export type Gender = "male" | "female" | "nonbinary" | "other" | "undisclosed";

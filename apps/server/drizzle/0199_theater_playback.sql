@@ -1,0 +1,15 @@
+-- Persisted theater (watch-party) playback checkpoint, so a server
+-- restart resumes each theater room near where viewers were instead of
+-- snapping back to the start of the playlist.
+--
+-- Stores a small JSON blob: { index, positionSec, isPlaying, updatedAtMs }
+-- (or NULL when theater is off / nothing has played yet). The LIVE
+-- position still lives in server memory and rides the `theater:sync`
+-- socket event; this column is only a periodic + on-change CHECKPOINT,
+-- not a per-tick write.
+--
+-- On boot the server rehydrates from here and RE-ANCHORS the playback
+-- clock to boot time, so the downtime is treated as a pause (resume from
+-- the checkpointed position) rather than fast-forwarding playback by the
+-- length of the outage. See apps/server/src/realtime/theaterState.ts.
+ALTER TABLE `rooms` ADD COLUMN `theater_playback` TEXT;

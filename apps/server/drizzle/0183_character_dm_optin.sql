@@ -7,10 +7,10 @@
 -- conversations are migrated to 1 so a player doesn't suddenly find
 -- their established characters unreachable on the next deploy.
 --
--- Backfill criteria — a character is migrated to enabled = 1 if ANY
+-- Backfill criteria, a character is migrated to enabled = 1 if ANY
 -- of the following hold:
 --   * they hold (or were the target of) at least one friendship row
---     of either status — "accepted" obviously, but ALSO "pending"
+--     of either status, "accepted" obviously, but ALSO "pending"
 --     because a pending inbox-request implies the character was
 --     reachable when the request was sent and the player likely
 --     expects to be able to accept it.
@@ -19,7 +19,7 @@
 --     identity.
 --
 -- The route layer (friend-request POST + DM send POST) gates further
--- writes against the same flag — see apps/server/src/routes/friends.ts
+-- writes against the same flag, see apps/server/src/routes/friends.ts
 -- and apps/server/src/routes/directMessages.ts for the runtime checks.
 -- Disabling the flag does NOT delete existing friendships or
 -- conversations; it only blocks NEW reach attempts.

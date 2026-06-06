@@ -14,7 +14,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS `rooms_is_default_uq`
 -- Remember the last room a user was in when they disconnect or idle out.
 -- On reconnect we try to drop them back into it (subject to bans /
 -- visibility / existence). Null means "never been in a room" (fresh
--- registrant) or "we explicitly cleared it" — in either case the
+-- registrant) or "we explicitly cleared it", in either case the
 -- canonical landing wins.
 ALTER TABLE `users`
   ADD COLUMN `last_room_id` text REFERENCES `rooms`(`id`) ON DELETE SET NULL;

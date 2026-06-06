@@ -24,7 +24,7 @@ export async function addWorldCollaborator(
 /**
  * Owner-only (or self-leave): drop a collaborator. Returns the updated
  * collaborator list. The server lets a collaborator remove themselves
- * even if they're not the owner — same UX as "leave" elsewhere.
+ * even if they're not the owner, same UX as "leave" elsewhere.
  */
 export async function removeWorldCollaborator(
   idOrSlug: string,

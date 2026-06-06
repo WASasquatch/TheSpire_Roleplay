@@ -27,7 +27,7 @@ interface Props {
   /** Author shortcut: open the editor from inside the reader. */
   onEdit?: () => void;
   /** When provided, the header shows a "← Back" affordance that calls
-   *  this instead of just closing — used when the reader is stacked on
+   *  this instead of just closing, used when the reader is stacked on
    *  top of the catalog so the user can return to browsing without
    *  collapsing the whole stack. */
   onBack?: () => void;
@@ -48,7 +48,7 @@ const LINE_HEIGHT_STEPS = [1.45, 1.55, 1.7, 1.85, 2];
 const MAX_WIDTH_STEPS = [560, 640, 720, 820, 960];
 
 /**
- * Reader modal with two display modes — `book` (paginated, one chapter
+ * Reader modal with two display modes, `book` (paginated, one chapter
  * at a time) and `pageless` (single-scroll with a floating chapter TOC).
  *
  * Reading position rides on `<p data-anchor="p-N">` markers the server
@@ -102,7 +102,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
   const chapters = detail?.chapters ?? [];
   const currentChapter = chapters[chapterIdx] ?? null;
 
-  // Fetch chapter bodies — current only in book mode, all in pageless.
+  // Fetch chapter bodies, current only in book mode, all in pageless.
   useEffect(() => {
     if (!detail) return;
     const targets = mode === "book" && currentChapter ? [currentChapter] : detail.chapters;
@@ -120,7 +120,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
   }, [mode, currentChapter?.id, detail?.story.id]);
 
   // Reading-position sync. Scroll handler is on the article (the actual
-  // scroll container) — scroll events don't bubble, so a parent listener
+  // scroll container), scroll events don't bubble, so a parent listener
   // wouldn't fire.
   const articleRef = useRef<HTMLElement | null>(null);
   const lastSent = useRef<{ chapterId: string | null; anchor: string | null; percent: number }>({
@@ -217,7 +217,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
   // Auto-scheme bg-luminance probe. The legibility-nudged
   // `--keep-text` already targets WCAG 4.5:1 against `--keep-bg`,
   // but in practice some theme designs ship a text color that's only
-  // *technically* contrast-passing and reads as washed-out — most
+  // *technically* contrast-passing and reads as washed-out, most
   // notably the scifi palette's dimmed accent-on-deep-navy. We solve
   // that by sampling the effective bg color from the reader-shell
   // element after mount and stamping a coarse `dark | light` tone
@@ -236,7 +236,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
     // `--keep-bg` is set as an "R G B" triple by applyTheme. Read it
     // from computed style and walk to relative luminance via the
     // standard sRGB weights. Bail to the default tone if anything
-    // looks off (no var, partial parse) — a wrong tone is worse than
+    // looks off (no var, partial parse), a wrong tone is worse than
     // the existing rendering.
     const cs = getComputedStyle(el);
     const raw = cs.getPropertyValue("--keep-bg").trim();
@@ -320,7 +320,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
           <div
             ref={readerShellRef}
             data-reader-scheme={scheme === "auto" ? undefined : scheme}
-            // Sampled bg luminance — only meaningful under the auto
+            // Sampled bg luminance, only meaningful under the auto
             // scheme; the manual schemes pin their own contrast.
             data-reader-bg-tone={scheme === "auto" ? readerBgTone : undefined}
             className={`reader-shell flex min-h-0 flex-1 gap-3 p-3 ${schemeBgClass}`}
@@ -353,7 +353,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
               />
             </aside>
 
-            {/* Main reading column — gets its own `keep-panel` so
+            {/* Main reading column, gets its own `keep-panel` so
                 the chapter sits on a themed "page card." The gap-3
                 on the parent + the two panels' independent chrome
                 paint a visible seam between them in every design,
@@ -413,7 +413,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
 }
 
 /* =============================================================
- *  BookPagedView — paginated reading surface for book mode
+ *  BookPagedView, paginated reading surface for book mode
  * =============================================================
  *
  *  Wraps the chapter content in a fixed-height viewport and pages
@@ -547,7 +547,7 @@ function BookPagedView({
   // max-width step (typographyStyle.maxWidth). The column width is
   // bounded by maxWidth, leaving symmetric margins inside the
   // available pane. The container measures THIS centered element so
-  // pageWidth equals the constrained reading width — not the full
+  // pageWidth equals the constrained reading width, not the full
   // pane width. `keep-panel` adopts the active theme design's chrome
   // (medieval / modern / scifi / glass) so the reader pane looks
   // like a "page" sitting on the modal's surface.
@@ -571,7 +571,7 @@ function BookPagedView({
       {/* Outer padding wrapper for visual breathing room. The
           inner `containerRef` div has ZERO padding so its
           clientWidth equals exactly the column-layout area we
-          measure for pagination — using a padded container caused
+          measure for pagination, using a padded container caused
           a progressive offset (translate stepped by clientWidth
           which included padding, but columns flowed inside
           clientWidth - padding, so every page drifted by the
@@ -677,7 +677,7 @@ function PageNavBar({
         {nextLabel}
       </button>
       <span className="flex-1" />
-      {/* Quick zoom — same model the AA panel uses for fontStep, just
+      {/* Quick zoom, same model the AA panel uses for fontStep, just
           surfaced here so the reader doesn't have to open the panel
           for the most common adjustment. Buttons clamp to the same
           step bounds the panel does. */}
@@ -705,7 +705,7 @@ function PageNavBar({
 }
 
 /* =============================================================
- *  ReaderSidebar — info + TOC + reviews + codex
+ *  ReaderSidebar, info + TOC + reviews + codex
  * =============================================================
  *
  *  Permanent left-rail companion to the reading column. Hosts the
@@ -742,7 +742,7 @@ function ReaderSidebar({
   const authorName = s.author.characterName ?? s.author.masterUsername;
   return (
     <div className="flex flex-col">
-      {/* Story info — cover + title + byline + meta bar + action bar */}
+      {/* Story info, cover + title + byline + meta bar + action bar */}
       <section className="px-3 pt-3 pb-4">
         {s.coverImageUrl ? (
           <img
@@ -772,7 +772,7 @@ function ReaderSidebar({
           </p>
         ) : null}
 
-        {/* Meta bar — full-width segmented row of rating / genre /
+        {/* Meta bar, full-width segmented row of rating / genre /
             status / counts. Each segment fills equal width via
             `flex-1`; thin vertical dividers between segments read
             as a single bar instead of free-floating chips. */}
@@ -787,7 +787,7 @@ function ReaderSidebar({
           ]}
         />
 
-        {/* Action bar — full-width segmented row of Applause /
+        {/* Action bar, full-width segmented row of Applause /
             Follow / Report. Empty actions (when `allowApplause` is
             off) are omitted from the segment list so the remaining
             actions stretch to fill. */}
@@ -798,7 +798,7 @@ function ReaderSidebar({
         />
       </section>
 
-      {/* Chapters TOC — `keep-section-header` picks up the per-theme
+      {/* Chapters TOC, `keep-section-header` picks up the per-theme
           header treatment (scifi adds a glow underline, glass adds
           a frosted band, etc.). `keep-row` on each chapter gives
           the list theme-aware hover states. */}
@@ -832,7 +832,7 @@ function ReaderSidebar({
         </section>
       ) : null}
 
-      {/* Reviews — collapsible, only when the author allows reviews.
+      {/* Reviews, collapsible, only when the author allows reviews.
           `<details>` keeps the panel out of the way at rest;
           `keep-section-header` on the summary matches the chapter
           TOC header so the sidebar reads as a single themed unit. */}
@@ -852,7 +852,7 @@ function ReaderSidebar({
         </details>
       ) : null}
 
-      {/* Codex appendix — collapsible, default closed. */}
+      {/* Codex appendix, collapsible, default closed. */}
       <details className="group border-y border-keep-rule/40">
         <summary className="keep-section-header keep-row flex cursor-pointer items-center bg-keep-panel-200/40 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
           <span className="mr-2 text-keep-muted transition group-open:rotate-90">▶</span>
@@ -875,7 +875,7 @@ function ReaderSidebar({
 }
 
 /* =============================================================
- *  MetaBar — full-width segmented row of story metadata
+ *  MetaBar, full-width segmented row of story metadata
  * =============================================================
  *
  *  Replaces the chip-cluster row that was floating loose under the
@@ -908,7 +908,7 @@ function MetaBar({ segments }: { segments: Array<{ label: string; value: string 
 }
 
 /* =============================================================
- *  ActionBar — full-width segmented row of story actions
+ *  ActionBar, full-width segmented row of story actions
  * =============================================================
  *
  *  Replaces the loose row of ApplauseButton + FollowButton +
@@ -1165,7 +1165,7 @@ function ReaderHeader({ detail }: { detail: StoryDetail }) {
  * ApplauseButton pattern.
  *
  * The author can subscribe to their own story (the server allows it
- * but no self-pings — the publish-fanout filters publishingUserId).
+ * but no self-pings, the publish-fanout filters publishingUserId).
  */
 function FollowButton({ storyId }: { storyId: string }) {
   const [state, setState] = useState<StorySubscriptionState | null>(null);
@@ -1254,7 +1254,7 @@ function FollowButton({ storyId }: { storyId: string }) {
 }
 
 /**
- * Inline applause toggle. Owns its own state — the reader doesn't
+ * Inline applause toggle. Owns its own state, the reader doesn't
  * thread applause props down. Author cannot see WHO applauded; we only
  * surface the rollup count.
  */
@@ -1320,7 +1320,7 @@ function ApplauseButton({ storyId, initialCount }: { storyId: string; initialCou
 }
 
 function ReaderFooter({ detail: _detail }: { detail: StoryDetail }) {
-  // In-progress signaling moved to the header chip — the footer just
+  // In-progress signaling moved to the header chip, the footer just
   // marks the end of available reading.
   return (
     <footer className="mx-auto mt-10 max-w-prose border-t border-current/20 pt-4 text-center text-xs opacity-70">
@@ -1573,7 +1573,7 @@ function labelForStatus(s: StoryStatus): string {
 }
 
 /**
- * True only when an HTML string has actual readable content — strips
+ * True only when an HTML string has actual readable content, strips
  * tags and whitespace, returns false for `""`, `"<p></p>"`, repeated
  * empty paragraphs from Tiptap, etc. Images and horizontal rules count
  * as visible even when there's no surrounding text.

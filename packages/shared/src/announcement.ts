@@ -2,11 +2,11 @@
  * Announcement feature shared types + the schedule-spec parser.
  *
  * Two surfaces share the admin tab:
- *   - **Banner marquee** — rows the chat shell rotates through above
+ *   - **Banner marquee**, rows the chat shell rotates through above
  *     the timeline. Body is sanitized HTML; the editor accepts
  *     Markdown and converts client-side at save time so the read
  *     path stays one shape.
- *   - **Scheduled announcements** — cron-like rows that fire as
+ *   - **Scheduled announcements**, cron-like rows that fire as
  *     `/announce` lines on a tick. Spec is human-readable
  *     ("1d8h", "30m", an ISO datetime); the parser below turns
  *     that into either a recurring `intervalMs` or a one-shot
@@ -20,7 +20,7 @@
  */
 export interface AnnouncementBanner {
   id: string;
-  /** Sanitized HTML — render with `dangerouslySetInnerHTML` after
+  /** Sanitized HTML, render with `dangerouslySetInnerHTML` after
    *  passing through the project's user-HTML sanitizer. */
   bodyHtml: string;
   enabled: boolean;
@@ -96,7 +96,7 @@ export interface ScheduleParseSuccess {
 export type ScheduleParseResult = ScheduleParseSuccess | ScheduleParseFailure;
 
 /**
- * Pure parser — no DB / clock side effects beyond `Date.now()` for
+ * Pure parser, no DB / clock side effects beyond `Date.now()` for
  * the one-shot future-check (the server re-validates against its own
  * clock on save). Returns a discriminated result so the caller can
  * surface the failure message verbatim in a NOTICE without throwing.
@@ -105,7 +105,7 @@ export function parseScheduleSpec(rawInput: string): ScheduleParseResult {
   const raw = rawInput.trim();
   if (raw === "") return { ok: false, message: "Schedule cannot be empty." };
 
-  // Interval shape first — cheap regex check. The expression demands
+  // Interval shape first, cheap regex check. The expression demands
   // at least one (\d+)(d|h|m) chunk, and the optional `s` is rejected
   // on purpose (sub-minute scheduling would bury the chat in
   // announcements faster than anyone could read them).
@@ -160,7 +160,7 @@ export function describeSchedule(
     return `Once at ${new Date(row.runAt).toLocaleString()}`;
   }
   const interval = row.intervalMs ?? 0;
-  const next = row.nextRunAt ? new Date(row.nextRunAt).toLocaleString() : "—";
+  const next = row.nextRunAt ? new Date(row.nextRunAt).toLocaleString() : "-";
   return `Every ${formatDurationMs(interval)} (next: ${next})`;
 }
 
@@ -187,12 +187,12 @@ function formatDurationMs(ms: number): string {
  * markdown / chip-token expansion that adds visible chars without
  * adding source chars, plus a touch of slack for shorter bodies that
  * end mid-word. A 4000-char cap (the previous value, lifted from
- * scheduled announces) lied to admins about how much would render —
+ * scheduled announces) lied to admins about how much would render,
  * the editor counted up to 4000 but the bar truncated past line one.
  *
  * `SCHEDULED_ANNOUNCEMENT_BODY_MAX` stays generous because scheduled
  * announces land as `kind: "announce"` chat lines (wrapping is
- * fine — no single-strip truncation in the chat renderer).
+ * fine, no single-strip truncation in the chat renderer).
  */
 export const ANNOUNCEMENT_BANNER_BODY_MAX = 180;
 export const SCHEDULED_ANNOUNCEMENT_BODY_MAX = 4000;

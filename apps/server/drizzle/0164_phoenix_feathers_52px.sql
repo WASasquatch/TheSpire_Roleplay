@@ -1,5 +1,5 @@
 -- Phoenix feather radius back to -52px. 0163's -46px sat right on
--- the ring edge — too close to read as a discrete feather halo
+-- the ring edge, too close to read as a discrete feather halo
 -- around the avatar. -52px gives ~10px outward bleed at xl scale
 -- and ~6px at sm, which is what the user dialed in by eye.
 --

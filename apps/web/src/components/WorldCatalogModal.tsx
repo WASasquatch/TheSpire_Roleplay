@@ -49,7 +49,7 @@ const PAGE_SIZE = 24;
  * this component owns the local filter state and re-fetches whenever
  * any of those change.
  *
- * Cover images are best-effort — when a world doesn't have one set we
+ * Cover images are best-effort, when a world doesn't have one set we
  * fall back to a text-only card the same shape so the grid stays
  * uniform. Cards are clickable to open the viewer; the secondary
  * actions (Join, Use in this room) sit in a small footer row.
@@ -57,7 +57,7 @@ const PAGE_SIZE = 24;
 export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Props) {
   // Viewer's own username so owner-of-this-card detection can skip
   // the join/apply button (owners are implicit members of their own
-  // worlds — clicking Join would be a no-op, clicking Apply would
+  // worlds, clicking Join would be a no-op, clicking Apply would
   // 400 with "owners don't apply to their own worlds").
   const meUsername = useChat((s) => s.me?.username ?? null);
   // Per migration 0187 the "Joined" pill must reflect the CURRENT
@@ -91,7 +91,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
   const [joining, setJoining] = useState<string | null>(null);
   const [linking, setLinking] = useState<string | null>(null);
   const [linkedFlash, setLinkedFlash] = useState<string | null>(null);
-  // Catalog entry the user clicked "Apply" on — drives the
+  // Catalog entry the user clicked "Apply" on, drives the
   // ApplicationFormModal mount. Cleared on close / submit.
   const [applyingTo, setApplyingTo] = useState<WorldCatalogEntry | null>(null);
 
@@ -102,10 +102,10 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
     return () => window.clearTimeout(h);
   }, [q]);
 
-  // Reset to page 0 whenever the filter changes — otherwise a user
+  // Reset to page 0 whenever the filter changes, otherwise a user
   // typing into the search box on page 3 would think the corpus is
   // empty when actually the new query has fewer pages.
-  // Vibe range as a stable string for the dependency array — keying
+  // Vibe range as a stable string for the dependency array, keying
   // by the JSON makes a per-axis slider change trigger the page
   // reset + refetch without needing to track each min/max as its own
   // separate state slot.
@@ -160,7 +160,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
         // Identity-aware Joined set: only memberships filed under the
         // viewer's CURRENT identity (active character, or OOC when
         // null) participate. Other identities of the same master are
-        // independent — their Joined status doesn't bleed onto the
+        // independent, their Joined status doesn't bleed onto the
         // current face's catalog view.
         setMemberWorldIds(new Set(
           mem
@@ -303,7 +303,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
           {/* Vibe-stat range filters. Collapsed by default so the
               filter strip stays compact; expand to reveal eight
               min/max sliders. Worlds with NULL stats drop out of
-              any axis the user constrains — see the server-side
+              any axis the user constrains, see the server-side
               IS NOT NULL gate. */}
           <div>
             <button
@@ -405,7 +405,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
             <p className="italic text-keep-muted">
               {anyFilter
                 ? "No worlds match the current filters."
-                : "No open worlds yet. Be the first — mark one of yours as “open” in its settings."}
+                : "No open worlds yet. Be the first, mark one of yours as “open” in its settings."}
             </p>
           ) : (
             <>
@@ -501,7 +501,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                         {memberWorldIds.has(e.id) || e.ownerUsername === meUsername ? (
                           // Owners are implicit members of their own
                           // worlds, so they get the same "Joined"
-                          // treatment as explicit members — no
+                          // treatment as explicit members, no
                           // separate Apply / Join button (it would
                           // either no-op or 400). The cover-image
                           // click still opens the viewer.
@@ -514,7 +514,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                         ) : e.joinMode === "invite-only" ? (
                           <span
                             className="rounded border border-keep-rule bg-keep-bg/60 px-2 py-0.5 text-keep-muted"
-                            title="The owner adds members directly — no public Join."
+                            title="The owner adds members directly, no public Join."
                           >
                             Invite only
                           </span>
@@ -522,7 +522,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                           <button
                             type="button"
                             onClick={() => setApplyingTo(e)}
-                            title="Submit an application to join — the owner reviews it."
+                            title="Submit an application to join, the owner reviews it."
                             className="rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-keep-action hover:bg-keep-action/20"
                           >
                             Apply
@@ -582,7 +582,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
             // user can see the catalog again; the world's apply
             // button stays "Apply" until the catalog refetches and
             // the next /worlds/:id detail call surfaces the pending
-            // viewerApplication state — which the user sees in
+            // viewerApplication state, which the user sees in
             // their My Worlds → Pending Applications view.
             setApplyingTo(null);
           }}
@@ -595,11 +595,11 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
 /**
  * Eight-bar vibe-stat strip rendered on each catalog card. Each axis
  * gets a slim bar with the value inset; null axes render as a muted
- * "—" so "unset" reads visually distinct from "0%". Mirrors the
+ * "-" so "unset" reads visually distinct from "0%". Mirrors the
  * advert-screenshot layout (Magic 60% / Combat 70% / etc.).
  */
 function VibeBars({ stats }: { stats: WorldVibeStats }) {
-  // If every axis is null, render nothing at all — a card with no
+  // If every axis is null, render nothing at all, a card with no
   // tuned stats shouldn't waste vertical space on eight dashes.
   const anyTuned = WORLD_VIBE_AXES.some((a) => stats[a.key] !== null);
   if (!anyTuned) return null;
@@ -611,7 +611,7 @@ function VibeBars({ stats }: { stats: WorldVibeStats }) {
           <li key={axis.key} className="flex items-center gap-1.5" title={axis.desc}>
             <span className="w-14 shrink-0 truncate text-keep-muted">{axis.label}</span>
             {v === null ? (
-              <span className="text-keep-muted/60">—</span>
+              <span className="text-keep-muted/60">-</span>
             ) : (
               <span className="relative h-2.5 flex-1 overflow-hidden rounded bg-keep-banner/40">
                 <span

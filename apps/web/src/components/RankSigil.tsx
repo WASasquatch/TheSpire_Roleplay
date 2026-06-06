@@ -1,17 +1,17 @@
 /**
- * Inline rank/tier sigil — the small badge image rendered next to a
+ * Inline rank/tier sigil, the small badge image rendered next to a
  * display name in chat lines, userlist rows, forum headers, and
  * profile cards.
  *
  * Two render variants:
  *
- *   `tier` (default) — the per-tier chevron pulled from the catalog's
+ *   `tier` (default), the per-tier chevron pulled from the catalog's
  *      `rankTiers.sigilImageUrl`. Requires both `rankKey` AND `tier`
  *      because each tier has its own art (I/II/III/IV). Used by chat
- *      lines, forum headers, the dashboard hero, etc. — anywhere the
+ *      lines, forum headers, the dashboard hero, etc., anywhere the
  *      tier distinction matters.
  *
- *   `gem` — the six abridged gem icons (`gem_rank_1.png` …
+ *   `gem`, the six abridged gem icons (`gem_rank_1.png` …
  *      `gem_rank_6.png`), one per top-level rank. Tier is ignored:
  *      a user at Active I and another at Active IV both render gem
  *      #2. Used in the userlist where horizontal real estate is
@@ -37,7 +37,7 @@ const GEM_MAX = 6;
 
 /**
  * Sigil sizing. `sm` / `md` use em so they scale with the
- * surrounding container's font-size — the Tools-menu font-step
+ * surrounding container's font-size, the Tools-menu font-step
  * setting flips the chat and rail's font-size in em, and these
  * sigils ride that change instead of staying pinned at 14/18px.
  * Larger fixed-size variants (`lg`, `xl`, `hero`) stay in px because
@@ -47,17 +47,17 @@ const GEM_MAX = 6;
  */
 const SIZES: Record<Size, { size: string }> = {
   sm: { size: "1.25em" }, // inline next to a chat-line name (legacy callers)
-  md: { size: "1.6em" },  // chat-line + userlist row gem icon — large
+  md: { size: "1.6em" },  // chat-line + userlist row gem icon, large
                           // enough to read the gem color at a glance,
                           // still scales with the Tools font cycle
                           // (em, not px) so a user on font-step 3 gets
                           // a proportionally bigger sigil. Bumped from
                           // 1.25em when the chat feed switched to the
-                          // gem variant — the gems benefit from more
+                          // gem variant, the gems benefit from more
                           // real estate than the older chevrons did.
   lg: { size: "28px" },   // dashboard sub-headers
-  xl: { size: "64px" },   // profile hero — the rank reads as the primary identity tag
-  hero: { size: "11rem" }, // earning dashboard hero rank — left-aligned chevron lockup
+  xl: { size: "64px" },   // profile hero, the rank reads as the primary identity tag
+  hero: { size: "11rem" }, // earning dashboard hero rank, left-aligned chevron lockup
 };
 
 interface Props {
@@ -119,7 +119,7 @@ export function RankSigil({ rankKey, tier, size = "sm", className, variant = "ti
       src={tierRow.sigilImageUrl}
       alt=""
       title={title}
-      // `align-middle` centers the sigil on the text's middle line —
+      // `align-middle` centers the sigil on the text's middle line,
       // `align-text-bottom` left it riding visually high because the
       // chevron PNGs are top-heavy artwork (no real descender to
       // anchor to). Middle alignment lines the chevron's vertical
@@ -129,7 +129,7 @@ export function RankSigil({ rankKey, tier, size = "sm", className, variant = "ti
       style={{ width: dim, height: dim }}
       draggable={false}
       // Bad URL (admin deleted the asset between writes) shouldn't
-      // leave a broken-image icon next to every line — onError hides
+      // leave a broken-image icon next to every line, onError hides
       // the element outright.
       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
     />

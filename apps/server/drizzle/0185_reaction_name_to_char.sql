@@ -12,7 +12,7 @@
 -- Strategy:
 --   1. UPDATE OR IGNORE rewrites every row whose unicode_char is a
 --      known catalog name. The OR IGNORE skips rows that would
---      collide with an already-correct row on the unique index —
+--      collide with an already-correct row on the unique index,
 --      same (target, user, target_id) with both the broken and the
 --      fixed value sitting in the table.
 --   2. A trailing DELETE removes the still-broken stragglers so the
@@ -655,7 +655,7 @@ UPDATE OR IGNORE `message_reactions`
  WHERE `unicode_char` IN (SELECT `name` FROM name_to_char);
 --> statement-breakpoint
 
--- Sweep any row left behind by the OR IGNORE — it didn't migrate
+-- Sweep any row left behind by the OR IGNORE, it didn't migrate
 -- because a correct row already existed for the same target + user.
 WITH name_to_char(name, char) AS (VALUES
   ('grinning', '😀'),

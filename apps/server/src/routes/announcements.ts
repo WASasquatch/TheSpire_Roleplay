@@ -4,7 +4,7 @@ import { announcementBanners } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 
 /**
- * Public marquee banners endpoint. Unauthenticated — the rotating
+ * Public marquee banners endpoint. Unauthenticated, the rotating
  * banner is sitewide chrome that the chat shell paints for every
  * viewer, anonymous or signed-in. Returns the enabled set only;
  * disabled (draft) rows stay invisible.

@@ -3,7 +3,7 @@ import { useChat } from "../state/store.js";
 import { SearchBar } from "./SearchBar.js";
 import { CloseButton } from "./CloseButton.js";
 
-/** Shape of `/characters` rows — narrow projection of the server payload. */
+/** Shape of `/characters` rows, narrow projection of the server payload. */
 interface CharacterRow {
   id: string;
   name: string;
@@ -50,7 +50,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   const [findOpen, setFindOpen] = useState(false);
   const [privateOpen, setPrivateOpen] = useState(false);
   // Identity switcher (above the Tools trigger). Lazily loads the user's
-  // character list the first time it's opened — most sessions never
+  // character list the first time it's opened, most sessions never
   // touch it, so paying the /characters fetch on every mount would be
   // wasteful. After the first open the result is cached for this tab.
   const [identityOpen, setIdentityOpen] = useState(false);
@@ -61,7 +61,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   const setFontStep = useChat((s) => s.setFontStep);
   const refreshIntervalSec = useChat((s) => s.refreshIntervalSec);
   // Per-kind totals across EVERY identity the user owns (master / OOC
-  // + each character). Kept as two numbers — not one combined cue —
+  // + each character). Kept as two numbers, not one combined cue,
   // because reports of "the badge said I have messages but they were
   // friend requests" kept landing: conflating the two left users
   // hunting for a DM that wasn't there. The envelope renders two
@@ -71,8 +71,8 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   // Reads from `inboxCountsByIdentity` (refreshed on every dm:new /
   // dm:read / friend:request by the App-level socket handlers, plus
   // by the messenger when it's open) instead of from
-  // `dmConversations`. The conversations map is IDENTITY-SCOPED —
-  // only the currently-active character's threads are loaded — so a
+  // `dmConversations`. The conversations map is IDENTITY-SCOPED,
+  // only the currently-active character's threads are loaded, so a
   // DM that lands on Char B while the viewer is on Char A would
   // otherwise leave the badge at zero and the recipient would have
   // no signal that a message arrived for one of their other
@@ -88,7 +88,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
     for (const row of s.inboxCountsByIdentity.values()) n += row.pendingFriendRequests;
     return n;
   });
-  // Combined total — used by the inner Tools-drawer "Messages" row
+  // Combined total, used by the inner Tools-drawer "Messages" row
   // (one-line list item that doesn't have room for two distinct pips)
   // and as the keep-it-simple hover summary on the envelope.
   const messagesBadgeTotal = unreadDmsTotal + pendingFriendRequestsTotal;
@@ -115,7 +115,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
    * Lazy load the character list when the identity dropdown opens for
    * the first time. Re-uses the cached list on subsequent opens this
    * session; an /char create or rename happens through the editor and
-   * its own onSaved hooks would need to invalidate this — but the
+   * its own onSaved hooks would need to invalidate this, but the
    * cache is per-mount of ToolPanel, which is cheap to remount (e.g.
    * after a room switch we don't, but after a full reload we do).
    */
@@ -125,7 +125,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
     // the rest of the mount" guard meant a character created mid-
     // session via the profile editor never surfaced here until the
     // user reloaded the page. The dropdown only opens on a deliberate
-    // click so a single network call per open is cheap — and we
+    // click so a single network call per open is cheap, and we
     // render the cached list immediately below so there's no loading
     // flash while the refresh is in flight; the spinner only shows
     // when there's no cache to display yet.
@@ -152,14 +152,14 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
       .catch(() => { if (!cancelled && characters === null) setCharacters([]); })
       .finally(() => { if (!cancelled) setCharactersLoading(false); });
     return () => { cancelled = true; };
-    // `characters` is intentionally NOT in the dependency list — adding
+    // `characters` is intentionally NOT in the dependency list, adding
     // it would loop the effect on every successful fetch (the fetch
     // writes characters, which fires the effect, which fetches again).
     // We only want to (re)fetch when the dropdown opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identityOpen]);
 
-  // Esc closes the identity dropdown too — same UX as the Tools drawer.
+  // Esc closes the identity dropdown too, same UX as the Tools drawer.
   useEffect(() => {
     if (!identityOpen) return;
     function onKey(e: KeyboardEvent) {
@@ -182,7 +182,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
     setIdentityOpen(false);
   }
   // Permission-gated incognito affordance. Only mods/admins with
-  // `use_ghost_mode` see the button at all — regular users can't
+  // `use_ghost_mode` see the button at all, regular users can't
   // even discover the feature exists, which is the privacy contract
   // the staff-observation tool was designed around.
   const canIncognito = !!me?.permissions.includes("use_ghost_mode");
@@ -218,7 +218,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
               space (~14rem reserved for the chat banner + room-topic
               strip + a small safety margin). Without this cap the
               drawer can extend ABOVE the rail and get clipped by the
-              parent's overflow-hidden — at which point its sticky
+              parent's overflow-hidden, at which point its sticky
               header sits in the clipped region and the user sees the
               top section title disappear behind the chat banner.
               The internal overflow-y-auto handles any overflow from
@@ -234,8 +234,8 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
             <MenuItem label="World Catalog" hint="Browse open worlds" onClick={() => fire("/world catalog")} />
 
             <SectionHeader title="Writing" />
-            <MenuItem label="My Stories" hint="Drafts + published — open the editor" onClick={() => fire("/scriptorium my")} />
-            <MenuItem label="Scriptorium" hint="Browse the library — read and write" onClick={() => fire("/scriptorium")} />
+            <MenuItem label="My Stories" hint="Drafts + published, open the editor" onClick={() => fire("/scriptorium my")} />
+            <MenuItem label="Scriptorium" hint="Browse the library, read and write" onClick={() => fire("/scriptorium")} />
 
             <SectionHeader title="Roleplay" />
             <MenuItem
@@ -305,7 +305,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
             <SectionHeader title="People" />
             <MenuItem
               label="Messages"
-              hint="DMs, friends, and friend requests — all in one place"
+              hint="DMs, friends, and friend requests, all in one place"
               badge={messagesBadgeTotal}
               onClick={() => { onOpenMessages(); setDrawerOpen(false); }}
             />
@@ -366,7 +366,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
 
             {/* Search lives at the bottom of the drawer so the input is
                 close to the user's resting touch position on mobile.
-                Results render upward (most-relevant nearest the bar) — see
+                Results render upward (most-relevant nearest the bar), see
                 SearchBar for the spatial-proximity-to-action rationale. */}
             <SectionHeader title="Search this room" />
             <div className="px-3 py-2">
@@ -386,7 +386,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
           The two share a row so the DM unread badge sits where the eye
           naturally lands when scanning the bottom strip, instead of
           competing with the Tools button. Identity dropdown owns the
-          left, messenger icon owns the right — fixed-width so it
+          left, messenger icon owns the right, fixed-width so it
           doesn't push the identity label around. All three buttons
           (identity, envelope, Tools) share the same explicit height
           (h-9 mobile / lg:h-7 desktop) so they line up regardless of
@@ -416,7 +416,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
           type="button"
           onClick={onOpenMessages}
           title={(() => {
-            // Spell out both numbers in the tooltip — the inner Tools
+            // Spell out both numbers in the tooltip, the inner Tools
             // drawer doesn't have room for two pips so this is the
             // disambiguation surface for users who can't tell the
             // DM cue from the friend-request cue at a glance.
@@ -427,13 +427,13 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
             if (pendingFriendRequestsTotal > 0) {
               parts.push(`${pendingFriendRequestsTotal} friend request${pendingFriendRequestsTotal === 1 ? "" : "s"}`);
             }
-            return parts.length > 0 ? `${parts.join(" + ")} — open Messages` : "Open Messages";
+            return parts.length > 0 ? `${parts.join(" + ")}, open Messages` : "Open Messages";
           })()}
           aria-label="Open Messages"
           className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-sm leading-none hover:bg-keep-banner lg:h-7 lg:w-7"
         >
           <span aria-hidden>✉</span>
-          {/* DM pip — top-right, accent red. Reserved for actual unread
+          {/* DM pip, top-right, accent red. Reserved for actual unread
               messages; users learn to read this corner as "someone
               messaged me." */}
           {unreadDmsTotal > 0 ? (
@@ -444,7 +444,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
               {unreadDmsTotal > 99 ? "99+" : unreadDmsTotal}
             </span>
           ) : null}
-          {/* Friend-request pip — bottom-right, accent yellow, with a
+          {/* Friend-request pip, bottom-right, accent yellow, with a
               "+" prefix so it reads as "someone wants to add you" even
               for a low number. Kept visually distinct from the DM pip
               so the user doesn't conflate them and go hunting for a
@@ -480,7 +480,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
 }
 
 /* ------------------------------------------------------------ *
- *  IdentityButton — character switcher dropdown
+ *  IdentityButton, character switcher dropdown
  *
  *  Sits above the Tools trigger and is always visible. The button's
  *  label reflects who's currently posting:
@@ -526,7 +526,7 @@ function IdentityButton({
    *  When false the incognito row is omitted entirely so regular
    *  users can't even discover the affordance exists. */
   canIncognito: boolean;
-  /** Mirrors `me.incognitoMode` — flips the button label between
+  /** Mirrors `me.incognitoMode`, flips the button label between
    *  "Go Incognito" and "Leave Incognito" without a refetch. */
   incognitoMode: boolean;
   onToggleIncognito: () => void;
@@ -536,7 +536,7 @@ function IdentityButton({
     : `${masterName ?? "OOC"} (OOC)`;
 
   // Filter the dropdown so the *currently active* character doesn't
-  // appear as a switch target — switching to yourself is a no-op that
+  // appear as a switch target, switching to yourself is a no-op that
   // confuses more than it helps. Still shown when OOC (no active char).
   const switchTargets = (characters ?? []).filter(
     (c) => !inCharacter || c.name !== activeCharacterName,
@@ -546,7 +546,7 @@ function IdentityButton({
     <div className="relative">
       {open ? (
         <>
-          {/* Same backdrop discipline as the Tools drawer — fixed
+          {/* Same backdrop discipline as the Tools drawer, fixed
               viewport so a click anywhere outside closes the panel. */}
           <button
             type="button"
@@ -604,14 +604,14 @@ function IdentityButton({
             {/* Incognito ("ghost") mode toggle. Only renders for users
                 holding the `use_ghost_mode` permission. Lives below
                 "Leave Character" because it's a staff-observation
-                tool, not a routine identity switch — keeps it visually
+                tool, not a routine identity switch, keeps it visually
                 separate from the regular character roster above. */}
             {canIncognito ? (
               <button
                 type="button"
                 onClick={onToggleIncognito}
                 title={incognitoMode
-                  ? "Reveal yourself — the room sees you join again."
+                  ? "Reveal yourself, the room sees you join again."
                   : "Disappear from userlists and observe rooms unseen. Mod/admin only."}
                 className={`flex w-full items-center justify-center gap-1 border-t border-keep-rule px-3 py-2 text-xs font-semibold uppercase tracking-widest lg:py-1 ${
                   incognitoMode
@@ -689,7 +689,7 @@ function Avatar({ url, name }: { url: string | null; name: string }) {
 /* ------------------------------------------------------------ *
  *  Drawer building blocks
  *
- *  The drawer renders as a vertical dropdown — section headers in a
+ *  The drawer renders as a vertical dropdown, section headers in a
  *  banner-tinted strip, then each option as a full-width row with a
  *  primary label and a smaller hint underneath. Matches the mobile-
  *  navigation pattern the rest of the app uses (single column,
@@ -702,7 +702,7 @@ function Avatar({ url, name }: { url: string | null; name: string }) {
  * ------------------------------------------------------------ */
 
 /**
- * Section divider strip. Visually distinct from a menu row — uses the
+ * Section divider strip. Visually distinct from a menu row, uses the
  * panel tint + uppercase tracking-widest so users scan the
  * categories quickly. Sticky-free so all sections scroll with the
  * drawer.
@@ -720,7 +720,7 @@ function SectionHeader({ title }: { title: string }) {
  * their trigger row (mood, scene, find, private-room, color,
  * refresh). Adds a subtle indent + padded surface so the form
  * visually nests under the row above instead of butting against
- * the next divider. Pure visual containment — the form components
+ * the next divider. Pure visual containment, the form components
  * own their own internal layout.
  */
 function InlinePanel({ children }: { children: ReactNode }) {
@@ -734,7 +734,7 @@ function InlinePanel({ children }: { children: ReactNode }) {
 /**
  * A single dropdown row. Full-width, left-aligned label. The `hint`
  * surfaces as a native browser tooltip on hover/focus rather than
- * sitting under the label — keeps the menu compact enough to fit on
+ * sitting under the label, keeps the menu compact enough to fit on
  * one screen without scrolling, while still being self-documenting
  * for users who pause over a row. Hover paints the row with the
  * panel-banner tint so the theme's accent color is reserved for
@@ -766,7 +766,7 @@ function MenuItem({
       // compact; md+ tightens to py-1. Border on the bottom only so
       // adjacent rows visually fuse into a single list. Active rows
       // get a left accent stripe + banner tint instead of a full
-      // background swap — preserves row text contrast across themes.
+      // background swap, preserves row text contrast across themes.
       className={`flex w-full items-center gap-3 border-b border-keep-rule/40 px-3 py-1.5 text-left text-sm lg:py-1 ${
         active
           ? "border-l-2 border-l-keep-action bg-keep-banner/60 pl-[10px]"

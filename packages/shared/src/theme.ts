@@ -24,7 +24,7 @@ export interface Theme {
 }
 
 /**
- * Default theme — the "Spire Modern" palette adopted as the install
+ * Default theme, the "Spire Modern" palette adopted as the install
  * default. Light neutral gray surfaces, near-black text, two-blue
  * accents (deeper indigo for primary actions, lighter steel-blue for
  * accent highlights), and a warm earth-tone system color. Picked to
@@ -128,15 +128,15 @@ export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
   },
   {
     // Default DARK companion to Parchment. Picked to read against the
-    // dark splash artwork (the_spire_bg_dark.jpg) — near-black bg/panel
+    // dark splash artwork (the_spire_bg_dark.jpg), near-black bg/panel
     // pulled from the artwork's deep blue-black sky, a dark sky-blue
     // system slot taken from the moonlit highlight on the mountain
     // ridge, a darker amber yellow accent matching the dragon glyphs
     // on the parchment overlay, and a spire-energy cyan action color
     // tying back to the magic circle's neon halo. The splash adds a
     // matching pair of corner glows (cyan top-left, moon-white
-    // bottom-right) when this palette — or any palette whose bg
-    // luminance reads as "dark" — is active.
+    // bottom-right) when this palette, or any palette whose bg
+    // luminance reads as "dark", is active.
     name: "Darkness",
     theme: {
       bg: "#0a0e1a",
@@ -150,14 +150,14 @@ export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
     },
   },
   {
-    // Glass Light — pairs with the "glass" design style. The visual
+    // Glass Light, pairs with the "glass" design style. The visual
     // language is translucent frosted panels over the user's chosen
     // backdrop (or the light Spire artwork as fallback), so the
     // PALETTE here is restrained: near-white bg/panel so the frost
     // reads as pale crystal, soft cool border for inset bevels, deep
     // navy text for legibility through 50–60% transparency. Action +
     // accent stay vivid because they ride the panel's frost tint at
-    // 0.6 alpha — desaturated picks would disappear into the glass.
+    // 0.6 alpha, desaturated picks would disappear into the glass.
     name: "Glass Light",
     theme: {
       bg: "#f7f8fb",
@@ -171,11 +171,11 @@ export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
     },
   },
   {
-    // Glass Dark — the dark companion to Glass Light. Deep cool
+    // Glass Dark, the dark companion to Glass Light. Deep cool
     // navy/blue-gray surfaces over the dark Spire backdrop, with
     // saturated sky-blue + pink accents that punch through the
     // frosted darkening overlay. Reads as a high-end OS / settings
-    // panel rather than a chatroom — professional, not playful.
+    // panel rather than a chatroom, professional, not playful.
     name: "Glass Dark",
     theme: {
       bg: "#0e1422",
@@ -198,7 +198,7 @@ export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
  * have to wire `themeDesignMap` for every shipped preset.
  *
  * Only includes pairings that are strongly bound to the preset's
- * visual identity — Glass Light/Dark exist specifically to dress the
+ * visual identity, Glass Light/Dark exist specifically to dress the
  * glass design. The medieval/modern/scifi-friendly presets (Parchment,
  * Twilight, etc.) stay unmapped so the admin or user picks what fits.
  */
@@ -235,7 +235,7 @@ export function isDarkPalette(theme: Theme): boolean {
  * Used by the style resolver: when the user's active palette equals a
  * preset, the per-preset design map in admin settings pins a default
  * design (medieval/modern/scifi) to it. Customized palettes fall
- * through to the site-wide default style instead — there's no preset
+ * through to the site-wide default style instead, there's no preset
  * name to look up.
  *
  * Comparison is case-insensitive on hex values so `#FFAA00` and
@@ -269,7 +269,7 @@ export function matchThemePreset(theme: Theme): string | null {
  * the right visual identity for every reader, regardless of their
  * personal theme.
  *
- * Only the text-tone slots are exposed — `bg`, `panel`, `border` are
+ * Only the text-tone slots are exposed, `bg`, `panel`, `border` are
  * structural and would render as invisible-on-itself text.
  */
 export const THEMEABLE_TEXT_SLOTS = ["system", "action", "accent", "muted", "text"] as const;
@@ -299,14 +299,14 @@ export const COLOR_TOKEN_OR_HEX_RE = new RegExp(
  *
  * The CSS-variable form depends on the web app exposing each theme
  * slot as `--keep-<slot>` in the format `R G B` (space-separated rgb
- * channels). The Vite app already does this — see `lib/theme.ts`'s
+ * channels). The Vite app already does this, see `lib/theme.ts`'s
  * `applyTheme` which sets each slot via `setProperty`.
  *
  * `themeBg` (optional) is the viewer's current theme background hex.
  * When supplied, literal hex colors that don't meet WCAG 4.5:1 contrast
  * against it are nudged toward legibility (lightened on dark bgs,
  * darkened on light bgs) while preserving hue and saturation. Theme
- * tokens are left alone — those already resolve to palette-tuned values
+ * tokens are left alone, those already resolve to palette-tuned values
  * the operator picked for that theme.
  */
 export function resolveMessageColor(
@@ -334,15 +334,15 @@ const CONTRAST_TARGET = 4.5;
 /**
  * Return `color` unchanged when it already meets {@link CONTRAST_TARGET}
  * contrast against `bgHex`. Otherwise return a hue/saturation-preserving
- * lightness-shifted variant — pushed lighter for dark backgrounds,
- * darker for light ones — until it crosses the target or hits the
+ * lightness-shifted variant, pushed lighter for dark backgrounds,
+ * darker for light ones, until it crosses the target or hits the
  * 0/100 lightness ceiling. Falls back to the input if either argument
  * isn't a parseable hex (we don't want to mangle CSS literals like
  * `rgb(...)` or palette tokens).
  *
  * Used so a player who picks, say, deep navy looks correct on a light
  * theme but stays readable when another viewer (or that same player)
- * switches to a dark theme — the saved color stays untouched, only the
+ * switches to a dark theme, the saved color stays untouched, only the
  * rendered value adapts to the current background.
  */
 export function legibleAgainstBg(color: string, bgHex: string, targetContrast: number = CONTRAST_TARGET): string {
@@ -371,20 +371,20 @@ export function legibleAgainstBg(color: string, bgHex: string, targetContrast: n
  * Return a copy of the theme with every FOREGROUND slot nudged for
  * readability against `bg` via {@link legibleAgainstBg}.
  *
- *   - `text`     — WCAG AA body-text floor (4.5:1)
- *   - `muted`    — large/secondary-text floor (3:1), kept softer than
+ *   - `text`    , WCAG AA body-text floor (4.5:1)
+ *   - `muted`   , large/secondary-text floor (3:1), kept softer than
  *                  text so the muted character is preserved
- *   - `action`   — button labels / links / active-room name. Drives
+ *   - `action`  , button labels / links / active-room name. Drives
  *                  the `text-keep-action` everywhere in the app, so
  *                  it needs the same 3:1 floor that button labels do
- *   - `accent`   — exit / strong CTA color, also rendered as text on
+ *   - `accent`  , exit / strong CTA color, also rendered as text on
  *                  warning chips. 3:1.
- *   - `system`   — italic system-message text. 3:1.
- *   - `border`   — rule lines. Doesn't need WCAG-level contrast but
+ *   - `system`  , italic system-message text. 3:1.
+ *   - `border`  , rule lines. Doesn't need WCAG-level contrast but
  *                  a 1.5:1 floor keeps the dividers from melting into
  *                  the panel on near-monochrome themes
  *
- * The `panel` slot is left at the user's pick — it's a surface, not
+ * The `panel` slot is left at the user's pick, it's a surface, not
  * a foreground, and its contrast story is "looks distinct from bg"
  * rather than "readable against bg." `bg` is the reference point we
  * measure everything else against, so it can't sensibly nudge itself.
@@ -400,7 +400,7 @@ export function legibleAgainstBg(color: string, bgHex: string, targetContrast: n
  * fully opaque. Callers that paint the owner palette onto a
  * translucent card (where the viewer's theme bleeds through) must
  * either tighten the surface alpha or pass an effective bg color
- * — otherwise the contrast guarantee here is computed against a
+ *, otherwise the contrast guarantee here is computed against a
  * surface color the user never actually sees.
  */
 export function legibleThemePalette(theme: Theme): Theme {

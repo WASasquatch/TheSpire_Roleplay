@@ -3,8 +3,8 @@
 --
 -- Model: users pay Currency from the active identity's pool to submit
 -- a custom 4×4 emoticon sheet. The row lands in `emoticon_sheets`
--- with `status='pending'` — filtered out of every user-facing picker
--- query — until an admin approves or rejects it. Rejection refunds
+-- with `status='pending'`, filtered out of every user-facing picker
+-- query, until an admin approves or rejects it. Rejection refunds
 -- the submission cost and deletes the asset file.
 --
 -- Why extend the existing table instead of a parallel submissions
@@ -31,7 +31,7 @@ ALTER TABLE `emoticon_sheets`
 -- Per-identity submission scope. `submitter_scope` is 'user' (master
 -- paid) or 'character' (that character paid); `submitter_pool_id` is
 -- the matching ownerId for the ledger refund on rejection. Both are
--- nullable because admin-created rows have no submission record —
+-- nullable because admin-created rows have no submission record,
 -- the `created_by_user_id` column already covers them.
 ALTER TABLE `emoticon_sheets`
   ADD COLUMN `submitter_scope` TEXT;
@@ -48,7 +48,7 @@ ALTER TABLE `emoticon_sheets`
 --> statement-breakpoint
 
 -- Moderation outcome columns. `reviewed_at` doubles as the
--- "was this row touched by moderation?" signal — null on admin-
+-- "was this row touched by moderation?" signal, null on admin-
 -- created rows that never went through the queue.
 ALTER TABLE `emoticon_sheets`
   ADD COLUMN `reviewed_at` INTEGER;
@@ -69,7 +69,7 @@ CREATE INDEX IF NOT EXISTS `emoticon_sheets_status_idx`
 --> statement-breakpoint
 
 -- Pricing cosmetic row. The submission endpoint reads `.cost` from
--- this row at submission time (NOT a one-time purchase — each upload
+-- this row at submission time (NOT a one-time purchase, each upload
 -- re-pays). Cost can be tuned by admins via the Flair admin tab.
 -- Idempotent: INSERT OR IGNORE protects re-runs after a baseline
 -- skip on an older install.

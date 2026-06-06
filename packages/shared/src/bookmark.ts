@@ -35,7 +35,7 @@ export interface BookmarkedMessage {
   kind: MessageKind;
   body: string;
   createdAt: number;
-  /** When the bookmarked message is itself a reply, the parent's id — used to render a "[in thread]" hint. */
+  /** When the bookmarked message is itself a reply, the parent's id, used to render a "[in thread]" hint. */
   replyToId: string | null;
   /** Snapshotted hex / theme:slot color from the row. Drives the body
    *  text color the same way the inline chat renderer does so a bookmarked

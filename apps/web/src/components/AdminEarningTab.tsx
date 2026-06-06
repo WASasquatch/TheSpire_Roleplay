@@ -1,7 +1,7 @@
 /**
  * Admin > Earning > Awards tab.
  *
- * Phase 1 ships the Awards editor only — every numeric value the
+ * Phase 1 ships the Awards editor only, every numeric value the
  * engine reads from `site_settings.earning_config_json`. Future
  * phases will add Ranks / Name Styles / Cosmetics tabs in this same
  * file (kept off the AdminPanel.tsx mega-file for sanity).
@@ -11,7 +11,7 @@
  *   - The two masteradmin-only fields (`multiCharacterEarnDivisor`,
  *     `backfill.xpPerHistoricalMessage`) are disabled for plain
  *     admins with an inline explainer. The server's PUT handler
- *     enforces the gate independently — this is just the UI mirror.
+ *     enforces the gate independently, this is just the UI mirror.
  *
  * Save behavior: the form maintains a local draft, and Save submits
  * the full document. The server returns the normalized config which
@@ -104,7 +104,7 @@ const SUB_TABS: ReadonlyArray<{ id: SubTab; label: string; requires?: Permission
   { id: "flashsale", label: "Flash Sale" },
   { id: "transfer", label: "Backup" },
   // Test grants targets a real user's pool and pushes XP / Currency /
-  // ownership rows that aren't undoable — gated on the matrix's
+  // ownership rows that aren't undoable, gated on the matrix's
   // `grant_earning_award` key (masteradmin-default per seed, but a
   // masteradmin can hand it to a trusted admin via the matrix).
   { id: "grants", label: "Test grants", requires: "grant_earning_award" },
@@ -118,7 +118,7 @@ export function AdminEarningTab() {
   return (
     <div className="space-y-3">
       {/* Mobile: dropdown picker, same pattern as the top-level admin
-          panel tab picker — saves horizontal space and avoids the
+          panel tab picker, saves horizontal space and avoids the
           off-screen-wrap problem with a row of chips. */}
       <div className="border-b border-keep-rule pb-2 md:hidden">
         <select
@@ -398,7 +398,7 @@ function AwardsSection() {
 
       <SectionFrame
         title="Spam detection"
-        description="Heuristics that drop the award to zero on suspect messages. Each check has its own threshold; setting any to 0 disables that check individually. Master switch (Enabled) bypasses every check at once. Flagged messages still post normally — only the award is denied — and the ledger metadata records why so admins can audit and tune."
+        description="Heuristics that drop the award to zero on suspect messages. Each check has its own threshold; setting any to 0 disables that check individually. Master switch (Enabled) bypasses every check at once. Flagged messages still post normally, only the award is denied, and the ledger metadata records why so admins can audit and tune."
       >
         <ToggleRow
           label="Spam detection enabled"
@@ -411,7 +411,7 @@ function AwardsSection() {
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <NumberRow
             label="Min length to check"
-            help="Skip every heuristic below this length — short messages are not flagged."
+            help="Skip every heuristic below this length, short messages are not flagged."
             value={config.messageQuality.spam.minLengthToCheck}
             min={0}
             disabled={!config.messageQuality.spam.enabled}
@@ -526,7 +526,7 @@ function AwardsSection() {
             <span>
               {config.backfill.completedAt
                 ? `Completed ${new Date(config.backfill.completedAt).toLocaleString()}`
-                : "Not yet run — will fire on next boot."}
+                : "Not yet run, will fire on next boot."}
             </span>
           </div>
         </div>
@@ -834,7 +834,7 @@ function RanksSection() {
           <p className="text-xs text-keep-muted">
             Edit thresholds, asset URLs, and enable flags. Saved changes take effect immediately;
             threshold edits re-place every earning row automatically. Disabling a rank is a soft close
-            — existing rank-holders keep their rank, but new earners skip past it.
+           , existing rank-holders keep their rank, but new earners skip past it.
           </p>
         </div>
         <button
@@ -972,7 +972,7 @@ function RankCard({
           type="button"
           onClick={() => void removeRank()}
           disabled={inUse}
-          title={inUse ? "Disable instead — users currently hold this rank." : "Delete rank"}
+          title={inUse ? "Disable instead, users currently hold this rank." : "Delete rank"}
           className="rounded border border-keep-rule px-2 py-0.5 text-xs text-keep-muted hover:text-keep-accent disabled:opacity-30 disabled:cursor-not-allowed"
         >
           Delete
@@ -1108,7 +1108,7 @@ function TierRow({
           <input
             value={borderUrl}
             onChange={(e) => setBorderUrl(e.target.value)}
-            placeholder="(optional — capstone border)"
+            placeholder="(optional, capstone border)"
             className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[11px]"
           />
           <label className="rounded border border-keep-rule bg-keep-banner/40 px-2 py-0.5 text-keep-muted hover:bg-keep-banner cursor-pointer">
@@ -1158,7 +1158,7 @@ function fileToDataUrl(file: File): Promise<string> {
  *  Live preview pane: while the admin edits HTML + CSS, the
  *  preview renders inside a Shadow DOM (see NameStylePreview)
  *  so the admin's exact classes + rules apply verbatim against
- *  the typed-in template — no scope mangling, no leakage in or
+ *  the typed-in template, no scope mangling, no leakage in or
  *  out of the page's own styles. Built-in styles can be
  *  rewritten but not deleted.
  * ========================================================= */
@@ -1267,7 +1267,7 @@ function NameStylesSection() {
             // previous editor and mount a fresh one when the admin
             // picks a different style from the sidebar. Without it
             // the StyleEditor's `useState(initial.*)` initializers
-            // only run on first mount — clicking another row
+            // only run on first mount, clicking another row
             // updated the `initial` prop but every form field
             // (name, template, CSS, cost, enabled) stayed frozen
             // on the originally-selected style, so the admin
@@ -1293,7 +1293,7 @@ function NameStylesSection() {
 /**
  * Tags / attributes mirrored from StyledName's production sanitizer.
  * Keeping them in lockstep means what the admin sees in the preview is
- * what users will see at runtime — same DOMPurify rules, same drops.
+ * what users will see at runtime, same DOMPurify rules, same drops.
  */
 const PREVIEW_SANITIZER_TAGS = ["span", "b", "i", "em", "strong", "u", "s", "small", "sub", "sup", "mark"];
 const PREVIEW_SANITIZER_ATTRS = ["class", "style", "data-*"];
@@ -1301,7 +1301,7 @@ const PREVIEW_SANITIZER_ATTRS = ["class", "style", "data-*"];
 /**
  * Live preview for the Name-Styles editor. Renders the admin's
  * *exact* HTML template + CSS inside a Shadow DOM so what they see is
- * literally what'll save — no class-name rewriting, no scope mangling,
+ * literally what'll save, no class-name rewriting, no scope mangling,
  * no risk of the draft clobbering already-rendered names elsewhere on
  * the page (the shadow boundary handles isolation in both directions).
  *
@@ -1309,22 +1309,22 @@ const PREVIEW_SANITIZER_ATTRS = ["class", "style", "data-*"];
  *  - The previous approach rewrote `ns-<slug>` to `ns-<previewKey>` in
  *    both the template and the CSS so the draft wouldn't collide with
  *    catalog rules. That worked for single-element built-ins but quietly
- *    collapsed BEM children (`ns-foo__bar` → `ns-foo`) — admins editing
+ *    collapsed BEM children (`ns-foo__bar` → `ns-foo`), admins editing
  *    multi-element templates saw the DOM render but with every nested
  *    class flattened to the wrapper, so none of their `__element` CSS
  *    rules matched and the preview painted as bare text. Fixing the
  *    regex helped but kept introducing edge cases (BEM modifiers,
  *    keyframes name collisions, custom-property names that contain `--`,
  *    nested `@scope`/`@media`). Shadow DOM removes the whole class of
- *    bug — the admin's classes apply to the admin's HTML, full stop.
+ *    bug, the admin's classes apply to the admin's HTML, full stop.
  *  - Style isolation goes both ways: the page's `keep-*` tokens and
  *    tailwind utilities don't bleed into the preview, so admins
  *    authoring against the host page can't accidentally rely on app
  *    styles that won't exist at runtime.
  *
  * Inherited CSS (color, font-family, line-height) still flows through
- * the host element into the shadow root — that's a property of the
- * cascade, not a leak — so the preview text picks up the editor's
+ * the host element into the shadow root, that's a property of the
+ * cascade, not a leak, so the preview text picks up the editor's
  * typography for context.
  */
 function NameStylePreview({
@@ -1347,7 +1347,7 @@ function NameStylePreview({
   }, []);
 
   // (Re)render the shadow content on every change. Clears then rebuilds
-  // — cheap for a single styled span, and avoids needing to diff the
+  //, cheap for a single styled span, and avoids needing to diff the
   // user's freeform HTML/CSS.
   useEffect(() => {
     const shadow = shadowRef.current;
@@ -1369,7 +1369,7 @@ function NameStylePreview({
     // runtime, so the admin sees what's actually going to survive
     // sanitization (e.g. `title=` attrs and disallowed tags getting
     // stripped). KEEP_CONTENT means stripped tags keep their inner
-    // text — matches production exactly. Placeholder substitution
+    // text, matches production exactly. Placeholder substitution
     // (`{username}` + `{username-span}`) routes through the shared
     // helper so the preview can't drift from the runtime render.
     const merged = applyNameStylePlaceholders(template, displayName);
@@ -1413,7 +1413,7 @@ function StyleEditor({
   const [saving, setSaving] = useState(false);
 
   // Preview is rendered via NameStylePreview (Shadow DOM). No
-  // class-name rewriting, no page-level style injection — the admin's
+  // class-name rewriting, no page-level style injection, the admin's
   // exact HTML + CSS apply inside an isolated shadow tree, so the
   // preview literally matches what saving will produce.
 
@@ -1504,7 +1504,7 @@ function StyleEditor({
           <code>{"{username}"}</code> drops the name as one text run.
           {" "}
           <code>{"{username-span}"}</code> wraps each character in its own
-          <code>&lt;span data-i="N"&gt;</code> so per-character CSS works —
+          <code>&lt;span data-i="N"&gt;</code> so per-character CSS works,
           target via <code>{"span[data-i=\"0\"]"}</code> or
           <code>:nth-child()</code> for alternating colors, per-letter
           animations, etc.
@@ -1541,7 +1541,7 @@ function StyleEditor({
       <div className="rounded border border-keep-rule/60 bg-keep-bg/60 p-3">
         <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Live preview</div>
         {/* `text-2xl font-bold` mirrors the EarningDashboard's
-            Available card preview sizing — at smaller weight the 1px
+            Available card preview sizing, at smaller weight the 1px
             text-stroke a lot of styles use overwhelms the fill, so
             matching the store's bigger sizing gives the admin a
             like-for-like comparison with what users see when shopping. */}
@@ -1594,7 +1594,7 @@ function StyleEditor({
  *  placeholder). Server enforces the XOR; this UI surfaces both
  *  fields and the admin picks one.
  *
- *  Rarity is an open string — admins can introduce a new tier
+ *  Rarity is an open string, admins can introduce a new tier
  *  ("seasonal", "limited", whatever) by typing it. The user-facing
  *  BordersTab palette covers a fixed set and falls back to the
  *  'common' palette for anything else.
@@ -1614,7 +1614,7 @@ function FreeformBordersSection() {
   // back to null (BorderedAvatar then shows the initials chip).
   //
   // Scoped to (me.id, activeCharacterId) so a sibling tab voicing a
-  // different identity can't poison this lookup — picking up a
+  // different identity can't poison this lookup, picking up a
   // character row's portrait while the admin is reviewing borders on
   // OOC would paint the wrong face into the preview frame.
   const me = useChat((s) => s.me);
@@ -1768,7 +1768,7 @@ function FreeformBordersSection() {
       ) : rows.length === 0 ? (
         <div className="text-sm text-keep-muted">No free-form borders yet.</div>
       ) : (
-        // Card grid — one tile per border, with a live preview using
+        // Card grid, one tile per border, with a live preview using
         // BorderedAvatar's freeformOverride path so disabled rows
         // still render at full fidelity. Responsive: 1col mobile,
         // 2col tablet, 3col desktop, 4col wide.
@@ -1780,7 +1780,7 @@ function FreeformBordersSection() {
                 r.enabled ? "border-keep-rule bg-keep-bg/40" : "border-keep-accent/40 bg-keep-accent/5"
               }`}
             >
-              {/* Live preview — same render path as the user-facing
+              {/* Live preview, same render path as the user-facing
                   picker. `freeformOverride` bypasses the snapshot
                   catalog so disabled rows still display, and inlines
                   the row's CSS into the preview so admin-edited
@@ -1842,7 +1842,7 @@ function FreeformBordersSection() {
                   type="button"
                   onClick={() => void remove(r)}
                   disabled={r.isBuiltin}
-                  title={r.isBuiltin ? "Built-in — disable instead" : "Delete border"}
+                  title={r.isBuiltin ? "Built-in, disable instead" : "Delete border"}
                   className="rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/20 disabled:opacity-40"
                 >
                   Delete
@@ -1874,7 +1874,7 @@ function FreeformBorderEditor({
   function set<K extends keyof AdminFreeformBorderRow>(k: K, v: AdminFreeformBorderRow[K]) {
     setDraft({ ...draft, [k]: v });
   }
-  // Pull the admin's own avatar for the live preview — same source
+  // Pull the admin's own avatar for the live preview, same source
   // as the section's grid previews. Scoped to (me.id, activeCharacterId)
   // for the same cross-tab leak rationale as the freeform-borders
   // preview above.
@@ -1894,7 +1894,7 @@ function FreeformBorderEditor({
         <div className="text-sm font-semibold">
           {creating ? "New free-form border" : `Editing: ${draft.key}`}
         </div>
-        {/* Live editor preview — feeds the draft through the same
+        {/* Live editor preview, feeds the draft through the same
             BorderedAvatar override path the card grid uses, so the
             admin sees the rendered border update as they type. */}
         {draft.template || draft.imageUrl ? (
@@ -1982,7 +1982,7 @@ function FreeformBorderEditor({
           className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
         />
       </label>
-      {/* Image vs template mode is exclusive — the server enforces
+      {/* Image vs template mode is exclusive, the server enforces
           XOR. The UI lets the admin clear one to switch to the
           other. */}
       <label className="block text-xs">
@@ -2038,7 +2038,7 @@ function FreeformBorderEditor({
  *
  *  One row per cosmetic; admins edit name / description / cost /
  *  enabled. Current buyable cosmetics: `inline_avatar` plus the
- *  `flair_*` family — profile_banner, typing_phrase, lurking_master,
+ *  `flair_*` family, profile_banner, typing_phrase, lurking_master,
  *  reaction_sheet, room_presence, session_presence, profile_visitors
  *  (migration 0192), and profile_marquee (migration 0192).
  *  `rank_border` remains a UX placeholder (real per-rank prices
@@ -2081,7 +2081,7 @@ function CosmeticsSection() {
       {err ? (
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-sm text-keep-accent">{err}</div>
       ) : null}
-      {/* Card grid — saves vertical space on tablet+ while staying
+      {/* Card grid, saves vertical space on tablet+ while staying
           1col on mobile. Each CosmeticRow keeps its own layout
           (header + description + inputs) so converting to a grid is
           purely the outer flow. */}
@@ -2100,7 +2100,7 @@ function CosmeticsSection() {
  *
  *  Per-cosmetic "clear this user's free-form content" actions.
  *  Banner URL and typing phrase are both user-supplied strings
- *  protected only by the up-front purchase + length checks — when
+ *  protected only by the up-front purchase + length checks, when
  *  a moderator gets a report ("Bob's banner is hotlinked NSFW",
  *  "Alice's typing phrase is harassing"), this is where they
  *  zero it out. Ownership of the cosmetic is retained so the user
@@ -2160,7 +2160,7 @@ function ClearFlairCard({
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ kind: "ok"; message: string } | { kind: "err"; message: string } | null>(null);
-  // Session-presence is master-only — hide the character-id input
+  // Session-presence is master-only, hide the character-id input
   // so admins don't think they can target a character's session
   // greeting (it doesn't exist).
   const supportsCharacterScope = kind !== "session-presence";
@@ -2212,7 +2212,7 @@ function ClearFlairCard({
       </label>
       {supportsCharacterScope ? (
         <label className="block">
-          <span className="text-keep-muted">Character id (optional — leave blank to clear master/OOC)</span>
+          <span className="text-keep-muted">Character id (optional, leave blank to clear master/OOC)</span>
           <input
             type="text"
             value={characterId}
@@ -2318,7 +2318,7 @@ function CosmeticRow({
       </label>
       {isRankBorderPlaceholder ? (
         <p className="rounded border border-keep-rule/60 bg-keep-banner/20 p-2 text-[11px] text-keep-muted">
-          The cost field for <code>rank_border</code> is ignored — actual per-rank prices live on each rank's Tier IV row in the Ranks tab.
+          The cost field for <code>rank_border</code> is ignored, actual per-rank prices live on each rank's Tier IV row in the Ranks tab.
         </p>
       ) : (
         <label className="flex items-center gap-1 text-xs">
@@ -2338,7 +2338,7 @@ function CosmeticRow({
 }
 
 /* =========================================================
- *  Items sub-tab — full CRUD on the items catalog.
+ *  Items sub-tab, full CRUD on the items catalog.
  *
  *  Mirrors the Name Styles editor shape: sidebar list of items
  *  + an editor pane on the right. The editor exposes identity
@@ -2347,7 +2347,7 @@ function CosmeticRow({
  *  window), and per-command message tables for /give /throw /drop.
  *
  *  Built-in seed items (migration 0094) carry `isBuiltin=1` and are
- *  delete-protected — admins can rewrite every field except the
+ *  delete-protected, admins can rewrite every field except the
  *  key, but the row stays. Custom items are fully deletable; the
  *  server cascades the FK on identity_inventory so deleting a
  *  custom item drops every outstanding inventory stack of it.
@@ -2364,7 +2364,7 @@ function ItemsSection() {
   const [creating, setCreating] = useState(false);
   // Browse-mode filters. Category chip + text search keep the grid
   // manageable as the catalog grows past 60+ items. State doesn't
-  // persist across mounts — admins re-filter per session.
+  // persist across mounts, admins re-filter per session.
   const [filterCategory, setFilterCategory] = useState<ItemCategory | "all">("all");
   const [query, setQuery] = useState("");
 
@@ -2406,7 +2406,7 @@ function ItemsSection() {
 
   if (loading) return <p className="text-sm text-keep-muted">Loading items…</p>;
 
-  // EDIT MODE — full-width editor with a back-to-catalog button.
+  // EDIT MODE, full-width editor with a back-to-catalog button.
   // We swap the entire view rather than splitting because the editor
   // already runs long (header + messages + sale window + commands)
   // and a side-by-side split made it cramped on anything below
@@ -2468,7 +2468,7 @@ function ItemsSection() {
         ) : selected ? (
           // `key={selected.key}` forces a fresh mount when the admin
           // pivots from one card to another via the editor's
-          // jump-to-edit links — useState(initial.*) in the editor
+          // jump-to-edit links, useState(initial.*) in the editor
           // only runs on first mount, so without the key prop the
           // form fields stay frozen on the originally-selected row.
           <ItemEditor
@@ -2484,7 +2484,7 @@ function ItemsSection() {
     );
   }
 
-  // BROWSE MODE — header + filter + responsive card grid.
+  // BROWSE MODE, header + filter + responsive card grid.
   return (
     <div className="space-y-3">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
@@ -2507,7 +2507,7 @@ function ItemsSection() {
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-sm text-keep-accent">{err}</div>
       ) : null}
 
-      {/* Filter row — category select + free-text search. Both narrow
+      {/* Filter row, category select + free-text search. Both narrow
           the visible grid so the admin doesn't scroll an infinite list.
           Empty categories are hidden from the picker so it doesn't
           carry dead "Weapons (0)" rows. */}
@@ -2603,7 +2603,7 @@ function ItemCard({
     <button
       type="button"
       onClick={onClick}
-      title={`${row.name} — ${row.description || "(no description)"}`}
+      title={`${row.name}, ${row.description || "(no description)"}`}
       className="group relative flex flex-col items-center gap-1 rounded border border-keep-rule bg-keep-bg/40 p-2 text-center text-xs hover:border-keep-action hover:bg-keep-banner"
     >
       {row.isBuiltin ? (
@@ -2695,7 +2695,7 @@ function ItemEditor({
   const [giveMessages, setGiveMessages] = useState(initial.giveMessages.join("\n"));
   const [throwMessages, setThrowMessages] = useState(initial.throwMessages.join("\n"));
   const [dropMessages, setDropMessages] = useState(initial.dropMessages.join("\n"));
-  // Aliases stored as a comma-separated string in the textarea — typed
+  // Aliases stored as a comma-separated string in the textarea, typed
   // inline in one row rather than line-per-entry like messages, since
   // alias lists are short and read more naturally as a single line.
   const [aliasesText, setAliasesText] = useState(initial.aliases.join(", "));
@@ -2706,7 +2706,7 @@ function ItemEditor({
     return s.split("\n").map((l) => l.trim()).filter(Boolean);
   }
 
-  /** Parse the aliases field — split by commas, trim whitespace, drop
+  /** Parse the aliases field, split by commas, trim whitespace, drop
    *  empties + dupes (case-insensitive). Keeps storage tight and
    *  avoids accidental "  drink ,  drink  " bloating the array. */
   function splitAliases(s: string): string[] {
@@ -2760,7 +2760,7 @@ function ItemEditor({
   async function remove() {
     if (!window.confirm(
       initial.owners > 0
-        ? `Delete "${initial.name}"? ${initial.owners} identit${initial.owners === 1 ? "y owns" : "ies own"} it — every stack will be wiped.`
+        ? `Delete "${initial.name}"? ${initial.owners} identit${initial.owners === 1 ? "y owns" : "ies own"} it, every stack will be wiped.`
         : `Delete "${initial.name}"?`,
     )) return;
     try {
@@ -2867,13 +2867,16 @@ function ItemEditor({
           />
         </label>
         <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Stack limit</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">
+            Stack limit <span className="text-keep-accent normal-case tracking-normal">(not enforced)</span>
+          </span>
           <input
             type="number"
             min={1}
             value={stackLimit}
             onChange={(e) => setStackLimit(Math.max(1, Number(e.target.value) || 1))}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+            title="Vestigial. Players accumulate without ceiling, /give, /raffle, and the Shop ignore this value. Kept for future re-introduction."
           />
         </label>
         <label className="block text-xs">
@@ -2893,7 +2896,7 @@ function ItemEditor({
         </label>
       </div>
 
-      {/* Availability block — layered switches with a live summary. */}
+      {/* Availability block, layered switches with a live summary. */}
       <fieldset className="space-y-2 rounded border border-keep-rule/60 bg-keep-banner/20 p-2">
         <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">Availability</legend>
         <div className="flex flex-wrap items-center gap-4">
@@ -2920,10 +2923,10 @@ function ItemEditor({
 
       {/* Per-command message tables. Empty array = command disabled. */}
       <fieldset className="space-y-3 rounded border border-keep-rule/60 bg-keep-banner/20 p-2">
-        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">Command messages — one template per line. Placeholders: {"{sender}"} {"{target}"} {"{num}"} {"{item_name}"} {"{icon}"} (inline image of this item's icon). Leave blank to disable that command for this item.</legend>
+        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">Command messages, one template per line. Placeholders: {"{sender}"} {"{target}"} {"{num}"} {"{item_name}"} {"{icon}"} (inline image of this item's icon). Leave blank to disable that command for this item.</legend>
         <CommandMessageEditor label="/give" hint="Transfers the item to the target's inventory." value={giveMessages} onChange={setGiveMessages} />
-        <CommandMessageEditor label="/throw" hint="Consumes the item as a silly weapon — target gets nothing." value={throwMessages} onChange={setThrowMessages} />
-        <CommandMessageEditor label="/drop" hint="Consumes the item as a 'drop on someone' gag — target gets nothing." value={dropMessages} onChange={setDropMessages} />
+        <CommandMessageEditor label="/throw" hint="Consumes the item as a silly weapon, target gets nothing." value={throwMessages} onChange={setThrowMessages} />
+        <CommandMessageEditor label="/drop" hint="Consumes the item as a 'drop on someone' gag, target gets nothing." value={dropMessages} onChange={setDropMessages} />
       </fieldset>
 
       {initial.isBuiltin ? (
@@ -2999,7 +3002,7 @@ function CommandMessageEditor({
 
 /** Sale window scheduler. Two datetime-local inputs + a "Sell for
  *  the next N hours/days" convenience widget that auto-fills the
- *  window from now. Each input is independent — clearing one leaves
+ *  window from now. Each input is independent, clearing one leaves
  *  the other intact. */
 function SaleWindowControls({
   saleStartsAt,
@@ -3111,7 +3114,7 @@ function DateTimeInput({
 }
 
 /* =========================================================
- *  Test grants sub-tab — masteradmin-only
+ *  Test grants sub-tab, masteradmin-only
  *
  *  Direct grants for testing rank/border/style/cosmetic
  *  visibility without grinding XP or buying with Currency.
@@ -3155,7 +3158,7 @@ function TestGrantsSection() {
       await op();
       setSavedFlash(label);
       // Refresh the local earning snapshot if the grant is on
-      // ourselves — that way the dashboard ribbon / wallet / sigil
+      // ourselves, that way the dashboard ribbon / wallet / sigil
       // all update without a reload.
       if (me?.username && target.trim().toLowerCase() === me.username.toLowerCase()) {
         await refreshEarning();
@@ -3197,7 +3200,7 @@ function TestGrantsSection() {
           <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{err}</div>
         ) : null}
         {savedFlash ? (
-          <div className="text-xs text-keep-system">{savedFlash} — done.</div>
+          <div className="text-xs text-keep-system">{savedFlash}, done.</div>
         ) : null}
       </section>
 
@@ -3224,7 +3227,7 @@ function TestGrantsSection() {
         />
       </SectionFrame>
 
-      <SectionFrame title="Grant border" description="Inserts ownership for the chosen rank's border. Bypasses the normal Tier IV eligibility gate — handy for previewing every frame without climbing.">
+      <SectionFrame title="Grant border" description="Inserts ownership for the chosen rank's border. Bypasses the normal Tier IV eligibility gate, handy for previewing every frame without climbing.">
         <GrantPickerRow
           options={ranks
             .filter((r) => tier4ByRank.has(r.key) && tier4ByRank.get(r.key)!.borderImageUrl)
@@ -3265,7 +3268,7 @@ function TestGrantsSection() {
       {/* ---- Free-form border grant / revoke (Phase 1 catalog) ---- */}
       <SectionFrame
         title="Grant free-form border"
-        description="Inserts ownership for the chosen free-form border (master pool). Idempotent. Auto-equips on first acquisition if the identity has no freeform border equipped — matches the user-facing purchase behavior."
+        description="Inserts ownership for the chosen free-form border (master pool). Idempotent. Auto-equips on first acquisition if the identity has no freeform border equipped, matches the user-facing purchase behavior."
       >
         <GrantPickerRow
           options={freeformBorders.map((b) => ({ value: b.key, label: `${b.name} (${b.rarity})` }))}
@@ -3321,7 +3324,7 @@ function TestGrantsSection() {
   );
 }
 
-/** Item grant picker — item + signed quantity. Same shape as the
+/** Item grant picker, item + signed quantity. Same shape as the
  *  other GrantPickerRow rows but with an extra numeric input. Empty
  *  catalog renders a small explainer pointing the admin at the Items
  *  sub-tab so they can seed at least one item first. */
@@ -3339,7 +3342,7 @@ function GrantItemRow({
   if (items.length === 0) {
     return (
       <p className="text-xs text-keep-muted">
-        No items in the catalog yet — create one in the Items sub-tab first.
+        No items in the catalog yet, create one in the Items sub-tab first.
       </p>
     );
   }
@@ -3453,7 +3456,7 @@ function SetRankRow({
         {tiersForRank.length === 0 ? (
           <option value={1}>Tier…</option>
         ) : tiersForRank.map((t) => (
-          <option key={t.id} value={t.tier}>Tier {t.tier} — {t.label}</option>
+          <option key={t.id} value={t.tier}>Tier {t.tier}, {t.label}</option>
         ))}
       </select>
       <button
@@ -3518,10 +3521,10 @@ function GrantPickerRow({
  *  Flash Sale sub-tab
  *
  *  Two panels in one section:
- *    1. Today's picks (read-only — the resolver has already made
+ *    1. Today's picks (read-only, the resolver has already made
  *       its choice for today; the only way to change it is queue
  *       an override for a FUTURE date).
- *    2. Future queue — one row per (category, date) override.
+ *    2. Future queue, one row per (category, date) override.
  *       Admin picks a target key + optional discount %. Queueing
  *       null target removes the queue (day falls back to random).
  *
@@ -3564,7 +3567,7 @@ function FlashSaleSection() {
   if (loading) return <p className="text-sm text-keep-muted">Loading flash-sale state…</p>;
   if (!data) return <p className="text-sm text-keep-accent">{err ?? "Load failed."}</p>;
 
-  // The "for_date" the override form starts at — tomorrow. Admins
+  // The "for_date" the override form starts at, tomorrow. Admins
   // can edit the date input to queue further out, but tomorrow is
   // the most common case.
   return (
@@ -3572,7 +3575,7 @@ function FlashSaleSection() {
       <header className="space-y-1">
         <h3 className="font-action text-base">Flash Sale</h3>
         <p className="text-xs text-keep-muted">
-          One row per category goes on sale each UTC day. Today's picks are read-only — the
+          One row per category goes on sale each UTC day. Today's picks are read-only, the
           resolver has already chosen. Queue a specific row for any future date, or leave a
           date un-queued to keep it random. Override targets that get disabled in the catalog
           before resolution day still get picked (admin intent wins over availability).
@@ -3742,7 +3745,7 @@ function FlashSaleOverrideRow({
 }) {
   const [date, setDate] = useState<string>(defaultDate);
   // `existing` is derived from the CURRENT date state, not a static
-  // prop — so when the admin types a different future date into the
+  // prop, so when the admin types a different future date into the
   // input, the row immediately reflects "is there already a queue
   // for this category on that date?" instead of frozenly showing
   // whatever tomorrow's queue happens to be. Empty string in
@@ -3757,7 +3760,7 @@ function FlashSaleOverrideRow({
   const [err, setErr] = useState<string | null>(null);
   // Sync the local form draft to the derived `existing` so a date
   // change (or a parent refresh after Save) populates the row with
-  // whatever's currently queued for that (category, date) — instead
+  // whatever's currently queued for that (category, date), instead
   // of leaving a stale "40%" in the discount field after navigating
   // to a date with no queue. The lookup is by-value of the derived
   // record, so React only re-runs these when the actual existing row
@@ -3773,7 +3776,7 @@ function FlashSaleOverrideRow({
   useEffect(() => { setDate((cur) => (cur === defaultDate ? defaultDate : cur)); }, [defaultDate]);
 
   // Options come from the corresponding catalog. Disabled rows are
-  // included — admins can pin one anyway (intent wins over availability).
+  // included, admins can pin one anyway (intent wins over availability).
   const options: Array<{ key: string; name: string }> =
     category === "name_style" ? styles.map((s) => ({ key: s.key, name: s.name }))
     : category === "item" ? items.map((i) => ({ key: i.key, name: i.name }))
@@ -3820,7 +3823,7 @@ function FlashSaleOverrideRow({
       >
         <option value="">(random)</option>
         {options.map((o) => (
-          <option key={o.key} value={o.key}>{o.name} — {o.key}</option>
+          <option key={o.key} value={o.key}>{o.name}, {o.key}</option>
         ))}
       </select>
       <input
@@ -3851,7 +3854,7 @@ function FlashSaleOverrideRow({
  *
  *  Four catalogs available. Each gets an Export button (downloads
  *  a ZIP) and an Import button (file-picker → POST). Import is
- *  upsert-by-key; absent rows are left alone — see
+ *  upsert-by-key; absent rows are left alone, see
  *  apps/server/src/admin/earningTransfer.ts for the semantics.
  * ============================================================ */
 function CatalogTransferSection() {
@@ -3867,7 +3870,7 @@ function CatalogTransferSection() {
       <header className="space-y-1">
         <h3 className="font-action text-base">Catalog Backup</h3>
         <p className="text-xs text-keep-muted">
-          Per-catalog ZIP export + import. Imports are <strong>upsert by key</strong> — rows you
+          Per-catalog ZIP export + import. Imports are <strong>upsert by key</strong>, rows you
           didn't include keep their existing values. Bundled `/uploads/*` images extract back to
           their original paths so a round-trip restores custom art too. Re-importing a file you
           just exported is a clean no-op.
@@ -3904,7 +3907,7 @@ function TransferRow({ kind, label, help }: { kind: EarningTransferKind; label: 
     const f = e.target.files?.[0];
     e.target.value = ""; // allow re-picking the same file later
     if (!f) return;
-    if (!window.confirm(`Import ${f.name} into ${label}? This UPSERTS by key — existing rows with matching keys will be overwritten.`)) return;
+    if (!window.confirm(`Import ${f.name} into ${label}? This UPSERTS by key, existing rows with matching keys will be overwritten.`)) return;
     setBusy(true);
     setStatus(null);
     setResult(null);

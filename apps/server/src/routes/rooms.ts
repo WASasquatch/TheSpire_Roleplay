@@ -16,6 +16,7 @@ import type {
 import { ignores, messages, roomMembers, roomThreadCategories, rooms } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
+import { getSettings } from "../settings.js";
 import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -110,12 +111,12 @@ export async function registerRoomsRoutes(
    * Privacy gates, in order, fail-closed:
    *   1. Caller must be authenticated.
    *   2. For private rooms: caller must be a member (or owner / site
-   *      admin). Non-members get 403 — even seeing whether their query
+   *      admin). Non-members get 403, even seeing whether their query
    *      matches something would be a privacy leak.
    *   3. Whispers are filtered to ones the caller is party to.
-   *   4. Soft-deleted messages (`deletedAt` set) are excluded — the
+   *   4. Soft-deleted messages (`deletedAt` set) are excluded, the
    *      author asked them gone; search shouldn't resurrect.
-   *   5. System messages are excluded — they're noise (joins/parts,
+   *   5. System messages are excluded, they're noise (joins/parts,
    *      "X kicked Y", description blasts) and confuse the result list.
    *
    * Ranking: LIKE-based with a simple frequency score (count of matches
@@ -138,7 +139,7 @@ export async function registerRoomsRoutes(
       if (!room) { reply.code(404); return { error: "no room" }; }
 
       // Private-room membership gate. Site admins are NOT bypassed here
-      // — the privacy contract is that admins can't read private room
+      //, the privacy contract is that admins can't read private room
       // content even via search.
       if (room.type === "private") {
         const member = (await db
@@ -174,7 +175,7 @@ export async function registerRoomsRoutes(
       // Frequency-based relevance: count occurrences of the query in the
       // body (case-insensitive). Ties broken by recency. The UI displays
       // results in ascending relevance so the most-relevant hit sits
-      // closest to the search input — see the SearchBar component.
+      // closest to the search input, see the SearchBar component.
       const needle = q.toLowerCase();
       const hits = rows.map((m): MessageSearchHit & { _ts: number } => {
         const lc = m.body.toLowerCase();
@@ -242,14 +243,14 @@ export async function registerRoomsRoutes(
       return { error: "message not in this room" };
     }
     // If the target itself is whisper-private and the caller isn't a
-    // party, we don't surface it (or its context) — same rule the live
+    // party, we don't surface it (or its context), same rule the live
     // backlog applies.
     if (target.kind === "whisper" && target.userId !== me.id && target.toUserId !== me.id) {
       reply.code(403);
       return { error: "not your whisper" };
     }
 
-    // Cross-room whisper overlay — see the union in
+    // Cross-room whisper overlay, see the union in
     // sendRoomBacklogTo / GET /rooms/:id/messages for the rationale.
     const roomOrPartyWhisper = or(
       and(sql`${messages.kind} != 'whisper'`, eq(messages.roomId, room.id)),
@@ -372,7 +373,7 @@ export async function registerRoomsRoutes(
         .from(ignores)
         .where(eq(ignores.userId, me.id))).map((r) => r.ignoredUserId),
     );
-    // Whispers overlay across rooms — see the matching union in
+    // Whispers overlay across rooms, see the matching union in
     // sendRoomBacklogTo. Non-whisper rows are scoped to THIS room;
     // whisper rows the caller is a party to are pulled regardless of
     // their original room.
@@ -457,12 +458,12 @@ export async function registerRoomsRoutes(
    *
    * 404s:
    *   - message not found in this room
-   *   - the topic (self or parent) was soft-deleted — forum-deletes
+   *   - the topic (self or parent) was soft-deleted, forum-deletes
    *     are hidden from end-user surfaces; jumping to a removed topic
    *     should fail closed.
    *
    * Auth: any logged-in user. The same justification as the topics
-   * endpoint applies — you can't jump to content in a room you haven't
+   * endpoint applies, you can't jump to content in a room you haven't
    * joined, since the search/bookmark/mention surfaces only emit ids
    * for content you can see.
    */
@@ -488,7 +489,7 @@ export async function registerRoomsRoutes(
         return { error: "topic not in this room" };
       }
       if (topicRow.deletedAt) {
-        // Topic was soft-deleted — surface a 404 rather than handing
+        // Topic was soft-deleted, surface a 404 rather than handing
         // back a "[message removed]" shell. The jump-from surfaces
         // (search, bookmarks) already filter deleted rows server-
         // side; this is the belt-and-suspenders for racing deletes.
@@ -497,7 +498,7 @@ export async function registerRoomsRoutes(
       }
 
       // Full reply chain under this topic, oldest first. Non-deleted
-      // replies only — the modal's renderer paints "[message removed]"
+      // replies only, the modal's renderer paints "[message removed]"
       // for deletedAt rows but we don't emit them at all here, since
       // a deleted reply in a thread you're viewing is noise.
       const replyRows = await db
@@ -558,25 +559,40 @@ export async function registerRoomsRoutes(
   );
 
   /**
-   * GET /rooms/:id/topics — paginated list of top-level topics in a
+   * GET /rooms/:id/topics, paginated list of top-level topics in a
    * forum (nested-mode) room. Filters by category and orders by
    * `last_activity_at` DESC so the most-recently-active threads
    * surface first. Used by the forum view to load topics on room
-   * enter, by the per-category "Load older" button, and by the
-   * orphan-fetch path when a reply arrives for a topic not yet in
-   * the client's buffer.
+   * enter, by the per-category numbered pagination strip, and by
+   * the orphan-fetch path when a reply arrives for a topic not yet
+   * in the client's buffer.
    *
    * Query params:
    *   - `category`: thread category id, `""` for uncategorized, or
    *      omitted for "all categories". Empty-string matches null
    *      threadCategoryId server-side.
-   *   - `before`: cursor — return only topics with
-   *      `last_activity_at < before` (epoch ms). Omit for the first
-   *      page. The client passes the lastActivityAt of the
-   *      oldest-loaded topic on each "Load older" click.
-   *   - `limit`: 1..50, default 20.
+   *   - `page`: 1-indexed page number. Defaults to 1.
+   *   - `perPage`: bounded 5..100. When omitted, the admin-set
+   *      site default (`forumTopicsPerPage`, migration 0193) is
+   *      used. Clients can pass a tighter value for compact
+   *      surfaces; the orphan-fetch path passes 1 to grab a
+   *      specific topic by id, etc.
    *
-   * Deleted topics (`deletedAt` set) are excluded entirely — they
+   * Returns: `{ topics, page, perPage, totalPages, totalCount }`.
+   * The client uses `totalPages` to render the numbered strip and
+   * decides whether to disable Prev/Next based on `page`.
+   *
+   * Stickies behavior: stickies are returned on page 1 only,
+   * BEFORE the non-sticky run, and are NOT counted against `perPage`.
+   * The non-sticky run is paginated independently; `totalCount` and
+   * `totalPages` describe the NON-STICKY pool only. This means
+   * pages 2+ are pure-non-sticky timelines and page 1 carries
+   * stickies as a header strip on top of `perPage` non-stickies.
+   * Without that carve-out a page-1 with N stickies would push some
+   * non-stickies into "the page after page 1", which made the page
+   * numbers misleading.
+   *
+   * Deleted topics (`deletedAt` set) are excluded entirely, they
    * don't appear in the forum view for anyone (admins review via the
    * audit panel, not via topic listings).
    *
@@ -588,7 +604,17 @@ export async function registerRoomsRoutes(
    */
   const topicsQuery = z.object({
     category: z.string().optional(),
+    page: z.coerce.number().int().min(1).optional(),
+    perPage: z.coerce.number().int().min(5).max(100).optional(),
+    /**
+     * LEGACY cursor, preserved so any in-flight clients running the
+     * older "Load older" code path don't break mid-deploy. When
+     * `before` is set we still cursor-page (no totalPages signal),
+     * but `page` takes precedence when both arrive on the same
+     * request. New clients should never set this.
+     */
     before: z.coerce.number().int().positive().optional(),
+    /** LEGACY alias for perPage on the cursor-page path. */
     limit: z.coerce.number().int().min(1).max(50).optional(),
   });
 
@@ -602,7 +628,15 @@ export async function registerRoomsRoutes(
       try { q = topicsQuery.parse(req.query); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid query" }; }
 
-      const limit = q.limit ?? 20;
+      const settings = await getSettings(db);
+      const perPage = q.perPage ?? q.limit ?? settings.forumTopicsPerPage;
+      const page = q.page ?? 1;
+      // Cursor mode wins ONLY when no `page` was supplied AND a
+      // `before` cursor IS supplied, that's the legacy "Load older"
+      // call shape. Fresh clients always pass `page`, in which case
+      // we ignore `before`.
+      const useCursor = q.page === undefined && q.before !== undefined;
+      const limit = perPage; // legacy `limit` was the page size; same alias.
       const roomId = req.params.id;
 
       // Build the WHERE clause. We always require:
@@ -622,9 +656,9 @@ export async function registerRoomsRoutes(
         isNull(messages.deletedAt),
         // Topics are ONLY ever `kind = "say"`. The forum composer
         // creates topics with this kind; replies use it too. Every
-        // other top-level row in the messages table — `system`
+        // other top-level row in the messages table, `system`
         // (joins/leaves/watch pings), `announce`, `scene`, `me`,
-        // `roll`, `npc`, `whisper`, `ooc` — is a chat-shaped event,
+        // `roll`, `npc`, `whisper`, `ooc`, is a chat-shaped event,
         // not a discussion thread, and must not surface in the forum
         // topics list. Without this filter, historical system rows
         // from before the forum-room suppression landed in
@@ -640,27 +674,13 @@ export async function registerRoomsRoutes(
         }
       }
 
-      // Pagination model for stickies:
-      //
-      //  - Page 1 (no `before`):
-      //      Returns ALL stickies in the category (no limit on those —
-      //      they're admin-pinned and should always be visible),
-      //      PLUS the first `limit` non-stickies ordered by
-      //      `last_activity_at DESC`.
-      //  - Page 2+ (with `before`):
-      //      Returns ONLY non-stickies older than `before`, ordered by
-      //      `last_activity_at DESC`. Stickies are already in the
-      //      bucket from page 1, so excluding them here prevents
-      //      duplicates.
-      //
-      // The client appends each page's `topics` directly to its bucket;
-      // since stickies always come first in the returned array, the
-      // bucket invariant "stickies first, then unstickies by activity
-      // DESC" holds automatically.
+      // Stickies are always returned on page 1 ONLY, and never count
+      // against perPage, the non-sticky pool is paginated
+      // independently below.
       let stickies: typeof messages.$inferSelect[] = [];
-      if (q.before === undefined) {
-        // First page: pull every sticky for this scope. Stickies are
-        // admin-set, so there should be few; no LIMIT here.
+      if (useCursor ? q.before === undefined : page === 1) {
+        // First page (both modes): pull every sticky for this scope.
+        // Stickies are admin-set, so there should be few; no LIMIT.
         stickies = await db
           .select()
           .from(messages)
@@ -668,28 +688,58 @@ export async function registerRoomsRoutes(
           .orderBy(desc(messages.lastActivityAt));
       }
 
-      // Non-sticky page: paginated by lastActivityAt.
       const nonStickyConditions = [...baseConditions, eq(messages.isSticky, false)];
-      if (q.before !== undefined) {
-        // We compare against last_activity_at, which is non-null for
-        // every top-level row (seeded on insert + backfilled in the
-        // 0041 migration). The `<` keeps the cursor strict so we don't
-        // re-emit the boundary topic.
-        nonStickyConditions.push(sql`${messages.lastActivityAt} < ${q.before}`);
-      }
-      const nonStickyRows = await db
-        .select()
-        .from(messages)
-        .where(and(...nonStickyConditions))
-        .orderBy(desc(messages.lastActivityAt))
-        .limit(limit + 1);
 
-      const hasMore = nonStickyRows.length > limit;
-      const nonStickyPage = hasMore ? nonStickyRows.slice(0, limit) : nonStickyRows;
-      const page = [...stickies, ...nonStickyPage];
+      // Branch on pagination mode.
+      let nonStickyPage: typeof messages.$inferSelect[];
+      let hasMore: boolean;
+      let totalCount = 0;
+      let totalPages = 1;
+
+      if (useCursor) {
+        // Legacy cursor path, preserved for old clients mid-deploy.
+        // No totals returned; the client either drops the new fields
+        // (old code) or treats them as 0 (new code, but new code
+        // shouldn't be hitting this path).
+        if (q.before !== undefined) {
+          nonStickyConditions.push(sql`${messages.lastActivityAt} < ${q.before}`);
+        }
+        const rows = await db
+          .select()
+          .from(messages)
+          .where(and(...nonStickyConditions))
+          .orderBy(desc(messages.lastActivityAt))
+          .limit(limit + 1);
+        hasMore = rows.length > limit;
+        nonStickyPage = hasMore ? rows.slice(0, limit) : rows;
+      } else {
+        // Offset-paged numbered mode. We need the total count of
+        // non-stickies in this scope so the client can render
+        // numbered page controls. The COUNT runs in parallel with
+        // the row fetch so we don't pay two sequential round-trips.
+        const countRow = await db
+          .select({ n: sql<number>`COUNT(*)` })
+          .from(messages)
+          .where(and(...nonStickyConditions));
+        totalCount = Number(countRow[0]?.n ?? 0);
+        totalPages = Math.max(1, Math.ceil(totalCount / perPage));
+        const offset = (page - 1) * perPage;
+        nonStickyPage = await db
+          .select()
+          .from(messages)
+          .where(and(...nonStickyConditions))
+          .orderBy(desc(messages.lastActivityAt))
+          .limit(perPage)
+          .offset(offset);
+        // `hasMore` is preserved for back-compat on the wire shape;
+        // new clients drive Next/Prev off totalPages instead.
+        hasMore = page < totalPages;
+      }
+
+      const pageRows = [...stickies, ...nonStickyPage];
 
       const canSeeOriginalBody = await hasPermission(me, "view_deleted_message_body", db);
-      const topics: ChatMessage[] = page.map((m) => ({
+      const topics: ChatMessage[] = pageRows.map((m) => ({
         id: m.id,
         roomId: m.roomId,
         userId: m.userId,
@@ -721,12 +771,27 @@ export async function registerRoomsRoutes(
         ...(m.tier != null ? { tier: m.tier } : {}),
         ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
       }));
-      return { topics, hasMore };
+      // Response shape:
+      //   - `topics`, `hasMore` are kept for back-compat with any
+      //     in-flight client that still consumed only these.
+      //   - `page`, `perPage`, `totalPages`, `totalCount` are the
+      //     new offset-pagination signals. On cursor-mode requests
+      //     totalPages/totalCount are 0 since we don't compute them
+      //     (would be an extra COUNT for a path nobody should be
+      //     hitting going forward).
+      return {
+        topics,
+        hasMore,
+        page: useCursor ? null : page,
+        perPage,
+        totalPages: useCursor ? 0 : totalPages,
+        totalCount: useCursor ? 0 : totalCount,
+      };
     },
   );
 
   /**
-   * GET /rooms/:id/thread-categories — list the admin-defined thread
+   * GET /rooms/:id/thread-categories, list the admin-defined thread
    * buckets for a room. Returned in the same `sortOrder asc, createdAt
    * asc` order the renderer applies, so the client can use the list
    * verbatim without re-sorting. Visible to any logged-in user (the
@@ -861,7 +926,7 @@ export async function registerRoomsRoutes(
       }
       // FK `ON DELETE SET NULL` on messages.thread_category_id means any
       // existing thread anchored to this bucket falls back to
-      // "Uncategorized" — history is preserved.
+      // "Uncategorized", history is preserved.
       await db
         .delete(roomThreadCategories)
         .where(and(

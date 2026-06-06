@@ -2,14 +2,14 @@
 --
 -- Replaces the master-only world model with a per-identity one. A
 -- user's OOC face AND each of their characters can independently
--- join worlds — Avery joins Halcyon City, Sigrid joins Eldermarsh,
+-- join worlds, Avery joins Halcyon City, Sigrid joins Eldermarsh,
 -- the master's OOC voice joins The Spire community world. Approval
 -- binds to the applying identity only; other identities of the same
 -- master are NOT auto-joined.
 --
 -- This also drops the "primary world" concept entirely. With each
 -- identity carrying its own memberships, the cross-identity "which
--- world badges you in the userlist" signal becomes meaningless —
+-- world badges you in the userlist" signal becomes meaningless,
 -- and the userlist's world-bucket grouping was the surface that
 -- leaked "this character is a member of X" by way of grouping them
 -- under their master's primary. We retire it; the world's own
@@ -41,7 +41,7 @@ CREATE TABLE `world_members_new` (
 
 -- Migrate existing rows: every legacy membership becomes an OOC
 -- membership (character_id = NULL). The is_primary column is
--- intentionally dropped — we retire primary-world entirely.
+-- intentionally dropped, we retire primary-world entirely.
 INSERT INTO `world_members_new` (`world_id`, `user_id`, `character_id`, `joined_at`)
   SELECT `world_id`, `user_id`, NULL, `joined_at` FROM `world_members`;
 --> statement-breakpoint
@@ -51,7 +51,7 @@ DROP TABLE `world_members`;
 ALTER TABLE `world_members_new` RENAME TO `world_members`;
 --> statement-breakpoint
 
--- "One membership per (world, user, identity)" — COALESCE collapses
+-- "One membership per (world, user, identity)", COALESCE collapses
 -- NULL (the OOC slot) into the empty string so SQLite's
 -- NULL-distinct-in-UNIQUE-index quirk doesn't let one user re-join
 -- the same world as OOC twice.

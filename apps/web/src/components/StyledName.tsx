@@ -1,5 +1,5 @@
 /**
- * StyledName — renders a user's display name with their equipped
+ * StyledName, renders a user's display name with their equipped
  * name-style template applied.
  *
  * Render strategy:
@@ -15,7 +15,7 @@
  *      element: every other path we tried (React `style={{ "--x": v }}`,
  *      cascade from a parent `<span>` wrapper, regex-inject `style="…"`
  *      into the template before DOMPurify) lost the vars somewhere
- *      between React, DOMPurify, JSX serialization, and the DOM — the
+ *      between React, DOMPurify, JSX serialization, and the DOM, the
  *      visual symptom was every gradient-style render appearing blank
  *      because `var(--user-color-1, currentColor)` fell back to
  *      currentColor which resolved to `transparent` (the same rule
@@ -27,7 +27,7 @@
  *   - styleKey doesn't match an enabled catalog entry (admin
  *     disabled / deleted the style after the user equipped it),
  *   - the template doesn't contain the `{username}` placeholder
- *     (malformed admin template — safer to render plain than to
+ *     (malformed admin template, safer to render plain than to
  *     omit the name entirely).
  */
 
@@ -79,7 +79,7 @@ export function StyledName({ displayName, styleKey, config, baseColor, overrideR
   const snapshot = useEarning((s) => s.snapshot);
   const themeBg = useActiveTheme().bg;
 
-  // `overrideRow` wins when set — admin preview pane passes the
+  // `overrideRow` wins when set, admin preview pane passes the
   // in-progress draft directly. Otherwise resolve from the live
   // catalog via the styleKey lookup.
   const styleRow = overrideRow ?? (snapshot && styleKey
@@ -135,7 +135,7 @@ export function StyledName({ displayName, styleKey, config, baseColor, overrideR
   }, []);
 
   // Ref to the styled element. Used to push the inline style via
-  // setAttribute('style', cssText) AFTER React mounts — bypassing
+  // setAttribute('style', cssText) AFTER React mounts, bypassing
   // React's style-prop serialization entirely. Every other path
   // we tried (style={cssVars}, per-instance <style> tag with the
   // vars, setProperty('--user-color-1', …)) silently failed to land
@@ -205,8 +205,8 @@ function resolveCssVars(config: Record<string, unknown>, _themeBg: string): Reco
   for (const [key, value] of Object.entries(config)) {
     if (typeof value !== "string" || value.length === 0) continue;
     const varName = `--user-${kebab(key)}`;
-    // Name-style colors are AESTHETIC choices — vivid greens, pastel
-    // pinks, etc. — not chat-readability colors. Running them through
+    // Name-style colors are AESTHETIC choices, vivid greens, pastel
+    // pinks, etc., not chat-readability colors. Running them through
     // `legibleAgainstBg` flattened the user's bright picks to muted
     // dark variants for "contrast", which collapsed two-stop gradients
     // into near-monochrome dark blobs. We skip the legibility shift
@@ -225,7 +225,7 @@ function resolveCssVars(config: Record<string, unknown>, _themeBg: string): Reco
  * the CSS-var names emitted into the inline style didn't match what
  * `.ns-gradient` looked up, every var fell back to currentColor
  * (= transparent on the gradient mask rule), and every preview
- * rendered blank — visible as the `--user-color1` vs `--user-color-1`
+ * rendered blank, visible as the `--user-color1` vs `--user-color-1`
  * mismatch in the DevTools inspector.
  */
 function kebab(camel: string): string {
@@ -268,7 +268,7 @@ function cssKeyToProp(key: string): string {
  * couldn't observe), the gradient / pulse / glow still renders.
  *
  * Anything we don't override here still inherits from the
- * admin-authored `.ns-*` rule via the cascade — animations,
+ * admin-authored `.ns-*` rule via the cascade, animations,
  * background-clip + color: transparent for gradient classes, etc.
  * Each branch also re-emits the CSS vars so a downstream rule that
  * still wants `var(--user-color-1)` can pick it up.
@@ -288,12 +288,12 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
   // gradient pixels under italic glyph overflow (the slant on the
   // last letter of an italic admin name otherwise extends past the
   // text-advance box, has no gradient to clip to, and renders
-  // transparent — looking like the slant was sheared off). Solid-
+  // transparent, looking like the slant was sheared off). Solid-
   // color styles get the same padding too so the chat-line "]" / ":"
   // punctuation isn't flush against the styled glyph.
   const out: Record<string, string> = { ...cssVars, paddingRight: "0.2em" };
 
-  // Gradient family — classic background-clip text + transparent
+  // Gradient family, classic background-clip text + transparent
   // text-fill pattern. The `-webkit-text-fill-color: transparent`
   // makes the glyph fill transparent (without zeroing `color`),
   // letting the background gradient show through via the text mask.
@@ -316,7 +316,7 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.WebkitTextStroke = `${className === "ns-gradient-sg" ? "2px" : "1px"} ${outline}`;
   }
 
-  // Panning gradient — five-stop gradient with bigger pan distance
+  // Panning gradient, five-stop gradient with bigger pan distance
   // so the motion is unmistakable. Same fill-transparent pattern as
   // the gradient family above.
   if (c1 && c2 && className === "ns-pan") {
@@ -326,14 +326,14 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.backgroundClip = "text";
     out.WebkitTextFillColor = "transparent";
     out.WebkitTextStroke = `1px ${outline}`;
-    // Halved glow (was 4px) — matches the softer drop-shadow widths in
+    // Halved glow (was 4px), matches the softer drop-shadow widths in
     // migration 0080. Keep the inline fallback and the .ns-pan
     // catalog rule synchronized so user.config-driven glow colors
     // render the same regardless of which path lands the CSS.
     out.filter = `drop-shadow(0 0 2px ${glow})`;
   }
 
-  // Pulse — solid color with breathing glow. The animation lives
+  // Pulse, solid color with breathing glow. The animation lives
   // on the .ns-pulse class rule (cycles drop-shadow from tight to
   // wide). Bake the static color + outline here.
   if (c1 && className === "ns-pulse") {
@@ -341,7 +341,7 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.WebkitTextStroke = `1px ${outline}`;
   }
 
-  // Billboard — solid color + white outline + dark drop-shadows.
+  // Billboard, solid color + white outline + dark drop-shadows.
   // Distinct from the gradient family in that there's no
   // background-clip text trickery, so paint-order: stroke fill
   // works (and is necessary) to put the outline BEHIND the fill.
@@ -355,14 +355,14 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.WebkitTextStroke = `2px ${billboardOutline}`;
     // paint-order works here because we're NOT using background-clip
     // text (the gradient family's issue from migration 0072 doesn't
-    // apply). Stroke first, then fill on top — the white outline sits
+    // apply). Stroke first, then fill on top, the white outline sits
     // behind the colored letters instead of bleeding over the glyph
     // edges.
     (out as Record<string, string>).paintOrder = "stroke fill";
     out.filter = "drop-shadow(2px 3px 3px rgba(0,0,0,0.85)) drop-shadow(0 0 6px rgba(0,0,0,0.5))";
   }
 
-  // Stencil — outline only, transparent fill. Same paint-order story
+  // Stencil, outline only, transparent fill. Same paint-order story
   // as billboard (safe since no clip-text). Outline defaults to white;
   // user-outline overrides for colored stencils.
   if (className === "ns-stencil") {
@@ -372,10 +372,10 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.filter = "drop-shadow(0 0 1px rgba(0,0,0,0.4))";
   }
 
-  // Chrome — vertical metallic gradient. Same clip-text recipe as the
+  // Chrome, vertical metallic gradient. Same clip-text recipe as the
   // horizontal gradient family but the gradient direction is 180deg
   // (top→middle→bottom). Three stops: highlight at top + bottom,
-  // shadow in the middle — that "tube of metal lit from above" look.
+  // shadow in the middle, that "tube of metal lit from above" look.
   if (c1 && c2 && className === "ns-chrome") {
     out.backgroundImage = `linear-gradient(180deg, ${c1} 0%, ${c2} 45%, ${c2} 55%, ${c1} 100%)`;
     out.WebkitBackgroundClip = "text";
@@ -384,7 +384,7 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.WebkitTextStroke = `1px ${outline}`;
   }
 
-  // Glassy — semi-translucent fill + thin white outline + soft inner
+  // Glassy, semi-translucent fill + thin white outline + soft inner
   // glow. Solid-color path (cascade-safe), bakes the filter stack so a
   // missed cascade still produces the frosted-glass look.
   if (c1 && className === "ns-glassy") {
@@ -394,7 +394,7 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.filter = "drop-shadow(0 0 3px rgba(255,255,255,0.5)) drop-shadow(0 1px 2px rgba(0,0,0,0.35))";
   }
 
-  // Comic Pop — solid + thick white outline + hard offset shadow.
+  // Comic Pop, solid + thick white outline + hard offset shadow.
   // Same paint-order recipe as billboard but with a 0-blur shadow
   // (`0` for the blur radius is what produces the hard cartoon shadow
   // instead of a soft blur).
@@ -406,9 +406,9 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.filter = "drop-shadow(3px 3px 0 rgba(0,0,0,0.85))";
   }
 
-  // Neon Tube — bright fill with a same-color halo. The halo comes
+  // Neon Tube, bright fill with a same-color halo. The halo comes
   // from text-shadow (not drop-shadow filter) so it hugs the glyph
-  // edges instead of the bounding box — that's what makes it read as
+  // edges instead of the bounding box, that's what makes it read as
   // "tube of light" rather than "object lit by a backlight".
   if (c1 && className === "ns-neon-tube") {
     out.color = c1;
@@ -416,7 +416,7 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.WebkitTextStroke = `0.5px ${outline}`;
   }
 
-  // Marquee — same paint as comic-pop but the catalog rule owns the
+  // Marquee, same paint as comic-pop but the catalog rule owns the
   // blink animation. Baker only needs the static color/outline/halo;
   // animation rides the cascade since it's an @keyframes definition
   // (no CSS-var dependency).
@@ -427,7 +427,7 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.filter = `drop-shadow(0 0 3px ${glow})`;
   }
 
-  // Synthwave — 2-stop vertical gradient + cyan-glow drop. Pairs with
+  // Synthwave, 2-stop vertical gradient + cyan-glow drop. Pairs with
   // the gradient family's clip-text but uses 180deg + a colored
   // drop-shadow underneath instead of a horizontal sweep.
   if (c1 && c2 && className === "ns-synthwave") {
@@ -440,7 +440,7 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.filter = `drop-shadow(0 2px 3px ${glow})`;
   }
 
-  // Aurora Borealis — 3-stop tropical gradient. Animation handles
+  // Aurora Borealis, 3-stop tropical gradient. Animation handles
   // the hue-rotation on the catalog rule; baker just sets the
   // gradient mask + stroke so the static look is right when the
   // animation isn't running (paused tabs, reduced-motion preference).
@@ -452,7 +452,7 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.WebkitTextStroke = `1px ${outline}`;
   }
 
-  // Hearth Fire — vertical fire-palette gradient. The pan animation
+  // Hearth Fire, vertical fire-palette gradient. The pan animation
   // lives on the catalog rule (background-position keyframes); baker
   // sets the static gradient + stroke + halo so the base look paints
   // even when the cascade misses. `backgroundSize: 100% 250%` so the
@@ -468,9 +468,9 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.filter = `drop-shadow(0 -2px 4px ${glow})`;
   }
 
-  // Embers — same fire gradient base as Hearth Fire. The particle
+  // Embers, same fire gradient base as Hearth Fire. The particle
   // pseudos (::before / ::after) and their rise animation live in the
-  // catalog rule only — pseudo-element CSS can't be re-emitted via
+  // catalog rule only, pseudo-element CSS can't be re-emitted via
   // inline `style` on the host element, so this fallback covers only
   // the gradient mask and halo. If the catalog CSS hasn't loaded the
   // user will see a static fire-gradient name (no particles); once
@@ -485,7 +485,7 @@ function bakeStyleForClassName(className: string, cssVars: Record<string, string
     out.filter = `drop-shadow(0 -2px 5px ${glow})`;
   }
 
-  // Neon Sign — lit state baked. Solid color face + neon-pink halo
+  // Neon Sign, lit state baked. Solid color face + neon-pink halo
   // via text-shadow (inner) and drop-shadow filter (outer). The
   // flicker keyframes live in the catalog rule; this fallback just
   // makes sure the lit look is right when the catalog CSS hasn't

@@ -18,7 +18,7 @@ export async function resolveDisplayName(
 ): Promise<string> {
   const u = (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0];
   if (!u) throw new Error(`user not found: ${userId}`);
-  // `undefined` means "no override — use DB". An explicit `null` means
+  // `undefined` means "no override, use DB". An explicit `null` means
   // "master, even if DB has an active char".
   const charId = overrideCharId === undefined ? u.activeCharacterId : overrideCharId;
   if (!charId) return u.username;

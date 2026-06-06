@@ -5,7 +5,7 @@ import type { StoryEntity, StoryEntityKind } from "@thekeep/shared";
  * Reader-side "Cast & Places" appendix. Surfaces a story's PUBLIC
  * codex entities at the bottom of the reader, grouped by kind. Hidden
  * entirely when the story has no public entries (private codex
- * entries — author notes, plot outlines — never reach this surface).
+ * entries, author notes, plot outlines, never reach this surface).
  */
 export function StoryCodexAppendix({ storyId }: { storyId: string }) {
   const [entities, setEntities] = useState<StoryEntity[] | null>(null);
@@ -23,7 +23,7 @@ export function StoryCodexAppendix({ storyId }: { storyId: string }) {
   if (!entities || entities.length === 0) return null;
 
   // Group by kind for display. Plot entries aren't surfaced even if
-  // marked public — they're spoiler territory by their nature. Authors
+  // marked public, they're spoiler territory by their nature. Authors
   // who want plot points readable can move them into a separate
   // "character" or "location" entry instead.
   const characters = entities.filter((e) => e.kind === "character");

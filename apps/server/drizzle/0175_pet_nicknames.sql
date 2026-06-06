@@ -1,7 +1,7 @@
 -- Per-pet nickname on identity_pet_collection. The pet's catalog name
 -- (Maine Coon, Phoenix Chick, etc.) stays the species/breed label; the
--- nickname is the owner's personal name for that specific creature —
--- "Whiskers", "Smaug", etc. — shown to anyone viewing their profile.
+-- nickname is the owner's personal name for that specific creature,
+-- "Whiskers", "Smaug", etc., shown to anyone viewing their profile.
 --
 -- Privacy: same posture as the rest of the pet collection. The pet's
 -- catalog name is already visible to every profile viewer, so a

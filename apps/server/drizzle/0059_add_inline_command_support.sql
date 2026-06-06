@@ -1,7 +1,7 @@
 -- Inline custom-command support.
 --
 -- Some custom commands make sense mid-sentence: `!random`, `!flip`,
--- `!d20`, etc. — the user wants the templated output spliced into
+-- `!d20`, etc., the user wants the templated output spliced into
 -- a plain chat message rather than issued as a standalone `/cmd`.
 -- This migration adds two opt-in columns:
 --
@@ -9,7 +9,7 @@
 --                     eligible for the `!name` palette in the composer
 --                     and for server-side mid-message expansion.
 --   inline_template   Optional alternate template used for the inline
---                     path. Falls back to `template` when NULL — the
+--                     path. Falls back to `template` when NULL, the
 --                     admin only needs to author a separate body when
 --                     the standalone wording ("Alice rolls 17 on a
 --                     d20") doesn't sit well embedded mid-sentence

@@ -13,7 +13,7 @@
  *   - `ackAllForUser()` clears the entire backlog (used by a
  *     "dismiss all" affordance).
  *
- * Notifications outlive socket sessions deliberately — a user who
+ * Notifications outlive socket sessions deliberately, a user who
  * ranks up while offline (e.g. via an admin grant) sees the ribbon
  * the next time they sign in.
  */
@@ -112,7 +112,7 @@ export async function listUnacknowledged(
 
 /**
  * Acknowledge a single notification by id. No-op when the id is
- * unknown or already acknowledged (idempotent — clients can safely
+ * unknown or already acknowledged (idempotent, clients can safely
  * retry on flaky connections).
  */
 export async function ack(db: Db, userId: string, notificationId: string): Promise<void> {

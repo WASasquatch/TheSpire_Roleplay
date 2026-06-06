@@ -38,7 +38,7 @@ interface Props {
    */
   ooc?: boolean;
   /**
-   * Earning rank/tier — drives the inline sigil rendered before the
+   * Earning rank/tier, drives the inline sigil rendered before the
    * name. Optional; nulls / missing values render no sigil. The
    * RankSigil component itself reads the catalog from the earning
    * store, so the caller only needs to pass the (key, tier) tuple.
@@ -51,7 +51,7 @@ interface Props {
   rankSigilSize?: "sm" | "md" | "lg";
   /**
    * Which rank-icon set to render. `tier` (default) uses the per-tier
-   * chevron from the catalog — the existing chat-line / forum-header
+   * chevron from the catalog, the existing chat-line / forum-header
    * art. `gem` uses the abridged six-gem set (`gem_rank_N.png`), one
    * per top-level rank, with tier ignored. Userlist callers pass
    * `gem` because the rail has no room for the tier-distinct chevron
@@ -59,7 +59,7 @@ interface Props {
    */
   rankIconVariant?: "tier" | "gem";
   /**
-   * Earning — equipped name style + per-user config for the
+   * Earning, equipped name style + per-user config for the
    * styled-name renderer. Both null when the user has nothing
    * equipped; the tag falls back to a plain text name button.
    * Source is the live occupant payload (broadcast.ts populates it
@@ -68,7 +68,7 @@ interface Props {
   nameStyleKey?: string | null;
   nameStyleConfig?: Record<string, unknown> | null;
   /**
-   * Earning — when set AND `avatarUrl` is non-null AND the user
+   * Earning, when set AND `avatarUrl` is non-null AND the user
    * has the `inline_avatar` cosmetic active, the gender-icon click
    * target is swapped for a bordered avatar (per plan.md Phase 4
    * spec). Users without the cosmetic keep the gender icon.
@@ -91,7 +91,7 @@ interface Props {
    * Opt the inner name button into ellipsis truncation. Default off.
    *
    * Truncation requires `overflow: hidden` on the button, which clips
-   * any paint extending past the layout box — italic glyph slant on
+   * any paint extending past the layout box, italic glyph slant on
    * the last character, drop-shadow halos on name styles, ember
    * pseudo-element particles, etc. Chat lines have plenty of room
    * and don't need to truncate, so leaving this off lets all of that
@@ -149,7 +149,7 @@ export function UserNameTag({
     // to wrap onto a second line.
     //
     // `items-center` (not baseline) because the rank sigil is an
-    // image with no text baseline of its own — under items-baseline
+    // image with no text baseline of its own, under items-baseline
     // it sits flush with the bottom of the line while the username
     // text rides its own baseline, and the two end up visibly
     // staggered (image floats above the name). Center keeps the
@@ -169,7 +169,7 @@ export function UserNameTag({
     // visual was rendered. Name-style templates can put the visible
     // name into CSS `content`, into a sprite-shaped span chain, or
     // into a `dangerouslySetInnerHTML` blob without ever exposing a
-    // real text node — and without this attribute the clipboard
+    // real text node, and without this attribute the clipboard
     // would receive `[] body` instead. See lib/chatCopy.ts for the
     // walker that consumes the attribute.
     <span
@@ -177,21 +177,21 @@ export function UserNameTag({
       data-display-name={displayName}
     >
       {(() => {
-        // Icon slot priority (only when an icon slot is shown at all —
+        // Icon slot priority (only when an icon slot is shown at all,
         // chat lines pass `hideIcon` so this branch doesn't render
         // there). Order is deliberate:
         //
-        //   1. Bordered avatar — opt-in cosmetic. Wins over everything
+        //   1. Bordered avatar, opt-in cosmetic. Wins over everything
         //      else because it's the most deliberately equipped piece
         //      of identity art.
-        //   2. Rank sigil — RANK ALWAYS REPLACES THE GENDER GLYPH WHEN
+        //   2. Rank sigil, RANK ALWAYS REPLACES THE GENDER GLYPH WHEN
         //      THE USER HAS A RANK. There is no per-user toggle: a
         //      resolved rank IS the user's primary identity badge, and
         //      stacking gender + rank in the same row reads as visual
         //      clutter (the legacy behavior). Falls back to gender
         //      automatically for unranked accounts, so flipping nothing
         //      on a fresh account doesn't leave the row icon-less.
-        //   3. Gender glyph — the original Unicode badge. Renders only
+        //   3. Gender glyph, the original Unicode badge. Renders only
         //      when there's no avatar AND no resolved rank.
         if (hideIcon) return null;
         if (inlineAvatar && avatarUrl) {
@@ -239,7 +239,7 @@ export function UserNameTag({
             // px-1 py-0.5 + rounded background on hover gives a real tap
             // target on mobile without changing visual density.
             // `shrink-0` keeps the gender icon at its natural size when
-            // the row scrunches — only the name button absorbs the
+            // the row scrunches, only the name button absorbs the
             // squeeze. font-size in em so the glyph scales with the
             // container's font-size (driven by the chat/rail font-step
             // setting). 1em matches the surrounding text; the Unicode
@@ -252,9 +252,9 @@ export function UserNameTag({
         );
       })()}
       {/* Standalone inline rank sigil. Renders in two cases:
-          1. Chat lines (`hideIcon`) — no icon slot, so the rank sits
+          1. Chat lines (`hideIcon`), no icon slot, so the rank sits
              here right before the name.
-          2. Avatar in the icon slot — rank gets a small repeat slot
+          2. Avatar in the icon slot, rank gets a small repeat slot
              after the avatar so the rank still shows even when the
              cosmetic owns the click target.
           Suppressed when the rank is ALREADY in the icon slot (icon
@@ -281,7 +281,7 @@ export function UserNameTag({
         }
         // Two render modes, gated by the `truncate` prop:
         //
-        //   truncate=true  — narrow-rail use (userlist). The button
+        //   truncate=true , narrow-rail use (userlist). The button
         //                    ellipsizes with `…` when the name is
         //                    longer than the available width. Adds
         //                    `min-w-0` so the button can shrink below
@@ -291,7 +291,7 @@ export function UserNameTag({
         //                    paint outside the box even while
         //                    truncation is enabled.
         //
-        //   truncate=false — chat-line / forum-header default. No
+        //   truncate=false, chat-line / forum-header default. No
         //                    overflow rule at all so the button is
         //                    the same size as its content and italic
         //                    glyphs / name-style decorations render
@@ -301,7 +301,7 @@ export function UserNameTag({
         //                    name; `overflow: hidden` was the actual
         //                    cause of clipped italic admin names.
         //
-        // `py-0.5` only — no horizontal padding here. Right-side
+        // `py-0.5` only, no horizontal padding here. Right-side
         // breathing room is applied INSIDE StyledName via its
         // wrapper's `padding-right` so the gradient-clip-text family
         // of name styles widens its mask to cover italic glyph
@@ -313,7 +313,7 @@ export function UserNameTag({
           truncate ? " min-w-0 overflow-clip text-ellipsis whitespace-nowrap [overflow-clip-margin:1.75em]" : ""
         }${italic ? " italic" : ""}`}
         // Inline chatColor is preserved as a fallback for users with
-        // no equipped style — StyledName below paints over it when a
+        // no equipped style, StyledName below paints over it when a
         // template's CSS sets `color` directly, but when the style
         // CSS doesn't touch color (e.g. a glow-only effect), the
         // user's picked chat color still bleeds through.
@@ -331,7 +331,7 @@ export function UserNameTag({
       </button>
       {mood ? (
         <span
-          // No `px-1` here either — same rationale as the username
+          // No `px-1` here either, same rationale as the username
           // button: punctuation around the chip ("[", ":") sits
           // adjacent enough that horizontal padding read as a gap.
           className="shrink-0 rounded bg-keep-action/15 text-[10px] uppercase tracking-wide text-keep-action"

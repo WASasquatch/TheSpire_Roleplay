@@ -1,12 +1,12 @@
 -- Per-character design override + per-theme design map.
 --
--- 1. `characters.style_key` — same shape as `users.style_key`.
+-- 1. `characters.style_key`, same shape as `users.style_key`.
 --    Lets a character carry its own design override (medieval / modern /
 --    scifi). Null = inherit from the user/master (or the theme-pinned
 --    design, or the site default). Mirrors how `characters.theme_json`
 --    already overrides the palette per character.
 --
--- 2. `site_settings.theme_design_map` — JSON object keyed by THEME PRESET
+-- 2. `site_settings.theme_design_map`, JSON object keyed by THEME PRESET
 --    NAME (e.g. {"Parchment":"medieval","Twilight":"scifi"}). When a
 --    user's active palette matches a preset, the renderer picks up that
 --    preset's pinned design unless the user has explicitly overridden.

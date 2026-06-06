@@ -14,7 +14,7 @@ interface Props {
   targetKind: ReactionTargetKind;
   targetId: string;
   /** Render-time fallback used when the cache doesn't yet have entries
-   *  for this target — typically the `reactions` field embedded in the
+   *  for this target, typically the `reactions` field embedded in the
    *  inline message payload. The bar primes the cache from this so
    *  realtime deltas merge correctly. */
   initialEntries?: ReactionEntry[];
@@ -34,7 +34,7 @@ interface Props {
 /** Hit the reactions toggle endpoint. Shared by ReactionBar (inline
  *  + button) and ReactionAddButton (toolbar standalone) so both code
  *  paths record the same emoticon-pick locally and send the same
- *  server payload. Accepts a polymorphic ref — `kind: "sheet"` for
+ *  server payload. Accepts a polymorphic ref, `kind: "sheet"` for
  *  legacy sticker reactions, `kind: "unicode"` for emoji-style ones
  *  added via the Unicode tab in the picker. */
 export async function toggleReaction(
@@ -46,7 +46,7 @@ export async function toggleReaction(
   try {
     // Record the pick in the local recents store so the picker's
     // "Recent" row reflects user preference next time it opens.
-    // Unicode picks don't have a sheet/cell to record — the picker's
+    // Unicode picks don't have a sheet/cell to record, the picker's
     // own recents track them separately (or not at all in v1).
     if (ref.kind === "sheet") {
       recordEmoticonPick(ref.sheetSlug, ref.cellIndex);
@@ -65,14 +65,14 @@ export async function toggleReaction(
       credentials: "include",
     });
     // The cache will update from the realtime `reaction:update` event.
-    // No manual merge here — that would risk doubling reactor entries
+    // No manual merge here, that would risk doubling reactor entries
     // when the socket event races the fetch response.
   } catch {
-    /* swallow — network blip; next reload re-syncs from backlog */
+    /* swallow, network blip; next reload re-syncs from backlog */
   }
 }
 
-/** Standalone "+ react" button — opens the emoticon picker anchored
+/** Standalone "+ react" button, opens the emoticon picker anchored
  *  to itself and on pick calls toggleReaction. Lets surfaces that
  *  want the add-trigger in a DIFFERENT row than the existing chips
  *  (forum action toolbar) mount just the button without ReactionBar. */
@@ -140,7 +140,7 @@ export function ReactionAddButton({
 
 /**
  * Inline bar of reaction chips beneath a message. Up to
- * `maxVisible` chips render directly (responsive — 4 on mobile, 10
+ * `maxVisible` chips render directly (responsive, 4 on mobile, 10
  * on desktop); overflow collapses into a "+N more" chip that opens
  * the full-list modal. Each chip shows the sprite + count + a
  * hover tooltip listing the reactors; clicking a chip toggles the
@@ -170,7 +170,7 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
   const maxVisible = isMobile ? MAX_VISIBLE_MOBILE : MAX_VISIBLE_DESKTOP;
 
   // Prime the store from `initialEntries` in an effect (NOT during
-  // render — that path queues a setState while rendering and React
+  // render, that path queues a setState while rendering and React
   // warns about it). The prime is a no-op when the cache already
   // holds something for this target, so backlog payloads can't
   // overwrite fresher socket-event state.
@@ -178,7 +178,7 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
     if (initialEntries && cached === undefined && initialEntries.length > 0) {
       primeReactions(targetKind, targetId, initialEntries);
     }
-    // Intentionally not depending on `cached` — we only want this
+    // Intentionally not depending on `cached`, we only want this
     // effect to run once per target/initial-payload pair. The merge
     // semantics inside the store guarantee monotonicity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -197,7 +197,7 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
   if (entries.length === 0 && readOnly) return null;
   // When the add button is suppressed (forum surface mounts it inside
   // the post action toolbar instead), an empty chip set means there's
-  // nothing to render at all — collapse out of the layout so we don't
+  // nothing to render at all, collapse out of the layout so we don't
   // ship an empty div.
   if (entries.length === 0 && hideAddButton) return null;
 
@@ -228,7 +228,7 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
           targetKind={targetKind}
           targetId={targetId}
           asCharacterId={asCharacterId}
-          // `emoticon-add-btn-hidden` is applied UNCONDITIONALLY — the
+          // `emoticon-add-btn-hidden` is applied UNCONDITIONALLY, the
           // button hides whether or not the message already has
           // reactions. CSS reveals it on `.group:hover` (desktop
           // hover) and `.group:focus-within` (mobile tap routes
@@ -250,7 +250,7 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
 }
 
 /* =============================================================
- *  Reaction glyph — renders either a sheet sprite or a Unicode
+ *  Reaction glyph, renders either a sheet sprite or a Unicode
  *  codepoint depending on the entry's ref shape. Reused by the chip,
  *  the tooltip, and the full-list modal so the rendering posture
  *  stays consistent.
@@ -258,7 +258,7 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
 /**
  * Loose runtime shape ReactionGlyph accepts. We can't strictly use
  * `ReactionEntry` because the server sometimes ships LEGACY entries
- * that don't carry a `ref` at all — instead they put `sheetSlug` +
+ * that don't carry a `ref` at all, instead they put `sheetSlug` +
  * `cellIndex` (sheet shape) or `char` (Unicode shape) directly on
  * the entry. The recovery pipeline below reads any combination of
  * fields that's present.
@@ -266,7 +266,7 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
 type ReactionGlyphInput = {
   ref?: ReactionRef | null;
   label?: string;
-  /** Legacy flat-shape sheet ref — pre-discriminated-union schema. */
+  /** Legacy flat-shape sheet ref, pre-discriminated-union schema. */
   sheetSlug?: string;
   cellIndex?: number;
   /** Legacy flat-shape Unicode ref. */
@@ -408,7 +408,7 @@ function ReactionGlyph({
           // visual parity with sticker sprites in the same chip. Emoji
           // fonts paint nearly the full em-box, while sticker PNGs are
           // exported with ~15-25% of transparent padding around the art
-          // — so a glyph at 85% of the container was reading noticeably
+          //, so a glyph at 85% of the container was reading noticeably
           // BIGGER than a sprite at 100%, exactly the opposite of what
           // a side-by-side chip row should show.
           fontSize: `${Math.round(size * 0.72)}px`,
@@ -435,7 +435,7 @@ function ReactionGlyph({
 }
 
 /* =============================================================
- *  Chip — one (sheet, cell) reaction's count + tooltip
+ *  Chip, one (sheet, cell) reaction's count + tooltip
  * =============================================================
  *
  *  Sizing model (per design spec):
@@ -448,8 +448,8 @@ function ReactionGlyph({
  *
  *  The hover-grow trigger uses both `:hover` on the chip itself
  *  AND `.group:hover` on the ancestor message row, so hovering
- *  anywhere on the message expands every reaction chip on it —
- *  Discord's behavior — not just the one under the cursor.
+ *  anywhere on the message expands every reaction chip on it,
+ *  Discord's behavior, not just the one under the cursor.
  */
 /** Prose tooltip describing who reacted with what:
  *    1 → "Alice reacted with happy"
@@ -478,10 +478,10 @@ function ReactionChip({ entry, onClick }: { entry: ReactionEntry; onClick: () =>
   const tooltip = formatReactorsTooltip(entry.reactors, entry.label);
   // Mood class is sheet-label-driven; Unicode reactions don't carry a
   // sheet animation hint, so they render with no jiggle. Pass the
-  // sheet's label only when the ref is a sheet — empty string for
+  // sheet's label only when the ref is a sheet, empty string for
   // Unicode is a safe no-op for the animationClassForLabel mapper.
   // Defensive: same null-tolerance as ReactionGlyph. A missing ref
-  // resolves to "no mood class" — the chip renders without a jiggle
+  // resolves to "no mood class", the chip renders without a jiggle
   // animation rather than crashing the whole row.
   const moodClass = animationClassForLabel(
     entry.ref && typeof entry.ref === "object" && entry.ref.kind === "sheet" ? entry.label : "",
@@ -494,7 +494,7 @@ function ReactionChip({ entry, onClick }: { entry: ReactionEntry; onClick: () =>
         onClick={onClick}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        // aria-label, not title — title would spawn a competing
+        // aria-label, not title, title would spawn a competing
         // native tooltip alongside the custom ReactionTooltip
         // below. The aria-label still announces the full reactor
         // list to screen readers.
@@ -527,7 +527,7 @@ function ReactionChip({ entry, onClick }: { entry: ReactionEntry; onClick: () =>
 }
 
 /* =============================================================
- *  Reaction tooltip — portal-rendered floating preview
+ *  Reaction tooltip, portal-rendered floating preview
  * =============================================================
  *
  *  Replaces the native `title` attribute so we can render a
@@ -634,7 +634,7 @@ function ReactionListModal({ entries, onClose }: { entries: ReactionEntry[]; onC
                 <li key={reactionRefKey(e.ref)}>
                   <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-widest text-keep-muted">
                     <ReactionGlyph entry={e} size={20} />
-                    <span>{e.label || "—"}</span>
+                    <span>{e.label || "-"}</span>
                     <span className="ml-auto tabular-nums text-keep-text">{e.reactors.length}</span>
                   </div>
                   <ul className="ml-7 space-y-0.5 text-xs">

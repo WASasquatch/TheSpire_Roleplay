@@ -10,7 +10,7 @@ import { getSettings } from "../settings.js";
 import type { Db } from "../db/index.js";
 
 /**
- * Sessions are now bearer-token based — no cookie. The client stores
+ * Sessions are now bearer-token based, no cookie. The client stores
  * the token returned by /auth/login or /auth/register in sessionStorage
  * (per-tab, not per-browser) and sends it on every request as
  * `Authorization: Bearer <sid>`. The session row in SQLite is
@@ -30,7 +30,7 @@ import type { Db } from "../db/index.js";
  *
  * The allow-list itself is intentionally generous within ASCII: letters,
  * digits, a handful of common punctuation marks, and one specific
- * "invisible" character — U+00A0 (NBSP), the Alt+0160 keyboard trick.
+ * "invisible" character, U+00A0 (NBSP), the Alt+0160 keyboard trick.
  *
  * The punctuation is what people coming from phpMyChat / older chat
  * systems expect to be able to use in handles (backticks for leet-style
@@ -43,7 +43,7 @@ import type { Db } from "../db/index.js";
  * problems a real space would cause. Users on Windows type Alt+0160
  * (numpad) to enter it.
  *
- * Regular spaces are NOT allowed — they break @mention tokenization
+ * Regular spaces are NOT allowed, they break @mention tokenization
  * (`@John Smith` would resolve only `@John`) and require URL encoding
  * (`/p/John%20Smith`) in every shareable link. NBSP gives the visual
  * illusion of a space without any of that breakage.
@@ -63,7 +63,7 @@ export function normalizeMasterUsername(input: string): string {
   // that only allows NBSP. NFC preserves NBSP while still composing
   // canonical sequences (e.g. `e` + combining-acute → `é` as a single
   // codepoint). The Unicode-confusables defense lives in the regex's
-  // `[a-zA-Z0-9_\-'.` ]` allow-list — Cyrillic 'а' isn't in
+  // `[a-zA-Z0-9_\-'.` ]` allow-list, Cyrillic 'а' isn't in
   // [a-zA-Z], so NFKC's compatibility passes never gated that anyway.
   return input.normalize("NFC");
 }
@@ -80,7 +80,7 @@ export function normalizeMasterUsername(input: string): string {
  * round-trip works regardless of which form the caller used.
  *
  * Regular spaces are NOT a legal username character (see
- * MASTER_USERNAME_RX above), so the substitution is unambiguous —
+ * MASTER_USERNAME_RX above), so the substitution is unambiguous,
  * there's no DB row that contains a literal U+0020.
  */
 export function slugToUsername(slug: string): string {
@@ -268,7 +268,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
         // Treat registration itself as the first login so the admin
         // panel's recent-registrations widget doesn't tag a user who
         // signed up + immediately started chatting (via the
-        // post-register session token) as "never logged in" — they
+        // post-register session token) as "never logged in", they
         // never hit POST /auth/login because they were already
         // authenticated by the issueSession call below, so without
         // this seed the column stayed null forever.
@@ -293,8 +293,8 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     const permissions = await permissionsFor({ id, role }, db);
     // Wire shape: `role` and `permissions` now always ride on the
     // register response (previously `role` was spread only on the
-    // bootstrap path). The change is backwards compatible — older
-    // clients that did `j.role ?? "user"` still work — but new
+    // bootstrap path). The change is backwards compatible, older
+    // clients that did `j.role ?? "user"` still work, but new
     // clients can rely on both fields being present so they don't
     // have to defensively re-derive permissions from the role tier.
     return {
@@ -379,12 +379,12 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       return { error: "not authenticated" };
     }
     // Treat the silent-poll endpoint as a "last active" stamp so an
-    // ongoing session keeps the `lastLoginAt` column fresh — without
+    // ongoing session keeps the `lastLoginAt` column fresh, without
     // this, a user who registered + chatted continuously via the
     // post-register session token would show as "never logged in"
     // forever because they never POST /auth/login. Gated to once per
     // 15 minutes so the 60s polling cadence (one per tab) doesn't
-    // hammer the DB. Best-effort — failure is ignored, the next poll
+    // hammer the DB. Best-effort, failure is ignored, the next poll
     // tries again.
     try {
       const row = (await db
@@ -399,7 +399,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
           .set({ lastLoginAt: new Date() })
           .where(eq(users.id, user.id));
       }
-    } catch { /* non-fatal — auth/me still succeeds */ }
+    } catch { /* non-fatal, auth/me still succeeds */ }
     // `version` rides on every /auth/me poll so the client can detect a
     // post-deploy version drift. The web bundle stamps the build's
     // VERSION at compile time; after a deploy the running server reports
@@ -418,7 +418,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     const rawUpdateMsg = process.env.UPDATE_MESSAGE ?? "";
     const updateMessage = rawUpdateMsg.trim().length > 0 ? rawUpdateMsg : null;
     // `permissions` is the resolved set the granular system answers
-    // for this user — every key for masteradmin, role-grant ∪
+    // for this user, every key for masteradmin, role-grant ∪
     // user-override otherwise. Client mirrors gate UI on
     // `me.permissions.includes(...)` instead of `isAdminRole(me.role)`.
     // Refreshes on the same 60s poll, so a matrix edit lands on the
@@ -475,7 +475,7 @@ async function issueSession(
  * Pull the session id out of an `Authorization: Bearer <sid>` header.
  * Case-insensitive on the scheme so a sloppy client still works; the
  * token itself is opaque (the `sessions.id` nanoid) and case-sensitive.
- * Returns null when the header is missing or malformed — never throws —
+ * Returns null when the header is missing or malformed, never throws,
  * so callers can use it inline.
  */
 export function readBearerToken(req: FastifyRequest): string | null {

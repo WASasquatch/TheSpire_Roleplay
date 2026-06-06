@@ -80,7 +80,7 @@ const TAB_ITEMS: ReadonlyArray<{
 
   // ----- People & access: who can do what -----
   // Permissions ships first because the workflow is "set policy then
-  // apply it" — admins typically pick a role's grant set before
+  // apply it", admins typically pick a role's grant set before
   // touching individual user rows.
   { id: "permissions", label: "Permissions", group: "people", permission: "view_admin_permissions" },
   { id: "users", label: "Users", group: "people" },
@@ -92,8 +92,8 @@ const TAB_ITEMS: ReadonlyArray<{
   { id: "scriptorium", label: "Scriptorium", group: "content" },
   { id: "commands", label: "Commands", group: "content" },
   { id: "titles", label: "Titles", group: "content" },
-  // Two distinct manage keys feed this tab — banner curation vs.
-  // cronjob scheduling — but they share one viewer permission so
+  // Two distinct manage keys feed this tab, banner curation vs.
+  // cronjob scheduling, but they share one viewer permission so
   // either delegate can land here without a separate route.
   { id: "announcements", label: "Announcements", group: "content", permission: "view_admin_announcements" },
 
@@ -123,7 +123,7 @@ const TAB_ITEMS: ReadonlyArray<{
  *   - A tab with `masterOnly: true` is visible only to masteradmin.
  *
  *  The compound case (`masterOnly` AND `permission`) is intentionally
- *  rejected at the type level via the discriminated-union shape — a
+ *  rejected at the type level via the discriminated-union shape, a
  *  tab carrying both fields would be ambiguous about which gate
  *  wins. Stick to one or the other. */
 function tabVisible(
@@ -140,7 +140,7 @@ function tabVisible(
 /** Bucket a list of (already-filtered-for-visibility) tabs by their
  *  `group` field. Returns the buckets in TAB_ITEMS order so the
  *  mobile dropdown preserves the same vertical sequence as the
- *  desktop strip. Empty groups drop out entirely — a viewer whose
+ *  desktop strip. Empty groups drop out entirely, a viewer whose
  *  permission set hides every tab in a category doesn't see that
  *  category's optgroup label. */
 function groupVisibleTabs<T extends { group: TabGroup }>(
@@ -190,7 +190,7 @@ function withGroupSeparators<T extends { group: TabGroup }>(
  * without prop-drilling.
  *
  * `setFooter(null)` (or letting the tab unmount on tab-switch) drops
- * back to the default footer — a lone Close button on the right.
+ * back to the default footer, a lone Close button on the right.
  */
 interface AdminShellAPI {
   setFooter: (node: ReactNode | null) => void;
@@ -201,7 +201,7 @@ const AdminShellContext = createContext<AdminShellAPI | null>(null);
 /**
  * Hook for tabs to register footer content. Returns null when called
  * outside the AdminPanel shell (tabs can render in isolation in
- * tests / Storybook without crashing) — callers should defensive-
+ * tests / Storybook without crashing), callers should defensive-
  * check before using `setFooter` / `close`.
  */
 export function useAdminShell(): AdminShellAPI | null {
@@ -210,8 +210,8 @@ export function useAdminShell(): AdminShellAPI | null {
 
 /**
  * Standard footer cluster for the three save-form tabs (Settings,
- * Branding, Rules). They all share the same shape — status text on
- * the left, Cancel + Save on the right — so the helper keeps the
+ * Branding, Rules). They all share the same shape, status text on
+ * the left, Cancel + Save on the right, so the helper keeps the
  * three tabs' useEffects from drifting apart visually.
  *
  * The Save button submits the tab's `<form id={formId}>` via the
@@ -261,7 +261,7 @@ export function AdminSaveFooter({
         }`}
       >
         {!canEdit
-          ? (readOnlyHint ?? "Read-only — you don't have permission to save changes here.")
+          ? (readOnlyHint ?? "Read-only, you don't have permission to save changes here.")
           : error
             ? error
             : savedFlash
@@ -298,7 +298,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
   // Master-admin gating for the destructive-control tabs. A plain
   // `admin` keeps moderation tools (rooms, users, reports, audit,
   // titles, commands, nav links, affiliates) but loses Settings,
-  // Branding, and Rules — the three surfaces that let an attacker
+  // Branding, and Rules, the three surfaces that let an attacker
   // materially damage the public face of the site, change caps that
   // affect every user, or rewrite legal/policy text. The two
   // `masterOnly*` references below are also used downstream by
@@ -306,7 +306,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
   const isMaster = useChat((s) => isMasterAdminRole(s.me?.role ?? "user"));
   // Resolved permission set for the viewer. Drives the
   // `permission`-keyed tab visibility filter in `tabVisible`. Read
-  // from the store via the AuthMe payload — refreshes on the /auth/me
+  // from the store via the AuthMe payload, refreshes on the /auth/me
   // poll, same as the rest of `me`.
   const mePermissions = useChat((s) => s.me?.permissions ?? []);
   // Inline tab-render gate that mirrors `tabVisible` for a single key.
@@ -322,7 +322,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
   const [footerNode, setFooterNode] = useState<ReactNode | null>(null);
   // Memoize the shell API. setFooter from useState is reference-stable
   // across renders, so the object identity only changes when `onClose`
-  // changes — which means tabs' useEffects don't re-fire on every
+  // changes, which means tabs' useEffects don't re-fire on every
   // render of AdminPanel.
   const shellApi = useMemo<AdminShellAPI>(
     () => ({ setFooter: setFooterNode, close: onClose }),
@@ -337,7 +337,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
       >
         {/* Header. On mobile (< md) we collapse the tab strip to a
             full-width <select> dropdown showing the active section,
-            with the close button glued to its right edge — earlier
+            with the close button glued to its right edge, earlier
             iterations had a horizontally-scrolling tab strip that
             visually overlapped the close button and made it hard to
             tap. Desktop keeps the scrollable strip since there's room
@@ -463,7 +463,7 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
       type="button"
       onClick={onClick}
       // `shrink-0 whitespace-nowrap` keeps each tab at its intrinsic
-      // size inside the scrolling nav — without these, tabs would
+      // size inside the scrolling nav, without these, tabs would
       // squish to single letters before the strip would start scrolling.
       className={`shrink-0 whitespace-nowrap rounded border border-keep-rule px-2 py-0.5 ${active ? "bg-keep-bg" : "bg-keep-banner/40 hover:bg-keep-banner"}`}
     >
@@ -474,7 +474,7 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
 
 /**
  * Shared style-key picker. Reads available styles from the ornaments
- * registry so the catalog stays single-sourced — adding a style file
+ * registry so the catalog stays single-sourced, adding a style file
  * automatically surfaces it here without UI changes.
  *
  * Caller controls value semantics:
@@ -555,6 +555,7 @@ interface SettingsRow {
   maxDirectMessageLength: number;
   maxForumPostLength: number;
   maxForumTopicTitleLength: number;
+  forumTopicsPerPage: number;
   /** Author edit/delete grace window in ms for chat + DM messages. */
   editGraceMs: number;
   maxBioLength: number;
@@ -624,7 +625,7 @@ function parseDurationMs(s: string): number | null {
  * Admin dashboard. Polls /admin/overview every 30s and renders a card
  * grid of headline counters plus a 7-day daily-series block covering
  * messages, topics, logins, and registrations. Distinct from the public
- * /stats endpoint — this one carries DAU/WAU/MAU, moderation volume,
+ * /stats endpoint, this one carries DAU/WAU/MAU, moderation volume,
  * and per-day login/registration counts that aren't appropriate for
  * the anonymous splash view.
  */
@@ -795,7 +796,7 @@ function OverviewCard({ title, hint, children }: { title: string; hint?: string;
  * Per-day buckets of the last 5 days of registrations. Newest day first,
  * empty days included so the panel always shows the rolling window
  * (an empty day is a useful signal too). Grouped by date in the
- * viewer's local time zone — registration timestamps are absolute, but
+ * viewer's local time zone, registration timestamps are absolute, but
  * "did anyone sign up yesterday" reads in local time.
  */
 function RecentRegistrationsPanel({ rows }: { rows: AdminOverviewRecentReg[] }) {
@@ -836,7 +837,7 @@ function RecentRegistrationsPanel({ rows }: { rows: AdminOverviewRecentReg[] }) 
                   <span className="tabular-nums">{dayRows.length} {dayRows.length === 1 ? "signup" : "signups"}</span>
                 </div>
                 {dayRows.length === 0 ? (
-                  <div className="text-xs text-keep-muted/60 italic">—</div>
+                  <div className="text-xs text-keep-muted/60 italic">-</div>
                 ) : (
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     {dayRows.map((u) => {
@@ -897,7 +898,7 @@ function SubStats({ items }: { items: { label: string; value: number }[] }) {
 /**
  * One labeled sparkline row in the "This week" panel. The plot area is a
  * fixed-height (`h-8`) box so every row occupies the same vertical extent
- * regardless of its peak — otherwise quiet rows shrink and busy rows grow
+ * regardless of its peak, otherwise quiet rows shrink and busy rows grow
  * and the panel gets a ragged baseline. Per-day date labels live once at
  * the bottom in `SparklineAxis` rather than under every row.
  */
@@ -953,7 +954,7 @@ function SparklineAxis({ days }: { days: string[] }) {
 function SettingsTab() {
   const setBranding = useChat((s) => s.setBranding);
   // Edit permission gates the Save button. A delegate granted only
-  // `view_admin_settings` reads the form but can't submit changes —
+  // `view_admin_settings` reads the form but can't submit changes,
   // the server's PUT /admin/settings would 403 anyway, but hiding
   // Save up front spares the user the wasted round-trip.
   const canEditSiteSettings = useChat((s) => s.me?.permissions.includes("edit_site_settings") ?? false);
@@ -969,6 +970,7 @@ function SettingsTab() {
   const [maxDmLen, setMaxDmLen] = useState("");
   const [maxForumLen, setMaxForumLen] = useState("");
   const [maxForumTitleLen, setMaxForumTitleLen] = useState("");
+  const [forumTopicsPerPage, setForumTopicsPerPage] = useState("");
   // Edit-grace window stored as a duration string (e.g. "5m", "30s",
   // "1h") so admins can pick the right unit for the room's pace.
   // Persisted as ms via parseDurationMs. "0" disables editing entirely
@@ -1006,6 +1008,7 @@ function SettingsTab() {
       setMaxDmLen(String(j.maxDirectMessageLength));
       setMaxForumLen(String(j.maxForumPostLength));
       setMaxForumTitleLen(String(j.maxForumTopicTitleLength));
+      setForumTopicsPerPage(String(j.forumTopicsPerPage));
       setEditGrace(formatMs(j.editGraceMs));
       setMaxBioLen(String(j.maxBioLength));
       setRegOpen(j.registrationOpen);
@@ -1055,6 +1058,7 @@ function SettingsTab() {
         maxDirectMessageLength: intOrThrow("Max DM length", maxDmLen, 100, 50_000),
         maxForumPostLength: intOrThrow("Max forum post length", maxForumLen, 100, 50_000),
         maxForumTopicTitleLength: intOrThrow("Max forum topic title length", maxForumTitleLen, 10, 500),
+        forumTopicsPerPage: intOrThrow("Forum topics per page", forumTopicsPerPage, 5, 100),
         editGraceMs,
         maxBioLength: intOrThrow("Max bio length", maxBioLen, 1000, 200_000),
         registrationOpen: regOpen,
@@ -1131,7 +1135,7 @@ function SettingsTab() {
         error={error}
         saveLabel="Save settings"
         canEdit={canEditSiteSettings}
-        readOnlyHint="Read-only — needs edit_site_settings to save."
+        readOnlyHint="Read-only, needs edit_site_settings to save."
       />,
     );
     return () => shell.setFooter(null);
@@ -1254,6 +1258,14 @@ function SettingsTab() {
             min={10}
             max={500}
           />
+          <LimitField
+            label="Forum topics per page"
+            hint="How many non-sticky topics appear on each page of a forum category's numbered pagination strip. Stickies stay on page 1 only and don't count against this. Default 20."
+            value={forumTopicsPerPage}
+            onChange={setForumTopicsPerPage}
+            min={5}
+            max={100}
+          />
           <label className="text-xs">
             <span className="mb-1 block uppercase tracking-widest text-keep-muted">
               Edit / delete window
@@ -1316,7 +1328,7 @@ function SettingsTab() {
               <span>{splashMessages24hEnabled ? "On - splash shows rolling 24h message count" : "Off - splash hides the 24h message stat"}</span>
             </div>
             <span className="mt-0.5 block text-[10px] text-keep-muted">
-              Surfaces a rolling 24h chat-message count on the splash. Independent of Activity feeds — flip it on alone to show the message volume by itself, or pair with Activity feeds so it sits in the same row as the online/registered/room counters.
+              Surfaces a rolling 24h chat-message count on the splash. Independent of Activity feeds, flip it on alone to show the message volume by itself, or pair with Activity feeds so it sits in the same row as the online/registered/room counters.
             </span>
           </label>
           <label className="text-xs">
@@ -1357,7 +1369,7 @@ function SettingsTab() {
         <p className="mb-2 text-keep-muted">
           The fallback visual treatment (ornaments, borders, textures) for
           palettes that don't have a design pinned below. Orthogonal to
-          the palette — picking a style doesn't change which colors are
+          the palette, picking a style doesn't change which colors are
           used, just how they're rendered. Users can override this on
           their master or character profile.
         </p>
@@ -1417,7 +1429,7 @@ function SettingsTab() {
 
       {/* Save controls + status (incl. error) live in the modal
           footer via `useAdminShell().setFooter(...)` near the top of
-          this component. No inline save row — keeps the form
+          this component. No inline save row, keeps the form
           scrolling area focused on field editing. */}
     </form>
   );
@@ -1457,7 +1469,7 @@ function BrandingTab() {
   // fields (site name, logos, banner CSS, welcome HTML, theme-design
   // map, …) requires `edit_branding`. So we hold the form open for
   // anyone with EITHER edit_branding OR the broader edit_site_settings
-  // — both let the patch through, and the server is the source of
+  //, both let the patch through, and the server is the source of
   // truth on what counts as "branding-only."
   //
   // The Upload-logo affordance below is independently gated on
@@ -1572,7 +1584,7 @@ function BrandingTab() {
   }
 
   // Project save controls into the modal footer. Same pattern as
-  // SettingsTab — the inline save row used to sit at the bottom of
+  // SettingsTab, the inline save row used to sit at the bottom of
   // the scrolling form; now it's anchored in the persistent footer
   // so it's always reachable and the modal's bottom chrome isn't
   // empty space.
@@ -1588,7 +1600,7 @@ function BrandingTab() {
         error={error}
         saveLabel="Save branding"
         canEdit={canEditSiteSettings}
-        readOnlyHint="Read-only — needs edit_site_settings to save."
+        readOnlyHint="Read-only, needs edit_site_settings to save."
       />,
     );
     return () => shell.setFooter(null);
@@ -1633,7 +1645,7 @@ function BrandingTab() {
         />
         <p className="mt-1 text-keep-muted">
           When set, the banner wraps the site name / logo image in an{" "}
-          unstyled link pointing here — useful for sending visitors back to a
+          unstyled link pointing here, useful for sending visitors back to a
           marketing landing page or the main domain when the chat lives at a
           subdomain. The wrapping is invisible (no underline, no color change);
           the logo still reads as a logo, it just becomes clickable. Must
@@ -1839,7 +1851,7 @@ function BrandingTab() {
 }
 
 /**
- * Logo image picker — URL input + Upload button + live preview.
+ * Logo image picker, URL input + Upload button + live preview.
  *
  * Two paths admins can take:
  *   1. Type/paste a URL (built-in `/thespire-logo.png`, an
@@ -1849,7 +1861,7 @@ function BrandingTab() {
  *   2. Click Upload, pick a local file. We read it via FileReader as
  *      a base64 data URL, POST to /admin/upload/logo, and the server
  *      writes it under /uploads + immediately persists the URL onto
- *      site_settings.logo_url. That bypass the parent form save —
+ *      site_settings.logo_url. That bypass the parent form save,
  *      the upload is its own atomic operation since admins typically
  *      want the new logo live as soon as they pick it. The parent
  *      callback then syncs the local draft + branding store.
@@ -1864,7 +1876,7 @@ function LogoImageRow({
   onChange: (next: string) => void;
   onUploaded: (j: { url: string; settings: SettingsRow }) => void;
   /** Whether the viewer holds `upload_logo`. When false the Upload
-   *  button hides — the URL input stays editable since pasting a
+   *  button hides, the URL input stays editable since pasting a
    *  URL only requires `edit_site_settings`, which the parent gates
    *  independently. */
   canUpload: boolean;
@@ -1941,7 +1953,7 @@ function LogoImageRow({
           type="button"
           onClick={() => onChange("")}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-keep-muted hover:text-keep-text"
-          title="Clear — banner falls back to the text site name."
+          title="Clear, banner falls back to the text site name."
         >
           Clear
         </button>
@@ -2069,7 +2081,7 @@ function RulesTab() {
   }
 
   // Project save controls into the modal footer. Same pattern as
-  // SettingsTab / BrandingTab — see those for the full rationale.
+  // SettingsTab / BrandingTab, see those for the full rationale.
   const shell = useAdminShell();
   useEffect(() => {
     if (!shell) return;
@@ -2082,7 +2094,7 @@ function RulesTab() {
         error={error}
         saveLabel="Save rules"
         canEdit={canEditSiteSettings}
-        readOnlyHint="Read-only — needs edit_site_settings to save."
+        readOnlyHint="Read-only, needs edit_site_settings to save."
       />,
     );
     return () => shell.setFooter(null);
@@ -2596,7 +2608,7 @@ function CommandsTab() {
       // Optimistic remove + close the edit form. The reload below
       // confirms against the server, but doing it eagerly fixes the
       // "deleted row stays visible until I refresh the whole app"
-      // bug — previously the edit form stayed open with the now-
+      // bug, previously the edit form stayed open with the now-
       // deleted command shown, and any subsequent re-add of the
       // same name looked like the old row had necroed back.
       setEditing(null);
@@ -2696,7 +2708,243 @@ function CommandsTab() {
         </table>
         </div>
       )}
+      <BuiltinCommandsSection />
     </div>
+  );
+}
+
+/**
+ * Built-in command tuning panel, rendered at the bottom of the
+ * Commands tab. Lists every social-game command the framework
+ * exposes via `BUILTIN_COMMAND_CATALOG` on the server; each card
+ * holds the editable duration + reward fields. Saves go through
+ * PUT /admin/builtin-commands/:name.
+ *
+ * Empty inputs are treated as "use the code default" (duration) or
+ * "no reward" (xp/currency/item), the server normalizes accordingly.
+ */
+interface BuiltinCommandRow {
+  name: string;
+  label: string;
+  description: string;
+  defaultDurationMs: number;
+  durationLabel: string;
+  supportsReward: boolean;
+  /** Out-of-the-box ship default reward shown as placeholder text
+   *  when `hasAdminConfig` is false (admin hasn't saved this row).
+   *  The moment the admin saves anything, their values take over
+   *  and these defaults retreat to legend-only context. */
+  defaultRewardXp: number;
+  defaultRewardCurrency: number;
+  hasAdminConfig: boolean;
+  rewardXp: number;
+  rewardCurrency: number;
+  rewardItemKey: string | null;
+  rewardItemCount: number;
+  durationMs: number | null;
+  updatedAt: number | null;
+}
+
+function BuiltinCommandsSection() {
+  const [rows, setRows] = useState<BuiltinCommandRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  async function reload() {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch("/admin/builtin-commands", { credentials: "include" });
+      if (!r.ok) throw new Error(await readError(r));
+      const j = (await r.json()) as { commands: BuiltinCommandRow[] };
+      setRows(j.commands);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "load failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { reload(); }, []);
+
+  return (
+    <section className="mt-6 space-y-3 border-t border-keep-rule pt-4">
+      <div className="text-xs text-keep-muted">
+        <span className="mr-2 inline-block rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-action">
+          Built-ins
+        </span>
+        Tune the duration + reward for the social-game commands. Leave the duration blank to use the code default. Each social game ships with a sensible default XP / Currency reward (shown pre-filled in cards marked "Defaults"); saving a card persists your values and replaces the defaults. Raffles ignore the reward fields (their prize IS the host's stake).
+      </div>
+      {error ? (
+        <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
+      ) : null}
+      {loading ? (
+        <div className="text-xs text-keep-muted">loading…</div>
+      ) : (
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+          {rows.map((row) => (
+            <BuiltinCommandCard key={row.name} row={row} onSaved={reload} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function BuiltinCommandCard({ row, onSaved }: { row: BuiltinCommandRow; onSaved: () => void }) {
+  // Pre-fill the inputs with the EFFECTIVE values users are
+  // currently earning, admin-saved values when `hasAdminConfig`,
+  // otherwise the ship defaults. This way the admin can save
+  // immediately to lock in the current behavior or tweak from a
+  // sensible starting point. The "Defaults" badge in the card
+  // header (below) makes it clear when the displayed numbers
+  // came from code rather than a save.
+  const [xp, setXp] = useState(row.hasAdminConfig ? String(row.rewardXp) : String(row.defaultRewardXp));
+  const [currency, setCurrency] = useState(row.hasAdminConfig ? String(row.rewardCurrency) : String(row.defaultRewardCurrency));
+  const [itemKey, setItemKey] = useState(row.rewardItemKey ?? "");
+  const [itemCount, setItemCount] = useState(String(row.rewardItemCount));
+  const [duration, setDuration] = useState(row.durationMs != null ? formatMs(row.durationMs) : "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    setSaving(true);
+    setErr(null);
+    setSaved(false);
+    try {
+      const body: Record<string, unknown> = {};
+      if (row.supportsReward) {
+        const xpN = parseInt(xp, 10);
+        const currencyN = parseInt(currency, 10);
+        const itemCountN = parseInt(itemCount, 10);
+        if (!Number.isFinite(xpN) || xpN < 0) throw new Error("XP must be a non-negative integer");
+        if (!Number.isFinite(currencyN) || currencyN < 0) throw new Error("Currency must be a non-negative integer");
+        if (!Number.isFinite(itemCountN) || itemCountN < 0) throw new Error("Item count must be a non-negative integer");
+        body.rewardXp = xpN;
+        body.rewardCurrency = currencyN;
+        body.rewardItemKey = itemKey.trim() || null;
+        body.rewardItemCount = itemCountN;
+      }
+      const durationTrimmed = duration.trim();
+      if (durationTrimmed === "") {
+        body.durationMs = null;
+      } else {
+        const parsed = parseDurationMs(durationTrimmed);
+        if (parsed === null) throw new Error("duration must be a value like 60s, 3m, 2h, or blank for default");
+        if (parsed < 1000 || parsed > 30 * 60_000) throw new Error("duration must be between 1s and 30m");
+        body.durationMs = parsed;
+      }
+      const r = await fetch(`/admin/builtin-commands/${encodeURIComponent(row.name)}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1500);
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <article className="flex flex-col gap-2 rounded border border-keep-rule bg-keep-bg/40 p-3 text-xs">
+      <header>
+        <div className="flex items-baseline justify-between gap-2">
+          <h4 className="font-semibold">
+            /{row.name}{" "}
+            <span className="text-keep-muted">· {row.label}</span>
+          </h4>
+          <div className="flex items-baseline gap-2">
+            {!row.hasAdminConfig && row.supportsReward ? (
+              <span
+                className="text-[10px] uppercase tracking-widest text-keep-muted"
+                title="No admin config saved yet, the fields below show the ship defaults users currently earn. Save to lock them in or tweak."
+              >
+                Defaults
+              </span>
+            ) : null}
+            {saved ? <span className="text-[10px] uppercase tracking-widest text-keep-system">Saved</span> : null}
+          </div>
+        </div>
+        <p className="mt-0.5 text-[11px] text-keep-muted">{row.description}</p>
+      </header>
+      <label className="block">
+        <span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">
+          {row.durationLabel} <span className="normal-case text-keep-muted/70">(default {formatMs(row.defaultDurationMs)}, leave blank to use it)</span>
+        </span>
+        <input
+          type="text"
+          value={duration}
+          placeholder={formatMs(row.defaultDurationMs)}
+          onChange={(e) => setDuration(e.target.value)}
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
+        />
+      </label>
+      {row.supportsReward ? (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">XP per winner</span>
+              <input
+                type="number"
+                min={0}
+                value={xp}
+                onChange={(e) => setXp(e.target.value)}
+                className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">Currency per winner</span>
+              <input
+                type="number"
+                min={0}
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
+              />
+            </label>
+          </div>
+          <div className="grid grid-cols-[1fr_70px] gap-2">
+            <label className="block">
+              <span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">Item key (optional)</span>
+              <input
+                type="text"
+                value={itemKey}
+                placeholder="e.g. cookie, blank for none"
+                onChange={(e) => setItemKey(e.target.value)}
+                className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">Count</span>
+              <input
+                type="number"
+                min={0}
+                value={itemCount}
+                onChange={(e) => setItemCount(e.target.value)}
+                className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
+              />
+            </label>
+          </div>
+        </>
+      ) : (
+        <p className="text-[10px] italic text-keep-muted">Reward fields hidden, this command ignores them.</p>
+      )}
+      {err ? <p className="text-[11px] text-keep-accent">{err}</p> : null}
+      <button
+        type="button"
+        onClick={save}
+        disabled={saving}
+        className="self-end rounded border border-keep-action/60 bg-keep-action/10 px-3 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
+      >
+        {saving ? "Saving…" : "Save"}
+      </button>
+    </article>
   );
 }
 
@@ -2717,13 +2965,13 @@ function CommandForm({
   const [kind, setKindRaw] = useState<"action" | "say">(initial?.kind ?? "action");
   // Kind picker acts as a "preset loader" in create mode: switching to
   // action vs say also seeds the template, CSS, and color to match what
-  // each legacy chat shape used to render as — `{sender} <body>` in
+  // each legacy chat shape used to render as, `{sender} <body>` in
   // italic + theme:action for action, `[{sender}] <body>` with default
   // styling for say. The presets give a one-click starting point that
   // mirrors how a baseline /me or /say would have looked, so a fresh
   // command immediately reads "right" before the admin tweaks it. We
   // only auto-fill when the field is still on the OTHER kind's preset
-  // (or empty) — once the admin has authored their own value, the
+  // (or empty), once the admin has authored their own value, the
   // toggle stops clobbering it.
   const KIND_PRESETS = {
     action: {
@@ -2796,12 +3044,12 @@ function CommandForm({
   // Run the same sanitizer the server uses on save so the preview
   // reflects exactly which declarations will survive. Anything dropped
   // here (e.g. an unsupported property like `position`) just won't
-  // show up in the rendered preview — surprises the author *before*
+  // show up in the rendered preview, surprises the author *before*
   // they hit save.
   const sanitizedCss = useMemo(() => sanitizeCustomCmdCss(css), [css]);
   // Pass `themeBg` so a color value in the CSS gets the same legibility
   // nudge against the operator's current palette that the chat renderer
-  // applies — keeps the preview honest about what the command will look
+  // applies, keeps the preview honest about what the command will look
   // like to viewers on different themes.
   const previewCssStyle = useMemo(
     () => customCmdCssToStyle(sanitizedCss, themeBg),
@@ -2842,7 +3090,7 @@ function CommandForm({
         body.color = color;
       }
       // Inline fields. Toggling Allow-Inline off DOESN'T clear the
-      // stored inline_template — the server gates the lookup on
+      // stored inline_template, the server gates the lookup on
       // allow_inline, so a stored body is harmless. Preserving it
       // means an admin who toggles off then back on doesn't lose
       // their authored override.
@@ -2970,7 +3218,7 @@ function CommandForm({
               className="w-full rounded border border-keep-rule px-2 py-1 font-mono"
             />
             <span className="mt-0.5 block text-[10px] text-keep-muted">
-              Rendered when invoked inline (no <code>{"{target}"}</code> / <code>{"{args}"}</code> —
+              Rendered when invoked inline (no <code>{"{target}"}</code> / <code>{"{args}"}</code>,
               inline mode has no slot for them). Leave blank to reuse the main template.
             </span>
           </label>
@@ -2999,7 +3247,7 @@ function CommandForm({
         </label>
         <label className="col-span-2">
           <span className="mb-1 block uppercase tracking-widest text-keep-muted">Color</span>
-          {/* Theme-slot chips — pick one of these to follow whatever
+          {/* Theme-slot chips, pick one of these to follow whatever
               palette the reader is running with. Useful for "system"
               flavor commands that should look like server notices to
               everyone regardless of their theme choice. */}
@@ -3070,9 +3318,9 @@ function CommandForm({
         </label>
       </div>
 
-      {/* Custom CSS — admin-authored declaration list applied to the
+      {/* Custom CSS, admin-authored declaration list applied to the
           rendered body. The textarea is intentionally small (most
-          authors only want a property or two — bold, italic, a glow
+          authors only want a property or two, bold, italic, a glow
           via text-shadow); the hard cap matches the server's
           CUSTOM_CMD_CSS_MAX_LEN. Sanitization runs locally on every
           keystroke so the preview reflects exactly what survives the
@@ -3159,7 +3407,7 @@ function CommandForm({
       {/* Live preview. Renders inline markdown the same way chat
           messages will at delivery time (see `lib/markdown.tsx`), so
           `**bold**`, `*italic*`, links, etc. show up exactly as
-          they'll appear to readers — not as their raw `**` source. */}
+          they'll appear to readers, not as their raw `**` source. */}
       <div className="mt-2 rounded border border-keep-rule bg-keep-banner/30 p-2">
         <div className="mb-0.5 text-[10px] uppercase tracking-widest text-keep-muted">
           Preview (Sigrid runs /{name || "..."} Bran tightly)
@@ -3170,7 +3418,7 @@ function CommandForm({
             ...(previewCssStyle ?? {}),
           }}
         >
-          {/* Custom commands now emit kind="cmd" — the chat renderer
+          {/* Custom commands now emit kind="cmd", the chat renderer
               doesn't auto-prepend the display name, so the preview
               mirrors that contract: whatever the template expanded to
               IS the entire visible line. Authors who want the name
@@ -3312,7 +3560,7 @@ interface AdminRoom {
    * Per-room message-expiry override in minutes. Null = no override;
    * the room inherits the global `messageRetentionMs` site setting.
    * Forum/nested rooms (replyMode='nested') are exempt from the
-   * sweep entirely — their messages persist regardless of this
+   * sweep entirely, their messages persist regardless of this
    * value; the expiry panel renders them as "never expires (forum)".
    */
   messageExpiryMinutes: number | null;
@@ -3645,7 +3893,7 @@ function TitleKindForm({
         <div className="text-[10px] text-keep-muted">
           <p>{"{target} is replaced with the other party's display name."}</p>
           <p className="mt-0.5">
-            {"{gender:Male|Female|Neutral} picks based on the subject's gender — e.g."}
+            {"{gender:Male|Female|Neutral} picks based on the subject's gender, e.g."}
             {' "{gender:Father|Mother|Parent} of {target}"'}
             {" renders as Father / Mother / Parent depending on whose profile the chip is on."}
           </p>
@@ -3734,7 +3982,7 @@ function RoomsTab() {
   // value. Without this the form mounts above the rooms table (where
   // it logically belongs in the markup) and a mobile user who clicked
   // "Edit" on a row near the bottom of the table sees no visible
-  // change — the form is offscreen above the current scroll position.
+  // change, the form is offscreen above the current scroll position.
   const formRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!editing) return;
@@ -3991,8 +4239,8 @@ function RoomsTab() {
       {/* Message-expiry management. Sits below the main room table so
           the existing edit surface (name/topic/type/etc.) stays
           uncluttered while admins still get a dedicated view for the
-          sweep schedule. Each row shows the effective expiry — per-
-          room override or "global (Xd)" fallback — and exposes
+          sweep schedule. Each row shows the effective expiry, per-
+          room override or "global (Xd)" fallback, and exposes
           inline + bulk controls. Forum/nested rooms are exempt from
           the sweep so they surface as "never expires" read-only. */}
       {!loading ? <RoomExpiryPanel rooms={rooms} onReload={reload} /> : null}
@@ -4039,7 +4287,7 @@ function RoomExpiryPanel({
   rooms: AdminRoom[];
   onReload: () => Promise<void>;
 }) {
-  // Global retention from the branding store — already populated from
+  // Global retention from the branding store, already populated from
   // /site on first paint, so no extra fetch here. Drives the "(global)"
   // fallback label rendered for rooms whose per-room override is null.
   const globalMs = useChat((s) => s.branding.messageRetentionMs);
@@ -4050,7 +4298,7 @@ function RoomExpiryPanel({
   // so existing values stay rendered as their canonical label until
   // the admin actually types into the input.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  // Bulk-select state — checkbox column. Forum rooms can be selected
+  // Bulk-select state, checkbox column. Forum rooms can be selected
   // but the bulk-apply just no-ops on them server-side (the column
   // updates but the sweep ignores forum rooms anyway).
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -4150,7 +4398,7 @@ function RoomExpiryPanel({
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
       <legend className="px-1 uppercase tracking-widest text-keep-muted">Message expiry</legend>
       <p className="mb-2 text-keep-muted">
-        Global retention is <b className="text-keep-text">{globalLabel}</b> — every flat-chat room without an
+        Global retention is <b className="text-keep-text">{globalLabel}</b>, every flat-chat room without an
         override below inherits it live. Per-room overrides take precedence
         when set; forum (nested) rooms keep messages forever regardless.
         Change the global value in <span className="text-keep-text">Settings → Message retention</span>.
@@ -4182,7 +4430,7 @@ function RoomExpiryPanel({
             onClick={() => void applyBulk("clear")}
             disabled={busy}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner disabled:opacity-50"
-            title="Clear the override on the selected rooms — they fall back to global retention."
+            title="Clear the override on the selected rooms, they fall back to global retention."
           >
             Clear override
           </button>
@@ -4259,7 +4507,7 @@ function RoomExpiryPanel({
                     <input
                       type="text"
                       value={draftValue}
-                      placeholder={isForum ? "—" : "inherit"}
+                      placeholder={isForum ? "-" : "inherit"}
                       disabled={isForum}
                       onChange={(e) =>
                         setDrafts((d) => ({ ...d, [r.id]: e.target.value }))
@@ -4280,7 +4528,7 @@ function RoomExpiryPanel({
                       type="button"
                       onClick={() => void clearPerRoom(r)}
                       disabled={busy || isForum || r.messageExpiryMinutes == null}
-                      title={r.messageExpiryMinutes == null ? "No override to clear — already inheriting global." : "Clear override; room falls back to global retention."}
+                      title={r.messageExpiryMinutes == null ? "No override to clear, already inheriting global." : "Clear override; room falls back to global retention."}
                       className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner disabled:opacity-40"
                     >
                       Clear
@@ -4448,8 +4696,8 @@ function RoomForm({
             onChange={(e) => setDraft({ ...draft, replyMode: e.target.value as "flat" | "nested" })}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
-            <option value="flat">flat — chronological chat (messages may auto-expire per retention)</option>
-            <option value="nested">nested — forum-style threads (persistent topics, replies group under their parent, supports categories)</option>
+            <option value="flat">flat, chronological chat (messages may auto-expire per retention)</option>
+            <option value="nested">nested, forum-style threads (persistent topics, replies group under their parent, supports categories)</option>
           </select>
           <span className="mt-1 block text-[10px] text-keep-muted">
             {draft.replyMode === "nested"
@@ -4459,7 +4707,7 @@ function RoomForm({
         </label>
       </div>
 
-      {/* Thread categories — only meaningful for nested-mode rooms.
+      {/* Thread categories, only meaningful for nested-mode rooms.
           We branch on the DRAFT replyMode (not the saved value) so
           flipping the select above immediately reveals the panel; the
           panel itself hits the API directly, independent of the
@@ -4470,7 +4718,7 @@ function RoomForm({
       ) : null}
       {mode === "create" && draft.replyMode === "nested" ? (
         <div className="mt-3 rounded border border-keep-action/40 bg-keep-action/10 p-2 text-[10px] uppercase tracking-widest text-keep-action">
-          Thread categories can be added after the room is created — save this form, then re-open the room's Edit panel and the categories editor will appear here.
+          Thread categories can be added after the room is created, save this form, then re-open the room's Edit panel and the categories editor will appear here.
         </div>
       ) : null}
 
@@ -4703,7 +4951,7 @@ interface AdminUserRow {
   characters: Array<{ id: string; name: string; deleted: boolean }>;
   /** Last ~5 distinct IPs this user has logged in from, newest-first.
    *  `altCount` is the number of OTHER accounts that have logged in
-   *  from the same IP — non-zero values flag ban-evasion or
+   *  from the same IP, non-zero values flag ban-evasion or
    *  shared-device patterns for moderation review. */
   recentIps: Array<{ ip: string; lastSeenAt: number; altCount: number }>;
 }
@@ -4720,15 +4968,15 @@ function UsersTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  // IP pivot — when set, scopes the list to every user who has a
+  // IP pivot, when set, scopes the list to every user who has a
   // session row from this IP. Set by clicking an IP chip on any
-  // user row; cleared by the "Showing alts on X — clear" affordance
+  // user row; cleared by the "Showing alts on X, clear" affordance
   // that appears in the toolbar while a pivot is active. Stored
   // alongside `q` so the two filters compose at the server.
   const [ipPivot, setIpPivot] = useState("");
   const [editing, setEditing] = useState<AdminUserRow | null>(null);
   // Default sort lands on newest signups so admins see fresh accounts
-  // first — supports the moderation workflow of "who joined since I last
+  // first, supports the moderation workflow of "who joined since I last
   // looked." Alphabetical is one click away on the header.
   const [sortKey, setSortKey] = useState<UserSortKey>("registered");
   const [sortDir, setSortDir] = useState<UserSortDir>("desc");
@@ -4885,7 +5133,7 @@ function UsersTab() {
         />
       </div>
 
-      {/* IP pivot chip — surfaces while a click on an IP chip in the
+      {/* IP pivot chip, surfaces while a click on an IP chip in the
           table has scoped the list to "every account on this IP." A
           small × clears it back to the unfiltered view. Sits above
           the filter row so it reads as a context layer on top of the
@@ -4998,7 +5246,7 @@ function UsersTab() {
               <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("chars")}>Chars{sortIndicator("chars")}</th>
               <th
                 className="px-2 py-1 text-left"
-                title="Up to 5 most-recent distinct IPs the user has logged in from. Click an IP to pivot the list to every account that shares it. Numeric badge = count of OTHER accounts that have used the same IP — flag for ban evasion or shared-device review."
+                title="Up to 5 most-recent distinct IPs the user has logged in from. Click an IP to pivot the list to every account that shares it. Numeric badge = count of OTHER accounts that have used the same IP, flag for ban evasion or shared-device review."
               >IPs &amp; alts</th>
               <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("registered")}>Registered{sortIndicator("registered")}</th>
               <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("lastSeen")}>Last seen{sortIndicator("lastSeen")}</th>
@@ -5094,14 +5342,14 @@ function UsersTab() {
 /**
  * Compact IP renderer for the UsersTab row. Each IP is a clickable
  * chip that sets the table's `ipPivot` so the surrounding view
- * scopes to every other account that's used the same address —
+ * scopes to every other account that's used the same address,
  * the canonical "spot ban evasion / alt accounts" moderation step.
  *
  * The chip's badge is the count of OTHER accounts on this IP. 0
  * means "this IP is only this user", which is the common case for
  * residential connections; ≥1 flags shared devices / proxies / alts
  * and is worth a closer look. Larger numbers (a coffee-shop or CGNAT
- * IP, say) often have benign explanations — the chip is a starting
+ * IP, say) often have benign explanations, the chip is a starting
  * point, not a verdict.
  *
  * `activeIp` highlights the chip when the pivot already matches it,
@@ -5118,7 +5366,7 @@ function UserIpChips({
   onPickIp: (ip: string) => void;
 }) {
   if (recentIps.length === 0) {
-    return <span className="italic text-keep-muted">—</span>;
+    return <span className="italic text-keep-muted">-</span>;
   }
   return (
     <ul className="flex flex-wrap gap-1">
@@ -5171,7 +5419,7 @@ function UserEditForm({
   /**
    * Whether the caller is a master admin (role-tier check, not a
    * permission key). Kept because granting the masteradmin role is a
-   * hardcoded exception in plan.md — no matrix toggle for that one
+   * hardcoded exception in plan.md, no matrix toggle for that one
    * action. Per-field gates below pull from `me.permissions` so the
    * matrix can hand out e.g. `edit_user_email` without minting a
    * masteradmin.
@@ -5196,7 +5444,7 @@ function UserEditForm({
   const canGrantEarning = mePermissions.includes("grant_earning_award");
   const canClearCosmetic = mePermissions.includes("clear_user_cosmetic_override");
   // A non-masteradmin caller can't act on a masteradmin target at all
-  // (no demote, no rename, etc.) — the row stays read-only so they
+  // (no demote, no rename, etc.), the row stays read-only so they
   // don't submit a save that would 403. The "you can't outrank
   // yourself" guard stays as a tier check per plan.md's hardcoded
   // exceptions.
@@ -5241,7 +5489,7 @@ function UserEditForm({
             className="w-full rounded border border-keep-rule px-2 py-1"
           />
         </label>
-        {/* Email is gated on `edit_user_email` — it's an
+        {/* Email is gated on `edit_user_email`, it's an
             account-recovery vector and changing it amounts to identity
             reassignment. Defaults masteradmin-only via the seed but
             grantable through the matrix. */}
@@ -5269,7 +5517,7 @@ function UserEditForm({
             <option value="trusted">trusted</option>
             <option value="mod">mod</option>
             <option value="admin">admin</option>
-            {/* `masteradmin` is master-only on both ends — only a
+            {/* `masteradmin` is master-only on both ends, only a
                 master can mint another master, and only a master can
                 strip an existing master's role. A plain admin sees
                 the option absent (it'd 403 server-side anyway). */}
@@ -5277,7 +5525,7 @@ function UserEditForm({
           </select>
         </label>
         {/* Disabled toggle is gated on `disable_user`/`enable_user`
-            — disabling is an account lockout, which the seed scopes
+           , disabling is an account lockout, which the seed scopes
             to masteradmin-default; the matrix can hand it out per
             user or per role. */}
         {canDisableEnable ? (
@@ -5497,7 +5745,7 @@ function PasswordResetSection({ userId, username }: { userId: string; username: 
     setNext(pw);
     setConfirm(pw);
     // Best-effort clipboard copy. navigator.clipboard requires
-    // a secure context (https or localhost) AND a user gesture —
+    // a secure context (https or localhost) AND a user gesture,
     // the click on this button qualifies for both. Falls back to
     // a hidden-textarea + execCommand on older browsers / non-
     // secure contexts. Either way the password is in the inputs
@@ -5522,7 +5770,7 @@ function PasswordResetSection({ userId, username }: { userId: string; username: 
       }
       window.setTimeout(() => setCopied(false), 3000);
     } catch {
-      // Silent — the password is visible in the inputs; admin can
+      // Silent, the password is visible in the inputs; admin can
       // select + copy by hand if the clipboard API rejected.
     }
   }
@@ -5587,7 +5835,7 @@ function PasswordResetSection({ userId, username }: { userId: string; username: 
 /**
  * Generate a `length`-char password using the platform CSPRNG. The
  * alphabet drops easily-confused glyphs (0/O, 1/l/I) so a verbally
- * dictated password doesn't trip the recipient up — admins commonly
+ * dictated password doesn't trip the recipient up, admins commonly
  * read these out over chat or paste into help-desk tickets where
  * font choices make those ambiguous.
  */
@@ -5669,7 +5917,7 @@ function EarningGrantSection({ username }: { username: string }) {
         </label>
       </div>
       <p className="mt-1 text-[10px] text-keep-muted">
-        Goes through the live earning engine — rank recomputes, the user's wallet updates live, the ledger gets an audit row. Negative values revoke.
+        Goes through the live earning engine, rank recomputes, the user's wallet updates live, the ledger gets an audit row. Negative values revoke.
       </p>
       <div className="mt-2 flex items-center gap-2">
         <button
@@ -5696,7 +5944,7 @@ function CosmeticGrantSection({ username }: { username: string }) {
   const [ok, setOk] = useState<string | null>(null);
   // Live snapshot of the TARGET user's ownership, refreshed after
   // every grant/revoke. We can't use the admin's own /earning/me
-  // for this — we need to see what THEY own. The lightweight
+  // for this, we need to see what THEY own. The lightweight
   // /admin/earning/user-ownership endpoint returns key arrays.
   const [owned, setOwned] = useState<{ styles: string[]; borders: string[] }>({ styles: [], borders: [] });
   const [refreshKey, setRefreshKey] = useState(0);
@@ -5752,7 +6000,7 @@ function CosmeticGrantSection({ username }: { username: string }) {
               onChange={(e) => setPickedStyle(e.target.value)}
               className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1"
             >
-              <option value="">— pick —</option>
+              <option value="">pick one</option>
               {styles.map((s) => (
                 <option key={s.key} value={s.key}>{s.name}</option>
               ))}
@@ -5775,7 +6023,7 @@ function CosmeticGrantSection({ username }: { username: string }) {
               onChange={(e) => setPickedBorder(e.target.value)}
               className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1"
             >
-              <option value="">— pick —</option>
+              <option value="">pick one</option>
               {borderRanks.map((t) => {
                 const rank = snapshot?.catalog.ranks.find((r) => r.key === t.rankKey);
                 return (
@@ -5797,7 +6045,7 @@ function CosmeticGrantSection({ username }: { username: string }) {
 
       {/* Currently-owned list with per-item Revoke. Driven off the
           live /admin/earning/user-ownership response so the panel
-          reflects the actual server state — including any grants
+          reflects the actual server state, including any grants
           made via /earning purchase flows OR earlier admin grants
           in the same session. */}
       {owned.styles.length > 0 || owned.borders.length > 0 ? (
@@ -5900,7 +6148,7 @@ function EarningResetSection({ username }: { username: string }) {
     <fieldset className="rounded border border-keep-accent/40 p-2">
       <legend className="px-1 uppercase tracking-widest text-keep-accent">Reset earning state</legend>
       <p className="text-[10px] text-keep-muted">
-        Destructive test affordance — clears the user's XP / Currency / rank / peak, drops every character pool to zero, and removes all owned styles + borders. Useful for testing earning flows from a clean slate.
+        Destructive test affordance, clears the user's XP / Currency / rank / peak, drops every character pool to zero, and removes all owned styles + borders. Useful for testing earning flows from a clean slate.
       </p>
       <div className="mt-2 flex items-center gap-2">
         <button
@@ -5951,7 +6199,7 @@ function LimitField({
 }
 
 /* =========================================================
- *  Reports tab — triage queue for user-filed public reports
+ *  Reports tab, triage queue for user-filed public reports
  * ========================================================= */
 function ReportsTab() {
   const [statusFilter, setStatusFilter] = useState<"open" | "reviewed" | "dismissed" | "all">("open");
@@ -6050,7 +6298,7 @@ function ReportsTab() {
               </div>
               <div className="mt-1 rounded border border-keep-rule/50 bg-keep-panel/30 p-2 text-xs">
                 <div className="text-keep-muted">
-                  {new Date(r.messageCreatedAt).toLocaleTimeString()} — <span className="font-semibold">{r.messageDisplayName}</span>
+                  {new Date(r.messageCreatedAt).toLocaleTimeString()}, <span className="font-semibold">{r.messageDisplayName}</span>
                 </div>
                 <div className="whitespace-pre-wrap break-words">{r.messageBody}</div>
               </div>
@@ -6060,7 +6308,7 @@ function ReportsTab() {
               {r.resolvedAt && r.resolvedByDisplayName ? (
                 <div className="mt-1 text-[11px] text-keep-muted">
                   Resolved by {r.resolvedByDisplayName}
-                  {r.resolutionNote ? ` — ${r.resolutionNote}` : ""}
+                  {r.resolutionNote ? `, ${r.resolutionNote}` : ""}
                 </div>
               ) : null}
               {r.status === "open" ? (
@@ -6090,7 +6338,7 @@ function ReportsTab() {
 }
 
 /* =========================================================
- *  Audit tab — append-only feed of admin/mod actions
+ *  Audit tab, append-only feed of admin/mod actions
  * ========================================================= */
 function AuditTab() {
   const [actionFilter, setActionFilter] = useState("");
@@ -6199,7 +6447,7 @@ function AuditTab() {
 }
 
 /* =========================================================
- *  Affiliates tab — partners / sponsors carousel manager
+ *  Affiliates tab, partners / sponsors carousel manager
  * =========================================================
  *
  * Each row is admin-trusted raw HTML (topsite networks like toprpsites

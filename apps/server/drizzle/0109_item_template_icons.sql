@@ -9,7 +9,7 @@
 -- Every existing builtin template uses `{item_name}` somewhere, so
 -- the substitution lands on each template once. Templates that
 -- already happen to include `{icon}` (none today, but harmless if
--- some admin pre-edited) get a duplicate icon — admins can clean
+-- some admin pre-edited) get a duplicate icon, admins can clean
 -- those up via the editor.
 --
 -- Scope: ALL items, not just builtins. Custom items added by admins

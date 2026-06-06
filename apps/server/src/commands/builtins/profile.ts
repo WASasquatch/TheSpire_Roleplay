@@ -35,7 +35,7 @@ async function resolveProfileStyleKey(
 /**
  * Resolve the identity's equipped name-style key + per-user config so
  * a profile view can paint the username with the user's chosen
- * cosmetic — name styles are show-off cosmetics, not chat-only
+ * cosmetic, name styles are show-off cosmetics, not chat-only
  * decoration. Master uses user_active_cosmetics + user_owned_name_styles;
  * a character uses character_earning + character_owned_name_styles
  * (per-identity store, migration 0086). Returns nulls when no style is
@@ -112,7 +112,7 @@ async function getEquippedProfileBannerUrl(
 
 /**
  * Resolve whether the viewer has moderator-tier authority. Used to
- * gate the mod-only `ownerUsername` field on character profiles — a
+ * gate the mod-only `ownerUsername` field on character profiles, a
  * site mod (or admin / masteradmin) sees who voices each character;
  * regular users don't. Returns false for anonymous viewers and for
  * users whose row vanished (shouldn't happen, but a safe default).
@@ -213,7 +213,7 @@ async function listPortraits(
 /**
  * Twin of listPortraits but for the master/OOC profile gallery
  * (user_portraits table, added in migration 0113). Same wire shape
- * — the client renders both kinds with the same PortraitGallery
+ *, the client renders both kinds with the same PortraitGallery
  * component, so the masters get gallery parity with characters
  * without a parallel rendering path.
  */
@@ -232,14 +232,14 @@ async function listMasterPortraits(
 /**
  * Prepend the avatar to the portrait list as a synthetic gallery
  * entry when the owner ticked "Include in Gallery" on the avatar
- * field. We don't store this as a real portrait row — that would
+ * field. We don't store this as a real portrait row, that would
  * dangle a stale copy of the URL whenever the user changes the
  * avatar later. Instead we synthesize one at read time with a
  * stable id ("avatar") so the renderer can deduplicate against
  * the same URL appearing as a real portrait too (a paranoid user
  * who added their avatar URL to the gallery manually + then
  * ticked the box). NSFW carries forward from the surrounding
- * profile — the synthetic tile inherits the profile-level NSFW
+ * profile, the synthetic tile inherits the profile-level NSFW
  * flag the same way the hero portrait already does.
  */
 function maybePrependAvatarPortrait(
@@ -331,7 +331,7 @@ async function listPublicJournal(
  *                    posting" signal), system/announce/cmd (server
  *                    chrome, not the user's voice), and forum kinds
  *                    (covered separately below).
- *   - forumTopics  : the top-level post that opens a topic — `title`
+ *   - forumTopics  : the top-level post that opens a topic, `title`
  *                    is set AND `replyToId` is null (and we filter on
  *                    nested rooms so a stray legacy title on a flat
  *                    row doesn't inflate the count).
@@ -340,7 +340,7 @@ async function listPublicJournal(
  *                    (rare; quote-replies in flat chats) don't count.
  *
  * Soft-deleted messages are EXCLUDED so a moderation hide reduces the
- * counter — the user no longer "has" that post in any meaningful
+ * counter, the user no longer "has" that post in any meaningful
  * sense. The author's hard counters survive their own re-publishes
  * since the message id is the row identity.
  */
@@ -350,7 +350,7 @@ async function computeProfileMetrics(
   characterId: string | null,
   /**
    * Authenticated viewer's user id, when available. Used to bypass
-   * the privacy hide flags for the owner viewing their own profile —
+   * the privacy hide flags for the owner viewing their own profile,
    * otherwise a user who toggled nothing still saw "private" on their
    * own counts (the flags applied unconditionally on the server).
    * Anonymous viewers, admins, and any other user pass through the
@@ -359,7 +359,7 @@ async function computeProfileMetrics(
   viewerId?: string,
 ): Promise<ProfileMetrics> {
   // Privacy flags live on the user row regardless of which character
-  // is being profiled — they're per-account preferences, not per
+  // is being profiled, they're per-account preferences, not per
   // identity. One query, three booleans; defaults to "show" if the
   // row is somehow missing.
   const u = (await db
@@ -371,7 +371,7 @@ async function computeProfileMetrics(
     .from(users)
     .where(eq(users.id, userId))
     .limit(1))[0];
-  // Owner self-view bypasses every hide flag — the owner is who SET
+  // Owner self-view bypasses every hide flag, the owner is who SET
   // the flag in the first place; redacting their own readout would
   // give them no way to confirm what other users see vs hide their
   // numbers from themselves. (Admin tools surface the actual counts
@@ -380,7 +380,7 @@ async function computeProfileMetrics(
   const hideChat = isSelfView ? false : (u?.hideChatMessageCount ?? false);
   const hideTopics = isSelfView ? false : (u?.hideForumTopicCount ?? false);
   const hideReplies = isSelfView ? false : (u?.hideForumReplyCount ?? false);
-  // Short-circuit each branch when its hide flag is set — saves the
+  // Short-circuit each branch when its hide flag is set, saves the
   // COUNT(*) query and returns null directly. Useful both for the
   // tiny perf win and so a "private" metric can't accidentally leak
   // via a server log of the underlying SQL.
@@ -428,7 +428,7 @@ async function computeProfileMetrics(
  * passive tier via the shared `resolveScriptoriumAuthorTier` helper.
  * Returns null for accounts that haven't published anything yet.
  *
- * Called from both the master + character profile builders — character
+ * Called from both the master + character profile builders, character
  * profiles inherit the same badge as their owner's master profile.
  */
 async function computeScriptoriumAuthorBadge(
@@ -452,7 +452,7 @@ async function computeScriptoriumAuthorBadge(
  * Build a ProfileView for an already-fetched master row. Used by the
  * token shortcut path in `lookupProfile` so a `@id:<userId>` query
  * skips name-disambiguation entirely. The legacy name-keyed master
- * branch in `lookupProfile` duplicates this logic inline — a future
+ * branch in `lookupProfile` duplicates this logic inline, a future
  * cleanup pass can collapse the two; for now they stay parallel.
  */
 async function buildMasterProfileView(
@@ -570,7 +570,7 @@ async function buildCharacterProfileView(
  * flow on the userlist.
  *
  * Tokens shortcut the name-resolution path entirely so the
- * "/whois @cid:abc" caller gets back exactly that character — not
+ * "/whois @cid:abc" caller gets back exactly that character, not
  * some other identity that happens to share its display name. Bare
  * names take the legacy NBSP-variant flow.
  */
@@ -584,7 +584,7 @@ async function lookupProfile(
 ): Promise<ProfileView | null> {
   // Token shortcut. We hand-roll the parse here (rather than importing
   // identityArg) to avoid a circular-import risk between profile.ts
-  // and identityArg.ts during bootstrap — the token format is two
+  // and identityArg.ts during bootstrap, the token format is two
   // string-prefix checks, cheap to inline.
   if (name.startsWith("@id:")) {
     const userId = name.slice(4).trim();
@@ -624,7 +624,7 @@ async function lookupProfile(
    * space form, while callers coming from chat (clicking a sender
    * name) hand us the canonical NBSP form. AND character names can
    * legally contain regular spaces ("Some Char") that should NOT be
-   * NBSP-substituted — those rows store the regular space in the DB.
+   * NBSP-substituted, those rows store the regular space in the DB.
    *
    * Earlier the URL/chat callers pre-substituted via slugToUsername
    * before calling lookupProfile, which broke character lookups: a
@@ -725,7 +725,7 @@ async function lookupProfile(
   // Mod-only OOC owner badge. The character row already exposes
   // `userId` on the wire (so the master is technically discoverable
   // by chained API calls), but mods on the modal need the friendly
-  // username inline — this query is the one that resolves it.
+  // username inline, this query is the one that resolves it.
   const showOwner = await viewerIsModerator(db, viewerId);
   const ns = await getEquippedNameStyle(db, "character", c.id);
   const charPortraits = maybePrependAvatarPortrait(

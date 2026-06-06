@@ -25,7 +25,7 @@ interface Props {
   /** Slash-command dispatcher for /friend, /accept, /decline, /unfriend. */
   onCommand: (text: string) => void;
   /**
-   * Optional pre-selected user id — when the modal opens, this user's
+   * Optional pre-selected user id, when the modal opens, this user's
    * thread is shown immediately. Used by the "💬 Message" button on
    * profiles. Null/undefined opens to the empty-state.
    */
@@ -33,7 +33,7 @@ interface Props {
   /**
    * Optional pre-selected character id pinned to the same target.
    * Required to distinguish a master/OOC thread from each of that
-   * master's character threads — without it, opening DM from
+   * master's character threads, without it, opening DM from
    * a character profile would surface the OOC conversation and leak
    * the character-to-master link.
    */
@@ -41,7 +41,7 @@ interface Props {
   /**
    * Open another user's profile by display name. Threaded from
    * App.tsx so clicking a name / avatar in a DM bubble OR the
-   * thread header opens the profile modal — same flow chat uses on
+   * thread header opens the profile modal, same flow chat uses on
    * the avatar tile. Optional so the modal stays callable from
    * surfaces that don't have profile-open wired (none today, but
    * keeping the option open).
@@ -89,7 +89,7 @@ interface FriendRequestEntry {
 }
 
 /** Match returned by /me/friend-resolve. Mirrors the server's
- *  FriendResolveMatch — kept inline to avoid threading a shared
+ *  FriendResolveMatch, kept inline to avoid threading a shared
  *  type through the API surface. */
 interface FriendResolveMatch {
   kind: "master" | "character";
@@ -100,7 +100,7 @@ interface FriendResolveMatch {
   avatarUrl: string | null;
 }
 
-/** Stable empty array sentinel — see Zustand selector notes elsewhere. */
+/** Stable empty array sentinel, see Zustand selector notes elsewhere. */
 const NO_DM_MESSAGES: DirectMessage[] = [];
 
 const PAGE_SIZE = 50;
@@ -116,7 +116,7 @@ const AUTO_GROW_MAX_PX = 128;
 
 /**
  * Unified Messages modal. Replaces the old standalone FriendsModal,
- * DmListModal, and DmFloatingPanel — the three felt fragmented and
+ * DmListModal, and DmFloatingPanel, the three felt fragmented and
  * the user couldn't tell which one to open for what. This is the
  * single surface:
  *
@@ -158,7 +158,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   // Pending requests come from the store so accept/decline in *any*
   // surface (this inbox, the chat-level prompts, or the DM thread's
   // bottom banner) clears every other surface in one shot. Previously
-  // the modal kept its own copy and would diverge — accepting from
+  // the modal kept its own copy and would diverge, accepting from
   // the inbox left the chat prompt and the DM banner stuck.
   const pendingFriendRequests = useChat((s) => s.pendingFriendRequests);
   const setPendingFriendRequests = useChat((s) => s.setPendingFriendRequests);
@@ -168,7 +168,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   const [loadingList, setLoadingList] = useState(true);
   const [error, setError] = useState<string | null>(null);
   /**
-   * Selected DM target — identified by BOTH userId and the pinned
+   * Selected DM target, identified by BOTH userId and the pinned
    * character id, because one master account can host multiple
    * concurrent threads (OOC plus one per character). Matching only on
    * userId conflates them and (a) highlights every row owned by that
@@ -181,7 +181,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
     initialOtherUserId ? { userId: initialOtherUserId, characterId: initialOtherCharacterId ?? null } : null,
   );
   const [refreshKey, setRefreshKey] = useState(0);
-  // Mobile pane switch — only one of "list" or "thread" is visible at <md.
+  // Mobile pane switch, only one of "list" or "thread" is visible at <md.
   // Pre-pick "thread" when the modal opens with a user selected so the
   // mobile user lands directly in the conversation.
   const [mobileView, setMobileView] = useState<"list" | "thread">(
@@ -193,7 +193,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
    * roughly the inbox-list proportion you'd see in Discord / Messenger
    * (about a quarter of a 1100px modal). Persisted to localStorage so
    * a user's drag-resize sticks across reopens. Mobile ignores this
-   * entirely — the left pane goes full-width via flex-1 when it's
+   * entirely, the left pane goes full-width via flex-1 when it's
    * the only visible pane.
    */
   const LIST_WIDTH_MIN = 220;
@@ -250,7 +250,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   /**
    * Transient header info for a brand-new compose-to-non-friend target.
    * Populated from the `/profiles/:name` lookup BEFORE the first message
-   * is sent — without it the ThreadPane has no friend row + no
+   * is sent, without it the ThreadPane has no friend row + no
    * conversation row to derive the header from, so it falls back to the
    * "…" placeholder until send creates the conversation. Cleared when
    * the conversation materializes (a friend/conv row takes over) or
@@ -282,7 +282,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
 
   // Pull the active character id from the store so identity-scoped
   // fetches default to the right inbox. Used as the SEED for the
-  // modal-local filter below — a chip click in the switcher can take
+  // modal-local filter below, a chip click in the switcher can take
   // the filter elsewhere without touching the user's global voice.
   const activeCharacterId = useChat((s) => s.activeCharacterId);
 
@@ -292,18 +292,18 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
    * thread send routes through. Seeds from the user's global active
    * character so the modal opens to the "current voice" inbox, but the
    * chip switcher at the top of the list can override it without
-   * firing `me:switch-character` — that's the design choice from the
+   * firing `me:switch-character`, that's the design choice from the
    * spec: switching chips ONLY refilters the inbox.
    *
    * When the user changes their global active character externally
    * (the /char dropdown, a slash command, another tab), we mirror that
-   * change into the filter — the assumption is that any global switch
+   * change into the filter, the assumption is that any global switch
    * is also what they want to see in their messages.
    *
    * Auto-jump on open: see the effect below. If the seeded identity has
    * no unread / pending but another identity does, we hop the filter to
    * that identity on the first counts-load so the user lands directly
-   * on the messages the badge is telling them about — instead of an
+   * on the messages the badge is telling them about, instead of an
    * empty inbox they have to puzzle out by clicking the dropdown.
    */
   const [inboxFilterCharId, setInboxFilterCharId] = useState<string | null>(activeCharacterId);
@@ -321,7 +321,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   interface CharChipRow { id: string; name: string; avatarUrl: string | null }
   const [myCharacters, setMyCharacters] = useState<CharChipRow[]>([]);
   /**
-   * Per-identity unread counts — sourced from the global store so
+   * Per-identity unread counts, sourced from the global store so
    * the chat-shell ✉ badge and the modal's chip pip see the same
    * numbers. The store's `refreshInboxCounts` is called from
    * App-level socket handlers on dm:new / dm:read / friend:request
@@ -335,7 +335,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   /**
    * Which `inboxFilterCharId` the current `dmConversations` map was
    * loaded for. Auto-open consults this so it doesn't grab a target
-   * from the previous chip's stale data — that was the bug behind
+   * from the previous chip's stale data, that was the bug behind
    * "click Kaal chip, Wallace conv auto-opens but the unread badge
    * never clears": the auto-open ran against OOC's leftover convs
    * before refreshLists had repopulated Kaal's, picked a target that
@@ -351,7 +351,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
     setError(null);
     // Pin the filter id at fetch start. If the user flips chips before
     // this Promise.all resolves, we'll discard the late result rather
-    // than letting it overwrite the new chip's data — classic stale-
+    // than letting it overwrite the new chip's data, classic stale-
     // response guard.
     const startedForCharId = inboxFilterCharId;
     try {
@@ -381,7 +381,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   }, [setDmConversations, setPendingFriendRequests, inboxFilterCharId]);
 
   // `friendsVersion` from the store is the cross-tab/cross-user
-  // refresh signal — the App-level `friend:request` socket listener
+  // refresh signal, the App-level `friend:request` socket listener
   // bumps it on every echo (accept, decline, unfriend, new request).
   // Without this dep, accepting in one user's modal updated their own
   // friends list (via the local `refreshKey` bump in `acceptRequest`)
@@ -396,14 +396,14 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
    * Inbox counts feed the per-identity chip badges. Kept on a separate
    * fetch from refreshLists so we can refresh just the counts whenever
    * the global DM/friend state changes (dm:new or friend:request from
-   * the socket) — refreshLists would loop because it owns the same
+   * the socket), refreshLists would loop because it owns the same
    * store fields it'd be reacting to. The counts endpoint returns
    * every identity I own, regardless of the inbox filter, so the chips
    * keep showing badges for unread on the OTHER characters too.
    */
   // `inboxCountsVersion` bumps from ThreadPane (after the /read
   // POST resolves) and from the App-level `dm:read` socket listener.
-  // Both signals mean "the server-side read marker just advanced —
+  // Both signals mean "the server-side read marker just advanced,
   // refetch counts so the chip pip stops lying."
   const inboxCountsVersion = useChat((s) => s.inboxCountsVersion);
   useEffect(() => {
@@ -411,7 +411,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   }, [refreshInboxCounts, dmConversations, pendingFriendRequests, refreshKey, inboxCountsVersion]);
 
   // NOTE: an earlier "auto-jump to the identity with unread items"
-  // effect lived here. Removed deliberately — characters are their
+  // effect lived here. Removed deliberately, characters are their
   // own accounts per the partition contract; opening the messenger
   // while voicing Character A should land on Character A's inbox,
   // even when OOC has waiting DMs. The previous auto-jump caused a
@@ -421,9 +421,9 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   // identity with messages; the auto-jump was adding more noise than
   // signal. If we want to surface "you have unread on OOC" while
   // viewing a character inbox, the right place is a banner or a
-  // bumped pip — not a forced filter switch.
+  // bumped pip, not a forced filter switch.
 
-  // Re-fire refreshLists whenever the inbox filter changes — Char A
+  // Re-fire refreshLists whenever the inbox filter changes, Char A
   // and Char B keep separate friends + DM inboxes, so flipping
   // chips (or following a global /char switch) should swap the
   // visible lists.
@@ -457,7 +457,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   /**
    * Auto-open the most recently active conversation when the modal
    * opens without an explicit target. Matches the user mental model
-   * of "open Messages and pick up where I left off" — same as the
+   * of "open Messages and pick up where I left off", same as the
    * Discord/Messenger first-paint. Skipped when:
    *   - The modal was opened with `initialOtherUserId` (profile DM
    *     button has already picked the target).
@@ -466,7 +466,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
    *   - `dmConversations` is still loaded for a PREVIOUS chip
    *     (`convsLoadedForCharId !== inboxFilterCharId`). Without this
    *     gate, clicking a chip auto-opened a target from the previous
-   *     chip's stale conversation list — ThreadPane then mounted with
+   *     chip's stale conversation list, ThreadPane then mounted with
    *     `conversation === null` after refreshLists landed, the /read
    *     POST never fired, and the unread badge on the *actual* most-
    *     recent thread of the new chip persisted forever.
@@ -479,7 +479,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   useEffect(() => {
     if (autoOpenAttempted.current) return;
     if (selectedTarget !== null) return;
-    if (convsLoadedForCharId !== inboxFilterCharId) return; // stale data — wait
+    if (convsLoadedForCharId !== inboxFilterCharId) return; // stale data, wait
     const convs = Object.values(dmConversations);
     if (convs.length === 0) return;
     autoOpenAttempted.current = true;
@@ -487,7 +487,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
       c.lastMessageAt > best.lastMessageAt ? c : best,
     );
     setSelectedTarget({ userId: mostRecent.otherUserId, characterId: mostRecent.otherCharacterId });
-    // Don't flip mobile to "thread" — on phones the user explicitly
+    // Don't flip mobile to "thread", on phones the user explicitly
     // tapped Messages and probably wants the inbox view first. Desktop
     // shows both panes anyway, so the auto-selection just highlights
     // the row and seeds the right pane.
@@ -510,7 +510,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
     return `${userId}:${characterId ?? ""}`;
   }
   // Friend rows are partitioned per (userId, characterId) on the
-  // friend's side, so the dedupe set has to be too — otherwise a
+  // friend's side, so the dedupe set has to be too, otherwise a
   // friendship pinned to a character and a separate friendship with
   // the same user's OOC handle would collide.
   const friendKeys = useMemo(
@@ -528,7 +528,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   // read) we then sort by lastMessageAt desc so threads the user just
   // touched stay near the top; friend rows with no conversation yet
   // fall to the bottom in original (server) order. The unread tier is
-  // also visually highlighted on the row itself — see UserRow.
+  // also visually highlighted on the row itself, see UserRow.
   function dmRowOrder<R extends { conv: DirectConversationSummary | null }>(a: R, b: R): number {
     const au = (a.conv?.unreadCount ?? 0) > 0 ? 1 : 0;
     const bu = (b.conv?.unreadCount ?? 0) > 0 ? 1 : 0;
@@ -542,7 +542,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
       kind: "friend" as const,
       userId: f.userId,
       username: f.username,
-      // The friend's pinned character id on this friendship — drives
+      // The friend's pinned character id on this friendship, drives
       // both the @handle display (character name when set) and the
       // `targetCharacterId` we seed onto a brand-new DM thread so the
       // first message lands in the right per-identity inbox.
@@ -591,7 +591,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
    * into the store's `openDmOtherUserId` so the App-level `dm:new`
    * handler can tell "user is staring at this conversation right now"
    * and skip the unread bump. Also locally reset that conversation's
-   * unreadCount to 0 — the server-side /read POST in ThreadPane fires
+   * unreadCount to 0, the server-side /read POST in ThreadPane fires
    * separately, but resetting the badge optimistically here keeps the
    * UI from showing a stale count for the half-second between mount
    * and the POST round-trip.
@@ -609,21 +609,21 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
         );
       if (conv) {
         // Optimistic clear so the badge drops to 0 immediately on
-        // selection — the user expects opening a thread to "consume"
+        // selection, the user expects opening a thread to "consume"
         // its notification without waiting for the server round-trip.
         if (conv.unreadCount > 0) {
           upsertDmConversation({ ...conv, unreadCount: 0 });
         }
         // ACTUAL server-side mark-read. Previously this only fired
         // from ThreadPane's seed effect, gated on `conversation?.id`
-        // changing — so re-clicking the already-selected row, or
+        // changing, so re-clicking the already-selected row, or
         // auto-opening a thread whose conv.id matched a prior selection,
         // updated the local store but never advanced
         // `directConversationReads.lastReadAt`. The next refreshLists
         // refetch returned the stale server unread count and the
         // "cleared" badge snapped back to its old value. Firing the
-        // POST here — keyed on identity-aware selection rather than
-        // conversation-id-change — closes that gap.
+        // POST here, keyed on identity-aware selection rather than
+        // conversation-id-change, closes that gap.
         //
         // `inboxFilterCharId` (not the global `activeCharacterId`) is
         // the right characterId to send: the conversation is pinned to
@@ -642,11 +642,11 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
           }),
         })
           .then((r) => {
-            if (!r.ok) return; // 401/404/etc — leave the optimistic clear standing for UX
+            if (!r.ok) return; // 401/404/etc, leave the optimistic clear standing for UX
             useChat.getState().bumpInboxCountsVersion();
             void useChat.getState().refreshInboxCounts();
           })
-          .catch(() => { /* network blip — next selection will retry */ });
+          .catch(() => { /* network blip, next selection will retry */ });
       }
     }
     return () => { setOpenDmOtherUser(null); };
@@ -659,7 +659,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   // `/accept <name>` / `/decline <name>` slash commands. Reason:
   // `resolveIdentityByName` on the server resolves master-first, so a
   // request whose sender was on a character with the same name as a
-  // master account never matched the row — the row stayed pending and
+  // master account never matched the row, the row stayed pending and
   // the UI looped on a banner that wouldn't clear. The new endpoints
   // operate on the exact (frienderUserId, frienderCharacterId,
   // friendedCharacterId) tuple carried in the inbox payload, so no
@@ -715,7 +715,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   /**
    * Submit the add-friend form. Hits POST /me/friend-requests instead
    * of dispatching the slash command so we get a structured success/
-   * error response — the slash-command path emits its result as a
+   * error response, the slash-command path emits its result as a
    * room system message, which the modal can't easily surface inline.
    *
    * The status messages map onto the four distinct server responses:
@@ -747,7 +747,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // Explicit identity target — bypasses the server's name-
+          // Explicit identity target, bypasses the server's name-
           // based resolution so the picker's choice is honored
           // exactly (a character with the same name as a master
           // doesn't lose to the master).
@@ -775,7 +775,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
       setAddDraft("");
       setRefreshKey((v) => v + 1);
     } catch {
-      setAddStatus({ kind: "error", text: "Network error — try again." });
+      setAddStatus({ kind: "error", text: "Network error, try again." });
     }
   }
 
@@ -800,16 +800,16 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
         return;
       }
       if (matches.length === 1) {
-        // Unambiguous — commit straight through without showing the picker.
+        // Unambiguous, commit straight through without showing the picker.
         await commitFriendRequest(matches[0]!);
         return;
       }
-      // Ambiguous — surface the picker. Status text becomes a hint;
+      // Ambiguous, surface the picker. Status text becomes a hint;
       // the actual UI is rendered inline in the add-friend form.
       setAddStatus({ kind: "info", text: `Pick the identity you meant:` });
       setResolveMatches(matches);
     } catch {
-      setAddStatus({ kind: "error", text: "Network error — try again." });
+      setAddStatus({ kind: "error", text: "Network error, try again." });
     }
   }
 
@@ -861,7 +861,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
         // Mobile: edge-to-edge fullscreen via MODAL_CARD_CONTENT.
         // Desktop: centered card at the standard 75vw/2400px cap.
         // `keep-frame` lets each theme own the border, corner radius,
-        // shadow, and the parchment/cyber texture overlay — same
+        // shadow, and the parchment/cyber texture overlay, same
         // pattern AdminPanel / ProfileEditor / EarningDashboard use
         // so DM modal matches the rest of the themed shell instead
         // of reading as a bare bg-keep-bg rectangle.
@@ -876,7 +876,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
             (Friends + Recents + add forms) and the active conversation
             without relying on the per-row back-arrow inside the thread
             header. Hidden on md+ where both panes are visible at once.
-            The Chat tab is disabled until a conversation is selected —
+            The Chat tab is disabled until a conversation is selected,
             tapping it with no selection would surface the empty-state
             pane, which is more confusing than a dimmed-out tab. */}
         <div className="flex shrink-0 border-b border-keep-rule bg-keep-banner/40 md:hidden" role="tablist">
@@ -915,12 +915,12 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
         </div>
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          {/* LEFT pane — list. Hidden on mobile when thread is visible.
+          {/* LEFT pane, list. Hidden on mobile when thread is visible.
               The state-driven `listWidth` (set by the drag-resize
               handle) only applies on md+; on mobile the aside fills
               the full modal width. We pass the width as a CSS custom
               property so the responsive `md:w-[var(...)]` class can
-              consume it — using `style={{ width }}` directly would win
+              consume it, using `style={{ width }}` directly would win
               over `w-full` on mobile via specificity. */}
           <aside
             style={{ "--list-width": `${listWidth}px` } as React.CSSProperties}
@@ -934,7 +934,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                 {error}
               </div>
             ) : null}
-            {/* Character switcher chips — pinned above the list so the
+            {/* Character switcher chips, pinned above the list so the
                 row stays visible while the list scrolls. Click a chip
                 to refilter the inbox by that identity (does NOT change
                 your global active character / voice). Badge totals
@@ -946,7 +946,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
               onSelect={setInboxFilterCharId}
             />
             <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-xs">
-              {/* Pending requests — sourced from the shared store so
+              {/* Pending requests, sourced from the shared store so
                   accept/decline elsewhere clears this list automatically. */}
               {pendingFriendRequests.length > 0 ? (
                 <div className="mb-2">
@@ -1066,7 +1066,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                   value={addDraft}
                   onChange={setAddDraft}
                   // Picking from the dropdown commits the friend
-                  // request to that exact identity — no follow-up
+                  // request to that exact identity, no follow-up
                   // disambiguation roundtrip. Mirrors the picker's
                   // commit path so a same-named character on another
                   // account can't intercept.
@@ -1207,7 +1207,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
             </div>
           </aside>
 
-          {/* Draggable divider between list and thread. Desktop only —
+          {/* Draggable divider between list and thread. Desktop only,
               mobile shows one pane at a time so there's nothing to
               resize. `cursor-col-resize` + a hover tint signal that
               the strip is grabbable. We capture the pointer so a
@@ -1225,7 +1225,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
             className="hidden w-1 shrink-0 cursor-col-resize touch-none bg-keep-rule/40 hover:bg-keep-action/40 md:block"
           />
 
-          {/* RIGHT pane — thread. Hidden on mobile when list is visible. */}
+          {/* RIGHT pane, thread. Hidden on mobile when list is visible. */}
           <section
             className={
               "flex min-h-0 flex-col " +
@@ -1237,7 +1237,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
               // can hand the pinned otherCharacterId down even when no
               // DirectConversation exists yet. Without this seed, the
               // first DM with a character-friend would create the
-              // conversation against the master (OOC) side — which is
+              // conversation against the master (OOC) side, which is
               // exactly the per-identity-partition leak the user
               // reported: clicking a character friend opened a chat
               // with their OOC account.
@@ -1367,7 +1367,7 @@ function UserRow({
               row.conv?.lastMessagePreview ?? `@${row.handle}`
             ) : (
               // Subtle hint that this character can no longer be
-              // reached — the friendship row stays so a player can
+              // reached, the friendship row stays so a player can
               // still see the relationship + history, but the next
               // send is gated server-side. Italic-muted contrast
               // matches other "informational, not actionable" rail
@@ -1422,7 +1422,7 @@ function Avatar({
       style={{ width: size, height: size }}
     >
       <span
-        // Round avatar — matches the chat-line / userlist / profile
+        // Round avatar, matches the chat-line / userlist / profile
         // treatment so the DM rail and conversation thread agree
         // visually with everywhere else.
         className="absolute inset-0 overflow-hidden rounded-full border border-keep-rule bg-keep-banner"
@@ -1481,7 +1481,7 @@ function initialsFor(name: string): string {
  * scales to that count without disturbing the inbox layout.
  *
  * Click semantics: per design choice, picking an identity ONLY
- * refilters the inbox in this modal — it does not call
+ * refilters the inbox in this modal, it does not call
  * `me:switch-character` or change the user's global voice. A user
  * can read Char A's messages without breaking their current in-room
  * Char B identity.
@@ -1500,7 +1500,7 @@ function CharacterSwitcher({
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
-  // Hide the switcher entirely when the user has no characters — the
+  // Hide the switcher entirely when the user has no characters, the
   // only option would be OOC, which is the default. Showing a
   // single-option dropdown is just noise.
   // (Hooks above must run unconditionally; this early return sits
@@ -1533,7 +1533,7 @@ function CharacterSwitcher({
     return (c?.unreadDms ?? 0) + (c?.pendingFriendRequests ?? 0);
   }
 
-  // Total of every OTHER identity's badge — surfaced on the current
+  // Total of every OTHER identity's badge, surfaced on the current
   // chip when the dropdown is closed so the user sees "there's traffic
   // somewhere else" at a glance without opening the menu.
   const selectedChar = selectedId ? characters.find((c) => c.id === selectedId) : null;
@@ -1543,7 +1543,7 @@ function CharacterSwitcher({
   for (const c of characters) if (c.id !== selectedId) otherUnread += badgeFor(c.id);
   if (selectedId !== null) otherUnread += badgeFor(null);
 
-  // Build the "jump-to-identity" hint strip — one pill per OTHER
+  // Build the "jump-to-identity" hint strip, one pill per OTHER
   // identity that has unread DMs or pending friend requests. Click
   // jumps the inbox filter straight there without going through the
   // dropdown. This was added because the old "X unread on other
@@ -1612,7 +1612,7 @@ function CharacterSwitcher({
         <span aria-hidden className="text-keep-muted">{open ? "▴" : "▾"}</span>
       </button>
       {/* "Jump to other identity" strip. Only renders when at least
-          one OTHER identity has unread DMs or pending friend requests —
+          one OTHER identity has unread DMs or pending friend requests,
           on a clean inbox the strip is invisible and the dropdown
           header carries no extra weight. Each pill is its own click
           target so the user goes straight to the right chip without
@@ -1624,7 +1624,7 @@ function CharacterSwitcher({
               key={h.id ?? "master"}
               type="button"
               onClick={() => onSelect(h.id)}
-              title={`Switch to ${h.label} — ${h.count} waiting`}
+              title={`Switch to ${h.label}, ${h.count} waiting`}
               className="flex items-center gap-1 rounded-full border border-keep-action/40 bg-keep-action/10 px-1.5 py-0.5 text-[10px] text-keep-action hover:bg-keep-action/20"
             >
               <Avatar url={h.avatarUrl} name={h.label} size={14} />
@@ -1668,7 +1668,7 @@ function ThreadPane({
   otherUserId: string;
   /**
    * The character id pinned to this thread on the OTHER party's side
-   * — null for an OOC/master thread. Required (paired with userId) to
+   *, null for an OOC/master thread. Required (paired with userId) to
    * pick out the right conversation when the master account hosts
    * multiple concurrent threads (OOC plus one per character). Matching
    * on userId alone would surface the wrong thread and leak the
@@ -1687,10 +1687,10 @@ function ThreadPane({
    *  no click affordance (no point in a click that does nothing). */
   onOpenProfile?: (displayName: string) => void;
 }) {
-  // Resolve conversation reactively — server creates the row on first
+  // Resolve conversation reactively, server creates the row on first
   // send, so it may be absent until then. Matching on BOTH userId AND
   // the pinned character id is what keeps a master's OOC thread, their
-  // Char A thread and their Char B thread separate — otherwise the
+  // Char A thread and their Char B thread separate, otherwise the
   // first one returned by `find` wins and the rest are invisible.
   // NO_DM_MESSAGES is a stable sentinel to prevent the Zustand selector
   // loop bug.
@@ -1699,11 +1699,11 @@ function ThreadPane({
       (c) => c.otherUserId === otherUserId && c.otherCharacterId === otherCharacterId,
     ) ?? null,
   );
-  // Admin-configured DM length cap — server is the source of truth,
+  // Admin-configured DM length cap, server is the source of truth,
   // this mirrors it so the input's maxLength matches what the send
   // path will accept.
   const maxDmLength = useChat((s) => s.inputLimits.maxDirectMessageLength);
-  // My identity for this thread — forwarded from the parent modal's
+  // My identity for this thread, forwarded from the parent modal's
   // inbox filter. Drives `?characterId=` on history fetches and the
   // read-marker POST so the server scopes the thread to my pinned
   // side. Null = master OOC.
@@ -1713,14 +1713,14 @@ function ThreadPane({
   // pinned side of the row); fresh threads with no conversation yet
   // fall back to the prop, which the parent seeds from the friend/conv
   // row's pinned character so the first send creates the conversation
-  // against the right identity — not the OOC side, which was the
+  // against the right identity, not the OOC side, which was the
   // partition-leak the user reported.
   const targetCharacterId = conversation?.otherCharacterId ?? otherCharacterId;
   const messages = useChat((s) =>
     conversation ? (s.dmMessagesByConv[conversation.id] ?? NO_DM_MESSAGES) : NO_DM_MESSAGES,
   );
   /**
-   * Bumped by the socket `connect` handler in App.tsx — see store
+   * Bumped by the socket `connect` handler in App.tsx, see store
    * comment. Watching it here lets a foregrounded ThreadPane catch
    * up on history it missed while the socket was disconnected
    * (Socket.io drops `dm:new` to offline sockets without replay).
@@ -1730,7 +1730,7 @@ function ThreadPane({
    * If the OTHER party has a pending friend request to us, surface it
    * as a pinned banner at the bottom of this thread. The full list
    * lives in the store; we only care about the one matching the
-   * thread's other user — undefined when there's no pending request.
+   * thread's other user, undefined when there's no pending request.
    */
   const pendingFromThisUser = useChat((s) =>
     s.pendingFriendRequests.find((r) => r.userId === otherUserId),
@@ -1739,12 +1739,12 @@ function ThreadPane({
   // Viewer's own zoom/pan + url for THIS thread's pinned identity,
   // pulled from any room's live occupant cache where the viewer is
   // currently present. Both fields come from the SAME live source so
-  // they always agree — without that pairing, the bubble was
+  // they always agree, without that pairing, the bubble was
   // rendering the snapshot URL frozen at send time under the LIVE
   // crop, so an avatar change re-cropped the OLD picture (sized for
   // the new picture's framing). Falls through to null (default crop
   // / snapshot fallback) when the viewer isn't in any room at the
-  // moment — same graceful-degradation pattern the chat-line path
+  // moment, same graceful-degradation pattern the chat-line path
   // uses for offline senders.
   //
   // Each selector returns ONE primitive / one persisted reference
@@ -1785,14 +1785,14 @@ function ThreadPane({
 
   // Sync the textarea's auto-grown height with the draft value. The
   // onChange handler keeps things in sync during typing; this effect
-  // covers programmatic resets — primarily setDraft("") after a
-  // successful send — so the textarea snaps back to one row instead
+  // covers programmatic resets, primarily setDraft("") after a
+  // successful send, so the textarea snaps back to one row instead
   // of staying inflated at its prior height.
   //
   // Floor at AUTO_GROW_MIN_PX. On mobile, an empty textarea's
   // `scrollHeight` can return a value smaller than a usable line
   // (or even 0 if the modal is still settling its layout when this
-  // effect fires) — without the floor the textarea collapsed to a
+  // effect fires), without the floor the textarea collapsed to a
   // sliver and there was nothing to tap into. The floor keeps a
   // visible one-line tap target no matter what scrollHeight returns.
   useEffect(() => {
@@ -1814,7 +1814,7 @@ function ThreadPane({
     return {
       displayName: fallback?.displayName ?? "…",
       avatarUrl: fallback?.avatarUrl ?? null,
-      // No fallback crop on the compose target — render at the
+      // No fallback crop on the compose target, render at the
       // default (centered cover) until the conversation row arrives.
       avatarCrop: null as AvatarCrop | null,
       online: fallback?.online ?? false,
@@ -1826,8 +1826,8 @@ function ThreadPane({
   //
   //   1. We key the effect on `conversation?.id` (a string) rather
   //      than the `conversation` object itself. The object identity
-  //      flips every time `dmConversations` is replaced — even when
-  //      the conversation's *id* is unchanged — so depending on the
+  //      flips every time `dmConversations` is replaced, even when
+  //      the conversation's *id* is unchanged, so depending on the
   //      object would cause the seed fetch to re-run on every
   //      `dm:new`-driven upsert. The id is the only thing that
   //      actually determines what to fetch.
@@ -1855,7 +1855,7 @@ function ThreadPane({
         return (await r.json()) as DirectMessageHistoryPage;
       })
       .then((j) => {
-        // Merge — don't replace. A `dm:new` socket event could have
+        // Merge, don't replace. A `dm:new` socket event could have
         // landed via `appendDmMessage` while this seed fetch was in
         // flight; replacing the buffer wholesale would wipe that
         // freshly-arrived message. Server is the source of truth
@@ -1872,13 +1872,13 @@ function ThreadPane({
         // Deliberately DON'T sync `lastSeenCount` to the seeded
         // length here. If we did, the auto-scroll-on-arrival effect
         // would see `messages.length === lastSeenCount.current` on
-        // its next run and skip — which left the thread parked at
+        // its next run and skip, which left the thread parked at
         // its initial scrollTop=0 (top of list). Letting the effect
         // observe a genuine 0→N transition makes the initial open
         // scroll to the most recent message.
       })
       .catch((e: unknown) => {
-        // AbortError is the cleanup path firing — not a real error.
+        // AbortError is the cleanup path firing, not a real error.
         if (e instanceof DOMException && e.name === "AbortError") return;
         setError(e instanceof Error ? e.message : "load failed");
       });
@@ -1895,7 +1895,7 @@ function ThreadPane({
         // committed. Without this, the inbox-counts refetch
         // triggered by the optimistic `unreadCount: 0` on
         // selection change races ahead of the DB write and
-        // comes back stale — the conversation row badge clears
+        // comes back stale, the conversation row badge clears
         // but the chip pip stays.
         useChat.getState().bumpInboxCountsVersion();
       })
@@ -1905,7 +1905,7 @@ function ThreadPane({
 
   // Reset the seen-count guard whenever the open conversation
   // changes so a chip-switch into a cached thread always scrolls to
-  // the bottom — even if the new thread happens to have the same
+  // the bottom, even if the new thread happens to have the same
   // number of messages as the previous one (which would otherwise
   // make the length-only check below short-circuit). Without this
   // reset the "open conversation X with 5 cached messages, then
@@ -2082,7 +2082,7 @@ function ThreadPane({
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-sm"
         // Plain-text-only clipboard for any selection copied out of
-        // the DM thread — same posture as the chat feed (see
+        // the DM thread, same posture as the chat feed (see
         // lib/chatCopy.ts). Strips name-style CSS, link
         // decoration, bold / italic, etc. so a copied DM line
         // pastes as the prose the user meant to quote, not as a
@@ -2134,7 +2134,7 @@ function ThreadPane({
               type="button"
               onClick={() => {
                 // Identity-keyed accept (see MessagesModal.acceptRequest
-                // for the rationale — name-based lookup loops forever
+                // for the rationale, name-based lookup loops forever
                 // when the sender was on a character whose name collides
                 // with a master account).
                 const r = pendingFromThisUser;
@@ -2191,7 +2191,7 @@ function ThreadPane({
         />
         <div className="flex items-center gap-1">
           {/* Relative wrapper anchors the SynonymPopup to the input's
-              top edge — the popup uses `absolute bottom-full` so it
+              top edge, the popup uses `absolute bottom-full` so it
               floats above the input when the user highlights a word
               and synonyms land. */}
           <div className="relative min-w-0 flex-1">
@@ -2235,7 +2235,7 @@ function ThreadPane({
               maxLength={maxDmLength}
               rows={1}
               className="block w-full resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
-              // `minHeight` is the static floor — even before any JS
+              // `minHeight` is the static floor, even before any JS
               // runs, the textarea reserves a tappable row. The JS
               // auto-grow then mirrors the same floor so a freshly
               // mounted modal on mobile never paints the input as a
@@ -2245,7 +2245,7 @@ function ThreadPane({
               style={{ minHeight: `${AUTO_GROW_MIN_PX}px`, maxHeight: `${AUTO_GROW_MAX_PX}px` }}
             />
             {/* `:emoji-name` typeahead. Same shape as the main composer's
-                — see EmoticonTypeahead for the full contract. */}
+               , see EmoticonTypeahead for the full contract. */}
             <EmoticonTypeahead
               textareaRef={dmInputRef}
               value={draft}
@@ -2278,7 +2278,7 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
   /** Live crop for the OTHER party's avatar (from the conversation row). */
   otherCrop: AvatarCrop | null;
   /** Live avatar URL for the VIEWER on this thread's pinned identity.
-   *  Same pairing rationale as `otherUrl` — falls back to the
+   *  Same pairing rationale as `otherUrl`, falls back to the
    *  snapshot when the viewer isn't in any room (no live source). */
   myUrl: string | null;
   /** Live crop for the VIEWER's avatar on this thread's pinned identity.
@@ -2291,7 +2291,7 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
   // new image with its matching crop. Falls back to the snapshot
   // URL + null crop when the live source isn't available (sender
   // offline + not pinned to the conv). Both fields always come from
-  // ONE source per side — never crossed.
+  // ONE source per side, never crossed.
   const liveOther = otherUrl !== null;
   const liveMine = myUrl !== null;
   const renderUrlOther = liveOther ? otherUrl : msg.avatarUrl;
@@ -2303,7 +2303,7 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
   // Tap-to-reveal timestamp footer. DMs hide their send time by default
   // to keep threads visually clean; tapping a bubble surfaces the full
   // date+time underneath. Toggling again hides it. Clicks on inline
-  // links/buttons inside the body don't toggle — they navigate normally.
+  // links/buttons inside the body don't toggle, they navigate normally.
   const [showTime, setShowTime] = useState(false);
   if (msg.deletedAt) {
     return (
@@ -2329,9 +2329,9 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
   // bubble, mirroring the existing right-alignment. Avatar uses the
   // snapshotted url so a later /char switch doesn't rewrite past
   // attribution (server-side snapshot in resolveSenderSnapshot is now
-  // character-only — no master-avatar fallback — so this can't leak
+  // character-only, no master-avatar fallback, so this can't leak
   // the OOC owner anymore).
-  // Floating "react" trigger geometry — the button overlays the
+  // Floating "react" trigger geometry, the button overlays the
   // bubble's *outer* bottom corner so it sits in the gutter between
   // bubbles without taking layout space inside the message row. Outer
   // here means the edge AWAY from the avatar: bottom-right on received
@@ -2341,7 +2341,7 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
   //
   // Always laid out in the DOM (opacity-toggled, not display:none) so
   // the EmoticonPicker's getBoundingClientRect() always reads a valid
-  // anchor — previously the button was display:none until hover, which
+  // anchor, previously the button was display:none until hover, which
   // made the picker open against a zero-rect anchor and pop into the
   // viewport corner whenever the click-to-open path lost hover state
   // mid-render.
@@ -2408,7 +2408,7 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
           </div>
           {msg.editedAt ? <span className="text-[9px] italic text-keep-muted">(edited)</span> : null}
         </div>
-        {/* Floating react trigger — sibling of the bubble (not a
+        {/* Floating react trigger, sibling of the bubble (not a
             descendant), so a click on it doesn't bubble through the
             bubble's onClick={toggleTime}. */}
         <ReactionAddButton
@@ -2437,7 +2437,7 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
   );
 }
 
-/** Bubble timestamp footer — locale-formatted date + time on a single
+/** Bubble timestamp footer, locale-formatted date + time on a single
  *  line. `dateStyle: "medium"` + `timeStyle: "short"` lands on e.g.
  *  "May 17, 2026, 6:34 PM" in en-US without runaway length. */
 function formatDmTime(ms: number): string {

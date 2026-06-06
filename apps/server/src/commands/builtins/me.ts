@@ -18,7 +18,7 @@ export const meCommand: CommandHandler = {
   aliases: ["he", "she", "they", "it", "em", "action", "pose", "emote"],
   usage: "/me <action>",
   // The `:` shortcut is parser-level (not an alias), so it isn't auto-
-  // listed in the aliases array — call it out in the description so it
+  // listed in the aliases array, call it out in the description so it
   // shows up in /help and the Help modal's command card.
   description: "Send an action - renders as 'YourName does the thing.' with no brackets. Shortcut: start a line with `:` and skip the rest. `:walks in casually` is the same as `/me walks in casually`.",
   async run(ctx) {

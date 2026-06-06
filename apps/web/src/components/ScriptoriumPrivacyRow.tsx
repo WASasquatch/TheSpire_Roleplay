@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { STORY_CONTENT_WARNINGS } from "@thekeep/shared";
 
 /**
- * Scriptorium catalog privacy toggle — a self-saving CW blocklist
+ * Scriptorium catalog privacy toggle, a self-saving CW blocklist
  * that PATCHes `/me/profile` on each change:
  *
- *   cw-blocklist  — content warnings the user wants filtered OUT of
+ *   cw-blocklist , content warnings the user wants filtered OUT of
  *                   the catalog entirely. Cards tagged with ANY
  *                   blocklisted warning are hidden (not just blurred).
  *

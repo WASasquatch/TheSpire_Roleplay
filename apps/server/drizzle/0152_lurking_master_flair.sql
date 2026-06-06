@@ -2,7 +2,7 @@
 --
 -- Hide-my-typing-status toggle. Gated by per-identity purchase of
 -- `flair_lurking_master`. When equipped, the server omits this
--- user from the room's typer set for every non-admin receiver —
+-- user from the room's typer set for every non-admin receiver,
 -- admins still see the typing pulse so moderators retain
 -- visibility for harassment/abuse investigation.
 --
@@ -23,7 +23,7 @@ ALTER TABLE `character_earning`
 --> statement-breakpoint
 
 -- Seed the catalog row. INSERT OR IGNORE for idempotent re-runs.
--- Cost is a placeholder — admins tune via the Flair admin tab.
+-- Cost is a placeholder, admins tune via the Flair admin tab.
 INSERT OR IGNORE INTO `cosmetics`
   (`key`, `name`, `description`, `cost`, `enabled`, `config_json`)
 VALUES

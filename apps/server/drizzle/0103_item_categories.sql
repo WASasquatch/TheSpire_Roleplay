@@ -4,7 +4,7 @@
 -- (5-slot, separate from the existing 10-slot Item Collection) can
 -- gate which items are pinnable in which collection.
 --
--- The category set is intentionally small (12 buckets) — fewer
+-- The category set is intentionally small (12 buckets), fewer
 -- buckets means tighter shop tabs and less admin guesswork when
 -- assigning a new item. `misc` is the fallback for anything that
 -- doesn't fit; the column is NOT NULL so every row has a value.
@@ -32,7 +32,7 @@ UPDATE `items` SET `category` = 'joke'
 --> statement-breakpoint
 
 -- Tool: utility, writing, navigation, tabletop. Cards and dice land
--- here too rather than their own micro-category — the bucket count
+-- here too rather than their own micro-category, the bucket count
 -- stays at 12.
 UPDATE `items` SET `category` = 'tool'
  WHERE `key` IN ('candle','feather','compass','hourglass','lantern','old_key','quill_inkwell','servant_bell','smoking_pipe','playing_cards','playing_dice');
@@ -70,9 +70,9 @@ UPDATE `items` SET `category` = 'gift'
  WHERE `key` IN ('rose','crown','tiara','bouquet','love_letter','enagement_ring','keepsake_locket','masquerade_mask','paerlescent_shell','kaal_dragon_plushie');
 --> statement-breakpoint
 
--- No existing items fall into 'pet' yet — that bucket fills entirely
+-- No existing items fall into 'pet' yet, that bucket fills entirely
 -- from migration 0104's new seeds. 'misc' stays as the safety
 -- default for any row this migration didn't catch (which should be
--- none — every is_builtin=1 row is enumerated above).
+-- none, every is_builtin=1 row is enumerated above).
 
 CREATE INDEX `items_category_idx` ON `items`(`category`);

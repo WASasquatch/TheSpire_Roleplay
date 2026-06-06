@@ -1,7 +1,7 @@
 /**
  * ZIP-envelope archive layer for both kinds of backup (format v3+).
  *
- * Earlier formats shipped JUST the database payload — a `.sqlite` for
+ * Earlier formats shipped JUST the database payload, a `.sqlite` for
  * full-DB snapshots and a `.json` table dump for content snapshots.
  * That left every uploaded asset (emoticon sheets, logo images, rank
  * sigil PNGs) on the source filesystem only; restoring the database on
@@ -24,7 +24,7 @@
  *
  * `content.json` is the existing v2 BackupContentDocument as JSON
  * text. `database.sqlite` is the `VACUUM INTO` output from full.ts.
- * Either path is mutually exclusive — the inspect/import code keys
+ * Either path is mutually exclusive, the inspect/import code keys
  * the archive's kind off which payload entry is present.
  *
  * Two operational modes:
@@ -33,14 +33,14 @@
  *      mirror restore commits, syncUploadsFromArchive swaps the live
  *      uploads root atomically (extract to a sibling staging dir,
  *      rename current root to a rollback dir, rename staging into
- *      place). Failure of either half leaves the safety snapshot —
- *      itself a v3 archive — as the rollback path.
+ *      place). Failure of either half leaves the safety snapshot,
+ *      itself a v3 archive, as the rollback path.
  *
  *   2. Full restore stages the .sqlite at the pending-restore slot
  *      AND the uploads tree at a pending-uploads dir; the
  *      Dockerfile/entrypoint swaps both before the server reopens
  *      the database. The process is about to exit anyway, so we
- *      don't do the live-rename dance — we just write to staging
+ *      don't do the live-rename dance, we just write to staging
  *      slots and exit.
  */
 
@@ -68,7 +68,7 @@ import {
 import JSZip from "jszip";
 
 /* ============================================================
- *  Pack — produce a ZIP envelope
+ *  Pack, produce a ZIP envelope
  * ============================================================ */
 
 interface PackResult {
@@ -101,7 +101,7 @@ export async function packFullArchive(opts: {
   const zip = new JSZip();
   // Stream the .sqlite into the zip via a node Buffer. The full DB
   // can run hundreds of MB; readFile holds it all in RAM, which is
-  // unavoidable for JSZip's API. Acceptable trade-off — backups are
+  // unavoidable for JSZip's API. Acceptable trade-off, backups are
   // admin-initiated and serialized behind the backup state lock.
   const dbBytes = await readFile(sourceDbPath);
   zip.file(BACKUP_ZIP_DATABASE_SQLITE, dbBytes);
@@ -143,7 +143,7 @@ export async function packContentArchive(opts: {
 /**
  * Walk uploadsRoot recursively and add every regular file under the
  * `uploads/<relative-path>` prefix in the zip. Subdirectories are
- * implicit — JSZip creates them on add. Symlinks and special files
+ * implicit, JSZip creates them on add. Symlinks and special files
  * are skipped (only stats.isFile() entries are taken).
  */
 async function addUploadsToZip(
@@ -152,7 +152,7 @@ async function addUploadsToZip(
 ): Promise<{ fileCount: number; totalBytes: number }> {
   if (!existsSync(uploadsRoot)) {
     // Fresh installs may have nothing under /data/uploads yet. Empty
-    // tree is legal — the inspect surface will just show 0 files.
+    // tree is legal, the inspect surface will just show 0 files.
     return { fileCount: 0, totalBytes: 0 };
   }
   const rootStat = statSync(uploadsRoot);
@@ -184,7 +184,7 @@ async function addUploadsToZip(
         fileCount += 1;
         totalBytes += bytes.length;
       } catch {
-        // Unreadable file (permissions, race with deletion) — skip
+        // Unreadable file (permissions, race with deletion), skip
         // silently rather than failing the whole snapshot.
       }
     }
@@ -227,7 +227,7 @@ function writeZipToDisk(zip: JSZip, destPath: string): Promise<void> {
 }
 
 /* ============================================================
- *  Peek — read archive metadata without extracting
+ *  Peek, read archive metadata without extracting
  * ============================================================ */
 
 export interface ArchivePeek {
@@ -247,10 +247,10 @@ export interface ArchivePeek {
  *   - file is not a ZIP / corrupted
  *   - both payload entries present, or neither
  *   - any `uploads/<...>` entry that would extract outside the
- *     destination root (path traversal defense — caught here too so
+ *     destination root (path traversal defense, caught here too so
  *     a malicious archive is rejected at inspect time)
  *
- * Does NOT validate the inner database payload — content.json parsing
+ * Does NOT validate the inner database payload, content.json parsing
  * + database.sqlite migration check live in their dedicated helpers
  * below, so the route layer can return a more useful inspect report.
  */
@@ -261,12 +261,12 @@ export async function peekArchive(zipPath: string): Promise<ArchivePeek> {
   const hasContent = zip.file(BACKUP_ZIP_CONTENT_JSON) != null;
   if (hasFull && hasContent) {
     throw new Error(
-      `Archive contains both ${BACKUP_ZIP_DATABASE_SQLITE} and ${BACKUP_ZIP_CONTENT_JSON} — invalid envelope.`,
+      `Archive contains both ${BACKUP_ZIP_DATABASE_SQLITE} and ${BACKUP_ZIP_CONTENT_JSON}, invalid envelope.`,
     );
   }
   if (!hasFull && !hasContent) {
     throw new Error(
-      `Archive is missing the database payload — expected ${BACKUP_ZIP_CONTENT_JSON} or ${BACKUP_ZIP_DATABASE_SQLITE}.`,
+      `Archive is missing the database payload, expected ${BACKUP_ZIP_CONTENT_JSON} or ${BACKUP_ZIP_DATABASE_SQLITE}.`,
     );
   }
   const kind: "full" | "content" = hasFull ? "full" : "content";
@@ -296,7 +296,7 @@ export async function peekArchive(zipPath: string): Promise<ArchivePeek> {
 }
 
 /* ============================================================
- *  Extract — pull payloads out of an archive
+ *  Extract, pull payloads out of an archive
  * ============================================================ */
 
 /**
@@ -373,7 +373,7 @@ export async function extractUploadsTo(opts: {
     const absDest = resolve(absRoot, rel);
     if (!isWithin(absRoot, absDest)) {
       // Defense-in-depth: skip entries that resolve outside the root
-      // even after the peek pass. Doesn't throw — caller may be in a
+      // even after the peek pass. Doesn't throw, caller may be in a
       // post-DB-commit window where aborting would split state.
       continue;
     }
@@ -446,7 +446,7 @@ export async function syncUploadsFromArchive(opts: {
     throw err;
   }
 
-  // Step 4: discard the rollback copy. Best-effort — a leftover
+  // Step 4: discard the rollback copy. Best-effort, a leftover
   // rollback dir is recoverable manually by the operator and doesn't
   // break anything.
   if (liveExisted) {
@@ -457,7 +457,7 @@ export async function syncUploadsFromArchive(opts: {
 }
 
 /* ============================================================
- *  Full-restore staging — for the boot-swap path
+ *  Full-restore staging, for the boot-swap path
  * ============================================================ */
 
 /**
@@ -532,7 +532,7 @@ export function streamReadableToFile(
 /**
  * Open a snapshot file as a readable stream (for the download
  * endpoint). The archive layer doesn't know the snapshots directory
- * — that's snapshots.ts. This is here so the route layer has a
+ *, that's snapshots.ts. This is here so the route layer has a
  * symmetric pair with streamReadableToFile.
  */
 export function snapshotReadStream(path: string): NodeJS.ReadableStream {

@@ -11,7 +11,7 @@
 -- Per-server tunables are intentionally LEFT ALONE:
 --   price, stack_limit, enabled, for_sale, sale_starts_at,
 --   sale_ends_at, order
--- — so an admin who's adjusted prices or pulled an item from sale
+--, so an admin who's adjusted prices or pulled an item from sale
 -- on their server doesn't lose those settings when this migration
 -- runs. Templates / icons / aliases are content the system author
 -- owns; pricing + availability are content the admin owns.
@@ -66,7 +66,7 @@ UPDATE `items` SET
   `icon_url`            = '/assets/items/pillow.png',
   `give_messages_json`  = '["{sender} tosses {target} {num} {item_name} for the road."]',
   `throw_messages_json` = '["{sender} smacks {target} with {num} {item_name}!","{sender} bonks {target} with {num} {item_name}.","{sender} whaps {target} {num} time(s) with a {item_name}."]',
-  `drop_messages_json`  = '["{sender} drops {num} {item_name} on {target} — fwump."]',
+  `drop_messages_json`  = '["{sender} drops {num} {item_name} on {target}, fwump."]',
   `aliases_json`        = '["cushion"]',
   `updated_at`          = (unixepoch() * 1000)
  WHERE `key` = 'pillow';
@@ -90,7 +90,7 @@ UPDATE `items` SET
   `name_plural`         = 'ales',
   `description`         = 'A frothy tankard of ale. Round''s on you.',
   `icon_url`            = '/assets/items/ale.png',
-  `give_messages_json`  = '["{sender} slides {target} {num} {item_name} across the bar.","{sender} buys {target} {num} {item_name}. Cheers.","{sender} clinks tankards with {target} — {num} {item_name} change hands."]',
+  `give_messages_json`  = '["{sender} slides {target} {num} {item_name} across the bar.","{sender} buys {target} {num} {item_name}. Cheers.","{sender} clinks tankards with {target}, {num} {item_name} change hands."]',
   `throw_messages_json` = '["{sender} flings {num} {item_name} at {target}. *splash!*","{sender} dumps {num} {item_name} on {target}''s head."]',
   `drop_messages_json`  = '["{sender} spills {num} {item_name} on {target}.","{sender} drop kicks {num} {item_name} at {target}."]',
   `aliases_json`        = '["beer","drink","tankard","mead"]',
@@ -153,7 +153,7 @@ UPDATE `items` SET
 UPDATE `items` SET
   `name`                = 'Tiara',
   `name_plural`         = 'tiaras',
-  `description`         = 'A delicate jeweled tiara. Royal-adjacent — like a crown that doesn''t commit.',
+  `description`         = 'A delicate jeweled tiara. Royal-adjacent, like a crown that doesn''t commit.',
   `icon_url`            = '/assets/items/tiara.png',
   `give_messages_json`  = '["{sender} gently places {num} {item_name} on {target}''s head.","{sender} crowns {target} with {num} {item_name}. Most regal.","{sender} hands {target} {num} {item_name}. The court approves."]',
   `throw_messages_json` = '["{sender} flings {num} {item_name} at {target}. Sparkly impact."]',
@@ -218,7 +218,7 @@ UPDATE `items` SET
 UPDATE `items` SET
   `name`                = 'Keep',
   `name_plural`         = 'keeps',
-  `description`         = 'A fortified stone tower — the central holdfast of any proper castle. Built to last; built, apparently, to fall on people too.',
+  `description`         = 'A fortified stone tower, the central holdfast of any proper castle. Built to last; built, apparently, to fall on people too.',
   `icon_url`            = '/assets/items/keep-fortress.png',
   `give_messages_json`  = '["{sender} hands {target} the deed to {num} {item_name}. Defend it well.","{sender} entrusts {target} with {num} {item_name}. The Keep stands. For now."]',
   `throw_messages_json` = '["{sender} catapults {num} {item_name} at {target}. The siege has reversed.","{sender} flings {num} {item_name} at {target}. Battlements first."]',

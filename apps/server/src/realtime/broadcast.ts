@@ -55,6 +55,19 @@ type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Sock = Socket<ClientToServerEvents, ServerToClientEvents>;
 
 /** Send a chat/system message to a room. Persists, then broadcasts. */
+/**
+ * Persist + broadcast a chat message authored by `ctx.user`.
+ *
+ * Returns the id of the inserted message on success, or null when
+ * the send is aborted before persistence (size cap exceeded after
+ * inline-command expansion, unauthorized UI route token, etc.).
+ * Most callers ignore the return value, they fire-and-forget the
+ * persist + broadcast, but a few paths (currently Story Dice's
+ * post-and-seed-reaction flow) need the message id to attach a
+ * server-authored reaction to the freshly-posted line. The id is
+ * returned regardless of caller need so future flows that want it
+ * can just await.
+ */
 export async function addMessage(
   ctx: CommandContext,
   payload: {
@@ -78,7 +91,7 @@ export async function addMessage(
     /**
      * Thread-category bucket for top-level messages in nested-mode rooms.
      * Caller (`dispatchChatInput`) validates the id belongs to the room
-     * and only forwards it for non-reply, plain sends — replies inherit
+     * and only forwards it for non-reply, plain sends, replies inherit
      * their parent's category implicitly through the thread relation.
      */
     threadCategoryId?: string | null;
@@ -98,15 +111,15 @@ export async function addMessage(
     cmdCss?: string | null;
     /**
      * Optional hero image URL for `kind: "scene"` banners. Validated
-     * by the /scene handler before this call lands — addMessage
+     * by the /scene handler before this call lands, addMessage
      * persists it verbatim. Ignored on every other kind so a stray
      * caller can't paint an image onto a /me line.
      */
     sceneImageUrl?: string | null;
   },
-): Promise<void> {
+): Promise<string | null> {
   // Inline-command expansion. The body may carry user-authored
-  // `!cmd` tokens — either from a plain chat send or from a slash
+  // `!cmd` tokens, either from a plain chat send or from a slash
   // command's free-form arg ("/me dances and !random"). We run the
   // expander here so every author path benefits without each handler
   // remembering to call it. The expander is a no-op for bodies that
@@ -129,17 +142,17 @@ export async function addMessage(
         code: "TOO_LONG",
         message: `Messages capped at ${maxMessageLength} chars after inline-command expansion.`,
       });
-      return;
+      return null;
     }
     body = expanded;
   }
 
-  // UI route token guard — rejects KNOWN tokens that the author's
+  // UI route token guard, rejects KNOWN tokens that the author's
   // role can't use (e.g. a regular user trying to drop
   // `{modal:admin}` into a `/say` so it renders for mods downstream).
   // Unknown tokens fall through as plain literal text so a roleplay
   // line like `{nervously}` stays unaffected. Runs after inline-cmd
-  // expansion in case a custom command's template embeds a token —
+  // expansion in case a custom command's template embeds a token,
   // the post-expansion body is what actually broadcasts.
   const uiTokenCheck = validateAuthorUiRouteTokens(body, ctx.user.role);
   if (!uiTokenCheck.ok) {
@@ -147,7 +160,7 @@ export async function addMessage(
       code: "UI_ROUTE_FORBIDDEN",
       message: uiTokenCheck.reason,
     });
-    return;
+    return null;
   }
 
   // Forum-thread auto-binding. When the dispatcher hydrated a reply
@@ -162,12 +175,12 @@ export async function addMessage(
   // speech-shaped kind.
   //
   // Excludes:
-  //   - `system`   — /kick, /mute, /lock, /topic, etc. are room-wide
+  //   - `system`  , /kick, /mute, /lock, /topic, etc. are room-wide
   //                  notices; threading them under whichever topic the
   //                  composer happened to be on misrepresents their
   //                  scope.
-  //   - `announce` — admin broadcasts are explicitly room-wide too.
-  //   - `whisper`  — DMs don't route through this function in practice,
+  //   - `announce`, admin broadcasts are explicitly room-wide too.
+  //   - `whisper` , DMs don't route through this function in practice,
   //                  but listing the kind here is a belt-and-suspenders
   //                  against a future caller picking up the auto-bind
   //                  for a recipient-targeted send.
@@ -195,15 +208,15 @@ export async function addMessage(
   // their incognito_alias (default "System"). Other participants
   // see what looks like a server announcement; only the audit log
   // retains the real author. The /incognito command's own system
-  // broadcasts (kind === "system") pass through untouched — they're
+  // broadcasts (kind === "system") pass through untouched, they're
   // already correctly attributed.
   //
   // Reply metadata is stripped because system lines don't render
   // reply tags and the reply target itself could leak "the mod
-  // replied to message X" — informative even without their name.
+  // replied to message X", informative even without their name.
   if (ctx.user.incognitoMode && payload.kind !== "system") {
     // Strip reply metadata via destructure rather than `= undefined`
-    // assignment — exactOptionalPropertyTypes treats the latter as a
+    // assignment, exactOptionalPropertyTypes treats the latter as a
     // type error because the field shape is `string`, not
     // `string | undefined`. Building the new payload without the keys
     // gets us a strict-clean object.
@@ -226,7 +239,7 @@ export async function addMessage(
   // System messages (server-authored via addSystemMessage) bypass this path,
   // so user-authored kinds inherit the author's snapshotted color unless
   // an explicit override is supplied. When in-character, prefer the
-  // character's own chat_color over the master's — that's how Character A
+  // character's own chat_color over the master's, that's how Character A
   // and Character B keep visually distinct chat lines under one account.
   // Falls through to the master's color when the character hasn't set one.
   let baseColor: string | null;
@@ -245,7 +258,7 @@ export async function addMessage(
   const colorSnapshot = colorForKind(payload.kind, baseColor);
   const displayName = payload.displayNameOverride ?? ctx.user.displayName;
   // Mood snapshots only on actually-spoken kinds, never on /npc lines (the
-  // NPC isn't the user — applying their mood would be misleading).
+  // NPC isn't the user, applying their mood would be misleading).
   //
   // Per-identity mood: pull from the in-memory store keyed on
   // (userId, activeCharacterId). The session-user mirror
@@ -284,7 +297,7 @@ export async function addMessage(
   //
   // Privacy gate (per-user `showRankInChat`): when off, we skip the
   // lookup and persist null/null on this message. The user's existing
-  // messages keep whatever rank was snapshotted at their send time —
+  // messages keep whatever rank was snapshotted at their send time,
   // the toggle affects FUTURE sends only, matching the snapshot
   // contract that other fields (color, displayName, mood) follow.
   let rankKeySnapshot: string | null = null;
@@ -316,7 +329,7 @@ export async function addMessage(
   }
   // Inline-avatar + border snapshot. Without this the chat renderer
   // has to read the live occupant row to decide whether to paint the
-  // inline avatar — meaning the avatar vanishes for backlog from
+  // inline avatar, meaning the avatar vanishes for backlog from
   // authors who later logged out. Scoped the same way `avatarSnapshot`
   // above is: prefer the active character's row, else the master's.
   let inlineAvatarEnabledSnapshot = false;
@@ -375,7 +388,7 @@ export async function addMessage(
     // for `kind: "cmd"` rows; left null on every other kind even when the
     // caller forgot to omit it.
     cmdCss: payload.kind === "cmd" ? (payload.cmdCss ?? null) : null,
-    // Scene hero image — gated to `kind: "scene"` for the same reason
+    // Scene hero image, gated to `kind: "scene"` for the same reason
     // cmdCss is gated to "cmd": a stray caller on a /me line shouldn't
     // be able to paint a hero image into chat. Validation already ran
     // upstream (scene.ts validateSceneImageUrl) before this column
@@ -387,7 +400,7 @@ export async function addMessage(
     senderSelectedBorderRankKey: selectedBorderRankKeySnapshot,
     // last_activity_at on insert:
     //   - top-level row (topic, or any flat-chat message): its own
-    //     createdAt — for forum topics this seeds the ordering before
+    //     createdAt, for forum topics this seeds the ordering before
     //     any replies arrive; for flat messages it's unused.
     //   - reply: null on the reply itself (the column is only read on
     //     topics), and the parent topic gets a separate UPDATE below.
@@ -431,10 +444,10 @@ export async function addMessage(
     // minimal for other kinds (a stray null would be harmless but adds
     // noise to every chat line).
     ...(payload.kind === "cmd" && payload.cmdCss ? { cmdCss: payload.cmdCss } : {}),
-    // Same posture for sceneImageUrl — only attached when this is a
+    // Same posture for sceneImageUrl, only attached when this is a
     // scene row that actually carried an image.
     ...(payload.kind === "scene" && payload.sceneImageUrl ? { sceneImageUrl: payload.sceneImageUrl } : {}),
-    // Rank snapshot — only attach when present so the wire stays
+    // Rank snapshot, only attach when present so the wire stays
     // light for unranked authors.
     ...(rankKeySnapshot ? { rankKey: rankKeySnapshot } : {}),
     ...(tierSnapshot != null ? { tier: tierSnapshot } : {}),
@@ -447,7 +460,7 @@ export async function addMessage(
   // room broadcast above only reaches sockets currently subscribed to
   // `room:${roomId}`, and a race between a fast room-switch and a send
   // (or a transient socket.io reconnect) can leave the sender's socket
-  // unsubscribed at the moment of broadcast — they'd miss their own
+  // unsubscribed at the moment of broadcast, they'd miss their own
   // message and not see it again until a page refetch pulled it from
   // history. The client-side `appendMessage` dedupes by id, so this
   // duplicate-on-the-wire is invisible in the typical happy path
@@ -461,7 +474,7 @@ export async function addMessage(
   void pushTriggers(ctx.io, ctx.db, out, ctx.user, payload.kind);
 
   // Fire-and-forget Earning award. Failures inside the engine are
-  // logged but never surfaced — a flaky award path must not break
+  // logged but never surfaced, a flaky award path must not break
   // message persistence (we just persisted + broadcast above).
   //
   // Routing:
@@ -471,7 +484,7 @@ export async function addMessage(
   //
   // Forum/chat split matters because the two carry independent
   // per-source amounts in EarningConfig. The room replyMode is the
-  // authoritative signal — `payload.title` alone is not enough (a
+  // authoritative signal, `payload.title` alone is not enough (a
   // flat room could in principle persist a title via /topic), and
   // `payload.replyToId` can also appear on flat rooms as a quote-
   // reply that isn't a forum post.
@@ -487,7 +500,7 @@ export async function addMessage(
       // user, plus one per character when the message was authored
       // under a character. Whispers / system / cmd / announce kinds
       // classify to null and skip. Failure is logged inside the
-      // helper — don't let a stuck counter roll back the awarding
+      // helper, don't let a stuck counter roll back the awarding
       // path below.
       void bumpLifetimeForMessage(
         ctx.db,
@@ -528,6 +541,11 @@ export async function addMessage(
       console.error("[earning] award hook failed", { messageId: id, err });
     }
   })();
+  // Surface the inserted row's id so callers that need to attach
+  // follow-up state (server-authored reactions, audit links, etc.)
+  // don't have to re-query. The award hook above runs asynchronously
+  // inside an IIFE so it doesn't gate the return.
+  return id;
 }
 
 /**
@@ -537,7 +555,7 @@ export async function addMessage(
  * and no live socket). Always best-effort - failures are logged inside
  * pushToUser, never thrown.
  *
- * Exported so the whisper handler can fire push directly — whispers don't
+ * Exported so the whisper handler can fire push directly, whispers don't
  * route through `addMessage` (which would broadcast to the whole room),
  * so without an explicit call here offline-recipient push notifications
  * never fire.
@@ -671,7 +689,7 @@ function colorForKind(kind: MessageKind, color: string | null): string | null {
  * close + reopen, page refresh, background-throttled tabs, brief network
  * blips, server reload in dev, the socket.io heartbeat misfiring once. With
  * no grace, every blip would yank them out of the userlist + fire
- * "X has disconnected" / "X has connected" pairs — misleading both to the
+ * "X has disconnected" / "X has connected" pairs, misleading both to the
  * affected user and to onlookers (it looks like they came and went, when
  * actually they were here the whole time).
  *
@@ -687,18 +705,18 @@ function colorForKind(kind: MessageKind, color: string | null): string | null {
  * (default 30 minutes). When the timer fires, the sweep clears every ghost
  * the user holds, runs `expireIfEmpty` on the affected rooms, and emits a
  * final `broadcastPresence` so the idle row finally disappears from every
- * viewer's rail. No "X has disconnected." line — silent end-to-end (the
+ * viewer's rail. No "X has disconnected." line, silent end-to-end (the
  * opt-in announce happens at the immediate exit-click path, not here).
  *
  * On reconnect (or on the user choosing to log in elsewhere), the
  * `consumePendingDisconnect` path clears ALL of the user's ghosts and
  * rebroadcasts presence to each formerly-ghosted room so the idle row
  * vanishes cleanly. The same call returns true, which `joinRoom` reads as
- * "this is a reconnect — suppress the connected announcement."
+ * "this is a reconnect, suppress the connected announcement."
  *
  * Why per-identity, not per-user: a user with two tabs voicing two
  * different characters in the same room shows two userlist rows (one per
- * identity). If only one tab closes, only that identity should ghost — the
+ * identity). If only one tab closes, only that identity should ghost, the
  * other stays live. Per-identity keys preserve that asymmetry.
  *
  * Why a single timer per user (not per ghost): a user closing three tabs
@@ -788,7 +806,7 @@ function isInBootGrace(): boolean {
 /**
  * In-process tracker for "has this user already seen the description
  * for this room?" Joined the codebase to fix the "room description
- * fires every time I come back to the tab on mobile" complaint —
+ * fires every time I come back to the tab on mobile" complaint,
  * the prior implementation only suppressed re-emission during the
  * 20-second reconnect-grace window, so a longer suspension (screen
  * off for 30+ min) lost the marker and the description fired again
@@ -797,7 +815,7 @@ function isInBootGrace(): boolean {
  * Scope is per-process: keys are `userId`, values are sets of room
  * ids the user has seen the description for during this server's
  * lifetime. A process restart resets the map and users see each
- * room's description once again — acceptable, since restarts are
+ * room's description once again, acceptable, since restarts are
  * intentional and infrequent. If we ever need durable suppression
  * across restarts we'd promote this to a `user_seen_descriptions`
  * table.
@@ -819,7 +837,7 @@ function markSeenDescription(userId: string, roomId: string): void {
  * Drop every ghost the user currently holds, cancel their sweep timer, and
  * rebroadcast presence to each formerly-ghosted room so the idle row
  * vanishes from every viewer's rail. Returns true when at least one ghost
- * was cleared — `joinRoom` reads that as the reconnect signal and
+ * was cleared, `joinRoom` reads that as the reconnect signal and
  * suppresses the "X has connected." announcement.
  *
  * Awaited inside `joinRoom` before its own broadcast for the room being
@@ -832,7 +850,7 @@ export async function consumePendingDisconnect(io: Io, db: Db, userId: string): 
   const keys = ghostKeysByUser.get(userId);
   if (!keys || keys.size === 0) {
     // Even with no ghosts, make sure any stray timer is cleared. Belt-and-
-    // suspenders — the timer is only ever set alongside ghost entries, so
+    // suspenders, the timer is only ever set alongside ghost entries, so
     // a leftover here would indicate a bookkeeping bug, but the cost of
     // the extra clear is nil.
     const t = ghostTimerByUser.get(userId);
@@ -855,14 +873,14 @@ export async function consumePendingDisconnect(io: Io, db: Db, userId: string): 
   }
   ghostKeysByUser.delete(userId);
   for (const roomId of affectedRooms) {
-    // Try to expire the room first — clearing the ghost may have left
+    // Try to expire the room first, clearing the ghost may have left
     // it empty (no live sockets, no remaining ghosts). Without this,
     // a user-created public room they were the sole occupant of would
     // linger in the rooms tree as a zombie row: the ghost-sweep timer
     // (which would have archived it via expireIfEmpty after the grace
     // window) gets cancelled by this consume path, so the only
     // remaining archive trigger is a fresh occupant explicitly exiting
-    // or switching rooms — neither of which is going to happen for an
+    // or switching rooms, neither of which is going to happen for an
     // unoccupied room.
     const expired = await expireIfEmpty(io, db, roomId);
     if (!expired) await broadcastPresence(io, db, roomId);
@@ -874,7 +892,7 @@ export async function consumePendingDisconnect(io: Io, db: Db, userId: string): 
  * Register a ghost for the given (room, identity) tuple and (re)arm the
  * user's sweep timer at `idleGraceMs`. Called by the disconnect handler
  * when a non-intentional disconnect leaves an identity with no live socket
- * in a room. Each new ghost extends the user's timer — three tabs closing
+ * in a room. Each new ghost extends the user's timer, three tabs closing
  * across two rooms get one consolidated sweep at the end, not three.
  *
  * The caller is responsible for the immediate `broadcastPresence` so the
@@ -893,7 +911,7 @@ export async function registerIdleGhost(
   if (existing) clearTimeout(existing);
   const userId = ghost.userId;
   const timer = setTimeout(() => {
-    // Move this into a fire-and-forget async closure — setTimeout can't
+    // Move this into a fire-and-forget async closure, setTimeout can't
     // await directly, and uncaught rejections here would crash the
     // process. The sweep runs the same per-room cleanup the old grace
     // window did (expireIfEmpty + broadcastPresence) so a now-empty
@@ -910,7 +928,7 @@ export async function registerIdleGhost(
       }
       ghostKeysByUser.delete(userId);
       // Lazy-import io from the ghost record's callback context isn't
-      // possible — we need it here. The disconnect handler captures `io`
+      // possible, we need it here. The disconnect handler captures `io`
       // at ghost-creation time via a closure (see index.ts).
       // Instead we accept that this sweep needs io passed in. To keep
       // the public API simple, we stash io on the first ghost call;
@@ -921,7 +939,7 @@ export async function registerIdleGhost(
         try {
           const expired = await expireIfEmpty(io, db, roomId);
           if (!expired) await broadcastPresence(io, db, roomId);
-        } catch { /* swallow — sweep must not crash */ }
+        } catch { /* swallow, sweep must not crash */ }
       }
     })().catch(() => {});
   }, idleGraceMs);
@@ -943,8 +961,8 @@ export function setGhostSweepIo(io: Io): void {
  * Persist + broadcast a server-fired chat line without going through
  * the slash-command dispatcher (no socket, no inline-cmd expansion,
  * no incognito rewrite). Used by the announcement scheduler, which
- * needs `addMessage`-shaped behavior — a real row in `messages`, a
- * filtered emit to the room, color/bodyHtml snapshots on the wire —
+ * needs `addMessage`-shaped behavior, a real row in `messages`, a
+ * filtered emit to the room, color/bodyHtml snapshots on the wire,
  * but doesn't have a `CommandContext`. Skips the award + push
  * pipelines (those are pegged to user activity, not server cronjobs).
  *
@@ -1038,7 +1056,7 @@ export async function addSystemMessage(
  *      row carries the flag thanks to the partial unique index. This is
  *      the source of truth on any post-migration install.
  *   2. Legacy fallback by name (`The_Spire`) for installs that haven't
- *      yet flipped the flag — the seed migrates them on next boot, but
+ *      yet flipped the flag, the seed migrates them on next boot, but
  *      this guards the gap.
  *   3. The alphabetically-first system room as a last resort so a
  *      malformed install (no default, no Spire) still lands users
@@ -1175,7 +1193,7 @@ export async function sendRoomBacklogTo(
       // bare placeholder.
       ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
       // Admin-only snapshot of who performed the delete. See toWire in
-      // routes/messages.ts for the same shape — both paths must stay
+      // routes/messages.ts for the same shape, both paths must stay
       // in sync or admins see audit info live but not in backlog.
       ...(viewerIsAdmin && m.deletedAt && m.deletedByUserId
         ? { deletedByUserId: m.deletedByUserId }
@@ -1203,7 +1221,7 @@ export async function sendRoomBacklogTo(
   socket.emit("message:bulk", backlog);
   // Authoritative "older messages exist" signal for the scroll-up
   // paginator. Computed from the DB-level query length (51) so it
-  // ignores per-viewer filtering — the load-older endpoint will
+  // ignores per-viewer filtering, the load-older endpoint will
   // apply the same filter again when the user actually scrolls up.
   socket.emit("room:history_meta", { roomId, hasMore: hasMoreOlder });
 }
@@ -1244,7 +1262,7 @@ export async function joinRoom(
   // resolved promise if there's no in-flight one). We then await
   // the chain head before doing any work. The new promise we store
   // back into the WeakMap covers BOTH waiting for the previous one
-  // AND running our own body — so the NEXT call's await sees the
+  // AND running our own body, so the NEXT call's await sees the
   // tail of our work and not the head.
   const prev = joinRoomQueue.get(socket) ?? Promise.resolve();
   let release: () => void = () => {};
@@ -1335,7 +1353,7 @@ async function joinRoomBody(
   // Character-active rooms read the character's own templates; OOC
   // rooms read the master's. Null on either column = use the default
   // phrasing. The session-presence templates are master-only.
-  // Reads are bounded — one row from each table the user touches.
+  // Reads are bounded, one row from each table the user touches.
   const presenceMaster = (await db
     .select({
       roomJoinTemplate: userEarning.roomJoinTemplate,
@@ -1361,7 +1379,7 @@ async function joinRoomBody(
   // Reconnect detection: if a "has disconnected" was scheduled for this user
   // and hasn't fired yet, this connect is a reconnect inside the grace window.
   // Sweep any idle ghosts the user was holding. Returns true when at
-  // least one was cleared — we read that as "this is a reconnect inside
+  // least one was cleared, we read that as "this is a reconnect inside
   // the idle window" and use it further down to suppress the "X has
   // connected." message + the room description re-emit. The same call
   // also rebroadcasts presence to each formerly-ghosted room so onlookers
@@ -1375,7 +1393,7 @@ async function joinRoomBody(
   // Drop the user from any previous room before joining the new one.
   // Per-room "X has left the room." chat broadcasts fire on real
   // room switches, but ONLY when no OTHER socket of this account
-  // remains in the room being left — `userHasSocketInRoom` is the
+  // remains in the room being left, `userHasSocketInRoom` is the
   // multi-tab gate. If the user has another tab still parked in
   // the old room (desktop tab stays put while phone tab moves;
   // second browser window) the move from THIS socket isn't a real
@@ -1396,7 +1414,7 @@ async function joinRoomBody(
     const stillThere = await userHasSocketInRoom(io, user.id, prevId);
     if (stillThere || isInBootGrace()) continue;
     // Incognito gate: room transitions stay silent for an incognito
-    // moderator — the whole point is they can drift across rooms
+    // moderator, the whole point is they can drift across rooms
     // without trace. Their "X has left the chat" line already
     // broadcast at the moment they went incognito.
     if (user.incognitoMode) continue;
@@ -1416,7 +1434,7 @@ async function joinRoomBody(
   // just on the disconnect path. Mobile suspension can lose the per-
   // tab sessionStorage cache (iOS reaping the tab from memory wipes
   // it), and the disconnect-side write is only made on
-  // `fullyOffline=true` — so a stale sibling socket anywhere (a
+  // `fullyOffline=true`, so a stale sibling socket anywhere (a
   // forgotten desktop tab, a second phone tab) would have caused the
   // mobile disconnect to skip the lastRoomId write, leaving the DB
   // pointing at whatever room the user logged in to days ago. Writing
@@ -1443,7 +1461,7 @@ async function joinRoomBody(
   // for the life of the server, so a returning mobile tab now only
   // sees the description on its *original* entry.
   //
-  // Forum rooms still skip the description entirely — the topic feed
+  // Forum rooms still skip the description entirely, the topic feed
   // isn't a chat log, and other UI affordances surface the description
   // there.
   if (room.description && !hasSeenDescription(user.id, roomId) && room.replyMode !== "nested") {
@@ -1464,7 +1482,7 @@ async function joinRoomBody(
   // Entry/connect chat broadcast. Three mutually-exclusive cases,
   // distinguished by `loginIntent` (fresh login/register handshake)
   // and `priorRooms.length` (was this socket already in another
-  // chat room before this join — i.e. a real room switch):
+  // chat room before this join, i.e. a real room switch):
   //
   //   loginIntent && priorRooms.length === 0  → "X has connected."
   //     The handshake just finished, this is the user's first room
@@ -1475,7 +1493,7 @@ async function joinRoomBody(
   //   priorRooms.length > 0                   → "X has entered the room."
   //     Same socket moved A → B via the room:join event; pair with
   //     the "X has left the room." departure broadcast emitted in
-  //     the leave loop above. NOT gated on `isReconnect` — a real
+  //     the leave loop above. NOT gated on `isReconnect`, a real
   //     room switch is an explicit action on a live socket, and
   //     `consumePendingDisconnect` may have legitimately swept
   //     ghosts from a tab the user closed in some OTHER room.
@@ -1494,7 +1512,7 @@ async function joinRoomBody(
     (socket.data as { loginIntent?: boolean }).loginIntent === true;
   // Gate "X has connected / entered" on the IDENTITY tuple, not the raw
   // userId. A user can be live on desktop as Character A and then log
-  // in on mobile as Character B — that's two distinct identities even
+  // in on mobile as Character B, that's two distinct identities even
   // though it's one user, and the room should learn about Character B
   // arriving. The legacy user-only check (userHasSocketInRoom)
   // silenced the mobile broadcast in that case because "the user was
@@ -1504,7 +1522,7 @@ async function joinRoomBody(
   // userlist render path does: a per-tab `tabCharId` set by `/char`
   // wins; otherwise fall back to the user's master-row default.
   // `undefined` only happens on a socket that hasn't issued any
-  // /char yet, which still resolves to the DB default — never null
+  // /char yet, which still resolves to the DB default, never null
   // by accident.
   const tabCharRaw = (socket.data as { tabCharId?: string | null }).tabCharId;
   const socketCharacterId: string | null =
@@ -1547,15 +1565,15 @@ async function joinRoomBody(
   // first branch and emit a duplicate "X has connected." line.
   (socket.data as { loginIntent?: boolean }).loginIntent = false;
   if (!otherSocketHere && !isReconnect && !userWasOnlineBefore && !isRoomSwitch) {
-    // Watcher pings: still relevant in forum rooms — they're per-user
+    // Watcher pings: still relevant in forum rooms, they're per-user
     // notifications, not room broadcasts. Fire whenever this is a
     // true online transition regardless of room type. Decoupled from
-    // the chat broadcast — a watcher should still get pinged when
+    // the chat broadcast, a watcher should still get pinged when
     // their friend reconnects after a mobile suspend, even though
     // the chat itself stays silent.
     //
     // `!isRoomSwitch` is load-bearing here. `userWasOnlineBefore`
-    // alone is NOT a sufficient gate — `userIsOnline` excludes the
+    // alone is NOT a sufficient gate, `userIsOnline` excludes the
     // current socket so a single-tab user moving room A → room B
     // sees their only socket excluded from the check and the
     // function returns false, even though the user is plainly
@@ -1595,7 +1613,7 @@ export async function userHasSocketInRoom(
  * characterId means "OOC" (the user's master identity).
  *
  * Resolution mirrors `currentOccupants`: tabCharId === undefined falls
- * back to the user's DB-default activeCharacterId — but we don't have
+ * back to the user's DB-default activeCharacterId, but we don't have
  * the user row here, so the caller is responsible for resolving
  * `undefined` to a concrete characterId before calling. (The disconnect
  * handler does this via the SessionUser it holds.)
@@ -1619,7 +1637,7 @@ export async function userIdentityHasSocketInRoom(
     // characterId; sibling sockets that haven't issued /char will read
     // as `undefined` here. To avoid leaking that ambiguity, fall back
     // to "any sibling socket of this user counts as the identity still
-    // being live for the master/OOC case" — same conservatism we used
+    // being live for the master/OOC case", same conservatism we used
     // before per-tab routing existed. If you ever see a regression where
     // an idle ghost lingers despite a sibling tab, this is the place
     // to thread a userById lookup through.
@@ -1691,7 +1709,7 @@ export async function broadcastRoomState(
   const occupants = await currentOccupants(io, db, roomId);
   io.to(`room:${roomId}`).emit("room:state", { room: summary, occupants });
   // Tree-wide invalidate. Room metadata changed (topic, replyMode,
-  // owner, archive flip, etc.) — anyone with a rooms rail open
+  // owner, archive flip, etc.), anyone with a rooms rail open
   // needs to know. Sockets in other rooms wouldn't see the room-
   // scoped emit above, so they'd be stuck on a stale tree until
   // the 20s backstop poll. Payload-free pulse; the client refetches
@@ -1735,12 +1753,12 @@ async function loadLinkedWorld(db: Db, roomId: string): Promise<LinkedWorldRef |
  * name on the wire is still `watch:online` (changing it would break
  * older cached client bundles); the underlying table moved from
  * `watches` to `friends`, and as of migration 0051 friendship is
- * symmetric — so we pull the OTHER side of every accepted edge that
+ * symmetric, so we pull the OTHER side of every accepted edge that
  * touches `user`, in either direction.
  */
 async function pingWatchers(io: Io, db: Db, user: SessionUser): Promise<void> {
   // Incognito gate. An incognito moderator coming online (login, reconnect,
-  // /char-switch, etc.) is supposed to leave no trace — friends receiving
+  // /char-switch, etc.) is supposed to leave no trace, friends receiving
   // a "☆ X is online" system line in their current room would directly
   // out the moderator's presence. Same rationale as the userlist
   // suppression in currentOccupants.
@@ -1779,7 +1797,7 @@ async function pingWatchers(io: Io, db: Db, user: SessionUser): Promise<void> {
  * replyMode, messageExpiryMinutes, npcDisabled, type/passwordHash)
  * stick around. The matching create flow detects the archived row
  * on a same-name create and resurrects it with the new caller as
- * owner — see `resurrectArchivedRoom` in routes/commands/builtins/
+ * owner, see `resurrectArchivedRoom` in routes/commands/builtins/
  * room.ts. System rooms (isSystem=true) are still exempt: they need
  * to stay live so users always have a landing place.
  *
@@ -1799,7 +1817,7 @@ export async function expireIfEmpty(io: Io, db: Db, roomId: string): Promise<boo
   const sockets = await io.in(`room:${roomId}`).fetchSockets();
   if (sockets.length > 0) return false;
   // Idle ghosts hold a room open against archival the same way live
-  // sockets do — the user is conceptually "still here, just idle." If
+  // sockets do, the user is conceptually "still here, just idle." If
   // we archived now we'd race the ghost's eventual sweep (which calls
   // back into expireIfEmpty) and a single-occupant private room would
   // disappear on every tab close. The ghost-sweep timer drives the
@@ -1839,7 +1857,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   // override (seeded from `users.activeCharacterId` at connect, then
   // mutated only by /char or me:switch-character from THAT socket).
   // The userlist must reflect what each socket is actually voicing in
-  // THIS room — falling back to the DB column would leak a /char run
+  // THIS room, falling back to the DB column would leak a /char run
   // on a sibling tab into this room's occupant display.
   //
   // Dedupe is on the IDENTITY tuple (userId, resolved characterId),
@@ -1850,7 +1868,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   // the same character (or both OOC) collapse to one row, since
   // they're the same identity. The previous userId-only dedup made
   // the second tab invisible in the userlist while their messages
-  // still flowed through — the bug this comment block now exists to
+  // still flowed through, the bug this comment block now exists to
   // prevent regressing.
   //
   // Resolution-before-dedup is load-bearing. `tabCharId === undefined`
@@ -1860,7 +1878,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   // character set explicitly would land in different buckets and both
   // pass dedup, even though they'd render as the same identity. We
   // therefore fetch user rows first, then key dedup on the resolved
-  // `(userId, characterId)` tuple — the same tuple the render loop
+  // `(userId, characterId)` tuple, the same tuple the render loop
   // emits, so the two layers can't disagree.
   type Raw = { userId: string; tabCharId: string | null | undefined };
   const raws: Raw[] = [];
@@ -1873,7 +1891,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   // Merge idle ghosts: identities the user was voicing in this room when
   // their last socket dropped, kept visible (faded + "(idle)") through the
   // configured idle-grace window. A ghost is dropped from the merge as
-  // soon as a live socket carries the same (userId, characterId) tuple —
+  // soon as a live socket carries the same (userId, characterId) tuple,
   // the dedup pass below handles that automatically since live raws are
   // processed first.
   const ghosts = getIdleGhostsForRoom(roomId);
@@ -1918,13 +1936,13 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   // Ghost identities are explicit (characterId was resolved at
   // ghost-creation), so we add them straight to `resolvedIdentities`
   // after the live pass. Anything the dedup already saw via a live
-  // socket wins — a ghost only surfaces when the identity has no
+  // socket wins, a ghost only surfaces when the identity has no
   // live presence.
   for (const g of ghosts) {
     const user = userById.get(g.userId);
     if (!user) continue;
     // Same incognito filter for the idle-ghost re-introduction
-    // path — a moderator who went incognito just before their last
+    // path, a moderator who went incognito just before their last
     // live socket dropped shouldn't reappear as an "(idle)" row.
     if (user.incognitoMode) continue;
     const key = `${g.userId}::${g.characterId ?? ""}`;
@@ -1962,7 +1980,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   // longer carry `primaryWorld`; the world's own member list is the
   // source of truth for "who's affiliated with this world."
 
-  // Earning — batched rank lookup for sigil rendering. We pull the
+  // Earning, batched rank lookup for sigil rendering. We pull the
   // denormalized (rankKey, tier) from user_earning for every user in
   // the occupant set, and from character_earning for every active
   // character. The occupant render below picks the pool that matches
@@ -2029,7 +2047,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   const charInlineAvatarByChar = new Map(
     charActiveRows.map((r) => [r.characterId, !!r.inlineAvatarEnabled]),
   );
-  // Selected border rank — keyed by the SCOPE of the occupant
+  // Selected border rank, keyed by the SCOPE of the occupant
   // (character row's selectedBorderRankKey when attached, master row's
   // otherwise). We've already pulled both earning tables above for
   // rank/tier; reuse the same query results by re-issuing two
@@ -2098,7 +2116,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
 
   // Parallel lookup for freeform-border per-identity color configs.
   // Only fetched for identities whose `selectedFreeformBorderKey` is
-  // set — characters cascade off their own row, master cascades off
+  // set, characters cascade off their own row, master cascades off
   // its own row, so we hit each ownership table once with the union of
   // (identity, borderKey) pairs.
   const usersWithFreeformBorder = [...userFreeformBorderByUser.entries()]
@@ -2163,12 +2181,12 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     // Privacy: a user whose master profile is marked private
     // (`users.isPublic = false`) only surfaces in the userlist while
     // *actively using* a character. In OOC mode (no active character)
-    // they're filtered out entirely — the (ooc) badge would otherwise
+    // they're filtered out entirely, the (ooc) badge would otherwise
     // expose the master username they specifically opted out of
     // publishing. Active-character rows still appear (and only the
     // character name is shown; the master link is independently gated
     // on the profile endpoint). Side-effect: the room's occupant
-    // count reflects what's visible, not raw socket presence — fine,
+    // count reflects what's visible, not raw socket presence, fine,
     // since invisible users are by definition not "in" the room from
     // a viewer's perspective.
     if (!u.isPublic && !c) continue;
@@ -2203,7 +2221,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     // Also surface the user's MASTER slot independently. When this
     // occupant is voicing a character, the master slot is what the
     // renderer should use for any of the user's OOC backlog (and
-    // for OOC whispers, etc.) — without it the chat renderer has
+    // for OOC whispers, etc.), without it the chat renderer has
     // no entry for `identityKey(userId, null)` while the user is
     // attached to a character, and OOC messages render unstyled.
     const masterStyleKey = masterActiveStyleByUser.get(u.id) ?? null;
@@ -2219,7 +2237,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     // Owner-chosen zoom/pan for that resolved avatar. Same scope rule:
     // character columns when attached, master columns otherwise. The
     // schema columns are NOT NULL with sensible defaults (zoom 1.0,
-    // offsets 50/50) so the fallback is just the defaults — but we
+    // offsets 50/50) so the fallback is just the defaults, but we
     // round-trip via `clampAvatarCrop` so any out-of-range row written
     // by an older client can't poison the wire shape.
     const occupantAvatarCrop = clampAvatarCrop(
@@ -2282,7 +2300,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
       // Per-user toggle. When `showRankInUserlist` is off, the
       // broadcast omits the rank fields entirely (renders as
       // null/null on the wire) so the UserNameTag falls back to the
-      // gender glyph automatically — no extra prop wiring needed
+      // gender glyph automatically, no extra prop wiring needed
       // downstream. Toggling re-fires presence on the next /me/profile
       // save (see characters.ts re-broadcast gate).
       rankKey: u.showRankInUserlist ? poolRank.rankKey : null,

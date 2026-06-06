@@ -4,7 +4,7 @@
  * Templates are admin-authored HTML strings that wrap a user's
  * avatar in custom markup. The single placeholder is:
  *
- *   {avatar}   — the avatar `<img>` (or initials fallback) as an
+ *   {avatar}  , the avatar `<img>` (or initials fallback) as an
  *                inline HTML fragment. Mirrors how nameStyleTemplate
  *                handles `{username}`.
  *
@@ -36,7 +36,7 @@ function escapeHtmlAttr(s: string): string {
  * caller has a URL we produce an `<img>` with the same attributes
  * BorderedAvatar's React render would have used (rounded, lazy
  * load, no referrer leak). When the URL is missing (or has been
- * marked errored upstream), we fall back to an initials chip —
+ * marked errored upstream), we fall back to an initials chip,
  * matches the React-rendered fallback so a missing avatar doesn't
  * leave the border empty.
  *
@@ -44,7 +44,7 @@ function escapeHtmlAttr(s: string): string {
  * (built by `lib/avatarCrop.ts`) that carries the owner's
  * zoom/pan transform. The template's own picture container
  * already clips to the circle, so the zoom rides through the same
- * mask without needing an extra wrapper — preserves the freeform
+ * mask without needing an extra wrapper, preserves the freeform
  * border's outer decoration unchanged.
  */
 export function buildAvatarFragment(opts: {

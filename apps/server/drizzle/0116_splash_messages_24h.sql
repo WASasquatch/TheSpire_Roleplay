@@ -13,7 +13,7 @@
 -- broader user/room counter surface.
 --
 -- Default false so the new column is purely additive on existing
--- installs — admins flip it on once they're sure the count reads
+-- installs, admins flip it on once they're sure the count reads
 -- as healthy on their community (an empty community surfacing
 -- "0 messages in the last 24h" would telegraph dead-site, so the
 -- opt-in posture matches the existing activityFeedsEnabled default).

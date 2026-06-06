@@ -46,7 +46,7 @@ export interface RoomOccupant {
   awayMessage: string | null;
   /**
    * True when this occupant is a ghost held over from a disconnected
-   * tab — their last socket dropped but they're inside the configured
+   * tab, their last socket dropped but they're inside the configured
    * idle-grace window (see site_settings.idleGraceMs). The userlist
    * renders idle rows faded out with an "(idle)" suffix so onlookers
    * can tell they're not active. Distinct from `away`, which is a
@@ -64,14 +64,14 @@ export interface RoomOccupant {
   accountRole: Role;
   /** Free-text current mood/expression set via /mood. Null when unset. */
   mood: string | null;
-  // primaryWorld was retired in migration 0187 — with per-identity
+  // primaryWorld was retired in migration 0187, with per-identity
   // world memberships the cross-identity "primary world" badge
   // became meaningless, and the userlist grouping it drove was the
   // surface that visibly linked characters to their master's world
   // affiliation. The world's own member list is now the source of
   // truth for "who's in this world."
   /**
-   * Earning — the occupant's current rank/tier on the relevant pool.
+   * Earning, the occupant's current rank/tier on the relevant pool.
    * Drives the inline sigil rendered next to the display name in the
    * userlist (and reused as the source of truth for chat-line sigils
    * via lookup-by-userId).
@@ -84,18 +84,18 @@ export interface RoomOccupant {
   rankKey: string | null;
   tier: number | null;
   /**
-   * Earning — name style + per-user config for live rendering of
+   * Earning, name style + per-user config for live rendering of
    * styled display names. Set when the user has a style equipped via
    * the dashboard; null when on the default rendering.
    *
    * `nameStyleConfig` is the parsed JSON shape the style's CSS reads
-   * (color picks, glow strength, etc.) — schema varies per style.
+   * (color picks, glow strength, etc.), schema varies per style.
    * Renderer falls back to the style's defaults when null.
    */
   activeNameStyleKey: string | null;
   nameStyleConfig: Record<string, unknown> | null;
   /**
-   * The user's MASTER/OOC name style + config — present even when
+   * The user's MASTER/OOC name style + config, present even when
    * the occupant is voicing a character. The chat renderer uses
    * this to style past messages the user authored OOC (where
    * `message.characterId === null`) while still using the active
@@ -107,7 +107,7 @@ export interface RoomOccupant {
   masterNameStyleKey: string | null;
   masterNameStyleConfig: Record<string, unknown> | null;
   /**
-   * Earning — purchasable cosmetic state for the occupant.
+   * Earning, purchasable cosmetic state for the occupant.
    *
    *  avatarUrl                  Resolved per-identity avatar (character
    *                             when attached, else master). Lets the
@@ -121,7 +121,7 @@ export interface RoomOccupant {
    *                             from the parallel `freeform_borders`
    *                             catalog. Takes precedence over
    *                             `selectedBorderRankKey` when both are
-   *                             set — the BorderedAvatar renderer
+   *                             set, the BorderedAvatar renderer
    *                             checks the freeform slot first and
    *                             falls back to the rank-tied slot.
    *  inlineAvatarEnabled        Master-scoped toggle for the
@@ -153,7 +153,7 @@ export interface RoomOccupant {
   /**
    * Master/OOC fallbacks for the avatar + border + inline-avatar
    * cosmetics. Same rationale as the master name-style fields
-   * above — past OOC messages from a user currently voicing a
+   * above, past OOC messages from a user currently voicing a
    * character still render with the user's master cosmetic
    * choices, not the character's.
    */

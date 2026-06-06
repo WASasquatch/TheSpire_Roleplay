@@ -11,7 +11,7 @@ interface Props {
    * Called when the user clicks the "Back" link in the header. The
    * caller typically pops the SPA back to whatever route mounted
    * the page (or `/` if the page was opened in a fresh tab from the
-   * registration form). Optional — when omitted, the back link
+   * registration form). Optional, when omitted, the back link
    * renders as a plain `<a href="/">` so a deep-linked visitor with
    * no history still has a way out.
    */
@@ -21,12 +21,12 @@ interface Props {
 /**
  * Public, no-auth-required Rules page.
  *
- * Mounted by App.tsx when `window.location.pathname === "/rules"` —
+ * Mounted by App.tsx when `window.location.pathname === "/rules"`,
  * BEFORE the AuthGate / chat shell, so an anonymous visitor (someone
  * the registration form pointed at the rules link) can read the
  * house rules and privacy notice without signing up first.
  *
- * Content is the same JSON the in-app RulesModal pulls — both
+ * Content is the same JSON the in-app RulesModal pulls, both
  * fetch `/api/rules`. The modal lives inside the chat shell and has
  * its own close affordance; this page wraps the same body in a
  * centered card with a "← Back" link in the header instead, so the

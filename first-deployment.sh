@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# first-deployment.sh — bootstrap a fresh Fly.io deployment of The Spire.
+# first-deployment.sh, bootstrap a fresh Fly.io deployment of The Spire.
 #
 # Use this ONCE per fresh Fly app. After it succeeds, use ./remote-deploy.sh
 # or `pnpm ship` for routine deploys (those keep SKIP_DEFAULT_SEED=1 so

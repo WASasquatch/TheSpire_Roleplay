@@ -34,7 +34,7 @@ export interface ChatMessage {
    * or character-name lookup); absent / undefined when the whisper
    * was addressed at the master / OOC handle. Lets the FE build the
    * matching `@cid:<id>` continuation token on a recipient-name
-   * click — without it, the next /whisper falls back to `@id:<userId>`
+   * click, without it, the next /whisper falls back to `@id:<userId>`
    * and re-routes a character thread back to the master account.
    * Added in migration 0189.
    */
@@ -65,7 +65,7 @@ export interface ChatMessage {
    * Trusted-HTML body for scheduled `/announce` lines (migration
    * 0191). When set, the announce renderer paints it via
    * `dangerouslySetInnerHTML` (after a defense-in-depth sanitizer
-   * pass) so admin-authored markup — links, lists, bold spans —
+   * pass) so admin-authored markup, links, lists, bold spans,
    * renders cleanly instead of as escaped text. Manual in-chat
    * `/announce` keeps this null and falls through to the existing
    * inline-markdown render pipeline.
@@ -76,7 +76,7 @@ export interface ChatMessage {
   /** Set when the author deleted the message inside the grace window. Renderer shows "[message removed]". */
   deletedAt?: number | null;
   /**
-   * Original body of a soft-deleted message — surfaced ONLY to viewers
+   * Original body of a soft-deleted message, surfaced ONLY to viewers
    * with `isAdminRole(role) === true` so a site admin can audit what
    * was hidden (in case the author was burying something). Mods,
    * room-owner mods, and ordinary viewers receive a wire payload
@@ -88,7 +88,7 @@ export interface ChatMessage {
   originalBody?: string | null;
   /**
    * Audit snapshot of who performed the soft-delete. Same admin-only
-   * gating as `originalBody` — the server only emits these fields to
+   * gating as `originalBody`, the server only emits these fields to
    * `isAdminRole` viewers. Compare `deletedByUserId === userId` at
    * render time to distinguish a self-delete (within the grace
    * window) from a mod/admin moderation action. Both fields are
@@ -101,13 +101,13 @@ export interface ChatMessage {
   /**
    * Thread-category anchor for top-level messages in nested-mode rooms.
    * Null/absent = "Uncategorized" (the renderer's fallback bucket).
-   * Replies inherit their parent's category implicitly — this field is
+   * Replies inherit their parent's category implicitly, this field is
    * only meaningful when `replyToId` is absent.
    */
   threadCategoryId?: string | null;
   /**
    * Forum topic title. Present only on top-level messages in nested-
-   * mode (forum) rooms — those are the "topics" replies live under.
+   * mode (forum) rooms, those are the "topics" replies live under.
    * Absent on replies and on every message in flat-mode chat rooms.
    */
   title?: string | null;
@@ -120,7 +120,7 @@ export interface ChatMessage {
   /**
    * Timestamp the topic was locked (author or moderator action). Set on
    * top-level topics in nested-mode rooms to indicate the thread is
-   * closed to new replies — server rejects `chat:input` replies under
+   * closed to new replies, server rejects `chat:input` replies under
    * a locked topic, the forum UI shows a 🔒 indicator + disables the
    * reply composer. Null/absent = unlocked. Replies and flat-room
    * messages always carry this as null.
@@ -128,7 +128,7 @@ export interface ChatMessage {
   lockedAt?: number | null;
   /**
    * Most-recent-activity timestamp for top-level topics. Updated by
-   * the server when a reply is inserted under the topic — the forum
+   * the server when a reply is inserted under the topic, the forum
    * pagination orders by this DESC so active threads surface first.
    * For replies and flat-room messages this is null/unused.
    */
@@ -198,7 +198,7 @@ export interface ChatMessage {
  *
  * `relevance` is a unitless server-assigned score (higher = better).
  * The UI sorts by it but doesn't surface the raw number. `snippet` is
- * the raw matched body — the client renders highlight on top via the
+ * the raw matched body, the client renders highlight on top via the
  * same logic message rendering uses, so we don't ship pre-built HTML
  * from the server.
  */

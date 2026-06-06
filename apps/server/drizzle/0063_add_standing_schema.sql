@@ -1,4 +1,4 @@
--- Standing system foundation — XP + Currency + Ranks + Cosmetics.
+-- Standing system foundation, XP + Currency + Ranks + Cosmetics.
 --
 -- Adds the full table set described in plan.md:
 --   ranks                     ladder definition (6 default rows; admin extensible)
@@ -13,7 +13,7 @@
 --   user_active_cosmetics     currently-equipped cosmetic state (inline avatar, name style)
 --   standing_notifications    persistent rank-up events for the ribbon
 --
--- This migration is structure-only — seed data lands in 0065 so the
+-- This migration is structure-only, seed data lands in 0065 so the
 -- seed step can be re-run independently (the catalog rows reference
 -- bundled asset paths that may shift if admins later upload
 -- replacements, and the seed migration is the place to re-establish

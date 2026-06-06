@@ -43,7 +43,7 @@ interface Props {
   /**
    * Available thread categories for the current room. Undefined when the
    * room isn't nested or the list hasn't loaded yet; empty array means
-   * "nested but no categories defined" — the picker is hidden in both
+   * "nested but no categories defined", the picker is hidden in both
    * cases since there's nothing to choose.
    */
   threadCategories?: ThreadCategory[];
@@ -57,14 +57,14 @@ interface Props {
    *   - `isForumRoom && activeTopic` → reply mode; submit calls onSend
    *     with `replyToId`.
    * In flat-chat rooms `isForumRoom` is false and these props are
-   * ignored — the composer behaves like the historic chat input.
+   * ignored, the composer behaves like the historic chat input.
    */
   isForumRoom?: boolean;
   /**
    * Active topic the user is reading / replying to. Passed in as the
    * topic message itself (we need `title` + `id` to render the
    * "Replying to" indicator). `locked` mirrors the server-side
-   * `messages.locked_at` state — when true the composer renders a
+   * `messages.locked_at` state, when true the composer renders a
    * "topic locked" notice and disables the textarea instead of the
    * usual reply indicator. Null = no topic selected.
    */
@@ -81,17 +81,17 @@ interface Props {
    * Override the textarea placeholder. When unset, the composer picks a
    * sensible contextual default (forum-disabled hint / "Reply to ..." /
    * "Type a message..."). Set this when embedding the composer in a
-   * context where the contextual defaults don't fit — e.g. the focused
+   * context where the contextual defaults don't fit, e.g. the focused
    * thread modal, which is itself the reply context and wants its own
    * "Reply to <topic>..." prompt instead of the chat default.
    */
   placeholder?: string;
   /**
    * Viewer is a moderator (role mod or admin). Moderators bypass the
-   * locked-topic input disable — they can still post in locked
+   * locked-topic input disable, they can still post in locked
    * threads to leave verdicts / notices, matching the server's
    * mod-bypass on the reply gate. The composer renders a distinct
-   * "🔒 Locked — replying as moderator" hint when this is true and
+   * "🔒 Locked, replying as moderator" hint when this is true and
    * the active topic is locked.
    */
   canModerate?: boolean;
@@ -130,7 +130,7 @@ function topicLabel(t: { title: string | null; body: string }): string {
   return `${body.slice(0, 60)}…`;
 }
 
-type TriggerKind = "/" | "@" | "whisper-target" | "!" | "item-target" | "item-key";
+type TriggerKind = "/" | "@" | "whisper-target" | "!" | "item-target" | "item-key" | "user-target";
 
 interface Trigger {
   /**
@@ -142,10 +142,10 @@ interface Trigger {
    *                      `!` doesn't open the palette, since punctuation
    *                      shouldn't keep popping the picker for every
    *                      "Wow!" or "stop!")
-   *   `item-target`    - first positional arg of /give /throw /drop —
+   *   `item-target`    - first positional arg of /give /throw /drop,
    *                      suggest room occupants by displayName
    *   `item-key`       - item-name slot of /give /throw /drop (after
-   *                      target + optional quantity) — suggest items
+   *                      target + optional quantity), suggest items
    *                      from the user's CURRENT identity's inventory
    */
   kind: TriggerKind;
@@ -158,7 +158,7 @@ interface Trigger {
 }
 
 /**
- * Slash commands whose first positional argument is a username — when the
+ * Slash commands whose first positional argument is a username, when the
  * user is typing the name, we open the same occupant picker we use for
  * `@`-mentions. Matches the server-side `whisper` command's `aliases`
  * list (see apps/server/src/commands/builtins/whisper.ts) so any alias
@@ -173,12 +173,23 @@ const WHISPER_CMDS = new Set([
  * trigger detection drives two picker stages for each: occupants at
  * the target slot, then the user's inventory at the item slot.
  * Quantity (digits-only between the two) is the only slot without
- * suggestions — the user just types a number. */
+ * suggestions, the user just types a number. */
 const ITEM_CMDS = new Set(["give", "throw", "drop"]);
 
 /**
+ * Social-game (and other) slash commands whose first positional arg
+ * is a GLOBAL identity (any user or character, not constrained to
+ * the current room's occupants). The picker drives off
+ * `/identities/autocomplete` and inserts an identity TOKEN
+ * (`@cid:<id>` or `@id:<id>`) so the server resolves unambiguously
+ * even when two identities share a display name. Add new commands
+ * here as the social-game system grows; nothing else needs to
+ * change for the picker to light up. */
+const USER_TARGET_CMDS = new Set(["duel"]);
+
+/**
  * NBSP-aware "word char" check used to walk back to a token boundary.
- * `/\s/` matches NBSP (U+00A0) — but NBSP is a legal username character,
+ * `/\s/` matches NBSP (U+00A0), but NBSP is a legal username character,
  * so we treat it as part of the same token to keep names like
  * `The[NBSP]Watcher` whole.
  */
@@ -189,9 +200,9 @@ function isWordChar(ch: string): boolean {
 
 /**
  * Detect whether the caret sits inside an active completion trigger:
- *   - `/word` — only when the slash is at the start of the message (matches
+ *   - `/word`, only when the slash is at the start of the message (matches
  *     the dispatcher, which treats slash commands as the *first* token only).
- *   - `@word` — anywhere; mentions can appear mid-message.
+ *   - `@word`, anywhere; mentions can appear mid-message.
  *   - whisper-target: when the caret is in the first positional argument
  *     of a /whisper-alias command, show the same occupant picker (the
  *     name is what the recipient resolves against on the server, so the
@@ -201,7 +212,7 @@ function isWordChar(ch: string): boolean {
  * a space).
  */
 function detectTrigger(text: string, caret: number): Trigger | null {
-  // Whisper-target check first — we want it to win over the @-mention
+  // Whisper-target check first, we want it to win over the @-mention
   // path when the user types `/w foo` (the `foo` part is a bare name,
   // not an @mention). The check looks at the WHOLE line because the
   // trigger boundary isn't a single delimiter char.
@@ -216,7 +227,7 @@ function detectTrigger(text: string, caret: number): Trigger | null {
       if (WHISPER_CMDS.has(cmd)) {
         const argStart = firstSpace + 1;
         const argSoFar = text.slice(argStart, caret);
-        // Bail out once the caret moves past the first arg — at that
+        // Bail out once the caret moves past the first arg, at that
         // point the user is typing the message body, not picking a
         // recipient. NBSP is intentionally NOT counted as whitespace
         // here so `/w The[NBSP]Watcher` keeps the picker open while
@@ -230,7 +241,26 @@ function detectTrigger(text: string, caret: number): Trigger | null {
           };
         }
       }
-      // /give /throw /drop pickers — two stages keyed off how many
+      // Social-game (and other) commands whose first positional arg
+      // is a global identity. Same scoping rule as whisper-target
+      // (stops at the first ASCII space), different downstream source
+      // and downstream insertion: the picker hits
+      // `/identities/autocomplete` and inserts an identity token, so
+      // even two characters sharing a display name route to the
+      // right one server-side.
+      if (USER_TARGET_CMDS.has(cmd)) {
+        const argStart = firstSpace + 1;
+        const argSoFar = text.slice(argStart, caret);
+        const pastNameBoundary = /[ \t]/.test(argSoFar);
+        if (!pastNameBoundary) {
+          return {
+            kind: "user-target",
+            tokenStart: argStart,
+            query: argSoFar.toLowerCase(),
+          };
+        }
+      }
+      // /give /throw /drop pickers, two stages keyed off how many
       // ASCII spaces appear before the caret inside the args portion.
       //
       //   stage 0 (no space yet):   typing the TARGET name → occupants
@@ -248,7 +278,7 @@ function detectTrigger(text: string, caret: number): Trigger | null {
         const argSoFar = text.slice(argStart, caret);
         const sp1 = argSoFar.indexOf(" ");
         if (sp1 === -1) {
-          // Target stage. Even an empty query is valid — the popup
+          // Target stage. Even an empty query is valid, the popup
           // shows every occupant before the user types anything.
           return {
             kind: "item-target",
@@ -259,7 +289,7 @@ function detectTrigger(text: string, caret: number): Trigger | null {
         const restAfterTarget = argSoFar.slice(sp1 + 1);
         const sp2 = restAfterTarget.indexOf(" ");
         if (sp2 === -1) {
-          // Stage 1 — quantity OR item.
+          // Stage 1, quantity OR item.
           if (/^\d+$/.test(restAfterTarget)) {
             // Mid-quantity: no popup. We don't want the inventory
             // list flashing under the cursor while the user types
@@ -306,7 +336,7 @@ function detectTrigger(text: string, caret: number): Trigger | null {
     return { kind: "@", tokenStart: s, query: token.slice(1).toLowerCase() };
   }
   if (token.startsWith("!")) {
-    // Bare `!` (no chars after it) is intentionally ignored — otherwise
+    // Bare `!` (no chars after it) is intentionally ignored, otherwise
     // every "Wow!" or "stop!" would pop the palette mid-sentence. We
     // also require the `!` to sit at start-of-string OR right after a
     // whitespace boundary, so word-internal `!` (rare but defensive)
@@ -360,7 +390,7 @@ export function Composer({
 }: Props) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastValueRef = useRef(value);
-  // Phase 4 typing indicator — last time this composer fired a
+  // Phase 4 typing indicator, last time this composer fired a
   // `chat:typing` pulse. Throttled to once per 2s so a long
   // sentence costs at most a handful of tiny socket events. The
   // server's entry TTL is ~5s, so pulsing every 2s comfortably
@@ -373,20 +403,20 @@ export function Composer({
   // Input history. Each successful send pushes its trimmed body onto a
   // ring buffer (deduped against the most recent entry). ArrowUp opens
   // a *popup* of past sends (most recent first) that the user picks
-  // from explicitly — pressing ArrowUp does NOT overwrite the current
+  // from explicitly, pressing ArrowUp does NOT overwrite the current
   // draft. Only Enter on a highlighted entry (or a click) replaces the
   // textarea. This matches the way the @ / / completers behave and
   // keeps the arrow keys from clobbering text the user is actively
   // editing.
   //
-  // historyRef holds the buffer itself (no React state — the visible
+  // historyRef holds the buffer itself (no React state, the visible
   // text already lives in the parent's `value`). `historyOpen`/`Index`
   // ARE state because the popup needs to render. Lives for the
   // Composer's lifetime; logging out unmounts the chat and clears it.
   const historyRef = useRef<string[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyIndex, setHistoryIndex] = useState(0);
-  // Account-level opt-out. When set, the popup never opens — ArrowUp
+  // Account-level opt-out. When set, the popup never opens, ArrowUp
   // falls through to its native caret-movement behavior. Pulled from
   // the chat store so a toggle in the profile editor takes effect
   // immediately.
@@ -407,7 +437,7 @@ export function Composer({
   }, [activeCharacterId, disableHistory]);
 
   // Per-identity inventory + catalog for the `item-key` trigger
-  // popup. We pull straight from the live earning snapshot — it's
+  // popup. We pull straight from the live earning snapshot, it's
   // already kept fresh by the `earning:inventory_changed` socket
   // listener, so the picker reflects the current stack the moment a
   // /buy / /give / /admin grant lands. Empty array when the snapshot
@@ -447,7 +477,7 @@ export function Composer({
   // Server-side dispatch picks per-room (dispatch.ts: `isForum ?
   // maxForumPostLength : maxMessageLength`). The composer mirrors
   // that here so the toolbar counter and the pre-flight gate
-  // reflect the cap the server will actually enforce on send —
+  // reflect the cap the server will actually enforce on send,
   // otherwise a forum room with the 8000 cap was showing 4000 in
   // the counter and forcing trims that the server would have
   // accepted. Topic-create body (no `activeTopic` yet) is also a
@@ -484,7 +514,7 @@ export function Composer({
   // when) it changes. Ref-guarded so an unchanged prop on re-renders
   // doesn't repeatedly clobber a manual select-dropdown override the
   // user made after their last section click. `undefined` means "no
-  // signal" — distinct from `null` (Uncategorized).
+  // signal", distinct from `null` (Uncategorized).
   const prevPreferredRef = useRef(preferredCategoryId);
   useEffect(() => {
     if (preferredCategoryId === prevPreferredRef.current) return;
@@ -496,7 +526,7 @@ export function Composer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preferredCategoryId]);
 
-  // Hide the picker for replies/whispers — they inherit the parent
+  // Hide the picker for replies/whispers, they inherit the parent
   // thread's category implicitly server-side. Also hide for any slash
   // command (the picker only governs plain-say top-level messages).
   const isTopLevelSay = !value.trimStart().startsWith("/");
@@ -568,7 +598,7 @@ export function Composer({
             if (u.username.toLowerCase().startsWith(q)) {
               out.push({ name: u.username, online: u.online });
             }
-            // Character names that prefix-match too — typing `@ly`
+            // Character names that prefix-match too, typing `@ly`
             // should surface a character named "Lyra" even if her
             // master account name doesn't start with "ly".
             for (const c of u.characters ?? []) {
@@ -583,6 +613,44 @@ export function Composer({
           setServerSuggestions(out);
         })
         .catch(() => { if (myReq === searchReqRef.current) setServerSuggestions([]); });
+    }, 120);
+    return () => window.clearTimeout(handle);
+  }, [trigger?.kind, trigger?.query]);
+
+  // Identity-token suggestions for the `user-target` trigger (social
+  // games like /duel). Distinct from the username string-search above
+  // because the picker needs the full identity tuple (userId,
+  // characterId) so it can insert an `@cid:` / `@id:` token. The
+  // server endpoint requires at least one character of query, so the
+  // empty-query slot is filled by room occupants (also identity-
+  // tupled, see the items computation below).
+  type IdentitySuggestion = {
+    kind: "user" | "character";
+    userId: string;
+    characterId: string | null;
+    displayName: string;
+    masterUsername: string;
+    online: boolean;
+  };
+  const [identitySuggestions, setIdentitySuggestions] = useState<IdentitySuggestion[]>([]);
+  const identityReqRef = useRef(0);
+  useEffect(() => {
+    if (!trigger || trigger.kind !== "user-target") {
+      setIdentitySuggestions([]);
+      return;
+    }
+    const q = trigger.query;
+    if (q.length < 1) { setIdentitySuggestions([]); return; }
+    const myReq = ++identityReqRef.current;
+    const handle = window.setTimeout(() => {
+      fetch(`/identities/autocomplete?q=${encodeURIComponent(q)}&limit=8`, { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (myReq !== identityReqRef.current) return;
+          if (!j || !Array.isArray(j.identities)) { setIdentitySuggestions([]); return; }
+          setIdentitySuggestions(j.identities as IdentitySuggestion[]);
+        })
+        .catch(() => { if (myReq === identityReqRef.current) setIdentitySuggestions([]); });
     }, 120);
     return () => window.clearTimeout(handle);
   }, [trigger?.kind, trigger?.query]);
@@ -614,7 +682,7 @@ export function Composer({
       const out: CompletionItem[] = [];
       for (const c of commands) {
         // Only commands with the admin-side "Allow inline use" toggle
-        // appear here — the rest of the slash-only commands stay
+        // appear here, the rest of the slash-only commands stay
         // invisible to the `!` trigger.
         if (!c.allowInline) continue;
         const names = [c.name, ...c.aliases];
@@ -629,11 +697,68 @@ export function Composer({
       out.sort((a, b) => a.label.localeCompare(b.label));
       return out.slice(0, MAX_COMPLETIONS);
     }
-    // Item-target — first positional of /give /throw /drop. Occupant
+    // User-target, first positional of any USER_TARGET_CMDS slash
+    // command (currently just /duel). Two sources merged:
+    //   1. Room occupants (instant, full identity tuples already in
+    //      hand, so we can build the @cid:/@id: token without a
+    //      server round-trip).
+    //   2. /identities/autocomplete results (catches offline users
+    //      and characters not currently in this room).
+    // Insertion value is always the IDENTITY TOKEN, not the
+    // displayName, so the server resolves unambiguously even when
+    // two identities share a name. The label is the displayName;
+    // the sublabel hints at character-of-master so the user can
+    // pick the right one when names collide.
+    if (trigger.kind === "user-target") {
+      const out: CompletionItem[] = [];
+      const seen = new Set<string>();
+      const pushIdentity = (
+        userId: string,
+        characterId: string | null,
+        displayName: string,
+        sublabel?: string,
+      ) => {
+        // Identity-correct dedupe: two suggestions sharing a name
+        // are NOT duplicates if they have different ids. Key on the
+        // id tuple, not the name.
+        const idKey = characterId ? `c:${characterId}` : `u:${userId}`;
+        if (seen.has(idKey)) return;
+        seen.add(idKey);
+        const token = characterId ? `@cid:${characterId}` : `@id:${userId}`;
+        out.push({
+          value: token,
+          label: displayName,
+          ...(sublabel ? { sublabel } : {}),
+        });
+      };
+      // Occupants first (instant). Filter by query prefix when the
+      // user has started typing; empty query shows everyone in the
+      // room so the picker is useful immediately after the space.
+      if (occupants) {
+        for (const o of occupants) {
+          if (trigger.query.length > 0
+            && !o.displayName.toLowerCase().startsWith(trigger.query)) continue;
+          pushIdentity(o.userId, o.characterId, o.displayName, o.away ? "in room, away" : "in room");
+        }
+      }
+      out.sort((a, b) => a.label.localeCompare(b.label));
+      // Then server-side identity matches (offline users / out-of-
+      // room characters). The endpoint requires q.length >= 1 so
+      // this set is empty on the bare `/duel ` (space-only) case;
+      // occupants alone seed the picker until the user types a letter.
+      for (const s of identitySuggestions) {
+        const sublabel = s.kind === "character"
+          ? `character of ${s.masterUsername}`
+          : "user";
+        pushIdentity(s.userId, s.characterId, s.displayName, sublabel);
+      }
+      return out.slice(0, MAX_COMPLETIONS);
+    }
+    // Item-target, first positional of /give /throw /drop. Occupant
     // picker, identical filter to the whisper-target path but no
     // server-backed lookup (the target MUST be in the room for the
     // command to land server-side, so suggesting offline users would
-    // misdirect — they'd accept an offline name and hit
+    // misdirect, they'd accept an offline name and hit
     // "ITEM_CMD_NO_TARGET" when they pressed Enter).
     //
     // NBSP-substitute spaces in the inserted value the same way
@@ -659,10 +784,10 @@ export function Composer({
       out.sort((a, b) => a.label.localeCompare(b.label));
       return out.slice(0, MAX_COMPLETIONS);
     }
-    // Item-key — the item slot of /give /throw /drop. Source is the
+    // Item-key, the item slot of /give /throw /drop. Source is the
     // CURRENT identity's inventory (master if no character is active,
     // otherwise the active character). Filter by prefix on the
-    // singular name AND the plural — typing "co" surfaces both
+    // singular name AND the plural, typing "co" surfaces both
     // "cookies" and any other co-prefixed item the user holds. Empty
     // query lists everything the identity owns. Aliases are NOT
     // surfaced as their own suggestions (they'd duplicate canonical
@@ -685,17 +810,17 @@ export function Composer({
         out.push({
           value: row.name,
           label: row.name,
-          sublabel: `× ${entry.quantity.toLocaleString()}${row.description ? ` — ${row.description}` : ""}`,
+          sublabel: `× ${entry.quantity.toLocaleString()}${row.description ? `, ${row.description}` : ""}`,
         });
       }
       out.sort((a, b) => a.label.localeCompare(b.label));
       return out.slice(0, MAX_COMPLETIONS);
     }
     // @-mention OR whisper-target. Two sources, merged:
-    //   1. Occupants of the current room (instant — fastest path for
+    //   1. Occupants of the current room (instant, fastest path for
     //      "who's here right now").
     //   2. Server `/users?q=` suggestions (catches offline folks +
-    //      characters not currently in this room — the autocomplete
+    //      characters not currently in this room, the autocomplete
     //      previously left you stuck if you forgot the exact spelling
     //      of someone not in the room).
     // Dedupe by lowercased name so an occupant doesn't appear twice
@@ -706,7 +831,7 @@ export function Composer({
     // is NBSP-friendly but stops at a regular space, so without this
     // conversion `@The Doctor` would tokenize as just `@The`. NBSP
     // renders visually identical to a regular space, so users still
-    // SEE "@The Doctor" — they just get a single clickable mention.
+    // SEE "@The Doctor", they just get a single clickable mention.
     // The label keeps a regular space for the popup list so picker
     // results don't look weird.
     const NBSP = " ";
@@ -739,7 +864,7 @@ export function Composer({
       push(s.name, s.sublabel);
     }
     return out.slice(0, MAX_COMPLETIONS);
-  }, [trigger, commands, occupants, serverSuggestions, inventoryForActiveIdentity, itemCatalogByKey]);
+  }, [trigger, commands, occupants, serverSuggestions, identitySuggestions, inventoryForActiveIdentity, itemCatalogByKey]);
 
   const [selectedIndex, setSelectedIndex] = useState(0);
   // The popup never steals Enter until the user has opted in by pressing
@@ -778,7 +903,7 @@ export function Composer({
   // some browsers fold CSS min-height into scrollHeight after the
   // `style.height = "auto"` reset, others don't. Reading the computed
   // min-height back and flooring the inline style here guarantees the
-  // textarea never collapses below its CSS floor — important for the
+  // textarea never collapses below its CSS floor, important for the
   // mobile layout where the floor is sized to match the ↵+Send right
   // column so the row has no dead space below the input.
   useLayoutEffect(() => {
@@ -806,7 +931,7 @@ export function Composer({
     // (accidental trailing newline / spaces on copy-paste).
     if (!value.trim()) return;
     const t = value.trimEnd();
-    // Length gate. chat:input is fire-and-forget — by the time the
+    // Length gate. chat:input is fire-and-forget, by the time the
     // server's TOO_LONG `error:notice` echoes back, the call site
     // below has already cleared the input and the user's text is
     // gone. Validate here so an over-cap submit surfaces the same
@@ -832,7 +957,7 @@ export function Composer({
 
     // Forum-mode routing. Server enforces these structurally; here we
     // just pick the right payload shape based on which UI mode we're
-    // in. Both modes still need the body (`t`) — a topic with no body
+    // in. Both modes still need the body (`t`), a topic with no body
     // is treated as the first post AND the topic anchor, same row.
     if (isForumRoom && topicCreateMode) {
       const title = topicTitle.trim();
@@ -864,7 +989,7 @@ export function Composer({
   // Replace the composer text with a recalled (or restored) value and park
   // the caret at the end. Used by ArrowUp/ArrowDown history navigation.
   // requestAnimationFrame waits for the controlled value to flush before
-  // we reposition the caret — same pattern acceptItem uses.
+  // we reposition the caret, same pattern acceptItem uses.
   const recallText = useCallback((text: string) => {
     onChange(text);
     requestAnimationFrame(() => {
@@ -887,13 +1012,13 @@ export function Composer({
     onChange(next);
     const newCaret = t.tokenStart + inserted.length;
     // Prime the mentions-validity cache so the resulting `@name`
-    // renders as a chip on the FIRST render after send — skips the
+    // renders as a chip on the FIRST render after send, skips the
     // `/mentions/resolve` round-trip that would otherwise leave the
     // mention briefly as plain text. The picker only surfaces names
     // the server vouched for (occupants are by definition real users;
     // server suggestions came from /users?q=), so marking them known
     // here is safe. Whisper-target completions (no `@` prefix) get
-    // primed too — same name, same validity, same future render.
+    // primed too, same name, same validity, same future render.
     if (t.kind === "@" || t.kind === "whisper-target") {
       const picked = item.value.startsWith("@") ? item.value.slice(1) : item.value;
       if (picked) markMentionKnown(picked);
@@ -925,7 +1050,7 @@ export function Composer({
         setNavigatedSuggestions(true);
         return;
       }
-      // Tab is the explicit "accept the suggestion" key — always honored.
+      // Tab is the explicit "accept the suggestion" key, always honored.
       // Enter only accepts if the user has already opted into the popup
       // by pressing Up/Down; otherwise it falls through and submits what
       // the user actually typed (see comment on navigatedSuggestions).
@@ -959,7 +1084,7 @@ export function Composer({
     // History popup. ArrowUp opens it; once open, ArrowUp / ArrowDown
     // navigate within it; Enter accepts the highlighted entry; Esc
     // dismisses. Two gates on the open-trigger:
-    //   1. Account-level opt-out (`disableHistory`) — when set, the
+    //   1. Account-level opt-out (`disableHistory`), when set, the
     //      popup never opens. The arrow keys fall through to native
     //      caret movement.
     //   2. Caret must be on the FIRST line of the textarea. Walking the
@@ -974,7 +1099,7 @@ export function Composer({
     //
     // CRUCIALLY: opening the popup does NOT replace the textarea's
     // value. The user picks an entry explicitly with Enter or by
-    // clicking — until then, the in-progress draft is untouched.
+    // clicking, until then, the in-progress draft is untouched.
     if (historyOpen) {
       if (e.key === "ArrowUp") {
         e.preventDefault();
@@ -986,7 +1111,7 @@ export function Composer({
         setHistoryIndex((i) => {
           const next = i - 1;
           if (next < 0) {
-            // Walked past the most recent entry — close the popup
+            // Walked past the most recent entry, close the popup
             // rather than wrapping around. Keeps the muscle memory
             // of "down past the bottom of a list closes it."
             setHistoryOpen(false);
@@ -1016,7 +1141,7 @@ export function Composer({
         return;
       }
       // Any other key (typing, arrow-left/right, etc.) closes the
-      // popup and falls through to the normal handler — the user is
+      // popup and falls through to the normal handler, the user is
       // signaling they're done browsing history.
       setHistoryOpen(false);
       setHistoryIndex(0);
@@ -1059,7 +1184,7 @@ export function Composer({
   }
 
   // Mobile newline insertion. On-screen keyboards don't have Shift+Enter,
-  // and the Enter key on most mobile keyboards is bound to submit — so
+  // and the Enter key on most mobile keyboards is bound to submit, so
   // multi-line posters need an explicit button. Inserts at the caret (or
   // replaces the selection) and restores the caret one char past the
   // inserted newline. Visible only on mobile via `lg:hidden`.
@@ -1146,7 +1271,7 @@ export function Composer({
 
   /**
    * Insert a literal string at the caret position (or replacing the
-   * current selection). Used by the inline-emoticon picker — no
+   * current selection). Used by the inline-emoticon picker, no
    * wrap, just paste the token and advance the caret past it.
    */
   function insertAtCursor(literal: string): void {
@@ -1191,7 +1316,7 @@ export function Composer({
   // viewer). Flat rooms ignore all of this and fall through to the
   // chat composer.
   //
-  // Moderators bypass the locked-state input disable — they can still
+  // Moderators bypass the locked-state input disable, they can still
   // post moderation notes in locked threads. `forumReplying` covers
   // both the "topic isn't locked" and "topic IS locked but I'm a mod"
   // cases so the textarea behaves identically; the indicator strip
@@ -1251,7 +1376,7 @@ export function Composer({
         </div>
       ) : null}
 
-      {/* Forum-mode disabled state — composer is locked until the user
+      {/* Forum-mode disabled state, composer is locked until the user
           picks a topic or starts a new one. The "New Topic" button is
           the primary call-to-action in this state. */}
       {forumDisabled ? (
@@ -1259,10 +1384,10 @@ export function Composer({
           {/* `min-w-0 flex-1` lets the long hint shrink + wrap on narrow
               viewports instead of pushing the "+ New Topic" button off
               the right edge. Default flex items have `min-width: auto`
-              which means "as wide as the intrinsic content" — and a
+              which means "as wide as the intrinsic content", and a
               one-line sentence in English has no good wrap point, so
               without this it forces horizontal overflow on mobile. */}
-          <span className="min-w-0 flex-1">This room is a forum — pick a topic to reply, or start a new one.</span>
+          <span className="min-w-0 flex-1">This room is a forum, pick a topic to reply, or start a new one.</span>
           {onStartTopicCreate ? (
             <button
               type="button"
@@ -1283,7 +1408,7 @@ export function Composer({
         <div className="flex items-center justify-between gap-2 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1 text-xs text-keep-muted">
           <span className="min-w-0 truncate">
             <span className="mr-1" aria-hidden>🔒</span>
-            <b>{topicLabel(activeTopic!)}</b> is locked — no new replies.
+            <b>{topicLabel(activeTopic!)}</b> is locked, no new replies.
           </span>
           {onLeaveThread ? (
             <button
@@ -1299,7 +1424,7 @@ export function Composer({
       ) : null}
 
       {/* Forum-mode "replying" indicator. Two variants:
-            - normal:  active topic is unlocked — standard accent strip.
+            - normal:  active topic is unlocked, standard accent strip.
             - mod override: active topic is locked but the viewer is a
               moderator. Input stays enabled so they can post a verdict
               or notice, but the strip swaps to a muted-amber lock
@@ -1309,7 +1434,7 @@ export function Composer({
           <div className="flex items-center justify-between gap-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">
             <span className="min-w-0 truncate">
               <span className="mr-1" aria-hidden>🔒</span>
-              <span className="mr-1 text-[10px] uppercase tracking-widest opacity-70">Locked — replying as moderator</span>
+              <span className="mr-1 text-[10px] uppercase tracking-widest opacity-70">Locked, replying as moderator</span>
               <b>{topicLabel(activeTopic!)}</b>
             </span>
             {onLeaveThread ? (
@@ -1343,7 +1468,7 @@ export function Composer({
         )
       ) : null}
 
-      {/* Forum-mode "create topic" form — title input + category select
+      {/* Forum-mode "create topic" form, title input + category select
           stacked above the body textarea below. */}
       {forumCreating ? (
         <div className="flex flex-col gap-1 rounded border border-keep-action/40 bg-keep-action/5 p-2">
@@ -1414,13 +1539,13 @@ export function Composer({
         </label>
       ) : null}
 
-      {/* Formatting toolbar. Compact icon row above the textarea —
+      {/* Formatting toolbar. Compact icon row above the textarea,
           each button wraps the current selection with the relevant
           markdown markers, or inserts the markers around a placeholder
           when nothing is selected. Hidden when the input is disabled
           (forum-locked-for-viewer or no-active-topic states) since
           formatting a blocked compose makes no sense. */}
-      {/* Earning stats strip — mobile placement: a standalone row
+      {/* Earning stats strip, mobile placement: a standalone row
           above the formatting toolbar. Self-hides when the earning
           snapshot hasn't loaded. The desktop placement lives inside
           the toolbar below (pushed right via ml-auto). */}
@@ -1433,7 +1558,7 @@ export function Composer({
         // Compact toolbar row. On mobile the rooms-drawer trigger (💬)
         // lives at the LEFT of this row with a thin vertical divider
         // after it, freeing the input row below from a 40px-wide
-        // shrink-0 column — that column was eating into the textarea's
+        // shrink-0 column, that column was eating into the textarea's
         // width and limiting how much of a long message could be
         // visible. md+ has the rail always visible, so the 💬 + divider
         // are hidden and the toolbar's first item is the Bold button.
@@ -1442,7 +1567,7 @@ export function Composer({
             <>
               {/* Sizing mirrors FmtButton (`h-8 w-8 text-sm leading-none`)
                   so the rooms toggle sits flush with the format buttons
-                  to its right — different fixed-height classes were the
+                  to its right, different fixed-height classes were the
                   source of the misaligned bottom edge. */}
               <button
                 type="button"
@@ -1451,7 +1576,7 @@ export function Composer({
                 title="Rooms"
                 className="keep-button mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none hover:bg-keep-banner lg:hidden"
               >
-                {/* scroll.png — same asset swap as the disabled-state
+                {/* scroll.png, same asset swap as the disabled-state
                     drawer trigger above, applied to the live toolbar
                     drawer button. */}
                 <img src="/assets/icons/scroll.png" alt="" aria-hidden className="h-5 w-5 select-none" draggable={false} />
@@ -1482,13 +1607,13 @@ export function Composer({
           <FmtButton title="Spoiler (click to reveal)" onClick={() => wrapSelection("||", "||", "spoiler")}>
             <span aria-hidden>👁</span>
           </FmtButton>
-          <FmtButton title="Blockquote — prefixes selected lines with '> '" onClick={() => prefixLines("> ")}>
+          <FmtButton title="Blockquote, prefixes selected lines with '> '" onClick={() => prefixLines("> ")}>
             <span aria-hidden>❝</span>
           </FmtButton>
-          <FmtButton title="Link — wraps selection as [text](url)" onClick={() => insertLinkOrImage("link")}>
+          <FmtButton title="Link, wraps selection as [text](url)" onClick={() => insertLinkOrImage("link")}>
             <span aria-hidden>🔗</span>
           </FmtButton>
-          <FmtButton title="Image — inserts ![alt](url)" onClick={() => insertLinkOrImage("image")}>
+          <FmtButton title="Image, inserts ![alt](url)" onClick={() => insertLinkOrImage("image")}>
             <span aria-hidden>🖼</span>
           </FmtButton>
           {/* Inline emoticon: pops the picker, then inserts the
@@ -1501,7 +1626,7 @@ export function Composer({
               surrounding B / I / U / etc. The component's default
               className matches the SHARED FormattingToolbar (h-6
               transparent-border), which is what DM + Forum
-              composers use — Composer's bigger row would otherwise
+              composers use, Composer's bigger row would otherwise
               look like a smaller pill dropped into the wrong
               toolbar. */}
           <EmoticonPickerButton
@@ -1547,12 +1672,12 @@ export function Composer({
         {/* Thesaurus popup. Same anchor strategy as CompleterPopup
             (absolute, bottom-full) so highlighting a word in chat /
             forum messages pops a list of synonyms above the
-            textarea — Enter or click swaps the highlighted word for
+            textarea, Enter or click swaps the highlighted word for
             the chosen synonym. */}
         <SynonymPopup inputRef={inputRef} value={value} onChange={onChange} />
         {/* History popup. Opens on ArrowUp (when the caret is on the
             first line of the textarea). Shows most-recent sends first
-            without touching the in-progress draft — the user has to
+            without touching the in-progress draft, the user has to
             highlight + Enter (or click) to actually replace the
             text. Same bottom-full anchor as the other two popups so
             it slides up out of the textarea's top edge. */}
@@ -1563,7 +1688,7 @@ export function Composer({
             className="absolute bottom-full left-0 z-30 mb-1 max-h-56 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl"
           >
             <li className="border-b border-keep-rule/40 bg-keep-banner/40 px-2 py-1 text-[10px] uppercase tracking-widest text-keep-muted">
-              Recent sends — Enter to insert
+              Recent sends, Enter to insert
             </li>
             {historyRef.current
               .slice()
@@ -1638,7 +1763,7 @@ export function Composer({
           }}
           rows={1}
           // enterKeyHint relabels the on-screen keyboard's return key to
-          // "Send" so mobile users see the right affordance — Enter
+          // "Send" so mobile users see the right affordance, Enter
           // submits, the dedicated ↵ button (mobile-only) inserts a
           // newline.
           enterKeyHint="send"
@@ -1648,7 +1773,7 @@ export function Composer({
             (forumDisabled
               ? "Pick a topic or start a new one to post."
               : forumLockedForViewer
-                ? "This topic is locked — no new replies."
+                ? "This topic is locked, no new replies."
                 : forumCreating
                   ? "First post of the new topic..."
                   : forumLockedModOverride
@@ -1663,8 +1788,8 @@ export function Composer({
           // line spacing tight so multi-line posts don't waste vertical room.
           //
           // Mobile min-height (`min-h-[68px]`) is tuned to match the right
-          // column's natural height — ↵ (h-6 = 24px) + gap-1 (4px) + Send
-          // (h-10 = 40px) — so a single-line empty textarea sits flush with
+          // column's natural height, ↵ (h-6 = 24px) + gap-1 (4px) + Send
+          // (h-10 = 40px), so a single-line empty textarea sits flush with
           // the column instead of leaving dead space below it. md+ keeps
           // the tight `min-h-8` because the ↵ button is hidden and Send
           // alone is only 32px tall. The auto-grow effect respects this
@@ -1713,12 +1838,12 @@ export function Composer({
           disabled={submitDisabled}
           // h-10 mobile / lg:h-8 desktop. The mobile column is now
           // ↵ (h-6) + gap (4px) + Send (h-10) = 68px total, which
-          // becomes the row's natural height via items-stretch — the
+          // becomes the row's natural height via items-stretch, the
           // textarea grows to match, giving longer messages noticeably
           // more visible space. Breakpoint pinned to `lg` so the
           // mobile-vs-desktop boundary matches the rest of the chat
           // shell (rail visibility, ↵ button, format toolbar position)
-          // — at viewports between `md` (768) and `lg` (1024) the rail
+          //, at viewports between `md` (768) and `lg` (1024) the rail
           // is still in drawer mode and the composer needs to keep its
           // mobile sizing to match.
           className="keep-button h-10 shrink-0 rounded border border-keep-rule bg-keep-bg px-4 text-sm hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50 lg:h-8"
@@ -1776,7 +1901,7 @@ function ComposerCharCount({
  * Compact formatting-button helper for the Composer toolbar. Matches
  * the visual weight of the rail toggle / Send button (subtle border +
  * banner-tinted hover) so the strip reads as part of the same input.
- * onMouseDown.preventDefault keeps focus on the textarea — without it,
+ * onMouseDown.preventDefault keeps focus on the textarea, without it,
  * clicking a button would steal focus and the selection would
  * disappear before the wrap-handler runs.
  */
@@ -1796,7 +1921,7 @@ function FmtButton({
       aria-label={title}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
-      // Square `h-8 w-8` (32px) — previously `h-7 min-w-7 px-1.5`,
+      // Square `h-8 w-8` (32px), previously `h-7 min-w-7 px-1.5`,
       // which let the `<>` button stretch wider than the single-char
       // buttons and let emoji glyphs (👁 ❝ 🔗 🖼) inflate the visual
       // bounds inconsistently across single-char text labels (B I S).

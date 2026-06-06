@@ -7,7 +7,7 @@
 -- assumption that the client would paint "<Alice> hugs Bob".
 --
 -- Going forward custom commands render as kind="cmd" and the renderer
--- does NOT auto-prepend the name — the template controls placement via
+-- does NOT auto-prepend the name, the template controls placement via
 -- a `{sender}` (or `{name}`) placeholder. New templates can put the
 -- sender mid-sentence, at the end, or omit it entirely. To stop the
 -- transition from silently dropping the sender name from every existing
@@ -16,7 +16,7 @@
 --
 -- The LIKE check is intentionally case-sensitive because the template
 -- engine matches placeholders case-insensitively (`{Sender}` works the
--- same as `{sender}`) — checking against lowercase covers the typical
+-- same as `{sender}`), checking against lowercase covers the typical
 -- author casing AND any odd-cased entries fall back to the prepend,
 -- which is a no-op render-wise (the placeholder just appears earlier
 -- in the body).
@@ -27,7 +27,7 @@ WHERE LOWER(template) NOT LIKE '%{sender}%'
 
 -- The inline-only alternate template (added in 0059) is deliberately
 -- NOT migrated. Inline templates render as text spliced into the host
--- message body — the host message's own kind ("me" / "say" / etc.)
+-- message body, the host message's own kind ("me" / "say" / etc.)
 -- already paints the sender's name at the start, so injecting another
 -- {sender} into the inline output would produce "<Alice> ... Alice
 -- flips a coin: heads" with the name duplicated mid-sentence.

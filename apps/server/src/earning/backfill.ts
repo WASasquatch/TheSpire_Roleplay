@@ -6,7 +6,7 @@
  * every existing message row, applies the same IC / OOC routing rule
  * the live engine uses, and credits the resulting XP onto each pool.
  *
- * Currency is NOT backfilled — only XP. The rationale (per plan.md):
+ * Currency is NOT backfilled, only XP. The rationale (per plan.md):
  * historical contribution is a fair signal of how far up the rank
  * ladder someone should land, but minting Currency from scratch
  * hands long-tenured users a buying war chest on day one and breaks
@@ -18,7 +18,7 @@
  *
  * Idempotency: the migration / first-boot path stamps
  * `earningConfig.backfill.completedAt` after a successful run.
- * Subsequent boots see the timestamp and skip — even if the
+ * Subsequent boots see the timestamp and skip, even if the
  * `_migrations` ledger forgets the seed migration ever ran.
  */
 
@@ -38,7 +38,7 @@ type Pool = { scope: "user" | "character"; ownerId: string; xp: number; messageC
 
 /**
  * Run the backfill if it hasn't run yet. Returns a summary describing
- * what happened. Safe to call on every boot — the guard checks below
+ * what happened. Safe to call on every boot, the guard checks below
  * short-circuit cleanly when the work is already done or disabled.
  *
  * The function logs progress at info level; failures bubble up so the
@@ -57,7 +57,7 @@ export async function runBackfillIfNeeded(
   }
   const ratePerMessage = cfg.backfill.xpPerHistoricalMessage;
   if (!Number.isFinite(ratePerMessage) || ratePerMessage <= 0) {
-    // Rate set to 0 or invalid — mark complete so we don't keep
+    // Rate set to 0 or invalid, mark complete so we don't keep
     // re-checking on every boot.
     await markBackfillComplete(db);
     return { status: "skipped", reason: "rate_zero_or_invalid" };
@@ -71,9 +71,9 @@ export async function runBackfillIfNeeded(
   // rule per group to decide which pool the count contributes to.
   //
   // Filters:
-  //   - kind not in ('cmd','system') — never earned XP live
-  //   - deleted_at IS NULL — removed messages never earned XP
-  //   - length(trim(body)) >= bodyFloor — body floor
+  //   - kind not in ('cmd','system'), never earned XP live
+  //   - deleted_at IS NULL, removed messages never earned XP
+  //   - length(trim(body)) >= bodyFloor, body floor
   const groups = await db.all<{
     userId: string;
     characterId: string | null;
@@ -122,7 +122,7 @@ export async function runBackfillIfNeeded(
 
   // Write each pool. Sequential rather than concurrent because every
   // write touches the singleton earning row + a new ledger row in
-  // the same SQLite WAL — concurrent writes would just serialize on
+  // the same SQLite WAL, concurrent writes would just serialize on
   // the writer lock anyway. Lazy-create the earning row if missing.
   for (const pool of pools.values()) {
     try {
@@ -175,7 +175,7 @@ export async function runBackfillIfNeeded(
       });
     } catch (err) {
       log.error({ err, pool }, "[earning] backfill: pool write failed");
-      // Keep going — a single pool failing shouldn't kill the whole batch.
+      // Keep going, a single pool failing shouldn't kill the whole batch.
     }
   }
 

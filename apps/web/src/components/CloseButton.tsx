@@ -1,15 +1,15 @@
 /**
- * CloseButton — shared dismiss control rendered as a square `×`
+ * CloseButton, shared dismiss control rendered as a square `×`
  * button.
  *
  * Replaces the ad-hoc `<button>close</button>` text links scattered
  * across modals/panels with a single consistent affordance. The
- * glyph is the Unicode multiplication sign (U+00D7) — universally
+ * glyph is the Unicode multiplication sign (U+00D7), universally
  * recognized as "close" without needing the word, and visually
  * lighter than typing the letter "X".
  *
  * Visual: bordered square, muted color, lifts to keep-text on hover
- * with a banner-tinted background — matches the existing keep-button
+ * with a banner-tinted background, matches the existing keep-button
  * treatment so it feels native everywhere.
  *
  * Use `aria-label` (or the default "Close") to keep screen readers

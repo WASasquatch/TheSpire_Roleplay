@@ -15,7 +15,7 @@ import {
 import { readError } from "../lib/http.js";
 
 interface Props {
-  /** Story detail — provides id, allowEdit, linked world id. */
+  /** Story detail, provides id, allowEdit, linked world id. */
   detail: StoryDetail;
 }
 
@@ -26,7 +26,7 @@ interface Props {
  *
  * When the story is linked to a world (`linkedWorld` set on detail),
  * an extra "Linked world" section surfaces that world's pages as
- * read-only references — the author can browse their world's lore
+ * read-only references, the author can browse their world's lore
  * without leaving the editor, but can't edit it from here.
  *
  * Self-contained: owns its own fetches + state so the parent
@@ -249,7 +249,7 @@ function LinkedWorldPanel({ worldId }: { worldId: string }) {
       ) : (
         <>
           <p className="px-3 py-2 text-[11px] text-keep-muted">
-            <span className="text-keep-text">{detail.world.name}</span> — {detail.world.pageCount}{" "}
+            <span className="text-keep-text">{detail.world.name}</span>, {detail.world.pageCount}{" "}
             {detail.world.pageCount === 1 ? "page" : "pages"}
           </p>
           <ul>
@@ -277,7 +277,7 @@ function LinkedWorldPanel({ worldId }: { worldId: string }) {
           </ul>
           {detail.pages.length > 30 ? (
             <p className="px-3 py-1 text-[10px] italic text-keep-muted">
-              + {detail.pages.length - 30} more pages — open in World viewer for the full tree.
+              + {detail.pages.length - 30} more pages, open in World viewer for the full tree.
             </p>
           ) : null}
         </>
@@ -472,7 +472,7 @@ function EntityEditor({
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
         <span>
-          Public — surfaces in the story's reader Cast &amp; Places appendix.
+          Public, surfaces in the story's reader Cast &amp; Places appendix.
           {" "}
           <span className="text-keep-muted">Default off (continuity notes stay author-only).</span>
         </span>
@@ -522,7 +522,7 @@ function EntityStatsRow({
       </div>
     );
   }
-  // Characters + locations — free-form key/value table.
+  // Characters + locations, free-form key/value table.
   return <FreeformStats stats={stats} setStats={setStats} kind={kind} />;
 }
 
@@ -623,10 +623,10 @@ function placeholderFor(k: StoryEntityKind): string {
 
 function bodyPlaceholderFor(k: StoryEntityKind): string {
   return k === "character"
-    ? "Long-form bio — backstory, motivations, voice notes…"
+    ? "Long-form bio, backstory, motivations, voice notes…"
     : k === "location"
-      ? "Long-form description — geography, history, atmosphere…"
-      : "Outline notes — setup beats, payoff beats, character impact…";
+      ? "Long-form description, geography, history, atmosphere…"
+      : "Outline notes, setup beats, payoff beats, character impact…";
 }
 
 function plotStatusClass(s: StoryPlotStatus): string {

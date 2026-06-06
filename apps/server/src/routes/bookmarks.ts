@@ -46,13 +46,13 @@ async function canCallerSeeMessage(db: Db, userId: string, messageId: string) {
 }
 
 /**
- * Per-user bookmarks. CRUD only — the unique index on (user_id, message_id)
+ * Per-user bookmarks. CRUD only, the unique index on (user_id, message_id)
  * makes POST idempotent (re-bookmarking the same message updates the
  * existing row's category/note instead of duplicating).
  *
  * Privacy: every write validates the caller can see the underlying
  * message (same gates as joinRoom backlog + search). Reads return only
- * the caller's own rows. Site admins are NOT bypassed — bookmarks are
+ * the caller's own rows. Site admins are NOT bypassed, bookmarks are
  * private user state.
  */
 export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Promise<void> {
@@ -103,7 +103,7 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
         replyToId: m.replyToId ?? null,
         // Snapshot color + cmd-css so the bookmark preview paints the
         // same way the row reads in chat. `kind: "cmd"` rows especially
-        // depend on this — without the css the bookmarked snippet drops
+        // depend on this, without the css the bookmarked snippet drops
         // back to plain text and an admin-styled command (italic + a
         // theme color) renders inconsistently between the live chat and
         // the bookmarks viewer.
@@ -136,7 +136,7 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
     const category = (body.category ?? "").trim();
     const note = body.note?.trim() || null;
 
-    // Idempotent upsert on the unique (user, message) index — re-bookmarking
+    // Idempotent upsert on the unique (user, message) index, re-bookmarking
     // updates the category/note instead of duplicating.
     const existing = (await db
       .select()

@@ -18,7 +18,7 @@
  *
  * Optional CSS payload: when the underlying command has a sanitized
  * CSS declaration list, it's URI-encoded and stitched into the start
- * marker after a `|` separator — `⁣⟦cmd:NAME|encoded%20css⟧⁣`. The
+ * marker after a `|` separator, `⁣⟦cmd:NAME|encoded%20css⟧⁣`. The
  * renderer decodes it and applies the resulting style to the verified
  * span so an inline `!cmd` call inherits the same look as its
  * standalone `/cmd` form (e.g. an admin-marked italic+red command
@@ -27,7 +27,7 @@
  * payloads compact.
  *
  * URI-encoding the CSS guarantees the separator (`|`) and the closing
- * bracket (`⟧`) can't appear inside the payload — that's what lets
+ * bracket (`⟧`) can't appear inside the payload, that's what lets
  * the regex below stay non-greedy without ambiguity.
  *
  * Strip-before-expand is load-bearing for the security claim: the
@@ -52,10 +52,10 @@ export const VMARK_ANY_RE =
  *
  * The two payload slots are independently optional and separated by `|`,
  * so callers see four legal start-tag shapes:
- *   - `⟦cmd:NAME⟧`           — bare (no css, no color)
- *   - `⟦cmd:NAME|css⟧`       — css only
- *   - `⟦cmd:NAME|css|color⟧` — both
- *   - `⟦cmd:NAME||color⟧`    — color only (empty css slot)
+ *   - `⟦cmd:NAME⟧`          , bare (no css, no color)
+ *   - `⟦cmd:NAME|css⟧`      , css only
+ *   - `⟦cmd:NAME|css|color⟧`, both
+ *   - `⟦cmd:NAME||color⟧`   , color only (empty css slot)
  * The css group's `[^|⟧]*` deliberately disallows `|` inside the value
  * so the parser can find the boundary between css and color without
  * any ambiguity. URI-encoding the inputs upstream guarantees that
@@ -67,21 +67,21 @@ export const VMARK_SPAN_RE =
 /**
  * Wrap a single expansion in verification markers. `name` is sanitized
  * to the command-name alphabet so an unexpected character never ends
- * up inside the marker (defense in depth — the server only feeds
+ * up inside the marker (defense in depth, the server only feeds
  * command names here, but the regex above expects this shape).
  *
  * `css` is the sanitized CSS declaration list to apply to the rendered
  * span. Caller is responsible for having already run the input through
  * `sanitizeCustomCmdCss`; this helper does NOT re-validate.
  *
- * `color` is the snapshotted color from the command row — either a
+ * `color` is the snapshotted color from the command row, either a
  * `#rrggbb` hex literal or a `theme:<slot>` token. Passed verbatim
  * through the marker so the renderer can resolve it the same way it
  * resolves `msg.color` on a standalone `/cmd` line (turning a theme
  * token into a CSS variable, or nudging a hex against the viewer's
  * theme bg for legibility).
  *
- * Both `css` and `color` are independently optional — passing only one
+ * Both `css` and `color` are independently optional, passing only one
  * is fine.
  */
 export function markVerified(

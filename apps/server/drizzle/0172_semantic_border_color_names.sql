@@ -248,7 +248,7 @@ SET `style_css` = '.b-holo {
   background: conic-gradient(from 0deg, var(--c-ring-bg-1, #00bcd4), var(--c-ring-bg-2, #e040fb), var(--c-ring-bg-3, #00e5ff), var(--c-ring-bg-4, #ff4081), var(--c-ring-bg-1, #00bcd4));
   box-shadow: 0 0 10px var(--c-ring-glow-1, rgba(0,229,255,.5));
 }
-/* Scanlines OVER the avatar — z-index 11 puts this above .pic
+/* Scanlines OVER the avatar, z-index 11 puts this above .pic
    (z=10 from the preamble); screen blend keeps the portrait
    visible underneath. */
 .b-holo::before {
@@ -268,7 +268,7 @@ SET `style_css` = '.b-holo {
   pointer-events: none;
   mix-blend-mode: screen;
 }
-/* Outer chromatic glitch ring — sits on top of everything. */
+/* Outer chromatic glitch ring, sits on top of everything. */
 .b-holo::after {
   content: "";
   position: absolute;
@@ -279,7 +279,7 @@ SET `style_css` = '.b-holo {
   z-index: 12;
   pointer-events: none;
 }
-/* Avatar stays stable — only a periodic chromatic-aberration
+/* Avatar stays stable, only a periodic chromatic-aberration
    flicker via filter (no transform, so it doesnt fight with the
    preamble or rotate weirdly). */
 .b-holo .pic {

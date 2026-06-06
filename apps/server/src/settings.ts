@@ -27,7 +27,7 @@ export function hashWelcome(html: string): string {
  *
  * For "your own profile" reads where the client needs to distinguish
  * "user explicitly picked X" from "user has no preference, inherits site
- * default", use `parseOwnThemeJson` below instead — it returns null
+ * default", use `parseOwnThemeJson` below instead, it returns null
  * rather than substituting the default. Without that distinction the
  * client would freeze a snapshot of the site default at fetch time and
  * stop responding to later admin changes (per-user theme save with
@@ -42,7 +42,7 @@ export async function parseUserThemeJson(db: Db, json: string | null): Promise<T
 }
 
 /**
- * Strict parse — returns Theme on success, null when the column was null
+ * Strict parse, returns Theme on success, null when the column was null
  * or the stored JSON is unparseable. No site-default fallback. Use this
  * on read paths where the caller must know whether the user has an
  * explicit theme of their own (e.g. /me/profile, so the client can let
@@ -105,6 +105,13 @@ export interface SiteSettings {
   /** Cap on the title of a forum topic. */
   maxForumTopicTitleLength: number;
   /**
+   * Topics shown per page in each forum category's pagination strip.
+   * Bounded 5..100 by the admin route; 20 is the default and mirrors
+   * the prior cursor-paged behavior so the UI doesn't visually shift
+   * on deploy.
+   */
+  forumTopicsPerPage: number;
+  /**
    * Author-edit / author-delete grace window in ms for flat chat
    * rooms. Mods and admins bypass the gate entirely; forum (nested)
    * rooms allow indefinite edits regardless. Default 5 minutes.
@@ -134,7 +141,7 @@ export interface SiteSettings {
   activityFeedsEnabled: boolean;
   /** Splash page shows a randomized carousel of up to 10 open worlds when on. Off by default. */
   featuredWorldsEnabled: boolean;
-  /** Splash stat: surface the rolling 24h chat message count. Independent of `activityFeedsEnabled` — each toggle gates its own section, so admins can show this alone, the online/room cluster alone, or both together. Off by default. */
+  /** Splash stat: surface the rolling 24h chat message count. Independent of `activityFeedsEnabled`, each toggle gates its own section, so admins can show this alone, the online/room cluster alone, or both together. Off by default. */
   splashMessages24hEnabled: boolean;
   /** Sanitized HTML for the post-login welcome/announcement modal. Empty string = no welcome to show. */
   newUserWelcomeHtml: string;
@@ -156,7 +163,7 @@ export interface SiteSettings {
   /** Iteration of the DEFAULT_WORLDS seed last applied to system worlds. The boot seeder compares against SEED_VERSION in seed_worlds.ts and overwrites when this is behind. */
   worldsSeedVersion: number;
   /**
-   * Earning system runtime config — every award rate, cap, and
+   * Earning system runtime config, every award rate, cap, and
    * transfer gate the engine reads. Always populated (parse failure
    * or NULL column falls back to DEFAULT_EARNING_CONFIG so the
    * engine can trust the shape unconditionally).
@@ -209,7 +216,7 @@ export interface SettingsPatch {
   /**
    * Banner/splash logo URL. Empty string clears the override (banner
    * falls back to text title). Any non-empty string is stored verbatim
-   * — typically `/thespire-logo.png` (default), an `/uploads/...` path
+   *, typically `/thespire-logo.png` (default), an `/uploads/...` path
    * from the upload endpoint, or a remote https URL.
    */
   logoUrl?: string;
@@ -220,6 +227,8 @@ export interface SettingsPatch {
   maxDirectMessageLength?: number;
   maxForumPostLength?: number;
   maxForumTopicTitleLength?: number;
+  /** Forum-pagination page size. Route handler validates 5..100. */
+  forumTopicsPerPage?: number;
   /** Author-edit/delete grace window in ms (chat rooms). */
   editGraceMs?: number;
   maxBioLength?: number;
@@ -250,7 +259,7 @@ export interface SettingsPatch {
    * Per-preset design map. Pass the full object to replace; the helper
    * stringifies. Pass null/empty to clear (every theme falls back to
    * `defaultStyleKey`). Keys outside the THEME_PRESETS catalog are
-   * stored verbatim — the renderer just ignores them.
+   * stored verbatim, the renderer just ignores them.
    */
   themeDesignMap?: Record<string, string> | null;
   /**
@@ -298,6 +307,7 @@ export async function updateSettings(
   if (patch.maxDirectMessageLength !== undefined) update.maxDirectMessageLength = patch.maxDirectMessageLength;
   if (patch.maxForumPostLength !== undefined) update.maxForumPostLength = patch.maxForumPostLength;
   if (patch.maxForumTopicTitleLength !== undefined) update.maxForumTopicTitleLength = patch.maxForumTopicTitleLength;
+  if (patch.forumTopicsPerPage !== undefined) update.forumTopicsPerPage = patch.forumTopicsPerPage;
   if (patch.editGraceMs !== undefined) update.editGraceMs = patch.editGraceMs;
   if (patch.maxBioLength !== undefined) update.maxBioLength = patch.maxBioLength;
   if (patch.registrationOpen !== undefined) update.registrationOpen = patch.registrationOpen;
@@ -367,6 +377,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     maxDirectMessageLength: row.maxDirectMessageLength,
     maxForumPostLength: row.maxForumPostLength,
     maxForumTopicTitleLength: row.maxForumTopicTitleLength,
+    forumTopicsPerPage: row.forumTopicsPerPage,
     editGraceMs: row.editGraceMs,
     maxBioLength: row.maxBioLength,
     registrationOpen: row.registrationOpen,
@@ -416,7 +427,7 @@ function parseThemeDesignMap(raw: string | null): Record<string, string> {
  * Atomically bump the stored worlds-seed-version. Called by the seeder
  * after it has successfully written the v{n} content so the next boot
  * compares against the new value and skips redundant work. Direct write
- * (not via `updateSettings`) because there's no actor user — the seed
+ * (not via `updateSettings`) because there's no actor user, the seed
  * is system-initiated, and we don't want it touching `updatedById`.
  */
 export async function setWorldsSeedVersion(db: Db, version: number): Promise<void> {

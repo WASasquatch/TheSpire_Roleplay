@@ -23,7 +23,7 @@ export interface PoolView {
   maxRankKeyEverHeld: string | null;
   maxTierEverHeld: number | null;
   selectedBorderRankKey: string | null;
-  /** Free-form border equip slot — independent of the rank-tier
+  /** Free-form border equip slot, independent of the rank-tier
    *  slot. BorderedAvatar resolves freeform first, falling back to
    *  the rank slot if unset. Null = no freeform border equipped. */
   selectedFreeformBorderKey: string | null;
@@ -62,7 +62,7 @@ export interface OwnedBorder {
   acquiredAt: number;
 }
 
-/** Free-form border ownership row. Distinct from `OwnedBorder` —
+/** Free-form border ownership row. Distinct from `OwnedBorder`,
  *  the keys point at `freeform_borders.key`, not a `ranks.key`, and
  *  the two ledgers are independent. */
 export interface OwnedFreeformBorder {
@@ -102,14 +102,14 @@ export interface IdentityCosmetics {
    * is empty (either no `flair_profile_banner` purchase yet, the
    * user cleared the URL, or admin moderation cleared an abusive
    * link). Renders as a 3:1 hero strip at the top of the profile
-   * modal — see ProfileModal.
+   * modal, see ProfileModal.
    */
   profileBannerUrl: string | null;
   /**
    * Whether this identity has purchased `flair_profile_banner` (the
    * Flair unlock for the banner URL slot). Separate from
    * `profileBannerUrl` because the user can own the cosmetic but
-   * have cleared their URL — the Flair tab needs to know to show
+   * have cleared their URL, the Flair tab needs to know to show
    * "Set / clear URL" instead of "Buy" in that state.
    */
   profileBannerOwned: boolean;
@@ -122,20 +122,20 @@ export interface IdentityCosmetics {
    *  alone in the indicator strip, replaces "is typing…" with this
    *  string. Server clamps to 60 chars and strips control chars
    *  before writing, so the client can render verbatim (still text-
-   *  escaped — never as HTML). */
+   *  escaped, never as HTML). */
   typingPhrase?: string | null;
   /** Whether this identity has purchased `flair_typing_phrase`. Same
-   *  pattern as `profileBannerOwned` — separates "owns the unlock"
+   *  pattern as `profileBannerOwned`, separates "owns the unlock"
    *  from "has currently set a phrase" so the Flair tab can show
    *  "Buy" vs "Set phrase" cleanly. */
   typingPhraseOwned?: boolean;
-  /** Phase 6 — Lurking Master toggle state. When true (and owned),
+  /** Phase 6, Lurking Master toggle state. When true (and owned),
    *  the typing indicator hides this user from non-admin receivers.
    *  Admins always see the typing pulse for moderation visibility. */
   lurkingMasterEnabled?: boolean;
   /** Whether this identity has purchased `flair_lurking_master`. */
   lurkingMasterOwned?: boolean;
-  /** Phase 7 (migration 0161) — custom room join template. When
+  /** Phase 7 (migration 0161), custom room join template. When
    *  set AND `roomPresenceOwned` is true, the join broadcast in
    *  every non-forum room substitutes this text (with `{name}` and
    *  `{room}` placeholders) for the default phrasing. Null = use
@@ -154,13 +154,13 @@ export interface IdentityCosmetics {
   sessionExitTemplate?: string | null;
   /** Whether the master has purchased `flair_session_presence`. */
   sessionPresenceOwned?: boolean;
-  /** Migration 0192 — `flair_profile_visitors` ownership. Gates the
+  /** Migration 0192, `flair_profile_visitors` ownership. Gates the
    *  CosmeticsTab Buy/Equip CTA and the editor's stats panel. The
    *  actual visibility toggle + view counts live behind
    *  `/me/profile-flair` (not on the snapshot) so the editor's
    *  fetched state stays decoupled from the catalog snapshot. */
   profileVisitorsOwned?: boolean;
-  /** Migration 0192 — `flair_profile_marquee` ownership. Gates the
+  /** Migration 0192, `flair_profile_marquee` ownership. Gates the
    *  CosmeticsTab Buy CTA + the editor's quotes grid. Quote bodies
    *  live behind `/me/profile-flair`, not on the snapshot, since
    *  they can be edited frequently and we don't want the snapshot
@@ -218,7 +218,7 @@ export const ITEM_CATEGORIES: readonly ItemCategory[] = [
   "magic", "treasure", "building", "gift", "pet", "misc",
 ] as const;
 
-/** Human-readable label for each category — used for shop-tab text. */
+/** Human-readable label for each category, used for shop-tab text. */
 export const ITEM_CATEGORY_LABELS: Record<ItemCategory, string> = {
   food: "Food", drink: "Drinks", joke: "Joke", tool: "Tools",
   weapon: "Weapons", armor: "Armor", magic: "Magic", treasure: "Treasure",
@@ -231,7 +231,7 @@ export const ITEM_CATEGORY_LABELS: Record<ItemCategory, string> = {
  * raw fields are also exposed so the UI can render the reason
  * something isn't purchasable (sale starts at X, sale ended at Y).
  * `availableCommands` mirrors which of give/throw/drop have non-empty
- * message arrays — the dashboard's command help uses it.
+ * message arrays, the dashboard's command help uses it.
  */
 export interface ItemCatalogRow {
   key: string;
@@ -260,7 +260,7 @@ export interface InventoryEntry {
 }
 
 /**
- * One pinned slot in an identity's Collection (Phase 3). Sparse —
+ * One pinned slot in an identity's Collection (Phase 3). Sparse,
  * a slot index in 0..9 with the chosen item key. The Collection
  * tab in the dashboard renders 10 slots and overlays the entries
  * indexed by `slot`.
@@ -292,7 +292,7 @@ export interface EarningMeResponse {
    *  carry their own owned lists in `ownedStylesByCharacter`. */
   ownedStyles: OwnedStyle[];
   ownedBorders: OwnedBorder[];
-  /** Master/OOC's owned free-form borders — parallel to
+  /** Master/OOC's owned free-form borders, parallel to
    *  `ownedBorders` but distinct, since the two catalogs are
    *  independent. */
   ownedFreeformBorders: OwnedFreeformBorder[];
@@ -301,21 +301,21 @@ export interface EarningMeResponse {
   ownedStylesByCharacter: Record<string, OwnedStyle[]>;
   ownedBordersByCharacter: Record<string, OwnedBorder[]>;
   ownedFreeformBordersByCharacter: Record<string, OwnedFreeformBorder[]>;
-  /** Master/OOC inventory — items owned on the OOC pool. Independent
+  /** Master/OOC inventory, items owned on the OOC pool. Independent
    *  of every character's inventory (`inventoryByCharacter`). */
   inventory: InventoryEntry[];
   /** Per-character inventory keyed by character id. Each entry is
    *  fully isolated; nothing implicitly mirrors across identities. */
   inventoryByCharacter: Record<string, InventoryEntry[]>;
   /** Master/OOC Collection pins (Phase 3, 10-slot showcase). Sparse.
-   *  Independent of every character's Collection — pins do not
+   *  Independent of every character's Collection, pins do not
    *  carry across identities. Items pinned here have category !=
    *  'pet'; pets live in `petCollection`. */
   collection: CollectionEntry[];
   /** Per-character Collection pins keyed by character id. */
   collectionByCharacter: Record<string, CollectionEntry[]>;
   /** Master/OOC Pet Collection pins (5-slot showcase). Only items
-   *  with category='pet' are pinnable here — server enforces. */
+   *  with category='pet' are pinnable here, server enforces. */
   petCollection: CollectionEntry[];
   /** Per-character Pet Collection pins keyed by character id. */
   petCollectionByCharacter: Record<string, CollectionEntry[]>;
@@ -342,7 +342,7 @@ export interface LedgerPage {
 export interface PublicEarningResponse {
   userId: string;
   username: string;
-  /** Present only when the response is scoped to a CHARACTER pool —
+  /** Present only when the response is scoped to a CHARACTER pool,
    *  echoed back from the `?characterId=` query the caller sent.
    *  Lets the client confirm it's reading the right pool before
    *  painting numbers (defensive against a stale state race). */
@@ -486,12 +486,12 @@ export async function patchEarningSettings(body: {
   hideCurrencyCount?: boolean;
   hideXpCount?: boolean;
   selectedBorderRankKey?: string | null;
-  /** Free-form border equip — independent of the rank-tier slot.
+  /** Free-form border equip, independent of the rank-tier slot.
    *  Pass null to unequip the freeform border (the rank border, if
    *  any, then takes over). */
   selectedFreeformBorderKey?: string | null;
   /** Per-identity scope for border equip (selectedBorderRankKey /
-   *  selectedFreeformBorderKey). Hide flags ignore characterId —
+   *  selectedFreeformBorderKey). Hide flags ignore characterId,
    *  they're master-only privacy preferences. Null/omitted = master
    *  pool. */
   characterId?: string | null;
@@ -559,7 +559,7 @@ export type RankingBoardKey =
  * A single leaderboard entry. Cosmetic context (border / freeform
  * config / name-style / rank tier) is carried so the Rankings tab
  * can paint the entry's avatar + name in the user's actual
- * equipped look — same fidelity as the userlist.
+ * equipped look, same fidelity as the userlist.
  */
 export interface RankingPoolEntry {
   scope: "user" | "character";
@@ -603,6 +603,38 @@ export interface RankingsResponse {
 
 export async function fetchRankings(): Promise<RankingsResponse> {
   return jsonOrThrow<RankingsResponse>(await fetch("/earning/rankings", { credentials: "include" }));
+}
+
+/* ---------- social-game rankings ---------- */
+
+export interface GameRankingRow {
+  ownerScope: "user" | "character";
+  ownerId: string;
+  displayName: string;
+  wins: number;
+  points: number;
+  lastWonAt: number;
+}
+
+export interface OverallRankingRow {
+  ownerScope: "user" | "character";
+  ownerId: string;
+  displayName: string;
+  totalWins: number;
+  totalPoints: number;
+}
+
+export interface GameRankingsResponse {
+  games: Array<{
+    gameKind: string;
+    label: string;
+    leaderboard: GameRankingRow[];
+  }>;
+  overall: OverallRankingRow[];
+}
+
+export async function fetchGameRankings(): Promise<GameRankingsResponse> {
+  return jsonOrThrow<GameRankingsResponse>(await fetch("/earning/game-rankings", { credentials: "include" }));
 }
 
 /* ---------- admin flash-sale + transfer ---------- */
@@ -712,7 +744,7 @@ export async function uploadCatalogImport(
   kind: EarningTransferKind,
   file: File,
 ): Promise<CatalogImportResult> {
-  // Same base64-in-JSON wire shape the existing logo upload uses —
+  // Same base64-in-JSON wire shape the existing logo upload uses,
   // no multipart plugin needed server-side.
   const buf = await file.arrayBuffer();
   const zipBase64 = bufferToBase64(new Uint8Array(buf));
@@ -742,7 +774,7 @@ export async function fetchPublicEarning(
   userId: string,
   characterId?: string | null,
 ): Promise<PublicEarningResponse> {
-  // characterId routes the response to the CHARACTER pool — required
+  // characterId routes the response to the CHARACTER pool, required
   // for character profiles, since the master pool's XP / currency /
   // rank / border belong to a different identity. Omitted (or null)
   // for master/OOC profiles, which keep the legacy behavior.
@@ -840,7 +872,7 @@ export async function deleteAdminTier(id: string): Promise<void> {
   if (!r.ok) throw new Error(await readError(r));
 }
 
-/* ---------- Self — cosmetic + border purchase / equip ---------- */
+/* ---------- Self, cosmetic + border purchase / equip ---------- */
 
 export async function purchaseCosmetic(
   key: string,
@@ -921,7 +953,7 @@ export async function patchTypingPhrase(
 
 /**
  * Set or clear the room-presence broadcast templates (migration 0161).
- * Each field is optional — omit to leave the slot unchanged, pass
+ * Each field is optional, omit to leave the slot unchanged, pass
  * null to clear it, pass a string to set. Per-identity scope mirrors
  * the typing-phrase endpoint. Server validates length + strips
  * control / angle-bracket characters and returns the post-write
@@ -946,7 +978,7 @@ export async function patchRoomPresenceTemplates(
 
 /**
  * Set or clear the session-presence templates (migration 0161).
- * Master-only — no characterId field, no per-character partition.
+ * Master-only, no characterId field, no per-character partition.
  * Same omit/null/string semantics as the room-presence twin.
  */
 export async function patchSessionPresenceTemplates(
@@ -1020,7 +1052,7 @@ export async function patchFreeformBorderConfig(
   if (!r.ok) throw new Error(await readError(r));
 }
 
-/* ---------- Self — name-style purchase / config / equip ---------- */
+/* ---------- Self, name-style purchase / config / equip ---------- */
 
 export async function purchaseNameStyle(
   styleKey: string,
@@ -1077,7 +1109,7 @@ export async function setInlineAvatarEnabled(
   if (!r.ok) throw new Error(await readError(r));
 }
 
-/* ---------- Admin — name styles CRUD ---------- */
+/* ---------- Admin, name styles CRUD ---------- */
 
 export interface AdminNameStyleRow {
   key: string;
@@ -1142,7 +1174,7 @@ export async function deleteAdminNameStyle(key: string): Promise<void> {
   if (!r.ok) throw new Error(await readError(r));
 }
 
-/* ---------- Admin — free-form borders CRUD ---------- */
+/* ---------- Admin, free-form borders CRUD ---------- */
 
 export interface AdminFreeformBorderRow {
   key: string;
@@ -1213,12 +1245,12 @@ export async function deleteAdminFreeformBorder(key: string): Promise<void> {
   if (!r.ok) throw new Error(await readError(r));
 }
 
-/* ---------- Admin — test grants (masteradmin only) ----------
+/* ---------- Admin, test grants (masteradmin only) ----------
  *
  * Direct grants used for QA / asset preview. They write through
  * the same engine the live earn/purchase paths use (ledger + rank
  * resolver + socket events), so the dashboard wallet of the
- * recipient updates immediately. Username is the lookup key —
+ * recipient updates immediately. Username is the lookup key,
  * admins don't need to dig up the internal user id.
  */
 
@@ -1278,7 +1310,7 @@ export async function adminGrantStyle(username: string, styleKey: string): Promi
 
 /** Remove ownership of a rank-tier border from the target user.
  *  If the user had it equipped, the equip slot clears too.
- *  Idempotent on unowned. Master-pool only — the server endpoint
+ *  Idempotent on unowned. Master-pool only, the server endpoint
  *  doesn't model per-character rank-border ownership today. */
 export async function adminRevokeBorder(username: string, rankKey: string): Promise<void> {
   const r = await fetch("/admin/earning/revoke-border", {
@@ -1343,7 +1375,7 @@ export async function adminRevokeFreeformBorder(
 /**
  * Admin moderation lever for the Phase 2 profile-banner Flair.
  * Wipes the banner URL on the target identity. Ownership of the
- * cosmetic is retained — the user can paste a new URL afterwards.
+ * cosmetic is retained, the user can paste a new URL afterwards.
  * Passing `characterId` scopes to that character; null/omitted
  * clears the master/OOC banner.
  */
@@ -1414,7 +1446,7 @@ export async function adminClearRoomPresence(opts: {
 
 /**
  * Admin moderation lever for the migration 0161 session-presence
- * Flair. Master-only — no characterId. Clears BOTH connect and
+ * Flair. Master-only, no characterId. Clears BOTH connect and
  * exit templates in a single call.
  */
 export async function adminClearSessionPresence(opts: {
@@ -1433,7 +1465,7 @@ export async function adminClearSessionPresence(opts: {
   if (!r.ok) throw new Error(await readError(r));
 }
 
-/* ---------- Admin — cosmetics CRUD ---------- */
+/* ---------- Admin, cosmetics CRUD ---------- */
 
 export interface AdminCosmeticRow {
   key: string;
@@ -1495,7 +1527,7 @@ export async function putAdminAwards(config: EarningConfig): Promise<{ config: E
   return (await r.json()) as { config: EarningConfig };
 }
 
-/* ---------- Items — buy + admin CRUD + grants ---------- */
+/* ---------- Items, buy + admin CRUD + grants ---------- */
 
 /**
  * Purchase `quantity` units of an item for the active identity.
@@ -1636,7 +1668,7 @@ export async function adminGrantItem(
 
 /**
  * Persist a diff-style update to the active identity's Collection.
- * The server treats each slot in `slots` independently — slots
+ * The server treats each slot in `slots` independently, slots
  * not listed are left untouched. Pass `itemKey: null` to clear a
  * slot. Pinned items must still be held in the same identity's
  * inventory; the server rejects cross-identity pins.
@@ -1674,7 +1706,7 @@ export async function setPetCollectionSlots(
 
 /**
  * Set or clear the owner's nickname for the pet pinned in `slot`. Pass
- * `null` (or an empty string — server normalizes) to remove. Returns
+ * `null` (or an empty string, server normalizes) to remove. Returns
  * the post-normalization nickname so the caller can sync local state
  * without re-fetching the whole earning snapshot.
  */
@@ -1737,7 +1769,7 @@ export function formatLedgerReason(reason: string): string {
       // Reaction submission refund (Phase 3). Two parallel reasons:
       // the debit at submission time, the credit-back on rejection.
       // The submission id is part of the suffix but not interesting
-      // to the user — surface a clean label.
+      // to the user, surface a clean label.
       if (reason.startsWith("emoticon_submission_refund_")) return "Reaction sheet refund";
       if (reason.startsWith("emoticon_submission_")) return "Reaction sheet submission";
       if (reason.startsWith("purchase_")) return `Purchase: ${reason.slice("purchase_".length)}`;

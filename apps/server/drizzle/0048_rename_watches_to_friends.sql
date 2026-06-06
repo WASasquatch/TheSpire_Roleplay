@@ -1,5 +1,5 @@
 -- Friends rename. The previous `watches` table held an asymmetric
--- "presence I care about" relationship — the rename is presentational
+-- "presence I care about" relationship, the rename is presentational
 -- (semantics are unchanged, still asymmetric, still composite PK) so
 -- the existing rows port over without any data transformation. Slash
 -- commands /watch + /unwatch + /watching stay around as aliases for

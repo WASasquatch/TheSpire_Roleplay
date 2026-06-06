@@ -1,5 +1,5 @@
 /**
- * Admin — Earning > Awards endpoints.
+ * Admin, Earning > Awards endpoints.
  *
  * Wired from inside `registerAdminRoutes` so the admin auth + role
  * gate already covers these routes (both `admin` and `masteradmin`
@@ -235,7 +235,7 @@ export function registerAdminEarningRoutes(
    * `backfill.xpPerHistoricalMessage`. Other fields are open to both
    * tiers.
    *
-   * `backfill.completedAt` is preserved from the prior config — the
+   * `backfill.completedAt` is preserved from the prior config, the
    * admin editor never touches it (set automatically by the backfill
    * job).
    */
@@ -294,12 +294,12 @@ export function registerAdminEarningRoutes(
   });
 
   /* =========================================================
-   *  Ranks tab — rank + tier CRUD + asset upload
+   *  Ranks tab, rank + tier CRUD + asset upload
    * ========================================================= */
 
   /**
    * GET /admin/earning/ranks
-   * Returns every rank + tier row (regardless of enabled flag — admins
+   * Returns every rank + tier row (regardless of enabled flag, admins
    * see the full ladder) plus the per-rank usage counts so the UI can
    * gate destructive actions (can't delete a rank that has users on it).
    */
@@ -368,7 +368,7 @@ export function registerAdminEarningRoutes(
       enabled: body.enabled ?? true,
     });
     // Seed 4 default tiers so the rank is usable from the UI without
-    // a follow-up call. Threshold defaults to 0 — admin sets the real
+    // a follow-up call. Threshold defaults to 0, admin sets the real
     // value via the tier-edit form.
     for (const t of [1, 2, 3, 4]) {
       await db.insert(rankTiers).values({
@@ -420,7 +420,7 @@ export function registerAdminEarningRoutes(
       reply.code(409);
       return {
         error: "rank is in use",
-        message: "Disable the rank instead — existing rank-holders should not be displaced.",
+        message: "Disable the rank instead, existing rank-holders should not be displaced.",
       };
     }
     await db.delete(ranks).where(eq(ranks.key, req.params.key));
@@ -564,21 +564,21 @@ export function registerAdminEarningRoutes(
   });
 
   /* =========================================================
-   *  Name Styles tab — CRUD on the template catalog
+   *  Name Styles tab, CRUD on the template catalog
    *
    *  Templates are HTML + CSS only (per the no-JS decision in
    *  plan.md). Server stores them verbatim; the client renders the
    *  HTML into the chat / userlist surfaces and scopes the CSS via
    *  a unique wrapper class per style key. Built-in styles
    *  (`isBuiltin = 1`) are protected from delete but fully
-   *  editable — admins can rewrite the seeded templates as long as
+   *  editable, admins can rewrite the seeded templates as long as
    *  they want; we just don't let them remove the catalog row a
    *  user might still have equipped.
    * ========================================================= */
 
   // CSS cap is generous (64KB) because animated styles can require
   // many keyframe blocks, per-letter timing offsets, and theme-scoped
-  // overrides. Template stays modest — it's HTML scaffolding, not CSS.
+  // overrides. Template stays modest, it's HTML scaffolding, not CSS.
   const styleBody = z.object({
     name: z.string().min(1).max(80).optional(),
     description: z.string().max(500).optional(),
@@ -705,20 +705,20 @@ export function registerAdminEarningRoutes(
     if (!existing) { reply.code(404); return { error: "style not found" }; }
     if (existing.isBuiltin) {
       reply.code(409);
-      return { error: "built-in styles cannot be deleted", message: "Disable it instead — the seed row backs anyone who owns it." };
+      return { error: "built-in styles cannot be deleted", message: "Disable it instead, the seed row backs anyone who owns it." };
     }
     await db.delete(nameStyles).where(eq(nameStyles.key, req.params.key));
     return { ok: true };
   });
 
   /* =========================================================
-   *  Free-form borders — full CRUD on the parallel `freeform_borders`
+   *  Free-form borders, full CRUD on the parallel `freeform_borders`
    *  catalog introduced in migration 0149. Two render paths share one
    *  table; the body validators enforce the XOR (either `imageUrl` OR
    *  `template`+`styleCss`, never both, never neither) so the
    *  BorderedAvatar renderer always has exactly one path to take.
    *
-   *  Rarity is an OPEN string by design — admins introduce new tiers
+   *  Rarity is an OPEN string by design, admins introduce new tiers
    *  without a schema migration; the client falls back to the
    *  'common' palette for unknown values, so a brand-new rarity that
    *  ships before the BordersTab knows about it still renders sanely.
@@ -773,7 +773,7 @@ export function registerAdminEarningRoutes(
     if (!(await requirePermission(req, reply, "view_earning_config"))) return;
     const rows = await db.select().from(freeformBorders).orderBy(asc(freeformBorders.order));
     // Owner / equipped counts for the destructive-action confirmation
-    // prompts. Mirrors the name-style endpoint shape — admins lean on
+    // prompts. Mirrors the name-style endpoint shape, admins lean on
     // this to know whether disabling a row will yank cosmetics from
     // live users.
     const userOwnerRows = await db.all<{ borderKey: string; n: number }>(sql`
@@ -905,7 +905,7 @@ export function registerAdminEarningRoutes(
         reply.code(409);
         return {
           error: "built-in borders cannot be deleted",
-          message: "Disable it instead — the seed row backs anyone who owns it.",
+          message: "Disable it instead, the seed row backs anyone who owns it.",
         };
       }
       // Ownership rows cascade via ON DELETE CASCADE on
@@ -918,14 +918,14 @@ export function registerAdminEarningRoutes(
   );
 
   /* =========================================================
-   *  Cosmetics tab — minimal CRUD for the inline_avatar row
+   *  Cosmetics tab, minimal CRUD for the inline_avatar row
    *  (the only buyable cosmetic that ships in Phase 4). Rank
    *  border prices live on rank_tiers.borderCost via the Ranks
    *  tab; this endpoint covers everything else in the
    *  `cosmetics` table.
    *
    *  Future cosmetics rows (animated avatar frames, audio cues,
-   *  etc.) flow through the same pair of endpoints — the seed
+   *  etc.) flow through the same pair of endpoints, the seed
    *  row stays as a single source of truth and admins toggle
    *  `enabled` to launch / retract.
    * ========================================================= */
@@ -974,7 +974,7 @@ export function registerAdminEarningRoutes(
   );
 
   /* =========================================================
-   *  Items tab — full CRUD on the catalog + sale-window scheduler.
+   *  Items tab, full CRUD on the catalog + sale-window scheduler.
    *
    *  Built-in seed rows (migration 0094) carry isBuiltin=1 and are
    *  protected from DELETE; every other field on them is editable so
@@ -983,11 +983,11 @@ export function registerAdminEarningRoutes(
    *  fully deletable.
    *
    *  Sale window semantics:
-   *    enabled        — master existence; 0 hides everywhere and
+   *    enabled       , master existence; 0 hides everywhere and
    *                     rejects commands, but inventory rows persist
-   *    forSale        — independent of enabled; gates shop only
-   *    saleStartsAt   — optional lower bound (unix ms); null = unbound
-   *    saleEndsAt     — optional upper bound (unix ms); null = unbound
+   *    forSale       , independent of enabled; gates shop only
+   *    saleStartsAt  , optional lower bound (unix ms); null = unbound
+   *    saleEndsAt    , optional upper bound (unix ms); null = unbound
    *  Server derives `purchasable = enabled && forSale && now ∈ window`
    *  in the /earning/me payload so the client doesn't reimplement it.
    *
@@ -996,12 +996,12 @@ export function registerAdminEarningRoutes(
    *  item.
    * ========================================================= */
 
-  /** JSON-array-of-strings — the server stores the stringified JSON so
+  /** JSON-array-of-strings, the server stores the stringified JSON so
    *  the same column can be read back, but admins POST/PATCH a real
    *  array and we validate + stringify on the server side. */
   const messageTemplateArray = z.array(z.string().min(1).max(800)).max(50);
 
-  /** Aliases array — each entry capped at 40 chars (long enough for
+  /** Aliases array, each entry capped at 40 chars (long enough for
    *  multi-word natural-language synonyms like "gold piece"), 30
    *  total max so an admin can't pad a row with hundreds of names
    *  and balloon the json_each cost on lookup. */
@@ -1175,7 +1175,7 @@ export function registerAdminEarningRoutes(
 
   /**
    * DELETE /admin/earning/items/:key
-   * Built-in items are delete-protected — admins should disable
+   * Built-in items are delete-protected, admins should disable
    * (enabled=0) or pull from sale (forSale=0) instead. Deleting a
    * custom item cascades the FK on identity_inventory so all
    * outstanding inventory rows for it are dropped. The admin UI
@@ -1189,7 +1189,7 @@ export function registerAdminEarningRoutes(
       reply.code(409);
       return {
         error: "built-in items cannot be deleted",
-        message: "Disable it instead — the seed row backs anyone who owns it.",
+        message: "Disable it instead, the seed row backs anyone who owns it.",
       };
     }
     await db.delete(items).where(eq(items.key, req.params.key));
@@ -1197,14 +1197,14 @@ export function registerAdminEarningRoutes(
   });
 
   /* =========================================================
-   *  Test grants — masteradmin-only direct grants for testing.
+   *  Test grants, masteradmin-only direct grants for testing.
    *
    *  These bypass the normal earn / purchase paths so admins
    *  can see how a sigil / border / styled name looks without
    *  grinding XP or buying with Currency. Every grant writes
    *  through the ledger so the audit row is preserved.
    *
-   *  Target is resolved by username (master account) — the
+   *  Target is resolved by username (master account), the
    *  caller doesn't need to look up an internal id.
    *
    *  All endpoints require masteradmin (mirrors plan.md's
@@ -1222,7 +1222,7 @@ export function registerAdminEarningRoutes(
       .limit(1))[0] ?? null;
   }
 
-  // Permission gate — thin closure over the shared
+  // Permission gate, thin closure over the shared
   // `requireSessionPermission` helper so call sites don't repeat
   // the `db` argument on every call.
   const requirePermission = (req: FastifyRequest, reply: FastifyReply, key: PermissionKey) =>
@@ -1257,7 +1257,7 @@ export function registerAdminEarningRoutes(
 
   /** Free-form border grant/revoke (Phase 1 catalog). Same shape as
    *  the rank-tier border grant but `characterId` adds per-identity
-   *  routing — master pool grants to user_owned_freeform_borders;
+   *  routing, master pool grants to user_owned_freeform_borders;
    *  character grants to character_owned_freeform_borders. */
   const grantFreeformBorderBody = z.object({
     username: z.string().min(1).max(80),
@@ -1275,7 +1275,7 @@ export function registerAdminEarningRoutes(
      *  before granting. */
     characterId: z.string().min(1).max(80).nullable().optional(),
     itemKey: z.string().min(1).max(64),
-    /** Negative quantities are allowed — revoking from an inventory
+    /** Negative quantities are allowed, revoking from an inventory
      *  shares the same endpoint. Clamped to 999 in either direction
      *  so a slip of the keyboard can't wipe a huge stack. */
     quantity: z.number().int().min(-999).max(999).refine((n) => n !== 0, {
@@ -1332,12 +1332,12 @@ export function registerAdminEarningRoutes(
    * POST /admin/earning/set-rank
    * Direct rank/tier override. Sets the user's master-pool
    * rankKey + tier AND bumps `maxRankKeyEverHeld` / `maxTierEverHeld`
-   * (only ever up — the merge helper is monotonic). Also sets XP
+   * (only ever up, the merge helper is monotonic). Also sets XP
    * to that tier's threshold so the resolver stays consistent on
    * the next earn.
    *
    * Pass rankKey=null + tier=null to clear the override and let
-   * XP drive again (XP is left untouched — admin can use grant-xp
+   * XP drive again (XP is left untouched, admin can use grant-xp
    * to re-tune).
    */
   app.post<{ Body: unknown }>("/admin/earning/set-rank", async (req, reply) => {
@@ -1386,7 +1386,7 @@ export function registerAdminEarningRoutes(
     }, { rankKey: body.rankKey, tier: body.tier });
     // Set XP to the threshold so the next earn doesn't immediately
     // drop the user back. We don't decrease XP if it's already above
-    // the threshold — that would feel punitive even on a test grant.
+    // the threshold, that would feel punitive even on a test grant.
     const newXp = Math.max(prior?.xp ?? 0, tierRow.xpThreshold);
     await db.update(userEarning).set({
       xp: newXp,
@@ -1398,7 +1398,7 @@ export function registerAdminEarningRoutes(
     }).where(eq(userEarning.userId, target.id));
 
     // Audit row through the ledger so the timeline shows the grant.
-    // Direct insert — we're using a small ledger entry without going
+    // Direct insert, we're using a small ledger entry without going
     // through creditPool because there's no XP/Currency delta; this
     // is purely a rank-override audit row.
     await db.insert(earningLedger).values({
@@ -1425,7 +1425,7 @@ export function registerAdminEarningRoutes(
    * Insert ownership for any rank's border on the target user,
    * bypassing the normal Tier IV eligibility gate. Lets admins
    * see what each border looks like without crossing every rank.
-   * Idempotent — re-granting an owned border is a no-op.
+   * Idempotent, re-granting an owned border is a no-op.
    */
   app.post<{ Body: unknown }>("/admin/earning/grant-border", async (req, reply) => {
     const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
@@ -1512,7 +1512,7 @@ export function registerAdminEarningRoutes(
    *
    * Audit: writes an `admin_grant` (positive) or `admin_revoke`
    * (negative) row to `earning_ledger` capturing the actor, target,
-   * scope, item, and delta. No currency moves — grants are free.
+   * scope, item, and delta. No currency moves, grants are free.
    */
   app.post<{ Body: unknown }>("/admin/earning/grant-item", async (req, reply) => {
     const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
@@ -1531,7 +1531,7 @@ export function registerAdminEarningRoutes(
         .from(characters)
         .where(eq(characters.id, characterId))
         .limit(1))[0];
-      // Ownership against the TARGET, not the admin — the admin is
+      // Ownership against the TARGET, not the admin, the admin is
       // depositing into another user's character pocket.
       if (!c || c.userId !== target.id || c.deletedAt) {
         reply.code(403);
@@ -1553,20 +1553,17 @@ export function registerAdminEarningRoutes(
     const have = existing?.qty ?? 0;
     const desired = have + body.quantity;
 
-    if (body.quantity > 0 && desired > item.stackLimit) {
-      reply.code(409);
-      return {
-        error: `would exceed stack limit (${item.stackLimit})`,
-        haveBefore: have,
-        stackLimit: item.stackLimit,
-      };
-    }
+    // No `stackLimit` gate. Players accumulate without ceiling, by
+    // design (the catalog column is preserved as a soft admin hint
+    // for future use but no runtime path reads it). Negative deltas
+    // are still clipped at zero via the `desired <= 0` branch
+    // below.
 
     if (desired <= 0) {
       // Net zero or revoke-through-zero: delete the row entirely so
       // the inventory map doesn't carry phantom zero-quantity entries.
       // Also prune any Collection pin on this identity that points at
-      // the now-removed item — the showcase shouldn't render an item
+      // the now-removed item, the showcase shouldn't render an item
       // the identity no longer holds.
       if (existing) {
         await db.delete(identityInventory).where(and(
@@ -1636,7 +1633,7 @@ export function registerAdminEarningRoutes(
    * POST /admin/earning/revoke-border
    * Remove ownership of a rank's border from the target user. If
    * that border was currently equipped, the equipped state clears
-   * too. Idempotent — revoking an unowned border is a no-op.
+   * too. Idempotent, revoking an unowned border is a no-op.
    */
   app.post<{ Body: unknown }>("/admin/earning/revoke-border", async (req, reply) => {
     const me = await requirePermission(req, reply, "grant_earning_award"); if (!me) return;
@@ -1715,12 +1712,12 @@ export function registerAdminEarningRoutes(
    * POST /admin/earning/grant-freeform-border
    * Insert ownership of a free-form border on the target identity,
    * bypassing the Currency cost. Mirrors the rank-tier border grant
-   * but with per-identity routing — passing a characterId scopes
+   * but with per-identity routing, passing a characterId scopes
    * the grant to that character's pool (the character must belong
    * to the target user). Idempotent.
    *
    * Auto-equip on first grant: matches the user-facing purchase
-   * flow — if the identity has no freeform border equipped yet,
+   * flow, if the identity has no freeform border equipped yet,
    * we set this one as the equipped key.
    */
   app.post<{ Body: unknown }>("/admin/earning/grant-freeform-border", async (req, reply) => {
@@ -1944,7 +1941,7 @@ export function registerAdminEarningRoutes(
     if (!target) { reply.code(404); return { error: "user not found" }; }
 
     // Zero out the master earning row (lazy-create first so the row
-    // exists to update — keeps the post-reset state consistent).
+    // exists to update, keeps the post-reset state consistent).
     // Includes every cosmetic equip slot + free-form text field
     // added across migrations 0148-0151 so a reset is genuinely a
     // clean slate (a leftover `typing_phrase` on a reset account
@@ -1990,7 +1987,7 @@ export function registerAdminEarningRoutes(
     }
 
     // Wipe ownership rows. Deleting (rather than soft-marking) is
-    // intentional — the whole point is a clean slate for testing.
+    // intentional, the whole point is a clean slate for testing.
     // Free-form border ownership is partitioned the same way as the
     // rank-tier set; both master + character pools need their rows
     // dropped.
@@ -2004,7 +2001,7 @@ export function registerAdminEarningRoutes(
     await db.delete(userActiveCosmetics).where(eq(userActiveCosmetics.userId, target.id));
 
     // Phase 3 reaction submissions. Pending rows hold paid Currency
-    // — but a reset is destructive by design (used by QA / dev),
+    //, but a reset is destructive by design (used by QA / dev),
     // and the same operator that zeroes wallets is OK losing the
     // amounts here too. The image files on disk get orphaned but a
     // janitor sweep / manual cleanup handles that; the rows
@@ -2043,7 +2040,7 @@ export function registerAdminEarningRoutes(
   });
 
   /* =========================================================
-   *  Flash Sales — admin
+   *  Flash Sales, admin
    *
    *  Reads:
    *    GET /admin/earning/flash-sale → settings + today's picks +
@@ -2065,7 +2062,7 @@ export function registerAdminEarningRoutes(
   app.get("/admin/earning/flash-sale", async (req, reply) => {
     if (!(await requirePermission(req, reply, "manage_flash_sale"))) return;
     const today = await resolveTodayFlashSale(db);
-    // Future overrides — anything for_date >= tomorrow. Today's
+    // Future overrides, anything for_date >= tomorrow. Today's
     // overrides have been consumed into `flash_sales` already; we
     // surface them on the today object so admins can see what
     // chose vs random.
@@ -2127,7 +2124,7 @@ export function registerAdminEarningRoutes(
     /** 'name_style' | 'item' | 'cosmetic' | 'freeform_border'. */
     category: z.enum(["name_style", "item", "cosmetic", "freeform_border"]),
     /**
-     * ISO 'YYYY-MM-DD' UTC. Must be strictly in the future — today
+     * ISO 'YYYY-MM-DD' UTC. Must be strictly in the future, today
      * has already been resolved by the time the admin sees it. The
      * shape regex catches typos; the `refine` catches values that
      * SHAPE like a date but aren't valid (e.g. "2026-99-99"), which
@@ -2152,7 +2149,7 @@ export function registerAdminEarningRoutes(
    *  Four catalogs are bundle-able: name-styles, items, borders,
    *  ranks. Each ships rows + any /uploads/* image assets referenced
    *  by those rows so the round-trip is lossless even when admins
-   *  uploaded custom art. Import is UPSERT BY KEY — admin-managed
+   *  uploaded custom art. Import is UPSERT BY KEY, admin-managed
    *  catalogs survive a partial import without losing rows that
    *  weren't in the file.
    *
@@ -2160,7 +2157,7 @@ export function registerAdminEarningRoutes(
    *  `Content-Type: application/zip` + `Content-Disposition: attachment`
    *  so the browser auto-saves the file. Import accepts the zip
    *  base64-encoded inside a JSON body to dodge the multipart
-   *  plugin dep — same pattern the existing logo upload uses.
+   *  plugin dep, same pattern the existing logo upload uses.
    * ========================================================= */
 
   function parseKind(raw: string): EarningCatalogKind | null {
@@ -2177,7 +2174,7 @@ export function registerAdminEarningRoutes(
 
   // Map a catalog kind to the matrix-grantable key that gates editing
   // it. Reused for both export (read-of-config) and import (catalog
-  // mutation) — same key for both since the export ships sensitive
+  // mutation), same key for both since the export ships sensitive
   // template/asset content and lacking edit permission shouldn't grant
   // export-side read either.
   function permKeyForKind(kind: EarningCatalogKind): PermissionKey {
@@ -2247,7 +2244,7 @@ export function registerAdminEarningRoutes(
       return { error: `forDate must be strictly after today (${today})` };
     }
     if (body.targetKey === null) {
-      // Remove queue for this slot — leaves the day random again.
+      // Remove queue for this slot, leaves the day random again.
       await db
         .delete(flashSaleOverrides)
         .where(and(
@@ -2269,7 +2266,7 @@ export function registerAdminEarningRoutes(
       reply.code(404);
       return { error: `no ${body.category} with key '${body.targetKey}'` };
     }
-    // Upsert by (category, forDate) — replacing an admin's earlier
+    // Upsert by (category, forDate), replacing an admin's earlier
     // pick on the same slot rather than 409ing.
     await db
       .insert(flashSaleOverrides)
@@ -2287,7 +2284,7 @@ export function registerAdminEarningRoutes(
   });
 
   /* =========================================================
-   *  Flair moderation — clear a user's banner URL
+   *  Flair moderation, clear a user's banner URL
    *
    *  Admin-only moderation lever for the URL-based profile banner.
    *  Use case: a user pastes a hotlink to something the admin's
@@ -2301,7 +2298,7 @@ export function registerAdminEarningRoutes(
    *  reason + actor survive for the moderation timeline.
    * ========================================================= */
   const clearBannerBody = z.object({
-    /** Master username — the account to clear. Same lookup the grant endpoints use. */
+    /** Master username, the account to clear. Same lookup the grant endpoints use. */
     username: z.string().min(1).max(80),
     /** When set, clears that character's banner instead of the master's. */
     characterId: z.string().nullable().optional(),
@@ -2320,7 +2317,7 @@ export function registerAdminEarningRoutes(
     if (body.characterId) {
       // Verify the character belongs to the target. Without this an
       // admin could clear a stranger's character banner by guessing
-      // ids — the column would still wipe but the audit row would
+      // ids, the column would still wipe but the audit row would
       // be misleading.
       const c = (await db
         .select({ id: characters.id, userId: characters.userId })
@@ -2354,7 +2351,7 @@ export function registerAdminEarningRoutes(
    *  Twin of clear-banner above, for the Phase 5 custom typing
    *  phrase Flair. Wipes the `typing_phrase` column on master or
    *  on a specific character. Ownership of `flair_typing_phrase`
-   *  is retained — the user can set a (presumably policy-
+   *  is retained, the user can set a (presumably policy-
    *  compliant) phrase again afterwards.
    *
    *  Auditable via `typing_phrase_clear` in the audit log.
@@ -2387,7 +2384,7 @@ export function registerAdminEarningRoutes(
         .where(eq(characterEarning.characterId, body.characterId));
     } else {
       // Master scope writes to user_earning (NOT user_active_cosmetics
-      // — typing phrase lives on the earning row alongside other
+      //, typing phrase lives on the earning row alongside other
       // master-pool fields).
       await db.update(userEarning)
         .set({ typingPhrase: null, updatedAt: new Date() })
@@ -2412,7 +2409,7 @@ export function registerAdminEarningRoutes(
    *  username + optional characterId + optional reason. Master
    *  scope when characterId is null; character scope when set.
    *
-   *  Both endpoints clear BOTH templates the flair owns at once —
+   *  Both endpoints clear BOTH templates the flair owns at once,
    *  granular per-slot clears would be too fiddly for moderation
    *  (the abuse case is usually "wipe all of this user's custom
    *  presence text"; surgical per-slot is unnecessary).

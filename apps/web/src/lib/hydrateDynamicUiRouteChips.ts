@@ -6,7 +6,7 @@
  * Static chips ({rules}, {shop}, …) render their final label up-front
  * from the catalog and need nothing extra. Dynamic chips
  * ({scriptorium:latest:story}) carry a `data-tk-ui-route-dynamic`
- * marker added by `renderUiRouteChipsInHtml` — this helper scans for
+ * marker added by `renderUiRouteChipsInHtml`, this helper scans for
  * that marker, fetches the resolved label, and rewrites the
  * `.tk-ui-route-chip-label` span in place.
  *
@@ -29,7 +29,7 @@ import { fetchLatestPublishedStory } from "./latestStory.js";
  */
 export function hydrateDynamicUiRouteChips(container: HTMLElement): () => void {
   let cancelled = false;
-  // querySelectorAll returns a snapshot — safe to iterate without
+  // querySelectorAll returns a snapshot, safe to iterate without
   // worrying about mid-iteration DOM mutations from the hydrator's
   // own writes.
   const latestStoryChips = container.querySelectorAll<HTMLElement>(
@@ -39,7 +39,7 @@ export function hydrateDynamicUiRouteChips(container: HTMLElement): () => void {
     void fetchLatestPublishedStory().then((r) => {
       if (cancelled || !r?.title) return;
       for (const chip of Array.from(latestStoryChips)) {
-        // Rewrite the dedicated label span only — leaves the leading
+        // Rewrite the dedicated label span only, leaves the leading
         // icon span (📖) intact. Falling back to the chip's plain
         // textContent setter would erase the icon glyph.
         const labelSpan = chip.querySelector<HTMLElement>(".tk-ui-route-chip-label");

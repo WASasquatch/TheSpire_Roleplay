@@ -1,4 +1,4 @@
--- Flash sale system — one row per enabled category (name styles,
+-- Flash sale system, one row per enabled category (name styles,
 -- items, cosmetics) goes on sale daily. Random by default; admins
 -- can queue a specific row for "tomorrow" via flash_sale_overrides,
 -- consumed once on the next UTC-midnight rollover.
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS `flash_sales` (
 -- /admin/earning/flash-sale; consumed by the daily resolver when
 -- it picks for that date. We DON'T delete the row on consumption
 -- so admins can see a historical record of what was scheduled and
--- why a specific row showed up on a specific date — the rolling
+-- why a specific row showed up on a specific date, the rolling
 -- sweeper only reads `flash_sales` once that day's row exists.
 CREATE TABLE IF NOT EXISTS `flash_sale_overrides` (
   -- 'name_style' | 'item' | 'cosmetic'. Keep the set extensible

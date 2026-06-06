@@ -5,21 +5,21 @@
 -- "strolls into" entrance with a "vanishes from" exit reads as one
 -- voice; charging twice for the pair would be pedantic).
 --
---   flair_room_presence    — overrides the per-room "X has entered
+--   flair_room_presence   , overrides the per-room "X has entered
 --                            the room." / "X has left the room."
 --                            system lines. Per-identity (the chat
 --                            shell already knows which voice is in
 --                            the room; the master / character split
 --                            mirrors typing_phrase).
 --
---   flair_session_presence — overrides the site-level "X has
+--   flair_session_presence, overrides the site-level "X has
 --                            connected." / "X has disconnected."
 --                            lines. Master-only because the session
 --                            is a property of the master account, not
 --                            of an active character.
 --
 -- Template grammar matches the help-modal voice: short, plain text,
--- two placeholder tokens — `{name}` (the broadcasting identity's
+-- two placeholder tokens, `{name}` (the broadcasting identity's
 -- display name) and `{room}` (the room name, room-presence only).
 -- Server clamps length per row and strips control characters /
 -- angle-bracket-bearing payloads at write time, mirroring the
@@ -27,7 +27,7 @@
 -- moderation, same shape as the existing banner / typing-phrase
 -- clears.
 
--- Room-presence templates — per-identity. Nullable so clearing
+-- Room-presence templates, per-identity. Nullable so clearing
 -- returns the slot to the default phrasing without an extra "is
 -- using custom" flag (the renderer treats NULL as "use the default").
 ALTER TABLE `user_earning`
@@ -43,7 +43,7 @@ ALTER TABLE `character_earning`
   ADD COLUMN `room_leave_template` TEXT;
 --> statement-breakpoint
 
--- Session-presence templates — master only. There's no "character
+-- Session-presence templates, master only. There's no "character
 -- has logged in" notion; characters are sub-identities of the active
 -- master session.
 ALTER TABLE `user_earning`
@@ -53,7 +53,7 @@ ALTER TABLE `user_earning`
   ADD COLUMN `session_exit_template` TEXT;
 --> statement-breakpoint
 
--- Catalog rows. Costs are placeholders — admins tune via the Flair
+-- Catalog rows. Costs are placeholders, admins tune via the Flair
 -- admin tab. Sit at the same tier as the typing-phrase / banner
 -- flairs (the work to ship them is similar; the visual presence is
 -- a fraction of a name-style or border).

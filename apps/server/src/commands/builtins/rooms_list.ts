@@ -12,7 +12,7 @@ import type { CommandHandler } from "../types.js";
  * Private rooms are intentionally omitted - listing them by name even
  * without messages would defeat the privacy contract for /list
  * specifically. Use /find for partial-match search (which DOES
- * include private + archived rooms — entry still gated by password)
+ * include private + archived rooms, entry still gated by password)
  * or the admin Rooms tab for the full inventory.
  */
 export const listCommand: CommandHandler = {
@@ -82,13 +82,13 @@ export const clearCommand: CommandHandler = {
  * remember a fragment of a room name (e.g. an archived room you made
  * months ago).
  *
- * Privacy model — archived AND private rooms are INCLUDED:
+ * Privacy model, archived AND private rooms are INCLUDED:
  *   - Archived rooms are listed so the user can find (and then
  *     recreate) one they made; archived rows are name reservations
  *     with no occupants, and anyone can re-establish the room by
  *     navigating to it.
  *   - Private rooms are listed because surfacing the name doesn't
- *     bypass the privacy contract — entry still requires the
+ *     bypass the privacy contract, entry still requires the
  *     password and there's no transcript leak from a name match.
  *
  * Authoritative full inventory still lives in the admin Rooms tab;
@@ -109,7 +109,7 @@ export const findCommand: CommandHandler = {
   async run(ctx) {
     const needle = ctx.argsText.trim();
     if (!needle) {
-      // Usage hint is a single line, transient feedback — toast fits.
+      // Usage hint is a single line, transient feedback, toast fits.
       ctx.socket.emit("error:notice", {
         code: "ROOM_FIND",
         message: "Usage: /find <name> - search rooms by partial name.",
@@ -142,7 +142,7 @@ export const findCommand: CommandHandler = {
     const shown = matches.slice(0, RESULT_CAP);
     const truncated = matches.length > RESULT_CAP;
 
-    // Occupant counts. Active rooms only — archived rooms always
+    // Occupant counts. Active rooms only, archived rooms always
     // have zero members by definition, so the join-then-filter on
     // shown ids skips them naturally.
     const counts = await ctx.db

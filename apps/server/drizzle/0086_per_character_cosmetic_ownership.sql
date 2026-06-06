@@ -3,7 +3,7 @@
 -- Before: `user_owned_name_styles` and `user_owned_borders` were a
 -- single account-wide list. Once any identity (master or a
 -- character) bought a style, the Owned list showed it for every
--- character of that user — Kaal saw Embers in their Owned tab even
+-- character of that user, Kaal saw Embers in their Owned tab even
 -- though WAS spent the currency from master's pool.
 --
 -- After: ownership splits by identity:
@@ -12,7 +12,7 @@
 --   character purchases    → `character_owned_*` (new tables, keyed
 --                            by character_id)
 --
--- Existing `user_owned_*` rows stay as master-only — no row movement,
+-- Existing `user_owned_*` rows stay as master-only, no row movement,
 -- just a semantic shift. Characters start with empty owned lists and
 -- have to purchase from their own currency pool to use a style on
 -- that identity.

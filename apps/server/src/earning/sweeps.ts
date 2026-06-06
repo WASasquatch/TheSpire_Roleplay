@@ -3,7 +3,7 @@
  *
  * Every `presenceBlockMinutes` (default 5) we iterate live sockets in
  * non-archived rooms and credit each socket's identity for one
- * presence block — IC sockets credit their character pool, OOC
+ * presence block, IC sockets credit their character pool, OOC
  * sockets credit the master pool.
  *
  * Cap: each pool earns at most `presenceDailyBlockCap` blocks per
@@ -11,7 +11,7 @@
  * activity still counts toward the user's session lifecycle, just
  * not the earning economy.
  *
- * Sockets — not memberships — drive the sweep. A user who closed
+ * Sockets, not memberships, drive the sweep. A user who closed
  * their browser but still has a `roomMembers` row earns nothing;
  * a user with two tabs voicing two characters in the same room
  * earns once per (userId, characterId) tuple, matching the
@@ -113,7 +113,7 @@ async function isPresenceCapHit(
 }
 
 /**
- * One sweep tick. Idempotent on its own — each call awards at most
+ * One sweep tick. Idempotent on its own, each call awards at most
  * one block per active identity, and the cap check stops repeat
  * awards from rolling past the daily limit if the interval drifts.
  *
@@ -193,7 +193,7 @@ export async function schedulePresenceSweep(db: Db, io: Io, log: {
     }
   };
 
-  // Don't fire on boot — wait one full block so a server restart
+  // Don't fire on boot, wait one full block so a server restart
   // doesn't double-pay a user who just received a presence award
   // immediately before the restart.
   const id = setInterval(() => void tick(), periodMs);

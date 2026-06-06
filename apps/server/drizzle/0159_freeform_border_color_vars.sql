@@ -10,7 +10,7 @@
 -- slots and the renderer inlines them onto the BorderedAvatar
 -- portal wrapper so the cascade resolves them.
 --
--- Color names chosen for player intuition rather than CSS purity —
+-- Color names chosen for player intuition rather than CSS purity,
 -- "ring-main" / "ring-accent" / "glow" reads better in a picker
 -- label than "stop-1" / "stop-2". The CSS uses `color-mix(...)` to
 -- preserve alpha on glows so the user picks a hex and the
@@ -21,7 +21,7 @@
 -- migration.
 
 -- =========================================================
--- aurora-v2 — RARE, conic gradient with cyan + purple bloom
+-- aurora-v2, RARE, conic gradient with cyan + purple bloom
 -- Customizable slots: ring-main (cyan), ring-soft (mid teal),
 --                     ring-accent (purple), glow (outer halo),
 --                     wash (highlight overlay sweep)
@@ -38,7 +38,7 @@ WHERE `key` = 'aurora-v2' AND `is_builtin` = 1;
 --> statement-breakpoint
 
 -- =========================================================
--- tide — RARE, conic teal gradient with ripple expansion
+-- tide, RARE, conic teal gradient with ripple expansion
 -- Customizable slots: ring-main (deep teal), ring-soft (light teal),
 --                     ripple (expanding ring color)
 -- =========================================================
@@ -57,7 +57,7 @@ WHERE `key` = 'tide' AND `is_builtin` = 1;
 --> statement-breakpoint
 
 -- =========================================================
--- forest — RARE, swaying conic green ring with falling leaves
+-- forest, RARE, swaying conic green ring with falling leaves
 -- Customizable slots: ring-main (deep green), ring-soft (mid green),
 --                     ring-accent (light leaf-green),
 --                     leaf (color of falling decorative leaves),

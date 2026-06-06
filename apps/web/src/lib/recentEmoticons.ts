@@ -2,13 +2,13 @@
  * Recent-emoticons cache for the picker's "Recent" section.
  *
  * Mirrors how Slack / Discord surface a "frequently used" row at the
- * top of the emoji picker — the user's last N picks, sorted by
+ * top of the emoji picker, the user's last N picks, sorted by
  * frequency (most-used first), capped at MAX_RECENT entries.
  *
  * Persistence: localStorage. The cache is a purely client-side
  * convenience; a fresh tab / device just starts empty and re-fills
  * with use. We deliberately avoid round-tripping this through the
- * server — every emoticon pick would otherwise be a write to a
+ * server, every emoticon pick would otherwise be a write to a
  * personal preference store, which the existing settings surface
  * isn't shaped for.
  */
@@ -18,14 +18,14 @@ import { emoticonKey, parseEmoticonKey } from "@thekeep/shared";
 const STORAGE_KEY = "scriptorium.recentEmoticons.v1";
 /** Cap on stored history. Picker surfaces a subset of this (`MAX_VISIBLE`). */
 const MAX_HISTORY = 64;
-/** Picker shows at most this many recent entries — keeps the "Recent"
+/** Picker shows at most this many recent entries, keeps the "Recent"
  *  row to one line at typical picker widths. */
 export const MAX_VISIBLE_RECENT = 12;
 
 interface RecentEntry {
   key: EmoticonKey;
   count: number;
-  /** Epoch ms of last use — tie-breaks the frequency sort so newer
+  /** Epoch ms of last use, tie-breaks the frequency sort so newer
    *  picks edge out older ones at the same count. */
   lastAt: number;
 }
@@ -55,7 +55,7 @@ function save(entries: RecentEntry[]): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(0, MAX_HISTORY)));
   } catch {
-    /* quota / private-browsing — swallow */
+    /* quota / private-browsing, swallow */
   }
 }
 

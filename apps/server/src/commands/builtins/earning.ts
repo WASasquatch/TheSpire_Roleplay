@@ -1,9 +1,9 @@
 /**
- * `/currency` and `/exp` — Earning slash commands.
+ * `/currency` and `/exp`, Earning slash commands.
  *
  * Output is **ephemeral and visible only to the requester** per the
  * Earning plan. We emit through `error:notice` (the existing
- * ephemeral channel — same code-as-tag convention `/color` uses).
+ * ephemeral channel, same code-as-tag convention `/color` uses).
  *
  * `/currency` subcommands:
  *   /currency                       Show your own balances (master + active character).
@@ -112,7 +112,7 @@ function formatPool(p: PoolSummary): string {
 
 /**
  * List borders the user has reached the Tier IV threshold for but
- * hasn't yet purchased. Used by `/exp` (own view) — reads:
+ * hasn't yet purchased. Used by `/exp` (own view), reads:
  *   - user_earning.maxRankKeyEverHeld / maxTierEverHeld → highest peak
  *   - ranks table (display order) → every rank at or below the peak
  *     whose Tier IV the user has crossed
@@ -134,7 +134,7 @@ async function unpurchasedEligibleBorders(
     .where(eq(userEarning.userId, userId))
     .limit(1))[0];
   if (!peak?.maxRankKeyEverHeld || (peak.maxTierEverHeld ?? 0) < 4) {
-    // User has never crossed any Tier IV — no borders eligible.
+    // User has never crossed any Tier IV, no borders eligible.
     // But if they *climbed past* a lower rank's Tier IV (maxRankKey is higher
     // than X), they're implicitly eligible for X's border too. The peak's
     // tier captures only the highest rank's tier; lower ranks were
@@ -208,7 +208,7 @@ export const currencyCommand: CommandHandler = {
   aliases: ["cur", "coin", "coins", "wallet"],
   usage: "/currency  |  /currency [user]  |  /currency send [target] [amount]",
   description:
-    "Show your Currency balance, look up another user's balance, or send Currency. Output is private to you — never broadcast.",
+    "Show your Currency balance, look up another user's balance, or send Currency. Output is private to you, never broadcast.",
   subcommands: [
     {
       verb: "(no args)",
@@ -230,7 +230,7 @@ export const currencyCommand: CommandHandler = {
   async run(ctx) {
     const args = ctx.argsText.trim();
 
-    // /currency (no args) — own balances
+    // /currency (no args), own balances
     if (!args) {
       const master = await readUserPool(ctx.db, ctx.user.id);
       const lines = [formatPool({ ...master, scopeLabel: "Your master OOC" })];
@@ -292,7 +292,7 @@ export const currencyCommand: CommandHandler = {
       return;
     }
 
-    // /currency <name> — view someone else's master balance
+    // /currency <name>, view someone else's master balance
     const target = args;
     const u = (await ctx.db
       .select()

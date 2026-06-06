@@ -1,9 +1,9 @@
 /**
- * Content-snapshot export + import — JSON full-mirror format (v2).
+ * Content-snapshot export + import, JSON full-mirror format (v2).
  *
  * Format v1 was a curated subset (items / ranks / name-styles /
  * custom-commands / title-kinds / site-settings / system rooms +
- * worlds). v2 is a FULL MIRROR — every per-user, per-character,
+ * worlds). v2 is a FULL MIRROR, every per-user, per-character,
  * per-room, per-world, per-message table lands in the document so
  * an import is "wipe + replace" semantics, not "merge customs."
  *
@@ -33,7 +33,7 @@
  *         disables `foreign_keys` enforcement during inserts (so
  *         mass-replace doesn't trip cascade rules mid-restore), then
  *         for each table in the doc: DELETE FROM, INSERT every row
- *       - runs `PRAGMA foreign_key_check` BEFORE COMMIT — any
+ *       - runs `PRAGMA foreign_key_check` BEFORE COMMIT, any
  *         dangling reference aborts the whole transaction
  *       - re-enables `foreign_keys` after COMMIT (or rollback)
  *
@@ -75,18 +75,18 @@ const SITE_SETTINGS_STRIP = new Set([
 /**
  * Tables that NEVER ride along in a content export.
  *
- *   _migrations         — bookkeeping; serialized into the
+ *   _migrations        , bookkeeping; serialized into the
  *                         schemaMigrations header instead.
- *   sessions            — live auth state; importing them would
+ *   sessions           , live auth state; importing them would
  *                         splice another install's logins onto this
  *                         one. Everyone gets re-prompted (correct
  *                         behavior post-restore anyway).
- *   push_subscriptions  — bound to the source install's VAPID keys;
+ *   push_subscriptions , bound to the source install's VAPID keys;
  *                         re-using them would send pushes that
  *                         neither browser nor server can decrypt.
- *   message_activity    — transient 26h ledger driving the splash
+ *   message_activity   , transient 26h ledger driving the splash
  *                         beacon; rebuilds itself naturally.
- *   sqlite_sequence     — SQLite internal AUTOINCREMENT counter;
+ *   sqlite_sequence    , SQLite internal AUTOINCREMENT counter;
  *                         SQLite manages this row, not us.
  */
 const SKIP_TABLES = new Set([
@@ -103,7 +103,7 @@ const SKIP_TABLES = new Set([
  * install's schema) and the import (compares against the doc's
  * stamp to decide whether the target install can safely apply it).
  *
- * Returns an empty array if the table doesn't exist yet — a pre-
+ * Returns an empty array if the table doesn't exist yet, a pre-
  * migration-system install can't host a content backup anyway, but
  * the empty-array fallback keeps the call shape predictable.
  */
@@ -143,7 +143,7 @@ function listExportableTables(sqlite: Database.Database): string[] {
 export function exportContent(sqlite: Database.Database): BackupContentDocument {
   const tableData: BackupContentTableMap = {};
   for (const table of listExportableTables(sqlite)) {
-    // Table name comes from sqlite_master — never user input.
+    // Table name comes from sqlite_master, never user input.
     // better-sqlite3 doesn't parameter-bind identifiers anyway, so
     // the inline interpolation here is the standard pattern.
     const rows = sqlite.prepare(`SELECT * FROM "${table}"`).all() as Array<Record<string, unknown>>;
@@ -229,7 +229,7 @@ export function diffContent(
   }
 
   // Tables on the target that the doc DOESN'T carry. The import
-  // leaves these alone — only tables explicitly in `tableData` get
+  // leaves these alone, only tables explicitly in `tableData` get
   // wiped. Surfaced as onlyOnTarget so the admin can see them.
   const docTables = new Set(Object.keys(doc.tableData));
   for (const table of targetTables) {
@@ -290,7 +290,7 @@ export interface ImportResult {
  * ourselves. Restored to its prior value in `finally`.
  *
  * Returns a count of inserted rows. `updated` and `unchanged` are
- * always zero in v2 — every row goes through DELETE+INSERT — but
+ * always zero in v2, every row goes through DELETE+INSERT, but
  * the field shape is preserved for back-compat with the admin UI.
  *
  * `actorUserId` is currently unused (kept in the signature for
@@ -331,7 +331,7 @@ export function importContent(
     sqlite.pragma("foreign_keys = OFF");
 
     const tx = sqlite.transaction(() => {
-      // Defer FK validation to COMMIT time — lets us replay rows in
+      // Defer FK validation to COMMIT time, lets us replay rows in
       // any order without each individual INSERT having to satisfy
       // FK preconditions. The pre-COMMIT `foreign_key_check` below
       // is the safety net.
@@ -356,7 +356,7 @@ export function importContent(
         // hand-edited document or a future export-time column add
         // on a target that hasn't migrated yet.
         const validCols = tableColumnSet(sqlite, table);
-        // Use the FIRST row's keys (filtered) as the column list —
+        // Use the FIRST row's keys (filtered) as the column list,
         // SELECT * always returns the same column set per call, so
         // every row in the dump shares the shape.
         const firstRow = rows[0]!;
@@ -388,7 +388,7 @@ export function importContent(
       if (violations.length > 0) {
         const sample = violations.slice(0, 5).map((v) => `${v.table}#${v.rowid}→${v.parent}`).join(", ");
         throw new Error(
-          `Import would leave ${violations.length} FK violation(s) — aborted. First few: ${sample}`,
+          `Import would leave ${violations.length} FK violation(s), aborted. First few: ${sample}`,
         );
       }
     });

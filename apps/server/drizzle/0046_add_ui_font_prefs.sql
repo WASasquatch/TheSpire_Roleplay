@@ -5,7 +5,7 @@
 --   use the default chat font stack (ui-sans-serif, system-ui, ...).
 --   Examples a user might enter: `"Georgia", serif`, `"Verdana",
 --   sans-serif`, `"Atkinson Hyperlegible", sans-serif`. We don't validate
---   beyond a length cap at the application layer — anything CSS rejects
+--   beyond a length cap at the application layer, anything CSS rejects
 --   silently falls back to the next font in the stack.
 --
 -- `ui_font_scale`: one of 'small' | 'medium' | 'large' | 'xl', stored as

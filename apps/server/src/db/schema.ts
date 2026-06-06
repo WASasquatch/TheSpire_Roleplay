@@ -31,10 +31,10 @@ export const users = sqliteTable(
      * points at the full source; these three fields let the owner
      * pick which part of the source becomes the visible circle.
      *
-     *   * `avatarZoom`    — 1.0 = no zoom (legacy cover-fit behavior);
+     *   * `avatarZoom`   , 1.0 = no zoom (legacy cover-fit behavior);
      *                       higher zooms in. Clamped to [1.0, 4.0].
-     *   * `avatarOffsetX` — 0..100, percent. CSS object-position X.
-     *   * `avatarOffsetY` — 0..100, percent. CSS object-position Y.
+     *   * `avatarOffsetX`, 0..100, percent. CSS object-position X.
+     *   * `avatarOffsetY`, 0..100, percent. CSS object-position Y.
      *
      * Defaults (1.0 / 50 / 50) reproduce the pre-feature centered
      * cover render exactly, so every legacy row keeps its old look.
@@ -64,7 +64,7 @@ export const users = sqliteTable(
     /**
      * Per-user override for the theme style axis ('medieval', 'modern',
      * 'scifi'). Null = follow `site_settings.default_style_key`. Style is
-     * orthogonal to palette — picking a style doesn't change which colors
+     * orthogonal to palette, picking a style doesn't change which colors
      * the user sees, just how the ornaments are drawn.
      */
     styleKey: text("style_key"),
@@ -107,8 +107,8 @@ export const users = sqliteTable(
       .notNull()
       .default(true),
     /**
-     * Per-event in-app sound toggles. All three default to on — opt out,
-     * not opt in — so a fresh sign-in hears notifications. Each maps to
+     * Per-event in-app sound toggles. All three default to on, opt out,
+     * not opt in, so a fresh sign-in hears notifications. Each maps to
      * one bundled mp3 in apps/web/public/audio:
      *   soundDmEnabled    → ping.mp3  (inbound DMs)
      *   soundChatEnabled  → tap.mp3   (inbound chat messages + actions)
@@ -126,7 +126,7 @@ export const users = sqliteTable(
     /**
      * Per-event whisper sound (whisper.mp3). Split out from
      * `soundDmEnabled` once the project shipped a fourth audio file
-     * dedicated to whispers — previously both DM and whisper rode
+     * dedicated to whispers, previously both DM and whisper rode
      * the same `ping` event because we only had three sound assets.
      * Default on, opt-out, matching the other sound prefs.
      */
@@ -135,11 +135,11 @@ export const users = sqliteTable(
       .default(true),
     /**
      * Per-user input-behavior toggles. Both default off (= feature on).
-     *   disableInputHistory — kills ArrowUp/ArrowDown command-history
+     *   disableInputHistory, kills ArrowUp/ArrowDown command-history
      *                         recall in the composer. Some users brush
      *                         the arrows while moving the cursor and
      *                         want the recall gone.
-     *   disableThesaurus    — kills the synonym popup that opens when
+     *   disableThesaurus   , kills the synonym popup that opens when
      *                         a word is highlighted. Annoying to users
      *                         who highlight just to copy.
      */
@@ -152,11 +152,11 @@ export const users = sqliteTable(
     /**
      * Scriptorium catalog preferences (migration 0142).
      *
-     *   storyShowNsfw  — opt-in for R / NC-17 cards in the catalog.
+     *   storyShowNsfw , opt-in for R / NC-17 cards in the catalog.
      *     Anonymous viewers never see these regardless; this gates
-     *     them for signed-in viewers. Default off — readers opt in.
+     *     them for signed-in viewers. Default off, readers opt in.
      *
-     *   storyCwBlocklist — comma-separated content warnings the user
+     *   storyCwBlocklist, comma-separated content warnings the user
      *     always wants filtered OUT of the catalog. Cards tagged with
      *     ANY blocklisted warning are hidden entirely (not just blurred).
      *     Same shape as worlds.contentWarnings and stories.contentWarnings.
@@ -179,19 +179,19 @@ export const users = sqliteTable(
     /**
      * Display + privacy prefs (migration 0077).
      *
-     *   showRankInUserlist — default true. When false, the user's
+     *   showRankInUserlist, default true. When false, the user's
      *     userlist row drops back to the gender glyph instead of the
      *     rank gem. Broadcast.ts nulls the occupant's rankKey/tier
      *     when this is off, so the existing UserNameTag conditional
      *     ("show rank if rank exists, else gender") naturally falls
      *     through to the gender path without needing extra props.
-     *   showRankInChat — default true. When false, addMessage
+     *   showRankInChat, default true. When false, addMessage
      *     snapshots null rank fields on outgoing messages from this
      *     author. Affects FUTURE sends only; past messages keep
      *     whatever was snapshotted at the time.
      *
      *   hideChatMessageCount / hideForumTopicCount / hideForumReplyCount
-     *     — default false. When true, the corresponding counter on
+     *    , default false. When true, the corresponding counter on
      *     `ProfileMetrics` returns null instead of the real number,
      *     and the ProfileModal renders "private" in its place. The
      *     three counters are independent so users can hide just the
@@ -214,7 +214,7 @@ export const users = sqliteTable(
       .default(false),
     /**
      * Lifetime post counters. Bumped at message-insert time by
-     * `bumpLifetimeForMessage`, never decremented — a soft-delete or
+     * `bumpLifetimeForMessage`, never decremented, a soft-delete or
      * retention purge leaves the counter intact. The profile view
      * reads from these columns directly; the legacy COUNT(*) over
      * `messages` is gone (it decayed every time a row was purged).
@@ -242,7 +242,7 @@ export const users = sqliteTable(
     /** Free-text current mood/expression (e.g. "angry", "wounded"). Null = no mood set. Capped at 32 chars; rendered as a chip next to the user's name on outgoing messages. */
     currentMood: text("current_mood"),
     /**
-     * Incognito (ghost) mode — moderator observation tool. When true,
+     * Incognito (ghost) mode, moderator observation tool. When true,
      * the user is removed from the userlist on every room they're in,
      * room transitions don't broadcast leave/join, and any chat
      * message they send renders as a system line under their
@@ -279,7 +279,7 @@ export const users = sqliteTable(
      *   - true (default): /profiles/:username returns the full profile to
      *     anyone, including anonymous viewers.
      *   - false: anonymous viewers get a `private: true` stub (HTTP 200,
-     *     so the splash can render a "this profile is private — sign in"
+     *     so the splash can render a "this profile is private, sign in"
      *     hint without confusing fetch() error handling); logged-in
      *     viewers always see the full profile (private == "members can
      *     view"); the owner and admins always see the full profile.
@@ -290,7 +290,7 @@ export const users = sqliteTable(
      * Anonymous viewers of an NSFW profile get the same `private: true`
      * stub as a non-public profile. Logged-in viewers see the full
      * profile but with a "View Profile" warning gate before the body
-     * renders — the gate is per-modal-mount so closing and reopening
+     * renders, the gate is per-modal-mount so closing and reopening
      * re-prompts. The owner and admins always see the content with no
      * gate.
      */
@@ -309,7 +309,7 @@ export const users = sqliteTable(
      * the previous room has since been deleted.
      *
      * FK enforcement: the `REFERENCES rooms(id) ON DELETE SET NULL` clause
-     * is declared at the DB layer in migration 0036 — not modeled here in
+     * is declared at the DB layer in migration 0036, not modeled here in
      * Drizzle's TS schema because pairing it with `rooms.ownerId → users.id`
      * forms a mutual-reference cycle that collapses both tables' inferred
      * types to `any`. The runtime constraint is unchanged; only the type-
@@ -328,7 +328,7 @@ export const users = sqliteTable(
      * CSS sizing strategy for `publicProfileBgUrl`. Stored as the
      * literal mode key ("cover" | "contain" | "tile" | "stretch")
      * that the client maps to `background-size`/`background-repeat`
-     * pairs. Default "cover" — most forgiving for typical landscape
+     * pairs. Default "cover", most forgiving for typical landscape
      * illustrations. See migration 0117 for the full table.
      */
     publicProfileBgMode: text("public_profile_bg_mode").notNull().default("cover"),
@@ -358,7 +358,7 @@ export const characters = sqliteTable(
     /** structured stats serialized as JSON; see CharacterStats in @thekeep/shared */
     statsJson: text("stats_json").notNull().default("{}"),
     avatarUrl: text("avatar_url"),
-    /** Mirrors `users.avatarZoom / avatarOffsetX / avatarOffsetY` —
+    /** Mirrors `users.avatarZoom / avatarOffsetX / avatarOffsetY`,
      *  per-character zoom + pan over the avatar source. Migration
      *  0178 added all six columns in lockstep so master and per-
      *  character avatars share the same focal-point UX. Defaults
@@ -366,7 +366,7 @@ export const characters = sqliteTable(
     avatarZoom: real("avatar_zoom").notNull().default(1.0),
     avatarOffsetX: real("avatar_offset_x").notNull().default(50.0),
     avatarOffsetY: real("avatar_offset_y").notNull().default(50.0),
-    /** Mirrors users.includeAvatarInGallery — per-character opt-in to
+    /** Mirrors users.includeAvatarInGallery, per-character opt-in to
      *  surface the avatar as the first tile in this character's
      *  portrait gallery. See the comment on users.includeAvatarInGallery
      *  for the rationale; the editor flag is the same checkbox. */
@@ -380,7 +380,7 @@ export const characters = sqliteTable(
      * 'modern', 'scifi'). Null = fall through the resolution chain:
      * users.style_key → theme-pinned design (from
      * site_settings.theme_design_map) → site_settings.default_style_key.
-     * Mirrors `themeJson` above — character can fully reskin the site
+     * Mirrors `themeJson` above, character can fully reskin the site
      * when active, design and all.
      */
     styleKey: text("style_key"),
@@ -388,9 +388,9 @@ export const characters = sqliteTable(
     isPublic: integer("is_public", { mode: "boolean" }).notNull().default(true),
     /** Same semantics as users.is_nsfw - forces private + adds a viewer gate splash. */
     isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
-    /** Mirrors users.publicProfileBgUrl — per-character public-profile backdrop image. NULL = use default. */
+    /** Mirrors users.publicProfileBgUrl, per-character public-profile backdrop image. NULL = use default. */
     publicProfileBgUrl: text("public_profile_bg_url"),
-    /** Mirrors users.publicProfileBgMode — "cover" | "contain" | "tile" | "stretch". */
+    /** Mirrors users.publicProfileBgMode, "cover" | "contain" | "tile" | "stretch". */
     publicProfileBgMode: text("public_profile_bg_mode").notNull().default("cover"),
     /**
      * Per-character lifetime post counters. Same semantics as the
@@ -418,7 +418,7 @@ export const characters = sqliteTable(
      *     new DM thread with this character; existing threads stay
      *     readable but new sends are gated, see route checks)
      *
-     * Existing friendships are NOT removed when the toggle flips off —
+     * Existing friendships are NOT removed when the toggle flips off,
      * the friend just can't reach this character via DM anymore. Flipping
      * it back on restores reachability with no further action needed.
      *
@@ -500,7 +500,7 @@ export const rooms = sqliteTable(
      * row is kept (settings + name reservation) so a future create
      * with the same lowercased name can resurrect the room with the
      * new caller as owner. Excluded from rooms-tree / search / join
-     * queries — archived rows are effectively invisible until
+     * queries, archived rows are effectively invisible until
      * resurrected. Null for active rooms; null for system rooms
      * permanently (they're never archived).
      */
@@ -582,7 +582,7 @@ export const messages = sqliteTable(
       onDelete: "set null",
     }),
     /**
-     * Per-identity whisper pin — the recipient's character id at send
+     * Per-identity whisper pin, the recipient's character id at send
      * time. Set when the resolution pointed at a specific character
      * (`@cid:` token or character-name lookup); null when the whisper
      * was addressed at the master / OOC handle. Added in migration
@@ -591,7 +591,7 @@ export const messages = sqliteTable(
      * master id, re-routing a thread that was opened to a character
      * back to the master account.
      *
-     * NOT a FK — same rationale as `toUserId` not being a hard FK on
+     * NOT a FK, same rationale as `toUserId` not being a hard FK on
      * users in the strict sense: a soft-deleted character shouldn't
      * cascade-mangle the whisper row. Kept as plain text.
      */
@@ -619,7 +619,7 @@ export const messages = sqliteTable(
     sceneImageUrl: text("scene_image_url"),
     /**
      * Trusted-HTML body for scheduled-/announce lines (migration 0191).
-     * The chat markdown pipeline still owns regular chat — when this
+     * The chat markdown pipeline still owns regular chat, when this
      * column is non-null, the announce-kind renderer paints it via
      * `dangerouslySetInnerHTML` (after the same sanitizer the bio
      * pipeline uses) so an admin who scheduled a banner with links /
@@ -629,7 +629,7 @@ export const messages = sqliteTable(
      */
     bodyHtml: text("body_html"),
     /**
-     * Thread category bucket — only meaningful for top-level messages in
+     * Thread category bucket, only meaningful for top-level messages in
      * a nested-mode room. Replies inherit their parent's bucket
      * implicitly via the thread the client groups. FK is SET NULL so
      * deleting a category preserves the thread history; the client
@@ -664,14 +664,14 @@ export const messages = sqliteTable(
     deletedByUserId: text("deleted_by_user_id"),
     /**
      * Snapshot of the actor's display name at delete time. Mirrors
-     * the existing `displayName` snapshot pattern for the author —
+     * the existing `displayName` snapshot pattern for the author,
      * keeps the audit coherent if the actor later renames or has
      * their account deleted.
      */
     deletedByDisplayName: text("deleted_by_display_name"),
     /**
      * Set when the topic has been locked (author or moderator action).
-     * Only meaningful for top-level topics in nested-mode rooms — the
+     * Only meaningful for top-level topics in nested-mode rooms, the
      * server rejects new replies under a locked topic. Stored as a
      * timestamp (ms) instead of a boolean so future audit surfaces can
      * show "locked at..."; the client only reads the truthiness.
@@ -680,7 +680,7 @@ export const messages = sqliteTable(
     /**
      * Timestamp of the most recent reply under this row (or its own
      * createdAt when no replies exist). Only meaningful for top-level
-     * topics in nested-mode rooms — the forum-topics endpoint orders
+     * topics in nested-mode rooms, the forum-topics endpoint orders
      * by this DESC so the most-recently-active threads surface first.
      * `addMessage` updates the parent's value on every reply insert.
      */
@@ -696,12 +696,12 @@ export const messages = sqliteTable(
     /**
      * Server-validated CSS snapshot for `kind: "cmd"` rows. Frozen on the
      * row at send time so a later edit to the underlying custom command's
-     * CSS doesn't restyle historical messages — same snapshot pattern used
+     * CSS doesn't restyle historical messages, same snapshot pattern used
      * for `display_name`, `color`, etc. Null on every other kind.
      */
     cmdCss: text("cmd_css"),
     /**
-     * Earning rank snapshot at send time — drives the chat-line sigil.
+     * Earning rank snapshot at send time, drives the chat-line sigil.
      * Same snapshot posture as displayName / color: a later rank-up or
      * a rank-disable doesn't rewrite history. Scope follows the IC/OOC
      * routing rule (character pool for IC, master pool for OOC).
@@ -715,7 +715,7 @@ export const messages = sqliteTable(
      * has to rely on the LIVE occupant row, so backlog from authors
      * who have logged out renders without their inline avatar even
      * though the avatarUrl snapshot above is present. Mirrors the
-     * rankKey / tier snapshot posture — a later toggle (or the
+     * rankKey / tier snapshot posture, a later toggle (or the
      * author logging out) doesn't rewrite history.
      */
     senderInlineAvatarEnabled: integer("sender_inline_avatar_enabled", { mode: "boolean" }).notNull().default(false),
@@ -787,8 +787,8 @@ export const characterPortraits = sqliteTable(
 
 /* ---------- user (OOC / master) portraits ----------
  * Parallel to character_portraits but keyed on userId. Powers the
- * gallery on master profiles — same shape, same per-portrait NSFW
- * gate, same sort_order semantics — so OOC profiles can show
+ * gallery on master profiles, same shape, same per-portrait NSFW
+ * gate, same sort_order semantics, so OOC profiles can show
  * additional images alongside the hero avatar the way character
  * profiles do.
  */
@@ -1002,7 +1002,7 @@ export const siteSettings = sqliteTable("site_settings", {
   /**
    * ms; how long a disconnected user lingers in the userlist as an
    * "idle" ghost before being dropped. Default 30 minutes. Overrides
-   * the long sessionTtlMs for *visible presence* only — session
+   * the long sessionTtlMs for *visible presence* only, session
    * validity itself is governed by sessionTtlMs. See migration
    * 0115_idle_grace_ms for the full rationale.
    */
@@ -1015,7 +1015,7 @@ export const siteSettings = sqliteTable("site_settings", {
    * Canonical public URL the banner logo links to. Empty string = no
    * link wrapping; the logo renders as a non-interactive element.
    * When set, the banner wraps the logo text or image in an `<a>`
-   * pointing at this URL — styling stays identical to the unwrapped
+   * pointing at this URL, styling stays identical to the unwrapped
    * version (no underline, no color change). Useful for pointing at a
    * marketing landing page, the project README, or just the site's
    * own home page when the chat lives at a different subdomain.
@@ -1077,10 +1077,17 @@ export const siteSettings = sqliteTable("site_settings", {
    */
   maxForumTopicTitleLength: integer("max_forum_topic_title_length").notNull().default(120),
   /**
+   * Topics-per-page for the discrete pagination strip rendered under
+   * each forum category. Migration 0193. Bounded (5..100) at the
+   * route handler; 20 mirrors the prior cursor-paged `limit ?? 20`
+   * default so existing pages don't visually shift on deploy.
+   */
+  forumTopicsPerPage: integer("forum_topics_per_page").notNull().default(20),
+  /**
    * Author-edit / author-delete grace window in ms. After this many
    * ms since createdAt, edits and deletes are rejected for the author.
    * Mods and admins bypass the gate entirely. Forum (nested) rooms
-   * ignore this and allow indefinite edits — the (edited) badge is
+   * ignore this and allow indefinite edits, the (edited) badge is
    * the transparency signal there. Default 300_000 (5 min).
    */
   editGraceMs: integer("edit_grace_ms").notNull().default(300_000),
@@ -1137,12 +1144,12 @@ export const siteSettings = sqliteTable("site_settings", {
   featuredWorldsEnabled: integer("featured_worlds_enabled", { mode: "boolean" }).notNull().default(false),
   /**
    * Splash stat: surface the rolling 24h chat message count on the
-   * splash. Independent of `activityFeedsEnabled` — each toggle gates
+   * splash. Independent of `activityFeedsEnabled`, each toggle gates
    * its own section of the splash stats row, so admins can show the
    * message count alone (just chat volume), the online/room counters
    * alone, or both together. When both are on, the splash renders
    * them in the same "· N stat" row so the cluster still reads as
-   * one beat. Default off — see migration 0116 for the rationale.
+   * one beat. Default off, see migration 0116 for the rationale.
    */
   splashMessages24hEnabled: integer("splash_messages_24h_enabled", { mode: "boolean" }).notNull().default(false),
   /** Sanitized HTML shown once to NEW users (registered after the welcome's last edit) until they dismiss it. Editing the text rotates a hash so the audience sees the new version on next load. */
@@ -1150,9 +1157,9 @@ export const siteSettings = sqliteTable("site_settings", {
   /** Timestamp of the most recent welcome-text edit. Null = never set. The audience filter is `users.created_at > new_user_welcome_updated_at`, so existing users at the time of the edit don't get retroactively spammed. */
   newUserWelcomeUpdatedAt: integer("new_user_welcome_updated_at", { mode: "timestamp_ms" }),
   /**
-   * Site-wide default theme STYLE — orthogonal to the palette (`defaultThemeJson`).
+   * Site-wide default theme STYLE, orthogonal to the palette (`defaultThemeJson`).
    * Where palette decides colors, style decides visual treatment ('medieval',
-   * 'modern', 'scifi' — each a full design language). Users who haven't picked
+   * 'modern', 'scifi', each a full design language). Users who haven't picked
    * a per-user override (users.style_key IS NULL) inherit this. Migrations
    * seed 'medieval' as the launch flagship.
    */
@@ -1177,11 +1184,11 @@ export const siteSettings = sqliteTable("site_settings", {
    * worlds (name, description, pages) when the constant is higher. Lets
    * us ship richer content to the bundled worlds without forcing a
    * manual admin step on each deploy. 0 = never seeded under the
-   * versioning scheme — implicitly v1.
+   * versioning scheme, implicitly v1.
    */
   worldsSeedVersion: integer("worlds_seed_version").notNull().default(0),
   /**
-   * Earning system configuration — every numeric input the XP /
+   * Earning system configuration, every numeric input the XP /
    * Currency / Rank engine touches. Stored as a single JSON blob
    * (versus 30+ flat columns) because the shape is deeply nested
    * (per-source × per-pool award amounts, transfer caps, backfill
@@ -1224,7 +1231,7 @@ export const siteSettings = sqliteTable("site_settings", {
  * `*_discount_pct` is snapshotted on insert: either the override's
  * per-pick discount or the global default at pick time. NULL on
  * read means "no pick for this category that day", not "use global
- * default" — the resolver always materializes a number on insert.
+ * default", the resolver always materializes a number on insert.
  */
 export const flashSales = sqliteTable("flash_sales", {
   /** ISO 'YYYY-MM-DD' UTC. Singleton per day. */
@@ -1236,7 +1243,7 @@ export const flashSales = sqliteTable("flash_sales", {
   cosmeticKey: text("cosmetic_key")
     .references(() => cosmetics.key, { onDelete: "set null" }),
   /** Free-form border pick (migration 0160). Same scope as
-   *  nameStyleKey — one row per UTC date, resolver-snapshotted
+   *  nameStyleKey, one row per UTC date, resolver-snapshotted
    *  discount alongside the FK. */
   freeformBorderKey: text("freeform_border_key")
     .references(() => freeformBorders.key, { onDelete: "set null" }),
@@ -1498,11 +1505,11 @@ export const worlds = sqliteTable(
       enum: ["freeform", "drop-in", "casual", "slice-of-life", "structured", "long-form"],
     }),
     /**
-     * Vibe-stat axes — author-tuned 0..100 integers that describe how
+     * Vibe-stat axes, author-tuned 0..100 integers that describe how
      * the world FEELS along eight orthogonal dimensions. Catalog
      * filters key on these, and world cards render them as horizontal
      * bars. Null = "author hasn't tuned this axis"; the renderer
-     * shows a muted "—" instead of a 0% bar so the visual difference
+     * shows a muted "-" instead of a 0% bar so the visual difference
      * between "deliberately none of this" and "not yet set" is clear.
      *
      * The axis list is INTENTIONALLY FIXED so cross-world comparison
@@ -1525,7 +1532,7 @@ export const worlds = sqliteTable(
      *   - "invite-only": only the owner can add members (no Join /
      *     Apply button surfaces in the catalog)
      * Defaults to "open" so legacy rows keep their pre-feature
-     * behavior — the visibility="open" check that gated joining
+     * behavior, the visibility="open" check that gated joining
      * before this column existed still applies via the route layer.
      */
     joinMode: text("join_mode", { enum: ["open", "application", "invite-only"] })
@@ -1534,7 +1541,7 @@ export const worlds = sqliteTable(
     /**
      * JSON array of question prompt strings (max 5, each 1..280
      * chars). The applicant's `answers_json` lines up by position.
-     * Empty array is legal — an open-question-set application just
+     * Empty array is legal, an open-question-set application just
      * captures the applicant's intent to join with no Q&A. The
      * column itself defaults to "[]" so the JSON-parse path never
      * sees null.
@@ -1552,7 +1559,7 @@ export const worlds = sqliteTable(
 );
 
 /**
- * World membership applications — created when a user clicks "Apply"
+ * World membership applications, created when a user clicks "Apply"
  * on a world whose `joinMode = "application"`. Row lifecycle:
  *
  *   pending → approved   (owner clicks Approve; user is auto-added
@@ -1568,7 +1575,7 @@ export const worlds = sqliteTable(
  *
  * Answers ride as a JSON array of strings keyed by question position
  * at the time of submission. Later edits to the world's questions
- * don't retroactively shorten or lengthen existing answers — what
+ * don't retroactively shorten or lengthen existing answers, what
  * the applicant wrote stays what the owner sees.
  */
 export const worldApplications = sqliteTable(
@@ -1602,7 +1609,7 @@ export const worldApplications = sqliteTable(
     worldStatusIdx: index("world_applications_world_status_idx").on(t.worldId, t.status),
     applicantIdx: index("world_applications_applicant_idx").on(t.applicantUserId, t.status),
     // The "at most one pending per (world, applicant, identity)"
-    // partial unique index lives in the migration only — drizzle's
+    // partial unique index lives in the migration only, drizzle's
     // typed builder doesn't model partial-expression indexes. The
     // runtime invariant is enforced both by that index AND by the
     // route layer (which queries for an existing pending row before
@@ -1659,8 +1666,8 @@ export const roomWorldLinks = sqliteTable(
 
 /**
  * Identity → world membership. A user (master account) can hold
- * memberships under multiple identities — their OOC face AND each
- * character — and each identity's membership is independent. Avery
+ * memberships under multiple identities, their OOC face AND each
+ * character, and each identity's membership is independent. Avery
  * can be in Halcyon City without dragging the master's OOC or
  * Sigrid along.
  *
@@ -1676,7 +1683,7 @@ export const roomWorldLinks = sqliteTable(
  * worlds if needed.
  *
  * Note: the per-master "isPrimary" concept was retired in migration
- * 0187 — with per-identity membership it became meaningless, and
+ * 0187, with per-identity membership it became meaningless, and
  * the userlist's primary-world grouping was the surface that
  * actually leaked "this character's master is in X" by way of
  * grouping a character row under the master's primary world.
@@ -1740,7 +1747,7 @@ export const worldCollaborators = sqliteTable(
 );
 
 /* =========================================================
- *  Scriptorium — long-form fiction (migration 0139)
+ *  Scriptorium, long-form fiction (migration 0139)
  *
  *  Stories are authored by identities (master account OR character)
  *  and inherit the same privacy posture as the rest of the app:
@@ -1851,7 +1858,7 @@ export const storyChapterVersions = sqliteTable(
 
 /**
  * Per-reader "continue reading" pointer. Author cannot see WHICH
- * readers have a row — only the aggregate readerCount. Admins cannot
+ * readers have a row, only the aggregate readerCount. Admins cannot
  * pull individual positions either.
  */
 export const storyReadingPositions = sqliteTable(
@@ -1884,7 +1891,7 @@ export const storyReadingPositions = sqliteTable(
  *
  * `pinnedByAuthor` floats the review to the top of the story's review
  * list; `hiddenByAuthor` removes it from public view (the reviewer
- * still sees it on their own surface — same shape as `/ignore`).
+ * still sees it on their own surface, same shape as `/ignore`).
  * `editGraceExpiresAt` is a 60-second window mirroring chat + DM grace.
  */
 export const storyReviews = sqliteTable(
@@ -1907,7 +1914,7 @@ export const storyReviews = sqliteTable(
     updatedAt: ts("updated_at"),
   },
   (t) => ({
-    // Identity-tuple uniqueness — partial index expression in the
+    // Identity-tuple uniqueness, partial index expression in the
     // migration (drizzle's typed builder doesn't expose the COALESCE
     // form directly).
     storyIdx: index("story_reviews_story_idx").on(t.storyId, t.createdAt),
@@ -1937,7 +1944,7 @@ export const storyReviewReplies = sqliteTable(
 );
 
 /**
- * Applause — idempotent boolean per (reader, target). Target is either
+ * Applause, idempotent boolean per (reader, target). Target is either
  * the whole story (chapterId null) or a specific chapter. Author
  * cannot see WHO applauded; only the rollup count on the story row.
  */
@@ -1955,7 +1962,7 @@ export const storyApplause = sqliteTable(
   },
   (t) => ({
     // Uniqueness is enforced by a COALESCE-expression unique index in
-    // the migration — SQLite forbids expressions in PK/UNIQUE
+    // the migration, SQLite forbids expressions in PK/UNIQUE
     // constraints, so this is a UNIQUE INDEX rather than a composite
     // PK. Rowid is the implicit primary key.
     uq: uniqueIndex("story_applause_uq").on(
@@ -1972,7 +1979,7 @@ export const storyApplause = sqliteTable(
 /**
  * Per-reader story subscription. On chapter publish, every row here is
  * notified (in-app via socket; optional web-push when pushEnabled).
- * Author cannot see WHO is subscribed — only the rollup count.
+ * Author cannot see WHO is subscribed, only the rollup count.
  */
 export const storySubscriptions = sqliteTable(
   "story_subscriptions",
@@ -2001,7 +2008,7 @@ export const storySubscriptions = sqliteTable(
  * heartbeat. Lease is 5 minutes since `lastRefreshAt`; the server
  * treats expired rows as available (lazy GC on the next acquire).
  *
- * "Force edit" simply bypasses the lock — the save still goes through
+ * "Force edit" simply bypasses the lock, the save still goes through
  * and divergence surfaces in the version history (each save is its
  * own row keyed by `savedByUserId`).
  */
@@ -2028,9 +2035,9 @@ export const storyChapterLocks = sqliteTable(
  * Per-story collaborators. The owner (`stories.authorUserId`) is
  * implicit and never has a row here. Three added roles:
  *
- *   reader    — read drafts only (beta readers)
- *   editor    — edit existing chapters + manage codex
- *   co_author — edit + add chapters, publish; cannot manage
+ *   reader   , read drafts only (beta readers)
+ *   editor   , edit existing chapters + manage codex
+ *   co_author, edit + add chapters, publish; cannot manage
  *               collaborators or delete the story
  *
  * `acceptedAt` null = pending invite (recipient hasn't decided);
@@ -2061,13 +2068,13 @@ export const storyCollaborators = sqliteTable(
 /* ---------- Scriptorium codex (Phase 8) ---------- */
 
 /**
- * Per-story continuity bible. Three discriminated kinds — characters,
- * locations, plot points — share one table with a `kind` column. Each
+ * Per-story continuity bible. Three discriminated kinds, characters,
+ * locations, plot points, share one table with a `kind` column. Each
  * entity has a per-(story, kind) unique slug so a character and a
  * location can share a name without colliding.
  *
  * `isPublic` opt-in surfaces an entity in the reader's "Cast & places"
- * appendix on the story landing page. Private by default — plot
+ * appendix on the story landing page. Private by default, plot
  * outlines especially shouldn't leak by default.
  */
 export const storyEntities = sqliteTable(
@@ -2077,7 +2084,7 @@ export const storyEntities = sqliteTable(
     storyId: text("story_id")
       .notNull()
       .references(() => stories.id, { onDelete: "cascade" }),
-    /** "character" | "location" | "plot" — enforced at the Zod layer. */
+    /** "character" | "location" | "plot", enforced at the Zod layer. */
     kind: text("kind").notNull(),
     slug: text("slug").notNull(),
     name: text("name").notNull(),
@@ -2110,7 +2117,7 @@ export const storyEntities = sqliteTable(
  *
  * The `snapshotJson` captures title / body / metadata at report time
  * so the queue stays useful even if the author later deletes the
- * reported content — mirror of the `bodySnapshot` pattern on the DM
+ * reported content, mirror of the `bodySnapshot` pattern on the DM
  * reports column of `reports` above.
  *
  * One report per (reporter, target). Second click silently no-ops.
@@ -2197,7 +2204,7 @@ export const reports = sqliteTable(
     /**
      * Room-message id when this is a room-content report; null for
      * DM reports (which use `directMessageId` below). Exactly one of
-     * (messageId, directMessageId) is set on a given row — enforced
+     * (messageId, directMessageId) is set on a given row, enforced
      * at the route layer because SQLite has no native XOR check.
      */
     messageId: text("message_id").references(() => messages.id, { onDelete: "cascade" }),
@@ -2219,7 +2226,7 @@ export const reports = sqliteTable(
      * querying `direct_messages` directly (preserves the "admin
      * queries cannot reach DM tables" invariant). `senderUserId` is
      * denormalized from `direct_messages.senderUserId` for the same
-     * reason — the admin row stands on its own.
+     * reason, the admin row stands on its own.
      */
     directMessageId: text("direct_message_id").references(() => directMessages.id, { onDelete: "set null" }),
     bodySnapshot: text("body_snapshot"),
@@ -2263,10 +2270,10 @@ export const friends = sqliteTable(
       .references(() => characters.id, { onDelete: "cascade" }),
     /**
      * Friendship state. `pending` means the friender sent a request and
-     * the friended user hasn't responded yet — they appear in the
+     * the friended user hasn't responded yet, they appear in the
      * inbox but NOT in either party's friends list. `accepted` means
      * the friendship is mutual: both sides see the other in their
-     * list. Decline removes the row entirely (no `'declined'` state —
+     * list. Decline removes the row entirely (no `'declined'` state,
      * we don't want a permanent "you've been declined" record sitting
      * in the DB).
      */
@@ -2287,14 +2294,14 @@ export const friends = sqliteTable(
 /* ---------- direct messages (Phase 3) ---------- */
 /**
  * Two-party persistent conversations, distinct from in-room whispers.
- * The canonical-pair invariant — `user_a_id < user_b_id` — combined
+ * The canonical-pair invariant, `user_a_id < user_b_id`, combined
  * with the unique index guarantees one conversation row per pair
  * regardless of who started it. The route layer enforces the
  * ordering on insert; once recorded the row never moves.
  *
  * Why a separate table family rather than reusing `rooms` + `messages`:
  *   - DMs are always 2-party. The room model carries replyMode, world
- *     links, thread categories, passwords, membership, expiry — every
+ *     links, thread categories, passwords, membership, expiry, every
  *     one of which would be a meaningless column on a DM "room."
  *   - Privacy: admins must never read DMs. Keeping the storage out of
  *     `messages` makes "admin queries can't touch DM bodies" enforceable
@@ -2398,7 +2405,7 @@ export const directConversationReads = sqliteTable(
 /**
  * Per-room admin-defined buckets for organizing top-level threads in
  * nested-mode rooms. The unique (room_id, lower(name)) index in the
- * migration enforces case-insensitive uniqueness within a room — no two
+ * migration enforces case-insensitive uniqueness within a room, no two
  * "Active Scenes" / "active scenes" categories side by side. Replies
  * inherit their parent's category implicitly; only top-level messages
  * carry a `thread_category_id` reference.
@@ -2433,7 +2440,7 @@ export const bookmarks = sqliteTable(
       .references(() => messages.id, { onDelete: "cascade" }),
     /** Free-form user-defined category; empty string is treated as "Uncategorized". */
     category: text("category").notNull().default(""),
-    /** Optional user-authored note for context — "why I bookmarked this". */
+    /** Optional user-authored note for context, "why I bookmarked this". */
     note: text("note"),
     createdAt: ts("created_at"),
   },
@@ -2444,7 +2451,7 @@ export const bookmarks = sqliteTable(
 );
 
 /* ============================================================
- * Earning — earned-currency (XP + Currency) + Rank ladder +
+ * Earning, earned-currency (XP + Currency) + Rank ladder +
  * cosmetics catalog. Drives the participation system described in
  * plan.md. All numeric values + asset paths in the catalog tables
  * are admin-managed from the Earning area of the admin panel; the
@@ -2489,7 +2496,7 @@ export const ranks = sqliteTable("ranks", {
  * to buy that rank's border frame (`borderImageUrl`).
  *
  * Eligibility persists via `maxRankKeyEverHeld` / `maxTierEverHeld`
- * on the earning rows — once a user has ever crossed Tier IV of a
+ * on the earning rows, once a user has ever crossed Tier IV of a
  * rank they retain the right to buy that border even if admins
  * raise the threshold later.
  */
@@ -2506,7 +2513,7 @@ export const rankTiers = sqliteTable(
     label: text("label").notNull(),
     /** Crossing this XP places the user at this tier of this rank. */
     xpThreshold: integer("xp_threshold").notNull().default(0),
-    /** Sigil PNG URL — bundled default `/assets/ranks/...` or `/uploads/ranks/<hash>.png`. */
+    /** Sigil PNG URL, bundled default `/assets/ranks/...` or `/uploads/ranks/<hash>.png`. */
     sigilImageUrl: text("sigil_image_url").notNull().default(""),
     /** Avatar border PNG URL. Set only for Tier IV (the capstone). */
     borderImageUrl: text("border_image_url"),
@@ -2525,7 +2532,7 @@ export const rankTiers = sqliteTable(
 /* ---------- name_styles ----------
  * Admin-authored HTML + CSS templates with a {username} placeholder
  * users can buy and equip to style their displayed name in chat /
- * forums / userlist. No JavaScript — animations are CSS-only via
+ * forums / userlist. No JavaScript, animations are CSS-only via
  * @keyframes, eliminating any stored-XSS surface even with
  * admin-only authoring.
  */
@@ -2534,7 +2541,7 @@ export const nameStyles = sqliteTable("name_styles", {
   /** Admin-facing label, e.g. "Sunset Gradient". */
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
-  /** HTML template — must include the literal `{username}` placeholder. */
+  /** HTML template, must include the literal `{username}` placeholder. */
   template: text("template").notNull(),
   /** Scoped CSS (animations via @keyframes). */
   styleCss: text("style_css").notNull().default(""),
@@ -2552,7 +2559,7 @@ export const nameStyles = sqliteTable("name_styles", {
  * Purchasable feature catalog distinct from name styles and
  * borders. Phase 4 seeds two rows: `inline_avatar` (round avatar
  * after the timestamp in chat) and `rank_border` (placeholder row
- * for the border-purchase flow — the actual per-rank prices live
+ * for the border-purchase flow, the actual per-rank prices live
  * on `rank_tiers.borderCost`).
  */
 export const cosmetics = sqliteTable("cosmetics", {
@@ -2571,7 +2578,7 @@ export const cosmetics = sqliteTable("cosmetics", {
 
 /* ---------- user_earning ----------
  * Per-master-account pool. Created on first earn (or lazily on first
- * dashboard read). `rankKey` + `tier` are denormalized — recomputed
+ * dashboard read). `rankKey` + `tier` are denormalized, recomputed
  * by the resolver every time XP changes so callers can read the
  * current rank without re-running the resolver. `maxRankKeyEverHeld`
  * + `maxTierEverHeld` capture the user's all-time peak so border
@@ -2587,7 +2594,7 @@ export const userEarning = sqliteTable("user_earning", {
   rankKey: text("rank_key"),
   /** Current tier within rank (1..N; null when rankKey is null). */
   tier: integer("tier"),
-  /** Highest rank ever held — never decreases. Drives "once eligible, always eligible" border purchasing. */
+  /** Highest rank ever held, never decreases. Drives "once eligible, always eligible" border purchasing. */
   maxRankKeyEverHeld: text("max_rank_key_ever_held"),
   maxTierEverHeld: integer("max_tier_ever_held"),
   /** Hides this user's Currency total from other users when set. Self always sees own. */
@@ -2627,7 +2634,7 @@ export const userEarning = sqliteTable("user_earning", {
    * site-level "{name} has connected." / "{name} has disconnected."
    * lines that surface in the user's first room when they log in /
    * out. Gated on this user owning `flair_session_presence`.
-   * Session presence is master-only — characters are sub-identities
+   * Session presence is master-only, characters are sub-identities
    * of the active session, not session participants themselves.
    * Supports `{name}` only. Null = use the default phrasing.
    */
@@ -2689,7 +2696,7 @@ export const characterEarning = sqliteTable("character_earning", {
   activeNameStyleKey: text("active_name_style_key"),
   /**
    * Per-character inline-avatar toggle. Same partition as
-   * activeNameStyleKey — character-active shows this character's
+   * activeNameStyleKey, character-active shows this character's
    * inline avatar choice, OOC shows the master's. Default false so
    * a new character starts with the avatar tile off.
    */
@@ -2707,7 +2714,7 @@ export const characterEarning = sqliteTable("character_earning", {
     .default(false),
   /**
    * Per-character banner image URL. Same per-identity partition as
-   * the cosmetics above — character-active shows this character's
+   * the cosmetics above, character-active shows this character's
    * banner on their profile, OOC shows the master's
    * (`user_active_cosmetics.profile_banner_url`). Writable only when
    * this character (not the master) owns `flair_profile_banner` in
@@ -2716,13 +2723,13 @@ export const characterEarning = sqliteTable("character_earning", {
   profileBannerUrl: text("profile_banner_url"),
   /**
    * Per-character custom typing phrase (migration 0150). Same
-   * partition rule as `profileBannerUrl` above — gated on THIS
+   * partition rule as `profileBannerUrl` above, gated on THIS
    * character (not the master) owning `flair_typing_phrase`.
    */
   typingPhrase: text("typing_phrase"),
   /**
    * Per-character room-presence templates (migration 0161). Same
-   * partition rule as `typingPhrase` above — gated on THIS character
+   * partition rule as `typingPhrase` above, gated on THIS character
    * (not the master) owning `flair_room_presence`. Character-active
    * rooms render this row's templates; OOC rooms render the master's.
    */
@@ -2743,7 +2750,7 @@ export const characterEarning = sqliteTable("character_earning", {
 /* ---------- profile_views ----------
  *
  * Append-only log of one row per unique (viewer, profile, day).
- * Drives the `flair_profile_visitors` counter — both display + the
+ * Drives the `flair_profile_visitors` counter, both display + the
  * owner's stats query. Always logged regardless of whether the
  * profile owner has equipped the flair, so the moment they buy +
  * enable it the count is non-zero. Viewer dedupe key is the
@@ -2766,7 +2773,7 @@ export const profileViews = sqliteTable(
     /** Signed-in viewer; NULL for anonymous. */
     viewerUserId: text("viewer_user_id")
       .references(() => users.id, { onDelete: "set null" }),
-    /** Dedupe key — `userId` for members, ip+UA hash for anon. */
+    /** Dedupe key, `userId` for members, ip+UA hash for anon. */
     viewerKey: text("viewer_key").notNull(),
     /** UNIX-day integer (floor(ms / 86_400_000)). */
     dayBucket: integer("day_bucket").notNull(),
@@ -2782,7 +2789,7 @@ export const profileViews = sqliteTable(
  * Append-only audit of every XP / Currency delta on either scope.
  * `scope` + `ownerId` together identify the pool (the FK relation
  * cannot be modeled in Drizzle because ownerId points to different
- * tables depending on scope — same pattern as audit_log's loose
+ * tables depending on scope, same pattern as audit_log's loose
  * target columns).
  *
  * Reason vocabulary lives in apps/server/src/earning/ledger.ts.
@@ -2863,7 +2870,7 @@ export const userOwnedNameStyles = sqliteTable(
  * Mirror of `user_owned_name_styles` keyed by character_id instead
  * of user_id. Each character carries its own owned list, purchased
  * from that character's currency pool. `configJson` holds the
- * character's color picks for THIS style — independent of any
+ * character's color picks for THIS style, independent of any
  * other identity's config for the same styleKey.
  */
 export const characterOwnedNameStyles = sqliteTable(
@@ -2915,7 +2922,7 @@ export const characterOwnedBorders = sqliteTable(
  * scoped CSS, mirroring the name-style system). App-layer validator
  * enforces exactly one path on insert/update.
  *
- * `rarity` is a free-string tier slug — drives the chip-strip
+ * `rarity` is a free-string tier slug, drives the chip-strip
  * filter and the per-card accent color in the user-facing UI.
  * Open string (no CHECK) so admins can add new tiers without a
  * schema migration; client falls back to a 'common' palette for
@@ -2998,16 +3005,16 @@ export const characterOwnedFreeformBorders = sqliteTable(
  * `isBuiltin = true`.
  *
  * Availability is a layered switch:
- *   enabled       — master existence. 0 hides everywhere and rejects
+ *   enabled      , master existence. 0 hides everywhere and rejects
  *                   commands referencing the item, but EXISTING
  *                   inventory rows persist so admins can revive an
  *                   item without nuking inventories.
- *   forSale       — independent of enabled; gates shop visibility
+ *   forSale      , independent of enabled; gates shop visibility
  *                   only. enabled=1+forSale=0 keeps the item usable
  *                   in commands while pulled from the store.
- *   saleStartsAt  — optional lower bound (unix ms). Shop hides the
+ *   saleStartsAt , optional lower bound (unix ms). Shop hides the
  *                   item until this time.
- *   saleEndsAt    — optional upper bound. Shop stops accepting
+ *   saleEndsAt   , optional upper bound. Shop stops accepting
  *                   purchases at/after this time.
  *
  * Per-command message tables are stored as JSON arrays. An empty
@@ -3055,7 +3062,7 @@ export const items = sqliteTable(
      */
     category: text("category").notNull().default("misc"),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
-    /** Independent of enabled — gates only shop visibility. */
+    /** Independent of enabled, gates only shop visibility. */
     forSale: integer("for_sale", { mode: "boolean" }).notNull().default(true),
     /** Optional lower bound on shop visibility (unix ms). */
     saleStartsAt: integer("sale_starts_at", { mode: "timestamp_ms" }),
@@ -3077,7 +3084,7 @@ export const items = sqliteTable(
 /* ---------- identity_inventory ----------
  * Per-identity holdings of catalog items. Composite-keyed by
  * (ownerScope, ownerId, itemKey) so OOC master and each character
- * carry fully independent inventories — see migration 0095. Every
+ * carry fully independent inventories, see migration 0095. Every
  * read MUST scope by (ownerScope, ownerId); a query that omits them
  * crosses the partition and is a bug.
  *
@@ -3088,7 +3095,7 @@ export const items = sqliteTable(
 export const identityInventory = sqliteTable(
   "identity_inventory",
   {
-    /** "user" (OOC master) or "character" — selects which id table ownerId points at. */
+    /** "user" (OOC master) or "character", selects which id table ownerId points at. */
     ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
     ownerId: text("owner_id").notNull(),
     itemKey: text("item_key")
@@ -3108,7 +3115,7 @@ export const identityInventory = sqliteTable(
 /* ---------- identity_collection ----------
  * Per-identity 10-slot pinned showcase of inventory items, rendered
  * on the identity's public profile. Migration 0096. Same partition
- * model as identity_inventory — every identity owns its own
+ * model as identity_inventory, every identity owns its own
  * Collection; nothing mirrors across identities. Slots are sparse:
  * a user can pin to 0, 3, and 7 and leave the rest empty. Reads
  * MUST scope by (ownerScope, ownerId), same as inventory.
@@ -3123,7 +3130,7 @@ export const identityCollection = sqliteTable(
   {
     ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
     ownerId: text("owner_id").notNull(),
-    /** 0..9 — enforced by SQL CHECK + the route validator. */
+    /** 0..9, enforced by SQL CHECK + the route validator. */
     slot: integer("slot").notNull(),
     itemKey: text("item_key")
       .notNull()
@@ -3142,7 +3149,7 @@ export const identityCollection = sqliteTable(
  * are higher-investment trophies, not common collectibles) and a
  * category guard enforced at the route layer.
  *
- * Same partitioning rules as item collection — every identity owns
+ * Same partitioning rules as item collection, every identity owns
  * its own pin set; OOC and each character are isolated. Slots are
  * sparse (0..4) and the slot range is enforced both by the SQL
  * CHECK constraint (migration 0105) and the route's zod validator.
@@ -3152,7 +3159,7 @@ export const identityPetCollection = sqliteTable(
   {
     ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
     ownerId: text("owner_id").notNull(),
-    /** 0..4 — enforced by SQL CHECK + the route validator. */
+    /** 0..4, enforced by SQL CHECK + the route validator. */
     slot: integer("slot").notNull(),
     itemKey: text("item_key")
       .notNull()
@@ -3206,7 +3213,7 @@ export const userActiveCosmetics = sqliteTable("user_active_cosmetics", {
  * Persists unacknowledged rank-up and tier-up events so the chat
  * ribbon survives reloads. Cleared by POST
  * /earning/me/notifications/rankup/ack. Per the project ethos
- * memory there are no popup toasts — this table backs a quiet,
+ * memory there are no popup toasts, this table backs a quiet,
  * dismissible ribbon and a dropdown indicator dot.
  */
 export const earningNotifications = sqliteTable(
@@ -3218,7 +3225,7 @@ export const earningNotifications = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     /** 'rankup' is the only kind in Phase 1; reserved for future expansion. */
     kind: text("kind", { enum: ["rankup"] }).notNull().default("rankup"),
-    /** Scope on which the rank-up happened — master pool or one of the user's characters. */
+    /** Scope on which the rank-up happened, master pool or one of the user's characters. */
     scope: text("scope", { enum: ["user", "character"] }).notNull(),
     /** characterId when scope = 'character'; null for scope = 'user'. */
     characterId: text("character_id"),
@@ -3274,10 +3281,10 @@ export const emoticonSheets = sqliteTable(
     }),
     /**
      * Moderation lifecycle (migration 0151).
-     *   'approved' — admin-created OR admin-approved user submission.
+     *   'approved', admin-created OR admin-approved user submission.
      *                Only these surface in the user-facing picker.
-     *   'pending'  — user submission awaiting review.
-     *   'rejected' — submission denied; Currency was refunded; the
+     *   'pending' , user submission awaiting review.
+     *   'rejected', submission denied; Currency was refunded; the
      *                image file has been deleted from disk but the
      *                row is retained for the moderation audit trail.
      * Open string (no DB CHECK) so future states ('flagged', etc.)
@@ -3308,7 +3315,7 @@ export const emoticonSheets = sqliteTable(
      * Currency per use, paid to the creator. When 0, uses are free
      * (the sheet still appears in the Community tab; the picker just
      * skips the debit/credit transaction). System sheets ignore this
-     * flag — they're always free.
+     * flag, they're always free.
      */
     commerceEnabled: integer("commerce_enabled", { mode: "boolean" })
       .notNull()
@@ -3343,10 +3350,10 @@ export const messageReactions = sqliteTable(
     characterId: text("character_id").references(() => characters.id, {
       onDelete: "set null",
     }),
-    /** Display name snapshot — survives renames the same way
+    /** Display name snapshot, survives renames the same way
      *  messages.displayName does. */
     displayName: text("display_name").notNull(),
-    /** Legacy sheet ref. Nullable since migration 0181 — set when the
+    /** Legacy sheet ref. Nullable since migration 0181, set when the
      *  reaction came from a sheet pick. Mutually exclusive with
      *  `unicodeChar`. App layer polices the "exactly one" rule. */
     sheetId: text("sheet_id")
@@ -3363,7 +3370,7 @@ export const messageReactions = sqliteTable(
   },
   (t) => ({
     /** Discord rule: one user, one emoji, one target. Across both ref
-     *  shapes — the index is keyed on a normalized COALESCE expression
+     *  shapes, the index is keyed on a normalized COALESCE expression
      *  per migration 0181. Drizzle doesn't model expression indexes
      *  natively; we still declare the column tuple here so the
      *  migration runner picks up the index by name and the application
@@ -3426,7 +3433,7 @@ export type DbIdentityCollection = typeof identityCollection.$inferSelect;
 /* ---------- role_permission_grants ----------
  * Phase 1 of the granular permission system (migration 0179). One row per
  * (role, permission_key) pair. Holds which permissions each role tier has
- * by default. Masteradmin has no row here — its bypass is hardcoded in
+ * by default. Masteradmin has no row here, its bypass is hardcoded in
  * `apps/server/src/auth/permissions.ts`. See plan.md for the catalog +
  * resolution precedence (masteradmin > user override > role grant > deny).
  */
@@ -3481,12 +3488,12 @@ export type DbIdentityPetCollection = typeof identityPetCollection.$inferSelect;
  *
  * Two surfaces share one admin tab:
  *
- *   `announcementBanners` — admin-curated rows the chat shell rotates
+ *   `announcementBanners`, admin-curated rows the chat shell rotates
  *   through in a fade-marquee at the top of the viewport. Body is
  *   sanitized HTML (Markdown is converted client-side at save time
  *   and stored as HTML so the read path is one shape).
  *
- *   `scheduledAnnouncements` — cron-like rows the server's scheduler
+ *   `scheduledAnnouncements`, cron-like rows the server's scheduler
  *   tick fires through the `/announce` code path. Each row carries
  *   either a one-shot `runAt` or a recurring `intervalMs` parsed from
  *   the admin's human-readable spec (`1d8h`, `3h`, `30m`, an ISO
@@ -3530,7 +3537,7 @@ export const scheduledAnnouncements = sqliteTable(
     bodyHtml: text("body_html").notNull(),
     bodyMarkdown: text("body_markdown").notNull(),
     /** Color override applied to the emitted `kind = 'announce'`
-     *  message — either NULL, a `#rrggbb` hex literal, or a
+     *  message, either NULL, a `#rrggbb` hex literal, or a
      *  `theme:<slot>` token. Same shape custom commands use. */
     color: text("color"),
     /** NULL = sitewide (broadcasts to every room); otherwise the
@@ -3548,3 +3555,71 @@ export const scheduledAnnouncements = sqliteTable(
 
 export type DbAnnouncementBanner = typeof announcementBanners.$inferSelect;
 export type DbScheduledAnnouncement = typeof scheduledAnnouncements.$inferSelect;
+
+/* ---------- builtin_command_config ----------
+ * Per-builtin command admin overrides for the social-game family.
+ * Migration 0194. One row per command name (lowercase, no slash);
+ * absent rows mean "use the code-default duration, mint no
+ * rewards." The admin Commands tab's "Built-ins" panel writes here;
+ * each game module reads via `getBuiltinCommandConfig` at
+ * game-start (duration) and game-end (rewards).
+ *
+ * Reward shape is shared across every social command, XP +
+ * Currency + optional item-from-shop, so a future game just adds
+ * its name to the registry side and immediately picks up the same
+ * reward pipeline. Raffles are deliberately excluded from reward
+ * minting (their prize IS the host's stake; adding bonus mint on
+ * top would dilute the gift). Raffles can still set `duration_ms`
+ * to retune the room / sitewide window.
+ */
+export const builtinCommandConfig = sqliteTable("builtin_command_config", {
+  commandName: text("command_name").primaryKey(),
+  rewardXp: integer("reward_xp").notNull().default(0),
+  rewardCurrency: integer("reward_currency").notNull().default(0),
+  rewardItemKey: text("reward_item_key").references(() => items.key, { onDelete: "set null" }),
+  rewardItemCount: integer("reward_item_count").notNull().default(0),
+  /** Null = use code default for this command. Bounded at the route
+   *  handler (1s..30min), the column itself is just the value. */
+  durationMs: integer("duration_ms"),
+  updatedAt: ts("updated_at"),
+  updatedByUserId: text("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+});
+export type DbBuiltinCommandConfig = typeof builtinCommandConfig.$inferSelect;
+
+/**
+ * Per-identity social-game win + points ledger (migration 0195).
+ *
+ * One row per (identity, game_kind). Updated automatically by
+ * `formatWinningsLine` in games/config.ts whenever a game ends with
+ * one or more winners, so adding a new social game kind in code
+ * needs no schema or routing change: the rankings page surfaces
+ * any game_kind that has rows.
+ *
+ *   owner_scope    'user' (OOC / master account) or 'character'.
+ *                  Master and each character are tracked separately,
+ *                  same per-identity model used by the earning
+ *                  pipeline. A user playing as a character credits
+ *                  the character; an OOC user credits themselves.
+ *
+ *   game_kind      Lowercase tag matching the kind the registry
+ *                  uses ("rps", "trivia", "storydice", "scramble",
+ *                  "duel", etc.).
+ *
+ *   wins           Total wins; incremented by 1 per game-end.
+ *
+ *   points         Game-specific score sum. For binary-win games
+ *                  it mirrors `wins`. For accumulating-score games
+ *                  (scramble) it's the winner's actual point total
+ *                  on each win.
+ */
+export const gameStats = sqliteTable("game_stats", {
+  ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
+  ownerId: text("owner_id").notNull(),
+  gameKind: text("game_kind").notNull(),
+  wins: integer("wins").notNull().default(0),
+  points: integer("points").notNull().default(0),
+  lastWonAt: ts("last_won_at"),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.ownerScope, t.ownerId, t.gameKind] }),
+}));
+export type DbGameStats = typeof gameStats.$inferSelect;

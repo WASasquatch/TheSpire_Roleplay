@@ -4,7 +4,7 @@
  * Aggregates per-pool metrics into the nine leaderboard "boards"
  * surfaced by the dashboard's Rankings tab. Per the user-confirmed
  * scope: each pool (master + each character) is a separate ranking
- * entry — a user with three characters can show up four times on a
+ * entry, a user with three characters can show up four times on a
  * board, once per active identity.
  *
  * Boards:
@@ -12,8 +12,8 @@
  *   messages  | borders   | styles     | topics       | reactions
  *
  * Each board returns up to TOP_N rows, sorted by metric value
- * descending. The endpoint also returns a `champions` list — the
- * #1 entry from each board — which the client uses for the
+ * descending. The endpoint also returns a `champions` list, the
+ * #1 entry from each board, which the client uses for the
  * rotating "Spotlight" carousel at the top of the tab.
  *
  * Privacy gates:
@@ -53,14 +53,14 @@ import {
 } from "../db/schema.js";
 
 /** Top N rows per board. 10 fits in a comfortable scroll without
- *  paging — anything more pushes the tab into virtual-list territory. */
+ *  paging, anything more pushes the tab into virtual-list territory. */
 const TOP_N = 10;
 
 export type RankingScope = "user" | "character";
 
 export interface RankingPoolEntry {
   scope: RankingScope;
-  /** Pool owner id — userId when scope='user', characterId when 'character'. */
+  /** Pool owner id, userId when scope='user', characterId when 'character'. */
   ownerId: string;
   /** Master user id. Same as ownerId for master rows; the character
    *  pool's owning user for character rows. Drives profile-modal
@@ -69,7 +69,7 @@ export interface RankingPoolEntry {
   characterId: string | null;
   displayName: string;
   avatarUrl: string | null;
-  /** Rank cosmetic context — for the avatar frame + the rank chip
+  /** Rank cosmetic context, for the avatar frame + the rank chip
    *  the card renders below the name. Nulls when unranked. */
   borderRankKey: string | null;
   freeformBorderKey: string | null;
@@ -130,7 +130,7 @@ const BOARD_LABELS: Record<RankingBoardKey, { label: string; metric: string }> =
   reactions: { label: "Reactor",        metric: "Reactions" },
 };
 
-/** Internal shape — a board entry before the display-info join. */
+/** Internal shape, a board entry before the display-info join. */
 interface RawEntry {
   scope: RankingScope;
   ownerId: string;
@@ -138,7 +138,7 @@ interface RawEntry {
 }
 
 /**
- * Build the full rankings response — runs all nine board queries,
+ * Build the full rankings response, runs all nine board queries,
  * collects the union of referenced pools, resolves display info in
  * one batched fetch, and stitches the boards + champions list.
  */
@@ -226,11 +226,11 @@ export async function buildRankings(db: Db): Promise<RankingsResponse> {
  *
  *  Each returns a top-TOP_N RawEntry[] for the board's metric.
  *  Privacy filters live inside each query so an aggregation can
- *  push them down past LIMIT — otherwise we'd over-fetch then
+ *  push them down past LIMIT, otherwise we'd over-fetch then
  *  prune and risk returning fewer than TOP_N rows after the prune.
  * ========================================================= */
 
-/** Common privacy gate — joinable into the user lookup so disabled
+/** Common privacy gate, joinable into the user lookup so disabled
  *  / private master accounts drop before the LIMIT applies. */
 function publicUserFilter() {
   return and(isNull(users.disabledAt), eq(users.isPublic, true));
@@ -330,7 +330,7 @@ async function queryRankBoard(db: Db): Promise<RawEntry[]> {
 
 async function queryItemsBoard(db: Db): Promise<RawEntry[]> {
   // SUM of `quantity` per pool, ignoring item type / stack semantics.
-  // The user said "most items" — a single 100-stack of bread counts
+  // The user said "most items", a single 100-stack of bread counts
   // the same as 100 unique items. Simpler + matches the player's
   // mental model of "how full is my inventory".
   const rows = await db
@@ -588,7 +588,7 @@ async function fetchDisplayInfo(
   const userIds = pools.filter((p) => p.scope === "user").map((p) => p.ownerId);
   const charIds = pools.filter((p) => p.scope === "character").map((p) => p.ownerId);
 
-  // Master rows — pull from users + user_earning + user_active_cosmetics.
+  // Master rows, pull from users + user_earning + user_active_cosmetics.
   if (userIds.length > 0) {
     const rows = await db
       .select({
@@ -607,7 +607,7 @@ async function fetchDisplayInfo(
       .leftJoin(userEarning, eq(userEarning.userId, users.id))
       .leftJoin(userActiveCosmetics, eq(userActiveCosmetics.userId, users.id))
       .where(inArray(users.id, userIds));
-    // Rank tier display labels (rankName, tierLabel, sigil) — one
+    // Rank tier display labels (rankName, tierLabel, sigil), one
     // batched lookup against ranks + rank_tiers.
     const rankTierMap = await loadRankTierDisplay(db);
     // Per-(user, style) configJson for the master scope. Same shape
@@ -642,7 +642,7 @@ async function fetchDisplayInfo(
     }
   }
 
-  // Character rows — pull from characters + character_earning,
+  // Character rows, pull from characters + character_earning,
   // joined to users for privacy + master fallback.
   if (charIds.length > 0) {
     const rows = await db
@@ -714,7 +714,7 @@ let rankTierDisplayCacheStamp = 0;
 const RANK_DISPLAY_TTL = 60_000; // 1 minute
 
 async function loadRankTierDisplay(db: Db): Promise<Map<string, RankTierDisplay>> {
-  // Cached for a minute — the rank catalog is admin-edited rarely,
+  // Cached for a minute, the rank catalog is admin-edited rarely,
   // and the rankings endpoint is hit on every dashboard open.
   // Stale-by-up-to-a-minute is acceptable for cosmetic labels.
   const now = Date.now();

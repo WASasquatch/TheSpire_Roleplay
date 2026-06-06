@@ -1,5 +1,5 @@
 /**
- * Permission-system diagnostics — pure check engine.
+ * Permission-system diagnostics, pure check engine.
  *
  * Walks a `PermissionsCache` snapshot (plus optional "live state" hints
  * like the set of known user ids) through every safety invariant the
@@ -10,8 +10,8 @@
  *
  * **Why pure?** The same checks need to run in three places:
  *
- *   1. CI / dev — against the *seed* SQL parsed off disk. No live DB.
- *   2. Production admin button — against the *live* cache loaded from
+ *   1. CI / dev, against the *seed* SQL parsed off disk. No live DB.
+ *   2. Production admin button, against the *live* cache loaded from
  *      `role_permission_grants` + `user_permission_overrides`.
  *   3. Future: against a *prospective* edit before commit (preview
  *      "if I toggle this, does it leak a masteradmin-only key?").
@@ -21,15 +21,15 @@
  *
  * Check taxonomy (returned `group` field):
  *
- *   - "resolver"    — invariants the pure resolver should always
+ *   - "resolver"   , invariants the pure resolver should always
  *                     uphold (masteradmin bypass, override
  *                     precedence). Sanity smoke test; if any fails the
  *                     codebase is broken, not the install.
- *   - "live-state"  — catches drift in the live tables: orphan rows
+ *   - "live-state" , catches drift in the live tables: orphan rows
  *                     (key removed from catalog, user deleted),
  *                     masteradmin-only key leaked to a lower role,
  *                     fallback unexpectedly engaged.
- *   - "meta"        — the diagnostics suite itself catches its own
+ *   - "meta"       , the diagnostics suite itself catches its own
  *                     drift (e.g., catalog coverage in the shared
  *                     PERMISSION_GROUPS table).
  */
@@ -85,7 +85,7 @@ export interface DiagnosticsResult {
 
 /**
  * Inputs the diagnostics suite needs that go beyond the `PermissionsCache`
- * itself. `knownUserIds` is optional — when omitted the
+ * itself. `knownUserIds` is optional, when omitted the
  * orphan-override-user check is skipped (so CI can run pure-resolver
  * checks without faking the users table).
  */
@@ -100,7 +100,7 @@ export interface DiagnosticsInputs {
 
 /**
  * Run every check appropriate to the given inputs. Returns a structured
- * report — caller renders it (CLI → ANSI summary, admin UI → React).
+ * report, caller renders it (CLI → ANSI summary, admin UI → React).
  */
 export function runPermissionsDiagnostics(input: DiagnosticsInputs): DiagnosticsResult {
   const failures: DiagnosticFailure[] = [];
@@ -165,7 +165,7 @@ export function runPermissionsDiagnostics(input: DiagnosticsInputs): Diagnostics
    * Resolver: user override grant beats role
    * Picking a user id that doesn't appear in `cache.userOverrides` so
    * we test against a clean slate per check. (`__diag_grant` is a
-   * sentinel — no real user has it.)
+   * sentinel, no real user has it.)
    * ===================================================================== */
   for (const role of NON_MASTERADMIN_ROLES) {
     for (const key of PERMISSION_KEYS) {
@@ -197,7 +197,7 @@ export function runPermissionsDiagnostics(input: DiagnosticsInputs): Diagnostics
 
   /* =====================================================================
    * Resolver: masteradmin ignores override revoke
-   * Bypass wins over the override layer — you can't strand the install
+   * Bypass wins over the override layer, you can't strand the install
    * by toggling your own row off.
    * ===================================================================== */
   for (const key of PERMISSION_KEYS) {
@@ -212,7 +212,7 @@ export function runPermissionsDiagnostics(input: DiagnosticsInputs): Diagnostics
 
   /* =====================================================================
    * Live state: fallback engaged
-   * If `cache.fallback === true` the table is empty — the install is
+   * If `cache.fallback === true` the table is empty, the install is
    * running on legacy `isAdminRole` defaults. Loud single failure so
    * an admin can repair the seed.
    * ===================================================================== */

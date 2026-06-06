@@ -1,7 +1,7 @@
 import type { Theme } from "./theme.js";
 
 /**
- * The Scriptorium — long-form fiction wire types. Stories are authored
+ * The Scriptorium, long-form fiction wire types. Stories are authored
  * by identities (master account OR a specific character) and surface in
  * three places:
  *
@@ -17,7 +17,7 @@ import type { Theme } from "./theme.js";
  */
 
 /**
- * Visibility tier — mirrors world visibility, with `unlisted` added so
+ * Visibility tier, mirrors world visibility, with `unlisted` added so
  * an author can share a beta-reader link without putting the story in
  * the public catalog.
  *
@@ -28,7 +28,7 @@ import type { Theme } from "./theme.js";
 export type StoryVisibility = "private" | "unlisted" | "public";
 
 /**
- * Rating tier — single-select. Drives the splash-page filter and the
+ * Rating tier, single-select. Drives the splash-page filter and the
  * NSFW gate for anonymous viewers.
  */
 export type StoryRating = "G" | "PG" | "PG-13" | "R" | "NC-17";
@@ -37,17 +37,17 @@ export type StoryRating = "G" | "PG" | "PG-13" | "R" | "NC-17";
 export const STORY_RATINGS = ["G", "PG", "PG-13", "R", "NC-17"] as const;
 
 /**
- * Splash-strip-safe ratings — ratings whose CARD (cover, title, summary)
+ * Splash-strip-safe ratings, ratings whose CARD (cover, title, summary)
  * may surface on anonymous-visible carousel-style preview surfaces
  * without a click-through. Stricter than {@link PUBLIC_READABLE_RATINGS}
- * because preview surfaces show content unconditionally — a thumbnail
+ * because preview surfaces show content unconditionally, a thumbnail
  * for an R-rated cover may itself be NSFW.
  */
 export const SFW_RATINGS: readonly StoryRating[] = ["G", "PG", "PG-13"] as const;
 
 /**
  * Ratings whose full BODY anonymous viewers may read. The intent here
- * is to mask only the explicit tier (NC-17 — graphic sex, extreme
+ * is to mask only the explicit tier (NC-17, graphic sex, extreme
  * gore) behind the login wall. Strong content up to and including R
  * is reachable without an account; the catalog still labels each
  * card with its rating chip so readers self-select.
@@ -59,7 +59,7 @@ export const SFW_RATINGS: readonly StoryRating[] = ["G", "PG", "PG-13"] as const
 export const PUBLIC_READABLE_RATINGS: readonly StoryRating[] = ["G", "PG", "PG-13", "R"] as const;
 
 /** True iff this rating requires an authenticated viewer to OPEN the
- *  story body. Catalog visibility is unaffected — cards still render. */
+ *  story body. Catalog visibility is unaffected, cards still render. */
 export function ratingRequiresAuth(rating: StoryRating): boolean {
   return rating === "NC-17";
 }
@@ -71,7 +71,7 @@ export function ratingRequiresAuth(rating: StoryRating): boolean {
  * of guessing at industry shorthand.
  *
  * The descriptions are intentionally explicit about WHERE the line
- * sits between R and NC-17 — the difference is "depicted vs. graphic"
+ * sits between R and NC-17, the difference is "depicted vs. graphic"
  * (R: sex / violence occurs, NC-17: sex / violence is depicted in
  * graphic detail). Picking the right tier matters because R is
  * publicly readable and NC-17 requires login.
@@ -105,7 +105,7 @@ export const STORY_RATING_INFO: Record<StoryRating, {
   "R":     {
     label: "R",
     short: "Adult themes",
-    description: "Strong violence, harsh language, sexual content and nudity. Acts may occur on the page but are NOT depicted in explicit detail — that's NC-17 territory. Publicly readable; readers expect mature situations.",
+    description: "Strong violence, harsh language, sexual content and nudity. Acts may occur on the page but are NOT depicted in explicit detail, that's NC-17 territory. Publicly readable; readers expect mature situations.",
     publicReadable: true,
   },
   "NC-17": {
@@ -208,7 +208,7 @@ export const STORY_TAG_CAP = 20;
 /** Hard cap on per-story autosave snapshots kept in history. Publish frames are kept indefinitely. */
 export const STORY_AUTOSAVE_HISTORY_CAP = 20;
 
-/** Slug derivation for stories — same rules as worlds. */
+/** Slug derivation for stories, same rules as worlds. */
 export function deriveStorySlug(input: string): string {
   return input
     .toLowerCase()
@@ -411,7 +411,7 @@ export interface StoryReviewReply {
   updatedAt: number;
 }
 
-/** Paged review listing — returned by GET /stories/:id/reviews. */
+/** Paged review listing, returned by GET /stories/:id/reviews. */
 export interface StoryReviewPage {
   /** Pinned reviews float to the top here, regardless of recency. */
   reviews: StoryReview[];
@@ -485,7 +485,7 @@ export interface StoryReport {
   targetId: string;
   storyId: string;
   storyTitle: string;
-  /** Reporter's master username (admin queue surface — no characters needed here). */
+  /** Reporter's master username (admin queue surface, no characters needed here). */
   reporterUsername: string;
   reporterUserId: string;
   reason: string | null;
@@ -539,9 +539,9 @@ export interface StoryChapterLockState {
  * implicit (`stories.authorUserId`) and never appears in the
  * collaborators table.
  *
- *   reader     — read drafts only
- *   editor     — edit existing chapters + manage codex
- *   co_author  — edit + add chapters, publish
+ *   reader    , read drafts only
+ *   editor    , edit existing chapters + manage codex
+ *   co_author , edit + add chapters, publish
  *
  * Owner (implicit) is the only role with manage-collaborators +
  * delete-story powers. Admins inherit owner-level access via the
@@ -620,7 +620,7 @@ export interface StoryCollaborator {
 }
 
 /**
- * Outbound listing for a user's pending collaboration invites — shown
+ * Outbound listing for a user's pending collaboration invites, shown
  * in the catalog's My Stories tab when there are any. Carries enough
  * story metadata that the recipient can decide without opening the
  * story first.
@@ -682,10 +682,10 @@ export const STORY_ENTITY_PER_KIND_CAP = 200;
  * Per-user Scriptorium catalog preferences. Wire shape returned by
  * `/me/profile` and accepted by `/me/profile` PATCH.
  *
- *   showNsfw    — Opt-in for R / NC-17 cards in the catalog. Anonymous
+ *   showNsfw   , Opt-in for R / NC-17 cards in the catalog. Anonymous
  *                 viewers are gated server-side regardless; this gates
  *                 signed-in viewers too. Default off.
- *   cwBlocklist — Always-hide list. Cards tagged with ANY warning in
+ *   cwBlocklist, Always-hide list. Cards tagged with ANY warning in
  *                 this set are filtered out of catalog responses.
  */
 export interface UserStoryPrefs {

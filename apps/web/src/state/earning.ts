@@ -1,5 +1,5 @@
 /**
- * Earning — Zustand slice + hooks.
+ * Earning, Zustand slice + hooks.
  *
  * Holds the cached `/earning/me` snapshot, a live-updated wallet on
  * `earning:earned` socket events, and the unacknowledged rank-up
@@ -43,14 +43,14 @@ interface EarningState {
   /**
    * Monotonic counter bumped every time `applyEarned` fires. Surfaced
    * so the Activity (ledger) tab can refetch its first page when a
-   * new credit lands — the ledger endpoint isn't push-based, but
+   * new credit lands, the ledger endpoint isn't push-based, but
    * keying a useEffect off this tick keeps the feed in sync with the
    * live wallet without a manual reload. Initialized at 0; only the
    * delta matters to listeners.
    */
   earnedTick: number;
 
-  /** Trigger a fresh fetch. Safe to call multiple times — guards against overlap. */
+  /** Trigger a fresh fetch. Safe to call multiple times, guards against overlap. */
   refresh: () => Promise<void>;
   /** Reset to initial state (call on logout). */
   reset: () => void;
@@ -81,7 +81,7 @@ interface EarningState {
 
   /**
    * Dismiss a single rank-up by id (POST the ack + drop from local
-   * queue). Fire-and-forget — UI optimistically removes; an ack
+   * queue). Fire-and-forget, UI optimistically removes; an ack
    * failure logs but doesn't restore the entry.
    */
   dismissRankUp: (notificationId: string) => Promise<void>;
@@ -103,7 +103,7 @@ export const useEarning = create<EarningState>((set, get) => ({
   ...INITIAL,
 
   refresh: async () => {
-    // Coalesce concurrent calls — multiple components mounting at the
+    // Coalesce concurrent calls, multiple components mounting at the
     // same time should share one network round trip.
     if (inFlight) return inFlight;
     set({ loading: true, error: null });
@@ -131,7 +131,7 @@ export const useEarning = create<EarningState>((set, get) => ({
   reset: () => set({ ...INITIAL }),
 
   applyEarned: (payload) => {
-    // Bump the live-tick regardless of whether we have a snapshot —
+    // Bump the live-tick regardless of whether we have a snapshot,
     // the Activity tab listens for it to refetch its page, and that
     // path should run on cold-cache states too (e.g. brand-new
     // character whose snapshot hasn't loaded yet but is already
@@ -240,7 +240,7 @@ function applyToPool(
 /**
  * Resolve a (rankKey, tier) tuple to its display fields using the
  * cached catalog from the snapshot. Returns nulls when the snapshot
- * isn't loaded or the lookup misses — the caller renders gracefully.
+ * isn't loaded or the lookup misses, the caller renders gracefully.
  */
 export function lookupRankTier(
   snap: EarningMeResponse | null,
@@ -255,7 +255,7 @@ export function lookupRankTier(
 
 /**
  * Compute the (xp progress, xp to next, percentage) tuple for a pool's
- * progress bar — finds the next-higher tier in the catalog and reports
+ * progress bar, finds the next-higher tier in the catalog and reports
  * progress between the current tier's threshold and that one. Returns
  * null when the pool is at the catalog's top tier (no "next").
  */
@@ -264,7 +264,7 @@ export function progressToNextTier(
   pool: PoolView,
 ): { inTier: number; tierSpan: number; pct: number; nextLabel: string | null } | null {
   if (!snap || !pool.rankKey || pool.tier == null) {
-    // Below the first tier — find the lowest tier and report progress
+    // Below the first tier, find the lowest tier and report progress
     // toward it.
     const tiers = snap?.catalog.rankTiers ?? [];
     const lowest = [...tiers]

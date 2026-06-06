@@ -1,7 +1,7 @@
 -- DM reports. Extends the existing reports table with an optional
 -- pointer to a `direct_messages` row, plus a snapshot of the DM body
 -- so the admin queue can show the reported content without ever
--- querying `direct_messages` from an /admin/* route — same posture
+-- querying `direct_messages` from an /admin/* route, same posture
 -- the whisper-report flow already uses.
 --
 -- The original `reports.message_id` column was `NOT NULL` (every

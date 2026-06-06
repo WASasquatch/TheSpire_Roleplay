@@ -11,7 +11,7 @@
  *     filename generation (timestamps with millisecond resolution).
  *   - Content imports hold a database transaction. A second import
  *     attempting to start while the first is mid-transaction would
- *     contend for the writer lock anyway — the in-memory check just
+ *     contend for the writer lock anyway, the in-memory check just
  *     makes that contention loud (clean 409 with a "still running"
  *     message) instead of silently blocking.
  *
@@ -73,7 +73,7 @@ export function getStatus(): BackupOperationStatus {
  * Resolves to either { ok: true, value } or { ok: false, busy: status }
  * so callers can return a 409 cleanly without throwing.
  *
- * Errors thrown inside `fn` propagate after the lock is released —
+ * Errors thrown inside `fn` propagate after the lock is released,
  * the caller's try/catch sees the original error.
  */
 export async function withLock<T>(

@@ -1,11 +1,11 @@
 -- Two new animated name styles in the fire family.
 --
---   hearth_fire — vertical fire-palette gradient that pans up and
+--   hearth_fire, vertical fire-palette gradient that pans up and
 --                 down through the glyphs (the flame "rises" through
 --                 the letters). Single-element style; no pseudo
 --                 trickery. Cheaper to render and a solid baseline.
 --
---   embers      — same fire gradient pan + two pseudo-element layers
+--   embers     , same fire gradient pan + two pseudo-element layers
 --                 emitting "particles" via stacked radial-gradients
 --                 that translate upward and fade. Three particles
 --                 per pseudo, two pseudos with offset durations and

@@ -9,14 +9,14 @@ export interface ClientToServerEvents {
   /** Raw user input. The server tokenizes (slash commands or plain text). */
   /**
    * Forum-mode payload extensions:
-   *   `threadTitle` — non-empty when the user is starting a new topic in
+   *   `threadTitle`, non-empty when the user is starting a new topic in
    *                   a nested-mode room. Becomes the topic header.
    *                   Rejected when combined with `replyToId`.
-   *   `replyToId`   — when set, the message becomes a reply under that
+   *   `replyToId`  , when set, the message becomes a reply under that
    *                   topic. Required in nested rooms when not creating
    *                   a new topic (forum-style: every post is either a
    *                   new topic or a reply to one).
-   *   `threadCategoryId` — same as before; only honored for new
+   *   `threadCategoryId`, same as before; only honored for new
    *                   top-level posts. The server validates the id
    *                   belongs to the target room; an invalid id silently
    *                   drops to "Uncategorized" rather than rejecting
@@ -32,7 +32,7 @@ export interface ClientToServerEvents {
       replyToId?: string;
       /**
        * Authoritative per-send identity claim from the client. The tab's
-       * current React state for `activeCharacterId` — string for a
+       * current React state for `activeCharacterId`, string for a
        * character, `null` for OOC (master), omitted to fall back to the
        * server's stored `socket.data.tabCharId`.
        *
@@ -40,13 +40,13 @@ export interface ClientToServerEvents {
        * tabCharId is seeded at handshake and can drift from the UI's
        * actual state across reconnects, multi-tab DB-default races, or
        * cross-tab /char-clear side effects. Sending the identity on
-       * every chat:input collapses all those failure modes — the
+       * every chat:input collapses all those failure modes, the
        * server validates the claim against the user's owned characters
        * and uses it as the source of truth for THIS send's display
        * name + per-character pool routing.
        *
        * Invalid claims (character isn't owned or has been deleted) are
-       * silently degraded to the socket's tabCharId — same safe fallback
+       * silently degraded to the socket's tabCharId, same safe fallback
        * the handshake middleware uses.
        */
       asCharacterId?: string | null;
@@ -82,12 +82,12 @@ export interface ClientToServerEvents {
    * Why this exists alongside the HTTP `PUT /me/active-character`:
    *   - HTTP can't identify which tab made the call, so it can only
    *     toggle the user-level default. That implementation moved every
-   *     tab in lockstep — surprising behavior for multi-character
+   *     tab in lockstep, surprising behavior for multi-character
    *     play where one tab is the in-character voice and another is OOC.
    *   - This socket event scopes the switch to the calling socket
    *     (`socket.data.tabCharId`). The server also updates the user-
    *     level default so a NEW tab opened later picks up the most-
-   *     recent character — but already-connected tabs are untouched.
+   *     recent character, but already-connected tabs are untouched.
    *
    * The server replies via `me:character-update` to the calling socket
    * with the resolved identity (new id + name) so the client can
@@ -99,12 +99,12 @@ export interface ClientToServerEvents {
     ack?: AckFn<{ ok: true; activeCharacterId: string | null; activeCharacterName: string | null } | AckError>,
   ) => void;
   /**
-   * Signal that the user is *intentionally* leaving — i.e. clicked the
+   * Signal that the user is *intentionally* leaving, i.e. clicked the
    * Exit button in the banner. The server flags the socket so the
    * eventual disconnect emits a "has disconnected." chat broadcast.
    * Without this signal, a disconnect is treated as transient
    * (mobile suspend, tab close, network blip) and stays silent in
-   * chat — the userlist still updates either way.
+   * chat, the userlist still updates either way.
    *
    * The client emits this immediately before `disconnect()` and does
    * not wait for an ack; the server's handler is synchronous in
@@ -116,7 +116,7 @@ export interface ClientToServerEvents {
    * Ask the server to re-emit `room:state` + `presence:update` +
    * `message:bulk` + `room:history_meta` for whichever room this socket
    * is currently in. Fired by the client when Chat mounts onto an
-   * already-connected socket — the case where the socket was created
+   * already-connected socket, the case where the socket was created
    * by an App-level effect during the deep-link standalone shell and
    * the initial join broadcasts went out before Chat's listeners were
    * attached. No-op when the socket isn't in any room.
@@ -134,7 +134,7 @@ export interface ClientToServerEvents {
    * No explicit "stop" event. The composer simply stops emitting
    * when the user pauses or sends; the server's expiry sweep is what
    * actually drops the entry from the typer set. Keeps the wire
-   * tiny — no signal needed on the common case of "user finished a
+   * tiny, no signal needed on the common case of "user finished a
    * sentence and walked away".
    *
    * Phase 4 of the cosmetic expansion. Phase 5 layers the custom
@@ -161,7 +161,7 @@ export interface ClientToServerEvents {
 /** Events emitted by the server → client. */
 export interface ServerToClientEvents {
   /**
-   * Scriptorium — a chapter the receiver is subscribed to has been
+   * Scriptorium, a chapter the receiver is subscribed to has been
    * published. The client surfaces a quiet one-line system message in
    * the user's current room and (when the follower opted into push)
    * the server independently fires a web-push notification.
@@ -172,7 +172,7 @@ export interface ServerToClientEvents {
    */
   "story:chapter-published": (payload: import("./story.js").StoryChapterPublishedEvent) => void;
   /**
-   * Scriptorium — the recipient has been invited to collaborate on a
+   * Scriptorium, the recipient has been invited to collaborate on a
    * story. Surfaces as an Accept | Decline card above the chat
    * composer, same UX shape as the mutual-titles `mutual:prompt`
    * flow. Multiple tabs/devices all see the prompt; whichever one
@@ -206,26 +206,26 @@ export interface ServerToClientEvents {
    * Global "your cached rooms tree is stale" pulse. Fired by the server
    * whenever a room is created, deleted, archived, has its metadata
    * changed, or sees a presence change (someone joined/left). Sockets
-   * receive it regardless of which room they're parked in — that's the
+   * receive it regardless of which room they're parked in, that's the
    * point: the rooms rail shows EVERY visible room, so a refresh has to
    * cross room boundaries. The client debounces refetches (a presence
    * burst from a join shouldn't fire many GETs); fast enough to feel
-   * live, slow enough to coalesce. Payload-free — the client refetches
+   * live, slow enough to coalesce. Payload-free, the client refetches
    * `/rooms` and re-renders from the response.
    */
   "rooms:tree-changed": () => void;
   /**
    * Emoticon reaction was added or removed on a chat message, DM, or
    * forum post. Clients merge the delta into the cached reaction
-   * summary for that target — no full refetch. The server scopes the
+   * summary for that target, no full refetch. The server scopes the
    * broadcast to the right audience: chat reactions go to the room,
    * DM reactions to the two participants' sockets.
    */
   "reaction:update": (payload: import("./emoticon.js").ReactionEvent) => void;
   /**
-   * The admin updated the emoticon catalog — new sheet uploaded,
+   * The admin updated the emoticon catalog, new sheet uploaded,
    * labels edited, sheet deleted, etc. Clients refetch
-   * `GET /emoticons` and re-prime the picker. No payload — the
+   * `GET /emoticons` and re-prime the picker. No payload, the
    * refetch handles the delta and is small.
    */
   "emoticons:updated": () => void;
@@ -278,7 +278,7 @@ export interface ServerToClientEvents {
    * resolved identity post-switch so the client can refresh local
    * activeCharacterId/Name + reload the active theme without polling
    * `/me/profile`. Other open tabs of the same user are deliberately
-   * NOT notified — each tab keeps its own character state.
+   * NOT notified, each tab keeps its own character state.
    */
   "me:character-update": (payload: {
     activeCharacterId: string | null;
@@ -291,7 +291,7 @@ export interface ServerToClientEvents {
    * in incognito mode" chat banner update the moment the toggle
    * lands, without the 60-second lag of waiting on the next
    * `/auth/me` poll to notice. Fanned to all tabs (not just the
-   * caller) because incognito is a user-global flag — a sibling
+   * caller) because incognito is a user-global flag, a sibling
    * tab observing the same account needs the same affordances.
    */
   "me:incognito-update": (payload: {
@@ -300,7 +300,7 @@ export interface ServerToClientEvents {
   }) => void;
   /**
    * Marquee banner catalog changed (admin added / edited / toggled /
-   * deleted a row). Carries no payload — clients refetch the public
+   * deleted a row). Carries no payload, clients refetch the public
    * `GET /announcements/banners` endpoint on receipt so any
    * permission-gated filtering happens at the source. Fanned to every
    * connected socket because banners are sitewide chrome.
@@ -325,7 +325,7 @@ export interface ServerToClientEvents {
   /**
    * The OTHER party read up to this timestamp. Lets the sender's
    * client advance its "seen" indicator without polling. Sent to
-   * the sender's sockets only — the reader already knows what
+   * the sender's sockets only, the reader already knows what
    * they read.
    */
   "dm:read": (payload: { conversationId: string; readerUserId: string; lastReadAt: number }) => void;
@@ -334,7 +334,7 @@ export interface ServerToClientEvents {
    * landed, a previously-pending request was accepted/declined, or
    * a friendship ended. The payload identifies the OTHER party so
    * the client can refresh its inbox / friends list without a
-   * full re-fetch dance — but the actual canonical state lives at
+   * full re-fetch dance, but the actual canonical state lives at
    * `/me/friends` + `/me/friend-requests`, so the client just bumps
    * a refresh key and re-polls those.
    */
@@ -345,7 +345,7 @@ export interface ServerToClientEvents {
   }) => void;
   /**
    * Broadcast to every connected socket when an admin creates / edits
-   * / deletes / toggles a custom command. Carries no payload — the
+   * / deletes / toggles a custom command. Carries no payload, the
    * Composer + HelpModal both refetch `/commands` on receipt so the
    * new command surfaces in autocomplete and help without forcing
    * users to reload their tab. Cheap to send (rare event, one HTTP
@@ -353,7 +353,7 @@ export interface ServerToClientEvents {
    */
   "commands:updated": () => void;
   /**
-   * Earning — XP / Currency credited. Emitted to every live socket
+   * Earning, XP / Currency credited. Emitted to every live socket
    * of the affected user after the ledger row + earning row update
    * land. Carries enough state for the Earning dashboard wallet
    * widget to live-update without a refetch. One event per credited
@@ -376,14 +376,14 @@ export interface ServerToClientEvents {
     reason: string;
   }) => void;
   /**
-   * Earning — rank or tier crossing. Fired alongside `earning:earned`
+   * Earning, rank or tier crossing. Fired alongside `earning:earned`
    * when the credit moved the user across a tier boundary. Drives the
    * persistent rank-up ribbon UI and the dashboard "What's new" pin.
    * Per the project ethos memory, the client renders a quiet ribbon,
    * never a popup toast.
    *
    * `notificationId` matches the row in `earning_notifications` that
-   * persists the event across reloads — the client passes it back to
+   * persists the event across reloads, the client passes it back to
    * the ack endpoint when the user dismisses the ribbon.
    */
   "earning:rankup": (payload: {
@@ -397,7 +397,7 @@ export interface ServerToClientEvents {
     newlyEligibleBorderKeys: string[];
   }) => void;
   /**
-   * Earning — per-identity inventory delta. Fired to every socket of
+   * Earning, per-identity inventory delta. Fired to every socket of
    * the affected user after an `/give` / `/throw` / `/drop` mutates
    * `identity_inventory`, and also after `/buy` deposits a fresh
    * stack. Lets the dashboard's Items tab refresh its inventory +
@@ -409,7 +409,7 @@ export interface ServerToClientEvents {
    */
   /**
    * Chat-line side-effect. A general-purpose channel for short visual
-   * effects the server triggers on a target user's client — body
+   * effects the server triggers on a target user's client, body
    * shake when they're hit by `/throw` / `/drop`, etc. Any future
    * target-based command can plug into the same event by adding a
    * new `kind`; the client effect runner branches on `kind` and
@@ -417,11 +417,11 @@ export interface ServerToClientEvents {
    *
    * Scope: fired ONLY to sockets of the target user that are currently
    * in the originating room. A user with chat open on a second tab in
-   * a different room doesn't see the effect on that tab — the effect
+   * a different room doesn't see the effect on that tab, the effect
    * is contextual to the scene it happened in.
    *
    * Effect kinds:
-   *   `struck` — the target was hit by `/throw` or `/drop`. The
+   *   `struck`, the target was hit by `/throw` or `/drop`. The
    *              runner shakes the document body (scaled up a hair
    *              to keep the edges off-screen) and flashes a pale-red
    *              overlay on the chat composer. Respects
@@ -430,14 +430,14 @@ export interface ServerToClientEvents {
   "chat:effect": (payload: {
     kind: "struck";
     /** Sub-flavor of the struck effect. Determines which audio cue
-     *  the runner plays — `throw` (whoosh-impact) vs `drop` (thud).
+     *  the runner plays, `throw` (whoosh-impact) vs `drop` (thud).
      *  Visual shake + composer flash are identical for either; only
      *  the audio differs. Optional so older server builds without
      *  the field still parse; the runner falls back to the generic
      *  "tap" chat sound when omitted. */
     variant?: "throw" | "drop";
     /** Display name of whoever caused the effect, surfaced for
-     *  screen-reader text / future tooltips. Optional — the runner
+     *  screen-reader text / future tooltips. Optional, the runner
      *  doesn't require it to fire. */
     sourceDisplayName?: string;
     /** Free-form context the runner ignores today. Reserved for future
@@ -450,7 +450,7 @@ export interface ServerToClientEvents {
     scope: "user" | "character";
     /** User id or character id depending on `scope`. */
     ownerId: string;
-    /** Item key that changed — also informational for now. */
+    /** Item key that changed, also informational for now. */
     itemKey: string;
     /** Net change in the affected stack. Positive = received,
      *  negative = sent / consumed. The client doesn't apply this
@@ -471,17 +471,17 @@ export interface ServerToClientEvents {
    * Authoritative "who is currently typing in this room" set. Sent
    * to every socket subscribed to the room whenever the set CHANGES
    * (new typer joins, existing typer expires). Idle ticks that don't
-   * change the set are suppressed — the wire only carries deltas.
+   * change the set are suppressed, the wire only carries deltas.
    *
    * The receiver replaces its cached set for `roomId` with `typers`
    * wholesale. Sends an empty `typers: []` array when the last
-   * person in the room stops typing — the client uses that to clear
+   * person in the room stops typing, the client uses that to clear
    * the indicator.
    *
    * The server filters each receiver's payload by their ignore list,
    * so a user who ignored Alice doesn't see "Alice is typing…"
    * even when she actually is. Matches how chat messages handle
-   * ignore — kept silent on the receiving side.
+   * ignore, kept silent on the receiving side.
    */
   "chat:typing:update": (payload: {
     roomId: string;
@@ -502,9 +502,9 @@ export interface TypingEntry {
    *  the renderer for any per-identity styling (custom typing phrase
    *  cosmetic in Phase 5, etc.). */
   characterId: string | null;
-  /** Custom typing phrase (Phase 5 — `flair_typing_phrase`
+  /** Custom typing phrase (Phase 5, `flair_typing_phrase`
    *  cosmetic). When present, the indicator renders this in place
-   *  of the default "is typing…" suffix — BUT only when this is
+   *  of the default "is typing…" suffix, BUT only when this is
    *  the sole typer in the room. Joint forms ("Alice and Bob are
    *  typing…") read poorly with mixed custom phrases so the
    *  renderer falls back to defaults for sets of 2+. Server reads
@@ -562,14 +562,14 @@ export type UiHint =
   /**
    * Open a persistent info-display modal with a server-provided title
    * and multi-line body. Used by commands that return structured
-   * informational content (e.g. `/list`, `/find`) — the data is too
+   * informational content (e.g. `/list`, `/find`), the data is too
    * long for the auto-dismissing toast and the user typically wants
    * to scan / re-scan it instead of catching it in passing.
    *
    * `body` is rendered with whitespace preserved + monospace font so
    * the server's bullet-list formatting (leading spaces, aligned
    * columns) stays intact. Caller-side, build it the same way you'd
-   * build an `error:notice` message — one line per row, `\n`-joined.
+   * build an `error:notice` message, one line per row, `\n`-joined.
    */
   | { kind: "open-info-modal"; title: string; body: string }
   /**
@@ -589,7 +589,7 @@ export type UiHint =
    * Open the full-screen item-zoom overlay (the same component that
    * powers tap-to-zoom on profile Collection / Pet pins). Carries
    * the resolved catalog row inline so the client doesn't need a
-   * separate roundtrip — the server already looked the item up by
+   * separate roundtrip, the server already looked the item up by
    * name / alias before emitting this hint. Used by the `/item
    * <name>` builtin command.
    */

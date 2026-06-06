@@ -1,23 +1,23 @@
--- Items catalog — admin-managed table of collectible items users can
+-- Items catalog, admin-managed table of collectible items users can
 -- buy with Currency, hold in their per-identity inventory, hand to
 -- others via /give, or toss around via /throw / /drop.
 --
 -- Companion to:
---   identity_inventory      (0095) — who owns how many of which item
---   identity_collection     (Phase 3, later migration) — pinned showcase
+--   identity_inventory      (0095), who owns how many of which item
+--   identity_collection     (Phase 3, later migration), pinned showcase
 --
 -- Sale window semantics: `enabled` is the master existence switch
 -- (when 0 the item is hidden everywhere and commands referencing it
 -- are rejected, but EXISTING inventory rows are preserved so admins
 -- can safely retire+revive an item without nuking inventories).
--- `for_sale` is independent — `enabled=1, for_sale=0` keeps the item
+-- `for_sale` is independent, `enabled=1, for_sale=0` keeps the item
 -- usable in commands while pulling it out of the shop. The optional
 -- `sale_starts_at` / `sale_ends_at` window further constrains the
 -- shop-listing time range. Server derives a `purchasable` boolean
 -- from all four for the client.
 --
 -- Per-command message arrays are stored as JSON arrays of templates.
--- An empty array disables that command for the item — e.g. a "crown"
+-- An empty array disables that command for the item, e.g. a "crown"
 -- item with only `give_messages_json` populated cannot be /throw'n
 -- or /drop'd. Placeholders: {sender} {target} {num} {item_name}
 -- {item_icon}.
@@ -72,7 +72,7 @@ INSERT INTO `items` (`key`, `name`, `name_plural`, `description`, `icon_url`, `p
   50,
   99,
   '["{sender} hands {target} {num} {item_name}.","{sender} offers {target} a fresh batch of {num} {item_name}.","{sender} sneaks {num} {item_name} into {target}''s pocket."]',
-  '["{sender} hurls {num} {item_name} at {target}!","{sender} launches {num} {item_name} across the room — {target} barely ducks.","{sender} winds up and pelts {target} with {num} {item_name}."]',
+  '["{sender} hurls {num} {item_name} at {target}!","{sender} launches {num} {item_name} across the room, {target} barely ducks.","{sender} winds up and pelts {target} with {num} {item_name}."]',
   '["{sender} drops {num} {item_name} on {target}''s head.","{sender} fumbles and dumps {num} {item_name} all over {target}."]',
   1, 10
 ),
@@ -85,7 +85,7 @@ INSERT INTO `items` (`key`, `name`, `name_plural`, `description`, `icon_url`, `p
   120,
   20,
   '["{sender} presents {target} with {num} {item_name}.","{sender} bows and offers {target} {num} {item_name}."]',
-  '["{sender} hurls {num} {item_name} at {target} — thorns first.","{sender} pelts {target} with {num} {item_name}."]',
+  '["{sender} hurls {num} {item_name} at {target}, thorns first.","{sender} pelts {target} with {num} {item_name}."]',
   '["{sender} lets {num} {item_name} fall at {target}''s feet."]',
   1, 20
 ),
@@ -112,7 +112,7 @@ INSERT INTO `items` (`key`, `name`, `name_plural`, `description`, `icon_url`, `p
   20,
   '["{sender} tosses {target} {num} {item_name} for the road."]',
   '["{sender} smacks {target} with {num} {item_name}!","{sender} bonks {target} with {num} {item_name}.","{sender} whaps {target} {num} time(s) with a {item_name}."]',
-  '["{sender} drops {num} {item_name} on {target} — fwump."]',
+  '["{sender} drops {num} {item_name} on {target}, fwump."]',
   1, 40
 ),
 (
@@ -136,8 +136,8 @@ INSERT INTO `items` (`key`, `name`, `name_plural`, `description`, `icon_url`, `p
   NULL,
   100,
   10,
-  '["{sender} slides {target} {num} {item_name} across the bar.","{sender} buys {target} {num} {item_name}. Cheers.","{sender} clinks tankards with {target} — {num} {item_name} change hands."]',
-  '["{sender} flings {num} {item_name} at {target} — splash!","{sender} dumps {num} {item_name} on {target}''s head."]',
+  '["{sender} slides {target} {num} {item_name} across the bar.","{sender} buys {target} {num} {item_name}. Cheers.","{sender} clinks tankards with {target}, {num} {item_name} change hands."]',
+  '["{sender} flings {num} {item_name} at {target}, splash!","{sender} dumps {num} {item_name} on {target}''s head."]',
   '["{sender} spills {num} {item_name} on {target}. Bartender weeps."]',
   1, 60
 ),
@@ -150,7 +150,7 @@ INSERT INTO `items` (`key`, `name`, `name_plural`, `description`, `icon_url`, `p
   300,
   5,
   '["{sender} presents {target} with {num} {item_name}, hilt-first.","{sender} entrusts {target} with {num} {item_name}."]',
-  '["{sender} throws {num} {item_name} at {target}. {target} ducks.","{sender} hurls {num} {item_name} at {target} — nailed the wall."]',
+  '["{sender} throws {num} {item_name} at {target}. {target} ducks.","{sender} hurls {num} {item_name} at {target}, nailed the wall."]',
   '["{sender} drops {num} {item_name} on {target}. Pointy end first."]',
   1, 70
 ),

@@ -1,18 +1,18 @@
 -- Per-identity whisper recipient snapshot.
 --
 -- Whispers used to store only `to_user_id` + `to_display_name`. The
--- display name is a frozen string (good — survives renames), but the
+-- display name is a frozen string (good, survives renames), but the
 -- recipient's CHARACTER id wasn't recorded anywhere, which broke the
 -- click-the-recipient-name-to-continue-the-thread flow: the FE could
 -- only fill the next `/whisper` with the master id (`@id:<userId>`),
 -- so a thread opened to a CHARACTER had its continuation re-routed to
--- the master account. That's a per-identity leak — the character and
+-- the master account. That's a per-identity leak, the character and
 -- the master are supposed to be separately addressable.
 --
 -- New column: `to_character_id` (nullable text). Set at send time to
 -- the resolution's `characterId` (null for OOC-addressed whispers,
 -- character id for character-addressed). Backfill is intentionally
--- left null on existing rows — we can't reconstruct which character
+-- left null on existing rows, we can't reconstruct which character
 -- was addressed for historical whispers, and the click-to-continue
 -- path falls back to the master id for legacy rows (same behavior as
 -- before this column existed).

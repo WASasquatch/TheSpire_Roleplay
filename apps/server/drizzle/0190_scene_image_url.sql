@@ -4,7 +4,7 @@
 -- the scene row so the client can render a centered hero strip
 -- (rounded corners) under the title. Stored on the message itself
 -- rather than a side table because the URL is part of the line's
--- presentation and frozen at send time — a later edit to whatever
+-- presentation and frozen at send time, a later edit to whatever
 -- the URL points at doesn't restyle history (same posture as the
 -- avatar / mood / color snapshots already on the row).
 --
@@ -14,7 +14,7 @@
 -- the long tail of non-scene messages is negligible.
 --
 -- URL shape is enforced server-side (http/https, length cap,
--- /^https?:\/\//i). Backfill is intentionally a no-op — historical
+-- /^https?:\/\//i). Backfill is intentionally a no-op, historical
 -- scene rows that predate this feature simply don't have an image,
 -- and the client renders them as before (title-only banner).
 ALTER TABLE messages ADD COLUMN scene_image_url TEXT;

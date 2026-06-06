@@ -2,12 +2,12 @@ import { randomInt } from "node:crypto";
 import { addMessage } from "../../realtime/broadcast.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
-// `NdM` with an optional `±X` flat modifier — e.g. 1d20+3, 3d6-1, 2d10+0.
+// `NdM` with an optional `±X` flat modifier, e.g. 1d20+3, 3d6-1, 2d10+0.
 // The modifier sign is captured separately from the magnitude so a single
 // expression of intent (`+3`) shows up the same in the rendered output
 // regardless of whether the user wrote `+3` or `+03` (parseInt collapses
-// leading zeros). Whitespace inside the expression is not accepted —
-// `1d20 + 3` would be a parse error — which keeps the regex tight and the
+// leading zeros). Whitespace inside the expression is not accepted,
+// `1d20 + 3` would be a parse error, which keeps the regex tight and the
 // inline-command form (`!roll:1d20+3`) unambiguous to the parser.
 const DICE_RX = /^(\d*)d(\d+)([+-]\d+)?$/i;
 const MAX_DICE = 100;

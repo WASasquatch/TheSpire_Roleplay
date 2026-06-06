@@ -166,7 +166,7 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
 
   // Force-reseed the `{icon}` placeholder on item-message templates
   // when the deploy script (remote-deploy.sh) staged the flag. Always
-  // ungated by SKIP_DEFAULT_SEED — that flag governs the room-rename
+  // ungated by SKIP_DEFAULT_SEED, that flag governs the room-rename
   // edge case; item-template policy is a separate concern.
   await maybeReseedItemTemplates(db);
 }
@@ -246,7 +246,7 @@ async function ensureDefaultWorlds(db: Db): Promise<void> {
     // preserved so anyone affiliated with a system world keeps that
     // affiliation across content updates.
     //
-    // Status is intentionally NOT overwritten — an admin who's
+    // Status is intentionally NOT overwritten, an admin who's
     // promoted a system world to `featured` shouldn't lose that on a
     // version bump.
     await db
@@ -290,7 +290,7 @@ async function ensureDefaultWorlds(db: Db): Promise<void> {
  * sheet's image via the admin route (which re-points the URL at
  * /uploads/emoticons/...) without disturbing existing reactions.
  *
- * Keyed on slug so re-running is a no-op once installed — admin edits
+ * Keyed on slug so re-running is a no-op once installed, admin edits
  * to name / labels / image are preserved on subsequent boots.
  *
  * `sortOrder` is explicit per row (not derived from array index)
@@ -353,7 +353,7 @@ async function ensureDefaultEmoticonSheets(db: Db): Promise<void> {
  * `remote-deploy.sh` stages with a fresh timestamp on every deploy.
  * Means: if an admin removed `{icon}` from a template via the live
  * admin UI, the next remote-deploy.sh run puts it back. The rest of
- * the template text (admin-edited flavor copy) is preserved — only
+ * the template text (admin-edited flavor copy) is preserved, only
  * the icon prefix is re-asserted.
  *
  * SCOPE: this function touches the `items` table ONLY, and only the
@@ -366,13 +366,13 @@ async function ensureDefaultEmoticonSheets(db: Db): Promise<void> {
  * table tracking in `apply-migrations.mjs`; once an installation has
  * recorded them, admin edits to those styles persist across every
  * future deploy. If you ever need to refresh name styles, do it via
- * a NEW migration file (idempotent UPDATE) — not by extending this
+ * a NEW migration file (idempotent UPDATE), not by extending this
  * function's scope.
  *
  * Why a timestamp rather than a sticky `1`: the env var being newer
  * than the last-applied value is what indicates "this boot came from
  * a deploy" rather than an OOM auto-restart. We don't compare here
- * (every boot just re-runs the idempotent sweep) — the timestamp is
+ * (every boot just re-runs the idempotent sweep), the timestamp is
  * the deploy-side signal; the server-side execution is unconditional
  * whenever the var is set. Cheap: a single UPDATE statement, no-op
  * SQL when every template already has the prefix.
@@ -445,7 +445,7 @@ export function startJanitor(
       const { messageRetentionMs } = await getSettings(db);
       if (messageRetentionMs > 0) {
         const cutoff = new Date(Date.now() - messageRetentionMs);
-        // Nested-mode rooms are forum threads — by design persistent
+        // Nested-mode rooms are forum threads, by design persistent
         // ("Persistent forum topics for long-lived games"). Exempt them
         // unconditionally so the global retention sweep can never gut a
         // forum overnight regardless of how short the site retention is
@@ -465,7 +465,7 @@ export function startJanitor(
       // We process room-by-room because each one has its own cutoff and
       // the alternative (a CTE / correlated subquery) doesn't buy us much
       // at chat-size scale and complicates the SQL. Nested-mode rooms are
-      // still exempt — same invariant as the global sweep.
+      // still exempt, same invariant as the global sweep.
       const expiringRooms = await db
         .select({ id: rooms.id, name: rooms.name, mins: rooms.messageExpiryMinutes, replyMode: rooms.replyMode })
         .from(rooms)
@@ -574,7 +574,7 @@ export function startJanitor(
   const trustId = setInterval(() => void sweepTrustPromotions(), 60 * 60 * 1000);
   const snapshotId = setInterval(() => sweepSnapshots(), 6 * 60 * 60 * 1000);
 
-  // Earning — one-shot historical XP backfill + recurring presence sweep.
+  // Earning, one-shot historical XP backfill + recurring presence sweep.
   //
   // Backfill is idempotent: the function self-skips when
   // `earningConfig.backfill.completedAt` is already set OR when the

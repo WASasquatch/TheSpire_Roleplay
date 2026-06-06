@@ -18,7 +18,7 @@ export interface UserRow {
   activeCharacterId: string | null;
   createdAt: number;
   lastLoginAt: number | null;
-  /** Master-pool rank key — drives the per-row gem icon. Null = unranked. */
+  /** Master-pool rank key, drives the per-row gem icon. Null = unranked. */
   rankKey: string | null;
   /** Current tier within the rank (1..N). Tier label is resolved client-side from the earning catalog. */
   rankTier: number | null;
@@ -50,7 +50,7 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
   const [rows, setRows] = useState<UserRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState(initialQuery ?? "");
-  // Rank filter (master-pool rank key) — "" means "any rank". Populated
+  // Rank filter (master-pool rank key), "" means "any rank". Populated
   // from the live earning catalog so admins adding / disabling ranks
   // see the dropdown change without a code release.
   const [rankFilter, setRankFilter] = useState<string>("");

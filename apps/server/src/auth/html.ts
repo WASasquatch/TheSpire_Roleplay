@@ -11,34 +11,34 @@ import sanitizeHtml from "sanitize-html";
  * `expression(...)` from inline style values.
  *
  * Specifically blocked:
- *   - `<script>`, `<noscript>` — XSS / inline execution.
- *   - `<object>`, `<embed>`, `<applet>` — plugin loaders, mostly
+ *   - `<script>`, `<noscript>`, XSS / inline execution.
+ *   - `<object>`, `<embed>`, `<applet>`, plugin loaders, mostly
  *     deprecated, no good reason to allow.
  *   - `<base>`, `<link>`, `<meta>`, `<title>`, `<head>`, `<body>`,
- *     `<html>` — document-level tags that would mutate the entire
+ *     `<html>`, document-level tags that would mutate the entire
  *     page (a `<base>` injection could rewrite every relative URL).
- *   - `<frame>`, `<frameset>` — deprecated framesets.
+ *   - `<frame>`, `<frameset>`, deprecated framesets.
  *   - `<form>`, `<input>`, `<button>`, `<select>`, `<textarea>`,
  *     `<option>`, `<optgroup>`, `<fieldset>`, `<legend>`,
- *     `<datalist>`, `<output>` — phishing surface (fake credential
+ *     `<datalist>`, `<output>`, phishing surface (fake credential
  *     prompts). Allow on request once we have a use case.
  *
  * Specifically ALLOWED (despite occasional concerns):
- *   - `<iframe>` — CSP `frame-src` restricts which origins can load,
+ *   - `<iframe>`, CSP `frame-src` restricts which origins can load,
  *     so an iframe pointing at an unlisted origin just shows a blank
  *     box. Useful for embeds.
- *   - `<style>` — server preserves contents VERBATIM (storage
+ *   - `<style>`, server preserves contents VERBATIM (storage
  *     policy). Client renders scope each selector with
  *     `.user-html-scope` via `scopeAndNonceStyleBlocks` and stamps
  *     the per-request CSP nonce so the inline stylesheet is
  *     actually applied.
- *   - SVG / MathML — XSS-relevant tags inside these (script, on*)
+ *   - SVG / MathML, XSS-relevant tags inside these (script, on*)
  *     are removed by the same passes that handle HTML.
  *
  * Storage policy: we store the writer's HTML close to verbatim.
  * Server-side scrubbing handles deny-list tags, event handlers, and
  * dangerous CSS values. Selector scoping + CSP nonce stamping happens
- * at RENDER time on the client — see `apps/web/src/lib/cssScope.ts`.
+ * at RENDER time on the client, see `apps/web/src/lib/cssScope.ts`.
  */
 const DENIED_TAGS = new Set([
   "script", "noscript",
@@ -53,12 +53,12 @@ const DENIED_TAGS = new Set([
  * Marker attribute the auto-paragraph pass stamps onto every `<br>` it
  * emits. The save-side strip + the read-side reverse both gate on it
  * so a `<br>` typed by hand (no marker) sails through every round-trip
- * untouched — the bug this fixes was that the previous shape-based
+ * untouched, the bug this fixes was that the previous shape-based
  * strip ("any `<br>` followed by `\n`") couldn't tell user-typed BRs
  * apart from auto-emitted ones and ate the writer's manual breaks on
  * save.
  *
- * The marker is just `<br data-auto-br>` (empty value — present-or-
+ * The marker is just `<br data-auto-br>` (empty value, present-or-
  * absent semantics). Browsers ignore unknown data-* attributes, so
  * the marker is invisible at render time.
  */
@@ -70,24 +70,24 @@ const AUTO_BR_RE = /<br\b[^>]*\bdata-auto-br\b[^>]*>/i;
 
 /**
  * Pre-pass: convert PARAGRAPH-break newlines to `<br>` for inputs that
- * look like plain text. Only runs of 2+ newlines emit `<br>`s — one
- * per newline in the run — so hitting Enter once is invisible
+ * look like plain text. Only runs of 2+ newlines emit `<br>`s, one
+ * per newline in the run, so hitting Enter once is invisible
  * (HTML collapses the lone newline to whitespace) and hitting Enter
  * twice gives one blank line. Each `<br>` is a single line break in
  * HTML; two stacked `<br>`s render as the blank line a writer who
  * pressed Enter twice expects to see. The earlier rule emitted
  * `run.length - 1` BRs, which gave a single line break for a double-
- * Enter input — visually identical to a single Enter, so the writer's
+ * Enter input, visually identical to a single Enter, so the writer's
  * paragraph break disappeared on display.
  *
  * Skipped entirely when the input carries paragraph-level wrappers
- * (`<p>`, `<div>`, `<blockquote>`, `<pre>`) — those already define their
+ * (`<p>`, `<div>`, `<blockquote>`, `<pre>`), those already define their
  * own vertical rhythm. Inline tags (`<br>`, `<b>`, `<i>`), lists, and
  * headings do NOT count as paragraph structure: a writer who typed
  * `<h3>Title</h3>` followed by two newlines of prose still expects the
  * paragraph rule to fire.
  *
- * IDEMPOTENT — and surgical about it. The strip phase only touches
+ * IDEMPOTENT, and surgical about it. The strip phase only touches
  * `<br>` tags carrying the `data-auto-br` marker, so a `<br>` the
  * writer typed (even at end-of-line, the shape that previously looked
  * indistinguishable from our auto-emit) survives the round-trip
@@ -145,7 +145,7 @@ function restoreStyles(body: string, blocks: string[], token: string): string {
  * they wrote it.
  *
  * Paragraph-structured bios (with `<p>` / `<div>` / `<blockquote>` /
- * `<pre>`) skip the transform — those were never touched on save, so
+ * `<pre>`) skip the transform, those were never touched on save, so
  * there's nothing to undo.
  *
  * Used by the owner-only GET paths that feed the editor; viewer-facing
@@ -170,13 +170,13 @@ export function bioHtmlForEdit(html: string): string {
 
 /**
  * Strip dangerous URL schemes and `expression()` calls from an inline
- * `style="..."` attribute value. We accept everything else verbatim —
+ * `style="..."` attribute value. We accept everything else verbatim,
  * the user picks their own positioning / sizing / animations / etc.,
  * matching the "profile is a mini-webpage" posture. The structural
  * break-out chars `<>{}` are also blocked from appearing literally so
  * a value can't end the style attribute and inject more markup.
  *
- * `;` is intentionally NOT scrubbed at this layer — sanitize-html
+ * `;` is intentionally NOT scrubbed at this layer, sanitize-html
  * splits the style attribute into per-property entries before calling
  * us, so a `;` in a single value is already a delimiter, not a
  * payload.
@@ -211,7 +211,7 @@ function scrubStyleAttrValue(value: string): string {
  * Storage-layer scrub for `<style>` block contents. Same intent as
  * `scrubStyleAttrValue` (block external/inline scripts via CSS
  * urls + expression()), applied to the body of every `<style>` tag.
- * Selectors are NOT touched here — the writer's CSS is preserved
+ * Selectors are NOT touched here, the writer's CSS is preserved
  * verbatim in the DB and the client scopes selectors at render time.
  */
 function scrubStyleBlocks(html: string): string {
@@ -259,7 +259,7 @@ function cleanAttribs(attribs: Record<string, string>): Record<string, string> {
 /** Sanitize a profile/bio HTML body. Used on save AND on read. */
 export function sanitizeBio(html: string): string {
   return sanitizeHtml(scrubStyleBlocks(nlToBrForPlainText(html)), {
-    // Allow EVERY tag — the deny list runs via `exclusiveFilter`
+    // Allow EVERY tag, the deny list runs via `exclusiveFilter`
     // below. Posture: profiles are mini-webpages; the writer gets
     // structural HTML freedom (semantic tags, layout containers,
     // tables, lists, deprecated-but-common presentational tags like
@@ -268,7 +268,7 @@ export function sanitizeBio(html: string): string {
     // Allow EVERY attribute. The `transformTags` wildcard below strips
     // event handlers (`on*`) and scrubs `style` attribute values. URL
     // schemes for href/src are restricted by `allowedSchemes` /
-    // `allowedSchemesByTag` below — sanitize-html applies those
+    // `allowedSchemesByTag` below, sanitize-html applies those
     // independent of `allowedAttributes`.
     allowedAttributes: false,
     // URL scheme restriction. `javascript:` and `data:` URLs are
@@ -301,7 +301,7 @@ export function sanitizeBio(html: string): string {
       }),
     },
     disallowedTagsMode: "discard",
-    // Silence the stderr warning about `<style>` in the allow set —
+    // Silence the stderr warning about `<style>` in the allow set,
     // we're knowingly allowing it; client-side render-time scoping +
     // CSP nonce stamping handle the XSS surface (see
     // `apps/web/src/lib/cssScope.ts`).
@@ -312,14 +312,14 @@ export function sanitizeBio(html: string): string {
 /**
  * Strip `<aside class="margin-note">…</aside>` blocks from a Scriptorium
  * chapter body. Margin notes are collaborator-side drafting comments
- * (per the Phase 5 spec) that MUST NOT survive publish — readers never
+ * (per the Phase 5 spec) that MUST NOT survive publish, readers never
  * see them, and unpublishing a chapter doesn't restore them.
  *
  * Matches any `<aside>` whose class attribute contains `margin-note`
  * as a whitespace-separated token. Case-insensitive. The strip is
  * non-nesting: an `<aside class="margin-note">` containing another
  * `<aside>` would close at the OUTER tag's first `</aside>` which is
- * a reasonable trade — the editor doesn't nest notes in practice.
+ * a reasonable trade, the editor doesn't nest notes in practice.
  *
  * Pure string transform; no DOM parser needed server-side.
  */

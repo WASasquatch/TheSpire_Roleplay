@@ -14,7 +14,7 @@
  *
  * Versioned key prefix (`v1`): if the dismissal vocabulary ever
  * needs a reset (e.g. we add structured payloads), bumping the
- * suffix makes every existing entry inert and forces re-dismissal —
+ * suffix makes every existing entry inert and forces re-dismissal,
  * the same posture `tk:lastActiveTheme:v2` already uses.
  *
  * Subscribing components can re-read via `useDismissed(key)`; the
@@ -46,7 +46,7 @@ function write(set: Set<string>): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify([...set]));
   } catch {
-    /* quota / private-mode — silently degrade to per-mount only */
+    /* quota / private-mode, silently degrade to per-mount only */
   }
 }
 
@@ -55,7 +55,7 @@ function notify(): void {
 }
 
 /**
- * Pure imperative read — useful for non-React call sites (one-shot
+ * Pure imperative read, useful for non-React call sites (one-shot
  * checks before mounting heavy chrome). React components should
  * prefer `useDismissed` so they re-render when a sibling tab or a
  * different banner dispatches a dismissal.
@@ -72,7 +72,7 @@ export function dismiss(key: string): void {
   notify();
 }
 
-/** Remove a key from the dismissed set (rare — admin tooling, "show
+/** Remove a key from the dismissed set (rare, admin tooling, "show
  *  this banner again" flows). */
 export function undismiss(key: string): void {
   const set = read();
@@ -90,7 +90,7 @@ export function clearAllDismissed(): void {
 }
 
 /**
- * React hook — returns `true` iff `key` is in the persisted set.
+ * React hook, returns `true` iff `key` is in the persisted set.
  * Re-renders the calling component when a dismissal lands (from
  * this tab OR a sibling tab via the `storage` event).
  */
@@ -98,13 +98,13 @@ export function useDismissed(key: string): boolean {
   return useSyncExternalStore(
     subscribe,
     () => isDismissed(key),
-    () => false, // SSR default — banners stay visible until hydration
+    () => false, // SSR default, banners stay visible until hydration
   );
 }
 
 function subscribe(cb: Listener): () => void {
   listeners.add(cb);
-  // Cross-tab sync via the `storage` event — only fires for OTHER
+  // Cross-tab sync via the `storage` event, only fires for OTHER
   // tabs (the firing tab gets notified by `notify()` above), and
   // only when the value actually changed.
   function onStorage(e: StorageEvent) {

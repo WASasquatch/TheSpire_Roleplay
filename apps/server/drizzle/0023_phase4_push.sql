@@ -1,6 +1,6 @@
--- Phase 4 — Web Push subscriptions + VAPID key persistence.
+-- Phase 4, Web Push subscriptions + VAPID key persistence.
 --   * push_subscriptions  (one row per browser/device a user has opted in)
---   * site_settings.vapid_public_key / vapid_private_key — generated at first
+--   * site_settings.vapid_public_key / vapid_private_key, generated at first
 --     boot if missing; persisted so deploys don't churn keys (which would
 --     invalidate every existing subscription).
 

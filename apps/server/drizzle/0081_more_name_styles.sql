@@ -1,18 +1,18 @@
 -- Eight new name styles broadening the visual range beyond the
 -- gradient-clip family. Six static + two animated. All seven of the
 -- pre-existing styles use the same "linear horizontal gradient masked
--- through clip-text + dark stroke" recipe — that's a narrow vocabulary
+-- through clip-text + dark stroke" recipe, that's a narrow vocabulary
 -- once a user owns three of them, so this migration deliberately picks
 -- treatments that look NOTHING like each other:
 --
---   chrome    — vertical metallic gradient, mid-toned shoulders
---   neon_tube — bright fill + same-color halo, no dark outline
---   comic_pop — solid + thick white outline + offset hard shadow
---   stencil   — outlined-only (transparent fill), faint ambient
---   synthwave — vertical pink-to-purple + cyan underglow drop
---   glassy    — semi-translucent fill + thin white outline + soft glow
---   marquee   — animated blinking opacity (lit-bulb marquee feel)
---   aurora_b  — animated hue-rotation across a 3-stop tropical palette
+--   chrome   , vertical metallic gradient, mid-toned shoulders
+--   neon_tube, bright fill + same-color halo, no dark outline
+--   comic_pop, solid + thick white outline + offset hard shadow
+--   stencil  , outlined-only (transparent fill), faint ambient
+--   synthwave, vertical pink-to-purple + cyan underglow drop
+--   glassy   , semi-translucent fill + thin white outline + soft glow
+--   marquee  , animated blinking opacity (lit-bulb marquee feel)
+--   aurora_b , animated hue-rotation across a 3-stop tropical palette
 --
 -- All accept the standard user CSS vars (--user-color-1, --user-color-2,
 -- --user-glow, --user-outline) where they apply, so users can re-tint

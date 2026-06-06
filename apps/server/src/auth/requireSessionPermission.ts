@@ -17,7 +17,7 @@
  *
  * Originally inlined into three separate admin/*.ts registrars
  * (admin/routes, admin/earning, admin/backup) with diverging shapes
- * — boolean in one, user-or-null in the others. Centralised here so
+ *, boolean in one, user-or-null in the others. Centralised here so
  * a future audit can grep one definition.
  */
 

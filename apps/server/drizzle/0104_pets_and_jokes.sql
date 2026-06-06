@@ -2,7 +2,7 @@
 -- the new `pet` category, and 2 joke-tier items (banana_hammock,
 -- glorious_panties). Pets use generic give templates (admin can
 -- tweak per-row via the editor); throw/drop arrays are empty so
--- those commands are disabled on pets — you don't throw pets.
+-- those commands are disabled on pets, you don't throw pets.
 -- Stack limit 1 per pet: each pet is a unique companion, not
 -- a stackable consumable. Pins live in identity_pet_collection
 -- (migration 0105), separate from the 10-slot item collection.

@@ -4,16 +4,16 @@
 --    Admin-authored CSS declaration list ("font-weight: bold; color: #4a8;").
 --    Validated against a hex / RGB / typography allow-list before save (see
 --    `sanitizeCustomCmdCss` in packages/shared/src/customCmdCss.ts). Null/empty
---    means "no override" — the command body picks up whatever the default
+--    means "no override", the command body picks up whatever the default
 --    chat styling provides.
 --
 -- 2. messages.cmd_css
 --    Snapshot of the resolved css string at send time. Frozen on the row so a
---    later edit to the command's css doesn't restyle historical messages —
+--    later edit to the command's css doesn't restyle historical messages,
 --    same "snapshot" rationale as `display_name`, `color`, etc.
 --
 -- 3. messages.kind acquires a new "cmd" value
---    Drizzle's `text(... enum: [...])` is a TypeScript-level hint only — the
+--    Drizzle's `text(... enum: [...])` is a TypeScript-level hint only, the
 --    underlying SQLite column is plain TEXT, so no DDL change is needed to
 --    permit the new value. Existing rows continue to use their prior kinds
 --    ("me" / "say"); new custom-command sends go out as "cmd". The renderer

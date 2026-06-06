@@ -36,7 +36,7 @@ export async function registerJournalRoutes(app: FastifyInstance, db: Db): Promi
     const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
     if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
     // Admin reads other characters' private journals via the
-    // `view_others_journal` key (privacy-sensitive — flagged in the
+    // `view_others_journal` key (privacy-sensitive, flagged in the
     // matrix UI with the yellow chip per PRIVACY_SENSITIVE_KEYS).
     const isOwner = me?.id === c.userId
       || (!!me && (await hasPermission(me, "view_others_journal", db)));

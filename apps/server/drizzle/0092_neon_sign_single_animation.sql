@@ -1,4 +1,4 @@
--- Neon Sign — collapse the two-animation composition into ONE
+-- Neon Sign, collapse the two-animation composition into ONE
 -- animation that explicitly sets `filter` on every keyframe.
 --
 -- Why the previous attempts kept reading inverted: when a property
@@ -7,7 +7,7 @@
 -- keyframes omitted `filter`, and the only specifying keyframes
 -- set `filter: none` (dead blips). So during the supposedly-lit
 -- segments, the browser was holding `filter: none` between adjacent
--- dead specifying keyframes — which is exactly what the user
+-- dead specifying keyframes, which is exactly what the user
 -- reported (no halo most of the time, brief flashes of halo).
 --
 -- The fix is unambiguous: every keyframe specifies filter. Lit
@@ -16,8 +16,8 @@
 -- glow alpha by a hair.
 --
 -- Per-keyframe `animation-timing-function` mixes the transitions:
---   ease-in-out  — lit ↔ dim-breath (smooth pulse)
---   step-end     — lit ↔ dead (sharp neon bulb pop)
+--   ease-in-out , lit ↔ dim-breath (smooth pulse)
+--   step-end    , lit ↔ dead (sharp neon bulb pop)
 --
 -- Timeline (7s cycle):
 --   0%–35%   slow breath: lit-full → hair-dim at 18% → lit-full

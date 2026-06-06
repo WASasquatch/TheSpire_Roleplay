@@ -1,7 +1,7 @@
 -- Unicode-emoji reactions.
 --
 -- Until now `message_reactions` stored a strict (sheet_id, cell_index)
--- pair for every reaction — sheet-only. This migration widens the
+-- pair for every reaction, sheet-only. This migration widens the
 -- table so a reaction can EITHER reference a sheet cell (the legacy
 -- shape, untouched) OR carry a raw Unicode codepoint string (the new
 -- shape, used when a user picks an emoji from the Unicode tab in the
@@ -29,7 +29,7 @@
 --   indexes, so the unique key becomes
 --     (target_kind, target_id, user_id, COALESCE(sheet_id || ':' || cell_index, unicode_char))
 --
--- Forward-compat: every existing row stays valid — they keep their
+-- Forward-compat: every existing row stays valid, they keep their
 -- sheet_id / cell_index, their unicode_char is NULL, the new index
 -- normalizes them to "sheet_id:cell_index" which is the same shape
 -- the old index was keyed on (just collapsed into one column).
@@ -100,7 +100,7 @@ CREATE INDEX `message_reactions_user_idx` ON `message_reactions` (`user_id`);
 --> statement-breakpoint
 
 -- Recreate the orphan-cleanup triggers from migration 0146. Verbatim
--- copy of the original bodies — the rebuild didn't change the
+-- copy of the original bodies, the rebuild didn't change the
 -- semantics, only the column shape, and `target_kind` + `target_id`
 -- are still the columns the cascade keys on.
 CREATE TRIGGER `cascade_reactions_on_message_delete`

@@ -26,7 +26,7 @@ export const colorCommand: CommandHandler = {
   name: "color",
   aliases: ["co", "colour"],
   usage: "/color <hex>   or   /color clear",
-  description: "Set the hex color used for your chat messages and actions. Sets the active character's color when you're in-character, your master/OOC color otherwise — so Character A and Character B can keep different chat colors.",
+  description: "Set the hex color used for your chat messages and actions. Sets the active character's color when you're in-character, your master/OOC color otherwise, so Character A and Character B can keep different chat colors.",
   subcommands: [
     {
       verb: "(no args)",

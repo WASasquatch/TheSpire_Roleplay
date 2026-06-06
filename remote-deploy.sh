@@ -3,13 +3,13 @@
 #
 # Two modes, picked by argument count:
 #
-#   No arguments — legacy redeploy:
+#   No arguments, legacy redeploy:
 #     ./remote-deploy.sh
 #     Hands off to `ship.sh --deploy-only`. Re-deploys whatever's
 #     already on origin/main without making a new commit. Use when
 #     fly machines need to roll forward but no new code is shipping.
 #
-#   With arguments — full ship flow:
+#   With arguments, full ship flow:
 #     ./remote-deploy.sh --commit "fix admin overview" --bump patch
 #     ./remote-deploy.sh -m "ship forum mode" --bump minor
 #     ./remote-deploy.sh "quick fix"                # message as positional
@@ -18,7 +18,7 @@
 #     Bumps the version (if --bump given), typechecks, commits the
 #     staged-by-default tree (apps/ + packages/ + README.md), pushes
 #     origin main, then deploys. All arguments (except --update-msg,
-#     handled here) forward straight to ship.sh — see
+#     handled here) forward straight to ship.sh, see
 #     `bash scripts/ship.sh --help` for the full set.
 #
 #     The --commit / -m / --message value can be either a literal string
@@ -36,8 +36,8 @@
 #     are forwarded to ship.sh.
 #
 #     The message is staged as the fly secret `UPDATE_MESSAGE`. EVERY
-#     invocation of this script sets that secret — to the provided text
-#     when --update-msg is given, or to the empty string when not — so a
+#     invocation of this script sets that secret, to the provided text
+#     when --update-msg is given, or to the empty string when not, so a
 #     message from yesterday's deploy doesn't linger across today's
 #     deploy. Empty value reads as "no message" on the server.
 #
@@ -56,35 +56,35 @@
 #   `FORCE_ITEM_TEMPLATES_RESEED` fly secret with the current
 #   timestamp. The server boot sequence reads that value and, when
 #   it's set, re-asserts the `{icon}` placeholder on every item's
-#   `/give` / `/throw` / `/drop` message template idempotently —
+#   `/give` / `/throw` / `/drop` message template idempotently,
 #   so an admin who removed `{icon}` via the admin UI gets it
 #   restored on the next deploy.
 #
-#   SCOPE — read this carefully if you're touching this script.
+#   SCOPE, read this carefully if you're touching this script.
 #   The reseed touches the `items` table ONLY, and only the three
 #   message-JSON columns (`give_messages_json`, `throw_messages_json`,
 #   `drop_messages_json`) on it. It does NOT touch:
 #
 #     items.name / description / icon_url / price / stack_limit /
 #       aliases_json / category / enabled / for_sale / order
-#       — these are item content/admin-tunables. Admins can rename
+#      , these are item content/admin-tunables. Admins can rename
 #         "Cookie" to "Biscuit", repoint the icon to /uploads/…,
 #         change pricing, or pull an item from sale via the admin
 #         Items panel and those edits are preserved across deploys.
 #     ranks / rank_tiers
-#       — admin-set rank labels, XP thresholds, sigil URLs, border
+#      , admin-set rank labels, XP thresholds, sigil URLs, border
 #         image URLs, border costs. Migration 0075 even gates each
 #         UPDATE on the OLD default value so admin-tuned thresholds
 #         survive its one-time run.
 #     name_styles / user_owned_name_styles /
 #     character_owned_name_styles
-#       — admin-authored CSS templates + costs, plus every user's
+#      , admin-authored CSS templates + costs, plus every user's
 #         per-style color/config picks. Migration 0070's CSS rewrite
 #         already ran once on every existing remote; subsequent
 #         admin edits via the admin Name Styles tab are permanent.
 #     themes / rooms / worlds / custom_commands / site_settings /
 #     user_active_cosmetics / character_earning / borders ownership
-#       — everything else admin-customizable.
+#      , everything else admin-customizable.
 #
 #   The general safety contract: anything seeded by a migration file
 #   (rooms 0001-…, ranks/rank_tiers/name_styles in 0065, name-style
@@ -95,12 +95,12 @@
 #   edits via the UI persist across every future deploy. If you
 #   want to ship a content refresh for ranks, borders, name styles,
 #   or anything else admin-customizable, add a NEW migration file
-#   (idempotent UPDATE, ideally gated on old values like 0075) —
+#   (idempotent UPDATE, ideally gated on old values like 0075),
 #   NOT a force-reseed of this kind.
 #
 #   The toggle is keyed by timestamp (not a sticky 1/0 flag) so a
-#   plain machine restart that DIDN'T come from this script — auto-
-#   restart after an OOM, manual `fly machine restart`, etc. — does
+#   plain machine restart that DIDN'T come from this script, auto-
+#   restart after an OOM, manual `fly machine restart`, etc., does
 #   NOT re-trigger the reseed. Only an actual deploy via this
 #   script bumps the value, which is what "force update remote
 #   deploy" reads as.
@@ -135,7 +135,7 @@ done
 # Stage the item-templates force-reseed flag for the next deploy.
 # `--stage` queues the value with flyctl without triggering its own
 # extra restart; ship.sh's flyctl deploy below picks it up cleanly.
-# Failure is non-fatal — flyctl might be missing on this box (the
+# Failure is non-fatal, flyctl might be missing on this box (the
 # user runs the deploy on a different machine) or the user might be
 # on a network-isolated dev rerun. The deploy path itself will fail
 # loudly later if flyctl is actually required, so a soft skip here
@@ -144,7 +144,7 @@ TS="$(date +%s)"
 if command -v flyctl >/dev/null 2>&1; then
   echo "==> Staging FORCE_ITEM_TEMPLATES_RESEED=$TS (force-reseed item templates on next boot)..."
   flyctl secrets set "FORCE_ITEM_TEMPLATES_RESEED=$TS" --stage >/dev/null || true
-  # Always set UPDATE_MESSAGE — to the provided text or to empty —
+  # Always set UPDATE_MESSAGE, to the provided text or to empty,
   # so a leftover from a previous deploy can't linger past the
   # release it described. Server treats empty as "no message" and
   # the stale-version banner renders the version lines alone.

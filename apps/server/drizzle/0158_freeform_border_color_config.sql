@@ -10,7 +10,7 @@
 -- variable extractor scans the CSS for these names and surfaces
 -- pickers in the user-facing Borders tab. The renderer inlines
 -- the per-identity values as CSS custom properties on the
--- BorderedAvatar's anchor — those cascade into the `.av`
+-- BorderedAvatar's anchor, those cascade into the `.av`
 -- template's `var()` references and override the fallbacks.
 --
 -- Why JSON rather than a structured table: the var SET varies per

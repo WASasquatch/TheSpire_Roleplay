@@ -2,7 +2,7 @@
 //
 // `VACUUM INTO` is a synchronous SQLite call that can take seconds
 // on a multi-hundred-MB database, and better-sqlite3 has no async
-// variant — running it on the main thread blocks the entire Node
+// variant, running it on the main thread blocks the entire Node
 // event loop for the duration. Socket.IO heartbeats time out, HTTP
 // requests stall, and every connected user feels the freeze.
 //
@@ -21,7 +21,7 @@
 //                + process.exit(1)
 //
 // .mjs (not .ts) so the file is loaded natively by Node without
-// needing tsx transpilation inside the worker — the parent process
+// needing tsx transpilation inside the worker, the parent process
 // runs under tsx, but worker threads inherit V8 isolation, not the
 // parent's module loader hooks.
 
@@ -41,8 +41,8 @@ try {
   }
 
   // Open the source DB read-only. VACUUM INTO doesn't actually need
-  // write privileges on the source — it produces a fresh copy at
-  // destPath — and readonly mode is a defense-in-depth gate against
+  // write privileges on the source, it produces a fresh copy at
+  // destPath, and readonly mode is a defense-in-depth gate against
   // accidentally mutating the live DB if a malformed query slips in.
   const src = new Database(sourcePath, { readonly: true, fileMustExist: true });
   try {

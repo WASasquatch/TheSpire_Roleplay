@@ -17,7 +17,7 @@ import {
  * Lets master/site admins upload new sticker sheets, edit per-cell
  * labels (or mark cells empty to hide them from the picker), replace
  * sheet images in-place, and delete sheets. Deletion cascades to
- * every reaction placed with the sheet — there's a confirm prompt
+ * every reaction placed with the sheet, there's a confirm prompt
  * since that's user-visible content vanishing.
  *
  * Storage posture: image goes up as a base64 data URL (matches the
@@ -39,7 +39,7 @@ export function AdminEmoticonsTab() {
 
   return (
     <div className="space-y-4">
-      {/* Moderation queue ABOVE the sheet management — it's the
+      {/* Moderation queue ABOVE the sheet management, it's the
           time-sensitive surface (users are waiting on review) and
           should be the first thing an admin sees on opening the tab. */}
       <SubmissionsQueue />
@@ -48,7 +48,7 @@ export function AdminEmoticonsTab() {
         <div>
           <h3 className="font-action text-base">Emoticon sheets</h3>
           <p className="text-xs text-keep-muted">
-            Each sheet is a 4×4 grid. The bottom row is reserved for future cells — leave any label blank or "empty" to hide a cell from the picker.
+            Each sheet is a 4×4 grid. The bottom row is reserved for future cells, leave any label blank or "empty" to hide a cell from the picker.
           </p>
         </div>
         <button
@@ -87,7 +87,7 @@ export function AdminEmoticonsTab() {
 }
 
 /* =============================================================
- *  Create form — slug + name + cells + image upload
+ *  Create form, slug + name + cells + image upload
  * ============================================================= */
 function CreateSheetForm({ onCreated }: { onCreated: () => void }) {
   const [slug, setSlug] = useState("");
@@ -192,7 +192,7 @@ function CreateSheetForm({ onCreated }: { onCreated: () => void }) {
 }
 
 /* =============================================================
- *  Per-sheet editor — labels, replace image, delete
+ *  Per-sheet editor, labels, replace image, delete
  * ============================================================= */
 function SheetEditor({ sheet }: { sheet: EmoticonSheet }) {
   const [name, setName] = useState(sheet.name);
@@ -331,7 +331,7 @@ function SheetEditor({ sheet }: { sheet: EmoticonSheet }) {
 }
 
 /* =============================================================
- *  4×4 label grid — used by both create + edit forms
+ *  4×4 label grid, used by both create + edit forms
  * ============================================================= */
 function CellLabelEditor({
   cells,
@@ -342,7 +342,7 @@ function CellLabelEditor({
   onChange: (i: number, v: string) => void;
   /** When present, renders the live sprite preview beside each cell so
    *  admins can verify the label matches the image. Omit during the
-   *  create flow — the sheet doesn't exist in the catalog yet. */
+   *  create flow, the sheet doesn't exist in the catalog yet. */
   sheetSlug?: string;
 }) {
   return (
@@ -545,7 +545,7 @@ function SubmissionRow({
       )}
       <div className="min-w-0 flex-1">
         <div className="font-semibold">
-          {row.name} <span className="text-keep-muted">— {row.slug}</span>
+          {row.name} <span className="text-keep-muted">· {row.slug}</span>
         </div>
         <div className="text-[10px] text-keep-muted">
           By {row.submitterLabel} · {row.costPaid != null ? `${row.costPaid} Currency` : "no cost recorded"}

@@ -2,7 +2,7 @@
 --   * Audit log    (audit_log table)
 --   * Reporting    (reports table)
 --   * Watch list   (watches table)
---   * Trust levels — `users.role` is a TEXT column with enum constraint
+--   * Trust levels, `users.role` is a TEXT column with enum constraint
 --                    enforced in code, not the DB layer; widening the union
 --                    in schema.ts is enough. No DDL needed.
 

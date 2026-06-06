@@ -1,13 +1,13 @@
 -- Two new Flair cosmetics for profile customization:
 --
---   `flair_profile_visitors` — purchase to unlock a visitors-count
+--   `flair_profile_visitors`, purchase to unlock a visitors-count
 --     widget that shows on YOUR profile a tally of distinct viewers
 --     split by members vs. anonymous external traffic. View logging
 --     is always-on (so the counter has data the moment the owner
 --     equips the flair); the widget itself only renders when the
 --     owner has bought the flair AND toggled it visible.
 --
---   `flair_profile_marquee` — purchase to unlock a rotating-quote
+--   `flair_profile_marquee`, purchase to unlock a rotating-quote
 --     marquee strip on YOUR profile, between the header and the
 --     bio. Owner can configure up to 10 quotes (Markdown / basic
 --     HTML); the strip rotates one-at-a-time with a fade transition
@@ -17,7 +17,7 @@
 --
 -- Schema additions:
 --
---   `profile_views` (new) — append-only log of one row per UNIQUE
+--   `profile_views` (new), append-only log of one row per UNIQUE
 --     (viewer, profile, day) tuple. Members fingerprint as their
 --     userId; anonymous viewers as a hash of (ip || userAgent), so
 --     the same logged-out viewer hitting the same profile twice in
@@ -26,13 +26,13 @@
 --     plain integer comparisons.
 --
 --   `profile_marquee_quotes_json` (added on `user_earning` AND
---     `character_earning`) — JSON array of strings, one per quote.
+--     `character_earning`), JSON array of strings, one per quote.
 --     Hard cap of 10 rows enforced application-side; per-quote
 --     length cap also enforced application-side. NULL = no quotes
 --     configured yet; empty array also valid.
 --
 --   `show_profile_visitors_count` (added on `user_earning` AND
---     `character_earning`) — owner's "display this counter on my
+--     `character_earning`), owner's "display this counter on my
 --     profile" toggle. Independent of ownership: a flair owner who
 --     hasn't toggled it on doesn't surface the counter publicly.
 --
@@ -44,7 +44,7 @@
 -- `flair_session_presence` (session_connect_template /
 -- session_exit_template). NOTE: `flair_profile_banner` predates
 -- that convention and parks its master URL on `user_active_cosmetics`
--- instead — that's the OUTLIER. The newer flairs (this one
+-- instead, that's the OUTLIER. The newer flairs (this one
 -- included) treat the per-identity earning tables as the canonical
 -- home for owner-configured flair payload, with ownership recorded
 -- separately in `earning_ledger`. Each character can own + configure
@@ -54,7 +54,7 @@
 
 CREATE TABLE IF NOT EXISTS profile_views (
   id TEXT PRIMARY KEY,
-  -- The profile being viewed. ALWAYS the master userId — the actual
+  -- The profile being viewed. ALWAYS the master userId, the actual
   -- identity is the (user, character) pair below. Cascading delete
   -- so a hard-delete clears the user's view history with them.
   profile_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -64,17 +64,17 @@ CREATE TABLE IF NOT EXISTS profile_views (
   profile_character_id TEXT REFERENCES characters(id) ON DELETE SET NULL,
   -- Signed-in viewer (NULL = anonymous). SET NULL on viewer delete
   -- so historical counts don't dangle if the viewer's account is
-  -- hard-deleted later — the row still contributes to the total.
+  -- hard-deleted later, the row still contributes to the total.
   viewer_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   -- Dedupe key: `userId#m` for members on a master profile,
   -- `userId#c:<charId>` for members on a character profile, and
   -- the parallel `anon:<hash>#…` for anonymous viewers. Embedding
   -- the profile-character distinction in the viewer_key sidesteps
   -- SQLite's NULL-distinct-from-NULL uniqueness semantics on
-  -- profile_character_id — a single column carrying everything the
+  -- profile_character_id, a single column carrying everything the
   -- UNIQUE constraint needs to read.
   viewer_key TEXT NOT NULL,
-  -- floor(created_at / 86_400_000) — UNIX day index. Dedupes
+  -- floor(created_at / 86_400_000), UNIX day index. Dedupes
   -- to one view per (viewer, profile) per day so a viewer
   -- F5-ing a profile doesn't inflate the count.
   day_bucket INTEGER NOT NULL,
@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS profile_views (
   -- existence check. `profile_character_id` is intentionally NOT
   -- in the unique key (the distinction is baked into viewer_key)
   -- because nullable columns in a SQLite UNIQUE silently break
-  -- dedupe — NULL is treated as distinct from every other NULL.
+  -- dedupe, NULL is treated as distinct from every other NULL.
   UNIQUE(profile_user_id, viewer_key, day_bucket)
 );
 CREATE INDEX IF NOT EXISTS profile_views_profile_idx
@@ -110,7 +110,7 @@ ALTER TABLE `character_earning`
 --> statement-breakpoint
 
 -- Seed the two new Flair catalog rows. Costs are placeholders the
--- admin can tune via the Flair admin tab — set above the existing
+-- admin can tune via the Flair admin tab, set above the existing
 -- typing-phrase (1500) but below the freeform-border tier, so the
 -- relative pricing reads as a meaningful upgrade rather than impulse
 -- purchase.

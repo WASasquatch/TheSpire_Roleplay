@@ -5,23 +5,23 @@
  * outer AdminPanel hides this tab from plain admins; the server also
  * 403s every endpoint, so a URL-guessing admin can't sneak in):
  *
- *   1. Full database — Create+download a fresh .zip snapshot
+ *   1. Full database, Create+download a fresh .zip snapshot
  *      bundling database.sqlite + the entire /uploads/ tree; upload
  *      + import a candidate .zip (with a confirmation modal once
  *      we've inspected it).
  *
- *   2. Content backup — Create+download a .zip snapshot bundling
+ *   2. Content backup, Create+download a .zip snapshot bundling
  *      content.json (every exportable table) + the /uploads/ tree;
  *      upload + import a candidate .zip (with a per-table diff
  *      preview before confirm).
  *
- *   3. Snapshots — Listing of every artifact in /data/backups/,
+ *   3. Snapshots, Listing of every artifact in /data/backups/,
  *      with download + delete actions. Auto-snapshots taken
  *      before a destructive restore are labelled distinctly so
  *      admins know which copies to keep as undo points.
  *
  * Everything destructive (Import) takes a pre-import snapshot
- * automatically — the server side handles that — so a botched
+ * automatically, the server side handles that, so a botched
  * restore is one Snapshots-tab click away from undo.
  *
  * Format note: every artifact (download or upload) is a v3+ ZIP
@@ -60,7 +60,7 @@ export function AdminBackupsTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Local "we just kicked off something" message. Distinct from
-  // serverStatus.currentOperation — the local message is set
+  // serverStatus.currentOperation, the local message is set
   // immediately on button click and cleared either when the server
   // status confirms an in-flight op (the server's message replaces
   // it) or when the operation completes.
@@ -108,7 +108,7 @@ export function AdminBackupsTab() {
           void refresh();
         }
       } catch {
-        /* ignore — next tick retries */
+        /* ignore, next tick retries */
       } finally {
         if (!cancelled) {
           const delay = serverStatus.currentOperation ? 1500 : 8000;
@@ -121,7 +121,7 @@ export function AdminBackupsTab() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-    // Re-creating the loop on serverStatus changes is intentional —
+    // Re-creating the loop on serverStatus changes is intentional,
     // it lets the dynamic cadence (1.5s / 8s) take effect mid-poll.
   }, [serverStatus.currentOperation, refresh]);
 
@@ -143,7 +143,7 @@ export function AdminBackupsTab() {
         });
         if (res.status === 409) {
           // Server's already running another op. Don't surface as a
-          // hard error — show a friendly note and let the status
+          // hard error, show a friendly note and let the status
           // poll display the live state of the in-flight job.
           const body = (await res.json().catch(() => ({}))) as { busy?: BackupOperationStatus };
           const op = body.busy?.currentOperation;
@@ -162,7 +162,7 @@ export function AdminBackupsTab() {
         // Immediately trigger a browser download of the just-created
         // artifact so the admin doesn't have to find it in the
         // Snapshots list. Failures here (network / auth) surface as
-        // the same error banner the create errors do — the file is
+        // the same error banner the create errors do, the file is
         // still on disk in /data/backups/ and the admin can retry
         // from the Snapshots panel below.
         await triggerDownload(entry.id);
@@ -316,12 +316,12 @@ function FullDbPanel({
   async function commitImport() {
     if (!report || !report.__file) return;
     if (!report.ok) {
-      onError("Cannot import — file failed validation.");
+      onError("Cannot import, file failed validation.");
       return;
     }
     if (report.missingMigrations.length > 0) {
       onError(
-        `Cannot import — this install is missing ${report.missingMigrations.length} migration(s) the backup expects. Deploy first.`,
+        `Cannot import, this install is missing ${report.missingMigrations.length} migration(s) the backup expects. Deploy first.`,
       );
       return;
     }
@@ -329,7 +329,7 @@ function FullDbPanel({
     if (!window.confirm(
       "Replacing the live database AND the uploads tree with this backup will sign every user out, drop unsaved changes, and restart the server. A pre-restore safety snapshot will be taken automatically. Continue?",
     )) return;
-    onBusy("Importing full archive — the server will restart…");
+    onBusy("Importing full archive, the server will restart…");
     onError("");
     try {
       const res = await fetch("/admin/backup/full/import", {
@@ -353,7 +353,7 @@ function FullDbPanel({
         throw new Error(body.message || body.error || `import failed: ${res.status}`);
       }
       const result = (await res.json()) as FullImportResult;
-      // Don't refresh — the server is about to exit. Just surface
+      // Don't refresh, the server is about to exit. Just surface
       // the message; the page will become unreachable for ~30s.
       onError("");
       onBusy(`${result.message} (${result.uploadsRestored} upload file(s) staged. Pre-restore snapshot: ${result.preSnapshotId})`);
@@ -372,7 +372,7 @@ function FullDbPanel({
       <header className="flex items-baseline justify-between gap-2">
         <h4 className="font-action text-sm">Full database snapshot</h4>
         <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-          .zip — database.sqlite + uploads/ (everything: users, messages, earning, cosmetics, all images)
+          .zip, database.sqlite + uploads/ (everything: users, messages, earning, cosmetics, all images)
         </span>
       </header>
       <div className="flex flex-wrap items-center gap-2">
@@ -405,7 +405,7 @@ function FullDbPanel({
           </div>
           {!report.ok ? (
             <p className="text-keep-accent">
-              File failed validation — not a valid backup archive, or the inner database isn't from a Spire install
+              File failed validation, not a valid backup archive, or the inner database isn't from a Spire install
               (missing the <span className="font-mono">users.system</span> sentinel row that every Spire install seeds).
             </p>
           ) : (
@@ -517,7 +517,7 @@ function ContentPanel({
     const diff = report.diff;
     if (diff.missingMigrations.length > 0) {
       onError(
-        `Cannot import — this install is missing ${diff.missingMigrations.length} migration(s) the backup expects. Deploy first.`,
+        `Cannot import, this install is missing ${diff.missingMigrations.length} migration(s) the backup expects. Deploy first.`,
       );
       return;
     }
@@ -578,7 +578,7 @@ function ContentPanel({
       <header className="flex items-baseline justify-between gap-2">
         <h4 className="font-action text-sm">Content backup (ZIP envelope)</h4>
         <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-          .zip — content.json (every exportable table) + uploads/ (every uploaded image)
+          .zip, content.json (every exportable table) + uploads/ (every uploaded image)
         </span>
       </header>
       <div className="flex flex-wrap items-center gap-2">
@@ -621,7 +621,7 @@ function ContentPanel({
             Bundled uploads:{" "}
             <span className="font-mono text-keep-text">{report.uploadsFileCount.toLocaleString()}</span> file(s),{" "}
             <span className="font-mono text-keep-text">{formatBytes(report.uploadsBytes)}</span>
-            {" "}— will replace the live <span className="font-mono">/uploads/</span> tree on import.
+            , will replace the live <span className="font-mono">/uploads/</span> tree on import.
           </p>
           <table className="w-full text-left">
             <thead>
@@ -642,7 +642,7 @@ function ContentPanel({
             </tbody>
           </table>
           <p className="text-keep-muted">
-            Content backup is a <b className="text-keep-text">mirror restore</b> — every table the document carries gets wiped on this install and replaced with the source rows, and the entire <span className="font-mono">/uploads/</span> tree is replaced with the archive's. Tables not in the document are left untouched. A pre-import safety snapshot is saved automatically so you can roll back.
+            Content backup is a <b className="text-keep-text">mirror restore</b>, every table the document carries gets wiped on this install and replaced with the source rows, and the entire <span className="font-mono">/uploads/</span> tree is replaced with the archive's. Tables not in the document are left untouched. A pre-import safety snapshot is saved automatically so you can roll back.
           </p>
           <div className="flex flex-wrap gap-2 pt-1">
             <button
@@ -784,7 +784,7 @@ async function triggerDownload(id: string): Promise<void> {
     let detail = `download failed: ${res.status}`;
     try {
       const body = (await res.json()) as { error?: string };
-      if (body.error) detail = `${detail} — ${body.error}`;
+      if (body.error) detail = `${detail}, ${body.error}`;
     } catch { /* response body wasn't JSON; the status alone is enough */ }
     throw new Error(detail);
   }

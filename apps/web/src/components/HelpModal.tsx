@@ -213,7 +213,7 @@ const FORMATTING_ROWS: Array<{ syntax: string; example: string; note?: string }>
   { syntax: "~~strikethrough~~", example: "~~not a ghost~~" },
   { syntax: "||spoiler||", example: "the killer is ||the butler||", note: "renders as a black box; click to reveal." },
   { syntax: "`code`", example: "press `Enter` to send" },
-  { syntax: "```fenced```", example: "```\nmulti-line\ncode block\n```", note: "triple backticks on their own line(s) for a preformatted block. Content inside is literal — no further markdown / mention / inline-command interpretation." },
+  { syntax: "```fenced```", example: "```\nmulti-line\ncode block\n```", note: "triple backticks on their own line(s) for a preformatted block. Content inside is literal, no further markdown / mention / inline-command interpretation." },
   { syntax: "[link text](https://url)", example: "[the Spire](https://thespire.example)", note: "http and https URLs only - `javascript:` schemes are dropped silently" },
   { syntax: "https://url", example: "see https://example.com for details", note: "bare URLs are auto-linked at word boundaries" },
   { syntax: "![alt](https://image-url)", example: "![cat](https://example.com/cat.png)", note: "renders as a link with a Show image toggle - opt-in so loading the image doesn't leak your IP to the host" },
@@ -352,7 +352,7 @@ function FormattingHelp() {
             <tbody>
               {/* Each row pairs the literal text a user would type
                   against the rendered output produced by running it
-                  through the *real* markdown parser — including the
+                  through the *real* markdown parser, including the
                   verification marker that the server adds in production.
                   That way the docs and the live renderer can't drift:
                   any visual change to <VerifiedInline /> shows up here
@@ -383,7 +383,7 @@ function FormattingHelp() {
 
         <p className="mt-2 text-keep-muted">
           The small <span className="text-keep-system">✓</span> next to a spliced result is the{" "}
-          <b>verification mark</b> — hover it and you'll see which command produced the text.
+          <b>verification mark</b>, hover it and you'll see which command produced the text.
           If you ever see output styled like a command but{" "}
           <em>without</em> the ✓, someone is typing the same characters by hand to fake a result;
           only output the server actually ran carries the mark.
@@ -398,8 +398,8 @@ function FormattingHelp() {
             <code className="font-mono text-keep-action">!roll:3d6</code>).
           </li>
           <li>
-            <b>Optional argument.</b> The bit after a colon — like{" "}
-            <code className="font-mono text-keep-action">:3d6</code> on roll — is passed to the
+            <b>Optional argument.</b> The bit after a colon, like{" "}
+            <code className="font-mono text-keep-action">:3d6</code> on roll, is passed to the
             command. Most custom commands don't take args inline and quietly ignore them.
           </li>
           <li>

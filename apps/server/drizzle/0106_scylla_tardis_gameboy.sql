@@ -1,14 +1,14 @@
 -- Three more builtin items from the latest asset drop:
---   scylla_pet   — mythical sea-creature pet, slots into the pet
+--   scylla_pet  , mythical sea-creature pet, slots into the pet
 --                  tier between mimic_chest_pet ($5k) and the
 --                  dragons ($18k+). $14k feels right.
---   tardis_pet   — a TARDIS as a pet (joke / homage). The filename
+--   tardis_pet  , a TARDIS as a pet (joke / homage). The filename
 --                  carries the `_pet` suffix so it lives in the
---                  pet bucket; price reflects the meme tier — same
+--                  pet bucket; price reflects the meme tier, same
 --                  ballpark as a dragon, since acquiring a TARDIS
 --                  as a "pet" is an absurd flex.
---   gameboy      — a retro handheld. Goes in the `tool` category
---                  alongside playing_cards / playing_dice — quirky
+--   gameboy     , a retro handheld. Goes in the `tool` category
+--                  alongside playing_cards / playing_dice, quirky
 --                  toy-ish utility item, throwable for laughs.
 --
 -- TARDIS's icon file is `TARDIS_pet.png` (capitalized acronym); the
@@ -35,7 +35,7 @@ INSERT INTO `items` (`key`, `name`, `name_plural`, `description`, `icon_url`, `p
   'tardis_pet',
   'TARDIS',
   'TARDISes',
-  'A small blue police box. Bigger on the inside. The most loyal pet you''ll ever own — if you can find the door.',
+  'A small blue police box. Bigger on the inside. The most loyal pet you''ll ever own, if you can find the door.',
   '/assets/items/TARDIS_pet.png',
   25000,
   1,

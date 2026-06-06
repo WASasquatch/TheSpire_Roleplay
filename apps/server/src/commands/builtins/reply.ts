@@ -61,14 +61,14 @@ export const replyCommand: CommandHandler = {
       return;
     }
     // Soft-deleted parents (forum topics or chat lines) are not reply
-    // targets — the parent's body is gone from public view and the
+    // targets, the parent's body is gone from public view and the
     // reply would look like an orphan quoting nothing. Mirrors the
     // plain-say reply gate in `dispatch.ts`.
     if (parent.deletedAt) {
       notice(ctx, "REPLY_NO_MSG", "That message is no longer available to reply to.");
       return;
     }
-    // Locked forum topics reject new replies — except holders of
+    // Locked forum topics reject new replies, except holders of
     // `bypass_topic_lock` (mod + admin by seed default), who can still
     // post in the thread to leave a notice / verdict. Mirrors the
     // plain-say path in dispatch.ts.

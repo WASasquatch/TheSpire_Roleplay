@@ -2,7 +2,7 @@
  * Tiny role icons rendered next to staff names in the userlist. Inlined
  * as React components (not <img src=…/>) so:
  *
- *   1. CSS `color` controls the fill — every path inside uses
+ *   1. CSS `color` controls the fill, every path inside uses
  *      `currentColor`, so wrapping the icon in a `text-keep-action`
  *      / `text-keep-accent` / `text-keep-system` (or an inline
  *      `style={{ color: … }}` for the legibility-nudged variant)
@@ -16,7 +16,7 @@
  *
  * Source SVGs live alongside the other web assets at
  * `apps/web/public/master_admin.svg`, `apps/web/public/admin.svg`,
- * and `apps/web/public/mod.svg` — kept on disk for marketing /
+ * and `apps/web/public/mod.svg`, kept on disk for marketing /
  * favicons / docs use. The paths below were lifted verbatim from
  * those files; the only change is the `stroke="#1C274C"` /
  * `fill="#1C274C"` slots were replaced with `currentColor` so the
@@ -38,7 +38,7 @@ type IconProps = SVGProps<SVGSVGElement> & {
 };
 
 /**
- * Crown — masteradmin tier. The original SVG is a filled crown with
+ * Crown, masteradmin tier. The original SVG is a filled crown with
  * an internal detail path (the band) plus an underline. We render all
  * three paths with `currentColor`.
  */
@@ -71,7 +71,7 @@ export function MasterAdminIcon({
 }
 
 /**
- * Trophy with a base bar — admin tier. Original `admin.svg`: the
+ * Trophy with a base bar, admin tier. Original `admin.svg`: the
  * trophy cup outline plus a horizontal line for the trophy's stand.
  */
 export function AdminIcon({
@@ -105,7 +105,7 @@ export function AdminIcon({
 }
 
 /**
- * Trophy outline only — mod tier. Original `mod.svg`: same cup
+ * Trophy outline only, mod tier. Original `mod.svg`: same cup
  * shape as the admin trophy but without the base bar, signaling
  * the lower authority level.
  */

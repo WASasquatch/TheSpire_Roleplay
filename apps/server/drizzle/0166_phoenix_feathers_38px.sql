@@ -1,4 +1,4 @@
--- Phoenix feathers at translate(0, -38px) — splits the difference
+-- Phoenix feathers at translate(0, -38px), splits the difference
 -- between -34px (too tucked in) and the original -44px (too far
 -- outside the ring band).
 

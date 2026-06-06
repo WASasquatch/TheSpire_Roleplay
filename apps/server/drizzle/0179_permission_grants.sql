@@ -1,15 +1,15 @@
--- Granular permission system — Phase 1.
+-- Granular permission system, Phase 1.
 --
 -- Replaces the hardcoded `isAdminRole(role)` / `isMasterAdminRole(role)` checks
 -- scattered across the codebase with two tables that an install can edit at
 -- runtime via the (Phase-2) Roles & Permissions matrix:
 --
---   * role_permission_grants     — (role, permission_key) rows. Which
+--   * role_permission_grants    , (role, permission_key) rows. Which
 --                                  permissions each role tier holds by
 --                                  default. The matrix's "By role"
 --                                  sub-tab edits this table.
 --
---   * user_permission_overrides  — per-user grants/revokes that layer
+--   * user_permission_overrides , per-user grants/revokes that layer
 --                                  ON TOP of the role grants. Lets the
 --                                  install give a specific user a single
 --                                  extra power (or take one away) without
@@ -17,7 +17,7 @@
 --                                  the matrix's "By user" sub-tab fills it
 --                                  in response to admin clicks.
 --
--- The masteradmin tier is NOT represented here — its bypass is hardcoded in
+-- The masteradmin tier is NOT represented here, its bypass is hardcoded in
 -- `apps/server/src/auth/permissions.ts:hasPermission`. Adding a row for it
 -- would be redundant and would also make it possible (via a misclick) to
 -- accidentally LOSE permissions from the tier that's supposed to be the
@@ -58,12 +58,12 @@ CREATE TABLE `user_permission_overrides` (
 CREATE INDEX `user_permission_overrides_user_idx` ON `user_permission_overrides` (`user_id`);
 --> statement-breakpoint
 
--- Seeded defaults — mirror the legacy `isAdminRole` / `isMasterAdminRole`
+-- Seeded defaults, mirror the legacy `isAdminRole` / `isMasterAdminRole`
 -- behavior so deploying this migration changes nothing about who can do
 -- what until an admin actively edits the matrix. See plan.md for the full
 -- catalog + rationale.
 --
--- `trusted` gets nothing here — it's a recognition badge today, not a
+-- `trusted` gets nothing here, it's a recognition badge today, not a
 -- pre-tier of moderation.
 --
 -- `mod` gets the moderation actions every install grants today.
@@ -100,7 +100,7 @@ INSERT INTO `role_permission_grants` (`role`, `permission_key`) VALUES
   ('mod', 'view_admin_audit'),
   ('mod', 'view_admin_reports'),
 
-  -- admin tier — every key except the masteradmin-only set
+  -- admin tier, every key except the masteradmin-only set
   ('admin', 'kick_user'),
   ('admin', 'ban_user'),
   ('admin', 'unban_user'),

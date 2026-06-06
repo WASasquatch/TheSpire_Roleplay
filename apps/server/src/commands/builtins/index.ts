@@ -56,6 +56,24 @@ import {
 } from "./earning_ui.js";
 import { dropCommand, giveCommand, throwCommand } from "./items.js";
 import { itemCommand } from "./item_lookup.js";
+import {
+  announceRaffleCommand,
+  answerCommand,
+  claimCommand,
+  gamesCommand,
+  raffleCommand,
+  rpsCommand,
+  scrambleCommand,
+  storyDiceCommand,
+  triviaCommand,
+} from "./social_games.js";
+import { duelCommand } from "./duel.js";
+import { registerRps } from "../../games/rps.js";
+import { registerRaffle } from "../../games/raffle.js";
+import { registerTrivia } from "../../games/trivia.js";
+import { registerStoryDice } from "../../games/storydice.js";
+import { registerScramble } from "../../games/scramble.js";
+import { registerDuel } from "../../games/duel.js";
 
 /** Registers all built-in commands. Must run before custom commands are loaded. */
 export function registerBuiltins(reg: CommandRegistry): void {
@@ -90,7 +108,7 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(friendsCommand);
   reg.registerBuiltin(worldCommand);
   reg.registerBuiltin(worldsCommand);
-  // Scriptorium — long-form fiction.
+  // Scriptorium, long-form fiction.
   reg.registerBuiltin(writeCommand);
   reg.registerBuiltin(storyCommand);
   reg.registerBuiltin(scriptoriumCommand);
@@ -117,17 +135,39 @@ export function registerBuiltins(reg: CommandRegistry): void {
   // Earning
   reg.registerBuiltin(currencyCommand);
   reg.registerBuiltin(expCommand);
-  // Earning UI shortcuts — open the dashboard at specific tabs.
+  // Earning UI shortcuts, open the dashboard at specific tabs.
   reg.registerBuiltin(earningsCommand);
   reg.registerBuiltin(shopCommand);
   reg.registerBuiltin(collectionCommand);
   reg.registerBuiltin(petsCommand);
-  // Items — hand / throw / drop catalog items from your inventory.
+  // Items, hand / throw / drop catalog items from your inventory.
   reg.registerBuiltin(giveCommand);
   reg.registerBuiltin(throwCommand);
   reg.registerBuiltin(dropCommand);
-  // /item <name> — open the full-screen item view from chat. Same
+  // /item <name>, open the full-screen item view from chat. Same
   // zoom overlay as tapping a Collection / Pets pin on a profile.
   reg.registerBuiltin(itemCommand);
+  // Social mini-games: rock-paper-scissors and raffles. The
+  // per-kind resolution hooks (group-elim for RPS, random-draw for
+  // raffle, refund-on-cancel-or-empty for both) are wired into the
+  // shared session registry by the two `register*` calls below,
+  // they run once at boot, NOT per-command, so resolution behaves
+  // the same regardless of which command spawned the session.
+  registerRps();
+  registerRaffle();
+  registerTrivia();
+  registerStoryDice();
+  registerScramble();
+  registerDuel();
+  reg.registerBuiltin(rpsCommand);
+  reg.registerBuiltin(raffleCommand);
+  reg.registerBuiltin(claimCommand);
+  reg.registerBuiltin(announceRaffleCommand);
+  reg.registerBuiltin(triviaCommand);
+  reg.registerBuiltin(answerCommand);
+  reg.registerBuiltin(storyDiceCommand);
+  reg.registerBuiltin(scrambleCommand);
+  reg.registerBuiltin(duelCommand);
+  reg.registerBuiltin(gamesCommand);
   reg.registerBuiltin(makeHelpCommand(() => reg));
 }

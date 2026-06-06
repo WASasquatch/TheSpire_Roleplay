@@ -107,7 +107,7 @@ async function findOwnWorld(ctx: CommandContext, slug: string) {
  * /world leave [slug]   - leave a world AS THE CURRENT IDENTITY.
  *
  * /world primary was retired in 0187 along with userlist world-bucket
- * grouping — primary world no longer means anything cross-identity.
+ * grouping, primary world no longer means anything cross-identity.
  */
 export const worldCommand: CommandHandler = {
   name: "world",
@@ -218,7 +218,7 @@ export const worldCommand: CommandHandler = {
           return notice(
             ctx,
             "INVITE_ONLY",
-            `"${w.name}" is invite-only. The author adds members directly — ask them if you'd like in.`,
+            `"${w.name}" is invite-only. The author adds members directly, ask them if you'd like in.`,
           );
         }
         if (joinMode === "application") {
@@ -293,14 +293,14 @@ export const worldCommand: CommandHandler = {
       return notice(ctx, "LEFT", `Left "${w.name}".`);
     }
 
-    // `/world primary` was retired in migration 0187 — primary world
+    // `/world primary` was retired in migration 0187, primary world
     // is no longer a thing now that memberships are per-identity. The
     // userlist no longer groups by world; visit the world's own page
     // to see its member list.
 
     // Slug shortcut: any unknown first arg is tried as a world slug. Lets
     // users type `/world darkrealm` instead of `/world view darkrealm`
-    // once they've memorized the slug — same energy as IRC's `/join #foo`
+    // once they've memorized the slug, same energy as IRC's `/join #foo`
     // skipping a separate "join" verb. Only fires when nothing else
     // matched, so future verbs added above can't be silently shadowed.
     if (subLower) {
@@ -310,7 +310,7 @@ export const worldCommand: CommandHandler = {
         return;
       }
       // Fall through to BAD_SUBCMD with a hint that the unknown token also
-      // wasn't a slug — so users who fat-fingered a verb get one notice,
+      // wasn't a slug, so users who fat-fingered a verb get one notice,
       // not two attempts.
       return notice(
         ctx,

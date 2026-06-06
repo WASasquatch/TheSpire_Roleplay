@@ -2,13 +2,13 @@
 --
 -- Phase 5 (soft-lock conflict policy): per-chapter editing lock so a
 -- second collaborator opening the same chapter sees "Alice is editing
--- — open read-only?" rather than silently overwriting Alice's draft.
+--, open read-only?" rather than silently overwriting Alice's draft.
 --
 -- The lock is advisory:
 --   * Acquired when an author/collaborator opens the chapter editor.
 --   * Refreshed by client heartbeat (every ~2 minutes; lease is 5
 --     minutes since `last_refresh_at`).
---   * Released on editor close (DELETE) or expires lazily — server
+--   * Released on editor close (DELETE) or expires lazily, server
 --     treats `last_refresh_at + 5min < now()` as available.
 --   * "Force edit" simply bypasses the lock; saves still go through.
 --     The version table already captures every save, so divergence

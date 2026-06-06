@@ -22,7 +22,7 @@ interface Props {
    */
   initialDetail?: WorldDetail;
   /**
-   * When false, hide membership/edit/primary controls — anonymous viewers
+   * When false, hide membership/edit/primary controls, anonymous viewers
    * have no way to call those endpoints (the server rejects them) so the
    * buttons would just produce 401s. Defaults true.
    */
@@ -102,7 +102,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
   }, [worldId]);
 
   // Belt-and-suspenders cleanup for the page-author's `<style>` blocks
-  // — same posture as ProfileModal's unmount sweep. The portal-and-
+  //, same posture as ProfileModal's unmount sweep. The portal-and-
   // dangerouslySetInnerHTML pipeline normally cleans up its own
   // styles on unmount, but a reported transition from the public
   // deep-link viewer back to the login modal showed page CSS bleeding
@@ -134,7 +134,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
     finally { setBusy(false); }
   }
   // setPrimary was removed alongside the primary-world feature in
-  // migration 0187 — per-identity memberships made a cross-identity
+  // migration 0187, per-identity memberships made a cross-identity
   // primary signal meaningless. Memberships still exist, just without
   // the "this one is your headline affiliation" flag.
 
@@ -283,7 +283,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
           onClose={() => setShowApplicationForm(false)}
           onSubmitted={() => {
             // Close on submit. The viewer's load() refresh isn't
-            // strictly required — the application status doesn't
+            // strictly required, the application status doesn't
             // change membership yet (still pending review), and the
             // catalog card the user came from will reflect "pending"
             // on its next mount. Keeping the close-only posture
@@ -334,7 +334,7 @@ function ViewerTree({
 function PageView({ page, description }: { page: WorldPage | null; description: string | null }) {
   // The viewer context here is already the world's scoped theme (the
   // modal wraps PageView in <ActiveThemeContext.Provider>), so `bg`
-  // is the actual background user-styled text is painted against —
+  // is the actual background user-styled text is painted against,
   // which is what legibleHtmlColors needs to compute its nudges.
   const themeBg = useActiveTheme().bg;
   const safeHtml = useMemo(() => {
@@ -376,7 +376,7 @@ function PageView({ page, description }: { page: WorldPage | null; description: 
  * join date.
  *
  * Privacy: the server-side filter in `memberListFor` already drops
- * users whose master profile is private or NSFW — they explicitly
+ * users whose master profile is private or NSFW, they explicitly
  * opted out of public affiliation, so they never appear here. The
  * client takes the wire list at face value.
  *
@@ -421,7 +421,7 @@ function MemberAvatar({ member }: { member: WorldMemberRef }) {
   const title = member.characterId !== null
     ? `${member.displayName} (${member.username})`
     : member.displayName;
-  // Shared crop resolver — see `lib/avatarCrop`. Default crop maps to
+  // Shared crop resolver, see `lib/avatarCrop`. Default crop maps to
   // `undefined` so the legacy centered-cover render is byte-identical.
   const cropStyle = cropStyleFor(member.avatarCrop);
   return (
@@ -496,7 +496,7 @@ function MembershipControls({
   if (detail.world.visibility !== "open") return null;
   const joinMode = detail.world.joinMode ?? "open";
   if (joinMode === "invite-only") {
-    // Static informational chip. Looks like a button but isn't one —
+    // Static informational chip. Looks like a button but isn't one,
     // there's nothing to do here besides ask the author. Title is
     // the actionable guidance.
     return (

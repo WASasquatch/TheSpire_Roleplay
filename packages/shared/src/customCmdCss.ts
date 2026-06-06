@@ -10,7 +10,7 @@
  * The allow-list mirrors (and is a subset of) the `allowedStyles` used
  * by `sanitizeBio` in apps/server/src/auth/html.ts. Layout / sizing
  * properties (`position`, `width`, `margin`, etc.) are deliberately
- * absent — a custom command paints text, not chrome.
+ * absent, a custom command paints text, not chrome.
  */
 import { legibleAgainstBg } from "./theme.js";
 
@@ -95,13 +95,13 @@ export function sanitizeCustomCmdCss(input: string | null | undefined): string {
  * the reader's current palette gets nudged toward a legible variant
  * (same contract that drives the per-user chat-color override). If the
  * CSS itself sets `background-color`, that bg wins over the theme bg
- * — an admin who explicitly paints a background is taking ownership of
+ *, an admin who explicitly paints a background is taking ownership of
  * the contrast model for that combo.
  *
  * Only `color` is nudged. `background-color` is left verbatim because
  * the admin chose it as the canvas; rewriting it would defeat the
  * purpose of styling the body. Non-hex values (rgb / rgba) also pass
- * through unchanged — the legibility helper is hex-only.
+ * through unchanged, the legibility helper is hex-only.
  */
 export function customCmdCssToStyle(
   css: string | null | undefined,

@@ -26,7 +26,7 @@ function notice(ctx: CommandContext, code: string, message: string) {
  *
  * Mod commands operate on the USER account (kick/ban/mute kick the
  * whole session, not a single character), so we follow the resolved
- * target's `userId` back to the full users row — that's the shape
+ * target's `userId` back to the full users row, that's the shape
  * the existing call sites consume for permissions + display.
  *
  * Stashes the RESOLVED display name on the returned row's
@@ -88,17 +88,17 @@ async function isKeymaster(ctx: CommandContext, userId: string): Promise<boolean
  * Caller has moderation authority for the current room.
  *
  * Three paths grant authority (any one suffices):
- *   1. Site-level permission `siteKey` — admin tier (and anyone the
+ *   1. Site-level permission `siteKey`, admin tier (and anyone the
  *      matrix has granted that specific moderation permission) skips
  *      the per-room ownership check.
- *   2. Room owner — `rooms.ownerId = caller` OR `room_members.role =
+ *   2. Room owner, `rooms.ownerId = caller` OR `room_members.role =
  *      "owner"`. Local privilege; not site-wide.
- *   3. Room mod — `room_members.role = "mod"`. Local privilege; the
+ *   3. Room mod, `room_members.role = "mod"`. Local privilege; the
  *      room owner promoted them via /promote.
  *
  * `siteKey` is the specific permission the command needs (e.g.
  * `kick_user`, `ban_user`). Threading it through means a user with
- * just `kick_user` can boot people but not ban them — granular
+ * just `kick_user` can boot people but not ban them, granular
  * matrix grants pass straight through.
  */
 async function callerCanModerateRoom(
@@ -170,7 +170,7 @@ export const kickCommand: CommandHandler = {
 
     // Boot every socket of the target out of this room and into the
     // canonical landing. After s.join we also push a fresh room:state and
-    // backlog to the booted socket — without those it's stuck on the old
+    // backlog to the booted socket, without those it's stuck on the old
     // room's UI even though it's now joined the landing channel.
     const landing = await findCanonicalLanding(ctx.db);
     const socks = await ctx.io.fetchSockets();
@@ -211,7 +211,7 @@ export const kickCommand: CommandHandler = {
     // Landing destination needs full room state (membership + occupants),
     // not just presence, so the booted socket's UI shows the right room
     // metadata. broadcastRoomState fans out room:state to all in the
-    // channel — the booted socket included.
+    // channel, the booted socket included.
     if (landing && booted > 0) await broadcastRoomState(ctx.io, ctx.db, landing.id);
   },
 };
@@ -329,7 +329,7 @@ export const promoteCommand: CommandHandler = {
   description: "Promote a user to room mod (room owner only).",
   async run(ctx) {
     // Site-key `edit_any_room_metadata` covers admins managing any
-    // room's roster — the legacy admin shortcut in `callerOwnsRoom`
+    // room's roster, the legacy admin shortcut in `callerOwnsRoom`
     // routes through it. Room-owner check stays local (hardcoded).
     if (!(await callerOwnsRoom(ctx, "edit_any_room_metadata"))) {
       return notice(ctx, "PERM", "Only the room owner (or a site admin) can promote room mods.");
@@ -347,7 +347,7 @@ export const promoteCommand: CommandHandler = {
     // this room. That's the current model; the broadcast below uses
     // the IDENTITY the caller targeted (character name when the
     // caller typed a character, master name otherwise) so the room
-    // sees the name they recognize — but the underlying privilege is
+    // sees the name they recognize, but the underlying privilege is
     // user-scoped until / unless we partition room_members per
     // identity.
     await ctx.db
@@ -507,7 +507,7 @@ export const banCommand: CommandHandler = {
   name: "ban",
   aliases: ["banish"],
   usage: "/ban <username> [duration] [reason]",
-  description: "Banish a user from the current room. Owner/admin only — room mods can /kick or /mute, but only the room owner can permanently bar someone.",
+  description: "Banish a user from the current room. Owner/admin only, room mods can /kick or /mute, but only the room owner can permanently bar someone.",
   subcommands: [
     {
       verb: "<username>",
@@ -527,11 +527,11 @@ export const banCommand: CommandHandler = {
   ],
   async run(ctx) {
     // Owner-or-sitewide-only. Room mods are intentionally NOT allowed
-    // to ban — banishment is a permanent escalation that revokes the
+    // to ban, banishment is a permanent escalation that revokes the
     // user's ability to even enter the room, and the room owner should
     // be the only local authority who gets to make that call. Room
     // mods can /kick (temporary ejection) and /mute (silenced but
-    // still present) — those cover the day-to-day moderation surface
+    // still present), those cover the day-to-day moderation surface
     // without handing out the "you can never come back" lever.
     if (!(await callerOwnsRoom(ctx, "ban_user"))) {
       return notice(ctx, "PERM", "Only the room owner or a site admin can /ban. Room mods can /kick or /mute instead.");
@@ -579,7 +579,7 @@ export const banCommand: CommandHandler = {
       });
 
     // Boot every live socket of the target out of this room. They go to
-    // the canonical landing — same flow as /kick but without the auto-
+    // the canonical landing, same flow as /kick but without the auto-
     // rejoin loop, since the ban row refuses the next /go back. Each
     // booted socket also gets a fresh backlog so its message list
     // matches the new room.
@@ -629,9 +629,9 @@ export const unbanCommand: CommandHandler = {
   name: "unban",
   aliases: ["pardon"],
   usage: "/unban <username>",
-  description: "Lift a /ban from the current room. Owner/admin only — pairs with /ban, which room mods can't issue.",
+  description: "Lift a /ban from the current room. Owner/admin only, pairs with /ban, which room mods can't issue.",
   async run(ctx) {
-    // Symmetric to /ban — only the room owner (or a site-perm holder)
+    // Symmetric to /ban, only the room owner (or a site-perm holder)
     // can lift a ban. A room mod who could /unban but not /ban would
     // be able to override an owner's permanent ban decision, which
     // defeats the purpose of restricting /ban to the owner.

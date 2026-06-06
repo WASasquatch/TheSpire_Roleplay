@@ -15,14 +15,14 @@
  * Result shape mirrors what the chip + dispatcher need: the
  * story id (so the click handler can open the StoryReader) plus
  * the title (so the chip can show "Latest: <Title>"). Returns
- * `null` when nothing is published yet or the fetch fails — the
+ * `null` when nothing is published yet or the fetch fails, the
  * chip falls back to a static label in that case.
  */
 
 export interface LatestStoryRef {
   id: string;
   title: string;
-  /** Pre-computed permalink slug — handy if a future click path
+  /** Pre-computed permalink slug, handy if a future click path
    *  wants to navigate via URL instead of opening the reader modal. */
   slug: string;
   /** Author's master username, for the title-bar attribution. */

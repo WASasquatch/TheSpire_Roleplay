@@ -5,7 +5,7 @@
 -- gets:
 --   - an in-app system notification (server-emitted socket event,
 --     surfaced as a one-line system message in the reader's current
---     room — mirrors the friend-online pattern)
+--     room, mirrors the friend-online pattern)
 --   - an optional web-push notification if push_enabled = 1
 --
 -- Author cannot see WHO is subscribed; only the rollup count.

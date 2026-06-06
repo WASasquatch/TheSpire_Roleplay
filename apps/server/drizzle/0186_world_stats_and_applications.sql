@@ -2,16 +2,16 @@
 --
 -- Adds two orthogonal feature groups to the worlds system:
 --
---   1. Vibe stats — eight integer axes (0..100) that authors tune to
+--   1. Vibe stats, eight integer axes (0..100) that authors tune to
 --      describe the feel of their setting (Combat / Magic / Tech /
 --      Romance / Politics / Mystery / Horror / Exploration). Nullable
 --      because "unset" reads differently from "0" in the catalog
---      bars; an empty column is rendered as a muted "—" rather than
+--      bars; an empty column is rendered as a muted "-" rather than
 --      a zero-width bar. The catalog uses range filters (min/max per
 --      axis) so a user can find e.g. combat-heavy + low-romance
 --      worlds.
 --
---   2. joinMode + applications — gates membership behind an
+--   2. joinMode + applications, gates membership behind an
 --      author-reviewed application instead of forcing the binary
 --      "open" / "owner-can-add-only" choice the visibility enum
 --      currently implies. Orthogonal to visibility: a private world
@@ -22,7 +22,7 @@
 -- Defaults:
 --   * stats: NULL (author hasn't tuned). Existing rows keep null.
 --   * join_mode: 'open' to preserve current behavior for legacy
---     worlds — anything that used to be `visibility = 'open'`
+--     worlds, anything that used to be `visibility = 'open'`
 --     remains open-join after this migration.
 --   * application_questions_json: '[]' so the JSON-parse path
 --     never sees null and existing app-mode toggles work without
@@ -51,7 +51,7 @@ ALTER TABLE `worlds` ADD COLUMN `application_questions_json` text NOT NULL DEFAU
 --> statement-breakpoint
 
 -- Per-applicant application rows. One row per (world, applicant)
--- in 'pending' status — once reviewed (approved / rejected) or
+-- in 'pending' status, once reviewed (approved / rejected) or
 -- withdrawn, the row stays as an audit trail and a fresh re-apply
 -- creates a new row. The partial unique index below enforces the
 -- "one pending per (world, applicant)" rule without blocking

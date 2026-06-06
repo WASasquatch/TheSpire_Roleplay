@@ -1,7 +1,7 @@
 /**
  * Curated subset of the Unicode 15 emoji catalog, grouped by category
  * for the picker UI. This is intentionally NOT the full catalog (~3700
- * entries) — that would bundle ~120KB just for picker labels — instead
+ * entries), that would bundle ~120KB just for picker labels, instead
  * it's the ~400 most-used emoji across the categories Discord and
  * Messenger surface by default.
  *
@@ -14,7 +14,7 @@
  *
  * Adding emoji: drop entries into the matching category array. Keep
  * `name` and `tags` lowercase. Skin-tone variants are deliberately
- * NOT enumerated — users who need them can copy/paste from a system
+ * NOT enumerated, users who need them can copy/paste from a system
  * picker. This subset trades catalog completeness for picker speed.
  */
 
@@ -720,7 +720,7 @@ export const UNICODE_EMOJI_FLAT: ReadonlyArray<UnicodeEmoji & { categoryId: stri
 
 /** Char → name lookup. Used by the reaction renderer to compose a
  *  human-readable tooltip ("smile") for the Unicode emoji chip. Falls
- *  back to the raw glyph when the catalog doesn't carry the entry —
+ *  back to the raw glyph when the catalog doesn't carry the entry,
  *  arbitrary Unicode reactions can still come in via paste / OS picker
  *  even though the matrix only enumerates the curated subset. */
 const UNICODE_EMOJI_NAME_BY_CHAR: ReadonlyMap<string, string> = (() => {
@@ -738,7 +738,7 @@ export function lookupUnicodeEmojiName(char: string): string | null {
  *  ("100", "smile") in the unicode_char column instead of the actual
  *  codepoint ("💯", "😄"). The server's reaction loader runs the
  *  stored value through this and falls through to the original
- *  string when the lookup misses — so OS-emoji-picker paste of a
+ *  string when the lookup misses, so OS-emoji-picker paste of a
  *  codepoint outside the curated catalog still renders. */
 const UNICODE_EMOJI_CHAR_BY_NAME: ReadonlyMap<string, string> = (() => {
   const m = new Map<string, string>();

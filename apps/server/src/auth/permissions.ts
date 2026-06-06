@@ -1,5 +1,5 @@
 /**
- * Granular permission resolver — Phase 1 of the role-permission system.
+ * Granular permission resolver, Phase 1 of the role-permission system.
  *
  * Routes through every privileged action in the codebase: kicks, bans,
  * admin-tab visibility, scriptorium overrides, the whole catalog in
@@ -10,33 +10,33 @@
  *
  * Resolution precedence (highest wins):
  *
- *   1. **Masteradmin bypass** — masteradmin always returns `true`. The
+ *   1. **Masteradmin bypass**, masteradmin always returns `true`. The
  *      tier holds no row in the grants table and the matrix locks
  *      their row as "all-on, uneditable"; misclicking can't strand
  *      the install with no one able to grant permissions.
  *
- *   2. **User override** — `user_permission_overrides[userId][key]` has
+ *   2. **User override**, `user_permission_overrides[userId][key]` has
  *      a row, `granted` decides. Lets an install give a specific user
  *      a privilege their role doesn't carry, or take one away from
  *      someone who'd otherwise inherit it from their role.
  *
- *   3. **Role grant** — `role_permission_grants[role][key]` exists →
+ *   3. **Role grant**, `role_permission_grants[role][key]` exists →
  *      `true`. The matrix's "By role" sub-tab edits this layer.
  *
- *   4. **Default deny** — no row anywhere → `false`.
+ *   4. **Default deny**, no row anywhere → `false`.
  *
  * **Defensive fallback (boot-time):** if `role_permission_grants` is
  * entirely empty (failed seed, accidental `DELETE`), the resolver
  * falls back to the legacy `isAdminRole(role)` / `isMasterAdminRole(role)`
  * checks for the catalog's keys so an admin can still reach the matrix
  * UI to repair the table. A `[permissions] fallback engaged` warning is
- * logged on boot — the breakage is loud, not silent.
+ * logged on boot, the breakage is loud, not silent.
  *
  * **Cache:** both grant tables fit in process memory (low hundreds of
  * rows max combined). We pin them on first lookup and invalidate on
  * any PATCH/DELETE via `invalidatePermissionsCache()`. Same pattern
  * `settings.getSettings()` uses. The deploy is single-instance per
- * `fly.toml: min_machines_running = 1` — if it ever scales out, swap
+ * `fly.toml: min_machines_running = 1`, if it ever scales out, swap
  * to a TTL refresh or socket.io adapter pub/sub for invalidations.
  */
 
@@ -65,7 +65,7 @@ let loadPromise: Promise<PermissionsCache> | null = null;
 /**
  * Drop the cache. Called by the matrix PATCH/DELETE endpoints after
  * they commit a change so the next `hasPermission` call observes the
- * new state. Cheap — just nulls the pointer.
+ * new state. Cheap, just nulls the pointer.
  */
 export function invalidatePermissionsCache(): void {
   cache = null;
@@ -104,7 +104,7 @@ async function loadCache(db: Db): Promise<PermissionsCache> {
     if (fallback) {
       // eslint-disable-next-line no-console
       console.warn(
-        "[permissions] fallback engaged — role_permission_grants is empty. " +
+        "[permissions] fallback engaged, role_permission_grants is empty. " +
         "hasPermission() is using legacy isAdminRole() checks until the table is repopulated. " +
         "If this isn't a fresh-install transient, restore 0179_permission_grants.sql's seed.",
       );
@@ -134,7 +134,7 @@ export async function reloadPermissionsSnapshot(
 
 /**
  * Synchronous read against the in-memory cache. Throws if the cache
- * hasn't been warmed yet — callers should be in a path where
+ * hasn't been warmed yet, callers should be in a path where
  * `ensurePermissionsReady` has run (route preHandlers, command
  * dispatcher entry). Most code paths use `hasPermission` (which
  * lazy-loads) instead; this exists for the rare hot-path that
@@ -203,7 +203,7 @@ export async function permissionsFor(
   db: Db = defaultDb,
 ): Promise<PermissionKey[]> {
   // Importing PERMISSION_KEYS inline to avoid a top-of-file shared
-  // dependency cycle — `auth/permissions` is otherwise leaf-imported.
+  // dependency cycle, `auth/permissions` is otherwise leaf-imported.
   const { PERMISSION_KEYS } = await import("@thekeep/shared");
   const c = await loadCache(db);
   return PERMISSION_KEYS.filter((k) => resolveAgainst(c, user, k));

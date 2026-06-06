@@ -4,7 +4,7 @@
 -- messages that have survived the global retention sweep
 -- (`messageRetentionMs`) and per-room expiry sweeps
 -- (`rooms.messageExpiryMinutes`). Without this ledger, the stat
--- counts down as old messages get deleted — backwards from what
+-- counts down as old messages get deleted, backwards from what
 -- "activity in the last 24h" should mean for visitors deciding
 -- whether the site is alive.
 --
@@ -12,7 +12,7 @@
 -- descriptions, "X has connected" / "X has disconnected"). Those
 -- are noise on an activity beacon, and including them would let a
 -- single reconnect-storm inflate the splash number. Whispers and
--- /npc and /me actions and forum posts all DO log — anything a
+-- /npc and /me actions and forum posts all DO log, anything a
 -- user typed counts as activity.
 --
 -- Bounded by the hourly janitor sweep below: rows older than 26h

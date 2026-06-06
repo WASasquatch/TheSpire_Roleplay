@@ -5,10 +5,10 @@
 -- the added roles only.
 --
 -- Roles (closed enum at the Zod layer):
---   reader    — read drafts only. Useful for beta readers.
---   editor    — edit existing chapters + manage codex; cannot add new
+--   reader   , read drafts only. Useful for beta readers.
+--   editor   , edit existing chapters + manage codex; cannot add new
 --               chapters or publish.
---   co_author — edit + add chapters, manage codex, publish. Cannot
+--   co_author, edit + add chapters, manage codex, publish. Cannot
 --               manage collaborators or delete the story (owner only).
 --
 -- accepted_at NULL = pending invitation. Set = active collaborator.

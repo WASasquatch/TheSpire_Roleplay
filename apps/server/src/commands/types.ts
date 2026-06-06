@@ -22,7 +22,7 @@ export interface SessionUser {
   /** Free-text mood/expression snapshotted onto outgoing messages; null = none. */
   currentMood: string | null;
   /**
-   * Incognito (ghost) mode flag — when true, the user is hidden from
+   * Incognito (ghost) mode flag, when true, the user is hidden from
    * userlists, room transitions don't broadcast, and any chat
    * message they send renders as a system line under
    * `incognitoAlias` instead of their identity. Persisted on the
@@ -64,7 +64,7 @@ export interface CommandContext {
    *     the same room that the user is allowed to reply to
    *
    * When present, `addMessage` automatically attaches the reply tuple
-   * to any non-system message it persists — so `/me`, `/roll`,
+   * to any non-system message it persists, so `/me`, `/roll`,
    * `/scene`, etc. all land as replies under the topic the composer
    * was bound to instead of leaking out as new top-level posts.
    *

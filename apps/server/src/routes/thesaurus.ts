@@ -7,14 +7,14 @@ import { getSessionUser } from "./auth.js";
  * `moby` is a CommonJS module that wraps the public-domain Moby
  * Thesaurus + Open Office Thesaurus data. It exposes a synchronous
  * `.search(word)` returning an array of synonyms (which may include
- * short phrases). No network, no key, no rate limit — the data
+ * short phrases). No network, no key, no rate limit, the data
  * ships inside the package and `.search` is a hash lookup.
  *
  * We load it via `createRequire(import.meta.url)` because the app
  * runs as ESM and Node won't let plain `require` through in that
  * context. A static `import moby from "moby"` works in some
  * setups but breaks under tsx + exactOptionalPropertyTypes on the
- * CJS interop — createRequire is the most predictable shim.
+ * CJS interop, createRequire is the most predictable shim.
  */
 const moby = createRequire(import.meta.url)("moby") as {
   search: (word: string) => string[];
@@ -38,7 +38,7 @@ const MAX_RESULTS = 50;
 const WORD_RX = /^[a-zA-Z][a-zA-Z'-]{0,39}$/;
 
 /**
- * `/thesaurus?word=<word>` — synonyms lookup powered by the public-
+ * `/thesaurus?word=<word>`, synonyms lookup powered by the public-
  * domain Moby Thesaurus + Open Office Thesaurus data. Auth-gated
  * so the lookup table stays a benefit of being signed in (and so
  * an unauthenticated attacker can't fingerprint the install or
@@ -52,7 +52,7 @@ const WORD_RX = /^[a-zA-Z][a-zA-Z'-]{0,39}$/;
  */
 export async function registerThesaurusRoutes(app: FastifyInstance, db: Db): Promise<void> {
   // 60/min/IP is generous for a feature that's triggered by text
-  // selection — even a fast-typing user won't hit it. Same bucket
+  // selection, even a fast-typing user won't hit it. Same bucket
   // as /auth/me so the rate-limit plugin's metrics stay tidy.
   const thesaurusLimit = {
     config: { rateLimit: { max: 60, timeWindow: "1 minute" } },

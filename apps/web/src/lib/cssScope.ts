@@ -1,7 +1,7 @@
 /**
  * Render-time CSS scoping for user-authored `<style>` blocks.
  *
- * The DB stores user CSS verbatim — `.userlist { … }` is preserved
+ * The DB stores user CSS verbatim, `.userlist { … }` is preserved
  * exactly as the writer typed it. At render time, we transform every
  * selector inside each `<style>` block to be prefixed with a wrapper
  * class (`.user-html-scope`) so the rules can only ever match
@@ -19,7 +19,7 @@
  *
  * Idempotency: selectors that ALREADY start with the scope class get
  * left alone. Protects against bios stored by a previous version of
- * the sanitizer that scoped at save time — re-rendering them through
+ * the sanitizer that scoped at save time, re-rendering them through
  * this pass doesn't double up.
  */
 
@@ -45,7 +45,7 @@ export const USER_HTML_STYLE_MARKER = "data-tk-user-bio-style";
  * reject the inline stylesheet under our strict `style-src` policy.
  *
  * `scopeClass` should be a class selector (e.g. `.user-html-scope`).
- * `html` is the sanitized user HTML — we run AFTER the main HTML
+ * `html` is the sanitized user HTML, we run AFTER the main HTML
  * sanitizer so this pass only has to think about CSS, not nested
  * tag-allow-list concerns.
  */
@@ -60,7 +60,7 @@ export function scopeAndNonceStyleBlocks(html: string, scopeClass: string): stri
     // by the SEO renderer; user-bio `<style>` tags inserted via
     // `dangerouslySetInnerHTML` need it stamped here at the same
     // render step. Without this stamp, the browser silently drops the
-    // block and the writer's CSS never applies — exactly the
+    // block and the writer's CSS never applies, exactly the
     // "custom CSS doesn't work" symptom.
     const safeAttrs = attrs.replace(/\bnonce\s*=\s*("[^"]*"|'[^']*'|\S+)/gi, "")
       // Defense against an upstream block that pre-stamped the marker:
@@ -78,7 +78,7 @@ function escapeAttr(s: string): string {
 
 /**
  * Neutralize `url()` values inside CSS that carry a dangerous scheme.
- * Same intent as the server-side `scrubStyleUrls` — defense-in-depth
+ * Same intent as the server-side `scrubStyleUrls`, defense-in-depth
  * second pass on the client in case a future server path forgets to
  * sanitize before storage.
  */
@@ -130,7 +130,7 @@ function scopeCss(css: string, scope: string): string {
       const lower = prelude.toLowerCase().trimStart();
       if (src[j] === ";") {
         // Single-line at-rule. Strip `@import`/`@charset`/`@namespace`
-        // — they all carry external-load semantics. Other top-level
+        //, they all carry external-load semantics. Other top-level
         // at-rules (rare; `@layer name;` declarations etc.) pass.
         const drop = /^@(?:import|charset|namespace)\b/.test(lower);
         if (!drop) out += `${prelude};`;
@@ -149,7 +149,7 @@ function scopeCss(css: string, scope: string): string {
         if (wraps) {
           out += `${prelude}{${scopeCss(body, scope)}}`;
         } else {
-          // @keyframes / @font-face / @page / @property — inner
+          // @keyframes / @font-face / @page / @property, inner
           // selectors aren't DOM selectors, leave the body alone.
           out += `${prelude}{${body}}`;
         }

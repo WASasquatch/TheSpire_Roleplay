@@ -29,11 +29,11 @@ interface Props {
   /** Current viewer's user id - so the renderer can decide which messages get edit/delete grace controls. Null when not yet authenticated. */
   selfUserId: string | null;
   /**
-   * Names that identify the viewer to the mention parser — master
+   * Names that identify the viewer to the mention parser, master
    * username plus any active character name, in any case (lower-cased
    * downstream for the lookup). Mentions matching one of these get a
    * "you got tagged" highlight using the theme's `system` slot. Optional
-   * — when omitted no self-detection runs and every mention renders in
+   *, when omitted no self-detection runs and every mention renders in
    * the default keep-action style.
    */
   selfNames?: ReadonlyArray<string>;
@@ -47,7 +47,7 @@ interface Props {
   replyMode?: "flat" | "nested";
   /** `characterId` lets the handler emit `@cid:` tokens for the
    *  resulting whisper / profile fetch so a same-named character on
-   *  another account can't intercept the click. Optional — callers
+   *  another account can't intercept the click. Optional, callers
    *  without an id (mention clicks) still work via the name-only path. */
   onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
   onNameClick: (userId: string, displayName: string, characterId?: string | null) => void;
@@ -58,7 +58,7 @@ interface Props {
   /** Click on the timestamp - pre-fill the composer with /reply <msgid>. Only enabled for chat kinds (say/me/ooc). */
   onTimeClick: (msgId: string) => void;
   /**
-   * Click on a reply's quote preview — jumps the chat to the parent
+   * Click on a reply's quote preview, jumps the chat to the parent
    * message (the one being replied to) and flashes it. Same flow used
    * by bookmarks; the App wires this to `jumpToMessage(currentRoomId,
    * id)`. When omitted, the quote stays as plain non-clickable text.
@@ -76,7 +76,7 @@ interface Props {
   roomId?: string | null;
   /**
    * Thread categories for the current room. Only consumed when
-   * `replyMode === "nested"` and the list is non-empty — in that case
+   * `replyMode === "nested"` and the list is non-empty, in that case
    * the forum renderer groups topics under collapsible category
    * sections. Replies stay nested under their parent regardless.
    */
@@ -98,7 +98,7 @@ interface Props {
    * on each topic card. The modal renders the same topic + replies
    * (read live from the parent's message buffer) with its own reply
    * composer; this prop just tells App.tsx which topic to focus.
-   * Independent of `activeTopicId` — popping out doesn't disturb the
+   * Independent of `activeTopicId`, popping out doesn't disturb the
    * inline-expanded state in the list view.
    */
   onPopoutTopic?: (id: string) => void;
@@ -111,7 +111,7 @@ interface Props {
   canModerate?: boolean;
   /**
    * Viewer can pin topics (admin only). Stricter than `canModerate`
-   * — mods can lock and delete but not pin, since stickies are
+   *, mods can lock and delete but not pin, since stickies are
    * persistent room-furniture. When true, the per-topic toolbar
    * surfaces a Pin/Unpin button. Defaults to false.
    */
@@ -129,7 +129,7 @@ interface Props {
    * present, each post in a forum room shows a "Quote" pill in its
    * toolbar; clicking it emits the pre-formatted blockquote text
    * (with attribution) so the parent can populate the appropriate
-   * composer — main composer for the inline list view, modal
+   * composer, main composer for the inline list view, modal
    * composer for the focused thread modal.
    */
   onQuotePost?: (quoteText: string) => void;
@@ -149,13 +149,18 @@ interface Props {
     hasMore: boolean;
     loading: boolean;
     pending: ChatMessage[];
+    currentPage: number;
+    totalPages: number;
+    totalCount: number;
+    perPage: number;
   }>;
-  /** Fetch the next page for a category. Called by the per-section "Load older" button. */
-  onLoadOlderTopics?: (categoryKey: string) => void;
+  /** Navigate the given category's bucket to the target page. Called
+   *  by the per-section pagination strip (Prev / 1 2 … N / Next). */
+  onGoToForumPage?: (categoryKey: string, page: number) => void;
   /** Flush queued topics (those behind the "X new topics" pill) into the visible list. */
   onFlushPendingTopics?: (categoryKey: string) => void;
   /**
-   * Fired when the user clicks a category section header — signals that
+   * Fired when the user clicks a category section header, signals that
    * the next "+ New topic" should pre-select this category. `null` for
    * the Uncategorized bucket. Acts in addition to (not instead of) the
    * section's collapse toggle.
@@ -163,7 +168,7 @@ interface Props {
   onActivateCategory?: (categoryId: string | null) => void;
   /**
    * Fired when the user clicks the per-section "+ New Topic" button.
-   * Distinct from `onActivateCategory` — this is the explicit "open the
+   * Distinct from `onActivateCategory`, this is the explicit "open the
    * composer in topic-create mode, target this category" path that also
    * cancels any active reply state in the parent. `null` = Uncategorized.
    */
@@ -202,8 +207,8 @@ const NO_SELF_NAMES: ReadonlyArray<string> = [];
 // previous shape) would override the profile preference and leave
 // accessibility users stuck at whatever the renderer baked in.
 //
-// The whole ladder was shifted up — step 0 is now what step 2 used to
-// be, step 1 what step 3 used to be — because the old smallest steps
+// The whole ladder was shifted up, step 0 is now what step 2 used to
+// be, step 1 what step 3 used to be, because the old smallest steps
 // (0.8em / 1em) read as cramped on the modern chat surface and almost
 // no one was selecting them. Keep MessageList.FONT_EM and
 // [RoomsTree.tsx](./RoomsTree.tsx)'s RAIL_FONT_EM in lockstep so the
@@ -219,7 +224,59 @@ function fmtTime(ms: number): string {
   return `${hh}:${mm}:${ss}`;
 }
 
-export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canAdminEdit = false, onQuotePost, forumBuckets, onLoadOlderTopics, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory }: Props) {
+/**
+ * Date-aware timestamp for forum surfaces (topic cards + the post
+ * timestamp on each ForumPostBody). Forum posts are persistent,
+ * a "09:21:48" with no date is meaningless once the topic is more
+ * than a few hours old, which is why the old `fmtTime` rendering
+ * read as wrong on the forum even though it was fine for live chat.
+ *
+ * Tier ladder, picked for "fits in a chip-sized footprint, reads
+ * like a human wrote it":
+ *   - < 60s:        "just now"
+ *   - < 60m:        "12m ago"
+ *   - < 24h:        "5h ago"
+ *   - < 7d:         "Mon at 9:21 PM"   (weekday + locale time)
+ *   - same year:    "Jun 4, 9:21 PM"
+ *   - older:        "Jun 4, 2025"      (year on its own, older posts
+ *                                       care about the year, not the
+ *                                       minute)
+ *
+ * Locale-aware via `toLocaleString`, month abbreviations + 12-/24-h
+ * preference follow the viewer's browser locale, so en-US sees
+ * "9:21 PM" and en-GB sees "21:21". The chat-line `fmtTime` stays
+ * HH:MM:SS because tight time-of-day precision is useful in an
+ * active conversation where context tells you what day it is.
+ */
+function fmtForumTime(ms: number): string {
+  const d = new Date(ms);
+  const now = Date.now();
+  const delta = now - ms;
+  if (delta < 60_000) return "just now";
+  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
+  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
+  if (delta < 7 * 86_400_000) {
+    const day = d.toLocaleDateString(undefined, { weekday: "short" });
+    const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    return `${day} at ${time}`;
+  }
+  const sameYear = d.getFullYear() === new Date(now).getFullYear();
+  if (sameYear) {
+    const md = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    return `${md}, ${time}`;
+  }
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+/** Always-explicit "wall clock" timestamp for hover tooltips, so
+ *  any tier of the date-aware label above can be cross-checked
+ *  against an unambiguous full date/time. */
+function fmtFullTimestamp(ms: number): string {
+  return new Date(ms).toLocaleString();
+}
+
+export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canAdminEdit = false, onQuotePost, forumBuckets, onGoToForumPage, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   /**
    * Scroll-bookkeeping for flat-mode auto-scroll-vs-preserve. We
@@ -262,12 +319,12 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       lastId: messages[messages.length - 1]?.id ?? null,
     };
   });
-  // ALSO capture geometry on every live scroll event — without this,
+  // ALSO capture geometry on every live scroll event, without this,
   // a user who scrolls UP without triggering a re-render leaves
   // `scrollState.top` at the stale post-render position (e.g.
   // pinned-to-bottom). When the scroll-to-load-older fetch then
   // prepends and re-renders, the layout effect computes
-  // `el.scrollTop = prev.top + delta` against the STALE prev.top —
+  // `el.scrollTop = prev.top + delta` against the STALE prev.top,
   // landing the user past the new scrollHeight, which clamps to the
   // bottom. That's the "scrolls back to the bottom every time more
   // history loads" symptom. Live-event capture keeps prev.top
@@ -289,7 +346,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   }, []);
 
   // Apply scroll adjustment for the new buffer. useLayoutEffect (not
-  // useEffect) so the position fix happens BEFORE the browser paints —
+  // useEffect) so the position fix happens BEFORE the browser paints,
   // an effect-based fix would let the user see the layout jump for one
   // frame on every prepend.
   useLayoutEffect(() => {
@@ -314,7 +371,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     }
     if (lastChanged) {
       // Append (or full replacement). End-pin only when the user was
-      // already near the bottom — otherwise they're reading older
+      // already near the bottom, otherwise they're reading older
       // history and we shouldn't yank them away.
       const NEAR_BOTTOM_PX = 120;
       const wasNearBottom = prev.height - prev.top - el.clientHeight < NEAR_BOTTOM_PX;
@@ -340,7 +397,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       `[data-message-id="${CSS.escape(highlightMessageId)}"]`,
     );
     if (!node) {
-      // Target not in the loaded buffer — caller is responsible for
+      // Target not in the loaded buffer, caller is responsible for
       // swapping the buffer first; we just clear the flag and let them
       // retry on the next render.
       onHighlightDone?.();
@@ -361,7 +418,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   // Whisper attention flash. Pulses any inbound whisper (`toUserId ===
   // selfUserId`) the first time it appears in the buffer for this
   // session. Ref-tracked Set ensures we never flash the same message
-  // twice — a buffer swap (jump-to-message, history reload, room
+  // twice, a buffer swap (jump-to-message, history reload, room
   // re-join) re-renders the same id and would otherwise re-flash. We
   // also seed the Set on first sight with anything older than the
   // freshness window so backlog whispers loaded on join don't all
@@ -383,7 +440,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       if (flashedWhispersRef.current.has(m.id)) continue;
       // Mark every whisper-to-me we encounter (fresh or backlog) so
       // future renders never reconsider it. Skip the visual flash
-      // when it's outside the freshness window — that's backlog
+      // when it's outside the freshness window, that's backlog
       // (loaded via message:bulk after a room join), not a live
       // arrival worth flagging.
       flashedWhispersRef.current.add(m.id);
@@ -409,9 +466,9 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   // someone who's left renders without italics, which is fine (italics is
   // decorative, not load-bearing identification).
   const adminUserIds = new Set<string>();
-  // Earning — equipped name style + cosmetic state keyed by the FULL
+  // Earning, equipped name style + cosmetic state keyed by the FULL
   // identity tuple (userId, characterId). Each row in `occupants`
-  // represents ONE identity — a user has one occupant row for OOC/
+  // represents ONE identity, a user has one occupant row for OOC/
   // master and one per character they're currently voicing. Keying
   // these maps by userId alone collapsed the rows down to "last
   // wins", which is why a master's equipped Embers bled onto every
@@ -422,7 +479,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   //
   // Falls back to plain rendering for backlog from identities that
   // have left the room (matches the gender / admin-italics
-  // fallbacks above — styling is decorative, not load-bearing).
+  // fallbacks above, styling is decorative, not load-bearing).
   function identityKey(userId: string, characterId: string | null | undefined): string {
     return `${userId}::${characterId ?? ""}`;
   }
@@ -443,7 +500,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     // regardless of which character they're voicing), so this stays
     // keyed by userId. Call sites that consume this set also need to
     // gate on the per-message `characterId === null` check to avoid
-    // italicizing a staff user's CHARACTER voices — that would leak
+    // italicizing a staff user's CHARACTER voices, that would leak
     // the OOC ↔ character link the per-identity partition is meant
     // to keep private. See `isSenderAdmin` usage below.
     if (isAdminRole(o.accountRole)) adminUserIds.add(o.userId);
@@ -459,7 +516,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       inlineAvatarEnabled: o.inlineAvatarEnabled,
     });
     // ALSO write the master/OOC identity (`identityKey(userId, null)`)
-    // for this user — even when the occupant row represents a
+    // for this user, even when the occupant row represents a
     // character, the wire carries the user's master slot fields too.
     // This is what lets past OOC messages from a user currently
     // voicing a character render with the master's equipped style
@@ -483,12 +540,12 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     // Keep a fallback by userId only for the gender map so the
     // existing default-keyed lookups elsewhere still resolve to
     // something sane for chat lines that authored before the
-    // occupant joined — first-write-wins via the if-guard, so a
+    // occupant joined, first-write-wins via the if-guard, so a
     // character row doesn't clobber the OOC fallback.
     if (!genderByUser.has(o.userId)) genderByUser.set(o.userId, o.gender);
   }
   // Fall back to an empty list when the caller doesn't supply selfNames
-  // (e.g. pre-auth or older callers) — every mention then renders in the
+  // (e.g. pre-auth or older callers), every mention then renders in the
   // default keep-action style.
   const effectiveSelfNames: ReadonlyArray<string> = selfNames ?? NO_SELF_NAMES;
 
@@ -499,7 +556,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     // tuple. Messages carry both userId and characterId snapshotted
     // at send time (characterId is null when the user posted OOC).
     // A miss here means the identity isn't in the current occupant
-    // list — falls through to plain rendering, same as gender.
+    // list, falls through to plain rendering, same as gender.
     const idKey = identityKey(m.userId, m.characterId);
     return (
       <Line
@@ -509,7 +566,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         senderCosmetics={cosmeticsByIdentity.get(idKey) ?? null}
         // Staff italic only when speaking AS the master (characterId
         // === null). Italicizing a character voice would leak the
-        // OOC ↔ character link — same partition rule applied to the
+        // OOC ↔ character link, same partition rule applied to the
         // RoomsTree staff crown.
         isSenderAdmin={m.characterId === null && adminUserIds.has(m.userId)}
         isRecipientAdmin={!!m.toUserId && adminUserIds.has(m.toUserId)}
@@ -541,14 +598,14 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   //
   // Defense-in-depth filters on REPLIES (the topic stream is already
   // filtered server-side):
-  //   1. Drop `kind: "system"` — belt-and-suspenders alongside the
+  //   1. Drop `kind: "system"`, belt-and-suspenders alongside the
   //      server-side suppression for forum rooms.
   //   2. Drop replies whose parent topic is in the deleted set
   //      (a topic can be soft-deleted while its reply rows are still
   //      in the chat buffer; we shouldn't render those replies under
   //      any topic since the topic itself is hidden).
   if (replyMode === "nested") {
-    // Build a set of deleted-topic ids from the chat backlog too —
+    // Build a set of deleted-topic ids from the chat backlog too,
     // the topics endpoint excludes deletes, but the chat buffer may
     // still carry the deleted topic row from when it was first sent.
     const deletedTopicIds = new Set(
@@ -571,7 +628,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         activeTopicId={activeTopicId ?? null}
         onSetActiveTopic={onSetActiveTopic ?? (() => {})}
         onPopoutTopic={onPopoutTopic ?? (() => {})}
-        onLoadOlderTopics={onLoadOlderTopics ?? (() => {})}
+        onGoToForumPage={onGoToForumPage ?? (() => {})}
         onFlushPendingTopics={onFlushPendingTopics ?? (() => {})}
         onActivateCategory={onActivateCategory ?? (() => {})}
         onStartTopicInCategory={onStartTopicInCategory ?? (() => {})}
@@ -680,7 +737,7 @@ function FlatMessageView({
 
   // Auto-fill the viewport: if the current message buffer doesn't
   // overflow the scroll container (a fresh room with fewer visible
-  // messages than the screen can hold — common on mobile after
+  // messages than the screen can hold, common on mobile after
   // server-side ignore/whisper filtering trims the post-50-row
   // backlog), the user CAN'T scroll, so the scrollTop-based trigger
   // above never fires. Auto-load older pages here until either the
@@ -747,14 +804,14 @@ function FlatMessageView({
         </div>
       ) : messages.length > 0 ? (
         <div className="mb-1 flex items-center justify-center text-[10px] uppercase tracking-widest text-keep-muted/60">
-          — start of history —
+          start of history
         </div>
       ) : null}
       {messages.map((m) => (
         // Each message rides through a viewport-aware gate that
         // unmounts the line's heavy DOM (embeds, sprite images,
         // bordered avatars, name-style decorations) when scrolled
-        // far away — Discord-style. The gate's outer div holds a
+        // far away, Discord-style. The gate's outer div holds a
         // measured-height placeholder while unmounted so scroll
         // position never jumps.
         <MessageVisibilityGate key={m.id}>{lineFor(m)}</MessageVisibilityGate>
@@ -778,13 +835,13 @@ export function topicHeading(m: ChatMessage): string {
 
 /**
  * Forum-mode renderer. Top-level messages with a title (or any chat-
- * kind top-level row in a forum room — we treat title-less legacy rows
+ * kind top-level row in a forum room, we treat title-less legacy rows
  * as untitled topics) render as forum cards grouped by category.
  * Clicking a card's header sets it as the active topic, which expands
  * to show the body + reply chain underneath. The active topic gets a
  * visual highlight so the user always knows which thread they're
  * reading. Replies to other topics stay tucked inside their (collapsed)
- * parent — you only see one expanded topic at a time.
+ * parent, you only see one expanded topic at a time.
  *
  * Collapse state for the *category sections* persists per `(roomId,
  * categoryId)` in localStorage; topic expanded-state is driven by
@@ -795,10 +852,132 @@ interface ForumBucket {
   hasMore: boolean;
   loading: boolean;
   pending: ChatMessage[];
+  currentPage: number;
+  totalPages: number;
+  totalCount: number;
+  perPage: number;
+}
+
+/**
+ * Numbered pagination strip for a forum category. Reads like:
+ *
+ *   ‹ Prev   1  2  3  …  17   Next ›       Page 3 of 17 · 340 topics
+ *
+ * For small totals every page button shows; once totalPages crosses
+ * the visible-window threshold we collapse the middle stretch with
+ * `…` markers. The page-list builder below picks a 1-2-…-(cur-1)-cur-
+ * (cur+1)-…-N shape that always anchors the first and last page.
+ *
+ * Disabling rules:
+ *   - Prev is disabled on page 1.
+ *   - Next is disabled on the last page.
+ *   - The currently-active page button is non-interactive.
+ *   - All controls disable when the bucket is mid-fetch so a quick
+ *     double-click can't race two requests.
+ */
+function ForumPaginationStrip({
+  sectionKey,
+  currentPage,
+  totalPages,
+  totalCount,
+  isLoading,
+  onGoToPage,
+}: {
+  sectionKey: string;
+  currentPage: number;
+  totalPages: number;
+  totalCount: number;
+  isLoading: boolean;
+  onGoToPage: (page: number) => void;
+}) {
+  const pageList = buildForumPageList(currentPage, totalPages);
+  return (
+    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-keep-rule/30 pt-2">
+      <nav
+        aria-label={`Page navigation for ${sectionKey === "_uncat" ? "Uncategorized" : "category"}`}
+        className="flex flex-wrap items-center gap-1"
+      >
+        <button
+          type="button"
+          onClick={() => onGoToPage(currentPage - 1)}
+          disabled={isLoading || currentPage <= 1}
+          className="rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner hover:text-keep-text disabled:cursor-not-allowed disabled:opacity-40"
+          title="Previous page"
+        >
+          ‹ Prev
+        </button>
+        {pageList.map((entry, i) =>
+          entry === "ellipsis" ? (
+            <span
+              key={`ellipsis-${i}`}
+              aria-hidden
+              className="px-1 text-[11px] text-keep-muted"
+            >
+              …
+            </span>
+          ) : (
+            <button
+              key={entry}
+              type="button"
+              onClick={() => onGoToPage(entry)}
+              disabled={isLoading || entry === currentPage}
+              aria-current={entry === currentPage ? "page" : undefined}
+              className={
+                entry === currentPage
+                  ? "rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-keep-action"
+                  : "rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 text-[11px] tabular-nums text-keep-muted hover:bg-keep-banner hover:text-keep-text disabled:cursor-not-allowed disabled:opacity-50"
+              }
+              title={`Go to page ${entry}`}
+            >
+              {entry}
+            </button>
+          ),
+        )}
+        <button
+          type="button"
+          onClick={() => onGoToPage(currentPage + 1)}
+          disabled={isLoading || currentPage >= totalPages}
+          className="rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner hover:text-keep-text disabled:cursor-not-allowed disabled:opacity-40"
+          title="Next page"
+        >
+          Next ›
+        </button>
+      </nav>
+      <span className="text-[10px] uppercase tracking-widest text-keep-muted tabular-nums">
+        Page {currentPage} of {totalPages} · {totalCount.toLocaleString()} {totalCount === 1 ? "topic" : "topics"}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Returns the visible page-button list. Always anchors page 1 and
+ * `totalPages`; shows two neighbors of `currentPage` in the middle;
+ * collapses everything in between with `"ellipsis"` markers. With
+ * `totalPages` of 7 or fewer every page is listed without collapse.
+ *
+ * Examples (current = 5, totalPages varies):
+ *   totalPages = 5:  [1, 2, 3, 4, 5]
+ *   totalPages = 7:  [1, 2, 3, 4, 5, 6, 7]
+ *   totalPages = 17: [1, "ellipsis", 4, 5, 6, "ellipsis", 17]
+ *   totalPages = 17, current = 2: [1, 2, 3, 4, "ellipsis", 17]
+ */
+function buildForumPageList(currentPage: number, totalPages: number): Array<number | "ellipsis"> {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+  const out: Array<number | "ellipsis"> = [1];
+  const left = Math.max(2, currentPage - 1);
+  const right = Math.min(totalPages - 1, currentPage + 1);
+  if (left > 2) out.push("ellipsis");
+  for (let p = left; p <= right; p++) out.push(p);
+  if (right < totalPages - 1) out.push("ellipsis");
+  out.push(totalPages);
+  return out;
 }
 
 function ForumView({
-  // `scrollRef` is intentionally NOT named `ref` — React treats `ref` as
+  // `scrollRef` is intentionally NOT named `ref`, React treats `ref` as
   // a special prop on function components and won't forward it. Renaming
   // dodges the "ref is not a prop" warning without needing forwardRef.
   scrollRef,
@@ -810,7 +989,7 @@ function ForumView({
   activeTopicId,
   onSetActiveTopic,
   onPopoutTopic,
-  onLoadOlderTopics,
+  onGoToForumPage,
   onFlushPendingTopics,
   onActivateCategory,
   onStartTopicInCategory,
@@ -842,19 +1021,22 @@ function ForumView({
   onSetActiveTopic: (id: string | null) => void;
   /** Open the given topic in the focused-view modal. The modal carries its own reply composer; this is independent of `activeTopicId`. */
   onPopoutTopic: (id: string) => void;
-  /** Fire when the user clicks "Load older topics" in a category section. */
-  onLoadOlderTopics: (categoryKey: string) => void;
+  /** Navigate the given category's pagination to the target page.
+   *  Replaces the old "Load older topics" cursor flow, the
+   *  pagination strip rendered under each category section calls
+   *  this for Prev / Next and for each numbered page button. */
+  onGoToForumPage: (categoryKey: string, page: number) => void;
   /** Flush pending → visible (user clicked the "X new topics" pill). */
   onFlushPendingTopics: (categoryKey: string) => void;
-  /** Fire when the user clicks a category section header — the parent should remember this as the target for the next "+ New topic". `null` = Uncategorized bucket. */
+  /** Fire when the user clicks a category section header, the parent should remember this as the target for the next "+ New topic". `null` = Uncategorized bucket. */
   onActivateCategory: (categoryId: string | null) => void;
-  /** Fire when the user clicks the per-section "+ New Topic" button — parent cancels reply mode + opens topic-create form targeted at this category. */
+  /** Fire when the user clicks the per-section "+ New Topic" button, parent cancels reply mode + opens topic-create form targeted at this category. */
   onStartTopicInCategory: (categoryId: string | null) => void;
-  /** Viewer is a moderator (role mod or admin) — exposes Lock/Unlock + cross-author Delete in PostToolbar. */
+  /** Viewer is a moderator (role mod or admin), exposes Lock/Unlock + cross-author Delete in PostToolbar. */
   canModerate: boolean;
-  /** Viewer is an admin — exposes Pin/Unpin on topics. */
+  /** Viewer is an admin, exposes Pin/Unpin on topics. */
   canPin: boolean;
-  /** Viewer is an admin — exposes cross-author Edit in PostToolbar. */
+  /** Viewer is an admin, exposes cross-author Edit in PostToolbar. */
   canAdminEdit: boolean;
   /** Pre-fill the right composer with a markdown blockquote of the post. Optional. */
   onQuotePost?: (quoteText: string) => void;
@@ -938,17 +1120,17 @@ function ForumView({
     <div
       ref={scrollRef as React.RefObject<HTMLDivElement>}
       // No horizontal padding on mobile so topic cards reach the viewport
-      // edges — every pixel of side gutter is one or two characters of
+      // edges, every pixel of side gutter is one or two characters of
       // reading width that otherwise gets eaten by chrome. lg+ restores
       // the gutter since desktop has plenty of horizontal room and the
       // visual breathing room reads as intentional, not cramped. The
-      // breakpoint is `lg` to match the rest of the chat shell — the
+      // breakpoint is `lg` to match the rest of the chat shell, the
       // rail stays in drawer mode until `lg` so the chat needs the
       // full viewport gutter-free at every `< lg` width.
       className="keep-chat-feed min-h-0 flex-1 overflow-y-auto py-2 leading-relaxed lg:px-4"
       style={{ fontSize: FONT_EM[fontStep] }}
       // Flatten any selection copied out of the chat feed to plain
-      // text — no avatar markup, no name-style CSS, no bold /
+      // text, no avatar markup, no name-style CSS, no bold /
       // italic / link decoration. See lib/chatCopy.ts for the
       // rationale; covers chat AND forum rendering since this scroll
       // container hosts both.
@@ -960,7 +1142,12 @@ function ForumView({
         const pendingCount = bucket?.pending.length ?? 0;
         const isCollapsed = s.label !== null && collapsed.has(s.key);
         const isLoading = bucket?.loading ?? false;
-        const hasMore = bucket?.hasMore ?? false;
+        // Pagination metadata. Falls back to a single-page assumption
+        // when the bucket hasn't loaded yet so the strip stays hidden
+        // until the first fetch returns real totals.
+        const currentPage = bucket?.currentPage ?? 1;
+        const totalPages = bucket?.totalPages ?? 1;
+        const totalCount = bucket?.totalCount ?? items.length;
         return (
           <section key={s.key} className="mb-3">
             {s.label !== null ? (
@@ -983,7 +1170,7 @@ function ForumView({
                   onActivateCategory(s.key === "_uncat" ? null : s.key);
                 }}
                 onKeyDown={(e) => {
-                  // Only respond when the row itself has focus — let
+                  // Only respond when the row itself has focus, let
                   // Enter/Space on a nested button fire its own handler.
                   if (e.target !== e.currentTarget) return;
                   if (e.key === "Enter" || e.key === " ") {
@@ -993,12 +1180,12 @@ function ForumView({
                   }
                 }}
                 // Sticky behavior is `lg+` only. Anything below a real
-                // desktop (1024px) — phones, landscape phones, tablets,
-                // small-window responsive testing — gets normal block
+                // desktop (1024px), phones, landscape phones, tablets,
+                // small-window responsive testing, gets normal block
                 // flow. On narrow viewports the sticky header was
                 // overlapping the topics below it as the user scrolled,
                 // both eating vertical space (already scarce on a 360×
-                // 800ish viewport) and reading as a bug — the user
+                // 800ish viewport) and reading as a bug, the user
                 // perceived it as the section "hovering" over threads.
                 // In block flow, each section's header sits naturally
                 // above its topics; the count badge + uppercase styling
@@ -1017,7 +1204,7 @@ function ForumView({
                 // On mobile / mid-width the root is edge-to-edge, so the
                 // header is already full-bleed at plain `w-full`. Pinning
                 // the breakpoint to lg keeps the negative-margin trick in
-                // lockstep with the gutter it's compensating for — earlier
+                // lockstep with the gutter it's compensating for, earlier
                 // the two diverged (md vs lg) and headers overflowed the
                 // chat container at 768–1023px widths.
                 className="keep-section-header mb-2 flex w-full cursor-pointer items-baseline justify-between gap-3 border-y border-keep-rule px-4 py-2 text-left text-[1.1rem] font-semibold uppercase tracking-widest text-keep-text shadow-sm hover:brightness-95 lg:-mx-4 lg:w-[calc(100%+2rem)] lg:sticky lg:top-0 lg:z-30"
@@ -1029,18 +1216,18 @@ function ForumView({
                     button on the right off the edge. */}
                 <span className="flex min-w-0 items-baseline">
                   <span aria-hidden className="mr-2 inline-block w-3 shrink-0 text-keep-muted">{isCollapsed ? "▶" : "▼"}</span>
-                  {/* `min-w-0` on the truncate target itself — without
+                  {/* `min-w-0` on the truncate target itself, without
                       it, Tailwind's `.truncate` (which sets overflow:
                       hidden) can't shrink below the text's intrinsic
                       width because the default flex min-width is auto. */}
                   <span className="min-w-0 truncate">{s.label}</span>
                 </span>
                 <span className="flex shrink-0 items-baseline gap-3">
-                  <span className="text-xs tabular-nums text-keep-muted">{items.length}{hasMore ? "+" : ""}</span>
+                  <span className="text-xs tabular-nums text-keep-muted">{totalCount}</span>
                   <button
                     type="button"
                     onClick={(e) => {
-                      // Don't propagate to the row — clicking this button
+                      // Don't propagate to the row, clicking this button
                       // should *only* open the composer for a new topic,
                       // not toggle the section's collapse state.
                       e.stopPropagation();
@@ -1056,7 +1243,7 @@ function ForumView({
             ) : null}
             {isCollapsed ? null : (
               <div className="flex flex-col gap-1.5">
-                {/* "X new topics" pill — visible only when at least one
+                {/* "X new topics" pill, visible only when at least one
                     topic from another user arrived since the last
                     flush. Click prepends them into `items`. */}
                 {pendingCount > 0 ? (
@@ -1095,7 +1282,7 @@ function ForumView({
                       {...(onQuotePost ? { onQuotePost } : {})}
                       {...(onJumpToReply ? { onJumpToReply } : {})}
                       // Reply pill activates the topic unconditionally (the
-                      // toggle semantic would deactivate when already active —
+                      // toggle semantic would deactivate when already active,
                       // wrong for "I'm about to reply to this").
                       onActivateForReply={(id) => onSetActiveTopic(id)}
                       genderByUser={genderByUser}
@@ -1112,20 +1299,22 @@ function ForumView({
                   ))
                 )}
 
-                {/* "Load older topics" — only when the server signaled
-                    `hasMore: true` on the most recent page fetch. The
-                    button stays disabled while a fetch is in flight to
-                    prevent double-firing. */}
-                {hasMore ? (
-                  <button
-                    type="button"
-                    onClick={() => onLoadOlderTopics(s.key)}
-                    disabled={isLoading}
-                    className="self-center rounded border border-keep-rule/60 bg-keep-bg/60 px-3 py-1 text-[11px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner hover:text-keep-text disabled:cursor-not-allowed disabled:opacity-50"
-                    title="Load 20 more topics"
-                  >
-                    {isLoading ? "Loading…" : "Load older topics"}
-                  </button>
+                {/* Per-category pagination strip, Prev / page numbers /
+                    Next. Only renders when there's more than one page
+                    of non-stickies. Stickies don't count against the
+                    pagination (the server keeps them on page 1 only
+                    and excludes them from the count), so a category
+                    with 3 stickies and 5 regular topics on a 20-per-
+                    page setting still shows as one page total. */}
+                {totalPages > 1 ? (
+                  <ForumPaginationStrip
+                    sectionKey={s.key}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalCount={totalCount}
+                    isLoading={isLoading}
+                    onGoToPage={(p) => onGoToForumPage(s.key, p)}
+                  />
                 ) : null}
               </div>
             )}
@@ -1139,12 +1328,12 @@ function ForumView({
 /**
  * One forum topic. The header is always visible (avatar + author +
  * title + timestamp + reply count). Clicking it makes this the
- * active topic — body + reply chain expand, the card gets an accent
+ * active topic, body + reply chain expand, the card gets an accent
  * border, and the composer up top switches to "reply to this topic"
  * mode. Replies render as compact forum-post cards.
  *
  * NESTED_VISIBLE_REPLIES caps very long chains at the most-recent N
- * with a "View earlier replies" toggle, same as before — for short
+ * with a "View earlier replies" toggle, same as before, for short
  * threads (the overwhelming common case) the toggle never renders.
  */
 function TopicCard({
@@ -1176,11 +1365,11 @@ function TopicCard({
   onToggle: () => void;
   /** Open this topic in the focused-view modal. Always available; rendered as a small icon to the left of the expand chevron. */
   onPopout: () => void;
-  /** Viewer is a moderator — passed through to PostToolbar so cross-author Delete + Lock/Unlock buttons appear. */
+  /** Viewer is a moderator, passed through to PostToolbar so cross-author Delete + Lock/Unlock buttons appear. */
   canModerate: boolean;
-  /** Viewer is an admin — Pin/Unpin button appears in the topic-post toolbar. */
+  /** Viewer is an admin, Pin/Unpin button appears in the topic-post toolbar. */
   canPin: boolean;
-  /** Viewer is an admin — Edit button appears on other users' posts. */
+  /** Viewer is an admin, Edit button appears on other users' posts. */
   canAdminEdit: boolean;
   /** Optional Quote-button callback. When present, ForumPostBody shows a Quote pill. */
   onQuotePost?: (quoteText: string) => void;
@@ -1189,8 +1378,8 @@ function TopicCard({
   /**
    * Activate the given topic id as the composer's reply target. The Reply
    * pill on each ForumPostBody calls this with the topic's id (replies
-   * always attach to the parent topic — replies-to-replies aren't a
-   * thing server-side). Always activates, never deactivates — distinct
+   * always attach to the parent topic, replies-to-replies aren't a
+   * thing server-side). Always activates, never deactivates, distinct
    * from `onToggle`, which toggles the topic open/closed.
    */
   onActivateForReply: (topicId: string) => void;
@@ -1219,7 +1408,7 @@ function TopicCard({
     <article
       data-message-id={topic.id}
       // The `.keep-frame` theme styles bake in a per-style border-radius
-      // (medieval 2px, modern 10px, scifi 0). On md+ we let that ride —
+      // (medieval 2px, modern 10px, scifi 0). On md+ we let that ride,
       // there's a gutter and the rounded chrome reads as deliberate.
       // On mobile the card runs edge-to-edge: a non-zero radius carves a
       // transparent notch in the corner that visually reads as a gutter
@@ -1235,7 +1424,7 @@ function TopicCard({
           nest real <button> elements for the avatar/author/pop-out
           without invalid HTML; click + keyboard handlers on the div
           drive the expand toggle. The chevron column at the right is
-          NOT a click target itself — clicking anywhere on the row
+          NOT a click target itself, clicking anywhere on the row
           toggles. The pop-out icon next to the chevron IS a real
           button that stops propagation so it doesn't also toggle. */}
       <div
@@ -1245,7 +1434,7 @@ function TopicCard({
           // Inner buttons (avatar / author / popout) already stop
           // propagation on their own clicks. This guard catches the
           // rare case where a click bubbles up from a non-stopping
-          // child (e.g. text spans) — toggle only when the click
+          // child (e.g. text spans), toggle only when the click
           // originated outside of an interactive descendant.
           if ((e.target as HTMLElement).closest("button") !== null) return;
           onToggle();
@@ -1275,14 +1464,14 @@ function TopicCard({
           }}
         />
         <div className="min-w-0 flex-1">
-          {/* min-w-0 on the inner flex too — without it, the `truncate`
+          {/* min-w-0 on the inner flex too, without it, the `truncate`
               on the title span doesn't actually shrink, because
               min-width:auto on flex children defeats overflow:hidden. */}
           <div className="flex min-w-0 items-baseline gap-2">
             {topic.isSticky ? (
               <span
                 aria-label="Pinned"
-                title="Pinned by an admin — stays at the top of this category."
+                title="Pinned by an admin, stays at the top of this category."
                 className="shrink-0 text-keep-action"
               >
                 📌
@@ -1291,7 +1480,7 @@ function TopicCard({
             {topic.lockedAt ? (
               <span
                 aria-label="Locked"
-                title="This topic is locked — no new replies."
+                title="This topic is locked, no new replies."
                 className="shrink-0 text-keep-muted"
               >
                 🔒
@@ -1303,8 +1492,11 @@ function TopicCard({
             >
               {parseInline(headingText)}
             </span>
-            <span className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted tabular-nums">
-              {fmtTime(topic.createdAt)}
+            <span
+              className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted tabular-nums"
+              title={fmtFullTimestamp(topic.createdAt)}
+            >
+              {fmtForumTime(topic.createdAt)}
             </span>
           </div>
           <div className="flex items-baseline gap-2 text-[11px] text-keep-muted">
@@ -1319,7 +1511,7 @@ function TopicCard({
                 "rounded font-semibold text-keep-action hover:underline " +
                 // Staff-italic only when the topic was authored OOC.
                 // A character voice doesn't get italicized even if
-                // the owner is staff — same partition rule as the
+                // the owner is staff, same partition rule as the
                 // chat-line `isSenderAdmin` above.
                 (topic.characterId === null && adminUserIds.has(topic.userId) ? "italic" : "")
               }
@@ -1438,7 +1630,7 @@ export function ForumAvatar({
    *  forum topic/reply call sites so the same border the user
    *  picked in the Earning dashboard frames their forum posts. */
   userId?: string | null;
-  /** Direct border override — wins over `userId` lookup. */
+  /** Direct border override, wins over `userId` lookup. */
   borderRankKey?: string | null;
 }) {
   const occupantBorderRankKey = useChat((s) => {
@@ -1465,10 +1657,10 @@ export function ForumAvatar({
     }
     return null;
   });
-  // Fall back to live occupant avatar when the message snapshot
-  // didn't carry one (older messages, system rows, etc.). Lets a
-  // user who set their avatar AFTER posting still see the new
-  // portrait on their existing forum posts without a backfill.
+  // Live-first lookup. The author's currently-set avatar URL +
+  // crop come from the occupant cache when they're online in any
+  // room the viewer can see. The message snapshot is the
+  // fallback for authors who have since logged out.
   const occupantAvatarUrl = useChat((s) => {
     if (!userId) return null;
     for (const list of Object.values(s.occupants)) {
@@ -1477,9 +1669,11 @@ export function ForumAvatar({
     }
     return null;
   });
-  // Crop has no message snapshot — pull from the live occupant cache
-  // alongside the avatar URL so forum posts honor the same zoom/pan
-  // the author picked in their profile editor.
+  // Crop has no message snapshot column, only the occupant cache
+  // carries it. Paired with `occupantAvatarUrl` below so we never
+  // frame a snapshot URL with a live crop (which produced the
+  // "old avatar, new zoom" mismatch reported on forum posts after
+  // an author re-cropped their portrait).
   const occupantAvatarCrop = useChat((s) => {
     if (!userId) return null;
     for (const list of Object.values(s.occupants)) {
@@ -1489,7 +1683,18 @@ export function ForumAvatar({
     return null;
   });
   const effectiveBorder = borderRankKey ?? occupantBorderRankKey;
-  const effectiveSrc = src ?? occupantAvatarUrl;
+  // Live URL wins over the snapshot. This is the inverse of the
+  // earlier `src ?? occupantAvatarUrl` order, which preferred the
+  // historical snapshot, but the snapshot URL has no companion
+  // snapshot crop, so the page-rendered crop (always live) had
+  // nothing to match the URL it was framing. Flipping to live-first
+  // restores the URL ↔ crop pairing; the snapshot URL still kicks
+  // in when the author isn't around anywhere (offline backlog).
+  const effectiveSrc = occupantAvatarUrl ?? src;
+  // Use the live crop ONLY when the live URL was chosen. When we
+  // fall back to the message-snapshot URL we have no matching crop
+  // and render with the default centered cover (avatarCrop null).
+  const effectiveCrop = occupantAvatarUrl ? occupantAvatarCrop : null;
   const mappedSize: BorderedAvatarSize =
     size <= 22 ? "sm" : size <= 28 ? "md" : size <= 48 ? "lg" : "xl";
   return (
@@ -1499,7 +1704,7 @@ export function ForumAvatar({
       borderRankKey={effectiveBorder ?? null}
       freeformBorderKey={occupantFreeformBorderKey}
       freeformConfig={occupantFreeformBorderConfig}
-      avatarCrop={occupantAvatarCrop}
+      avatarCrop={effectiveCrop}
       size={mappedSize}
       {...(onClick ? { onClick } : {})}
       title={`View ${name}'s profile`}
@@ -1511,7 +1716,7 @@ export function ForumAvatar({
 const BOOKMARKABLE_KINDS = new Set(["say", "me", "ooc", "whisper", "npc", "roll"]);
 
 /**
- * Body of a forum post — avatar (small), author header (optional), the
+ * Body of a forum post, avatar (small), author header (optional), the
  * message body with mentions/markdown/links parsed, and an inline action
  * toolbar (Edit / Delete / Bookmark / Report) underneath. Used both for
  * the topic's first post and for each reply underneath. Topic cards pass
@@ -1519,7 +1724,7 @@ const BOOKMARKABLE_KINDS = new Set(["say", "me", "ooc", "whisper", "npc", "roll"
  * author info; replies pass true so the reader sees who wrote each one.
  *
  * Edit/delete in forum rooms is **not** gated by the 60-second grace
- * window — the server lifts the cap for nested-mode rooms, and the
+ * window, the server lifts the cap for nested-mode rooms, and the
  * toolbar exposes the controls indefinitely to the author. Transparency
  * comes from the `(edited)` badge + server-preserved soft-delete bodies
  * (admins can recover the original content for moderation review).
@@ -1562,7 +1767,7 @@ export function ForumPostBody({
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
-  /** Click the small `↪ <author>` chip in the post header to jump to the parent message. Optional — chip stays non-clickable when omitted. */
+  /** Click the small `↪ <author>` chip in the post header to jump to the parent message. Optional, chip stays non-clickable when omitted. */
   onJumpToReply?: (messageId: string) => void;
   showAuthorHeader: boolean;
   /** Viewer identities for self-mention highlighting inside this post's body. Optional. */
@@ -1570,7 +1775,7 @@ export function ForumPostBody({
 }) {
   // Forum posts use the block-level body renderer so blockquotes
   // (`> quoted text` line prefix) render as styled <blockquote>
-  // elements — needed by the Quote-reply flow. Flat-chat lines still
+  // elements, needed by the Quote-reply flow. Flat-chat lines still
   // use the inline parser (see the `Line` component further down).
   const knownMentions = useMentionsCache((s) => {
     void s.version;
@@ -1588,7 +1793,7 @@ export function ForumPostBody({
   // readable when the current palette flips between light and dark.
   const themeBg = useActiveTheme().bg;
   const authorColor = resolveMessageColor(msg.color, themeBg);
-  // Earning — equipped name style for this post's author, looked up
+  // Earning, equipped name style for this post's author, looked up
   // in the current room's occupant cache. The match keys on the
   // full identity tuple (userId + characterId) so a forum post
   // authored as a specific character doesn't bleed onto the OOC
@@ -1596,7 +1801,7 @@ export function ForumPostBody({
   // occupant list. Backlog from authors no longer present renders
   // unstyled; matches the chat-line policy.
   // Split into two scalar selectors instead of returning `{ key, config }`
-  // — zustand's default Object.is comparator treats a freshly-constructed
+  //, zustand's default Object.is comparator treats a freshly-constructed
   // object as "changed" on every render, which triggers an infinite
   // re-render loop (React #185) when the user has an active name style.
   // Two scalar selectors are individually comparable (string === string,
@@ -1620,7 +1825,7 @@ export function ForumPostBody({
   // attributed to a new reaction without remounting the post.
   const viewerActiveCharacterIdForForum = useChat((s) => s.activeCharacterId);
 
-  // Inline editor state — when editing, the body region is replaced
+  // Inline editor state, when editing, the body region is replaced
   // with a textarea + Save/Cancel. Hoisted here (not in PostToolbar) so
   // the toolbar's Edit button can swap the post's main content.
   const [editing, setEditing] = useState(false);
@@ -1629,7 +1834,7 @@ export function ForumPostBody({
   const [editBusy, setEditBusy] = useState(false);
 
   if (msg.deletedAt) {
-    // Mirror the chat-line variant's author + actor surfacing — see
+    // Mirror the chat-line variant's author + actor surfacing, see
     // that branch (around line 2361) for the rationale on the three
     // possible actor states.
     const isSelfDelete = !!msg.deletedByUserId && msg.deletedByUserId === msg.userId;
@@ -1653,7 +1858,7 @@ export function ForumPostBody({
             >
               admin audit
               <span className="ml-1 normal-case tracking-normal">
-                — {msg.displayName}
+               , {msg.displayName}
                 {actorBlurb ? ` · ${actorBlurb}` : ""}
               </span>
               :
@@ -1735,7 +1940,7 @@ export function ForumPostBody({
             <RankSigil rankKey={msg.rankKey ?? null} tier={msg.tier ?? null} size="md" variant="gem" />
             {/* Author name button. Suppressed for /me posts because the
                 action body below renders as "DisplayName <body>" in the
-                action color — repeating the name in the header would
+                action color, repeating the name in the header would
                 read as "Kaal\nKaal raises his sword". Profile access
                 stays available via the avatar tile on the left. */}
             {msg.kind === "me" ? null : (
@@ -1746,7 +1951,7 @@ export function ForumPostBody({
                   "rounded font-semibold text-keep-text hover:text-keep-action " +
                   (isSenderAdmin ? "italic" : "")
                 }
-                // Author color only applies when no style is active —
+                // Author color only applies when no style is active,
                 // a style's CSS typically owns the color directly.
                 style={authorColor && !authorStyle ? { color: authorColor } : undefined}
               >
@@ -1762,9 +1967,9 @@ export function ForumPostBody({
               type="button"
               onClick={() => onTimeClick(msg.id)}
               className="rounded text-keep-muted tabular-nums hover:text-keep-action hover:underline"
-              title="Reply to this post"
+              title={`Reply to this post, posted ${fmtFullTimestamp(msg.createdAt)}`}
             >
-              {fmtTime(msg.createdAt)}
+              {fmtForumTime(msg.createdAt)}
             </button>
             {msg.replyToDisplayName ? (
               onJumpToReply && msg.replyToId ? (
@@ -1825,7 +2030,7 @@ export function ForumPostBody({
           // the action color, mirroring the chat-line /me treatment
           // (see the `case "me"` branch in [renderChatLine](./MessageList.tsx)).
           // The header's name button is suppressed above so the name
-          // appears exactly once, integrated into the action sentence —
+          // appears exactly once, integrated into the action sentence,
           // `/me raises his sword` → "Kaal raises his sword" rather
           // than a name header followed by an awkward bare verb body.
           // StyledName preserves any equipped name-style glamour
@@ -1851,12 +2056,12 @@ export function ForumPostBody({
             {editedBadge}
           </div>
         )}
-        {/* Reaction CHIPS — same `chat_message` target kind as flat
+        {/* Reaction CHIPS, same `chat_message` target kind as flat
             chat (forum posts ARE chat messages: say / me / ooc).
             Chips sit ABOVE the action toolbar (just under the message
             body) so reactions read as content rather than chrome.
             The "+ react" trigger is mounted INSIDE the action toolbar
-            below via `extraActions` — keeps the toolbar row as a
+            below via `extraActions`, keeps the toolbar row as a
             single tidy bar of post actions instead of stranding the
             add button on its own row beneath the message. */}
         {REPLYABLE_KINDS.has(msg.kind) && !msg.deletedAt ? (
@@ -1884,7 +2089,7 @@ export function ForumPostBody({
             isAdminEdit={!isOwn && showAdminEdit}
             // Delete is shown to the author (within the normal rules)
             // OR to any moderator. The server re-validates the actual
-            // permission — this is just the UI affordance.
+            // permission, this is just the UI affordance.
             showDelete={showOwnControls || (canModerate && REPLYABLE_KINDS.has(msg.kind))}
             showBookmark={showBookmark}
             // Reporting your own post is meaningless; reporting as a
@@ -1916,18 +2121,18 @@ export function ForumPostBody({
  * Inline action toolbar for forum posts. Sits beneath the post body and
  * carries Edit / Lock / Delete / Bookmark / Report pills. Buttons
  * render only when the relevant action is available for the viewer:
- *   - Edit       — author only (forum rooms lift the 60s grace cap).
- *   - Delete     — author OR moderator. Mod cross-author deletes are
+ *   - Edit      , author only (forum rooms lift the 60s grace cap).
+ *   - Delete    , author OR moderator. Mod cross-author deletes are
  *                  the moderation lever for offensive replies.
- *   - Lock       — only on top-level topics; author OR moderator.
+ *   - Lock      , only on top-level topics; author OR moderator.
  *                  Locked topics show as 🔓 → unlock; the server-side
  *                  PATCH /messages/:id/lock toggles the state.
- *   - Bookmark   — anyone on bookmarkable kinds.
- *   - Report     — non-authors on reportable kinds in public rooms,
+ *   - Bookmark  , anyone on bookmarkable kinds.
+ *   - Report    , non-authors on reportable kinds in public rooms,
  *                  hidden for moderators (they can act directly).
  *
  * Edit triggers `onEdit` so the parent (ForumPostBody) can swap the
- * body region for an inline editor — keeping the editor scoped to the
+ * body region for an inline editor, keeping the editor scoped to the
  * post being edited instead of floating in a corner. Delete + Lock are
  * self-contained here: confirm, fire the appropriate REST call, and
  * the server's `message:update` broadcast flips the row state so the
@@ -1966,7 +2171,7 @@ function PostToolbar({
    * rendered to the LEFT of the Quote pill. Clicking it makes the
    * post's parent topic active in the composer so the user can type a
    * reply immediately. Distinct from Quote (which also pre-fills the
-   * composer with a blockquote of the post) — Reply is the bare
+   * composer with a blockquote of the post), Reply is the bare
    * "start replying to this thread" affordance.
    */
   onReply?: () => void;
@@ -1991,10 +2196,10 @@ function PostToolbar({
   const showPin = isTopic && canPin;
   const isSticky = !!msg.isSticky;
   // Quote is offered on any post the parent provides a handler for.
-  // Replying to your own post via Quote is fine — sometimes users
+  // Replying to your own post via Quote is fine, sometimes users
   // quote themselves to keep a long thread organized.
   const showQuote = !!onQuotePost;
-  // Reply pill ditto — only renders when the parent wires up a
+  // Reply pill ditto, only renders when the parent wires up a
   // handler, so contexts that don't make sense (e.g. inside the focused
   // thread modal where the composer is already targeted at this topic)
   // can simply not pass `onReply` and the button hides itself.
@@ -2172,7 +2377,7 @@ function PostToolbar({
 
 /**
  * `/scene <title> [| <url>]` banner. Bare scenes render exactly as the
- * old inline JSX did — just a tinted strip with the theatre mask and
+ * old inline JSX did, just a tinted strip with the theatre mask and
  * the rendered title. Scenes that snapshot an image URL render the
  * title at a larger text size with the image centered below, rounded
  * corners, capped at 20rem tall so a portrait poster doesn't blow out
@@ -2181,7 +2386,7 @@ function PostToolbar({
  * viewer who's scrolled back through a long scene can tap once to
  * reclaim vertical space without losing the chapter marker.
  *
- * State is local-only — the toggle is per-viewer and per-mount, not
+ * State is local-only, the toggle is per-viewer and per-mount, not
  * shared across tabs or persisted across reloads. That matches user
  * intent: "collapse" is a personal "I've already looked at the
  * image" gesture, not a director decision.
@@ -2200,7 +2405,7 @@ function SceneBanner({
       // Click the banner to collapse/expand when there's an image.
       // Without an image the click handler is omitted so the banner
       // stays a non-interactive timeline marker (matches the
-      // pre-image behavior — no "click me" cursor, no pointer
+      // pre-image behavior, no "click me" cursor, no pointer
       // affordance changes on hover).
       {...(hasImage
         ? {
@@ -2222,7 +2427,7 @@ function SceneBanner({
       }`}
     >
       {/* Title at chat-text-plus-two so the scene marker reads more
-          like a chapter heading than a regular line. Larger only —
+          like a chapter heading than a regular line. Larger only,
           color, italic, and the theatre-mask glyph come from the
           banner wrapper. */}
       <div className="whitespace-pre-wrap text-base leading-tight sm:text-lg">
@@ -2407,14 +2612,14 @@ function InlineBookmark({ msg }: { msg: ChatMessage }) {
 }
 
 /* =============================================================
- *  AnnounceHtmlBody — wraps the scheduled-announce `bodyHtml`
+ *  AnnounceHtmlBody, wraps the scheduled-announce `bodyHtml`
  *  render so the dynamic UI-route chip hydrator (e.g. for the
  *  {scriptorium:latest:story} chip) can post-process the painted
  *  HTML. Without this wrapper the render loop for messages has
  *  no place to host a per-message `useEffect`, since the loop
  *  body isn't itself a component.
  *
- *  The wrapper re-runs hydration whenever the HTML changes — an
+ *  The wrapper re-runs hydration whenever the HTML changes, an
  *  admin editing a scheduled announce + the server re-pushing it
  *  flips `html` and the dynamic chip resolves against the new
  *  body. The shared cache + in-flight coalescing in `latestStory`
@@ -2479,7 +2684,7 @@ function InlineReport({ msg }: { msg: ChatMessage }) {
       type="button"
       onClick={file}
       disabled={busy || done}
-      title={done ? "Reported — admins will review." : "Report this post to admins"}
+      title={done ? "Reported, admins will review." : "Report this post to admins"}
       className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 hover:bg-keep-accent/10 hover:text-keep-accent disabled:opacity-50"
     >
       {done ? "✓ Reported" : "🚩 Report"}
@@ -2507,10 +2712,10 @@ function renderParts(
    * which batch-resolves unknown names against `/mentions/resolve`
    * and populates this set asynchronously. Mentions not in this
    * set (and not in `selfNames`) render as plain `@text` rather
-   * than as a styled chip — typos and dangling `@bobs` don't
+   * than as a styled chip, typos and dangling `@bobs` don't
    * dress up as broken-looking links.
    *
-   * When `null` or omitted, every mention is styled — kept as
+   * When `null` or omitted, every mention is styled, kept as
    * the fallback for surfaces that don't subscribe to the cache.
    */
   knownNames?: ReadonlySet<string> | null,
@@ -2540,7 +2745,7 @@ function renderParts(
     } else {
       const isSelf = selfSet.has(p.name);
       // If the caller supplied a known-names set and this name isn't
-      // in it (and isn't a self identity), fall back to plain text —
+      // in it (and isn't a self identity), fall back to plain text,
       // matches the rule: only valid users get the chip treatment;
       // typos and dangling @bobs stay as literal text.
       const isKnown = isSelf || (knownNames ? knownNames.has(p.name) : true);
@@ -2591,7 +2796,7 @@ function Line({
   gender: Gender;
   /** Equipped name style for the sender, from the live occupant cache. Null when nothing equipped or sender has left the room. */
   nameStyle: { key: string; config: Record<string, unknown> | null } | null;
-  /** Cosmetic state for the sender (avatar + border + inline-avatar toggle). Null = sender no longer in room — inline avatar suppressed for backlog. */
+  /** Cosmetic state for the sender (avatar + border + inline-avatar toggle). Null = sender no longer in room, inline avatar suppressed for backlog. */
   senderCosmetics: {
     avatarUrl: string | null;
     avatarCrop: AvatarCrop | null;
@@ -2605,9 +2810,9 @@ function Line({
   /** True iff the viewer is the addressed recipient on a whisper. Combined with `isOwn` to decide whether the viewer is a *party* to this whisper, which drives the resting-tint highlight. */
   isRecipient: boolean;
   canReport: boolean;
-  /** Viewer is mod/admin/masteradmin — surfaces a cross-author Delete button on others' lines (no grace window). */
+  /** Viewer is mod/admin/masteradmin, surfaces a cross-author Delete button on others' lines (no grace window). */
   canModerate: boolean;
-  /** Viewer is admin/masteradmin — surfaces a cross-author Edit button on others' lines. Stricter than canModerate. */
+  /** Viewer is admin/masteradmin, surfaces a cross-author Edit button on others' lines. Stricter than canModerate. */
   canAdminEdit: boolean;
   /** Unbound - Line binds with the relevant userId/displayName for sender vs recipient. */
   onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
@@ -2649,7 +2854,7 @@ function Line({
       {timeText}
     </span>
   );
-  // Inline avatar — round portrait between the timestamp and the
+  // Inline avatar, round portrait between the timestamp and the
   // styled name. The author's "should this show?" + border picks
   // come from the LIVE occupant row when the sender is still in
   // the room; otherwise from the per-message snapshot the server
@@ -2664,10 +2869,10 @@ function Line({
   // schema column for it on `messages`); we only have the LIVE
   // occupant cache to consult. For senders who've logged out, the
   // freeform border falls away on backlog while the rank border
-  // still renders from the message snapshot — matches the existing
+  // still renders from the message snapshot, matches the existing
   // graceful-degradation pattern for name-style configs.
   const inlineFreeformBorderKey = senderCosmetics?.selectedFreeformBorderKey ?? null;
-  // Crop has no per-message snapshot column — pull from the live
+  // Crop has no per-message snapshot column, pull from the live
   // occupant cache when available, fall through to BorderedAvatar's
   // null-handling (defaults to centered cover) for backlog from
   // senders who've left the room.
@@ -2699,14 +2904,14 @@ function Line({
   const isReply = !!(msg.replyToId && msg.replyToDisplayName);
   // Quote preview reads at the chat body size (`text-sm`), not the
   // smaller meta size. Previously this rendered at `text-xs` which was
-  // unreadable next to the actual chat lines — users were squinting at
+  // unreadable next to the actual chat lines, users were squinting at
   // the reference they were responding to. `leading-tight` keeps the
   // single-line preview compact at the larger size; `truncate` still
   // caps the run so a long parent body stays one line.
   //
   // When `onJumpToReply` is provided AND the parent's id is known,
   // wrap the preview in a button so a click jumps to the original
-  // message — same flow as bookmarks. The visual stays mostly
+  // message, same flow as bookmarks. The visual stays mostly
   // unchanged (hover adds a subtle accent so the affordance is
   // discoverable) so the quote doesn't suddenly read as a chip.
   const quoteInner = isReply ? (
@@ -2720,7 +2925,7 @@ function Line({
           `[&_a]:pointer-events-none` + neutralized link styling
           stops the inner `<a>` from intercepting the parent button's
           jump-to-reply click (and from rendering as a competing
-          interactive affordance — the quote IS the affordance). */}
+          interactive affordance, the quote IS the affordance). */}
       <span className="truncate italic [&_a]:pointer-events-none [&_a]:text-current [&_a]:no-underline">
         {parseInline(msg.replyToBodySnippet ?? "")}
       </span>
@@ -2751,7 +2956,7 @@ function Line({
       color={msg.color}
       italic={isSenderAdmin}
       mood={msg.moodSnapshot ?? null}
-      // Snapshot from the message row itself — rank at send time
+      // Snapshot from the message row itself, rank at send time
       // never gets rewritten by a later rank-up. Matches the
       // display-name / color / mood snapshot pattern.
       rankKey={msg.rankKey ?? null}
@@ -2762,7 +2967,7 @@ function Line({
       // everything else in the message stream.
       rankSigilSize="md"
       rankIconVariant="gem"
-      // Name style — live lookup from the current room's occupant
+      // Name style, live lookup from the current room's occupant
       // cache (no snapshot on the message row). Backlog from a
       // sender who has left the room renders unstyled, which is
       // intentional: stale styling on offline-author messages is
@@ -2784,7 +2989,7 @@ function Line({
   // the timeline doesn't shift when an in-grace delete fires.
   if (msg.deletedAt) {
     // Compute the actor blurb for the admin audit. Three cases:
-    //   * Self-delete (deletedByUserId === userId): "self-deleted" — the
+    //   * Self-delete (deletedByUserId === userId): "self-deleted", the
     //     author hit delete within the grace window.
     //   * Mod/admin action (different deletedByUserId): "deleted by Y".
     //   * Pre-migration delete (no deletedByUserId snapshot): omit the
@@ -2821,7 +3026,7 @@ function Line({
                   actor came in with migration 0084 and falls back
                   cleanly for older rows. */}
               <span className="ml-1 normal-case tracking-normal">
-                — {msg.displayName}
+               , {msg.displayName}
                 {actorBlurb ? ` · ${actorBlurb}` : ""}
               </span>
               :
@@ -2860,7 +3065,7 @@ function Line({
   // Sticker promotion: if the whole body is a single emoticon token,
   // we render it at 84px (Messenger / Discord / Telegram lone-emoji
   // size) below in the "say" kind switch. Hook-call must live at the
-  // component top level (not inside the switch) — Rules of Hooks.
+  // component top level (not inside the switch), Rules of Hooks.
   // Resolved here once for ALL kinds so the lookup obeys hook order
   // even when this message renders as `me`/`ooc`/`whisper` etc. and
   // doesn't end up taking the sticker path.
@@ -2874,7 +3079,7 @@ function Line({
 
   // Edit/delete controls only apply to the author's own chat-shaped
   // lines and only inside the admin-configured grace window. The
-  // server re-validates both rules — this is just the affordance
+  // server re-validates both rules, this is just the affordance
   // hint, and reading the window from the store means an admin tweak
   // takes effect on the next render without a reload.
   const editGraceMs = useChat((s) => s.branding.editGraceMs);
@@ -2886,7 +3091,7 @@ function Line({
   const showOwnControls = isOwn && ageMs < editGraceMs && REPLYABLE_KINDS.has(msg.kind);
   // Moderation affordances. Mods get Delete (hide a post); admins
   // additionally get Edit (rewrite the body). Both bypass the grace
-  // window — that's the whole point of the moderation lever, and the
+  // window, that's the whole point of the moderation lever, and the
   // server (apps/server/src/routes/messages.ts) enforces the same
   // bypass when `isAdminRole(role)` / mod is true.
   //
@@ -2895,7 +3100,7 @@ function Line({
   // own message age past the grace window would lose the edit/delete
   // buttons entirely (the in-grace `showOwnControls` would be false
   // AND the old `!isOwn` clause locked them out of ModControls). The
-  // gate is just "not currently showing OwnControls" — within-grace
+  // gate is just "not currently showing OwnControls", within-grace
   // own posts keep the standard OwnControls path so the UI doesn't
   // render both row variants on top of each other.
   const showModDelete = canModerate && !msg.deletedAt && REPLYABLE_KINDS.has(msg.kind) && !showOwnControls;
@@ -2904,7 +3109,7 @@ function Line({
   // Inline edit lives at the ROW level, not inside the controls dock.
   // The dock is `md:absolute md:right-3` on desktop so its children
   // (Bookmark, React, OwnControls, ModControls, Report) stack neatly on
-  // the right — but anything `w-full` inside the dock is "100% of the
+  // the right, but anything `w-full` inside the dock is "100% of the
   // dock's content width," which is a narrow strip. That's exactly
   // what made the edit textarea scrunch up against the right edge.
   // Lifting the form's open/closed state here lets us render it as a
@@ -2922,7 +3127,7 @@ function Line({
     </span>
   ) : null;
 
-  // Reactions — same kind set as replies (say / me / ooc). System +
+  // Reactions, same kind set as replies (say / me / ooc). System +
   // command + whisper kinds skip the bar entirely: whispers are
   // private threads where reactions don't make sense, and system /
   // cmd lines are chrome, not user content. Soft-deleted messages
@@ -2930,7 +3135,7 @@ function Line({
   //
   // `hideAddButton` because the chat feed lifts the "+ react"
   // trigger out of the inline bar and into the floating right-side
-  // controls row (next to Edit) — see `chatReactButton` below.
+  // controls row (next to Edit), see `chatReactButton` below.
   // Mirrors the forum-post pattern at line 1814 where the
   // add-reaction trigger sits in the post action toolbar.
   const reactionBar = REPLYABLE_KINDS.has(msg.kind) ? (
@@ -2952,7 +3157,7 @@ function Line({
   // cohesive set. `md:invisible md:group-hover:visible
   // md:group-focus-within:visible` matches the
   // ReportButton/ModControls/BookmarkButton reveal pattern on
-  // desktop — without it, the React button would sit visible under
+  // desktop, without it, the React button would sit visible under
   // every message and clutter the feed.
   const reactAvailable = REPLYABLE_KINDS.has(msg.kind) && !msg.deletedAt;
   const chatReactButton = reactAvailable ? (
@@ -2976,7 +3181,7 @@ function Line({
       );
       break;
     case "cmd": {
-      // Custom-command output — the template controls placement via
+      // Custom-command output, the template controls placement via
       // `{sender}`, so the renderer does NOT auto-prepend the display
       // name like it does for "me"/"say". The body styles itself with
       // the snapshotted CSS (when the admin set one); fall through to
@@ -3007,7 +3212,7 @@ function Line({
     case "system": {
       // A system line whose `displayName` is the literal "system" is
       // a genuine server-authored notice (joins/parts, /describe,
-      // /scene-end, etc.) — rendered bare. When displayName is
+      // /scene-end, etc.), rendered bare. When displayName is
       // anything else, it's a user-supplied alias the server kept on
       // the row: today that's the `/incognito <alias>` rewrite, where
       // a moderator's outgoing chat lines are stored as kind=system
@@ -3054,7 +3259,7 @@ function Line({
       // bg, same as it does for chat lines.
       const announceColor = bodyColor;
       const announceStyle = announceColor ? { color: announceColor } : undefined;
-      // Scheduled-announce body — sanitize, then run the UI route
+      // Scheduled-announce body, sanitize, then run the UI route
       // chip generator so `{rules}` / `{modal:earning}` shortcuts in
       // the saved HTML render as clickable chips. Delegated click
       // handler picks them up. Manual `/announce <text>` (no
@@ -3100,7 +3305,7 @@ function Line({
               type="button"
               onClick={() => onMentionClick(msg.npcVoicedBy!)}
               className="ml-1 rounded text-[10px] uppercase tracking-wide text-keep-muted hover:text-keep-action hover:underline"
-              title={`voiced by ${msg.npcVoicedBy} — click to view profile`}
+              title={`voiced by ${msg.npcVoicedBy}, click to view profile`}
             >
               (voiced by {msg.npcVoicedBy})
             </button>
@@ -3119,7 +3324,7 @@ function Line({
       // Per-identity recipient pin (migration 0189). When the original
       // whisper was addressed at a CHARACTER (`@cid:` resolution),
       // this carries the character id so the continuation `/whisper`
-      // built from a click here addresses the SAME character — not
+      // built from a click here addresses the SAME character, not
       // the master account. Older rows pre-0189 have no snapshot
       // here; the click falls back to `@id:<userId>` (legacy behavior)
       // which is correct for OOC-addressed whispers anyway.
@@ -3147,7 +3352,7 @@ function Line({
       // even when the sender's rank gem makes the line height taller.
       // (The bare inline render was leaving sender/recipient `align-middle`
       // chips centered on the line height while the body text rode the
-      // text baseline below them — visibly staggered on whispers because
+      // text baseline below them, visibly staggered on whispers because
       // there are TWO name tags plus several text spans, and on narrow
       // viewports the body wraps and lands below the prefix where the
       // misalignment is most obvious.) `break-words` on the body span
@@ -3202,7 +3407,7 @@ function Line({
   // Bookmarking is offered on the content-bearing kinds. System / scene /
   // announce are server-authored noise (joins, kicks, "Scene begins")
   // that don't reward saving for later. Soft-deleted messages can still
-  // be bookmarked in principle but the body is empty — hide there too.
+  // be bookmarked in principle but the body is empty, hide there too.
   const BOOKMARKABLE_KINDS = new Set(["say", "me", "ooc", "whisper", "npc", "roll"]);
   const showBookmark = BOOKMARKABLE_KINDS.has(msg.kind) && !msg.deletedAt;
 
@@ -3218,7 +3423,7 @@ function Line({
   // Persistent tint on whispers the viewer is a party to (sender OR
   // recipient). Pulls the action-color slot at 15% so it picks up the
   // current palette automatically. Skipped for whispers the viewer is
-  // only watching (e.g. an admin reading a channel) — those are
+  // only watching (e.g. an admin reading a channel), those are
   // technically visible in the timeline but they aren't theirs to
   // visually claim, and tinting them as such would falsely imply the
   // viewer is on one end of the conversation. The whisper-flash
@@ -3239,22 +3444,22 @@ function Line({
   //     a right-aligned flex row when the row gains focus-within. To
   //     receive focus from a touch tap we give the outer row
   //     `tabIndex=-1` (focusable via pointer but not keyboard tab order
-  //     — keyboard users get the desktop hover/focus path instead). Tap
+  //    , keyboard users get the desktop hover/focus path instead). Tap
   //     once to surface the controls, tap a different row (or the
   //     composer) to dismiss.
   //
   //   Desktop (md+): the wrapper goes `absolute right-3 top-0 flex
   //     gap-1` and lays its children out right-aligned via flex
-  //     order — bookmark, react, edit/delete, mod, report. Each
+  //     order, bookmark, react, edit/delete, mod, report. Each
   //     button keeps its own `md:invisible md:group-hover:visible
   //     md:group-focus-within:visible` so the hover/focus-reveal
   //     behavior survives per-button (BookmarkButton + ReportButton
   //     + ModControls + chatReactButton all hide until interaction;
   //     OwnControls stays always-visible for the author's own
   //     edit/delete row). Adding a new control means appending it
-  //     to the JSX with the standard visibility modifiers — no
+  //     to the JSX with the standard visibility modifiers, no
   //     pixel-offset bookkeeping.
-  // Mods can act directly — surfacing a Report button next to their own
+  // Mods can act directly, surfacing a Report button next to their own
   // moderation controls would be redundant (and confusing).
   const effectiveShowReport = showReport && !showOwnControls && !showModControls;
   // `reactAvailable` (defined above) counts as a control for the
@@ -3268,11 +3473,11 @@ function Line({
   // making people think the controls didn't exist. When `showOwnControls`
   // is true, the wrapper is always-flex on mobile so edit/delete are
   // visible on the row without an extra interaction. Other people's
-  // messages keep the tap-to-reveal behavior — mod actions stay
+  // messages keep the tap-to-reveal behavior, mod actions stay
   // tap-to-reveal too so a moderator's timeline isn't a wall of buttons.
   //
   // Desktop (md+): the wrapper itself goes `absolute right-3 top-0
-  // flex gap-1` so its children stack right-aligned via flex order —
+  // flex gap-1` so its children stack right-aligned via flex order,
   // bookmark, react, edit/delete, etc. Previously the wrapper used
   // `md:contents` and EACH child set its own `md:absolute md:right-X`
   // offset, which only worked because there were a fixed number of
@@ -3291,7 +3496,7 @@ function Line({
       {/* React lives immediately LEFT of Edit so the author-facing
           and reader-facing actions sit side by side. On other
           people's messages OwnControls is absent and React just
-          floats next to Bookmark — fine, still left of any
+          floats next to Bookmark, fine, still left of any
           ModControls/Report that might follow. */}
       {chatReactButton}
       {/* When the inline edit form is open, the buttons collapse so
@@ -3326,7 +3531,7 @@ function Line({
 
   // `tabIndex=-1` makes the row focusable from a tap without putting it
   // in the keyboard tab order. `outline-none` strips the default focus
-  // ring — the hover background tint already signals "this row is
+  // ring, the hover background tint already signals "this row is
   // active". Skipped when there are no controls to reveal (saves users
   // a phantom focus state with no visible effect).
   //
@@ -3336,7 +3541,7 @@ function Line({
   // call is harmless on desktop (the element either already has
   // focus or is about to receive it from the click event anyway).
   // We also bail out when the tap originated inside a focusable
-  // descendant (button, link, input) — letting that native control's
+  // descendant (button, link, input), letting that native control's
   // own focus win prevents the row from snatching it back and
   // closing things like an open bookmark popover.
   function activateRow(e: React.MouseEvent<HTMLDivElement>) {
@@ -3353,7 +3558,7 @@ function Line({
     // the reply's timestamp + body still align column-for-column with
     // surrounding non-reply messages. `hoverRow` brings `-mx-4 px-4`
     // (edge-to-edge hover); we keep its left padding intact (`pl-4`)
-    // so content starts at the same column as a plain message — the
+    // so content starts at the same column as a plain message, the
     // older `pl-2` value undershot it and pulled the whole reply
     // block ~6px to the left. The quote line gets a small extra
     // indent so it visually sits with the body rather than encroaching
@@ -3483,7 +3688,7 @@ function OwnControls({ msg, onStartEdit }: { msg: ChatMessage; onStartEdit: () =
     // when `showOwnControls` is true, which already means "your own message,
     // still within the admin-configured grace window, chat-style kind."
     // Hiding the edit button behind a hover trigger turned that into a
-    // discoverability black hole — people kept reporting the option was
+    // discoverability black hole, people kept reporting the option was
     // missing because they didn't think to mouse over their own messages
     // to find it.
     //
@@ -3493,7 +3698,7 @@ function OwnControls({ msg, onStartEdit }: { msg: ChatMessage; onStartEdit: () =
     // accent-tinted as the danger-coded option so a fast click can't
     // confuse the two.
     //
-    // Editing state itself lives on the parent Line — clicking Edit
+    // Editing state itself lives on the parent Line, clicking Edit
     // just signals up via `onStartEdit` so the row can render the
     // form full-width as a sibling of the message body. Keeping
     // state out of this component means the absolute-positioned
@@ -3502,7 +3707,7 @@ function OwnControls({ msg, onStartEdit }: { msg: ChatMessage; onStartEdit: () =
     //
     // `md:invisible md:group-hover:visible md:group-focus-within:visible`
     // matches every other action button on the row (Bookmark,
-    // chatReact, ModControls, Report) — on desktop the controls
+    // chatReact, ModControls, Report), on desktop the controls
     // appear only when the message row is hovered or keyboard-
     // focused, so they don't permanently obscure long message
     // bodies that span the full chat width. Mobile keeps the
@@ -3536,7 +3741,7 @@ function OwnControls({ msg, onStartEdit }: { msg: ChatMessage; onStartEdit: () =
  * (out-of-grace) edits. Lives at the message-row level (sibling of
  * `lineEl`) so its `w-full` resolves against the full row instead of
  * the narrow absolute-positioned controls dock. `variant` picks the
- * border / button tint and the aria-label phrasing — author edits are
+ * border / button tint and the aria-label phrasing, author edits are
  * accent-neutral (matches their own controls), admin edits are
  * accent-red to remind the actor they're using a moderation lever.
  */
@@ -3592,7 +3797,7 @@ function InlineEditForm({
   return (
     <form
       onSubmit={submitEdit}
-      // Full row width — that's the entire reason this form lives at
+      // Full row width, that's the entire reason this form lives at
       // the Line level instead of inside the absolute-positioned
       // controls dock. `mt-1` keeps a small breath between the
       // original message body and the editor; `flex-col` stacks the
@@ -3695,12 +3900,12 @@ function ModControls({
     // moderation lever, not a self-edit.
     //
     // Visibility: on desktop these are HOVER-ONLY (`md:invisible
-    // md:group-hover:visible md:group-focus-within:visible`) — admins
+    // md:group-hover:visible md:group-focus-within:visible`), admins
     // see the whole room's worth of these buttons on every row
     // otherwise, which turned the chat into a wall of pills. Same
     // pattern ReportButton / BookmarkButton use for cross-author
     // affordances. Mobile follows the parent wrapper's
-    // `hidden group-focus-within:flex` — tap a row to reveal.
+    // `hidden group-focus-within:flex`, tap a row to reveal.
     //
     // Editing itself lives on the parent Line and renders the form as
     // a row-level sibling (full width), so this component stays focused
@@ -3845,7 +4050,7 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
           // friendly width via min-w. Stops propagation so clicks inside
           // don't dismiss the underlying message row hover state.
           onClick={(e) => e.stopPropagation()}
-          // Same mobile-sheet treatment as InlineBookmark — see that
+          // Same mobile-sheet treatment as InlineBookmark, see that
           // popover for the rationale. Desktop dropdown stays anchored
           // to the trigger's right edge (the flat-chat hover icon
           // lives near the right of the message row, so right-0 is
@@ -3870,7 +4075,7 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
               {(knownCategories ?? []).map((c) => <option key={c} value={c} />)}
             </datalist>
           </label>
-          {/* Existing-categories chip row — same UX as InlineBookmark
+          {/* Existing-categories chip row, same UX as InlineBookmark
               so users see and reuse their categories without typing. */}
           {knownCategories && knownCategories.length > 0 ? (
             <div className="mb-2 flex flex-wrap gap-1">

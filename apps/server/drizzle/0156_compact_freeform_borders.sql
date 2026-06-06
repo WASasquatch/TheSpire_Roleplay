@@ -3,7 +3,7 @@
 -- The borders inherited from complete_avatar_borders.html were sized
 -- for a showcase grid with generous padding around each tile. In the
 -- userlist + chat-line slots they bled into neighbors regardless of
--- masks / clip-paths / variable scaling — the only correct fix is to
+-- masks / clip-paths / variable scaling, the only correct fix is to
 -- rewrite the CSS at the source so the effects are intrinsically
 -- compact.
 --
@@ -11,16 +11,16 @@
 --   - .av frame size = 82px (preamble), .pic = 76px → 3px ring native
 --     → ~5px at xl scale, ~1-2px at inline tiers.
 --   - Pseudo-element rings (`::before`, `::after`) keep `inset` to
---     0 or -2px max — no more -14px halos.
+--     0 or -2px max, no more -14px halos.
 --   - Decorative children (.leaf, .feather, .gem, .ember, .bolt,
 --     .petal, .glyph, .wing, .ray, .qdot, .ref) live ON the frame
 --     edge or inside, not far outside.
 --   - Falling / orbital animations travel ≤25px native (≈40px at
 --     xl) so a Sakura petal or Sylvan leaf doesn't reach a row
 --     below in any tier.
---   - Outer box-shadow glows max 12px native (≈20px at xl) — keeps
+--   - Outer box-shadow glows max 12px native (≈20px at xl), keeps
 --     the bloom present without painting two rows over.
---   - No more `var(--b-spread)` references — every value is a real
+--   - No more `var(--b-spread)` references, every value is a real
 --     intrinsic size; the renderer no longer needs to scale bleed
 --     per tier.
 --

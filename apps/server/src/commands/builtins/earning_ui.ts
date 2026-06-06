@@ -2,13 +2,13 @@ import type { CommandHandler } from "../types.js";
 
 /**
  * Earning-related UI shortcut commands. None of these mutate state on
- * the server — they just emit a `ui:hint` that the client's App.tsx
+ * the server, they just emit a `ui:hint` that the client's App.tsx
  * resolves into opening the Earning dashboard at a specific tab + sub-
  * tab. The commands exist so a user can deep-link to the spot they
  * actually want (shop / collection / pets / overview) instead of
  * opening the dashboard and then clicking through to it.
  *
- * Mirrors the pattern used by `/users`, `/worlds`, `/bookmarks` — all
+ * Mirrors the pattern used by `/users`, `/worlds`, `/bookmarks`, all
  * tiny dispatchers that send a single `ui:hint`. Each command rejects
  * stray arguments so a typo'd `/shop something` surfaces a clear
  * usage hint instead of silently opening the modal and dropping the
@@ -27,7 +27,7 @@ function rejectArgs(ctx: Parameters<NonNullable<CommandHandler["run"]>>[0], usag
 }
 
 /**
- * /earnings — open the Earnings dashboard at the Overview tab. The
+ * /earnings, open the Earnings dashboard at the Overview tab. The
  * dashboard is also reachable from the bottom-right tools panel
  * ("Your Earning"); the command is a keyboard-friendly shortcut.
  */
@@ -43,7 +43,7 @@ export const earningsCommand: CommandHandler = {
 };
 
 /**
- * /shop — open Earnings ▸ Items ▸ Shop in one shot. The shop is the
+ * /shop, open Earnings ▸ Items ▸ Shop in one shot. The shop is the
  * "spend currency on items" surface; the named command is the
  * fastest path to it from anywhere in chat.
  */
@@ -59,7 +59,7 @@ export const shopCommand: CommandHandler = {
 };
 
 /**
- * /collection — open Earnings ▸ Items ▸ Collection. The 10-slot
+ * /collection, open Earnings ▸ Items ▸ Collection. The 10-slot
  * pinned-item showcase that other players see on your profile. Each
  * identity (master + each character) keeps its own collection; the
  * dashboard surfaces the active identity's slots.
@@ -76,7 +76,7 @@ export const collectionCommand: CommandHandler = {
 };
 
 /**
- * /pets — open Earnings ▸ Items ▸ Pets. The 5-slot pinned-pet
+ * /pets, open Earnings ▸ Items ▸ Pets. The 5-slot pinned-pet
  * showcase. Same partitioning rules as the item collection (one set
  * per identity), but only items with category='pet' are pinnable
  * here. The server-side PUT enforces that gate; the command just

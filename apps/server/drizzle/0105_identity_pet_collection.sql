@@ -1,4 +1,4 @@
--- Per-identity Pet Collection — a 5-slot pinned showcase of pet
+-- Per-identity Pet Collection, a 5-slot pinned showcase of pet
 -- items the identity wants to display on their profile.
 --
 -- Twin of identity_collection (0096) with two design differences:
@@ -9,7 +9,7 @@
 --     the items table at write time; non-pet items get rejected
 --     with a 403.
 --
--- Same partitioning as the item collection — every identity (OOC
+-- Same partitioning as the item collection, every identity (OOC
 -- master AND each character) carries its own independent Pet
 -- Collection. A character's profile shows that character's pets;
 -- the OOC profile shows OOC's; they never merge or inherit. Pets

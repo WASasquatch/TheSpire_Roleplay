@@ -1,5 +1,5 @@
 /**
- * Medieval — Parchment
+ * Medieval, Parchment
  *
  * The flagship style. Treats every panel as a sheet of aged vellum bound
  * with ink filigree. Visual vocabulary:
@@ -29,7 +29,7 @@ export const medieval: StyleGenerator = {
   key: "medieval",
   label: "Medieval",
   generate(p: OrnamentPalette): OrnamentSet {
-    // Tiled noise textures were ugly at viewport scale — visible
+    // Tiled noise textures were ugly at viewport scale, visible
     // wallpaper seams + repetition. The style identity now lives in
     // the per-style frame CSS (border treatment, shadows, gradients)
     // and the SVG bg-overlay, neither of which tile. Texture stays
@@ -48,7 +48,7 @@ export const medieval: StyleGenerator = {
 };
 
 /* ============================================================
- * Texture — tiled parchment grain
+ * Texture, tiled parchment grain
  * ============================================================ */
 function makeTexture(p: OrnamentPalette): string {
   const SIZE = 128;
@@ -57,7 +57,7 @@ function makeTexture(p: OrnamentPalette): string {
   if (!cx) return "none";
   cx.imageSmoothingEnabled = false;
 
-  // Base fill is transparent — the texture is meant to overlay on the
+  // Base fill is transparent, the texture is meant to overlay on the
   // panel's actual background color, contributing only grain + age spots.
   // Two ramp steps drive the grain: panel-400 (one shade darker than
   // base) for the dark fibers and panel-200 (one shade lighter) for the
@@ -81,7 +81,7 @@ function makeTexture(p: OrnamentPalette): string {
       const n3 = rng2(x + 191, y + 313) - 0.5;
       const noise = n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
 
-      // Tiny chance per pixel of an age spot. Sparse and irregular —
+      // Tiny chance per pixel of an age spot. Sparse and irregular,
       // the rng2 seed mixing avoids tile-edge alignment.
       const spotChance = rng2(x + 977, y + 1289);
       const isSpot = spotChance > 0.985;
@@ -96,7 +96,7 @@ function makeTexture(p: OrnamentPalette): string {
         data[idx + 2] = ab;
         data[idx + 3] = Math.round(aIntensity * 140);
       } else if (noise > 0.12) {
-        // Dark fiber — boosted alpha so the grain reads even under
+        // Dark fiber, boosted alpha so the grain reads even under
         // the multiply blend mode the CSS layer applies.
         data[idx] = dr;
         data[idx + 1] = dg;
@@ -109,7 +109,7 @@ function makeTexture(p: OrnamentPalette): string {
         data[idx + 2] = lb;
         data[idx + 3] = Math.round(Math.min(1, -noise * 1.8) * 55);
       } else {
-        // Neutral pixel — fully transparent so the panel color shows
+        // Neutral pixel, fully transparent so the panel color shows
         // through unaltered.
         data[idx + 3] = 0;
       }
@@ -120,7 +120,7 @@ function makeTexture(p: OrnamentPalette): string {
 }
 
 /* ============================================================
- * Corner ornament — ink filigree
+ * Corner ornament, ink filigree
  *
  * Drawn natively in the top-left quadrant then transformed onto the
  * other three corners. Designed at 32×32 px, scaled 1×; pixel-art
@@ -133,16 +133,16 @@ function makeCorner(p: OrnamentPalette, corner: "tl" | "tr" | "bl" | "br"): stri
   const ctx = c.getContext("2d");
   if (!ctx) return "none";
   // Capture the non-null context into a `const` so the nested helpers
-  // below close over a definitely-defined value — TS can't propagate the
+  // below close over a definitely-defined value, TS can't propagate the
   // null-guard narrowing through a function boundary otherwise.
   const cx = ctx;
   cx.imageSmoothingEnabled = false;
 
   // Filigree palette:
-  //   dark   — the deepest border step, for the spine of every line
-  //   mid    — one step lighter, for the curl interior
-  //   light  — accent (gilded ink highlights)
-  //   bone   — the lightest text tone, for inner glow dots
+  //   dark  , the deepest border step, for the spine of every line
+  //   mid   , one step lighter, for the curl interior
+  //   light , accent (gilded ink highlights)
+  //   bone  , the lightest text tone, for inner glow dots
   const dark = p.border[4] ?? p.border[3] ?? "#3a2a18";
   const mid = p.border[2] ?? p.muted[2] ?? "#6c5532";
   const light = p.action[2] ?? p.accent[2] ?? "#b88a3c";
@@ -175,7 +175,7 @@ function makeCorner(p: OrnamentPalette, corner: "tl" | "tr" | "bl" | "br"): stri
     plot(1, y, dark);
     plot(2, y, mid);
   }
-  // Inner corner notch — adds depth where the two rules meet
+  // Inner corner notch, adds depth where the two rules meet
   plot(1, 1, dark);
   plot(2, 2, light);
 
@@ -225,7 +225,7 @@ function makeCorner(p: OrnamentPalette, corner: "tl" | "tr" | "bl" | "br"): stri
 }
 
 /* ============================================================
- * Divider — horizontal flourish with center sigil
+ * Divider, horizontal flourish with center sigil
  * ============================================================ */
 function makeDivider(p: OrnamentPalette): string {
   const W = 240;
@@ -301,7 +301,7 @@ function makeDivider(p: OrnamentPalette): string {
       cx.fillRect(px, py, 1, 1);
     }
   }
-  // Accent-color inset cross inside the diamond — reads as a heraldic gem
+  // Accent-color inset cross inside the diamond, reads as a heraldic gem
   cx.fillStyle = accent;
   cx.fillRect(cxp - 1, cyp, 3, 1);
   cx.fillRect(cxp, cyp - 1, 1, 3);
@@ -312,7 +312,7 @@ function makeDivider(p: OrnamentPalette): string {
 }
 
 /* ============================================================
- * Background overlay — warm ambient glow + vignette (SVG)
+ * Background overlay, warm ambient glow + vignette (SVG)
  *
  * SVG so it scales to any viewport without raster blur. The CSS
  * consumer applies it as a fixed full-viewport `background-image` on

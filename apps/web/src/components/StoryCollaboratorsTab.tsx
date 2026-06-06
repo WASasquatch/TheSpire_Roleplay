@@ -21,7 +21,7 @@ interface Props {
  * list. (The owner-only mutate routes 403 anyone else server-side, so
  * the UI is a soft gate.)
  *
- * The role grid mirrors permissionsForCollaboratorRole() — kept in
+ * The role grid mirrors permissionsForCollaboratorRole(), kept in
  * lockstep so the matrix in the UI matches what the server actually
  * enforces.
  */
@@ -86,7 +86,7 @@ export function StoryCollaboratorsTab({ detail }: Props) {
 }
 
 /* =============================================================
- *  Role matrix — quick reference for the author and reader.
+ *  Role matrix, quick reference for the author and reader.
  * ============================================================= */
 
 function RoleMatrix() {

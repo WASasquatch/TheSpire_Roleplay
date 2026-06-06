@@ -6,7 +6,7 @@ import type { Config } from "tailwindcss";
  * modal showing the OWNER's theme).
  *
  * Each `--keep-*` variable is a *space-separated RGB triple* (e.g. "226 214 184")
- * — NOT a hex value — because that's the format Tailwind needs for the
+ *, NOT a hex value, because that's the format Tailwind needs for the
  * opacity modifier to compose. With this setup `bg-keep-panel/30` resolves to
  * `rgb(226 214 184 / 0.3)`. The hex→RGB conversion happens in lib/theme.ts.
  *
@@ -16,7 +16,7 @@ import type { Config } from "tailwindcss";
 const c = (name: string) => `rgb(var(--keep-${name}) / <alpha-value>)`;
 
 /**
- * Ramp helper — emits the 5-step lightness ramp Tailwind tokens for a
+ * Ramp helper, emits the 5-step lightness ramp Tailwind tokens for a
  * slot. e.g. `ramp("panel")` returns `{ 100: ..., 200: ..., 300: ...,
  * 400: ..., 500: ..., DEFAULT: ... }` so callers can use both
  * `bg-keep-panel` (the user-picked value, == 300) AND
@@ -53,7 +53,7 @@ export default {
         // titles, rank chips, and other "set me apart from body
         // copy" surfaces. We funnel it through the user's font-pref
         // CSS variable first so a user-selected font (Roboto, Lora,
-        // Atkinson Hyperlegible, etc.) propagates here too — the
+        // Atkinson Hyperlegible, etc.) propagates here too, the
         // Georgia/Cambria stack remains as the fallback when no
         // preference is set. Inline `style="font-family: …"` and
         // any more-specific CSS rule still override per the normal
@@ -65,7 +65,7 @@ export default {
       },
       colors: {
         keep: {
-          // canonical names — each is a ramp so `bg-keep-panel` (the
+          // canonical names, each is a ramp so `bg-keep-panel` (the
           // user-picked tone) AND `bg-keep-panel-200` (lighter highlight)
           // / `bg-keep-panel-400` (darker shadow rim) both compose.
           bg: ramp("bg"),
@@ -77,7 +77,7 @@ export default {
           accent: ramp("accent"),
           system: ramp("system"),
 
-          // legacy aliases — same canonical vars, just different spelling.
+          // legacy aliases, same canonical vars, just different spelling.
           // Kept ramp-aware so existing call sites still benefit from
           // the new tiers (e.g. `bg-keep-banner-200`).
           parchment: ramp("bg"),

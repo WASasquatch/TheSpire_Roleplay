@@ -1,7 +1,7 @@
--- Site URL — optional canonical URL the banner logo links to.
+-- Site URL, optional canonical URL the banner logo links to.
 --
 -- When set, the banner renders the site name / logo image inside an
--- anchor pointing at this URL (no link styling — the wrapping is
+-- anchor pointing at this URL (no link styling, the wrapping is
 -- transparent so the logo still reads as a logo, not a chip). Empty
 -- string / NULL = no wrapping; logo renders as a non-interactive
 -- element.

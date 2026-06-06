@@ -14,7 +14,7 @@ export interface Identity {
 /**
  * Build a drizzle WHERE condition that matches a (userIdCol,
  * characterIdCol) pair against a given identity. We have to special-
- * case NULL characterId because SQL `col = NULL` is always false —
+ * case NULL characterId because SQL `col = NULL` is always false,
  * drizzle's `eq()` doesn't fold to `IS NULL` automatically, so the
  * master-side comparison needs `isNull(col)` instead.
  */
@@ -34,7 +34,7 @@ export function eqIdentity(
  * Read `?characterId=<id>` off an HTTP request and normalize. Empty
  * string and missing both resolve to null (master OOC identity).
  * Caller is responsible for validating the character belongs to the
- * authenticated user — typically by also checking that `me.id` owns
+ * authenticated user, typically by also checking that `me.id` owns
  * the character row, since otherwise a user could spoof another
  * player's character id and read their inbox.
  */
@@ -48,7 +48,7 @@ export function characterIdFromQuery(raw: unknown): string | null {
  * Verify the caller actually owns the character they claim to be acting
  * as. Returns true when ok, false when the character doesn't exist /
  * is soft-deleted / belongs to a different user. Callers should treat
- * a false here as a 403 (don't 401 — the user IS authenticated; they
+ * a false here as a 403 (don't 401, the user IS authenticated; they
  * just can't act as someone else's character).
  */
 export async function ownsCharacter(

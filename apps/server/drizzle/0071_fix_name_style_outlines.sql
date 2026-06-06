@@ -1,16 +1,16 @@
--- Fix name-style CSS — proper outlines + visible animations.
+-- Fix name-style CSS, proper outlines + visible animations.
 --
 -- Migration 0070 attempted layered text using an 8-direction
 -- text-shadow stack at 1px offsets for the outline. That technique
 -- WAS WRONG: each shadow is a sharp copy of the glyph offset by 1px,
 -- and 8 of them at small offsets REINFORCE inside the glyph
--- interior, producing a solid black mass — not the thin outline
+-- interior, producing a solid black mass, not the thin outline
 -- intended. The background-clip:text gradient was technically being
 -- painted on top, but the dense text-shadow stack overwhelmed it
 -- and every gradient render came out as a black blob.
 --
 -- This migration replaces the text-shadow outline with
--- `-webkit-text-stroke` + `paint-order: stroke fill` — the
+-- `-webkit-text-stroke` + `paint-order: stroke fill`, the
 -- platform-correct way to outline text. The stroke paints first
 -- (behind), then the fill (gradient mask) paints on top, so the
 -- gradient is fully visible inside the glyph and the stroke shows
@@ -20,7 +20,7 @@
 --   * Pulse: stronger glow with higher base + peak blur radius
 --     and tighter alpha so the breathing is actually visible.
 --   * Aurora Pan: drops to a SOLID-coloring approach with a
---     gradient that fully cycles its position — combined with a
+--     gradient that fully cycles its position, combined with a
 --     hue rotate filter so the color motion is unmistakable even
 --     with the outline on top.
 --

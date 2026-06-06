@@ -8,7 +8,7 @@
  *                      their original relative paths so a round-trip
  *                      restores the URLs verbatim
  *
- * Import is UPSERT BY KEY — the admin's pre-import rows are preserved unless
+ * Import is UPSERT BY KEY, the admin's pre-import rows are preserved unless
  * the import file explicitly carries a row with the same primary key (in
  * which case the import wins). Rows NOT in the file are left alone, so a
  * partial import can't accidentally nuke a built-in catalog. Want a true
@@ -17,7 +17,7 @@
  * Image extraction: server-side we walk the imported assets/ entries and
  * write them into `uploads/<relative-path>` under the server's uploads root
  * (the same directory `/uploads/*` is served from). Existing files are
- * overwritten by hash — exports already produce content-addressed names for
+ * overwritten by hash, exports already produce content-addressed names for
  * uploaded images, so this is the desired behavior.
  */
 
@@ -41,12 +41,12 @@ interface ExportManifest {
   kind: EarningCatalogKind;
   version: number;
   exportedAt: number;
-  /** Row count at export time. Diagnostic only — import re-counts. */
+  /** Row count at export time. Diagnostic only, import re-counts. */
   rowCount: number;
 }
 
 interface ExportResult {
-  /** Raw zip bytes — caller is responsible for streaming/encoding. */
+  /** Raw zip bytes, caller is responsible for streaming/encoding. */
   zip: Buffer;
   /** Suggested filename, e.g. `name-styles-export-20260527.zip`. */
   filename: string;
@@ -84,7 +84,7 @@ export async function exportCatalog(
     const rows = await db.select().from(nameStyles).orderBy(asc(nameStyles.order));
     zip.file("rows.json", JSON.stringify(rows.map(stripTimestamps), null, 2));
     rowCount = rows.length;
-    // Name styles are HTML+CSS only — no image refs.
+    // Name styles are HTML+CSS only, no image refs.
   } else if (kind === "items") {
     const rows = await db.select().from(items).orderBy(asc(items.order));
     for (const r of rows) collectUploadPath(r.iconUrl, referencedUploads);
@@ -108,7 +108,7 @@ export async function exportCatalog(
   } else if (kind === "borders") {
     // Borders = the BORDER-RELATED COLUMNS of rank_tiers (any tier
     // with a borderImageUrl OR a non-null borderCost). Importing
-    // this kind only touches those columns — the rank structure
+    // this kind only touches those columns, the rank structure
     // itself isn't disturbed.
     const tierRows = await db
       .select({
@@ -128,7 +128,7 @@ export async function exportCatalog(
     // Each row carries EITHER an `imageUrl` OR a `template`+`styleCss`
     // pair (server enforces XOR). Image-mode rows reference a
     // /uploads/* path; template-mode rows are pure text. The
-    // ownership ledgers are NOT exported — they're per-user state,
+    // ownership ledgers are NOT exported, they're per-user state,
     // not catalog content.
     const rows = await db.select().from(freeformBorders).orderBy(asc(freeformBorders.order));
     for (const r of rows) collectUploadPath(r.imageUrl, referencedUploads);
@@ -140,7 +140,7 @@ export async function exportCatalog(
 
   // Bundle referenced uploads. Missing files are silently skipped
   // (the row may reference an asset that was deleted on disk but
-  // not the DB) — the import side warns when an asset path in
+  // not the DB), the import side warns when an asset path in
   // rows.json has no zip entry.
   for (const rel of referencedUploads) {
     const abs = resolve(uploadsRoot, rel);
@@ -270,7 +270,7 @@ export async function importCatalog(
         forSale: row.forSale !== false,
         // Dates round-trip as ISO strings via JSON.stringify(Date),
         // so `Number(isoString)` is NaN. Hand the raw value (string OR
-        // number) straight to the Date constructor — it parses ISO
+        // number) straight to the Date constructor, it parses ISO
         // strings AND treats numbers as unix ms. Anything else (object,
         // bool) becomes Invalid Date, which we coerce to null to avoid
         // poisoning the row.
@@ -349,7 +349,7 @@ export async function importCatalog(
       const rankKey = String(row.rankKey ?? "");
       const tier = Number(row.tier ?? 0);
       if (!rankKey || !tier) { warnings.push("skipping border without rankKey/tier"); continue; }
-      // Border import is SURGICAL — it only touches borderImageUrl
+      // Border import is SURGICAL, it only touches borderImageUrl
       // and borderCost on an EXISTING rank_tier row. If the matching
       // (rankKey, tier) doesn't exist we skip (admin needs to create
       // the rank/tier first via a Ranks import or the admin UI).
@@ -449,7 +449,7 @@ function isWithin(root: string, candidate: string): boolean {
 
 function newRowId(): string {
   // Lightweight uid for new rank_tiers rows. Format is intentionally
-  // not compatible with the existing nanoid IDs in the table — that's
+  // not compatible with the existing nanoid IDs in the table, that's
   // fine because ids are opaque downstream.
   return randomBytes(12).toString("hex");
 }
@@ -458,7 +458,7 @@ function newRowId(): string {
  * Parse an unknown value into a Date or null. Handles the three shapes
  * a `timestamp_ms` column round-trips through:
  *   - number (unix ms; the on-disk format and what `+date` yields)
- *   - string (ISO; what `JSON.stringify(date)` produces — this is the
+ *   - string (ISO; what `JSON.stringify(date)` produces, this is the
  *     case the previous `Number(value)` wrapper got wrong, yielding
  *     NaN → Invalid Date)
  *   - null/undefined/garbage → null

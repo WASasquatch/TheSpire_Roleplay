@@ -5,7 +5,7 @@
  * Without this, the browser writes BOTH `text/plain` AND `text/html`
  * to the clipboard. Pasting into a rich-text target (Word, Discord,
  * an HTML email composer) then drags along every span class, inline
- * style, name-style CSS, link decoration, color, etc. — so a
+ * style, name-style CSS, link decoration, color, etc., so a
  * pasted line looks like the chat's render rather than the prose
  * the user actually meant to quote. Writing ONLY `text/plain`
  * forces every rich-text paste surface to fall back to the bare
@@ -29,13 +29,13 @@
  *     that would otherwise leak into the paste. Live `select-none`
  *     CSS still drives the browser's visible selection highlight
  *     (a parallel UX cue) but the actual clipboard text comes from
- *     this attribute, not from CSS — `textContent` doesn't honor
+ *     this attribute, not from CSS, `textContent` doesn't honor
  *     `user-select: none`, so we can't rely on that path alone.
  *
  * Selection block-level structure (newlines between messages,
  * intra-line spacing inside a message) is preserved because we lean
  * on `textContent` which serializes block elements with their natural
- * boundaries — the same shape `selection.toString()` already
+ * boundaries, the same shape `selection.toString()` already
  * produced for the surrounding scaffolding.
  */
 
@@ -53,7 +53,7 @@ function fragmentToPlainText(fragment: DocumentFragment | Element): string {
   //
   // `Range.cloneContents()` produces a DocumentFragment whose
   // descendants are detached from the live DOM, so live computed
-  // styles aren't available — we drive every decision off attribute
+  // styles aren't available, we drive every decision off attribute
   // checks set at render time instead. Inputs with CSS `user-select:
   // none` are not implicitly skipped here; the renderer also tags
   // them with `data-copy-skip` so the walker drops them.

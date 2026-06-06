@@ -1,13 +1,13 @@
 /**
- * Scifi — Cyberpunk
+ * Scifi, Cyberpunk
  *
- * Neon-on-dark aesthetic — flat data planes, hot edges, scan lines.
+ * Neon-on-dark aesthetic, flat data planes, hot edges, scan lines.
  * Visual vocabulary:
  *
  *  - **Texture**: 1px horizontal scan lines + a sparse hexgrid overlay.
  *    Reads as a CRT or low-budget terminal display.
  *  - **Corners**: angular L-brackets with a neon outer glow trace.
- *    Cut at 45° tips so the corners look "chopped" — very Y2K UI.
+ *    Cut at 45° tips so the corners look "chopped", very Y2K UI.
  *  - **Divider**: thin neon line with a center diamond and end-caps.
  *  - **Bg overlay**: deep vignette + magenta/cyan ambient blooms.
  */
@@ -71,7 +71,7 @@ function makeCorner(p: OrnamentPalette, corner: "tl" | "tr" | "bl" | "br"): stri
   // matching the body's cyan bloom at viewport 12% 8% / 68% 28%); bottom
   // corners pull from accent (magenta, matching the bloom at 90% 94% /
   // 22% 76%). The result: each L-bracket is brightest at its outer tip,
-  // fading back to the current dim "neon" along the legs — reads as if
+  // fading back to the current dim "neon" along the legs, reads as if
   // the body bg blooms are casting onto the chrome.
   const isTop = corner === "tl" || corner === "tr";
   const bright = (isTop ? p.action[0] : p.accent[0]) ?? (isTop ? "#bff7f1" : "#ffc7e8");
@@ -80,7 +80,7 @@ function makeCorner(p: OrnamentPalette, corner: "tl" | "tr" | "bl" | "br"): stri
   // Radial gradient centered on the outer tip (0,0 in the path's local
   // frame). After the per-corner transform below, that tip lands at the
   // actual outer corner of the frame, so the brightest spot points away
-  // from the panel into the ambient bloom — exactly where the light is.
+  // from the panel into the ambient bloom, exactly where the light is.
   // Gradient ID is per-corner so multiple corner backgrounds on one page
   // can't collide. `userSpaceOnUse` keeps the radius literal-pixels.
   const gid = `scifi-corner-${corner}`;
@@ -129,7 +129,7 @@ function makeDivider(p: OrnamentPalette): string {
 
 function makeBgOverlay(p: OrnamentPalette): string {
   // Strong cyan/magenta ambient blooms layered ON TOP of the CSS
-  // body bokeh in styles.css — both contribute additively so the
+  // body bokeh in styles.css, both contribute additively so the
   // viewport reads as a dense lens-defocus haze rather than one
   // dim wash. No vignette (the previous 45%-alpha black darken
   // was crushing the body bokeh's pink/cyan corners).

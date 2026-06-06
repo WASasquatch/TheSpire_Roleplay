@@ -4,10 +4,10 @@
 -- quotes; double quotes are stored verbatim, which produces invalid
 -- JSON inside the `give_messages_json` column. `parseItemMessages`
 -- swallows the parse error and returns an empty array, so /give on
--- those items silently reports "can't be /given" — load-bearing
+-- those items silently reports "can't be /given", load-bearing
 -- flavor lost for `rock`, `gold_coin`, and `scroll`.
 --
--- The correct JSON escape for a literal " inside a string is \" —
+-- The correct JSON escape for a literal " inside a string is \",
 -- the backslash passes through the SQL literal unchanged, then
 -- JSON.parse interprets `\"` correctly. Each UPDATE below replaces
 -- the corrupt row's value with the same intended templates, just

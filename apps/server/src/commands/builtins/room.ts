@@ -22,7 +22,7 @@ async function checkRoomCap(ctx: CommandContext): Promise<boolean> {
     });
     return false;
   }
-  // Archived rooms don't count against the per-user cap — they hold a
+  // Archived rooms don't count against the per-user cap, they hold a
   // name reservation but have no users and add no load. Without this
   // exclusion, a user who created N rooms that all auto-archived would
   // permanently lose the ability to create more even though all of
@@ -49,7 +49,7 @@ async function checkRoomCap(ctx: CommandContext): Promise<boolean> {
 const NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
 
 async function findRoomByName(ctx: CommandContext, name: string) {
-  // Returns ARCHIVED rooms too — callers branch on `row.archivedAt` to
+  // Returns ARCHIVED rooms too, callers branch on `row.archivedAt` to
   // decide between "join existing", "resurrect", and "name conflict".
   // Filtering archived rows here would break the resurrect path
   // because the room_name unique index still holds, so the matching
@@ -72,7 +72,7 @@ async function findRoomByName(ctx: CommandContext, name: string) {
  * new owner doesn't inherit someone else's moderation history.
  *
  * `overrides` is the escape hatch for resurrection paths where the
- * caller explicitly redeclared the room's mode — `/private` / `/go
+ * caller explicitly redeclared the room's mode, `/private` / `/go
  * <name> <password>` clearly want a private room with a known
  * password regardless of how the previous incarnation was set up. A
  * plain `/go <name>` leaves both fields alone and the preserved
@@ -235,7 +235,7 @@ async function joinExistingWithPassword(
  * AND the entire argsText doesn't match an existing room name, the first
  * token is treated as the room name and the rest is the password (mirroring
  * /private's convention). Multi-word room names with inline passwords aren't
- * supported via this sugar form — use /private with quoting (or just /go
+ * supported via this sugar form, use /private with quoting (or just /go
  * <name> first, then enter the password in the modal) for that.
  */
 export const goCommand: CommandHandler = {
@@ -269,7 +269,7 @@ export const goCommand: CommandHandler = {
     // joinRoom itself surfaces the password prompt UI for private rooms when
     // the user didn't supply one inline.
     //
-    // Archived rooms surface here too — `joinOrCreatePublic` handles the
+    // Archived rooms surface here too, `joinOrCreatePublic` handles the
     // resurrection branch when there's no password component. A
     // matched-but-archived row with a password supplied later in the flow
     // (the multi-token branch below) routes through `createPrivateRoom`
@@ -324,7 +324,7 @@ export const privateRoomCommand: CommandHandler = {
     }
     const existing = await findRoomByName(ctx, name);
     if (existing && !existing.archivedAt) {
-      // LIVE room — name's still in active use, reject. Archived
+      // LIVE room, name's still in active use, reject. Archived
       // rooms fall through to createPrivateRoom which resurrects.
       ctx.socket.emit("error:notice", {
         code: "DUP_ROOM",
@@ -439,7 +439,7 @@ export const describeCommand: CommandHandler = {
     const txt = ctx.argsText.trim();
 
     // No args → show the current description to the caller only.
-    // Up to 5000 chars of long-form prose — surfaced via the
+    // Up to 5000 chars of long-form prose, surfaced via the
     // persistent info modal so the user can read at leisure
     // (the auto-dismissing toast can't display 5000 chars).
     if (!txt) {

@@ -1,11 +1,11 @@
 -- 0142_scriptorium_privacy_reports.sql
 --
 -- Phase 9: per-user catalog preferences for the Scriptorium.
---   * story_show_nsfw      — opt-in for R / NC-17 cards in the catalog.
+--   * story_show_nsfw     , opt-in for R / NC-17 cards in the catalog.
 --                            Anonymous viewers already never see these
 --                            server-side; this gates them for signed-in
---                            viewers too. Default OFF — readers opt in.
---   * story_cw_blocklist   — comma-separated content warnings that hide
+--                            viewers too. Default OFF, readers opt in.
+--   * story_cw_blocklist  , comma-separated content warnings that hide
 --                            cards entirely. Reader-personalised filter
 --                            that the catalog ANDs into every query.
 --
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS `story_reports` (
 );
 --> statement-breakpoint
 
--- One report per (reporter, target) — second-tap is silently a no-op,
+-- One report per (reporter, target), second-tap is silently a no-op,
 -- not a duplicate. Same posture as room-message reports.
 CREATE UNIQUE INDEX IF NOT EXISTS `story_reports_reporter_target_uq`
   ON `story_reports` (`reporter_user_id`, `target_kind`, `target_id`);

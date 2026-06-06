@@ -17,7 +17,7 @@
 -- (chromtic_legendary_armor, enagement_ring, paerlescent_shell);
 -- the slug matches the filename so the icon_url resolves, but
 -- display names are spelled correctly so chat lines / shop
--- cards read clean. `ComfyUI_00207_.png` is not registered —
+-- cards read clean. `ComfyUI_00207_.png` is not registered,
 -- its filename doesn't describe an item, so it stays
 -- orphaned until an admin renames the asset.
 
@@ -382,7 +382,7 @@ INSERT INTO `items` (`key`, `name`, `name_plural`, `description`, `icon_url`, `p
     50,
     '["{sender} hands {target} {num} {item_name}.","{sender} tickles {target} with {num} {item_name}."]',
     '["{sender} tosses {num} {item_name} at {target}. They drift gently down.","{sender} flicks {num} {item_name} at {target}."]',
-    '["{sender} drops {num} {item_name} on {target}. *fwoosh* — settle, settle."]',
+    '["{sender} drops {num} {item_name} on {target}. *fwoosh*, settle, settle."]',
     '["plume"]',
     1, 301
   ),
@@ -535,7 +535,7 @@ INSERT INTO `items` (`key`, `name`, `name_plural`, `description`, `icon_url`, `p
     5000,
     2,
     '["{sender} kneels and offers {target} {num} {item_name}. \"Will you?\"","{sender} presents {target} with {num} {item_name}. The Question hangs."]',
-    '["{sender} hurls {num} {item_name} at {target}. Rejection — dramatic.","{sender} chucks {num} {item_name} at {target}. *clink* — heart-shaped impact."]',
+    '["{sender} hurls {num} {item_name} at {target}. Rejection, dramatic.","{sender} chucks {num} {item_name} at {target}. *clink*, heart-shaped impact."]',
     '["{sender} drops {num} {item_name} on {target}''s lap. Awkward proposal."]',
     '["ring","proposal"]',
     1, 352

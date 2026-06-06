@@ -8,16 +8,16 @@ import { sanitizeUserHtml } from "../lib/userHtml.js";
  * drop into ProfileModal at the right slots without ProfileModal
  * needing to know about flair plumbing.
  *
- * `ProfileMarquee` — rotating quote strip rendered between the
+ * `ProfileMarquee`, rotating quote strip rendered between the
  *   header and the bio/stats grid when the profile owner has the
  *   `flair_profile_marquee` flair AND has configured quotes.
  *
- * `ProfileVisitorsChip` — small inline counter for distinct
+ * `ProfileVisitorsChip`, small inline counter for distinct
  *   member + external viewers, rendered only when the owner has
  *   the `flair_profile_visitors` flair AND has flipped the
  *   visibility toggle on.
  *
- * `useTrackProfileView` — log-once-per-mount hook that POSTs to
+ * `useTrackProfileView`, log-once-per-mount hook that POSTs to
  *   `/profiles/:name/view`. Always-on regardless of flair state so
  *   the counter has data the moment the owner equips it. Skipped
  *   when the viewer would be looking at their own profile
@@ -29,7 +29,7 @@ const ROTATION_MS = 8_000;
 const FADE_MS = 300;
 
 interface ProfileNameProps {
-  /** `/p/<name>` slug — what the lookup endpoint matches on. */
+  /** `/p/<name>` slug, what the lookup endpoint matches on. */
   profileName: string;
   /** Optional character id when this profile is character-scoped.
    *  Null = master / OOC profile. */
@@ -41,7 +41,7 @@ export function ProfileMarquee({ profileName, characterId }: ProfileNameProps) {
   const [activeIdx, setActiveIdx] = useState(0);
   const [fading, setFading] = useState(false);
   // Bumped on manual dot-click so the auto-rotation effect tears
-  // down + restarts its interval — viewer gets the full ROTATION_MS
+  // down + restarts its interval, viewer gets the full ROTATION_MS
   // on the quote they explicitly chose, same posture as the
   // sitewide announcement marquee.
   const [resetKey, setResetKey] = useState(0);
@@ -57,7 +57,7 @@ export function ProfileMarquee({ profileName, characterId }: ProfileNameProps) {
           setQuotes(j.quotes);
           setActiveIdx(0);
         }
-      } catch { /* ignore — flair simply won't render */ }
+      } catch { /* ignore, flair simply won't render */ }
     }
     void load();
     return () => { cancelled = true; };
@@ -148,7 +148,7 @@ export function ProfileVisitorsChip({ profileName, characterId }: ProfileNamePro
   // Render the chip even at zero so the owner has visible
   // confirmation that the flair is on and counting. Previously the
   // chip self-hid at total=0, which was indistinguishable from
-  // "feature not working" — owners viewing their own profile (whose
+  // "feature not working", owners viewing their own profile (whose
   // self-views don't count) saw nothing after buying + enabling and
   // assumed the purchase was broken. The visibility gate above
   // (`j.visible`) is what hides the chip from non-owners when the

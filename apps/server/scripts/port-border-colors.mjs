@@ -39,7 +39,7 @@ const SKIP = new Set([
 const HEX_RE = /#([0-9a-fA-F]{3,8})\b/g;
 const RGBA_RE = /\brgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*(?:,\s*[\d.]+\s*)?\)/g;
 
-// Property names that hint at a semantic category. Order matters —
+// Property names that hint at a semantic category. Order matters,
 // more specific keys first. Each property name maps to a base slot
 // name; deduplication appends a suffix when colors clash.
 const CONTEXT_KEYS = [
@@ -93,7 +93,7 @@ function port(styleCss) {
   //    map of "which slot drives what" rather than a guessable
   //    semantic that breaks down on unusual cases.
   //
-  //    We DO try to keep existing `--c-<name>` references intact —
+  //    We DO try to keep existing `--c-<name>` references intact,
   //    those already-named slots stay; only the newly-wrapped
   //    literals get c-numbered names. The picker will then show
   //    the named slots first and the numbered ones after.
@@ -125,7 +125,7 @@ function main() {
   console.log("-- Port every literal color in remaining built-in borders to");
   console.log("-- `--c-*` CSS variables so the per-identity color picker can");
   console.log("-- customize every visible color. Names use a stable `c1..cN`");
-  console.log("-- scheme rather than ad-hoc semantic labels — labels would");
+  console.log("-- scheme rather than ad-hoc semantic labels, labels would");
   console.log("-- diverge between borders and become unmemorable; numbered");
   console.log("-- slots are honest about \"this is slot 3 in source order.\"");
   console.log("-- Identical colors collapse to a single slot so changing one");

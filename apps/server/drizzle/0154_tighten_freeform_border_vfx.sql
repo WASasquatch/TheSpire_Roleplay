@@ -10,20 +10,20 @@
 -- Fog bands extend 30% of the avatar diameter on each side, Neon's
 -- box-shadow glows 40px). The portal-based render path already
 -- escapes ancestor `overflow: hidden`, so the bleed actually paints
--- onto neighbors — which is the wrong default.
+-- onto neighbors, which is the wrong default.
 --
 -- Tightening philosophy:
 --   - Keep the animation's IDENTITY (falling petals still fall,
 --     bands still drift, glow still pulses).
 --   - Cap external bleed to roughly +/- 10px of native frame, so at
---     sm-tier scale (~0.47×) the bleed lands at ~5px — a clean halo
+--     sm-tier scale (~0.47×) the bleed lands at ~5px, a clean halo
 --     that doesn't reach a sibling avatar.
 --   - Leave borders whose VFX is already contained alone (Hologram,
 --     Nebula crown, Aurora prime, Tide caller, Magma core, Crown
 --     jewels, Tempest lord, Event horizon, Prismatic).
 --
 -- Important caveat: an admin who has manually edited a seed row's
--- `style_css` will lose those edits — the UPDATE is unconditional.
+-- `style_css` will lose those edits, the UPDATE is unconditional.
 -- The `is_builtin = 1` gate on the WHERE clauses limits the blast
 -- radius to admin-untouched seed content; admins can re-author via
 -- the Flair admin tab after this lands.

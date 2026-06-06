@@ -3,7 +3,7 @@
  *
  * The award engine needs these for the "every logged-in character
  * earns full IC award" rule. The source of truth is live socket
- * state (`io.fetchSockets()`), not the DB — a character can be
+ * state (`io.fetchSockets()`), not the DB, a character can be
  * attached to one tab and not another, and the `socket.data.tabCharId`
  * override only exists in memory.
  *
@@ -29,7 +29,7 @@ type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
  * we don't need a second DB roundtrip in the award hot path.
  *
  * A null in the returned array means "this user has a logged-in tab
- * voicing OOC" (no character) — relevant for the OOC routing branch
+ * voicing OOC" (no character), relevant for the OOC routing branch
  * but not for the IC fan-out. The caller filters as needed.
  */
 export async function liveCharacterIdsFor(
@@ -50,7 +50,7 @@ export async function liveCharacterIdsFor(
 }
 
 /**
- * Same as `liveCharacterIdsFor` but filters to non-null entries — the
+ * Same as `liveCharacterIdsFor` but filters to non-null entries, the
  * award-pipeline's IC fan-out only cares about characters, never OOC
  * tabs.
  */

@@ -1,4 +1,4 @@
--- Per-identity Collection — a 10-slot pinned showcase of inventory
+-- Per-identity Collection, a 10-slot pinned showcase of inventory
 -- items the identity wants to display on their profile. Same
 -- partitioning model as identity_inventory: every identity (OOC
 -- master AND each character) carries its own independent Collection.
@@ -7,7 +7,7 @@
 --
 -- Slots are sparse: a user can pin to slots 0, 3, and 7 and leave
 -- the rest empty. The 10-slot cap is enforced by the (owner_scope,
--- owner_id, slot) PK plus the CHECK constraint below — the server
+-- owner_id, slot) PK plus the CHECK constraint below, the server
 -- additionally validates the pinned item is still owned in the
 -- same identity's inventory before writing.
 

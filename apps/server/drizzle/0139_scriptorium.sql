@@ -2,7 +2,7 @@
 --
 -- The Scriptorium feature: long-form fiction authored by identities
 -- (master accounts OR characters), readable from the splash page and
--- in-app. Mirrors the privacy posture of worlds — visibility tiers
+-- in-app. Mirrors the privacy posture of worlds, visibility tiers
 -- gate who sees a story, and the rating tier gates whether anonymous
 -- splash viewers see it at all (R / NC-17 are excluded from the
 -- splash + sitemap regardless of visibility).

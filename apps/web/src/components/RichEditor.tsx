@@ -26,7 +26,7 @@ interface Props {
 }
 
 /* =============================================================
- *  MarginNote node — wraps `<aside class="margin-note">…</aside>`
+ *  MarginNote node, wraps `<aside class="margin-note">…</aside>`
  *
  *  Renders inside the editor as a yellow-bordered block so authors
  *  can see their drafting annotations. Server's `stripMarginNotes`
@@ -127,7 +127,7 @@ export function RichEditor({
 
   // External value resets (load chapter, restore version) should
   // replace the doc. Compare against the editor's current HTML so we
-  // don't clobber the user's keystrokes — every onUpdate flows back
+  // don't clobber the user's keystrokes, every onUpdate flows back
   // up as `value` and would otherwise loop.
   const lastSync = useRef(value);
   useEffect(() => {
@@ -284,7 +284,7 @@ function RichToolbar({
       {enableMarginNote ? (
         <Btn
           label="+ Note"
-          title="Insert a margin note — visible to collaborators in drafts; stripped on publish"
+          title="Insert a margin note, visible to collaborators in drafts; stripped on publish"
           disabled={disabled}
           onClick={() => {
             editor

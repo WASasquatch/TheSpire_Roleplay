@@ -37,7 +37,7 @@ interface Props {
   characterId: string | null;
   /**
    * Optional initial tab. Threads through from `editor.initialTab` in
-   * the chat store so a deep-link can land on a non-default tab —
+   * the chat store so a deep-link can land on a non-default tab,
    * e.g. the shop's "Configure in Edit Profile → Flair" CTA. Defaults
    * to "description" when omitted.
    */
@@ -54,20 +54,20 @@ interface Props {
    * trigger a chat-wide theme refresh (only useful when the saved
    * target is what THIS tab is currently voicing; saving a sibling
    * identity should leave the chat's active palette alone). Omit
-   * the parent's logic when not needed — argument is optional.
+   * the parent's logic when not needed, argument is optional.
    */
   onSaved?: (savedTarget?: { kind: "master" | "character"; id?: string }) => void;
   /**
    * Admin-acting-on-another-user mode. When set, the editor:
    *   - Forces `mode: "character"` and edits the supplied `characterId`
-   *     (master-account fields belong to the target user — out of scope
+   *     (master-account fields belong to the target user, out of scope
    *     for this UI; that's what the admin Users tab edits).
-   *   - Skips the `/me/profile` + `/characters` initial fetches —
+   *   - Skips the `/me/profile` + `/characters` initial fetches,
    *     those return the CALLER's data, not the target user's. The
    *     character itself loads through `/characters/:id`, which the
    *     server allows for admins regardless of ownership.
    *   - Hides the master/character dropdown + the +New / Switch / Delete
-   *     buttons — admin edits ONE character at a time; to touch a
+   *     buttons, admin edits ONE character at a time; to touch a
    *     different one, close and reopen from the admin Users row.
    *   - Shows an "Editing as admin: …" banner so the admin knows
    *     they're touching someone else's character.
@@ -111,7 +111,7 @@ interface MasterData {
   isNsfw?: boolean;
   /** Public-profile backdrop image URL. Null/empty = use default. */
   publicProfileBgUrl?: string | null;
-  /** "cover" | "contain" | "tile" | "stretch" — display strategy for `publicProfileBgUrl`. */
+  /** "cover" | "contain" | "tile" | "stretch", display strategy for `publicProfileBgUrl`. */
   publicProfileBgMode?: string | null;
   /** Admin-tunable input caps. Surfaced so each composer's counter matches the server's accept threshold. */
   limits?: {
@@ -140,14 +140,14 @@ interface CharacterRow {
    * Per-character chat color override. Null = inherit the master
    * account's color. When set, every message authored AS this
    * character uses this color regardless of the tab's current `/color`
-   * state — so Character A and Character B stay visually distinct
+   * state, so Character A and Character B stay visually distinct
    * even when both belong to the same master account.
    */
   chatColor?: string | null;
   /**
    * Per-character theme style override (medieval/modern/scifi). Null =
    * inherit through master → theme-pinned → site default. Lets each
-   * character carry its own design when active — pairs with the
+   * character carry its own design when active, pairs with the
    * existing `themeJson` palette override.
    */
   styleKey?: string | null;
@@ -155,12 +155,12 @@ interface CharacterRow {
   isNsfw?: boolean;
   /** Public-profile backdrop image URL. Null/empty = use default. */
   publicProfileBgUrl?: string | null;
-  /** "cover" | "contain" | "tile" | "stretch" — display strategy for `publicProfileBgUrl`. */
+  /** "cover" | "contain" | "tile" | "stretch", display strategy for `publicProfileBgUrl`. */
   publicProfileBgMode?: string | null;
   /**
    * Per-character Direct Messenger opt-in (migration 0183). When
    * false, this character is filtered out of friend-request lookups
-   * and DM recipient pickers — existing friends + conversations are
+   * and DM recipient pickers, existing friends + conversations are
    * preserved but cannot start a new DM thread with this identity.
    * Brand-new characters default to false; existing characters with
    * prior friendships / conversations were migrated to true.
@@ -198,7 +198,7 @@ const STAT_FIELDS: Array<{ key: ClassicStatField; label: string }> = [
 export function ProfileEditor({ mode: initialMode, characterId: initialCharId, initialTab, onClose, onSaved, adminContext }: Props) {
   const isAdminEdit = !!adminContext;
   const [target, setTarget] = useState<Target>(
-    // Admin mode locks the target to the supplied character — no
+    // Admin mode locks the target to the supplied character, no
     // master option (admin Users tab edits master fields), no
     // dropdown to other characters (the admin opened THIS one).
     isAdminEdit && initialCharId
@@ -241,7 +241,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   /** When the form has a theme set; null means "use default / inherit". */
   const [theme, setTheme] = useState<Theme | null>(null);
   /**
-   * Theme style override for the *current target* — master or character.
+   * Theme style override for the *current target*, master or character.
    * Master: persisted to `users.style_key`; null = follow theme-pinned
    * design then site default.
    * Character: persisted to `characters.style_key`; null = inherit
@@ -280,11 +280,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   // profile modal's backdrop (the area outside the modal card) for
   // any viewer of /p/<this identity>. Null URL = no override (modal
   // falls back to its default `bg-black/40` overlay). Mode is one of
-  // "cover" | "contain" | "tile" | "stretch" — mapped to the CSS
+  // "cover" | "contain" | "tile" | "stretch", mapped to the CSS
   // `background-size` / `background-repeat` pair at render time.
   const [publicProfileBgUrl, setPublicProfileBgUrl] = useState<string>("");
   const [publicProfileBgMode, setPublicProfileBgMode] = useState<"cover" | "contain" | "tile" | "stretch">("cover");
-  // Live earning snapshot — the preview profile reads the user's
+  // Live earning snapshot, the preview profile reads the user's
   // current collection + pet collection pins from here so the
   // preview matches the real profile 1:1. The dashboard already
   // keeps this fresh via the `earning:inventory_changed` socket
@@ -368,7 +368,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   const [switching, setSwitching] = useState(false);
 
   // Initial load: master + character list (we always need both for the
-  // dropdown). Skipped in admin-edit mode — those endpoints return
+  // dropdown). Skipped in admin-edit mode, those endpoints return
   // the CALLER's master + characters, which has nothing to do with
   // the target user the admin is editing. The character itself
   // loads via the target useEffect below (admin-allowed `/characters/:id`).
@@ -445,7 +445,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               ? master.publicProfileBgMode
               : "cover",
           );
-          // Master/OOC gallery — same wire shape as the character
+          // Master/OOC gallery, same wire shape as the character
           // gallery below, just keyed on the user (user_portraits
           // table, added in migration 0113). Failing the fetch is
           // non-fatal; the editor's Gallery tab just shows empty.
@@ -482,7 +482,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           setAvatarCrop(clampAvatarCrop(c.avatarCrop));
           setIncludeAvatarInGallery(!!c.includeAvatarInGallery);
           // Per-character chat color. Null means "fall back to the
-          // master account's color" — preserved as a distinct state
+          // master account's color", preserved as a distinct state
           // from "" so the picker can tell apart "no override set"
           // (inherit) from a deliberate clear-to-default.
           setChatColor(c.chatColor ?? null);
@@ -504,7 +504,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           setIsPublic(c.isPublic ?? true);
           setIsNsfw(c.isNsfw ?? false);
           // Default to false so a server response missing the field
-          // (older shape) reads as "opt-out" — matches the new
+          // (older shape) reads as "opt-out", matches the new
           // characters policy.
           setDirectMessengerEnabled(!!c.directMessengerEnabled);
           setPublicProfileBgUrl(typeof c.publicProfileBgUrl === "string" ? c.publicProfileBgUrl : "");
@@ -574,7 +574,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
             isNsfw,
             // Public-profile backdrop. Empty string normalizes to null
             // (server treats "missing" and "explicit clear" the same).
-            // Mode always rides along — it's a NOT NULL column with a
+            // Mode always rides along, it's a NOT NULL column with a
             // default, so sending it on every save keeps the row
             // consistent even when the URL itself is cleared.
             publicProfileBgUrl: publicProfileBgUrl.trim() === "" ? null : publicProfileBgUrl.trim(),
@@ -592,7 +592,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
             avatarCrop,
             // Gallery-membership flag must round-trip through the
             // cache or the checkbox snaps back to false on the next
-            // render — the form's local state stays correct, but
+            // render, the form's local state stays correct, but
             // when the component re-derives from `master`, an
             // undefined `includeAvatarInGallery` evaluates to `!!u`
             // → false, which is what was happening before the fix.
@@ -622,7 +622,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           return next;
         });
         // Push the new sound prefs into the global store so lib/sound
-        // picks them up before the next ping/tap/alert event fires —
+        // picks them up before the next ping/tap/alert event fires,
         // no need to wait for the next /me/profile reload.
         useChat.getState().setSoundPrefs({
           dm: soundDmEnabled,
@@ -642,7 +642,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         // mid-stream (cross-field clamp moved to onBlur so typing
         // stays smooth), so a Save click that fires before the
         // user blurs the input could ship a row with min > max
-        // or value outside [min, max] — the schema would 400 the
+        // or value outside [min, max], the schema would 400 the
         // whole stats body and the surface error wouldn't point at
         // the bad row. Same goes for rows the owner started but
         // never named: empty labels fail `z.string().min(1)`.
@@ -711,7 +711,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   bioHtml,
                   statsJson: JSON.stringify(stats),
                   avatarUrl: avatarUrl.trim() || null,
-                  // See note on the master path above — without
+                  // See note on the master path above, without
                   // this the checkbox flips back to false on the
                   // next render even though the server persisted
                   // the value correctly.
@@ -750,7 +750,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
 
   /**
    * Switch THIS tab's active character to the one currently being edited.
-   * Equivalent to typing `/char switch <name>` from chat — and like that
+   * Equivalent to typing `/char switch <name>` from chat, and like that
    * path, it routes through the socket so the change is scoped to this
    * tab. Other tabs the user has open keep voicing whatever they were.
    * The server emits `me:character-update` which App.tsx picks up to
@@ -768,7 +768,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         // waiting for the App.tsx-level me:character-update handler
         // to round-trip its state update back to props.
         setMaster((prev) => (prev ? { ...prev, activeCharacterId: charId } : prev));
-        // Active identity just changed to this character — chat
+        // Active identity just changed to this character, chat
         // should refresh to that character's theme.
         onSaved?.({ kind: "character", id: charId });
       } else {
@@ -826,7 +826,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   // so flipping the modal closed and back open doesn't refetch. Null
   // entries here mean "haven't fetched yet"; the modal renders
   // "private" placeholders for the brief moment before the fetch
-  // returns. Once it lands, the real counts replace them — including
+  // returns. Once it lands, the real counts replace them, including
   // for the owner's own preview, because /profiles/:name bypasses
   // the hide-flag redaction when viewer === owner.
   const [previewMetrics, setPreviewMetrics] = useState<
@@ -853,7 +853,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   }, [previewing, previewTargetKey, target, master, characters, previewMetrics]);
   // Build live ProfileCollectionEntry arrays from the earning snapshot
   // so the preview matches what visitors see on the real profile.
-  // Pure derivation — `snapshot.collection` etc. are sparse `{slot,
+  // Pure derivation, `snapshot.collection` etc. are sparse `{slot,
   // itemKey}[]` arrays; we join against the catalog to surface
   // name/icon/description. Master and character pins are kept
   // separate so identity-switching the preview target swaps the
@@ -974,7 +974,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           // preview. The real profile view shows the real badge.
           scriptoriumAuthor: null,
           // Preview pins read live from the earning snapshot so the
-          // preview matches the real profile 1:1 — the editor still
+          // preview matches the real profile 1:1, the editor still
           // doesn't expose pin management (users curate from the
           // Earning dashboard's Items > Collection / Pets tabs), but
           // the preview at least surfaces what's currently pinned.
@@ -982,7 +982,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           petCollection: previewCollections.pets,
           nameStyleKey: previewNameStyle.key,
           nameStyleConfig: previewNameStyle.config,
-          // Banner URL isn't editable from ProfileEditor — it lives on
+          // Banner URL isn't editable from ProfileEditor, it lives on
           // the Flair tab. Surface the currently-equipped URL from
           // the earning snapshot so the preview shows what's saved
           // (or null when nothing's set / cosmetic isn't owned).
@@ -994,7 +994,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         },
       };
     }
-    // Same synthetic-portrait dance as the master branch above —
+    // Same synthetic-portrait dance as the master branch above,
     // the character preview also reflects the checkbox immediately.
     const trimmedCharAvatar = avatarUrl.trim();
     const previewCharPortraits =
@@ -1031,11 +1031,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         createdAt: Date.now(),
         updatedAt: Date.now(),
         metrics: fetchedMetrics,
-        // Editor's preview doesn't fetch the Scriptorium author tier —
+        // Editor's preview doesn't fetch the Scriptorium author tier,
         // same null fallback as the master branch above. The actual
         // profile view (lookupProfile path) populates the real badge.
         scriptoriumAuthor: null,
-        // Live pin counts from the snapshot — same parity goal as
+        // Live pin counts from the snapshot, same parity goal as
         // the master branch above. Switching the preview target to
         // a character picks up that character's pin sets.
         collection: previewCollections.items,
@@ -1066,7 +1066,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   const isCharacter = target.kind === "character";
   const targetValue = target.kind === "master" ? "master:" : `character:${target.id}`;
 
-  // Live preview — push the editor's pending palette + style + bg
+  // Live preview, push the editor's pending palette + style + bg
   // URL onto <html> so the chat behind the editor reflects every
   // dropdown change instantly. Without this, the user has to click
   // Save (and sometimes re-open the modal) to verify their pick
@@ -1085,14 +1085,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         ? (publicProfileBgMode === "stretch" ? "100% 100%" : publicProfileBgMode)
         : "cover";
       const repeat = trimmed && publicProfileBgMode === "tile" ? "repeat" : "no-repeat";
-      // Publish as CSS vars only — the actual paint happens on
+      // Publish as CSS vars only, the actual paint happens on
       // `.keep-bg-overlay` (inside the chat shell) so the image
       // never leaks past the shell when a devtools / extension UI
       // shifts the document.
       root.style.setProperty("--keep-shell-bg-url", `url("${url}")`);
       root.style.setProperty("--keep-shell-bg-size", size);
       root.style.setProperty("--keep-shell-bg-repeat", repeat);
-      // Luminance-aware glass tints — mirror App.tsx so the live
+      // Luminance-aware glass tints, mirror App.tsx so the live
       // preview matches post-save. White overlays on light themes;
       // palette-color overlays on dark themes.
       const isDark = isDarkPalette(previewTheme);
@@ -1133,7 +1133,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
             {isAdminEdit ? (
               // Admin-acting-on-other-user banner. Replaces the
               // master/character switcher + side buttons (those are
-              // self-edit affordances — +New makes no sense on
+              // self-edit affordances, +New makes no sense on
               // another user's account, Switch acts on the admin's
               // own session, Delete is reserved to the admin Users
               // tab). The label `name` (set by the load effect from
@@ -1201,7 +1201,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
             split + the two-column desktop grid. Each tab gets the full
             modal width so the color picker, links editor, etc. have
             room to breathe instead of fighting a 420px sidebar. The
-            strip scrolls horizontally on narrow viewports — mobile
+            strip scrolls horizontally on narrow viewports, mobile
             users swipe; desktop users see them all at once.
             `flex-nowrap` + `overflow-x-auto` is the canonical pattern
             for this. */}
@@ -1231,7 +1231,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               {/* Mobile (<md): collapse the tab strip to a full-width
                   dropdown. The horizontal-scroll strip pushed the last
                   tab(s) off-screen on phones and made discovery
-                  hostile — Gallery/Journal frequently fell into the
+                  hostile, Gallery/Journal frequently fell into the
                   hidden overflow on character profiles. This pattern
                   mirrors AdminPanel + EarningDashboard, so the whole
                   app reads consistently on mobile. */}
@@ -1274,12 +1274,12 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           );
         })()}
 
-        {/* Tab content — fills remaining height; scrolls when long. */}
+        {/* Tab content, fills remaining height; scrolls when long. */}
         {loadingTarget ? (
           <div className="flex flex-1 items-center justify-center text-keep-muted">loading...</div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            {/* DESCRIPTION — the bio HTML editor. Was the right column on
+            {/* DESCRIPTION, the bio HTML editor. Was the right column on
                 desktop; now its own tab so it gets the full width too. */}
             {activeTab === "description" ? (
               <div className="flex min-h-0 flex-1 flex-col p-4">
@@ -1307,7 +1307,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               </div>
             ) : null}
 
-            {/* PROFILE — name, avatar, gender (master) / stats (character).
+            {/* PROFILE, name, avatar, gender (master) / stats (character).
                 The bread-and-butter "who am I" tab. */}
             {activeTab === "profile" ? (
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
@@ -1317,7 +1317,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   readOnly
                   hint={isCharacter ? "Renaming is blocked - message history snapshots the name at send time." : "Set at registration."}
                 />
-                {/* Gender (OOC) — moved up here from below the gallery
+                {/* Gender (OOC), moved up here from below the gallery
                     toggle so the "who am I" identity fields cluster
                     together (name + gender) instead of being split by
                     the avatar block. Character views still keep their
@@ -1348,7 +1348,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   placeholder="https://example.com/portrait.png"
                   hint="Drives the userlist icon and the modal hero."
                 />
-                {/* Zoom + pan picker — lets the owner pick which part
+                {/* Zoom + pan picker, lets the owner pick which part
                     of the source image becomes the visible circle. The
                     output threads through to the server as `avatarCrop`
                     on the PUT body, then back out to every BorderedAvatar
@@ -1360,7 +1360,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   crop={avatarCrop}
                   onChange={setAvatarCrop}
                 />
-                {/* "Include in Gallery" — when ticked, the server
+                {/* "Include in Gallery", when ticked, the server
                     prepends a synthetic tile (the avatar) to the
                     portrait gallery list, so visitors see the avatar
                     alongside the other gallery images instead of only
@@ -1448,7 +1448,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               </div>
             ) : null}
 
-            {/* APPEARANCE — chat color, theme palette, theme style
+            {/* APPEARANCE, chat color, theme palette, theme style
                 (master), font/size (master). All the visual customization
                 in one place so the color picker has the full modal width
                 instead of getting squeezed to 420px. */}
@@ -1483,8 +1483,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Theme style</legend>
                   <p className="mb-2 text-[10px] text-keep-muted">
                     {isCharacter
-                      ? "Visual treatment — ornaments, borders, textures — applied when this character is active. Leave on \"use default\" to inherit your master account, then the theme's pinned design, then the site default."
-                      : "Visual treatment — ornaments, borders, textures. Orthogonal to the palette above; the same style works with any colors. Leave on \"use default\" to follow the theme's pinned design (admin-configured per palette) and finally the site default."}
+                      ? "Visual treatment, ornaments, borders, textures, applied when this character is active. Leave on \"use default\" to inherit your master account, then the theme's pinned design, then the site default."
+                      : "Visual treatment, ornaments, borders, textures. Orthogonal to the palette above; the same style works with any colors. Leave on \"use default\" to follow the theme's pinned design (admin-configured per palette) and finally the site default."}
                   </p>
                   <StylePicker
                     value={userStyleKey}
@@ -1492,18 +1492,18 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     allowInherit
                   />
                 </fieldset>
-                {/* PUBLIC PROFILE BACKGROUND — image painted on the
+                {/* PUBLIC PROFILE BACKGROUND, image painted on the
                     profile modal's backdrop (the area around the
                     modal card) when others view /p/<this identity>.
                     Per-identity: a character's BG is independent of
                     the master's. Clicking the backdrop still closes
-                    the modal — the BG only changes how that area
+                    the modal, the BG only changes how that area
                     looks, not how it behaves. */}
                 <fieldset className="rounded border border-keep-rule p-3">
                   <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Public profile background</legend>
                   <p className="mb-2 text-[10px] text-keep-muted">
                     {isCharacter
-                      ? "Image painted behind this character's profile modal for any viewer. Leave the URL empty to use the default backdrop. Per-character — each character can carry its own scene."
+                      ? "Image painted behind this character's profile modal for any viewer. Leave the URL empty to use the default backdrop. Per-character, each character can carry its own scene."
                       : "Image painted behind your master / OOC profile modal for any viewer. Leave the URL empty to use the default backdrop."}
                   </p>
                   <label className="block text-xs">
@@ -1529,14 +1529,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                       }}
                       className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
                     >
-                      <option value="cover">Cover — fill viewport, crop to fit</option>
-                      <option value="contain">Contain — fit inside viewport, letterbox</option>
-                      <option value="tile">Tile — repeat across viewport</option>
-                      <option value="stretch">Stretch — fill exact dimensions</option>
+                      <option value="cover">Cover, fill viewport, crop to fit</option>
+                      <option value="contain">Contain, fit inside viewport, letterbox</option>
+                      <option value="tile">Tile, repeat across viewport</option>
+                      <option value="stretch">Stretch, fill exact dimensions</option>
                     </select>
                   </label>
                   {publicProfileBgUrl.trim() !== "" ? (
-                    // Inline preview tile — shows the URL with the
+                    // Inline preview tile, shows the URL with the
                     // chosen mode at a small fixed-aspect frame so the
                     // user can verify the BG renders correctly before
                     // saving. Same backgroundSize / backgroundRepeat
@@ -1560,13 +1560,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     </div>
                   ) : null}
                 </fieldset>
-                {/* PROFILE BANNER — Flair cosmetic surfaced inline so
+                {/* PROFILE BANNER, Flair cosmetic surfaced inline so
                     the URL is editable here (not just in the Flair tab).
                     Renders only when this identity OWNS the cosmetic;
                     purchase still happens on the Flair tab to keep all
                     buy flows + price logic in one place, but URL edits
                     happen wherever the user is currently looking at
-                    their appearance — which is here. Per-identity:
+                    their appearance, which is here. Per-identity:
                     master vs each character carries its own banner +
                     own purchase. */}
                 {(() => {
@@ -1579,7 +1579,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   if (!bannerOwned) return null;
                   const trimmedDraft = bannerDraft.trim();
                   const dirty = trimmedDraft !== (equippedBannerUrl ?? "");
-                  // Live URL preview — `trimmedDraft` for the input's
+                  // Live URL preview, `trimmedDraft` for the input's
                   // current value, falling back to the saved URL so the
                   // section always has something to render when the
                   // slot has any image. Empty draft + empty saved =
@@ -1688,7 +1688,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                         // having to save first. Per-option font previews
                         // are attempted via inline `style.fontFamily`;
                         // some browsers honor it in the open dropdown,
-                        // some show all options in the default UI font —
+                        // some show all options in the default UI font,
                         // both behaviors are acceptable.
                         style={uiFontFamily ? { fontFamily: uiFontFamily } : undefined}
                         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
@@ -1746,7 +1746,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               </div>
             ) : null}
 
-            {/* PRIVACY — visibility (public / NSFW), push notifications,
+            {/* PRIVACY, visibility (public / NSFW), push notifications,
                 desktop notification preference. All the "who can see /
                 hear from me" toggles. */}
             {activeTab === "privacy" ? (
@@ -1792,7 +1792,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     onChangeDisableThesaurus={setDisableThesaurus}
                   />
                 ) : null}
-                {/* Earning — Currency privacy. Master-only; characters
+                {/* Earning, Currency privacy. Master-only; characters
                     inherit the master's privacy flag and don't have their
                     own. Self-saving (immediate PATCH to
                     /earning/me/settings), so it doesn't ride the
@@ -1815,19 +1815,19 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     don't have separate versions, so we gate the
                     render on `!isCharacter`. Self-saving via the
                     /me/profile PUT for the same reason CurrencyPrivacyRow
-                    self-saves — the row sits alongside other privacy
+                    self-saves, the row sits alongside other privacy
                     sections and "checked it, expected it, didn't see
                     a Save button" was a sharp paper-cut earlier. */}
                 {!isCharacter ? <DisplayPrivacyRow /> : null}
                 {/* Scriptorium catalog prefs: NSFW opt-in + per-user
-                    CW blocklist. Master-only — characters don't have
+                    CW blocklist. Master-only, characters don't have
                     their own catalog filters (the master account is
                     the reader identity, not the per-character mask). */}
                 {!isCharacter ? <ScriptoriumPrivacyRow /> : null}
               </div>
             ) : null}
 
-            {/* LINKS — profile-link chips, edited via the existing
+            {/* LINKS, profile-link chips, edited via the existing
                 LinksEditor component. */}
             {activeTab === "links" ? (
               <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -1839,7 +1839,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               </div>
             ) : null}
 
-            {/* GALLERY — portrait gallery, available for both
+            {/* GALLERY, portrait gallery, available for both
                 character and master/OOC profiles. Scope is picked
                 from the active target and threaded through to the
                 editor; the gallery component itself doesn't care
@@ -1858,14 +1858,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               </div>
             ) : null}
 
-            {/* JOURNAL — character journal entries (character only). */}
+            {/* JOURNAL, character journal entries (character only). */}
             {activeTab === "journal" && isCharacter && target.kind === "character" ? (
               <div className="min-h-0 flex-1 overflow-y-auto p-4">
                 <JournalEditor characterId={target.id} />
               </div>
             ) : null}
 
-            {/* FLAIR — profile-customization flairs (visitor counter +
+            {/* FLAIR, profile-customization flairs (visitor counter +
                 quote marquee). Self-contained: handles its own fetch,
                 ownership gating, and saves against `/me/profile-flair`. */}
             {activeTab === "flair" ? (
@@ -1902,7 +1902,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               onClick={onClose}
               // Cancel = neutral, muted. Save = primary, action-color
               // tint. The two are visually distinct so a fast click
-              // doesn't accidentally discard unsaved edits — the
+              // doesn't accidentally discard unsaved edits, the
               // accent on Save reads as the "go" button at a glance.
               className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm text-keep-muted hover:bg-keep-banner hover:text-keep-text"
             >
@@ -1923,7 +1923,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         // preview) doesn't bubble to the editor's backdrop and close that too.
         // zIndex must beat the editor underneath us. The editor sits at 50
         // (or 60 in admin-edit mode), so the preview goes one tier higher
-        // — without this the preview opened UNDER the editor and was
+        //, without this the preview opened UNDER the editor and was
         // invisible. Modal portals to <body> in both cases, so these
         // z-index values compete in a single sibling stacking context.
         <div onClick={(e) => e.stopPropagation()}>
@@ -1942,7 +1942,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               setCharacters((prev) => [...prev, c]);
               setTarget({ kind: "character", id: c.id });
               // Drop the user onto the description tab so they can start
-              // writing immediately — most of the other tabs are empty
+              // writing immediately, most of the other tabs are empty
               // for a fresh character.
               setActiveTab("description");
               setCreateOpen(false);
@@ -2046,11 +2046,11 @@ function CreateCharacterModal({
 
 /**
  * Multi-portrait gallery management UI for character targets. Add by URL,
- * label, delete. Reordering deferred — most galleries are small and the
+ * label, delete. Reordering deferred, most galleries are small and the
  * primary avatarUrl already drives the hero/userlist icon.
  *
  * Each mutation hits the server immediately so the gallery stays consistent
- * with what others see — no "save" button per portrait.
+ * with what others see, no "save" button per portrait.
  */
 /**
  * Gallery scope drives the REST endpoint shape:
@@ -2093,7 +2093,7 @@ type ImgStatus = "loading" | "loaded" | "error";
  * touch-friendly up/down arrow buttons as a fallback that works the
  * same on every device), and a delete button. A trailing "new
  * portrait" draft card sits at the end of the list so adding more is
- * a single field-paste away — no separate "Add" mode toggle.
+ * a single field-paste away, no separate "Add" mode toggle.
  *
  * Edits commit on blur: URL/label PATCH the existing row, or POST a
  * new row when the draft slot is filled. NSFW toggles immediately.
@@ -2115,7 +2115,7 @@ function PortraitGalleryEditor({
   onChange: (next: CharacterPortrait[]) => void;
 }) {
   const [err, setErr] = useState<string | null>(null);
-  // Draft slot — the trailing empty card. Captured here (not inside
+  // Draft slot, the trailing empty card. Captured here (not inside
   // the card itself) so it survives if portraits prop refetches.
   const [draftUrl, setDraftUrl] = useState("");
   const [draftLabel, setDraftLabel] = useState("");
@@ -2287,7 +2287,7 @@ function PortraitGalleryEditor({
 }
 
 /** Single saved-portrait card with live preview + edit fields +
- *  drag/reorder controls. Pure presentation — every mutation goes
+ *  drag/reorder controls. Pure presentation, every mutation goes
  *  through callbacks so the parent owns the transactional state. */
 function PortraitCard({
   portrait,
@@ -2322,7 +2322,7 @@ function PortraitCard({
   onToggleNsfw: () => void;
   onDelete: () => void;
 }) {
-  // Local edit buffers — values commit to the parent (and the
+  // Local edit buffers, values commit to the parent (and the
   // server) on blur. This keeps every keystroke from PATCHing,
   // which would be wasteful AND would race when the user is
   // mid-edit and a refetch overwrites their buffer.
@@ -2337,7 +2337,7 @@ function PortraitCard({
     <div
       draggable
       onDragStart={(e) => {
-        // Dragged payload IS the portrait id — drop targets read it
+        // Dragged payload IS the portrait id, drop targets read it
         // to compute the from-index.
         e.dataTransfer.setData("text/portrait-id", portrait.id);
         e.dataTransfer.effectAllowed = "move";
@@ -2402,7 +2402,7 @@ function PortraitCard({
             placeholder="https://example.com/portrait.png"
             className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 font-mono text-[11px] outline-none focus:border-keep-action"
           />
-          {/* Up / Down / Delete — universal so touch users have a
+          {/* Up / Down / Delete, universal so touch users have a
               real reorder path even when HTML5 drag doesn't fire on
               their device. */}
           <button
@@ -2444,7 +2444,7 @@ function PortraitCard({
             const cur = portrait.label ?? "";
             if (next !== cur) onSaveLabel(next);
           }}
-          placeholder="Label (optional — e.g. 'transformed')"
+          placeholder="Label (optional, e.g. 'transformed')"
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-0.5 outline-none focus:border-keep-action"
         />
         <label className="flex items-center gap-1 text-[11px] text-keep-muted">
@@ -2458,7 +2458,7 @@ function PortraitCard({
         </label>
         {imgStatus === "error" ? (
           <p className="text-[10px] text-keep-accent">
-            This image won't load — either the URL is broken, the host blocks hotlinking, or it requires a referrer the browser strips. Try a direct CDN link.
+            This image won't load, either the URL is broken, the host blocks hotlinking, or it requires a referrer the browser strips. Try a direct CDN link.
           </p>
         ) : null}
       </div>
@@ -2467,7 +2467,7 @@ function PortraitCard({
 }
 
 /** Trailing draft card. Same visual layout as a saved card but
- *  with no server id yet — committing the URL POSTs it and
+ *  with no server id yet, committing the URL POSTs it and
  *  promotes it to a real portrait. */
 function DraftPortraitCard({
   url,
@@ -2495,7 +2495,7 @@ function DraftPortraitCard({
   // moment URL loses focus, the draft card unmounts mid-typing
   // when the user tabs to the label or NSFW. So we listen on the
   // card wrapper and only commit when focus has actually left the
-  // entire card (relatedTarget is outside) — letting URL/Label/NSFW
+  // entire card (relatedTarget is outside), letting URL/Label/NSFW
   // edits all happen inside the draft before promoting it.
   return (
     <div
@@ -2554,7 +2554,7 @@ function DraftPortraitCard({
         </label>
         {trimmed && imgStatus === "error" ? (
           <p className="text-[10px] text-keep-accent">
-            Preview won't load. The portrait will still save, but viewers may not see it either — try a direct CDN link.
+            Preview won't load. The portrait will still save, but viewers may not see it either, try a direct CDN link.
           </p>
         ) : null}
       </div>
@@ -2563,7 +2563,7 @@ function DraftPortraitCard({
 }
 
 /* ============================================================
- *  LinksEditor — owner-set external links rendered as styled
+ *  LinksEditor, owner-set external links rendered as styled
  *  chips on the profile. Up to 6 per profile (server-enforced).
  * ============================================================ */
 
@@ -2607,12 +2607,12 @@ function LinksEditor({
     setErr(null);
   }
 
-  // Triggered by the inline "Add" button. NOT a form submit handler —
+  // Triggered by the inline "Add" button. NOT a form submit handler,
   // the surrounding ProfileEditor is itself a <form onSubmit={save}>, and
   // an inner <form> nested inside it is invalid HTML. Browsers route
   // submit events from an inner form's button up to whichever ancestor
   // form the DOM commits to, which used to fire the outer profile save
-  // instead of this handler — links never POSTed, the outer save ran,
+  // instead of this handler, links never POSTed, the outer save ran,
   // and the user saw the profile-save side effects instead of a saved link.
   async function add() {
     if (!title.trim() || !url.trim()) return;
@@ -2786,7 +2786,7 @@ function LinksEditor({
 }
 
 /**
- * AvatarCropPicker — drag-to-pan + zoom slider over a square preview.
+ * AvatarCropPicker, drag-to-pan + zoom slider over a square preview.
  *
  * Layout: a square crop window (192px) holds a circle-mask overlay
  * showing exactly what the avatar will look like once saved. The
@@ -2798,7 +2798,7 @@ function LinksEditor({
  * Dragging inside the window moves the focal point. Movement is
  * converted from pixel delta to percent delta against the source's
  * natural dimensions (read after the image loads), accounting for the
- * fact that `object-fit: cover` already crops some of the source — we
+ * fact that `object-fit: cover` already crops some of the source, we
  * only let the user pan within the "hidden" overflow region.
  *
  * Zoom is a 1..MAX slider. Both axes are clamped via the shared
@@ -2807,7 +2807,7 @@ function LinksEditor({
  *
  * No-URL state: when the URL field is empty the picker renders a
  * muted placeholder explaining that a Main Profile Image URL is
- * required. Saves still work — they ship the current crop value but
+ * required. Saves still work, they ship the current crop value but
  * it has no visual effect until an avatar URL exists.
  */
 function AvatarCropPicker({
@@ -2850,7 +2850,7 @@ function AvatarCropPicker({
     const rect = el.getBoundingClientRect();
     // Convert pixel delta to percent delta on the source image. We
     // approximate by treating the container as the source's
-    // shorter-axis projection — for the 192px square preview this
+    // shorter-axis projection, for the 192px square preview this
     // gives a comfortable 1:1 drag feel. Dividing by zoom keeps the
     // pan rate consistent when zoomed in (a small pixel drag moves
     // the focal point a smaller percent when the image is bigger).
@@ -2905,7 +2905,7 @@ function AvatarCropPicker({
                 className="pointer-events-none h-full w-full object-cover"
                 style={imgStyle}
               />
-              {/* Pan affordance — small four-way arrows badge that
+              {/* Pan affordance, small four-way arrows badge that
                   hovers in the bottom-center of the circle so users
                   who don't read tooltips still see "this is draggable."
                   Fades on grab so it doesn't compete with the photo
@@ -2942,7 +2942,7 @@ function AvatarCropPicker({
           ) : (
             <div className="flex h-full w-full items-center justify-center px-3 text-center text-[11px] italic text-keep-muted">
               {trimmed && imgError
-                ? "Couldn't load that image — check the URL above."
+                ? "Couldn't load that image, check the URL above."
                 : "Paste a Main Profile Image URL above to crop."}
             </div>
           )}
@@ -3015,10 +3015,10 @@ function Field({
  * Editable chat-color picker. Writes onto the profile form state; the
  * containing save() handler bundles it into the PUT body for master or
  * character. Two scopes:
- *   - `master`  — null = system default. This is the OOC color and the
+ *   - `master` , null = system default. This is the OOC color and the
  *                 fallback every character without its own override
  *                 inherits.
- *   - `character` — null = inherit the master color. Setting a hex
+ *   - `character`, null = inherit the master color. Setting a hex
  *                 makes this character's messages render in that color
  *                 regardless of the tab's `/color` state, which is the
  *                 whole reason the per-character column exists (so
@@ -3026,7 +3026,7 @@ function Field({
  *                 even after a `/char switch`).
  *
  * The "Use OOC color" / "Use system default" button writes null rather
- * than a hex so the inheritance chain stays intact — clearing to a
+ * than a hex so the inheritance chain stays intact, clearing to a
  * literal "#000000" would freeze the inheritance even when the upstream
  * color changes later.
  */
@@ -3035,7 +3035,7 @@ function Field({
  * (default = show) and explicit `true` both round-trip to `false`; an
  * existing `false` round-trips back to undefined so the saved blob
  * doesn't accumulate redundant `: true` entries on every flip. The
- * field stays in the stats blob regardless — visibility only affects
+ * field stays in the stats blob regardless, visibility only affects
  * the rendered profile, not the persisted value.
  */
 function toggleVisibility(stats: CharacterStats, key: keyof CharacterStatsVisibility): CharacterStats {
@@ -3053,7 +3053,7 @@ function toggleVisibility(stats: CharacterStats, key: keyof CharacterStatsVisibi
 
 /**
  * Tiny eye / eye-slash button used inline next to a stats field label.
- * Pure cosmetic affordance — the actual visibility toggling is owned
+ * Pure cosmetic affordance, the actual visibility toggling is owned
  * by the parent's `onToggle` so the button stays stateless and
  * reusable across all the editor sections that want a show/hide
  * indicator (classic fields, the Vibe section header, the Attributes
@@ -3086,10 +3086,10 @@ function VisibilityToggle({
 }
 
 /**
- * Vibe-axes editor — eight bipolar 0..100 sliders that paint the
+ * Vibe-axes editor, eight bipolar 0..100 sliders that paint the
  * "what kind of character is this at a glance" read. Each axis can
  * be UNSET (null), in which case it doesn't render on the profile;
- * the editor still shows the slider with a "Not set — drag to set"
+ * the editor still shows the slider with a "Not set, drag to set"
  * label so the owner can opt the axis in.
  *
  * Distinct from World vibe axes (magnitude); each end of the axis
@@ -3175,7 +3175,7 @@ function VibeAxesEditor({
 }
 
 /**
- * Attributes editor — a freeform numeric stat block. Each row is a
+ * Attributes editor, a freeform numeric stat block. Each row is a
  * label + value + per-row min/max bounds so a D&D-style "STR 14"
  * (min 1, max 20) and an HP gauge (min 0, max whatever) can coexist
  * on the same character without sharing scales.
@@ -3198,7 +3198,7 @@ function AttributesEditor({
   function update(idx: number, patch: Partial<CharacterAttribute>) {
     // Mid-typing path: apply the patch verbatim, no cross-field
     // clamp. Auto-clamping on every keystroke produced surprising
-    // state when a user typed "55" intending "550" — the "55"
+    // state when a user typed "55" intending "550", the "55"
     // cascade dragged value+max along with min and the next digit
     // landed on the cascaded state instead of the original. The
     // clamp now runs on blur (see `clampRow` below) and again on
@@ -3228,7 +3228,7 @@ function AttributesEditor({
       if (merged.min > merged.max) merged.max = merged.min;
       if (merged.value < merged.min) merged.value = merged.min;
       if (merged.value > merged.max) merged.value = merged.max;
-      // Skip the state write entirely when nothing moved — keeps
+      // Skip the state write entirely when nothing moved, keeps
       // useless re-renders out of the tree.
       if (
         merged.min === row.min &&
@@ -3287,7 +3287,7 @@ function AttributesEditor({
         />
       </legend>
       <p className="mb-3 text-[10px] text-keep-muted">
-        Numeric stat block — D&D ability scores ("STR 14"), HP, or any custom attributes you want next to your profile. Each row sets its own min / max so different stat systems can live side by side.
+        Numeric stat block, D&D ability scores ("STR 14"), HP, or any custom attributes you want next to your profile. Each row sets its own min / max so different stat systems can live side by side.
       </p>
       {rows.length === 0 ? (
         <p className="mb-2 text-[11px] italic text-keep-muted">
@@ -3423,7 +3423,7 @@ function ChatColorRow({
 }) {
   // Local mirror so an in-progress typed hex doesn't bubble up on every
   // keystroke and trigger downstream side effects (formDirty etc.).
-  // Pushed up on blur or via the explicit "Set" button — the swatch
+  // Pushed up on blur or via the explicit "Set" button, the swatch
   // picker still commits on each pick, since that's a discrete choice.
   const [draft, setDraft] = useState(value ?? "");
   useEffect(() => { setDraft(value ?? ""); }, [value]);
@@ -3553,12 +3553,12 @@ function NotificationsRow({
  * In-app sound effect toggles. Three discrete events, three checkboxes.
  * Stored as boolean columns on `users` (sound_*_enabled) and persisted
  * via the same /me/profile PUT that handles the rest of the master
- * settings — saved when the user clicks Save in the editor footer, not
+ * settings, saved when the user clicks Save in the editor footer, not
  * on toggle.
  *
  * All four default on; users opt out of the noises they find
  * intrusive. The toggles take effect immediately on save thanks to the
- * Zustand store push in the parent's onSubmit — no need to reload the
+ * Zustand store push in the parent's onSubmit, no need to reload the
  * page or the Audio elements.
  */
 function SoundRow({
@@ -3648,8 +3648,8 @@ function SoundRow({
 
 /**
  * Character-only Direct Messenger opt-in toggle. New characters
- * default to OFF — friend-add lookups and DM recipient pickers
- * filter them out — and the player has to deliberately turn it on
+ * default to OFF, friend-add lookups and DM recipient pickers
+ * filter them out, and the player has to deliberately turn it on
  * here for the character to appear as a contactable identity. The
  * copy below leans on plain language so the consequence is obvious:
  * existing friendships stick around, but new reach attempts can't
@@ -3691,10 +3691,10 @@ function CharacterDmOptInRow({
 /**
  * Input behavior opt-outs. Two toggles for composer features that some
  * users find intrusive rather than helpful:
- *   - Command/post history (ArrowUp recall) — easy to brush ArrowUp by
+ *   - Command/post history (ArrowUp recall), easy to brush ArrowUp by
  *     accident while moving the cursor; with history off, the arrow
  *     keys do nothing but move the caret.
- *   - Thesaurus on highlight — the synonym popup opens whenever a word
+ *   - Thesaurus on highlight, the synonym popup opens whenever a word
  *     is selected, which surprises users who highlight just to copy.
  *
  * Both default off (= feature enabled) for new accounts; flipping the
@@ -3751,7 +3751,7 @@ function InputBehaviorRow({
 }
 
 /**
- * Earning — hide-Currency toggle.
+ * Earning, hide-Currency toggle.
  *
  * Master-scope only (character pools cascade off the master flag).
  * Saves immediately on change rather than riding the profile form's
@@ -3789,7 +3789,7 @@ function CurrencyPrivacyRow() {
         if (hideCurrency === null) setHideCurrency(!!r.master.hideCurrencyCount);
         if (hideXp === null) setHideXp(!!r.master.hideXpCount);
       })
-      .catch(() => { /* user can still toggle — server is source of truth on save */ });
+      .catch(() => { /* user can still toggle, server is source of truth on save */ });
     return () => { cancelled = true; };
   }, [snapshot, hideCurrency, hideXp]);
 
@@ -3812,7 +3812,7 @@ function CurrencyPrivacyRow() {
     }
   }
 
-  // Current totals readout — so the user sees their own Earning state
+  // Current totals readout, so the user sees their own Earning state
   // here, not just the privacy toggles. Mirrors what the chat strip
   // shows; pulled from the same snapshot so it stays in sync with
   // live `earning:earned` updates.
@@ -4017,7 +4017,7 @@ function PushRow() {
         <div>
           <div className="text-keep-text">Browser push (offline)</div>
           <div className="text-[10px] text-keep-muted">
-            Pings even when this tab is closed. Privacy: payloads carry no message body — just "whisper waiting" / "mention waiting".
+            Pings even when this tab is closed. Privacy: payloads carry no message body, just "whisper waiting" / "mention waiting".
           </div>
         </div>
         {state === "loading" ? (
@@ -4050,7 +4050,7 @@ function PushRow() {
 }
 
 /* ============================================================
- *  JournalEditor — owner-only solo writing attached to a
+ *  JournalEditor, owner-only solo writing attached to a
  *  character. Public entries surface on the profile in
  *  chronological order; private entries only show here.
  * ============================================================ */
@@ -4212,7 +4212,7 @@ function JournalEntryForm({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Plain handler (not onSubmit) — see LinksEditor.add for why nesting a
+  // Plain handler (not onSubmit), see LinksEditor.add for why nesting a
   // <form> inside the outer ProfileEditor <form> silently routes the
   // submit to the wrong handler.
   async function submit() {

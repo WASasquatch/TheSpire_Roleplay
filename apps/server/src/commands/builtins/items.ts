@@ -1,5 +1,5 @@
 /**
- * /give /throw /drop — chat commands that consume items from the
+ * /give /throw /drop, chat commands that consume items from the
  * sender's per-identity inventory and emit a flavor-line system
  * message drawn from the item's per-command random message table.
  *
@@ -10,11 +10,11 @@
  *   /throw <name> [num] <item>   consumes `num` units from the sender;
  *                                target is named in the chat line but
  *                                doesn't receive anything
- *   /drop  <name> [num] <item>   same as /throw — different flavor
+ *   /drop  <name> [num] <item>   same as /throw, different flavor
  *                                ("drops on" vs "throws at")
  *
  * Target resolution: matches against the room's current occupants by
- * `displayName` (case-insensitive — exact first, then prefix-unique).
+ * `displayName` (case-insensitive, exact first, then prefix-unique).
  * Self-targeting is allowed ("WAS drops a House on WAS" is a feature,
  * not a bug, and self-give between two of your own identities is the
  * only legal cross-partition transfer).
@@ -25,7 +25,7 @@
  *     inventory pool to debit.
  *   - For /give, target's CURRENTLY-VOICED identity determines which
  *     inventory pool to credit. If they're voicing Kaal, the cookie
- *     lands in Kaal's pocket — not the master's.
+ *     lands in Kaal's pocket, not the master's.
  *
  * Atomicity: the debit (+ credit, for /give) runs in a single sqlite
  * transaction so a concurrent /give can't double-spend the same stack.
@@ -33,14 +33,14 @@
  * Audit: every command writes an `earning_ledger` row with reason
  * `command_give` / `command_throw` / `command_drop` so masteradmin
  * can trace large inventory shifts back to specific chats. /give
- * writes two rows — one debit-style row for the sender (positive
+ * writes two rows, one debit-style row for the sender (positive
  * quantity in metadata, no currency delta) and one credit-style row
- * for the target — so each identity's ledger surfaces what landed
+ * for the target, so each identity's ledger surfaces what landed
  * in / left its inventory.
  *
  * Rendering: the rendered template lands as a `kind: "system"` chat
  * message via `addSystemMessage`. Name styling for `{sender}` /
- * `{target}` is not honored in the body — Phase 2 substitutes plain
+ * `{target}` is not honored in the body, Phase 2 substitutes plain
  * text. The chat renderer will gain template-aware name styling in
  * a later iteration; the templates already use the placeholder
  * shape that will support it.
@@ -62,10 +62,10 @@ type ItemCommandKind = "give" | "throw" | "drop";
 
 /** Minimum gap between consecutive `/throw` and `/drop` invocations
  *  by the same sender, in ms. Prevents a stack of cookies from being
- *  flung at someone 50 times in 5 seconds — both because that's
+ *  flung at someone 50 times in 5 seconds, both because that's
  *  abusive in chat AND because the receiving client's effect runner
  *  would compound shake animations into a seizure-grade strobe.
- *  /give is exempt — it's a gift, not an attack, and stack-cap is the
+ *  /give is exempt, it's a gift, not an attack, and stack-cap is the
  *  natural pacing.
  *
  *  Process-local: a server restart resets every user's cooldown to
@@ -75,7 +75,7 @@ const ATTACK_COOLDOWN_MS = 4000;
 
 /** sender userId → unix ms timestamp of the last accepted /throw or
  *  /drop. Module-scoped Map so the gate survives across calls within
- *  one server process. We never grow this unbounded — the entry is
+ *  one server process. We never grow this unbounded, the entry is
  *  overwritten on each accepted command, and stale entries just sit
  *  there harmlessly until the next process restart. */
 const lastAttackAt = new Map<string, number>();
@@ -114,7 +114,7 @@ function parseItemCommandArgs(args: readonly string[]): {
 /** Resolve `query` against the items catalog by (key | name | plural |
  *  aliases). Lookups are case-insensitive and accept the slug, the
  *  singular display name, the plural display name, or any string in
- *  the item's `aliases_json` array — so `cookie` / `cookies`
+ *  the item's `aliases_json` array, so `cookie` / `cookies`
  *  / `biscuit`, `dagger` / `knife` / `blade`, etc. all resolve to the
  *  right row. Returns null when nothing matches.
  *
@@ -163,7 +163,7 @@ function matchOccupant(
   const exact = occupants.filter((o) => norm(o.displayName) === q);
   if (exact.length === 1) return { ok: true, occupant: exact[0]! };
   if (exact.length > 1) {
-    // Two characters in the same room sharing a display name — rare
+    // Two characters in the same room sharing a display name, rare
     // (two players named "Kaal" coincidentally) but possible. Force
     // disambiguation by surfacing the conflict.
     return { ok: false, ambiguous: true, matches: exact.map((o) => o.displayName) };
@@ -198,7 +198,7 @@ function pickTemplate(json: string): string | null {
  *  the chat renderer turns into a 1.2em img. When the item has no
  *  iconUrl set we collapse the placeholder to empty so the rendered
  *  line doesn't end up with a literal `<icon src="">` tag. The URL is
- *  passed straight through — the client parser owns the URL allow-
+ *  passed straight through, the client parser owns the URL allow-
  *  list (`/assets/...` or `http(s)://...`), so a malformed iconUrl
  *  here fails closed there. */
 function renderTemplate(
@@ -274,7 +274,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
   // Cooldown gate for the "attack-flavored" commands. /give is a gift
   // and exempt; /throw and /drop produce a visible body-shake on the
   // recipient's client, and flooding those is both spammy in chat
-  // AND seizure-grade for the receiver — the cooldown caps that at
+  // AND seizure-grade for the receiver, the cooldown caps that at
   // one effect per ATTACK_COOLDOWN_MS per sender.
   //
   // Important: this runs BEFORE the transaction so a rejected call
@@ -288,7 +288,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
       notice(
         ctx,
         "ITEM_CMD_COOLDOWN",
-        `Slow down — you can /${kind} again in ${remaining}s.`,
+        `Slow down, you can /${kind} again in ${remaining}s.`,
       );
       return;
     }
@@ -307,14 +307,18 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
   const targetScope: "user" | "character" = target.characterId ? "character" : "user";
   const targetOwnerId = target.characterId ?? target.userId;
 
-  // Atomic mutation. Wrapping the funds check, debit, and (for give)
-  // credit + stack-cap check in a single transaction so two
-  // concurrent /give commands by the same identity can't double-
-  // spend the same stack, and a /give that would overflow the
-  // target's cap doesn't end up partial-transferred.
+  // Atomic mutation. Wrapping the funds check + debit + (for give)
+  // credit in a single transaction so two concurrent /give commands
+  // by the same identity can't double-spend the same stack.
+  //
+  // No stack-cap check: the catalog's `stackLimit` column is
+  // vestigial in 2026, players accumulate without a target-side
+  // ceiling, by design. The column is preserved as a soft admin
+  // hint (the admin items tool still lets staff set a number for
+  // future reference) but no runtime gate reads it on this path.
   type TxnResult =
     | { ok: true }
-    | { ok: false; status: number; error: string; have?: number; want?: number; stackLimit?: number };
+    | { ok: false; status: number; error: string; have?: number; want?: number };
   const result: TxnResult = ctx.db.transaction((tx): TxnResult => {
     // Read sender's current stack.
     const senderRow = tx.select({ qty: identityInventory.quantity })
@@ -331,38 +335,9 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
       return { ok: false, status: 400, error: "not enough", have, want: quantity };
     }
 
-    // For /give: check target stack cap BEFORE debiting. Self-transfer
-    // (sender and target are the same identity) is a no-op net change
-    // — the debit + re-credit cancel out, so the cap check would be
-    // redundant against the pre-debit value of `have`.
-    if (kind === "give") {
-      const sameIdentity =
-        senderScope === targetScope && senderOwnerId === targetOwnerId;
-      if (!sameIdentity) {
-        const tgtRow = tx.select({ qty: identityInventory.quantity })
-          .from(identityInventory)
-          .where(and(
-            eq(identityInventory.ownerScope, targetScope),
-            eq(identityInventory.ownerId, targetOwnerId),
-            eq(identityInventory.itemKey, item.key),
-          ))
-          .limit(1)
-          .all()[0];
-        const tgtHave = tgtRow?.qty ?? 0;
-        if (tgtHave + quantity > item.stackLimit) {
-          return {
-            ok: false,
-            status: 409,
-            error: "target stack full",
-            stackLimit: item.stackLimit,
-          };
-        }
-      }
-    }
-
     // Debit sender. Delete the row at quantity=0 so the inventory
     // map doesn't accumulate empty stacks over time. Don't touch
-    // the collection here — same-identity /give re-inserts the
+    // the collection here, same-identity /give re-inserts the
     // inventory row immediately below, so the final-state prune at
     // the end of the txn is what's load-bearing.
     const senderRemaining = have - quantity;
@@ -384,7 +359,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
     }
 
     // Credit target (give only). Re-read the target row INSIDE the
-    // transaction — the debit above may have just deleted the row
+    // transaction, the debit above may have just deleted the row
     // when sender == target. Insert when no row exists yet; update
     // otherwise.
     if (kind === "give") {
@@ -425,7 +400,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
     // paths where this triggers; same-identity `/give` re-inserts
     // the row above, so the row still exists and the prune skips.)
     // The TARGET identity in `/give` only ever credits the row, so
-    // pinned-but-empty can't happen there — no symmetric prune
+    // pinned-but-empty can't happen there, no symmetric prune
     // needed.
     const senderFinal = tx.select({ qty: identityInventory.quantity })
       .from(identityInventory)
@@ -463,7 +438,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
         roomId: ctx.roomId,
       }),
     }).run();
-    // Target ledger row (give only — the only command that actually
+    // Target ledger row (give only, the only command that actually
     // deposits anything).
     if (kind === "give") {
       tx.insert(earningLedger).values({
@@ -496,12 +471,6 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
         "ITEM_INSUFFICIENT",
         `You have ${result.have ?? 0} ${itemNoun}, can't ${kind} ${quantity}.`,
       );
-    } else if (result.error === "target stack full") {
-      notice(
-        ctx,
-        "ITEM_TARGET_FULL",
-        `${target.displayName}'s pockets are full (stack cap ${result.stackLimit}). They can't carry that many ${item.namePlural ?? `${item.name}s`}.`,
-      );
     } else {
       notice(ctx, "ITEM_CMD_FAILED", result.error);
     }
@@ -526,7 +495,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
   // Attack-flavored commands fire the `struck` effect on the target's
   // sockets that are in THIS room (so the effect renders in the
   // scene it happened in, not on the target's other tabs). Also
-  // record the sender's cooldown timestamp here — only AFTER the
+  // record the sender's cooldown timestamp here, only AFTER the
   // transaction succeeds, so a failed /throw doesn't burn cooldown.
   if (kind === "throw" || kind === "drop") {
     lastAttackAt.set(ctx.user.id, Date.now());
@@ -574,7 +543,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
 
 /** Fire a `chat:effect` event at every live socket of `targetUserId`
  *  that's currently joined to the source room. Scoping to the room
- *  (not just the user) keeps the effect contextual — a target with
+ *  (not just the user) keeps the effect contextual, a target with
  *  a second tab open in a different room doesn't see a body-shake
  *  there for an attack that happened elsewhere.
  *
@@ -593,7 +562,7 @@ async function emitChatEffect(
   },
 ): Promise<void> {
   const sockets = await ctx.io.in(`room:${ctx.roomId}`).fetchSockets();
-  // `exactOptionalPropertyTypes: true` — optional fields can't be
+  // `exactOptionalPropertyTypes: true`, optional fields can't be
   // assigned `undefined` literally, they must be omitted. Build the
   // emit payload conditionally so missing fields don't carry an
   // explicit `undefined` on the wire.
@@ -617,7 +586,7 @@ async function emitChatEffect(
 
 /** Fan out the `earning:inventory_changed` event to every live
  *  socket belonging to `userId`. Cheap when the user has no live
- *  sockets — Socket.IO's `fetchSockets` returns an empty list and
+ *  sockets, Socket.IO's `fetchSockets` returns an empty list and
  *  the loop is a no-op. */
 async function emitInventoryChanged(
   ctx: CommandContext,
@@ -654,7 +623,7 @@ export const giveCommand: CommandHandler = {
   name: "give",
   usage: "/give <name> [num] <item>",
   description:
-    "Hand `num` units of an item to another user in the room. The item leaves your inventory and lands in theirs (whichever identity they're currently voicing). Quantity defaults to 1. Item can be the slug (cookie) or display name (cookies). Each identity (OOC + each character) has its own inventory — `/give` is the only legal way to move items across the partition.",
+    "Hand `num` units of an item to another user in the room. The item leaves your inventory and lands in theirs (whichever identity they're currently voicing). Quantity defaults to 1. Item can be the slug (cookie) or display name (cookies). Each identity (OOC + each character) has its own inventory, `/give` is the only legal way to move items across the partition.",
   subcommands: [
     {
       verb: "<name> <item>",
@@ -676,7 +645,7 @@ export const throwCommand: CommandHandler = {
   name: "throw",
   usage: "/throw <name> [num] <item>",
   description:
-    "Consume an item to toss it at someone in the room — flavor only, target gets nothing. Quantity defaults to 1. Item can be the slug or display name. Each item ships its own random `/throw` lines; if an item has none, /throw isn't allowed on it. Subject to a 4-second per-sender cooldown.",
+    "Consume an item to toss it at someone in the room, flavor only, target gets nothing. Quantity defaults to 1. Item can be the slug or display name. Each item ships its own random `/throw` lines; if an item has none, /throw isn't allowed on it. Subject to a 4-second per-sender cooldown.",
   subcommands: [
     {
       verb: "<name> <item>",
@@ -698,7 +667,7 @@ export const dropCommand: CommandHandler = {
   name: "drop",
   usage: "/drop <name> [num] <item>",
   description:
-    "Consume an item to drop it on someone in the room — flavor only, target gets nothing. Same shape as /throw with different flavor text. Quantity defaults to 1. Each item ships its own random `/drop` lines; if an item has none, /drop isn't allowed on it. Subject to a 4-second per-sender cooldown.",
+    "Consume an item to drop it on someone in the room, flavor only, target gets nothing. Same shape as /throw with different flavor text. Quantity defaults to 1. Each item ships its own random `/drop` lines; if an item has none, /drop isn't allowed on it. Subject to a 4-second per-sender cooldown.",
   subcommands: [
     {
       verb: "<name> <item>",

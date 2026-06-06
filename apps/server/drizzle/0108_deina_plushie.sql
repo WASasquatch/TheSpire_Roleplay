@@ -1,5 +1,5 @@
 -- New builtin: Deina Plushie. Same shape as kaal_dragon_plushie
--- (gift category, $1500, stack 3) — both are character-named
+-- (gift category, $1500, stack 3), both are character-named
 -- collectible plushies, so pairing the pricing/limits keeps them
 -- as peer trophies in the gift bucket.
 --

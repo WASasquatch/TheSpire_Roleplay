@@ -4,12 +4,12 @@
 -- price ladders without standing out as outliers.
 --
 -- Tier overview:
---   * Pets (cats / dog / white tiger) — 2500-12000, stack 1.
---   * Plushies (frodo, timelord) — 1500 stack 3, matching the
+--   * Pets (cats / dog / white tiger), 2500-12000, stack 1.
+--   * Plushies (frodo, timelord), 1500 stack 3, matching the
 --     iconic-figure plushie tier 0110 established.
---   * Greeter hats — 600 stack 5, gift category. Decorative.
---   * Sonic-screwdriver tier — 1500-2500 stack 2, tool category.
---   * Curio junk (broken / worn / lost / rotten things) —
+--   * Greeter hats, 600 stack 5, gift category. Decorative.
+--   * Sonic-screwdriver tier, 1500-2500 stack 2, tool category.
+--   * Curio junk (broken / worn / lost / rotten things),
 --     30-120 stack 5-10, joke category. Cheap, throwable, gag.
 --   * pouch_of_gold → treasure 500 stack 5.
 --   * foraged_herbs → food 80 stack 10.
@@ -19,7 +19,7 @@
 --
 -- Every INSERT uses `INSERT OR IGNORE`. If an admin already minted
 -- a custom item under one of these slugs, the seed silently no-ops
--- for that key — admins keep their edit, the rest of the catalog
+-- for that key, admins keep their edit, the rest of the catalog
 -- still seeds.
 --
 -- Every template uses the `{icon} {item_name}` convention from

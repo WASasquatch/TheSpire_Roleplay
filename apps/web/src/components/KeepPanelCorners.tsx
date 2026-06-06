@@ -1,5 +1,5 @@
 /**
- * `<KeepPanelCorners />` — renders the two bottom-corner ornament
+ * `<KeepPanelCorners />`, renders the two bottom-corner ornament
  * spans that the `.keep-panel-corners` CSS rules expect as children.
  *
  * CSS pseudo-elements can only provide two corners (::before / ::after),

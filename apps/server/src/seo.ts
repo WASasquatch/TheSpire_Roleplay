@@ -10,7 +10,7 @@ import { getSettings } from "./settings.js";
  * Site-wide keyword shelf shared across every public route. Lead with
  * the term the user-facing complaint identified: searches for
  * "The Spire Chat" should land here, not on RPG-sites unrelated to
- * the actual product. Order matters for some crawlers — most-specific
+ * the actual product. Order matters for some crawlers, most-specific
  * first, broader synonyms later.
  */
 const DEFAULT_KEYWORDS =
@@ -21,7 +21,7 @@ const DEFAULT_KEYWORDS =
 /**
  * Homepage tagline appended after the admin-configured siteName. Keeps
  * the `<title>` keyword-rich without forcing admins to bake search
- * keywords into the brand name itself — the bare brand still gets to
+ * keywords into the brand name itself, the bare brand still gets to
  * own the `og:site_name` slot. Mirrors the static default in
  * `apps/web/index.html` so the rewritten and bare-GET copies of the
  * page tell the same story to indexers.
@@ -30,7 +30,7 @@ const HOMEPAGE_TAGLINE = "Roleplay Chat & Collaborative Writing";
 
 /**
  * Generate a fresh nonce for a single HTTP response. Base64 of 16 random
- * bytes — 128 bits is well above the CSP3 floor (the spec asks for ≥
+ * bytes, 128 bits is well above the CSP3 floor (the spec asks for ≥
  * 128 bits because the policy directly trusts anything that quotes the
  * nonce). Url-safe so it survives being dropped into an HTML attribute
  * without escaping.
@@ -49,7 +49,7 @@ export function generateCspNonce(): string {
  *   2. Vite's prod-built `<script type="module" src="/assets/...">` tag.
  *   3. The admin-configured analytics scripts spliced into HEAD_EXTRA.
  *
- * The regex is intentionally simple — we only care about the tag-open
+ * The regex is intentionally simple, we only care about the tag-open
  * sequence and don't try to parse attributes. Anything looking like
  * `<script foo` becomes `<script nonce="…" foo` (and same for `<style`).
  */
@@ -101,7 +101,7 @@ export function escapeHtmlAttr(text: string): string {
  */
 function stripToText(html: string, maxChars = 155): string {
   // FIRST pass: drop entire tag bodies for tags whose CONTENT is NOT
-  // user-visible prose. `<style>` is the load-bearing case — bio
+  // user-visible prose. `<style>` is the load-bearing case, bio
   // sanitization keeps custom CSS for theming, so without this step
   // a 2000-char `.section { … }` block in a user's bio leaked into
   // the og:description verbatim and Discord/Slack cards showed raw
@@ -109,7 +109,7 @@ function stripToText(html: string, maxChars = 155): string {
   // dropped by the bio sanitizer entirely, but we belt-and-suspenders
   // it here in case any pre-sanitizer data still carries one. The
   // `<iframe>` rule is for the YouTube embed shortcut sanitizeBio
-  // allows — its `src` URL would otherwise blob into the snippet.
+  // allows, its `src` URL would otherwise blob into the snippet.
   // SECOND pass: drop all remaining tag MARKERS so attributes and
   // intentional prose markup don't leak. The body text of `<p>`,
   // `<span>`, etc. survives this pass.
@@ -136,7 +136,7 @@ function stripToText(html: string, maxChars = 155): string {
  * Format a join date for the statistical profile OG snippet ("…since
  * March 2025"). Month-precision so the snippet stays compact and we
  * don't seed a precise account-creation timestamp into search-result
- * link previews. Returns "" if the input isn't a usable date — the
+ * link previews. Returns "" if the input isn't a usable date, the
  * caller falls back to a date-less variant of the description.
  */
 function formatJoinDate(input: Date | number | null | undefined): string {
@@ -195,7 +195,7 @@ export async function renderSplashHtml(
     "A roleplay-focused chat sanctuary.";
 
   // Per-route SEO. Every public bookmarkable page gets its own title,
-  // description, canonical URL, and keyword shelf — otherwise crawlers
+  // description, canonical URL, and keyword shelf, otherwise crawlers
   // see N identical pages and duplicate-content rules collapse them,
   // costing us the targeted keyword space. Routes serving real data
   // (profiles, worlds, stories) do a tiny scoped DB read to pull the
@@ -225,7 +225,7 @@ export async function renderSplashHtml(
     .replace(
       // Per-route keyword shelf. Google ignores `<meta name="keywords">`
       // but Bing, DuckDuckGo, and a long tail of niche crawlers still
-      // index it — and Discord / Slack card scrapers pass it through to
+      // index it, and Discord / Slack card scrapers pass it through to
       // their previews. Cheap inclusion, measurable upside.
       /<meta name="keywords" content="[^"]*"\s*\/?>/,
       `<meta name="keywords" content="${keywordsAttr}" />`,
@@ -294,7 +294,7 @@ export async function renderSplashHtml(
   // Surface the CSP nonce to runtime JS via a `<meta>` tag so client
   // code that dynamically creates `<style>` / `<script>` elements
   // (the name-style catalog injector + per-user CSS-var stamper)
-  // can stamp the nonce on them — otherwise the strict
+  // can stamp the nonce on them, otherwise the strict
   // `style-src 'self' 'nonce-…'` CSP blocks every dynamic stylesheet
   // and name-style classes simply don't apply (chat names render
   // as plain text on prod even though local dev works). We splice
@@ -339,7 +339,7 @@ export function renderRobotsTxt(origin: string): string {
  *    - Profiles: only `users.isPublic = true && !isNsfw`. Characters are
  *      reachable via the same `/p/:name` route the SPA exposes but listing
  *      characters in addition to master usernames could double up the same
- *      person — we stick to master accounts here for cleaner crawl shape.
+ *      person, we stick to master accounts here for cleaner crawl shape.
  *    - Worlds: any non-private world (public OR open).
  */
 export async function renderSitemapXml(db: Db, origin: string): Promise<string> {
@@ -374,7 +374,7 @@ export async function renderSitemapXml(db: Db, origin: string): Promise<string> 
   ];
 
   // Public + SFW (G/PG/PG-13) published stories. The previous version
-  // pointed at `/stories/@…` — those URLs 404 because the actual
+  // pointed at `/stories/@…`, those URLs 404 because the actual
   // route is `/scriptorium/@…` (see index.ts:1396). Fixed here so
   // crawlers don't blacklist us for serving a sitemap full of 404s.
   try {
@@ -410,10 +410,10 @@ export async function renderSitemapXml(db: Db, origin: string): Promise<string> 
         `  </url>`,
       );
     }
-  } catch { /* swallow — the sitemap still serves the entrance URLs */ }
+  } catch { /* swallow, the sitemap still serves the entrance URLs */ }
 
   // Public, non-NSFW user profiles. Master accounts only (characters
-  // share the same /p/:name space — adding them too would double-list
+  // share the same /p/:name space, adding them too would double-list
   // the same person from a search-results perspective).
   try {
     const rows = await db
@@ -493,7 +493,7 @@ interface RouteMeta {
  * a hidden entity and don't fragment crawler dedup across broken
  * deep-links.
  *
- * Title format: `{Specific thing} · {SiteName}` — pipe-delimited
+ * Title format: `{Specific thing} · {SiteName}`, pipe-delimited
  * variants sometimes show up in tweaked SEO advice, but the middle dot
  * matches what `apps/web/src/lib/scriptoriumUrl.ts` and similar use
  * for in-app breadcrumbs, so the format stays consistent across
@@ -586,7 +586,7 @@ async function resolveRouteMeta(
         };
       }
     } catch { /* fall through */ }
-    // Private / no match — generic Scriptorium meta, canonical at the catalog.
+    // Private / no match, generic Scriptorium meta, canonical at the catalog.
     return {
       title: `Scriptorium - Collaborative Stories · ${siteName}`,
       description: siteDescription,
@@ -715,7 +715,7 @@ async function resolveRouteMeta(
  * stylesheet + favicon as the splash so it doesn't look like a stranded
  * server error page; offers a single link back to the chat.
  *
- * Note: this is a one-off HTML string rather than a React render — keeping
+ * Note: this is a one-off HTML string rather than a React render, keeping
  * the 404 path simple (no SPA boot) matters for crawlers and for the
  * pathological case where the bundle itself fails to load.
  */
@@ -725,7 +725,7 @@ export async function render404Html(db: Db, origin: string, nonce?: string): Pro
   const home = escapeHtmlAttr(`${origin}/`);
   // Nonce attribute on the inline <style> below so the strict CSP
   // ships allow it. Empty string when no nonce was passed (e.g. unit
-  // tests, dev-mode call paths) — browsers ignore `nonce=""`, which
+  // tests, dev-mode call paths), browsers ignore `nonce=""`, which
   // matches the pre-CSP behavior.
   const styleNonce = nonce ? ` nonce="${nonce}"` : "";
   // Inline minimal CSS so the page looks themed even if the main bundle is
@@ -738,7 +738,7 @@ export async function render404Html(db: Db, origin: string, nonce?: string): Pro
 <meta name="robots" content="noindex" />
 <link rel="icon" href="/favicon.ico" />
 <link rel="canonical" href="${home}" />
-<title>404 — ${title}</title>
+<title>404, ${title}</title>
 <style${styleNonce}>
   :root { color-scheme: light; }
   body {

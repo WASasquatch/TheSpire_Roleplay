@@ -1,11 +1,11 @@
 -- Hearth Flame redo to match the Hearth Fire name style's vocabulary.
 --
 -- The name style is a clean vertical flame gradient (red → orange →
--- gold) that pans up and down with a faint upward drop-shadow — no
+-- gold) that pans up and down with a faint upward drop-shadow, no
 -- particles, no 360° decoration. The previous border had 8 flame
 -- tongues distributed evenly around the rim, which broke physics
 -- (flames shouldn't lick sideways or downward) and stopped reading
--- as "hearth fire" — it looked like a flaming Catherine wheel.
+-- as "hearth fire", it looked like a flaming Catherine wheel.
 --
 -- New design (companion to ns-hearth-fire):
 --   • Outer ring uses the same color stack (b71c1c → ff7700 → ffd244)
@@ -17,7 +17,7 @@
 --     swaying with their own offsets. Bottom-anchored so the base
 --     stays planted on the log while the tip dances.
 --   • An ascending heat haze fades from the log toward the top of
---     the avatar — the warmth around the figure rather than around it.
+--     the avatar, the warmth around the figure rather than around it.
 
 UPDATE `freeform_borders`
 SET `style_css` = '.b-hearth-flame { padding: 2px; background: linear-gradient(to top, var(--c-ring-base, #b71c1c) 0%, var(--c-ring-mid, #ff7700) 50%, var(--c-ring-top, #ffd244) 100%); background-size: 100% 250%; animation: hfPan 2.4s ease-in-out infinite; box-shadow: 0 -4px 14px color-mix(in srgb, var(--c-glow, #ff8f00) 70%, transparent), 0 0 0 1px rgba(255,87,34,.45), inset 0 -6px 10px rgba(255,213,79,.35), inset 0 4px 6px rgba(0,0,0,.15); }

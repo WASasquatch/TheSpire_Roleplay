@@ -2,7 +2,7 @@
 --
 -- Migration 0154 tightened the bleed-prone templates uniformly,
 -- which fixed the userlist-overlap problem but also flattened the
--- showcase bloom at xl — the profile / catalog tile lost the
+-- showcase bloom at xl, the profile / catalog tile lost the
 -- dramatic effect the templates were designed for.
 --
 -- Replacement architecture: restore the FULL design-intent bleed
@@ -12,14 +12,14 @@
 -- BorderedAvatar.tsx `TEMPLATE_BLEED_SPREAD`): 0.35 for inline
 -- tiers (userlist, forum row), 0.7 at mid-zoom, 1.0 at showcase.
 -- Templates that don't reference the variable pick up its fallback
--- (1.0) and render unchanged — only the bleed-noisy templates need
+-- (1.0) and render unchanged, only the bleed-noisy templates need
 -- the variable threaded through.
 --
--- Same `is_builtin = 1` guard as 0154 — only seeded rows are
+-- Same `is_builtin = 1` guard as 0154, only seeded rows are
 -- rewritten; admin edits to seed rows are not preserved (they'd
 -- need to be re-authored via the Flair admin tab after running).
 
--- Sylvan — leaves fall, scaled to tier
+-- Sylvan, leaves fall, scaled to tier
 UPDATE `freeform_borders`
 SET `style_css` = '.b-forest { padding: 3px; background: conic-gradient(from 45deg, #2e7d32, #66bb6a, #aed581, #66bb6a, #1b5e20); animation: forestSway 6s ease-in-out infinite; box-shadow: 0 0 12px rgba(102,187,106,.4); }
 .b-forest .leaf { position: absolute; width: 8px; height: 12px; background: #66bb6a; border-radius: 0 100% 0 100%; box-shadow: inset 0 0 0 1px #2e7d32; }
@@ -40,7 +40,7 @@ SET `style_css` = '.b-forest { padding: 3px; background: conic-gradient(from 45d
 WHERE `key` = 'forest' AND `is_builtin` = 1;
 --> statement-breakpoint
 
--- Phoenix plumage — feather ring radius scales
+-- Phoenix plumage, feather ring radius scales
 UPDATE `freeform_borders`
 SET `style_css` = '.b-phoenix-v4 { padding: 4px; background: conic-gradient(from 90deg, #ff1744, #ff6f00, #ffab00, #ff3d00, #ff1744); animation: phx4Spin 6s linear infinite; box-shadow: 0 0 18px rgba(255,87,34,.55), inset 0 0 10px rgba(255,193,7,.35); }
 .b-phoenix-v4::before { content: ""; position: absolute; inset: calc(-10px * var(--b-spread, 1)); border-radius: 50%; background: radial-gradient(circle, rgba(255,109,0,.35), transparent 65%); animation: phx4Aura 2.2s ease-in-out infinite; pointer-events: none; }
@@ -91,7 +91,7 @@ SET `style_css` = '.b-phoenix-v4 { padding: 4px; background: conic-gradient(from
 WHERE `key` = 'phoenix-v4' AND `is_builtin` = 1;
 --> statement-breakpoint
 
--- Wyrm sovereign — ember spray distance + aura inset
+-- Wyrm sovereign, ember spray distance + aura inset
 UPDATE `freeform_borders`
 SET `style_css` = '.b-dragon-v2 { padding: 5px; background: conic-gradient(from 0deg, #4a0e0e, #b71c1c, #ff6f00, #ffab00, #ff6f00, #b71c1c, #4a0e0e); animation: dr2Breath 1.8s ease-in-out infinite; box-shadow: 0 0 24px rgba(244,67,54,.6), inset 0 0 12px rgba(255,193,7,.3); }
 .b-dragon-v2::before { content: ""; position: absolute; inset: calc(-12px * var(--b-spread, 1)); border-radius: 50%; background: radial-gradient(circle, rgba(255,87,34,.35) 30%, rgba(255,193,7,.2) 50%, transparent 70%); animation: dr2Aura 1.8s ease-in-out infinite; pointer-events: none; }
@@ -133,7 +133,7 @@ SET `style_css` = '.b-dragon-v2 { padding: 5px; background: conic-gradient(from 
 WHERE `key` = 'dragon-v2' AND `is_builtin` = 1;
 --> statement-breakpoint
 
--- Seraph — wings and aura halo scale
+-- Seraph, wings and aura halo scale
 UPDATE `freeform_borders`
 SET `style_css` = '.b-celestial-v2 { padding: 4px; background: radial-gradient(circle, #fffde7 0%, #fff59d 40%, #ffd54f 70%, #ffa726); box-shadow: 0 0 24px rgba(255,213,79,.8), inset 0 0 10px rgba(255,255,255,.6); }
 .b-celestial-v2::before { content: ""; position: absolute; inset: calc(-14px * var(--b-spread, 1)); border-radius: 50%; background: conic-gradient(from 0deg, transparent, rgba(255,235,59,.7), transparent, rgba(255,193,7,.5), transparent, rgba(255,235,59,.7), transparent); animation: cl2Rotate 5s linear infinite; }
@@ -166,7 +166,7 @@ SET `style_css` = '.b-celestial-v2 { padding: 4px; background: radial-gradient(c
 WHERE `key` = 'celestial-v2' AND `is_builtin` = 1;
 --> statement-breakpoint
 
--- Runebound — glyph ring orbit radius
+-- Runebound, glyph ring orbit radius
 UPDATE `freeform_borders`
 SET `style_css` = '.b-runic { padding: 4px; background: conic-gradient(from 0deg, #1a237e, #0d47a1, #1565c0, #0d47a1, #1a237e); box-shadow: 0 0 18px rgba(13,71,161,.6); }
 .b-runic::before { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid #4fc3f7; box-shadow: inset 0 0 10px rgba(79,195,247,.4); }
@@ -189,7 +189,7 @@ SET `style_css` = '.b-runic { padding: 4px; background: conic-gradient(from 0deg
 WHERE `key` = 'runic' AND `is_builtin` = 1;
 --> statement-breakpoint
 
--- Quantum drift — orbit radius scales
+-- Quantum drift, orbit radius scales
 UPDATE `freeform_borders`
 SET `style_css` = '.b-quantum { padding: 4px; background: conic-gradient(from 0deg, #00bcd4, #00897b, #00bcd4); box-shadow: 0 0 14px rgba(0,188,212,.5); }
 .b-quantum::before { content: ""; position: absolute; inset: -2px; border-radius: 50%; border: 2px solid #ff4081; mix-blend-mode: screen; animation: qPhaseA 1.4s ease-in-out infinite; }
@@ -214,7 +214,7 @@ SET `style_css` = '.b-quantum { padding: 4px; background: conic-gradient(from 0d
 WHERE `key` = 'quantum' AND `is_builtin` = 1;
 --> statement-breakpoint
 
--- The fog — band horizontal extent + halo inset
+-- The fog, band horizontal extent + halo inset
 UPDATE `freeform_borders`
 SET `style_css` = '.b-fog-v2 { position: relative; }
 .b-fog-v2 .moon-ring {
@@ -259,7 +259,7 @@ SET `style_css` = '.b-fog-v2 { position: relative; }
 WHERE `key` = 'fog-v2' AND `is_builtin` = 1;
 --> statement-breakpoint
 
--- Neon sign — outer halo glow scales (the flicker keyframes use
+-- Neon sign, outer halo glow scales (the flicker keyframes use
 -- the variable for the visible-state shadow rings; tube + dim
 -- overlays don't bleed and are left alone)
 UPDATE `freeform_borders`
@@ -354,7 +354,7 @@ SET `style_css` = '.b-neon-v2 {
 WHERE `key` = 'neon-v2' AND `is_builtin` = 1;
 --> statement-breakpoint
 
--- Sakura petals — petal field bounds + fall distance + pile width
+-- Sakura petals, petal field bounds + fall distance + pile width
 UPDATE `freeform_borders`
 SET `style_css` = '.b-sakura-v2 {
   padding: 0;
@@ -435,7 +435,7 @@ SET `style_css` = '.b-sakura-v2 {
 WHERE `key` = 'sakura-v2' AND `is_builtin` = 1;
 --> statement-breakpoint
 
--- Tempest lord — bolt overshoot
+-- Tempest lord, bolt overshoot
 UPDATE `freeform_borders`
 SET `style_css` = '.b-storm { padding: 4px; background: conic-gradient(from 0deg, #263238, #37474f, #455a64, #37474f, #263238); box-shadow: 0 0 18px rgba(255,235,59,.3); }
 .b-storm::before { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid #ffd600; box-shadow: inset 0 0 12px rgba(255,214,0,.4); animation: stormFlash 3s steps(1) infinite; }

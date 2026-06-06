@@ -1,13 +1,13 @@
 -- Dial back the Phoenix feather radius. Migration 0162 pushed
 -- feathers from -44px to -52px (8px outward) which was way too
--- much — at xl scale that's ~13px outside the avatar's visible
+-- much, at xl scale that's ~13px outside the avatar's visible
 -- frame, far enough that adjacent userlist rows started getting
 -- overlapped by the spinning ring.
 --
 -- The correct outward offset is half the border ring width. The
 -- ring is (84 - 76) / 2 = 4px per side native; half = 2px. So
 -- feathers should sit at radius 46px from center (2px outside the
--- 42px .av edge) — just enough to clear the box-shadow bloom
+-- 42px .av edge), just enough to clear the box-shadow bloom
 -- without invading neighbor rows.
 --
 -- Feather size + drop-shadow are kept at the slightly bolder values

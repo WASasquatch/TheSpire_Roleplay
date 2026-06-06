@@ -14,12 +14,12 @@ function notice(ctx: CommandContext, code: string, message: string) {
  *
  * Returns the ResolvedTarget on success. On any failure (no match,
  * ambiguous, self-targeting) emits the appropriate notice and returns
- * null — the caller short-circuits.
+ * null, the caller short-circuits.
  *
  * NOTE: `/ignore` is keyed on the OOC master id, so we surface
  * `target.userId` regardless of whether the caller pointed at a
  * character. That preserves the "ignoring `Kaal` silences WAS no
- * matter which face they're wearing" contract — character disambig
+ * matter which face they're wearing" contract, character disambig
  * just helps you specify WHICH user when names collide.
  */
 async function resolveIgnoreTarget(
@@ -61,7 +61,7 @@ export const ignoreCommand: CommandHandler = {
   name: "ignore",
   aliases: ["block", "mute-user"],
   usage: "/ignore [name|clear]",
-  description: "Toggle ignoring a user — runs again to undo. Persists on your account across all characters.",
+  description: "Toggle ignoring a user, runs again to undo. Persists on your account across all characters.",
   subcommands: [
     { verb: "<name>", usage: "/ignore <name>", description: "Ignore (or, if already ignored, unignore) this user." },
     { verb: "clear", usage: "/ignore clear", description: "Clear your entire ignore list." },

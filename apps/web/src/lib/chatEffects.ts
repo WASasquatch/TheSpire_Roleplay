@@ -4,7 +4,7 @@
  * a registry so future target-based commands can plug in another
  * runner without scattering DOM manipulation across the app.
  *
- * Every runner is idempotent — calling it again while the previous
+ * Every runner is idempotent, calling it again while the previous
  * cycle is still mid-animation cancels the lingering classes,
  * forces a reflow, and re-applies, so a double-tap of /throw
  * doesn't compound transforms or leave classes stuck on a node.
@@ -29,12 +29,12 @@ function prefersReducedMotion(): boolean {
 
 /**
  * Fire the "struck" reaction:
- *   1. `keep-struck-shake` class on `document.body` — shake + tiny
+ *   1. `keep-struck-shake` class on `document.body`, shake + tiny
  *      scale-up so the translate offsets never reveal viewport edges.
- *   2. `keep-struck-flash` class on `.keep-composer` — pale-red
+ *   2. `keep-struck-flash` class on `.keep-composer`, pale-red
  *      overlay pulse via the `::after` pseudo-element on the
  *      composer surface.
- *   3. Audio cue — `throw` (whoosh-impact) or `drop` (thud), routed
+ *   3. Audio cue, `throw` (whoosh-impact) or `drop` (thud), routed
  *      through the existing sound infrastructure so the user's
  *      sound preferences + /away mute apply consistently with every
  *      other in-app sound.
@@ -44,12 +44,12 @@ function prefersReducedMotion(): boolean {
  * skips audio entirely and only runs the visual reaction.
  *
  * Classes auto-remove after the animation duration. Reentrancy: a
- * second call mid-cycle cancels and re-triggers cleanly — we strip
+ * second call mid-cycle cancels and re-triggers cleanly, we strip
  * the class, force a reflow, then re-add so the keyframes restart
  * from frame zero instead of resuming mid-animation.
  *
  * Reduced-motion respects: visual classes are skipped, but the
- * audio cue still fires — users who've asked the OS to reduce
+ * audio cue still fires, users who've asked the OS to reduce
  * motion typically don't want every other sensory signal stripped
  * too, and a strike sound without the shake reads as "something
  * happened" rather than "the screen had a seizure."
@@ -58,7 +58,7 @@ export function runStruckEffect(variant?: "throw" | "drop"): void {
   if (typeof document === "undefined") return;
 
   // Audio fires regardless of reduced-motion. sound.ts handles its
-  // own preference / away-mute gating internally — we just route
+  // own preference / away-mute gating internally, we just route
   // by variant. Skip when variant is missing (older server build
   // that doesn't ship the field) so we don't double up with a
   // generic "tap" or default sound on top of the visual reaction.

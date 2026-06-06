@@ -21,7 +21,7 @@ const sess = db
   .get();
 
 if (!sess) {
-  console.error("no active session for WAS — log in once and retry");
+  console.error("no active session for WAS, log in once and retry");
   process.exit(1);
 }
 

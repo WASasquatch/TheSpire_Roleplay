@@ -19,7 +19,7 @@
 }
 
 /*
- * Default theme — "Spire Modern" gray-blue palette (the install
+ * Default theme, "Spire Modern" gray-blue palette (the install
  * seed; mirrors `DEFAULT_THEME` in packages/shared/src/theme.ts).
  * Each value is a *space-separated RGB triple* so Tailwind opacity
  * modifiers (bg-keep-panel/30, border-keep-border/40, ...) compose
@@ -38,15 +38,15 @@
   --keep-action: 30 95 184;     /* #1e5fb8 */
   --keep-accent: 53 116 162;    /* #3574a2 */
   --keep-system: 122 90 26;     /* #7a5a1a */
-  /* Derived neon variants — same hue AND saturation as the user's
+  /* Derived neon variants, same hue AND saturation as the user's
    * action/accent, only their lightness clamped down to a mid-dark
    * ceiling (~42%) so glow blurs don't bleach toward white. Re-emitted
    * at theme-apply time by lib/theme.ts; these defaults match the
    * default seed action/accent above (which are already at-or-below
    * the lightness ceiling, so neon == base for the seed). Consumed
-   * only by the scifi glow rules — harmless on medieval/modern. */
-  --keep-action-neon: 30 95 184;   /* default action — already at ceiling */
-  --keep-accent-neon: 53 116 162;  /* default accent — already at ceiling */
+   * only by the scifi glow rules, harmless on medieval/modern. */
+  --keep-action-neon: 30 95 184;   /* default action, already at ceiling */
+  --keep-accent-neon: 53 116 162;  /* default accent, already at ceiling */
 }
 
 @layer base {
@@ -73,7 +73,7 @@
      * descendant unless an element explicitly overrides with
      * `text-shadow: none` (or its own value). Zero offset + 2px blur
      * at 0.2 alpha reads as a non-directional rim glow rather than
-     * a drop — pops text off the bg blooms / parchment grain without
+     * a drop, pops text off the bg blooms / parchment grain without
      * implying a fake light source. */
     text-shadow: 0px 0px 2px rgba(0, 0, 0, 0.2);
   }
@@ -88,7 +88,7 @@
  * the row's tint between the resting 15% and a peak 45% three times so
  * the eye catches the new line without the page feeling jumpy. The CSS
  * uses the same `--keep-action` slot the whisper text already lives in,
- * so it picks up whichever palette the user is on — forest-green flash
+ * so it picks up whichever palette the user is on, forest-green flash
  * on Parchment, purple on Twilight, etc.
  *
  * The "resting" tint matches `bg-keep-action/15` applied directly on
@@ -106,26 +106,26 @@
 }
 
 /* ============================================================
- * STRUCK reaction — body shake + composer flash
+ * STRUCK reaction, body shake + composer flash
  * ============================================================
  *
  * Fired by `runStruckEffect()` (apps/web/src/lib/chatEffects.ts) when
  * the server-side `chat:effect` event lands a `kind: "struck"` payload
- * — i.e. someone /throw'd or /drop'd an item at this user. Two
+ *, i.e. someone /throw'd or /drop'd an item at this user. Two
  * pieces:
  *
- *   1. `.keep-struck-shake` on <body> — a short translate-and-zoom
+ *   1. `.keep-struck-shake` on <body>, a short translate-and-zoom
  *      keyframe that buzzes the viewport like an "I got hit"
  *      reaction. `transform-origin: 50% 50%` keeps the scale + shake
  *      composed from the center so the document isn't lopsided.
  *      `scale(1.0X)` ramps up alongside the translate amplitude
- *      specifically to keep the edges off-screen — without the
+ *      specifically to keep the edges off-screen, without the
  *      scale, the translate offsets would reveal viewport edges
  *      / outer page background and read as "the chat window is
  *      sliding around inside the browser" instead of "the world
  *      got struck."
  *
- *   2. `.keep-struck-flash` on `.keep-composer` — a pale-red overlay
+ *   2. `.keep-struck-flash` on `.keep-composer`, a pale-red overlay
  *      pulse via the `::after` pseudo-element. `pointer-events: none`
  *      lets the user keep typing through it (no input interruption),
  *      and `z-index` sits above the composer surface so the tint
@@ -135,12 +135,12 @@
  * Reentrancy: the runner force-reflows between remove and re-add so a
  * second hit during the previous cycle restarts cleanly. Reduced-
  * motion is respected at the runner level (no class added at all),
- * not via @media — that way an admin can still test the animation
+ * not via @media, that way an admin can still test the animation
  * locally with a CSS override if they want to verify the keyframes.
  */
 .keep-struck-shake {
   /* Linear timing keeps each leg of the buzz feeling abrupt rather
-   * than cushioned. `ease-out` here was the original mistake — it
+   * than cushioned. `ease-out` here was the original mistake, it
    * smoothed every transition into a slide, which read as the page
    * gently swaying instead of being struck. 320ms is short enough to
    * land as a single "hit" reaction, long enough to fit ~6 full L↔R
@@ -156,7 +156,7 @@
 @keyframes keep-struck-shake {
   /* Tight L↔R chatter. Translate is primarily on X (±4px peak) with
    * a ±1px Y noise to give the chatter texture without breaking the
-   * left-right read. Scale snaps up to 1.022 at the first frame —
+   * left-right read. Scale snaps up to 1.022 at the first frame,
    * that ratio covers ±4px on viewports down to ~320px wide
    * (4/320 ≈ 1.25%, scale margin = 2.2% → 0.95% buffer), so the body
    * edges stay off-screen for the whole shake on mobile and desktop
@@ -213,12 +213,12 @@
 }
 
 /* ============================================================
- * SCROLLBAR — touch-first horizontal strips
+ * SCROLLBAR, touch-first horizontal strips
  * ============================================================
  *
  * Used by the admin panel's tab nav (and any future strip-style nav).
  * Hides the scrollbar entirely on touch viewports so a swipe is the
- * only affordance — a visible scrollbar on a horizontal mobile nav
+ * only affordance, a visible scrollbar on a horizontal mobile nav
  * just adds chrome that doesn't help. On md+ (where the user is
  * almost certainly on a pointing device) a thin themed scrollbar
  * appears with reserved bottom padding so it never overlaps the
@@ -237,11 +237,11 @@
   display: none; /* WebKit / Blink: hide entirely */
 }
 
-/* Earning burst chips — the floating "+5 coins" / "+12 XP" badges
+/* Earning burst chips, the floating "+5 coins" / "+12 XP" badges
  * that pop above the totals in EarningStatsStrip when a credit
  * lands. Bounce in, hold readably, then drift upward and fade out.
  * The hold phase is the bulk of the lifetime so users can actually
- * READ the number — earlier the chip flew through in ~1.6s and was
+ * READ the number, earlier the chip flew through in ~1.6s and was
  * easy to miss in peripheral vision. Total runtime is 3.2s; the
  * component's setTimeout that removes the chip from React state
  * must match (see EarningStatsStrip's `bursts` cleanup). The
@@ -263,7 +263,7 @@
  * afterglow, then resets off-screen and runs the loop again.
  *
  * Sized for a header chip (~44px square) so the storm scene is
- * scoped to its own little box — the flash overlay's `inset: 0`
+ * scoped to its own little box, the flash overlay's `inset: 0`
  * stays inside the container, never washing out the header.
  *
  * Honors `prefers-reduced-motion`: the rule block at the bottom
@@ -381,13 +381,13 @@
   animation: earn-burst 3.2s cubic-bezier(0.22, 0.61, 0.36, 1) both;
   /* Float above the `keep-accent-rail` divider (z-index 5) that sits
    * just above the composer. Without an explicit z-index the chip
-   * was rendering UNDER the rail's glow band — visible as a faded
+   * was rendering UNDER the rail's glow band, visible as a faded
    * "+3" stuck below the accent stripe instead of cleanly popping up
    * out of the pouch icon. pointer-events:none stays so the chip
    * never blocks clicks even when it floats over the chat. */
   z-index: 20;
   pointer-events: none;
-  /* Bump from the previous text-xs / inherited size — the burst is
+  /* Bump from the previous text-xs / inherited size, the burst is
    * already short-lived (~3.2s) AND overlays moving chat content,
    * so it needs a bigger glyph to register before it fades. 0.875rem
    * (text-sm) reads cleanly without dominating the toolbar row when
@@ -446,13 +446,13 @@
  * leans on attribute selectors on <html data-theme-style="…"> so we
  * never have to touch component markup to re-skin.
  *
- *   medieval  — flat warm parchment, soft inset highlights, drop
+ *   medieval , flat warm parchment, soft inset highlights, drop
  *               shadows directly below (0deg from top, soft blur),
  *               square-ish corners (2px). Ink-toned borders.
- *   modern    — soft two-tone linear gradients, rounded corners
+ *   modern   , soft two-tone linear gradients, rounded corners
  *               (8px), airy shadows, action accents for interactive
  *               surfaces.
- *   scifi     — multi-color radial bokeh, glass surfaces, sharp
+ *   scifi    , multi-color radial bokeh, glass surfaces, sharp
  *               corners, neon action-color edges that intensify on
  *               focus/hover.
  *
@@ -475,7 +475,7 @@
 /* Parchment texture overlay (medieval only). A fixed pseudo-element
  * sits between the body background and the rest of the document so
  * the grey-noise texture is layered over whatever palette the user
- * picked, at low opacity, without tinting their color choices —
+ * picked, at low opacity, without tinting their color choices,
  * the body's radial gradient still drives the actual hue, and the
  * texture only adds surface noise on top of it. z-index: -1 (combined
  * with the body forming its own stacking context via `isolation`)
@@ -537,7 +537,7 @@
   z-index: -1;
 }
 
-/* Buttons — opt-in via `.keep-button`. Link-style banner / nav
+/* Buttons, opt-in via `.keep-button`. Link-style banner / nav
  * buttons stay text-only by not adding the class. Default is a
  * flat warm tile with an ink-colored border; hover lifts to bg-100
  * with a deeper drop, active sinks slightly. */
@@ -568,7 +568,7 @@
     0 1px 0 rgb(var(--keep-border-500) / 0.18);
 }
 
-/* Inputs — fresh slip of vellum laid on the page. */
+/* Inputs, fresh slip of vellum laid on the page. */
 [data-theme-style="medieval"] input,
 [data-theme-style="medieval"] textarea,
 [data-theme-style="medieval"] select {
@@ -591,7 +591,7 @@
     0 0 0 2px rgb(var(--keep-border-300) / 0.45);
 }
 
-/* Headers — semibold, slight tracking. Sits over panel without a
+/* Headers, semibold, slight tracking. Sits over panel without a
  * background of its own. The serif feel comes from font-chat
  * (already configured in tailwind). */
 [data-theme-style="medieval"] h1,
@@ -601,7 +601,7 @@
   letter-spacing: 0.02em;
 }
 
-/* List rows — rooms list, thread list. Border-300 hairlines, hover
+/* List rows, rooms list, thread list. Border-300 hairlines, hover
  * lifts to bg-100, active row marked by accent border. */
 [data-theme-style="medieval"] .keep-row {
   background-color: transparent;
@@ -616,7 +616,7 @@
   border-left: 3px solid rgb(var(--keep-action));
 }
 
-/* Shell surfaces — chat banner, rooms sidebar, composer. Each
+/* Shell surfaces, chat banner, rooms sidebar, composer. Each
  * style paints these consistently so the whole app reads as one
  * piece. These are opt-in via specific classes (rather than bare
  * `header` / `aside`) because modal sub-components also use those
@@ -665,7 +665,7 @@
 }
 
 /* Parchment overlay on the shell surfaces. Same z-index: -1 trick as
- * the frame/panel rule above — paints between the surface's own
+ * the frame/panel rule above, paints between the surface's own
  * background-color and its children. `pointer-events: none` keeps
  * the overlay click-through. */
 [data-theme-style="medieval"] .keep-app-banner::before,
@@ -690,7 +690,7 @@
     linear-gradient(160deg, rgb(var(--keep-bg-100)) 0%, rgb(var(--keep-bg)) 45%, rgb(var(--keep-bg-400)) 100%);
 }
 
-/* Frames — subtle white-to-black overlay (~3% intensity) on top
+/* Frames, subtle white-to-black overlay (~3% intensity) on top
  * of the base panel color, giving a barely-perceptible bevel that
  * reads as "light from above" regardless of palette. The crisp
  * highlight line sits on the inside-top via box-shadow inset, and
@@ -713,7 +713,7 @@
     0 12px 24px -8px rgb(var(--keep-border-500) / 0.15);
 }
 
-/* Buttons (opt-in via `.keep-button`) — soft-gradient pill. */
+/* Buttons (opt-in via `.keep-button`), soft-gradient pill. */
 [data-theme-style="modern"] .keep-button:not([disabled]) {
   background:
     linear-gradient(180deg, rgb(var(--keep-panel-100)) 0%, rgb(var(--keep-panel)) 100%);
@@ -749,7 +749,7 @@
     0 0 0 3px rgb(var(--keep-action) / 0.25);
 }
 
-/* Inputs — clean rounded with action-color focus ring. */
+/* Inputs, clean rounded with action-color focus ring. */
 [data-theme-style="modern"] input,
 [data-theme-style="modern"] textarea,
 [data-theme-style="modern"] select {
@@ -790,7 +790,7 @@
   box-shadow: inset 3px 0 0 rgb(var(--keep-action));
 }
 
-/* Banner — the marquee shell surface. Solid crisp 1px borders top
+/* Banner, the marquee shell surface. Solid crisp 1px borders top
  * (highlight) and bottom (shadow); the body of the bar is the
  * panel color with a *very* subtle 4-5% white→black overlay so
  * there's a perceptible bevel without anything looking gradiented.
@@ -811,7 +811,7 @@
     inset 0 1px 0 rgb(255 255 255 / 0.30),
     0 4px 14px -8px rgb(var(--keep-border-500) / 0.18);
 }
-/* Sidebar — same bevel recipe, just oriented along the left edge.
+/* Sidebar, same bevel recipe, just oriented along the left edge.
  * Top is bright (light from above), bottom is shadowed. */
 [data-theme-style="modern"] .keep-app-sidebar {
   background-color: rgb(var(--keep-panel)) !important;
@@ -826,7 +826,7 @@
     inset 1px 0 0 rgb(255 255 255 / 0.20),
     -4px 0 14px -8px rgb(var(--keep-border-500) / 0.10);
 }
-/* Composer — sits at the bottom of the chat, so its top edge is
+/* Composer, sits at the bottom of the chat, so its top edge is
  * the bright highlight (light from above) and the bottom touches
  * the viewport edge. Same overlay recipe as the banner. */
 [data-theme-style="modern"] .keep-composer {
@@ -848,7 +848,7 @@
  *   S C I F I
  * ---------------------------------------------------------------- */
 
-/* Bokeh-glass backdrop. Six overlapping radial blobs — bigger,
+/* Bokeh-glass backdrop. Six overlapping radial blobs, bigger,
  * more saturated, mixing the user-picked action + accent + system
  * colors plus their lighter ramp steps. Action is the primary
  * (cyan / blue / etc) and accent provides the secondary pop
@@ -873,7 +873,7 @@
 }
 
 /* Subtle cyber-grid texture noise layered over the gradient backdrop
- * — same overlay recipe Medieval uses for parchment, swapped for the
+ *, same overlay recipe Medieval uses for parchment, swapped for the
  * scifi asset. Sits behind every UI element via z-index: -1 inside the
  * body's isolated stacking context. Opacity tuned lower than parchment
  * (0.12 vs 0.25) because the gradient under it is already busy with
@@ -890,12 +890,12 @@
   z-index: -1;
 }
 
-/* Frames — frosted glass with a real tube-light edge. Same color-mix-
+/* Frames, frosted glass with a real tube-light edge. Same color-mix-
  * with-white recipe as before (gives the soft pastel rim look), but
  * routed through `--keep-action-neon` instead of raw `--keep-action`
  * so the underlying color is already darkened before the white admix.
  * Net effect: the eye sees the original soft, slightly-desaturated
- * neon look, just dimmer — no extra brightness, no extra hue shift. */
+ * neon look, just dimmer, no extra brightness, no extra hue shift. */
 [data-theme-style="scifi"] .keep-frame,
 [data-theme-style="scifi"] .keep-panel {
   /* `position: relative` + `isolation` give each frame its own
@@ -928,7 +928,7 @@
     0 0 26px -6px rgb(var(--keep-accent-neon) / 0.16),
     0 14px 42px -12px rgb(var(--keep-bg-500) / 0.55);
 }
-/* Cyber-texture overlay on frames/panels — same z-index: -1 trick
+/* Cyber-texture overlay on frames/panels, same z-index: -1 trick
  * the medieval rule uses. Paints between the frame's own
  * background-color/backdrop-filter layer and its non-positioned
  * children. `border-radius: inherit` keeps the overlay clipped to
@@ -947,7 +947,7 @@
   z-index: -1;
 }
 
-/* Buttons (opt-in via `.keep-button`) — glass tile with a true neon
+/* Buttons (opt-in via `.keep-button`), glass tile with a true neon
  * tube-light border. Borders + halos route through `--keep-action-neon`
  * (full-sat, mid-dark derivation) so the palette neon reads as a
  * saturated edge instead of a pale lit-from-white sliver. Surface
@@ -982,7 +982,7 @@
     0 0 8px rgb(var(--keep-action-neon) / 0.35);
 }
 
-/* Inputs — recessed glass pits with a saturated tube-light core on
+/* Inputs, recessed glass pits with a saturated tube-light core on
  * focus. Borders + halos use the neon derivation so a focused field
  * reads as a saturated rim, not as a near-white outline. */
 [data-theme-style="scifi"] input,
@@ -1017,7 +1017,7 @@
   text-transform: uppercase;
 }
 
-/* Forum section headers ("LOOKING FOR RP", "RP THREADS", etc.) —
+/* Forum section headers ("LOOKING FOR RP", "RP THREADS", etc.),
  * the most visible chunk of UI in the chat area. In scifi these
  * read as the accent (pink) terminal section dividers with a
  * fading neon underline, so the secondary palette color is
@@ -1038,7 +1038,7 @@
   text-shadow: 0 0 4px rgb(var(--keep-accent-neon) / 0.30);
 }
 /* The chevron + count children of the section header need their own
- * color override — the parent rule's `color: ...` only sets the
+ * color override, the parent rule's `color: ...` only sets the
  * default text node color, and these spans have explicit
  * `text-keep-muted` from tailwind that wins on specificity. */
 [data-theme-style="scifi"] .keep-section-header .text-keep-muted {
@@ -1070,8 +1070,8 @@
     0 0 12px -6px rgb(var(--keep-accent-neon) / 0.18);
 }
 
-/* Banner — tube-light bottom edge in the ACTION color (the
- * primary neon — cyan/blue/green depending on palette). Real
+/* Banner, tube-light bottom edge in the ACTION color (the
+ * primary neon, cyan/blue/green depending on palette). Real
  * fluorescent tube anatomy: a 1px near-white "hot core" followed
  * by three blur falloffs in saturated action. The bright core
  * uses color-mix to land on white-tinted-with-action regardless
@@ -1079,15 +1079,15 @@
  * as a glowing tube and never as a flat colored line. */
 [data-theme-style="scifi"] .keep-app-banner {
   /* `position: relative` + `isolation` so the cyber-texture ::before
-   * (below) anchors and stays scoped — same pattern as medieval. */
+   * (below) anchors and stays scoped, same pattern as medieval. */
   position: relative;
   isolation: isolate;
   background-color: rgb(var(--keep-panel) / 0.30) !important;
   backdrop-filter: blur(18px) saturate(1.35);
   -webkit-backdrop-filter: blur(18px) saturate(1.35);
   /* The flat 1px tube + uniform box-shadow that used to live here are
-   * replaced by the ::after pseudo below so the whole emission — hot
-   * core + wide halo — can fade horizontally as a single shape. The
+   * replaced by the ::after pseudo below so the whole emission, hot
+   * core + wide halo, can fade horizontally as a single shape. The
    * transparent border keeps the banner's layout height unchanged
    * vs. the Tailwind `border-b` utility on the element. */
   border-bottom: 1px solid transparent !important;
@@ -1136,7 +1136,7 @@
   background-size: 100% 1px, 100% 100%;
   background-position: top left, top left;
 }
-/* Sidebar — action-colored tube on the left edge facing the chat.
+/* Sidebar, action-colored tube on the left edge facing the chat.
  * Same recipe rotated 90°, glow projects right into the chat.
  *
  * DO NOT add `position: relative` here. The sidebar's positioning is
@@ -1146,7 +1146,7 @@
  * override the mobile `fixed` (higher CSS specificity: theme
  * selector + class beats utility class), making the rail render
  * in-flow at mobile, eat 18rem on the right, and squeeze the chat
- * into a narrow column — exact bug we hit and fixed in medieval.
+ * into a narrow column, exact bug we hit and fixed in medieval.
  * `isolation: isolate` is enough on its own to scope the
  * cyber-texture ::before's z-index without needing to set a
  * position value here. */
@@ -1161,15 +1161,15 @@
     -4px 0 14px rgb(var(--keep-action-neon) / 0.22),
     -12px 0 32px -8px rgb(var(--keep-action-neon) / 0.14) !important;
 }
-/* Composer — ACCENT-colored tube on the top edge (the secondary
- * neon — typically pink/magenta complementing the action color).
+/* Composer, ACCENT-colored tube on the top edge (the secondary
+ * neon, typically pink/magenta complementing the action color).
  * Banner's cyan top + composer's pink bottom = the classic two-
  * tone cyberpunk pairing. Same hot-core recipe swapping action
  * → accent, with the inside of the bar tinted accent so even the
  * BODY of the composer reads pink, not just the edge. */
 [data-theme-style="scifi"] .keep-composer {
   /* `position: relative` + `isolation` for the cyber-texture ::before
-   * (below) — same pattern as medieval composer / scifi banner. */
+   * (below), same pattern as medieval composer / scifi banner. */
   position: relative;
   isolation: isolate;
   background-color: rgb(var(--keep-panel) / 0.30) !important;
@@ -1185,8 +1185,8 @@
   box-shadow: none !important;
 }
 /* Mirror of the banner emission, anchored to the composer's top
- * edge. Peak at x=83% — under the body's bottom-right accent bloom
- * (radial at viewport 90% 94%) — fading off to the left so the
+ * edge. Peak at x=83%, under the body's bottom-right accent bloom
+ * (radial at viewport 90% 94%), fading off to the left so the
  * left side of the composer reads as unlit. Halo radiates UPWARD
  * into the chat area above. */
 [data-theme-style="scifi"] .keep-composer::after {
@@ -1218,7 +1218,7 @@
 }
 
 /* Cyber texture overlay on the shell surfaces. Same z-index: -1
- * trick as the frame/panel rule above — paints between the surface's
+ * trick as the frame/panel rule above, paints between the surface's
  * own background-color/backdrop-filter layer and its children.
  * Mirrors the medieval shell overlay block, swapped to the scifi
  * asset and lower opacity (the neon glow under it is busy enough
@@ -1240,15 +1240,15 @@
  * Cross-style utilities & ornament glue.
  * ============================================================ */
 
-/* `keep-accent-rail` — 3px tall standalone strip that sits between
+/* `keep-accent-rail`, 3px tall standalone strip that sits between
  * major UI sections (header zone vs chat, chat vs composer). Body
  * color is a LIGHT tint of the user's `accent` palette slot so the
  * rail reads as a colored separator regardless of palette. Per-
  * style rules below add the appropriate glow / matte treatment:
  *
- *   medieval — flat dusty-rose tint, very subtle drop shadow
- *   modern   — horizontal fade with a soft halo
- *   scifi    — glowing neon tube with 4-stage falloff
+ *   medieval, flat dusty-rose tint, very subtle drop shadow
+ *   modern  , horizontal fade with a soft halo
+ *   scifi   , glowing neon tube with 4-stage falloff
  *
  * Width fills its parent; height is fixed so it always looks like
  * a deliberate band rather than a hairline border. */
@@ -1260,23 +1260,23 @@
   flex-shrink: 0;
 }
 
-/* Composer stacking context — sits ABOVE the accent rail (z:5) so
+/* Composer stacking context, sits ABOVE the accent rail (z:5) so
  * popups (CompleterPopup autocomplete, EarningStatsStrip's "+N" burst
  * chips) and the composer's own neon top-edge ::after emission all
  * paint above the rail. Without this, .keep-composer is at z:auto in
- * the parent and the rail's z:5 wins — popups end up clipped behind
+ * the parent and the rail's z:5 wins, popups end up clipped behind
  * the rail's horizontal band, which the user sees as suggestion lists
  * disappearing into the divider.
  *
  * Each per-theme `.keep-composer` rule below ALSO sets `position:
  * relative` + `isolation: isolate` for its texture pseudos. This
- * base rule ensures the z-index applies regardless of theme — a new
+ * base rule ensures the z-index applies regardless of theme, a new
  * theme that forgets to repeat the z-index inherits the right
  * stacking from here.
  *
  * Visual side-effect: the composer's ::after neon edge (36px tall
  * above the composer's top edge) now paints OVER the rail where the
- * two overlap. Acceptable — both elements share the accent palette,
+ * two overlap. Acceptable, both elements share the accent palette,
  * so they blend; and the design intent of the ::after is "the
  * composer is lit", which reads cleaner when its glow isn't being
  * sliced through by the rail. */
@@ -1284,12 +1284,12 @@
   position: relative;
   z-index: 10;
 }
-/* Medieval — solid colored stripe, no glow. Reads as a printed
+/* Medieval, solid colored stripe, no glow. Reads as a printed
  * separator on a tome page. */
 [data-theme-style="medieval"] .keep-accent-rail {
   background-color: color-mix(in srgb, rgb(var(--keep-accent)) 50%, white);
 }
-/* Modern — solid colored stripe edge-to-edge (no edge-fade
+/* Modern, solid colored stripe edge-to-edge (no edge-fade
  * gradient) + a soft 0.3-alpha drop shadow projecting straight
  * down at 90° from top. No glow halo. */
 [data-theme-style="modern"] .keep-accent-rail {
@@ -1302,7 +1302,7 @@
    * bloom). The OLD rule painted a constant `accent-neon / 0.75`
    * background-color underneath the gradient which made the rail
    * visible across its whole width and defeated the horizontal
-   * fade — leaving the bottom of the chat shell bright on the left
+   * fade, leaving the bottom of the chat shell bright on the left
    * even though the composer's pseudo was fading correctly. Now
    * transparent on the dim side so the gradient fully owns the
    * visible color, and the box-shadow halo is removed for the same
@@ -1310,7 +1310,7 @@
    * of the gradient. The banner/composer ::after pseudo already
    * contributes a wider radial halo at the bright peak that
    * envelops the rail's y-range, so removing the rail's own glow
-   * doesn't lose the tube-light effect — it just stops the dim
+   * doesn't lose the tube-light effect, it just stops the dim
    * half from accumulating diffuse magenta. */
   background-color: transparent;
   background-image: linear-gradient(
@@ -1324,13 +1324,13 @@
   box-shadow: none;
 }
 
-/* Header rail override — no body bloom sits under this rail's bright
+/* Header rail override, no body bloom sits under this rail's bright
  * end (the upper-right ambient is system / action-100, not accent),
  * so a flat magenta peak there read as a bare neon strip floating on
  * its own ambient. Swap the bright stops to a darker blue/purple so
  * the rail's right end sinks into the chat shell's purple haze
  * instead of competing with it. Hardcoded RGB at the bright stops
- * (rather than a palette var) is intentional — these are blends
+ * (rather than a palette var) is intentional, these are blends
  * tuned against the scifi body's purple/indigo tones, not a hue the
  * user's palette controls. */
 [data-theme-style="scifi"] .keep-accent-rail[data-rail="header"] {
@@ -1469,7 +1469,7 @@
 /* Heading scale tuned so an h1 reads as a document title, h2 as a
  * section header, and h3 down stay reasonable as sub-sections inside
  * a short-form admin page. The em-based sizing means a `prose-sm`
- * container still scales the headings down proportionally — they
+ * container still scales the headings down proportionally, they
  * stay distinct from body copy without overwhelming the column. */
 .prose h1 { font-size: 1.75em; }
 .prose h2 { font-size: 1.4em; }
@@ -1524,7 +1524,7 @@
 }
 
 /* ============================================================
- *  GLASS — Frosted translucent panels over a backdrop image
+ *  GLASS, Frosted translucent panels over a backdrop image
  *
  *  Visual recipe:
  *    1. Body shows the user's chosen backdrop (publicProfileBgUrl)
@@ -1535,7 +1535,7 @@
  *       palette luminance) sits over the backdrop so chat text is
  *       always legible against any image the user picks.
  *    3. The bg-overlay ornament (faint palette-color radial blooms)
- *       layers between the darken pass and the panels — palette
+ *       layers between the darken pass and the panels, palette
  *       presence without overwhelming the artwork.
  *    4. Every chrome surface (.keep-frame, .keep-panel, .keep-app-
  *       banner, .keep-composer, .keep-button, inputs) uses backdrop
@@ -1544,7 +1544,7 @@
  *       ambient shadow.
  * ============================================================ */
 
-/* Backdrop image painted on `.keep-bg-overlay` — a fixed
+/* Backdrop image painted on `.keep-bg-overlay`, a fixed
  * full-viewport div INSIDE the chat shell. Painting on <html> or
  * <body> leaked the image past the shell whenever a browser
  * extension (color picker, devtools panel) shifted the document:
@@ -1576,10 +1576,10 @@ html[data-theme-style="glass"] .keep-bg-overlay {
   background-attachment: fixed, fixed;
   opacity: 1;
 }
-/* Darkening pass — fixed-positioned full-viewport rectangle over
+/* Darkening pass, fixed-positioned full-viewport rectangle over
  * the html bg image. Sits above the image but below all chat-shell
  * content, so the artwork stays visible but every chrome layer
- * over it has improved contrast. ~25% alpha — light enough that
+ * over it has improved contrast. ~25% alpha, light enough that
  * the image is still legible as an image, dark enough to lift
  * chat text off it. Palette-aware: uses the palette's bg color so
  * dark themes darken with their own dark color (preserves hue
@@ -1599,7 +1599,7 @@ html[data-theme-style="glass"] body::before {
  * sidebars, toolpanel, dropdowns, etc. use `bg-keep-banner`,
  * `bg-keep-bg`, `bg-keep-panel`, `bg-keep-parchment` (with various
  * opacity modifiers). Glass mode lifts every panel-shape that uses
- * one of those onto a frosted glass tile — backdrop-filter blur so
+ * one of those onto a frosted glass tile, backdrop-filter blur so
  * the bg image reads as milky glass behind, palette-tinted fill at
  * low alpha so the panel still has color memory.
  *
@@ -1636,7 +1636,7 @@ html[data-theme-style="glass"] .bg-keep-bg {
 /* Opaque surface utility for floating menus / dropdowns that overlay
  * busy content (the userlist, the chat feed, etc.). The default
  * `bg-keep-bg` class is intentionally translucent under the glass
- * theme so the chrome reads as frosted glass — gorgeous for static
+ * theme so the chrome reads as frosted glass, gorgeous for static
  * panels, terrible for a Tools drawer floating over the userlist
  * because the menu rows and the names underneath collide visually.
  *
@@ -1662,23 +1662,23 @@ html[data-theme-style="glass"] .bg-keep-parchment {
   background-color: var(--keep-glass-panel-tint, rgb(var(--keep-panel) / 0.45)) !important;
 }
 
-/* Room banner / list item highlights — Tailwind's `bg-keep-banner/40`
+/* Room banner / list item highlights, Tailwind's `bg-keep-banner/40`
  * variant. The 40% palette alpha is too sheer in glass mode (the
  * room rows blend into the chrome below), so bump it to 0.9 panel
  * alpha. Works for both light + dark themes: light gets near-opaque
- * white, dark gets near-opaque panel-color — both clearly readable
+ * white, dark gets near-opaque panel-color, both clearly readable
  * over the backdrop. */
 html[data-theme-style="glass"] .bg-keep-banner\/40 {
   background-color: rgb(var(--keep-panel) / 0.9) !important;
 }
 
-/* Chat area darkening — a translucent veil over JUST the `<main>`
+/* Chat area darkening, a translucent veil over JUST the `<main>`
  * element (chat feed + composer column). The backdrop image stays
  * visible behind the rooms sidebar / banner / tools, but the chat
  * itself rides on top of a heavy darken pass so long-form reading
  * is comfortable against any backdrop. Uses the palette's own `bg`
- * slot — automatically dark on dark themes (rgba over near-black)
- * and light on light themes (veil over near-white) — so there's no
+ * slot, automatically dark on dark themes (rgba over near-black)
+ * and light on light themes (veil over near-white), so there's no
  * second light/dark switch to maintain. */
 html[data-theme-style="glass"] main {
   background-color: var(--keep-glass-chat-tint, rgb(var(--keep-bg) / 0.75));
@@ -1698,7 +1698,7 @@ html[data-theme-style="glass"] .keep-tool-panel {
   -webkit-backdrop-filter: blur(18px) saturate(1.3);
 }
 
-/* Accent rails — the 3px palette-color strips above the chat content
+/* Accent rails, the 3px palette-color strips above the chat content
  * and above the composer. In glass mode they sit over the backdrop
  * image; without a tint they'd disappear into the frost. Paint them
  * with the palette accent at 0.75 alpha so the bar reads as a
@@ -1710,14 +1710,14 @@ html[data-theme-style="glass"] .keep-accent-rail {
   -webkit-backdrop-filter: blur(18px) saturate(1.3);
 }
 
-/* Frames / panels — the workhorse glass surface. Inset frost bevel
+/* Frames / panels, the workhorse glass surface. Inset frost bevel
  * = a 1px white top-left highlight (light catching the chamfered
  * edge) plus a 1px dark bottom-right (depth recess). Outer shadow
  * is a triple stack: a tight contact shadow under the panel + a
  * mid-range ambient bloom + a wide soft halo so the panel feels
  * lifted off the backdrop rather than pasted on.
  *
- * `backdrop-filter: blur(24px) saturate(1.4)` is the frost itself —
+ * `backdrop-filter: blur(24px) saturate(1.4)` is the frost itself,
  * higher than scifi's 16px because we want the backdrop to read as
  * milky frost, not a clearly-visible image behind tinted glass. */
 [data-theme-style="glass"] .keep-frame,
@@ -1736,7 +1736,7 @@ html[data-theme-style="glass"] .keep-accent-rail {
   border: 1px solid rgb(var(--keep-border) / 0.45);
   border-radius: 14px;
   box-shadow:
-    /* Inset frost bevel — top-left highlight, bottom-right shadow */
+    /* Inset frost bevel, top-left highlight, bottom-right shadow */
     inset 1px 1px 0 rgb(255 255 255 / 0.18),
     inset -1px -1px 0 rgb(0 0 0 / 0.10),
     inset 0 0 40px rgb(255 255 255 / 0.03),
@@ -1746,7 +1746,7 @@ html[data-theme-style="glass"] .keep-accent-rail {
     0 20px 40px -12px rgb(0 0 0 / 0.32);
 }
 
-/* Buttons — small glass tiles. Lighter blur (the tile is smaller, a
+/* Buttons, small glass tiles. Lighter blur (the tile is smaller, a
  * heavier blur produces obvious blur-edge artefacts at this size).
  * Inset top highlight gives the chamfer cue; hover lifts the
  * surface slightly via a brighter highlight + accent-tinted halo. */
@@ -1788,10 +1788,10 @@ html[data-theme-style="glass"] .keep-accent-rail {
     inset -1px -1px 0 rgb(255 255 255 / 0.10);
 }
 
-/* Inputs — recessed glass pits. The top inset shadow does the
+/* Inputs, recessed glass pits. The top inset shadow does the
  * "hole" cue (light shouldn't pool inside the input the way it
  * does on a raised button). Focus lights the rim in the action
- * color, no neon — we want professional, not gaming. */
+ * color, no neon, we want professional, not gaming. */
 [data-theme-style="glass"] input,
 [data-theme-style="glass"] textarea,
 [data-theme-style="glass"] select {
@@ -1817,7 +1817,7 @@ html[data-theme-style="glass"] .keep-accent-rail {
     0 0 0 3px rgb(var(--keep-action) / 0.18);
 }
 
-/* Top banner — deeper blur so the chat shell reads as floating
+/* Top banner, deeper blur so the chat shell reads as floating
  * above a slightly more obscured strip. Soft 1px hairline below
  * the banner picks up the action color, faint, professional. */
 [data-theme-style="glass"] .keep-app-banner {
@@ -1839,7 +1839,7 @@ html[data-theme-style="glass"] .keep-accent-rail {
     0 8px 24px -8px rgb(0 0 0 / 0.32) !important;
 }
 
-/* Composer (chat input area) — same family as panels, slightly
+/* Composer (chat input area), same family as panels, slightly
  * lower opacity so the chat above bleeds visual weight downward.
  * Frost bevel on top so it reads as docked at the bottom edge of
  * the chat shell. */
@@ -1856,7 +1856,7 @@ html[data-theme-style="glass"] .keep-accent-rail {
     0 -8px 24px -8px rgb(0 0 0 / 0.22) !important;
 }
 
-/* Section headers — soft palette-tinted strip. Background uses the
+/* Section headers, soft palette-tinted strip. Background uses the
  * accent at 8% over the panel at 35%, so the divider color reads as
  * the secondary palette tone (the user's accent) without screaming
  * for attention. Avoids the neon-rail look scifi uses. */
@@ -1878,7 +1878,7 @@ html[data-theme-style="glass"] .keep-accent-rail {
   -webkit-backdrop-filter: blur(20px) saturate(1.3);
 }
 
-/* List rows — transparent, no per-row glass (too many stacked
+/* List rows, transparent, no per-row glass (too many stacked
  * backdrop-filter layers tank perf and visually muddy). Hover +
  * active states tint with the palette colors at low alpha. */
 [data-theme-style="glass"] .keep-row {
@@ -1908,7 +1908,7 @@ html[data-theme-style="glass"] .keep-accent-rail {
   -webkit-backdrop-filter: none;
 }
 
-/* Headers — let palette text show through, no uppercase tracking
+/* Headers, let palette text show through, no uppercase tracking
  * (we want a refined look, not a UI label feel). */
 [data-theme-style="glass"] h1,
 [data-theme-style="glass"] h2,
@@ -1916,7 +1916,7 @@ html[data-theme-style="glass"] .keep-accent-rail {
   color: rgb(var(--keep-text));
 }
 
-/* Scriptorium prose chips. Decorated by storyMentions.ts —
+/* Scriptorium prose chips. Decorated by storyMentions.ts,
  * `@world:slug` and `@char:slug` patterns in chapter HTML become
  * `<a class="story-chip">` after mount. Theme-aware: uses keep-action
  * for the chip text/border so the link feels native to whatever
@@ -1957,7 +1957,7 @@ html[data-theme-style="glass"] .keep-accent-rail {
  * the editor inserts via the + Note toolbar button. Stripped server-
  * side at publish via stripMarginNotes() so readers never see them.
  *
- * Renders as a yellow sticky-note callout pulled out of prose flow —
+ * Renders as a yellow sticky-note callout pulled out of prose flow,
  * floats right on wide screens, falls back to block-flow inline on
  * narrow ones. The slight rotation + warm border evokes a hand-written
  * margin gloss; the .ml-prefix prevents collision with sanitize-html
@@ -1994,7 +1994,7 @@ aside.margin-note {
 }
 
 /* ============================================================
- * Rich text editor (Tiptap) — canvas + placeholder
+ * Rich text editor (Tiptap), canvas + placeholder
  * ============================================================
  *
  * The editor's `.rich-editor-canvas` is the contenteditable surface
@@ -2068,7 +2068,7 @@ aside.margin-note {
 }
 .rich-editor-canvas pre code { background: transparent; padding: 0; }
 
-/* Margin-note appearance INSIDE the editor — distinct from the
+/* Margin-note appearance INSIDE the editor, distinct from the
  * `.prose` render so authors recognize "this won't ship" at a
  * glance. Amber rule on the left + dotted top/bottom; never
  * floats inside the editor (the reader-side float rule above
@@ -2085,7 +2085,7 @@ aside.margin-note {
   position: relative;
 }
 .rich-editor-canvas aside.margin-note::before {
-  content: "Margin note (collaborators only — stripped on publish)";
+  content: "Margin note (collaborators only, stripped on publish)";
   display: block;
   font-size: 0.7rem;
   font-style: normal;
@@ -2095,7 +2095,7 @@ aside.margin-note {
   margin-bottom: 0.25em;
 }
 
-/* Placeholder text — Tiptap's Placeholder extension stamps the
+/* Placeholder text, Tiptap's Placeholder extension stamps the
  * placeholder string as a data attribute on the first empty
  * node. We surface it via CSS so it disappears the moment the
  * author starts typing. */
@@ -2116,7 +2116,7 @@ aside.margin-note {
  * manual light/sepia/dark scheme via the AA panel. The reader sets
  * the bg + inherited text color on its parent flex container, but
  * descendants pull `text-keep-*` and theme-style heading colors
- * from the user's APP theme — wrong against a manually-chosen
+ * from the user's APP theme, wrong against a manually-chosen
  * reader bg (e.g. dark app + light reader = white text on white).
  *
  * When the reader is in a manual scheme, `data-reader-scheme` is
@@ -2124,7 +2124,7 @@ aside.margin-note {
  * TOC. Headings, the `keep-text` / `keep-muted` text classes, and
  * the global body text-shadow are all reset to inherit so the
  * subtree matches the reader's chosen scheme. We leave
- * `keep-action` alone — it's the accent (active chapter, links)
+ * `keep-action` alone, it's the accent (active chapter, links)
  * and the theme picker's accent picks a value contrasting against
  * the chosen scheme on the user's end. */
 [data-reader-scheme] h1,
@@ -2136,7 +2136,7 @@ aside.margin-note {
   color: inherit;
 }
 /* Tailwind's `text-keep-text` / `text-keep-muted` classes hard-set
- * a color from the app theme — wrong inside a manual reader scheme.
+ * a color from the app theme, wrong inside a manual reader scheme.
  * Use `currentColor` (the scheme's body color) with opacity for
  * the muted variant so the visual hierarchy survives without
  * pulling a dark-theme color onto a light reader. */
@@ -2149,7 +2149,7 @@ aside.margin-note {
   color: inherit;
   opacity: 0.7;
 }
-/* TOC sidebar rule / chapter divider — use a soft tint per scheme
+/* TOC sidebar rule / chapter divider, use a soft tint per scheme
  * instead of the app theme's `--keep-border` which is calibrated
  * for the wrong background. */
 [data-reader-scheme="light"] .border-keep-rule,
@@ -2182,7 +2182,7 @@ aside.margin-note {
   box-shadow: none !important;
 }
 
-/* Documentary-reading variant — used on the World viewer / editor
+/* Documentary-reading variant, used on the World viewer / editor
  * and any future surface where user-authored text needs to stay
  * legible against whatever palette the author picked.
  *
@@ -2196,7 +2196,7 @@ aside.margin-note {
  *   1. `legibleThemePalette` nudges the foreground slots against
  *      `theme.bg`, not `theme.panel`, so a text that just barely
  *      meets 4.5:1 against the bg can fall below 3:1 against the
- *      actual panel surface — text reads as smoke against a brown
+ *      actual panel surface, text reads as smoke against a brown
  *      modal.
  *   2. scifi's 50% transparency + blur lets the chat behind the
  *      modal bleed through, mixing the surface color with whatever
@@ -2207,7 +2207,7 @@ aside.margin-note {
  * `.keep-frame--reading` forces the frame to render as an opaque
  * `--keep-bg` surface, kills the backdrop blur, and suppresses the
  * design-key's texture `::before`. The border / shadow stays so
- * the modal still reads as a card — just with the bg the
+ * the modal still reads as a card, just with the bg the
  * legibility nudge was computed against. */
 .keep-frame.keep-frame--reading,
 [data-theme-style] .keep-frame.keep-frame--reading {
@@ -2222,12 +2222,12 @@ aside.margin-note {
 }
 
 /* ============================================================
- * Reader shell — two-pane partitioning
+ * Reader shell, two-pane partitioning
  * ============================================================
  *
  * The reader modal hosts two side-by-side `.keep-panel` cards
- * (sidebar + reading column). In a dark palette — or in a theme
- * design like glass whose panel chrome is intentionally subtle —
+ * (sidebar + reading column). In a dark palette, or in a theme
+ * design like glass whose panel chrome is intentionally subtle,
  * the panels' fill can be visually identical to the modal's bg,
  * which collapses the partitioning the user expects (rounded
  * corners, visible seams, distinct card surfaces).
@@ -2254,7 +2254,7 @@ aside.margin-note {
 }
 /* Always-on rounded card chrome on the two inner panels. The
  * theme-design's per-design rules can OVERRIDE these (e.g. glass
- * sets its own larger 14px radius + frosted bevel) — these are
+ * sets its own larger 14px radius + frosted bevel), these are
  * the floor so even a minimal / no-design palette still reads as
  * partitioned. */
 .reader-shell > .reader-sidebar,
@@ -2263,11 +2263,11 @@ aside.margin-note {
   border-radius: 12px;
   border: 1px solid rgb(var(--keep-border) / 0.55);
   box-shadow:
-    /* Top highlight — picks up any light source on the modal */
+    /* Top highlight, picks up any light source on the modal */
     inset 0 1px 0 rgb(255 255 255 / 0.06),
-    /* Inset bottom shadow — chamfer cue */
+    /* Inset bottom shadow, chamfer cue */
     inset 0 -1px 0 rgb(0 0 0 / 0.18),
-    /* Outer ambient drop — separates the card from the desktop */
+    /* Outer ambient drop, separates the card from the desktop */
     0 2px 4px rgb(0 0 0 / 0.25),
     0 12px 28px -10px rgb(0 0 0 / 0.55);
 }
@@ -2293,10 +2293,10 @@ aside.margin-note {
 }
 
 /* ============================================================
- * Auto-scheme reader — solid theme-bg surface for legibility
+ * Auto-scheme reader, solid theme-bg surface for legibility
  * ============================================================
  *
- * The reader is a dedicated reading surface — comfort > visual
+ * The reader is a dedicated reading surface, comfort > visual
  * harmony with the surrounding chrome. The "auto" scheme (the
  * default) inherits the active theme's palette, but the
  * designs layered on `.keep-frame` / `.keep-panel` paint
@@ -2318,7 +2318,7 @@ aside.margin-note {
  * regardless of which design is active.
  *
  * The outer .keep-frame's chrome (neon border, glass bevel)
- * is unaffected — these rules only target the inner reader
+ * is unaffected, these rules only target the inner reader
  * surfaces.
  */
 .reader-shell:not([data-reader-scheme]) {
@@ -2365,7 +2365,7 @@ aside.margin-note {
  * below then force a near-white text on dark backgrounds and
  * near-black on light backgrounds, regardless of what value the
  * theme's `--keep-text` resolved to. This is a deliberate override
- * — comfort > theme fidelity inside the reader, where the surface
+ *, comfort > theme fidelity inside the reader, where the surface
  * exists to be read for long stretches.
  *
  * The override applies to the prose body, the chapter headings,
@@ -2409,7 +2409,7 @@ aside.margin-note {
 }
 
 /* ============================================================
- * Themed notice bars — top-of-app notification strips
+ * Themed notice bars, top-of-app notification strips
  * ============================================================
  *
  * Used by the rank-up ribbon, stale-version banner, linked-world
@@ -2419,13 +2419,13 @@ aside.margin-note {
  * (medieval parchment, modern soft gradient, scifi neon, glass
  * frost).
  *
- *   .keep-notice         — neutral strip (room topic, expiry)
- *   .keep-notice-accent  — accent-tinted strip (rank-up, world
+ *   .keep-notice        , neutral strip (room topic, expiry)
+ *   .keep-notice-accent , accent-tinted strip (rank-up, world
  *                          link, stale version) for action-color
  *                          emphasis without leaving the theme
  *
  * Default (no theme-style attribute) renders as a subtle tinted
- * strip with a hairline border — visible but quiet. Each
+ * strip with a hairline border, visible but quiet. Each
  * theme-style block below paints richer chrome on top.
  */
 .keep-notice {
@@ -2446,7 +2446,7 @@ aside.margin-note {
 }
 
 /* Glass: frost + saturate. The strips become true glass tiles
- * with the backdrop blurring everything beneath them — same
+ * with the backdrop blurring everything beneath them, same
  * visual language as keep-panel. */
 [data-theme-style="glass"] .keep-notice {
   background-color: rgb(var(--keep-panel) / 0.45);
@@ -2552,7 +2552,7 @@ aside.margin-note {
  * `.prose-reader` is the chapter-body wrapper. It needs paragraph
  * spacing (so Tiptap's `<p>` blocks render with visible breaks
  * between paragraphs / dialogue), plus the standard typography
- * defaults — lists, blockquote, hr, link color. Mirrors the
+ * defaults, lists, blockquote, hr, link color. Mirrors the
  * `.prose` rules above but uses a slightly larger margin since
  * the reader runs at user-controlled font sizes where 0.6em
  * paragraphs collapse into a wall of text. */
@@ -2601,7 +2601,7 @@ aside.margin-note {
 .prose-reader img { max-width: 100%; height: auto; }
 
 /* ============================================================
- * Book mode pagination — CSS multi-column flow
+ * Book mode pagination, CSS multi-column flow
  * ============================================================
  *
  * The story reader's `book` mode flows the chapter into multiple
@@ -2643,7 +2643,7 @@ aside.margin-note {
   break-after: avoid-column;
 }
 /* Block-quotes, code blocks, lists are short structures that look
- * broken when split — try to keep them whole. */
+ * broken when split, try to keep them whole. */
 .book-paged-content blockquote,
 .book-paged-content pre,
 .book-paged-content figure {
@@ -2658,7 +2658,7 @@ aside.margin-note {
 }
 
 /* ============================================================
- * Emoticon system — pop-in animations + hover affordances
+ * Emoticon system, pop-in animations + hover affordances
  * ============================================================
  *
  * Mood-keyed one-shot animations triggered by stamping
@@ -2672,12 +2672,12 @@ aside.margin-note {
  * "feels" the way it looks.
  *
  * Performance: only `transform`, `opacity`, `filter`, and
- * `box-shadow` are animated — all GPU-compositable. No layout
+ * `box-shadow` are animated, all GPU-compositable. No layout
  * thrash even with 50 chips on screen.
  */
 
 /* ============================================================
- * Reaction chip — resting + hover sizing
+ * Reaction chip, resting + hover sizing
  * ============================================================
  *
  * Two-tier reaction chip:
@@ -2707,7 +2707,7 @@ aside.margin-note {
  * (which carries its own `title=` for the cell label, e.g.
  * "happy") is the topmost hit-test target when the cursor is over
  * the sprite, and the browser prefers the deepest element's title
- * — so the chip's "Alice reacted with happy" tooltip never
+ *, so the chip's "Alice reacted with happy" tooltip never
  * appears in the area users actually aim at. Clicks bubble to the
  * button regardless, so toggle behavior is unaffected. */
 .reaction-chip > *,
@@ -2769,7 +2769,7 @@ aside.margin-note {
  * Each Owned / Available card in the Earning dashboard renders a
  * `<StyledName>` preview directly above the Equip / Buy button.
  * Admin-authored styles can ship pseudo-elements that paint OUTSIDE
- * the styled span — fog overlays, halos, sparkle particles — and a
+ * the styled span, fog overlays, halos, sparkle particles, and a
  * pseudo-element at default `pointer-events: auto` happily eats
  * pointer input from the area it covers. The Fog style was the
  * reported case: its overlay drifted across the Equip button and
@@ -2780,7 +2780,7 @@ aside.margin-note {
  *
  *   `pointer-events: none` cascaded onto every descendant + pseudo
  *   guarantees that even if some future style somehow escapes (e.g.
- *   `position: fixed`), it cannot capture pointer input — clicks
+ *   `position: fixed`), it cannot capture pointer input, clicks
  *   pass through to whatever sits below, which is the card chrome,
  *   never an interactive surface. The preview is read-only anyway
  *   so disabling pointer input on its subtree costs nothing.
@@ -2794,7 +2794,7 @@ aside.margin-note {
    * splash card / modal further up the tree). */
   position: relative;
   /* CSS containment: `paint` clips ALL descendant rendering to this
-   * box — strictly stronger than `overflow: hidden`. Notably it also
+   * box, strictly stronger than `overflow: hidden`. Notably it also
    * clips `position: fixed` descendants, which `overflow: hidden`
    * does NOT do; if a future admin-authored style ships a
    * `position: fixed` pseudo, it still can't overlap the card chrome.
@@ -2802,7 +2802,7 @@ aside.margin-note {
    * alignment, margin collapse) so the preview box's height stays
    * predictable regardless of what a style does inside. */
   contain: layout paint;
-  /* Fresh stacking context — a name-style that bumps z-index in an
+  /* Fresh stacking context, a name-style that bumps z-index in an
    * animation keyframe can't escape above the surrounding card
    * (Equip button, Save row, etc.) because every internal layer
    * now lives in this isolated context. */
@@ -2827,7 +2827,7 @@ aside.margin-note {
   z-index: 1;
   pointer-events: auto;
 }
-/* Count digit pulses when reactor count changes — driven by a
+/* Count digit pulses when reactor count changes, driven by a
  * key=count React trick on the chip's number span. */
 .emoticon-chip-count {
   display: inline-block;
@@ -2848,7 +2848,7 @@ aside.margin-note {
  * animation on the inner sprite (the "face"). The animations
  * intentionally avoid `transform` on the container itself so the
  * existing `.emoticon-chip:hover` scale-up still reads as a clean
- * hover affordance — the chip can scale on hover without colliding
+ * hover affordance, the chip can scale on hover without colliding
  * with a perpetual translate / rotate on the same property.
  *
  * Decorations (rage ripple, surprise "!", smirk sparkle, sleep "z",
@@ -2856,7 +2856,7 @@ aside.margin-note {
  * `::before` / `::after` so no JSX wiring is needed at the call
  * sites. Containers must keep `overflow: visible` (reaction chips
  * and picker cells already do) so out-of-bounds decorations don't
- * clip — the chip's flex parents are also visible by default.
+ * clip, the chip's flex parents are also visible by default.
  *
  * Sizing: pseudo-element offsets are tuned for ~32-48px sprite
  * containers (reaction chips + picker cells). Slightly oversized
@@ -2865,11 +2865,11 @@ aside.margin-note {
  * scales naturally between the two surfaces.
  *
  * Performance: only `transform`, `opacity`, `background-position`,
- * `border-color`, `box-shadow`, and `filter` are animated — all
+ * `border-color`, `box-shadow`, and `filter` are animated, all
  * GPU-compositable. 30+ chips on screen render without layout
  * thrash. */
 
-/* Shared baseline — reaction chips and picker cells need
+/* Shared baseline, reaction chips and picker cells need
  * `position: relative` so pseudo decorations anchor to the chip
  * rather than escaping to the nearest positioned ancestor (which on
  * a deeply nested message row is the splash card / modal). The
@@ -2889,10 +2889,10 @@ aside.margin-note {
 /* Picker cells need a permanent ring of border-width so the
  * mood keyframes have something to animate the COLOR of. Without
  * this the cells render with no `border` declaration at all (the
- * JSX className is just `rounded p-1` — no `border` Tailwind
+ * JSX className is just `rounded p-1`, no `border` Tailwind
  * utility), the keyframe `border-color: …` lines have no surface
  * to paint, and the only visible "border-like" effect ends up
- * being the keyframe box-shadow halo — which pops in and out as
+ * being the keyframe box-shadow halo, which pops in and out as
  * its spread/alpha cycles between transparent and visible frames.
  * That's the "flashing / disappearing borders" complaint: it
  * wasn't the color shift, it was the absence of a real border to
@@ -2922,7 +2922,7 @@ aside.margin-note {
 }
 
 /* ---------- 1. CHUCKLE (laughing / happy) ----------
- * Yellow border pulses with the face's vertical bounce — the two
+ * Yellow border pulses with the face's vertical bounce, the two
  * read as a single "ha-ha-ha" beat. */
 .emoticon-anim-chuckle {
   animation: emoticon-chuckle-border 1.2s ease-in-out infinite;
@@ -2946,7 +2946,7 @@ aside.margin-note {
 }
 
 /* ---------- 2. GIGGLE (squint smile) ----------
- * Gentler than chuckle — a rocking sway in the border with the
+ * Gentler than chuckle, a rocking sway in the border with the
  * face nodding side-to-side. */
 .emoticon-anim-giggle {
   animation: emoticon-giggle-border 1.6s ease-in-out infinite;
@@ -2966,7 +2966,7 @@ aside.margin-note {
 
 /* ---------- 3. RAGE (angry) ----------
  * Red border pulse + an outward ripple ring + a tight face jitter.
- * Container translate is dropped (would fight hover scale) — the
+ * Container translate is dropped (would fight hover scale), the
  * face's sub-pixel jitter carries the "vibrating with anger" read. */
 .emoticon-anim-rage {
   animation: emoticon-rage-pulse 0.6s ease-in-out infinite;
@@ -3291,7 +3291,7 @@ aside.margin-note {
 }
 
 /* ---------- 12. ANNOY (sharp twitch) ----------
- * Mostly quiet — every 2.2s the border snaps and a triangular
+ * Mostly quiet, every 2.2s the border snaps and a triangular
  * "spark" pops from the corner. Face shifts a few pixels at the
  * same beat. */
 .emoticon-anim-annoy {
@@ -3331,7 +3331,7 @@ aside.margin-note {
 }
 
 /* ---------- Default (no keyword match) ----------
- * Soft accent-color halo pulse — alive but unobtrusive, so chips
+ * Soft accent-color halo pulse, alive but unobtrusive, so chips
  * whose labels don't map to a named mood don't sit visually inert
  * next to their animated siblings. */
 .emoticon-anim-default {
@@ -3343,7 +3343,7 @@ aside.margin-note {
 }
 
 /* ---------- Picker cell scale overrides ----------
- * The picker grid renders sprites at 64px (recents at 48px) — the
+ * The picker grid renders sprites at 64px (recents at 48px), the
  * pseudo decorations tuned for 32px chips would look undersized in
  * that context. Bump font sizes / heights so the same mood class
  * reads correctly on both surfaces. */
@@ -3402,14 +3402,14 @@ aside.margin-note {
   max-height: 100% !important;
 }
 
-/* Discord-style "show the add-reaction button on row hover" — the
+/* Discord-style "show the add-reaction button on row hover", the
  * button is invisible at rest when the message has NO reactions yet
  * (so the row stays clean) and slides in when the user hovers the
  * parent message row. Once a reaction exists, the button is always
  * visible because the bar is already taking space anyway. We use
  * `.group` on the message row (already present from Tailwind's group
  * variant on the chat Line / DM bubble) to drive the reveal. */
-/* Inline emoticons in message bodies — `:slug:idx:` tokens that
+/* Inline emoticons in message bodies, `:slug:idx:` tokens that
  * the markdown renderer converts to a sprite. Sits inline with
  * the surrounding text at 24px, scales up to 42px on hover so
  * the user can read what the sprite is without having to open
@@ -3459,7 +3459,7 @@ aside.margin-note {
   }
 }
 
-/* Inline Unicode emoji in message bodies — parity with the sticker
+/* Inline Unicode emoji in message bodies, parity with the sticker
  * `.inline-emoticon` hover treatment. Emoji glyphs are font-sized
  * (they grow / shrink with the surrounding text), so we don't
  * impose a fixed pixel box like stickers do; instead we treat the
@@ -3492,7 +3492,7 @@ aside.margin-note {
   .inline-emoji:hover { transform: none; }
 }
 
-/* Sticker variant — promoted when the entire message body is a
+/* Sticker variant, promoted when the entire message body is a
  * single emoticon token. Matches the Messenger / Discord /
  * Telegram lone-emoji UX: the sprite jumps from the 24px inline
  * size to 84px so a one-off reaction reads as expressive content
@@ -3510,7 +3510,7 @@ aside.margin-note {
   height: 84px !important;
 }
 
-/* Add-reaction button geometry — match the resting reaction chip's
+/* Add-reaction button geometry, match the resting reaction chip's
  * outer height so the trigger reads as a sibling of the chips
  * instead of a smaller pill at the end of the row. A chip is
  * ~32px sprite + 4px vertical padding + 2px border = ~38px outer;
@@ -3524,7 +3524,7 @@ aside.margin-note {
   font-size: 1.125rem;
   line-height: 1;
 }
-/* Add-reaction button visibility — hidden at rest, revealed on
+/* Add-reaction button visibility, hidden at rest, revealed on
  * interaction with the parent message. `display: none` (not
  * `opacity: 0`) so the button takes ZERO layout space when hidden;
  * a row of feint "+ 😊" pills under every empty message reads as
@@ -3537,11 +3537,11 @@ aside.margin-note {
  *                              which makes any focusable descendant
  *                              including the +react itself trigger
  *                              this match)
- *   - `:hover` / `:focus-visible` on the button itself — defensive
+ *   - `:hover` / `:focus-visible` on the button itself, defensive
  *     for surfaces that aren't wrapped in `.group`
  *
  * Used on every ReactionBar instance (chat feed, DM bubbles, forum
- * posts) regardless of whether the message already has reactions —
+ * posts) regardless of whether the message already has reactions,
  * the trailing "+react" at the end of an existing chip row hides
  * the same way. */
 .emoticon-add-btn.emoticon-add-btn-hidden {
@@ -3554,7 +3554,7 @@ aside.margin-note {
   display: inline-flex;
 }
 
-/* Honor `prefers-reduced-motion` — kill every perpetual mood loop
+/* Honor `prefers-reduced-motion`, kill every perpetual mood loop
  * (chip border pulses, face transforms, ::before / ::after
  * decorations) AND the chip-count pulse. Keep the gentle hover
  * transition so the affordance is still there. Accessibility win
@@ -3590,7 +3590,7 @@ aside.margin-note {
 }
 
 /* ============================================================
- * Splash bookshelf — antique 3D pull-out volumes (BookshelfStrip)
+ * Splash bookshelf, antique 3D pull-out volumes (BookshelfStrip)
  * ============================================================
  * The shelf chrome (wood, brass, vignette) reads as a constant
  * medieval library across every theme, but the colors are mixed
@@ -3600,7 +3600,7 @@ aside.margin-note {
 .bookshelf {
   /* Wood gradient blends the theme panel ramp with antique-brown
    * anchors. Panel weight is HIGH (60–65%) so the shelf truly
-   * tracks the theme — on light themes the wood reads as
+   * tracks the theme, on light themes the wood reads as
    * honey/oak, on dark themes as dark walnut, instead of always
    * looking like a dim antique brown regardless of theme. */
   --shelf-wood-deep: color-mix(in srgb, rgb(var(--keep-panel-500)) 60%, #2a160b 40%);
@@ -3695,7 +3695,7 @@ aside.margin-note {
   transform-style: preserve-3d;
 }
 
-/* Back wall vignette — extends past the shelf so the dim library
+/* Back wall vignette, extends past the shelf so the dim library
  * ambience fades into the surrounding card rather than ending in
  * a hard edge. */
 .bookshelf-shelf::before {
@@ -3861,16 +3861,16 @@ aside.margin-note {
    * (rather than after the first ~30% of the rotation, which is
    * what a 100ms delay produced). The cover face is rotated behind
    * the spine in 3D space, so until the rotation visibly moves it
-   * around there's nothing to see — making opacity full from frame
+   * around there's nothing to see, making opacity full from frame
    * 1 doesn't show a floating dim cover, it just primes the reveal.
    * Pull-IN direction (the rule above with `transition: opacity
    * 220ms ease 1000ms`) keeps its 1000ms delay so the cover stays
    * lit during the put-away rotation and only fades AFTER the
-   * book is back on the shelf — symmetric with this entry path. */
+   * book is back on the shelf, symmetric with this entry path. */
   transition: opacity 200ms ease 0ms;
 }
 
-/* SPINE — visible when shelved. The spine pulls from the per-book
+/* SPINE, visible when shelved. The spine pulls from the per-book
  * HSL trio set inline by the React component. */
 .bookshelf-book .spine {
   width: var(--w);
@@ -3935,7 +3935,7 @@ aside.margin-note {
   font-weight: 500;
 }
 
-/* COVER (front) — perpendicular to spine, on its right side. */
+/* COVER (front), perpendicular to spine, on its right side. */
 .bookshelf-book .cover {
   width: var(--d);
   height: var(--h);
@@ -4013,7 +4013,7 @@ aside.margin-note {
   opacity: 0.7;
 }
 
-/* COVER content — title, author, art. Fades in late so the user
+/* COVER content, title, author, art. Fades in late so the user
  * sees the rotation finish before the lettering reveals. */
 .bookshelf-book .cover-content {
   position: absolute;
@@ -4029,8 +4029,8 @@ aside.margin-note {
   pointer-events: none;
 }
 .bookshelf-book .cover-art {
-  /* Portrait slot (2:3 book-cover aspect) so portrait uploads —
-   * the genre standard for cover art — fill the cover-art area
+  /* Portrait slot (2:3 book-cover aspect) so portrait uploads,
+   * the genre standard for cover art, fill the cover-art area
    * naturally. Paired with `object-fit: contain` on the img so
    * landscape uploads letterbox top/bottom instead of being
    * center-cropped, and portrait uploads at any aspect taller
@@ -4126,7 +4126,7 @@ aside.margin-note {
   border-radius: 999px;
   font-weight: 600;
 }
-/* Anonymous NC-17 lock badge — small overlay anchored to the
+/* Anonymous NC-17 lock badge, small overlay anchored to the
  * top-right of the cover face. Hints that opening the book will
  * route through the login prompt before the user clicks. Only
  * rendered when viewer is anonymous AND rating is NC-17 (see
@@ -4148,11 +4148,11 @@ aside.margin-note {
   pointer-events: none;
 }
 
-/* HOVER + PULL — pull book forward, rotate so cover swings into
+/* HOVER + PULL, pull book forward, rotate so cover swings into
  * view. Three triggers:
- *   :hover                  — desktop mouse / trackpad
- *   :focus-visible          — keyboard tab navigation
- *   [data-pulled="true"]    — touch devices via the
+ *   :hover                 , desktop mouse / trackpad
+ *   :focus-visible         , keyboard tab navigation
+ *   [data-pulled="true"]   , touch devices via the
  *                              first-tap-pulls / second-tap-opens
  *                              state machine in BookshelfStrip.tsx.
  *                              Without it, mobile users couldn't
@@ -4230,7 +4230,7 @@ aside.margin-note {
 .bookshelf-bookend-right { transform: scaleX(-1); }
 .bookshelf-bookend svg { width: 100%; height: 100%; display: block; }
 
-/* Loading silhouette — shelf only, no books. Keeps the splash
+/* Loading silhouette, shelf only, no books. Keeps the splash
  * from popping when the fetch resolves. */
 .bookshelf-loading .bookshelf-stage {
   min-height: 140px;
@@ -4238,11 +4238,11 @@ aside.margin-note {
 
 /* Responsive shrinks for the bookshelf. The shelved row fits the
  * splash card via the per-book `--w / --h / --d` shrinks in the
- * mobile breakpoints below — the grid-column fix at the splash
+ * mobile breakpoints below, the grid-column fix at the splash
  * layout level (SplashLanding.tsx, `minmax(min(450px, 100%), 1fr)`)
  * keeps the bookshelf section inside the card so a separate stage-
  * level horizontal clip isn't needed. DO NOT add `overflow-x: clip`
- * here — the pulled-out book uses `translateZ` + `rotateY` to swing
+ * here, the pulled-out book uses `translateZ` + `rotateY` to swing
  * forward into the viewer's space, and a stage-level clip chops
  * that projection off mid-animation. The book is supposed to bleed
  * VISUALLY past the stage's flat bounds; that's the whole point of
@@ -4292,7 +4292,7 @@ aside.margin-note {
 }
 /* Ultra-narrow viewports (older phones, foldables in cover mode,
  * 320–380px). 8 books × 34px + 2 bookends × 30px + 9 gaps × 2px =
- * 350px — already overflows a 320px viewport. Shrink the books
+ * 350px, already overflows a 320px viewport. Shrink the books
  * further and tighten the bookend so the row fits cleanly. */
 @media (max-width: 380px) {
   .bookshelf-shelf { height: 270px; }
@@ -4323,11 +4323,11 @@ aside.margin-note {
 }
 
 /* ============================================================
- * Spire scroll — splash page "What Awaits You" parchment
+ * Spire scroll, splash page "What Awaits You" parchment
  * ============================================================
  * Two brass-capped wooden rods slide apart; a parchment expands
  * between them; a quill flies down a feature list typing each
- * description. Animation choreographed in SpireScroll.tsx —
+ * description. Animation choreographed in SpireScroll.tsx,
  * this stylesheet just exposes the visual primitives and the
  * `open` / `content-on` / `shown` state classes the component
  * toggles. The palette is intentionally fixed (parchment + wood
@@ -4337,12 +4337,12 @@ aside.margin-note {
 .spire-scroll-wrap {
   width: 100%;
   position: relative;
-  /* TRUE theme integration — every scroll surface is driven by the
+  /* TRUE theme integration, every scroll surface is driven by the
    * active theme's palette ramps, not blended with a hardcoded
    * antique base. So on light themes the parchment lands near
    * `--keep-bg` (cream / light gray, paper-like) with darker rods
    * built from `--keep-panel-500`; on dark themes the SAME
-   * variables flip — parchment becomes a dark-bg surface with
+   * variables flip, parchment becomes a dark-bg surface with
    * black-panel rods. The medieval feel comes from the SHAPE
    * (rod, parchment unfurl, drop-cap layout) not the colors. */
   --scroll-paper:       rgb(var(--keep-bg));
@@ -4353,7 +4353,7 @@ aside.margin-note {
   --scroll-wood-hi:     rgb(var(--keep-panel-300));
   --scroll-wood-rim:    rgb(var(--keep-panel-500) / 0.85);
   --scroll-wood-vein:   rgb(var(--keep-panel-500) / 0.55);
-  /* Brass colors are MUTED — pure accent reads as eye-searing
+  /* Brass colors are MUTED, pure accent reads as eye-searing
    * neon on saturated themes (pink/magenta/cyan). Each brass stop
    * mixes the accent ramp with the panel ramp so the rod metal
    * stays a calmer dusky tone tinted by the theme accent, not the
@@ -4375,14 +4375,14 @@ aside.margin-note {
 .scroll-stage {
   position: relative;
   width: 100%;
-  /* Full container width — was 760px when the scroll lived in a
+  /* Full container width, was 760px when the scroll lived in a
    * narrow column. With more horizontal room, descriptions fit on
    * one line and the scroll can be much shorter vertically. */
   max-width: 100%;
   margin: 0 auto;
   height: 560px;
   /* CSS variables for layout. The rod SVG now has 45px decorative
-   * ends (was 80px) so paper-inset-y matches that — paper edges
+   * ends (was 80px) so paper-inset-y matches that, paper edges
    * land on the main wood shaft just below the second brass collar
    * with less dead vertical space above and below the parchment.
    * --paper-overlap-x tucks the paper edge behind the rod's shaft
@@ -4392,7 +4392,7 @@ aside.margin-note {
   --paper-overlap-x: 14px;
 }
 
-/* Rods — slide in from center and settle at the stage edges when
+/* Rods, slide in from center and settle at the stage edges when
  * the stage gets the `open` class. Transition tightened to 0.7s
  * so the splash gets to the content faster. */
 .scroll-rod {
@@ -4420,7 +4420,7 @@ aside.margin-note {
 .scroll-stage.open .scroll-rod-left  { left:  0; }
 .scroll-stage.open .scroll-rod-right { right: 0; }
 
-/* Parchment — starts at zero width center-anchored, then expands
+/* Parchment, starts at zero width center-anchored, then expands
  * out to (stage - 2 * (rod-w - overlap)) when `open`. Background
  * is pure theme bg ramp so the parchment FLIPS on dark themes:
  * dark bg-shade with theme text on top, instead of bright cream
@@ -4470,7 +4470,7 @@ aside.margin-note {
   position: absolute;
   inset: 0;
   /* Curl-shadow band at the edges where parchment tucks behind the
-   * rod. On light parchment, hard black would read as soot — the
+   * rod. On light parchment, hard black would read as soot, the
    * `light-dark()` swap gives a warm brown shadow there and keeps
    * the deep-black curl on dark parchment. */
   background: linear-gradient(
@@ -4564,7 +4564,7 @@ aside.margin-note {
  * float-left; the rest of the title + the description flow around
  * it as one paragraph. With the smaller (28px) cap, ~2 lines of
  * body text fit beside the cap before subsequent lines wrap below
- * it as the float clears — matching a true inline drop cap rather
+ * it as the float clears, matching a true inline drop cap rather
  * than a tall pillar that text can never wrap under. */
 .scroll-feature-body {
   margin: 0;
@@ -4575,7 +4575,7 @@ aside.margin-note {
   text-shadow: none;
   /* Long unbroken runs (URLs, no-space tags, dashed phrases like
    * "IC-and-OOC-strictly-separate") otherwise push past the
-   * parchment's right edge on narrow viewports — `.scroll-content`
+   * parchment's right edge on narrow viewports, `.scroll-content`
    * has `overflow: hidden` so the bleed silently clips. Word-break +
    * hyphens lets the browser wrap mid-token when no whitespace
    * opportunity is available. */
@@ -4583,13 +4583,13 @@ aside.margin-note {
   word-break: break-word;
   hyphens: auto;
 }
-/* Drop cap — uses native `initial-letter` on browsers that
+/* Drop cap, uses native `initial-letter` on browsers that
  * support it (Safari and Chrome 110+) for perfect baseline
  * alignment that float can't achieve. The cap automatically sizes
  * to span 2 body lines and its baseline aligns with body line 2's
  * baseline. Firefox (no support) falls back to the inline rule
  * below: cap renders inline at 1.3em with no drop, looks like a
- * slightly enlarged first letter — readable and aligned. */
+ * slightly enlarged first letter, readable and aligned. */
 .scroll-feature-cap {
   font-family: Georgia, "Cinzel Decorative", "Cinzel", serif;
   font-weight: 700;
@@ -4634,7 +4634,7 @@ aside.margin-note {
   pointer-events: none;
   opacity: 0;
   /* Quick `left`/`top` transition because the quill is now driven
-   * per character — a long 500ms ease would lag the cursor by a
+   * per character, a long 500ms ease would lag the cursor by a
    * char or two. 90ms feels like a held pen tracking writing. */
   transition:
     opacity 0.25s,
@@ -4685,7 +4685,7 @@ aside.margin-note {
   .scroll-quill { transition: none !important; }
 }
 
-/* Profile modal — when the viewed profile carries a public BG
+/* Profile modal, when the viewed profile carries a public BG
  * image, ProfileModal sets `data-profile-bg="1"` on the card and
  * scopes CSS-var overrides (tighter glass tint + a luminance-aware
  * --keep-text swap). The text-shadow below is a final safety net
@@ -4703,7 +4703,7 @@ aside.margin-note {
 }
 /* Keep ornament/text-on-image surfaces that already manage their
  * own contrast (the orb text, name-style glyphs, code blocks) from
- * being double-shadowed — the existing rules in those scopes win. */
+ * being double-shadowed, the existing rules in those scopes win. */
 [data-profile-bg="1"] .orb-text,
 [data-profile-bg="1"] [data-name-style],
 [data-profile-bg="1"] pre,
@@ -4712,7 +4712,7 @@ aside.margin-note {
 }
 
 /* ============================================================
- * Splash worlds orb — crystal-ball carousel (FeaturedWorldsCarousel)
+ * Splash worlds orb, crystal-ball carousel (FeaturedWorldsCarousel)
  * ============================================================ */
 .orb-section {
   /* Panel container so the orb visually segments from neighbors
@@ -4737,7 +4737,7 @@ aside.margin-note {
   margin: 0 0 1.5rem;
 }
 
-/* Orb section header — brass-diamond rule + serif title + italic
+/* Orb section header, brass-diamond rule + serif title + italic
  * subtitle, mirroring the bookshelf header treatment so the worlds
  * orb and the Scriptorium shelf read as a matched pair. */
 .orb-section-header {
@@ -4828,13 +4828,13 @@ aside.margin-note {
   position: relative;
   width: 360px;
   height: 360px;
-  /* The sphere IS the link target — cursor and a soft brightness
+  /* The sphere IS the link target, cursor and a soft brightness
    * lift on hover signal it's clickable. focus-visible adds a ring
    * for keyboard navigation. `drop-shadow` on the wrap stacks an
    * additional grounding shadow (under the orb) and an accent
    * halo (around it) on TOP of whatever the canvas already paints,
    * so the orb feels lifted off the surrounding panel rather than
-   * pasted onto it. The accent halo uses the theme accent — the
+   * pasted onto it. The accent halo uses the theme accent, the
    * per-world tint is already in the canvas. */
   cursor: pointer;
   transition: filter 220ms ease, transform 220ms ease;
@@ -4854,7 +4854,7 @@ aside.margin-note {
     drop-shadow(0 22px 44px rgb(0 0 0 / 0.55))
     drop-shadow(0 0 56px rgb(var(--keep-accent) / 0.55))
     brightness(1.08);
-  /* Glow ring around the sphere on keyboard focus — uses the world's
+  /* Glow ring around the sphere on keyboard focus, uses the world's
    * own jewel-tone palette via the canvas's accent halo, so the
    * focus state ties into the theme. */
   box-shadow: 0 0 0 3px rgb(var(--keep-accent) / 0.55);
@@ -4890,7 +4890,7 @@ aside.margin-note {
 /* Strong multi-layer text shadow so the title stays legible against
  * whatever color is blooming inside the sphere (bright cover art,
  * shifting swirl, particle bursts). Uses static dark shadows because
- * the sphere interior is uniformly dim regardless of theme — the
+ * the sphere interior is uniformly dim regardless of theme, the
  * shadows are an opaque reading frame, not a theme accent. */
 .orb-text {
   text-shadow:
@@ -4919,7 +4919,7 @@ aside.margin-note {
   margin: 0 0 12px;
   color: rgba(255,255,255,0.98);
   line-height: 1.15;
-  /* Two-line clamp with ellipsis — keeps long titles like
+  /* Two-line clamp with ellipsis, keeps long titles like
    * "The Thrice-Crowned Realm" from spilling past the orb's
    * circular boundary and pushing the description below the
    * sphere's bottom. */

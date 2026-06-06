@@ -15,11 +15,11 @@ import { hasPermission } from "../auth/permissions.js";
  * `isCustom: true` so the UI can group/badge them.
  *
  * Permission-gated commands (those that declare a `permission` field
- * on the handler — currently /promoteadmin, /demoteadmin, /incognito)
+ * on the handler, currently /promoteadmin, /demoteadmin, /incognito)
  * are dropped from the response for callers who don't hold that
  * permission. The dispatcher gates execution independently, but
  * filtering here keeps non-permitted users from seeing the command
- * exists in /help — useful for the incognito case specifically, since
+ * exists in /help, useful for the incognito case specifically, since
  * the whole point is mods/admins observing without their tools being
  * visible to regular users.
  */
@@ -78,7 +78,7 @@ export async function registerCommandsRoutes(
       kinds.map((k) => {
         const flags: string[] = [];
         if (!k.symmetric) flags.push("asymmetric");
-        if (k.exclusive) flags.push("exclusive — one accepted at a time");
+        if (k.exclusive) flags.push("exclusive, one accepted at a time");
         const flagText = flags.length > 0 ? ` (${flags.join("; ")})` : "";
         return {
           verb: k.slug,
@@ -116,7 +116,7 @@ export async function registerCommandsRoutes(
       isCustom: true,
       // Surfaced so the composer's `!name` palette can filter to just
       // the inline-eligible commands. Built-in docs above leave this
-      // off — only custom commands can opt in.
+      // off, only custom commands can opt in.
       ...(c.allowInline ? { allowInline: true } : {}),
     }));
 

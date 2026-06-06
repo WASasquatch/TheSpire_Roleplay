@@ -19,7 +19,7 @@ export interface AuthMe {
   role: Role;
   /** Resolved permission set the server reports for this user (Phase
    *  2 granular permissions). Used by UI gates as the canonical
-   *  source of truth — `me.permissions.includes("manage_emoticon_catalog")`
+   *  source of truth, `me.permissions.includes("manage_emoticon_catalog")`
    *  beats `isAdminRole(me.role)` because it folds in per-user
    *  overrides + matrix role-grant edits without needing a re-login.
    *  Refreshes on the same /auth/me 60s poll the rest of the payload
@@ -50,7 +50,7 @@ export interface SiteBranding {
   /**
    * Canonical site URL the banner logo links to. Empty string = no
    * wrapping (logo renders bare). The wrapper anchor is intentionally
-   * unstyled — the logo still reads as a logo, not a chip; clicking
+   * unstyled, the logo still reads as a logo, not a chip; clicking
    * it just navigates.
    */
   siteUrl: string;
@@ -117,7 +117,7 @@ export interface SiteBranding {
   featuredWorldsEnabled: boolean;
   /**
    * Splash stat: surface the rolling 24h chat message count.
-   * Independent of `activityFeedsEnabled` — each toggle gates its own
+   * Independent of `activityFeedsEnabled`, each toggle gates its own
    * section of the splash stats row, so admins can show the message
    * count alone (just chat volume), the online/room cluster alone,
    * or both together. When both are on, the splash renders them in
@@ -145,7 +145,7 @@ export interface SiteBranding {
 
 export const DEFAULT_BRANDING: SiteBranding = {
   siteName: "The Spire",
-  // Empty by default — no logo link wrapping. Admins set this via the
+  // Empty by default, no logo link wrapping. Admins set this via the
   // Branding tab; real value arrives on first /site fetch.
   siteUrl: "",
   bannerCoverCss: null,
@@ -161,7 +161,7 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // TTL 30 days. Real values are pushed in by /site on first paint.
   messageRetentionMs: 0,
   sessionTtlMs: 30 * 24 * 60 * 60 * 1000,
-  // 5 minutes — mirrors the server migration default. Real value
+  // 5 minutes, mirrors the server migration default. Real value
   // arrives via /site on first paint.
   editGraceMs: 5 * 60 * 1000,
   defaultTheme: DEFAULT_THEME,
@@ -174,14 +174,14 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // representative or after seeding the catalog with their own.
   featuredWorldsEnabled: false,
   // Off by default. Admin opt-in once they're sure their 24h volume reads
-  // as healthy. Independent of `activityFeedsEnabled` — each toggle gates
+  // as healthy. Independent of `activityFeedsEnabled`, each toggle gates
   // its own splash section.
   splashMessages24hEnabled: false,
   // Flagship style. Site admins can change this to any registered style
   // key ('medieval', 'modern', 'scifi'); unknown keys fall back to this
   // value at render time.
   defaultStyleKey: "medieval",
-  // Empty by default — every theme falls straight through to
+  // Empty by default, every theme falls straight through to
   // defaultStyleKey. Admins seed pinned designs via the migration and
   // can edit them in the admin settings UI.
   themeDesignMap: {},
@@ -267,7 +267,7 @@ export function loadCachedBranding(): SiteBranding {
  * `/site` payload. Drops anything that isn't `Record<string, string>`,
  * since the column is admin-editable and a malformed entry would crash
  * the style resolver. Empty object is a valid value (meaning "no
- * pinning — fall through to defaultStyleKey").
+ * pinning, fall through to defaultStyleKey").
  */
 export function sanitizeThemeDesignMap(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
@@ -288,7 +288,7 @@ export function saveCachedBranding(b: SiteBranding): void {
 /**
  * Cache the user's most recently *resolved* active theme (palette
  * after all character / master / branding fallbacks). The splash
- * reads this on a fresh tab — before /auth/me has resolved — so a
+ * reads this on a fresh tab, before /auth/me has resolved, so a
  * brief sign-out doesn't bounce a user who chose Darkness through a
  * flash of the Parchment splash. localStorage (not sessionStorage)
  * so the value survives a tab close + reopen: the user's *theme
@@ -312,7 +312,7 @@ export function saveCachedActiveTheme(theme: Theme): void {
   try {
     if (typeof localStorage === "undefined") return;
     localStorage.setItem(LAST_ACTIVE_THEME_KEY, JSON.stringify(theme));
-  } catch { /* private-mode — splash will fall back to prefers-color-scheme */ }
+  } catch { /* private-mode, splash will fall back to prefers-color-scheme */ }
 }
 
 export function loadCachedActiveTheme(): Theme | null {
@@ -447,7 +447,7 @@ interface ChatState {
    *   - The forum view in nested-mode rooms shows topics ordered by
    *     `lastActivityAt DESC` and paginated 20-at-a-time via
    *     `GET /rooms/:id/topics`. The chat backlog (last 50 messages
-   *     via room:join) is the wrong substrate — busy threads can
+   *     via room:join) is the wrong substrate, busy threads can
    *     push every topic out of the window, and we want explicit
    *     "Load older" navigation, not implicit "scroll up".
    *   - `messagesByRoom` is still the source of truth for REPLIES
@@ -466,10 +466,36 @@ interface ChatState {
     loading: boolean;
     /** Topics from socket events waiting behind a "X new topics" pill. */
     pending: ChatMessage[];
+    /** 1-indexed page the bucket is currently showing. Drives the
+     *  pagination strip (Prev / 1 2 … N / Next). Defaults to 1 on
+     *  bucket creation. */
+    currentPage: number;
+    /** Total pages in the non-sticky pool for this category. Used by
+     *  the strip to decide how many page numbers to render and
+     *  whether to disable Prev/Next. 1 when there are zero or fewer
+     *  non-stickies than one page's worth. */
+    totalPages: number;
+    /** Total non-sticky topic count for this category. Surfaced in
+     *  the pagination strip as "Page X of Y, N topics" for context. */
+    totalCount: number;
+    /** Page size the server actually used to compute totalPages.
+     *  Mirrors `siteSettings.forumTopicsPerPage` for the common
+     *  case; a request that overrode `perPage` reflects that here
+     *  so the strip's math stays self-consistent. */
+    perPage: number;
   }>>;
-  /** Replace a category bucket entirely (used on first page load). */
-  setForumTopicsPage: (roomId: string, categoryKey: string, topics: ChatMessage[], hasMore: boolean) => void;
-  /** Append the next page to the end of a bucket (used on "Load older"). */
+  /** Replace a category bucket entirely (used on first page load AND
+   *  on every page-navigation click). Replaces topics + updates the
+   *  pagination metadata in one shot. */
+  setForumTopicsPage: (
+    roomId: string,
+    categoryKey: string,
+    topics: ChatMessage[],
+    pageInfo: { currentPage: number; totalPages: number; totalCount: number; perPage: number },
+  ) => void;
+  /** LEGACY append helper, preserved for the cursor-page path on
+   *  the off chance an older surface still calls it. New surfaces
+   *  use `setForumTopicsPage` only. */
   appendForumTopicsPage: (roomId: string, categoryKey: string, topics: ChatMessage[], hasMore: boolean) => void;
   /** Mark a bucket as in-flight (UI shows a spinner / disables the button). */
   setForumTopicsLoading: (roomId: string, categoryKey: string, loading: boolean) => void;
@@ -489,7 +515,7 @@ interface ChatState {
   setRoom: (room: RoomSummary) => void;
 
   /**
-   * Phase 4 typing indicator — who is currently typing in each
+   * Phase 4 typing indicator, who is currently typing in each
    * room, keyed by roomId. Server filters out the viewer and
    * anyone they've ignored before sending, so the renderer can
    * splat this directly into the indicator strip.
@@ -517,7 +543,7 @@ interface ChatState {
    *   CALLER's data, not the target user's).
    * - Loads the named character via `GET /characters/:id` (admin
    *   allowed), saves via `PUT /characters/:id` (admin allowed).
-   * - Hides the master/character switcher — admin edits ONE
+   * - Hides the master/character switcher, admin edits ONE
    *   character at a time. To edit a different one, close + reopen
    *   from the admin user row.
    * - Shows an "Editing as admin: X (owned by Y)" banner so the
@@ -530,7 +556,7 @@ interface ChatState {
         adminContext?: { ownerUserId: string; ownerUsername: string };
         /**
          * Optional tab the editor opens on. Used by deep-links from
-         * surfaces that want the user to land on a specific tab —
+         * surfaces that want the user to land on a specific tab,
          * e.g. the Earning shop's "Configure in Edit Profile → Flair"
          * pointer after buying a profile-customization flair lands on
          * "flair", and the Direct Messenger / Profile back-link could
@@ -582,7 +608,7 @@ interface ChatState {
    * Per-conversation message buffer. Keyed by conversationId. Each
    * list stays sorted oldest → newest; the store action handles
    * dedupe by id (server can fan a message to multiple sockets of
-   * the same user). Trimmed lazily — the DmThread caps display at
+   * the same user). Trimmed lazily, the DmThread caps display at
    * its own rendering layer.
    */
   dmMessagesByConv: Record<string, DirectMessage[]>;
@@ -592,14 +618,14 @@ interface ChatState {
    * The OTHER user id of the currently-open DM panel, or null when no
    * panel is open. We key on the user id rather than the conversation
    * id because the conversation row may not exist server-side until
-   * the first message is sent — letting the panel mount with just an
+   * the first message is sent, letting the panel mount with just an
    * otherUserId removes the "first-DM bootstrapping" footgun.
    *
    * The companion `openDmOtherCharacterId` is the *pinned* character
    * id on that thread; together they identify the conversation
    * uniquely. A master account with three characters can have four
    * concurrent threads (OOC + each character), so matching only on
-   * userId would conflate them — that's the per-identity partition
+   * userId would conflate them, that's the per-identity partition
    * leak the privacy model is built around.
    */
   openDmOtherUserId: string | null;
@@ -618,7 +644,7 @@ interface ChatState {
     /**
      * The friender's character id pinned to THIS request, or null
      * when the sender was on their master OOC handle. Required for
-     * the accept/decline buttons to identify the exact row — resolving
+     * the accept/decline buttons to identify the exact row, resolving
      * by username alone is ambiguous because `resolveIdentityByName`
      * matches the master account first, so a request sent from a
      * character would never match and would loop forever in the
@@ -659,7 +685,7 @@ interface ChatState {
   /**
    * Counter bumped each time the socket (re)connects. Any open
    * ThreadPane watches this and re-runs its history seed when it
-   * changes — that's the catch-up path for `dm:new` events the
+   * changes, that's the catch-up path for `dm:new` events the
    * client missed while disconnected (Socket.io drops `emit`s when
    * the recipient socket isn't connected; there's no replay).
    */
@@ -688,7 +714,7 @@ interface ChatState {
    * bumps on every echo (new request, accept, decline, unfriend).
    * MessagesModal keys its refreshLists effect on this so the
    * friends list / DM conversations / pending inbox re-poll
-   * whenever friend state changes elsewhere — without this, accepting
+   * whenever friend state changes elsewhere, without this, accepting
    * a request only refreshed the acceptor's own modal (via its local
    * refreshKey bump in `acceptRequest`); the other party's modal
    * showed the stale list until they closed and reopened the modal
@@ -718,7 +744,7 @@ interface ChatState {
    * Per-identity unread DM + pending-friend-request counts, keyed on
    * characterId (`null` = master / OOC). Hoisted from
    * MessagesModal's local state into the store so the chat-shell ✉
-   * badge can sum unread across ALL of the user's identities —
+   * badge can sum unread across ALL of the user's identities,
    * `dmConversations` only holds the currently-active identity's
    * threads, so a DM that lands on Char B while the viewer is on
    * Char A would otherwise leave the badge at zero with no signal
@@ -729,7 +755,7 @@ interface ChatState {
    */
   inboxCountsByIdentity: Map<string | null, import("@thekeep/shared").InboxIdentityCount>;
   /** Best-effort fetch of `/me/inbox-counts` that overwrites
-   *  {@link inboxCountsByIdentity}. Silent on failure — counts are
+   *  {@link inboxCountsByIdentity}. Silent on failure, counts are
    *  non-critical and stale data is preferable to a thrown error.
    *  Cheap (one indexed SQL query); safe to call after every
    *  inbound DM event. */
@@ -751,6 +777,36 @@ function compareTopicsForBucket(a: ChatMessage, b: ChatMessage): number {
   return (b.lastActivityAt ?? b.createdAt) - (a.lastActivityAt ?? a.createdAt);
 }
 
+/** Default empty-bucket shape, used by every action that may run
+ *  against a category the loader hasn't filled yet (a live topic
+ *  socket arriving for an as-yet-unseen category, a defensive
+ *  fallback in setLoading, etc.). Page metadata defaults to a 1-page
+ *  empty bucket; the first real `setForumTopicsPage` call overwrites
+ *  it with server-derived totals. `perPage: 20` mirrors the prior
+ *  hardcoded fallback so back-of-envelope math reads consistently
+ *  even before the first fetch completes. */
+function emptyBucket(): {
+  topics: ChatMessage[];
+  hasMore: boolean;
+  loading: boolean;
+  pending: ChatMessage[];
+  currentPage: number;
+  totalPages: number;
+  totalCount: number;
+  perPage: number;
+} {
+  return {
+    topics: [],
+    hasMore: false,
+    loading: false,
+    pending: [],
+    currentPage: 1,
+    totalPages: 1,
+    totalCount: 0,
+    perPage: 20,
+  };
+}
+
 export const useChat = create<ChatState>((set) => ({
   me: null,
   setMe: (me) => set({ me }),
@@ -764,7 +820,7 @@ export const useChat = create<ChatState>((set) => ({
     staleVersion: version,
     // When the version itself is cleared (e.g. after a refresh tears
     // the store down), drop any leftover release note too. When the
-    // caller omits the second arg, leave the existing note in place —
+    // caller omits the second arg, leave the existing note in place,
     // not all callsites have the message handy, and we don't want a
     // re-set of the same version to wipe an already-rendered note.
     ...(version === null
@@ -789,7 +845,7 @@ export const useChat = create<ChatState>((set) => ({
       const list = s.messagesByRoom[msg.roomId] ?? [];
       // Idempotent on duplicate id. The server may deliver the same
       // message via two paths (room broadcast + explicit sender emit, or
-      // a reconnect-replay landing on top of a live append) — appending
+      // a reconnect-replay landing on top of a live append), appending
       // again would render the line twice. Cheap O(n) tail scan since
       // duplicates almost always arrive within a handful of entries of
       // the canonical insertion.
@@ -820,7 +876,7 @@ export const useChat = create<ChatState>((set) => ({
       // message under whichever room they were viewing when it arrived.
       // Scan every bucket so the edit/delete lands regardless of which
       // view holds the row. Bucket roomId on the cached copy is
-      // preserved — only the body / editedAt / deletedAt etc. change.
+      // preserved, only the body / editedAt / deletedAt etc. change.
       let touched = false;
       const nextByRoom: Record<string, ChatMessage[]> = {};
       for (const rid of Object.keys(s.messagesByRoom)) {
@@ -844,7 +900,7 @@ export const useChat = create<ChatState>((set) => ({
     set((s) => {
       if (older.length === 0) return {};
       const current = s.messagesByRoom[roomId] ?? [];
-      // Dedupe by id — a live `message:new` may have landed within the
+      // Dedupe by id, a live `message:new` may have landed within the
       // window we just fetched (race between socket and HTTP), and the
       // server-returned page is the authoritative ordering up to the
       // boundary so the live row stays put.
@@ -862,7 +918,7 @@ export const useChat = create<ChatState>((set) => ({
 
   forumTopicsByRoom: {},
 
-  setForumTopicsPage: (roomId, categoryKey, topics, hasMore) =>
+  setForumTopicsPage: (roomId, categoryKey, topics, pageInfo) =>
     set((s) => {
       const room = s.forumTopicsByRoom[roomId] ?? {};
       const prev = room[categoryKey];
@@ -873,12 +929,21 @@ export const useChat = create<ChatState>((set) => ({
             ...room,
             [categoryKey]: {
               topics,
-              hasMore,
+              // `hasMore` is the legacy boolean; we keep it set from
+              // page < totalPages so any old code path that still
+              // reads it (the cursor-mode fallback) doesn't break.
+              hasMore: pageInfo.currentPage < pageInfo.totalPages,
               loading: false,
-              // Preserve pending across a first-page refetch — a topic
-              // queued behind the pill is still "new" relative to what
-              // the user has seen.
+              // Preserve pending across a page swap, a topic queued
+              // behind the pill is still "new" relative to what the
+              // user has seen. Pending only flushes onto page 1, but
+              // we don't clear it when the user navigates AWAY from
+              // page 1 because they'll come back.
               pending: prev?.pending ?? [],
+              currentPage: pageInfo.currentPage,
+              totalPages: pageInfo.totalPages,
+              totalCount: pageInfo.totalCount,
+              perPage: pageInfo.perPage,
             },
           },
         },
@@ -890,13 +955,25 @@ export const useChat = create<ChatState>((set) => ({
       const room = s.forumTopicsByRoom[roomId] ?? {};
       const prev = room[categoryKey];
       if (!prev) {
-        // Defensive: append on an empty bucket behaves like setPage.
+        // Defensive: append on an empty bucket behaves like setPage
+        // with a stub pagination block, we don't know totalPages
+        // from a legacy append path, so we use a 1-page assumption
+        // and let the next clean fetch correct it.
         return {
           forumTopicsByRoom: {
             ...s.forumTopicsByRoom,
             [roomId]: {
               ...room,
-              [categoryKey]: { topics, hasMore, loading: false, pending: [] },
+              [categoryKey]: {
+                topics,
+                hasMore,
+                loading: false,
+                pending: [],
+                currentPage: 1,
+                totalPages: hasMore ? 2 : 1,
+                totalCount: topics.length,
+                perPage: topics.length || 20,
+              },
             },
           },
         };
@@ -911,10 +988,10 @@ export const useChat = create<ChatState>((set) => ({
           [roomId]: {
             ...room,
             [categoryKey]: {
+              ...prev,
               topics: [...prev.topics, ...extra],
               hasMore,
               loading: false,
-              pending: prev.pending,
             },
           },
         },
@@ -924,7 +1001,7 @@ export const useChat = create<ChatState>((set) => ({
   setForumTopicsLoading: (roomId, categoryKey, loading) =>
     set((s) => {
       const room = s.forumTopicsByRoom[roomId] ?? {};
-      const prev = room[categoryKey] ?? { topics: [], hasMore: false, loading: false, pending: [] };
+      const prev = room[categoryKey] ?? emptyBucket();
       return {
         forumTopicsByRoom: {
           ...s.forumTopicsByRoom,
@@ -936,7 +1013,7 @@ export const useChat = create<ChatState>((set) => ({
   prependOwnForumTopic: (roomId, categoryKey, topic) =>
     set((s) => {
       const room = s.forumTopicsByRoom[roomId] ?? {};
-      const prev = room[categoryKey] ?? { topics: [], hasMore: false, loading: false, pending: [] };
+      const prev = room[categoryKey] ?? emptyBucket();
       // Don't double-insert if the topic is already at the head.
       if (prev.topics.some((t) => t.id === topic.id)) return {};
       return {
@@ -944,7 +1021,14 @@ export const useChat = create<ChatState>((set) => ({
           ...s.forumTopicsByRoom,
           [roomId]: {
             ...room,
-            [categoryKey]: { ...prev, topics: [topic, ...prev.topics] },
+            [categoryKey]: {
+              ...prev,
+              topics: [topic, ...prev.topics],
+              // A brand-new topic bumps the total non-sticky count
+              // and may push the last page over the perPage boundary.
+              totalCount: prev.totalCount + 1,
+              totalPages: Math.max(1, Math.ceil((prev.totalCount + 1) / prev.perPage)),
+            },
           },
         },
       };
@@ -953,7 +1037,7 @@ export const useChat = create<ChatState>((set) => ({
   queuePendingForumTopic: (roomId, categoryKey, topic) =>
     set((s) => {
       const room = s.forumTopicsByRoom[roomId] ?? {};
-      const prev = room[categoryKey] ?? { topics: [], hasMore: false, loading: false, pending: [] };
+      const prev = room[categoryKey] ?? emptyBucket();
       // De-dup: ignore if already pending OR already visible (the
       // user might have just flushed and this is a late echo).
       if (prev.pending.some((t) => t.id === topic.id)) return {};
@@ -1069,7 +1153,7 @@ export const useChat = create<ChatState>((set) => ({
 
   setTypers: (roomId, typers) =>
     set((s) => {
-      // Clean up empty arrays — keeps the dict small and lets the
+      // Clean up empty arrays, keeps the dict small and lets the
       // indicator-renderer's `Object.keys` check stay cheap.
       if (typers.length === 0) {
         if (!s.typersByRoom[roomId]) return {};
@@ -1093,9 +1177,9 @@ export const useChat = create<ChatState>((set) => ({
   closeEditor: () => set({ editor: null }),
 
   // fontStep is local-only (no server mirror) and the user cycles it
-  // via the Tools panel. Persist to localStorage so a tab reload —
+  // via the Tools panel. Persist to localStorage so a tab reload,
   // which happens every time the user picks up a fresh post-deploy
-  // bundle, but also any plain refresh — restores their choice
+  // bundle, but also any plain refresh, restores their choice
   // instead of snapping back to the default. The previous "in-memory
   // only" behavior made deploys look like they were wiping custom
   // sizes when really any reload did it.
@@ -1208,7 +1292,7 @@ export const useChat = create<ChatState>((set) => ({
       for (const row of j.counts) m.set(row.characterId, row);
       set({ inboxCountsByIdentity: m });
     } catch {
-      // Counts are non-critical decoration — never bubble.
+      // Counts are non-critical decoration, never bubble.
     }
   },
 }));

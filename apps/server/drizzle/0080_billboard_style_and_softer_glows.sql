@@ -7,12 +7,12 @@
 --    8px / 12px keeps the breathing motion on pulse and the bloom on
 --    the gradient family without smothering the letters.
 --
--- 2. Add `billboard` — solid-color fill with a WHITE outline and a
+-- 2. Add `billboard`, solid-color fill with a WHITE outline and a
 --    drop-shadow stack underneath. Pairs the marquee/jersey-numeral
 --    feel with the existing dark-outline family so users have an
 --    actual visual contrast option, not just six variants of the same
 --    aesthetic. Uses `paint-order: stroke fill` so the outline sits
---    behind the fill instead of bleeding over the glyph edges — safe
+--    behind the fill instead of bleeding over the glyph edges, safe
 --    here because this style does NOT use background-clip text (which
 --    is what made paint-order break in 0072).
 

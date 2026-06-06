@@ -1,5 +1,5 @@
 /**
- * Granular permission system — coverage audit.
+ * Granular permission system, coverage audit.
  *
  * Answers two operational questions the resolver-invariant check
  * (`check-permissions.ts`) cannot:
@@ -10,7 +10,7 @@
  *      `requireSessionPermission`, `requireMatrixPermission`) and
  *      counts which catalog keys appear inside. Keys with zero call
  *      sites are either:
- *        - intentionally tab-only (`view_admin_*` — gates the UI tab
+ *        - intentionally tab-only (`view_admin_*`, gates the UI tab
  *          on the client, the data endpoints behind it check a
  *          DIFFERENT key), OR
  *        - dead permissions left in the catalog after a refactor.
@@ -22,8 +22,8 @@
  *      the seed grants. Concrete example of the bug class this catches:
  *      a route that gates on a different key from the tab visibility
  *      and a role that holds the first but not the second would see
- *      the tab and 403 on the data fetch. (That exact case — audit
- *      tab vs `view_audit_log` — was fixed in migration 0182 by
+ *      the tab and 403 on the data fetch. (That exact case, audit
+ *      tab vs `view_audit_log`, was fixed in migration 0182 by
  *      consolidating onto `view_admin_audit`.)
  *
  * Run:
@@ -35,7 +35,7 @@
  *
  * False-positives to expect:
  *   - A key that's checked dynamically (`hasPermission(user, dynamicVar)`)
- *     where `dynamicVar` is built from a permKey lookup — won't show as
+ *     where `dynamicVar` is built from a permKey lookup, won't show as
  *     a static call site. Currently rare; we'd add a `// audit:dynamic
  *     <key>` annotation comment if it becomes a problem.
  *   - The catalog file itself defines every key as a string literal;
@@ -69,7 +69,7 @@ const SEED_SQL_AFFILIATES_PATH = resolve(SERVER_ROOT, "drizzle/0180_permission_g
  * parameter (e.g., `callerCanModerateRoom(ctx, "kick_user")` in
  * `commands/builtins/mod.ts`). With the helper-name filter on, those
  * wrapper call sites get classified as orphans even though the key
- * IS gated — just one level of indirection deeper.
+ * IS gated, just one level of indirection deeper.
  *
  * The looser policy: count any code-level reference to a catalog key
  * as evidence the key is wired in. Comments are excluded (otherwise
@@ -77,7 +77,7 @@ const SEED_SQL_AFFILIATES_PATH = resolve(SERVER_ROOT, "drizzle/0180_permission_g
  * definition file is not in the scan root.
  *
  * Trade-off: a match in `recordAudit({ action: "ban_user" })` counts
- * the same as a real check call. We accept that — both confirm the
+ * the same as a real check call. We accept that, both confirm the
  * key isn't dead. The script's job is to surface keys with ZERO
  * references at all; deeper "is the check correctly gating the
  * intended route?" auditing has to happen by reading code. */
@@ -91,7 +91,7 @@ const KEY_LITERAL_RE = /['"]([a-z_]+)['"]/g;
  * detect tabs where a role can see the tab but can't fetch anything
  * inside.
  *
- * `[]` means "no separate data gate" — the tab is self-contained
+ * `[]` means "no separate data gate", the tab is self-contained
  * (read-only views that piggyback on the tab key itself, or content
  * the tab gate already covers). The coherence pass treats `[]` as
  * "always OK."
@@ -99,11 +99,11 @@ const KEY_LITERAL_RE = /['"]([a-z_]+)['"]/g;
  * **Manual review note:** the right way to maintain this map is to
  * read each AdminPanel tab's component and identify which endpoints
  * it calls + which keys those endpoints require. The mapping below
- * was assembled from a code walk on 2026-05-31 — if a future tab
+ * was assembled from a code walk on 2026-05-31, if a future tab
  * adds a new endpoint, add the key here.
  * ===================================================================== */
 const TAB_DATA_MAP: Record<string, readonly PermissionKey[]> = {
-  view_admin_overview: [], // counter snapshots — same gate as the tab
+  view_admin_overview: [], // counter snapshots, same gate as the tab
   view_admin_users: ["view_user_directory_secure"],
   view_admin_rooms: [], // rooms list reuses public rooms endpoint
   view_admin_audit: [], // route gates on the tab key itself (consolidated 0182)
@@ -130,7 +130,7 @@ const NON_MASTER_ROLES: readonly Role[] = ["user", "trusted", "mod", "admin"] as
 /* =====================================================================
  * SCAN PASS
  * Walk apps/server/src/ recursively. For each .ts file (but not
- * permissionsCore.ts / permissions.ts / requireSessionPermission.ts —
+ * permissionsCore.ts / permissions.ts / requireSessionPermission.ts,
  * those DEFINE the helpers, references inside don't represent
  * application-level gates), find every helper call and extract the
  * keys mentioned.
@@ -209,7 +209,7 @@ function extractCallSites(): CallSite[] {
  * newlines for line-number mapping). String literals are honoured so
  * a `"//"` inside a quoted string isn't mistaken for a line comment.
  *
- * Cheap and good-enough for an audit script — doesn't handle every
+ * Cheap and good-enough for an audit script, doesn't handle every
  * edge case (regex literals with comment-like contents, template
  * literal interpolations with comments), but those don't appear in
  * the server source in practice.
@@ -229,7 +229,7 @@ function stripComments(src: string): string {
     }
     if (ch === '"' || ch === "'" || ch === "`") { inStr = ch; out.push(ch); i++; continue; }
     if (ch === "/" && src[i + 1] === "/") {
-      // Line comment — eat through end of line, preserve the newline.
+      // Line comment, eat through end of line, preserve the newline.
       while (i < src.length && src[i] !== "\n") {
         out.push(src[i] === "\n" ? "\n" : " ");
         i++;
@@ -237,7 +237,7 @@ function stripComments(src: string): string {
       continue;
     }
     if (ch === "/" && src[i + 1] === "*") {
-      // Block comment — eat through closing */, preserve newlines.
+      // Block comment, eat through closing */, preserve newlines.
       out.push("  ");
       i += 2;
       while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) {
@@ -386,7 +386,7 @@ function render(): void {
   const { coverage, coverageByGroup, coherence, sites } = summary;
   const verbose = process.argv.includes("--verbose") || process.argv.includes("-v");
 
-  console.log(bold("\nPermission system — coverage audit\n"));
+  console.log(bold("\nPermission system, coverage audit\n"));
   console.log(dim(`  Scanned ${sites.length} server call sites across permission helpers.\n`));
 
   console.log(bold("== Server call sites by key =="));
@@ -411,7 +411,7 @@ function render(): void {
   console.log(dim("   For every view_admin_<X> tab key, every role that holds the tab"));
   console.log(dim("   must also hold the data keys needed to render the tab."));
   if (coherence.length === 0) {
-    console.log(`\n  ${green("✓ all tabs coherent — every tab-holder can fetch the data behind it")}`);
+    console.log(`\n  ${green("✓ all tabs coherent, every tab-holder can fetch the data behind it")}`);
   } else {
     for (const f of coherence) {
       console.log(

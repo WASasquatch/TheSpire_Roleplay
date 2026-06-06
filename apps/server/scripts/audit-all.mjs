@@ -575,7 +575,7 @@ console.log(`\n[27a] auto-expire: room is removed when its last socket leaves`);
 console.log(`\n[27b] admin can delete non-system rooms; refuses The_Spire`);
 {
   // Promote a fresh user to admin via the helper script. Easier: reuse the
-  // 'WAS' admin set up earlier — log in as them with the dev password.
+  // 'WAS' admin set up earlier, log in as them with the dev password.
   // Skip if WAS doesn't exist or password mismatches.
   const sessRow = await fetch(`${BASE}/auth/login`, {
     method: "POST",
@@ -650,7 +650,7 @@ console.log(`\n[27c] mod commands: /kick + /mute + /unmute (admin → target)`);
     await adminSend(`/mute ${username} 1h spam test`);
     await wait(200);
 
-    // Audit user tries to speak — should be MUTED
+    // Audit user tries to speak, should be MUTED
     const before = events.length;
     await send("trying to speak while muted");
     await wait(200);

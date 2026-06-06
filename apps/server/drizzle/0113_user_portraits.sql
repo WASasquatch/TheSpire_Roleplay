@@ -1,7 +1,7 @@
--- OOC profile gallery — same shape as character_portraits but
+-- OOC profile gallery, same shape as character_portraits but
 -- attached to the master account. Lets a user maintain a portrait
 -- gallery on their OOC profile (avatar styles, art tags, OOC photos
--- — whatever they want others to see on the master profile they
+--, whatever they want others to see on the master profile they
 -- DON'T attach to any character).
 --
 -- Same column shape + index pattern as character_portraits for

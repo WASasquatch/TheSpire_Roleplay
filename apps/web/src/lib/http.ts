@@ -7,13 +7,13 @@
  * bio-HTML sanitizer + the lack of inline-script dependencies mitigate
  * but do not eliminate that risk.
  *
- * Storage layering — per-tab isolation that survives mobile suspend:
+ * Storage layering, per-tab isolation that survives mobile suspend:
  *
- *   1. `sessionStorage["tk_sid"]` — the primary holder. Lives for the
+ *   1. `sessionStorage["tk_sid"]`, the primary holder. Lives for the
  *      page session, gives us per-tab isolation (two tabs can be
  *      signed in as two different accounts).
  *
- *   2. `localStorage["tk_sid_map"]` — a JSON object keyed by per-tab
+ *   2. `localStorage["tk_sid_map"]`, a JSON object keyed by per-tab
  *      UUIDs. Acts as the recovery store when iOS / Android suspend a
  *      backgrounded tab and reclaim its JS context: on the next read,
  *      sessionStorage comes up empty, we look up this tab's UUID in the
@@ -21,7 +21,7 @@
  *      socket reconnect after a screen-off lands with no auth and the
  *      user gets booted to login.
  *
- *   3. Per-tab UUID — stored in BOTH `window.name` (designed to persist
+ *   3. Per-tab UUID, stored in BOTH `window.name` (designed to persist
  *      across navigation + tab restoration) AND in `sessionStorage`. We
  *      prefer window.name because it's part of the browsing-context
  *      state browsers preserve through memory-pressure discard/restore;
@@ -29,8 +29,8 @@
  *
  * Net effect: closing a tab loses the session (sessionStorage gone,
  * window.name gone → tab id gone → orphaned map entry pruned after
- * the inactivity threshold). Backgrounding a tab and coming back —
- * even through a hard discard — restores the same session for that
+ * the inactivity threshold). Backgrounding a tab and coming back,
+ * even through a hard discard, restores the same session for that
  * tab without leaking it to a sibling tab signed in as someone else.
  */
 
@@ -40,7 +40,7 @@ const TAB_ID_WINDOW_NAME_PREFIX = "tk-tab-";
 const TOKEN_MAP_STORAGE_KEY = "tk_sid_map";
 
 /** Prune map entries unused for this long. 90 days comfortably exceeds
- *  the server's session TTL — entries older than that wouldn't validate
+ *  the server's session TTL, entries older than that wouldn't validate
  *  anyway, and an active tab updates its entry every successful
  *  setSessionToken / clearSessionToken call. */
 const TOKEN_MAP_PRUNE_MS = 90 * 24 * 60 * 60 * 1000;
@@ -100,7 +100,7 @@ function readTokenMap(): Record<string, TokenMapEntry> {
 
 /**
  * Persist the map with stale entries pruned. Always pass through this
- * helper so the prune contract is uniform — every write tidies up
+ * helper so the prune contract is uniform, every write tidies up
  * after long-closed tabs without us needing a dedicated sweep job.
  */
 function writeTokenMap(map: Record<string, TokenMapEntry>): void {
@@ -116,17 +116,17 @@ function writeTokenMap(map: Record<string, TokenMapEntry>): void {
     }
   }
   try { window.localStorage.setItem(TOKEN_MAP_STORAGE_KEY, JSON.stringify(map)); }
-  catch { /* quota or private-mode — recovery still works while sessionStorage holds the token */ }
+  catch { /* quota or private-mode, recovery still works while sessionStorage holds the token */ }
 }
 
 /**
  * Pull a human-readable error message out of a non-OK Response. The server
  * returns either `{ error: "..." }` or `{ message: "..." }` depending on
- * the route — older routes use `error`, zod-validation routes use
+ * the route, older routes use `error`, zod-validation routes use
  * `message`. Falls back to `<status> <statusText>` when the body isn't
  * JSON or doesn't carry either field.
  *
- * Single source of truth — without this, six components each rolled their
+ * Single source of truth, without this, six components each rolled their
  * own copy and any future server-side change to the error shape would
  * have to land in all of them.
  */
@@ -159,9 +159,9 @@ export function getSessionToken(): string | null {
   const map = readTokenMap();
   const entry = map[tabId];
   if (!entry || !entry.token) return null;
-  // Recovery hit — re-seed sessionStorage so the hot path takes over.
+  // Recovery hit, re-seed sessionStorage so the hot path takes over.
   try { window.sessionStorage.setItem(TOKEN_STORAGE_KEY, entry.token); }
-  catch { /* private-mode — read still returns the token, just won't cache */ }
+  catch { /* private-mode, read still returns the token, just won't cache */ }
   return entry.token;
 }
 
@@ -185,7 +185,7 @@ export function setSessionToken(token: string): void {
  * Append `?characterId=<id>` (or `&characterId=<id>` if the URL already
  * has a query string) when the active tab is in-character. Used by
  * friend + DM fetches so the server scopes responses to the right
- * identity — Char A and Char B of the same player keep separate
+ * identity, Char A and Char B of the same player keep separate
  * friends lists and inboxes.
  *
  * Reads from the Zustand store at call time, so callers don't need
@@ -201,7 +201,7 @@ export function withIdentityQuery(url: string, characterId: string | null | unde
 /**
  * Wipe the token (logout, or 401 from /auth/me). Clears BOTH the
  * sessionStorage hot path and this tab's entry in the localStorage
- * recovery map — without removing the map entry, the next read after
+ * recovery map, without removing the map entry, the next read after
  * logout would re-seed sessionStorage from the recovery store and the
  * user would silently bounce back to the previous session.
  */
@@ -222,7 +222,7 @@ export function clearSessionToken(): void {
  * Monkey-patch `window.fetch` once on app boot so every same-origin
  * request automatically carries `Authorization: Bearer <token>` when
  * the tab has one. The alternative would be a wrapped `apiFetch` and
- * a sweep of every fetch call site — this is fewer moving parts.
+ * a sweep of every fetch call site, this is fewer moving parts.
  *
  * Constraints:
  *   - Same-origin only. Third-party fetches (CDN, external APIs) must
@@ -257,7 +257,7 @@ export function installAuthFetch(): void {
       if (/^https?:\/\//i.test(urlStr)) {
         isSameOrigin = new URL(urlStr).origin === window.location.origin;
       }
-    } catch { /* malformed url — let the original fetch surface the error */ }
+    } catch { /* malformed url, let the original fetch surface the error */ }
     if (!isSameOrigin) return original(input, init);
 
     const headers = new Headers(init.headers);

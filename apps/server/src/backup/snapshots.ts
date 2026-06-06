@@ -18,14 +18,14 @@
  *              filename is filesystem-safe on Windows volumes too)
  *
  * Both kinds use a `.zip` envelope (format v3+) so the database
- * payload AND the `/data/uploads/` tree travel together — restoring on
+ * payload AND the `/data/uploads/` tree travel together, restoring on
  * a fresh host gets the emoticon sheets, logo images, and rank sigil
  * PNGs alongside the database rows that reference them. The inner
  * layout differs per kind (`content.json` vs `database.sqlite`); the
  * outer extension is uniform.
  *
  * Retention: keep the last MAX_PER_KIND of each {kind, trigger}
- * combination. FIFO rotation by mtime. We don't trim by total size —
+ * combination. FIFO rotation by mtime. We don't trim by total size,
  * a single full snapshot can be 100MB+ but the volume is the deploy's
  * persistent /data and is sized for the whole DB, not for backups
  * alone; cap the count and call it a day.
@@ -55,7 +55,7 @@ const MAX_PER_KIND = 10;
 
 /**
  * Backups live next to the SQLite file on the same persistent
- * volume — when SQLITE_PATH is `/data/thekeep.sqlite`, this resolves
+ * volume, when SQLITE_PATH is `/data/thekeep.sqlite`, this resolves
  * to `/data/backups/`. The directory is created lazily on first
  * write so a fresh deploy doesn't need a separate provisioning step.
  */
@@ -139,7 +139,7 @@ export function listSnapshots(): BackupSnapshotEntry[] {
       continue;
     }
     entries.push({
-      // The id is the filename itself — opaque-enough from the
+      // The id is the filename itself, opaque-enough from the
       // client's perspective, and the download/delete handlers can
       // round-trip back to a real path via the same parse step.
       id: filename,

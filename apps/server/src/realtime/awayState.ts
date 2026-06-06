@@ -2,7 +2,7 @@
  * Per-identity in-memory away state.
  *
  * The `/away` and `/back` commands used to write to `users.away_message`
- * — a single column on the master row, so going away in one tab made
+ *, a single column on the master row, so going away in one tab made
  * EVERY other tab of the same account (including different characters
  * and OOC) also show as away. Per the per-identity contract used
  * elsewhere in the app (userlist dedupe, color/avatar snapshots, name
@@ -16,7 +16,7 @@
  * Lifetime: in-memory only. Server restart wipes the table (away is
  * a transient session signal, not a persistent setting), and a full
  * disconnect of every socket voicing a given identity clears that
- * identity's entry — so a user who closes every tab and comes back
+ * identity's entry, so a user who closes every tab and comes back
  * later starts present rather than carrying a stale "away: brb"
  * marker from yesterday.
  */
@@ -57,7 +57,7 @@ export function clearAway(userId: string, characterId: string | null): void {
  * who closes their browser doesn't come back to a stale away mark
  * inherited from their previous session.
  *
- * NOT called on a per-tab disconnect — a sibling tab voicing the
+ * NOT called on a per-tab disconnect, a sibling tab voicing the
  * same identity might still want to keep the mark, and a sibling
  * tab voicing a DIFFERENT identity has its own entry that this
  * mass-clear would erroneously sweep too. Use the per-identity

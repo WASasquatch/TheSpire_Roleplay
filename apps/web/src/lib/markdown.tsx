@@ -145,7 +145,7 @@ function findAsteriskClose(text: string, start: number, delim: "*" | "**" | "***
 const URL_RE = /^https?:\/\/[^\s<>"]+/;
 
 /**
- * Standard trailing punctuation that's almost never URL-meaningful —
+ * Standard trailing punctuation that's almost never URL-meaningful,
  * stripped unconditionally so a URL at the end of a sentence
  * (`see https://example.com.`) doesn't eat the period.
  *
@@ -155,7 +155,7 @@ const URL_RE = /^https?:\/\/[^\s<>"]+/;
  * character (`see (https://example.com)`). The simple "always strip"
  * rule lops the closing paren off legitimate URLs; we walk the URL
  * backward instead and only strip `)` when there are more `)` than
- * `(` in the string — i.e. when the trailing paren is part of the
+ * `(` in the string, i.e. when the trailing paren is part of the
  * surrounding prose rather than the URL itself.
  */
 const STD_TRAILING_PUNCT = ".,;:!?]'\"";
@@ -174,7 +174,7 @@ function trimTrailingPunct(url: string): { url: string; trailing: string } {
       // Count parens in the URL up to AND INCLUDING this `)`. If the
       // closes still outnumber the opens, this `)` is wrapping prose
       // (e.g. `see (https://x.com)`); strip it. Otherwise it's a
-      // balanced paren that belongs to the URL — keep it and stop.
+      // balanced paren that belongs to the URL, keep it and stop.
       const head = url.slice(0, idx + 1);
       let opens = 0;
       let closes = 0;
@@ -198,7 +198,7 @@ function trimTrailingPunct(url: string): { url: string; trailing: string } {
 
 /**
  * HTML-tag aliases for chat formatting. A small allow-list of inline
- * tags that double as synonyms for the existing markdown — lets users
+ * tags that double as synonyms for the existing markdown, lets users
  * coming from phpMyChat / older HTML-based chats format the way they're
  * already used to. The mapping is intentionally narrow: only inline
  * text-style tags that have a markdown equivalent (or a clear
@@ -207,13 +207,13 @@ function trimTrailingPunct(url: string): { url: string; trailing: string } {
  * Implementation contract:
  *   - Recognized at the same level as markdown tokens (see `tryToken`).
  *   - Tag matching is case-insensitive (<b>, <B>, <Bold> wouldn't match
- *     since "bold" isn't in the table — only the listed names).
+ *     since "bold" isn't in the table, only the listed names).
  *   - Inner content is recursed through `parseInline` so nested
  *     formatting works regardless of syntax mix:
  *       `<b>**italic**</b>` → bold containing italic
  *       `**<i>both</i>**`   → bold containing italic
  *   - Unmatched / unknown tags fall through as plain text. They're
- *     never rendered as raw HTML. Output is still a React tree —
+ *     never rendered as raw HTML. Output is still a React tree,
  *     `dangerouslySetInnerHTML` is not used.
  *   - Attributes on the opening tag are deliberately not parsed. A
  *     pasted `<b class="foo">` falls through as text; if the writer
@@ -235,7 +235,7 @@ const HTML_TAG_ALIASES: Record<string, (children: ReactNode[]) => ReactNode> = {
 
 const HTML_OPEN_RE = /^<([a-zA-Z]+)>/;
 /** Opener for `<font color="#rrggbb">` / `<font color='#rgb'>`. Single-
- *  attribute only — that's the one attribute users actually reach for in
+ *  attribute only, that's the one attribute users actually reach for in
  *  IRC-era HTML and it keeps the parser tiny. The color value is required
  *  and must be a 3- or 6-digit hex literal; anything else falls through
  *  to the literal-text path. */
@@ -249,7 +249,7 @@ const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}){1,2}$/;
  *  URL gate (`ICON_URL_RE` below) is the safety contract: only same-
  *  origin `/assets/...` paths and `http(s)://` absolute URLs reach
  *  `<img src>`. `javascript:` / `data:` / `file:` schemes never match.
- *  Attributes other than `src` are deliberately ignored — there's no
+ *  Attributes other than `src` are deliberately ignored, there's no
  *  width/height knob; sizing is controlled by the renderer's CSS so
  *  the icon stays consistent across every place this tag appears. */
 const ICON_OPEN_RE = /^<icon\s+src\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>/]+))\s*\/?\s*>/i;
@@ -258,7 +258,7 @@ const ICON_URL_RE = /^(?:\/assets\/[^\s"'<>]+|https?:\/\/[^\s"'<>]+)$/i;
 function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
   if (text[i] !== "<") return null;
 
-  // <icon src="..."/> — inline item icon. Self-closing void element; no
+  // <icon src="..."/>, inline item icon. Self-closing void element; no
   // inner content, no closing tag. URL must point at a same-origin
   // asset OR an http(s) absolute URL. Failing the URL gate falls
   // through to the literal-text path so the user sees what they typed
@@ -275,7 +275,7 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
             alt=""
             loading="lazy"
             referrerPolicy="no-referrer"
-            // 1.75em renders the icon as a small inline thumbnail —
+            // 1.75em renders the icon as a small inline thumbnail,
             // clearly recognizable as the actual item art rather than
             // a tiny punctuation-sized hint. align-middle keeps it
             // centered against the text baseline; the row's
@@ -288,7 +288,7 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
     }
   }
 
-  // <font color="..."> — special-cased first since the generic
+  // <font color="...">, special-cased first since the generic
   // HTML_OPEN_RE requires zero attributes and would otherwise miss it.
   const fontOpen = FONT_OPEN_RE.exec(text.slice(i));
   if (fontOpen) {
@@ -331,7 +331,7 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
 }
 
 /**
- * Sticky regex matching a single Unicode emoji "grapheme" — a base
+ * Sticky regex matching a single Unicode emoji "grapheme", a base
  * pictographic codepoint, optionally followed by a variation selector
  * (U+FE0F) or skin-tone modifier, optionally extended with any number
  * of ZWJ continuation segments. Covers single emoji (😀), variation-
@@ -339,7 +339,7 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
  * sequences (👨\u200D👩\u200D👧 → family).
  *
  * Sticky `y` flag lets tryToken anchor the match at the current
- * cursor without slicing the input — set `lastIndex = i` and call
+ * cursor without slicing the input, set `lastIndex = i` and call
  * `exec` once. Module-scoped so we don't re-compile per call.
  */
 const EMOJI_AT_RE =
@@ -347,7 +347,7 @@ const EMOJI_AT_RE =
 
 /**
  * Markdown-significant characters that a leading backslash can escape.
- * Covers every delimiter `tryToken` would otherwise consume — asterisk,
+ * Covers every delimiter `tryToken` would otherwise consume, asterisk,
  * underscore, tilde, pipe, backtick, the link/image brackets, the HTML
  * tag opener, the `@` (mention) and `!` (inline-command / image) triggers,
  * and the backslash itself (so users can type a literal `\` without it
@@ -365,7 +365,7 @@ const EMOJI_AT_RE =
 const MD_ESCAPABLE = new Set("*_~|`[]()!<>\\@");
 
 function tryToken(text: string, i: number, depth: number): TokenMatch | null {
-  // Verified inline command — wins over everything else so the ✓
+  // Verified inline command, wins over everything else so the ✓
   // tooltip stays attached to authentic server output. The marker uses
   // U+2063 + U+27E6/U+27E7 brackets (see packages/shared/src/inlineMark.ts);
   // the strip-before-expand pass on the server ensures the only way
@@ -408,7 +408,7 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
     }
   }
 
-  // UI route shortcut chip — `{token}` patterns like `{rules}`,
+  // UI route shortcut chip, `{token}` patterns like `{rules}`,
   // `{modal:earning}`, `{scriptorium:latest}` get replaced with a
   // small clickable chip that dispatches a `tk:open-ui-route` event
   // the chat shell listens for. Unknown tokens (anything matching the
@@ -451,7 +451,7 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
   const htmlMatch = tryHtmlTag(text, i, depth);
   if (htmlMatch) return htmlMatch;
 
-  // Inline emoticon token: `:slug:idx:` — produced by the emoticon
+  // Inline emoticon token: `:slug:idx:`, produced by the emoticon
   // picker button when the user inserts a sprite into a message body.
   // The slug must start with a letter (rules out `:42:end:` ratios
   // and the like); the idx is plain digits. Looked up at render time
@@ -469,7 +469,7 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
     }
   }
 
-  // Inline Unicode emoji — wrap a base pictographic codepoint
+  // Inline Unicode emoji, wrap a base pictographic codepoint
   // (plus any variation selector / skin-tone modifier / ZWJ
   // continuation segments) in a hover-zoom span so users can read
   // the glyph at a larger size without copying it out. Mirrors the
@@ -543,7 +543,7 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
   // Fenced code block: ```optional-lang\n...content...\n```
   //
   // Checked BEFORE the single-backtick inline rule so a triple-fence
-  // isn't mistaken for three empty inline spans. Content is literal —
+  // isn't mistaken for three empty inline spans. Content is literal,
   // no further markdown / mention / autolink parsing happens inside.
   // The optional language hint (the run of non-newline chars after the
   // opening ```) is stripped from the rendered output but its presence
@@ -600,7 +600,7 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
     }
   }
 
-  // Spoiler: ||hidden text||. Click to reveal. Same shape as ~~ — paired
+  // Spoiler: ||hidden text||. Click to reveal. Same shape as ~~, paired
   // delimiter, no boundary rules; nested formatting inside still parses.
   if (ch === "|" && ch2 === "|") {
     const close = text.indexOf("||", i + 2);
@@ -756,7 +756,7 @@ export function parseInline(text: string, depth: number = 0): ReactNode[] {
  * from the /roll command" rather than having to take the rolling
  * player's word for it.
  *
- * The span itself doesn't change typography — the inline output should
+ * The span itself doesn't change typography, the inline output should
  * read naturally with the surrounding sentence. The ✓ is rendered as
  * a faint superscript glyph after the content so it doesn't push other
  * tokens around.
@@ -774,7 +774,7 @@ function VerifiedInline({
    *  per-command palette an admin sees on the standalone `/cmd` form
    *  also fires when the command is spliced inline via `!cmd`. */
   css: string | null;
-  /** Optional admin-picked color from the `/cmd` form — either a
+  /** Optional admin-picked color from the `/cmd` form, either a
    *  `#rrggbb` hex literal or a `theme:<slot>` token. Resolved through
    *  the same `resolveMessageColor` the standalone `cmd` kind uses, so
    *  a `theme:system` token becomes the system-slot CSS variable on
@@ -795,7 +795,7 @@ function VerifiedInline({
   const inlineStyle = customCmdCssToStyle(css, themeBg);
   const resolvedColor = resolveMessageColor(color, themeBg);
   // The color slot wins over any `color` declaration the user CSS
-  // might have set — `color` is the admin's explicit "this command is
+  // might have set, `color` is the admin's explicit "this command is
   // this color" pick, while `css` is the broader style declaration;
   // an admin who set both intends the color slot to take precedence
   // on each render path the same way the standalone form does.
@@ -858,7 +858,7 @@ function SpoilerSpan({ children }: { children: ReactNode }) {
  * render inline via parseInline + the mention splitter, same as
  * before.
  *
- * Chat lines (flat-room rendering) deliberately don't use this — they
+ * Chat lines (flat-room rendering) deliberately don't use this, they
  * stay single-visual-line. Forum posts opt in via ForumPostBody.
  *
  * Why a manual pre-pass instead of upgrading parseInline:
@@ -872,7 +872,7 @@ function SpoilerSpan({ children }: { children: ReactNode }) {
  * part of a quote. Adjacent quote lines fuse into one blockquote;
  * the `> ` prefix (or just `>`) is stripped from each line before
  * the inline parser runs on the body. Lines inside a fenced ```code```
- * block are exempt — the body is first split into code vs. text
+ * block are exempt, the body is first split into code vs. text
  * regions via `splitOnCode`, and only the text regions undergo the
  * blockquote pass. This way a `> ` line inside a code snippet stays
  * literal instead of getting reclassified as a quote.
@@ -885,13 +885,13 @@ export function renderForumBody(
    * Lower-cased names that identify the current viewer (master username
    * plus any active character). Mentions matching these names render
    * with a distinct "you got tagged" highlight rather than the regular
-   * keep-action color. Optional — when omitted no self-detection runs.
+   * keep-action color. Optional, when omitted no self-detection runs.
    */
   selfNames: ReadonlyArray<string> = [],
   /**
    * Lowercased set of names known to resolve to a real profile.
    * Mentions not in this set (and not in `selfNames`) render as plain
-   * text. When omitted, every mention is styled — fallback for
+   * text. When omitted, every mention is styled, fallback for
    * callers that don't subscribe to the mention cache.
    */
   knownMentions?: ReadonlySet<string> | null,
@@ -921,7 +921,7 @@ export function renderForumBody(
       if (g.kind === "quote") {
         // Strip the leading `>` (and one optional following space) from
         // every line so the inner text reads cleanly. Leaves any
-        // existing markdown inside the quote intact — `> **bold**`
+        // existing markdown inside the quote intact, `> **bold**`
         // renders the bold inside the blockquote.
         const stripped = g.lines.map((l) => l.replace(/^\s*>\s?/, "")).join("\n");
         const parts = splitMentions(stripped);
@@ -949,7 +949,7 @@ export function renderForumBody(
 
 /**
  * Internal: render the array returned by `splitMentions` into nodes.
- * Mirrors the renderer that lives in MessageList — duplicated here as
+ * Mirrors the renderer that lives in MessageList, duplicated here as
  * a lightweight helper so `renderForumBody` doesn't need a circular
  * import. The behavior is identical: text segments → parseInline,
  * mentions → button stubs, world chips → world-link buttons.
@@ -995,7 +995,7 @@ function renderPartsInline(
 
 /**
  * Render a single @user mention. When `name` matches one of the viewer's
- * identities (master username / active character — all lower-cased into
+ * identities (master username / active character, all lower-cased into
  * `selfSet`), the chip gets the "you got tagged" treatment: a light
  * variant of the theme's `system` slot for the background, with the
  * darker ramp step for the text. Otherwise it falls back to the regular
@@ -1034,16 +1034,16 @@ const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:\?[^\s]*)?(?:#[^\s
 /**
  * Known image-CDN subdomains where every URL serves a direct media
  * file regardless of path extension. Twitter's media CDN
- * (`pbs.twimg.com`) is the canonical example — its URLs use opaque
+ * (`pbs.twimg.com`) is the canonical example, its URLs use opaque
  * media ids with the format encoded in the query string
  * (`?format=jpg&name=small`), so the extension regex above misses
  * them entirely. Each of these subdomains is the CDN host, not the
  * main site domain (we don't want `twitter.com/user` to look like an
- * image — only `pbs.twimg.com/media/...` does).
+ * image, only `pbs.twimg.com/media/...` does).
  *
  * Matching ANY URL on these hosts as "probably an image" is safe
  * because:
- *   1. The render is opt-in — the user has to click "Show image" to
+ *   1. The render is opt-in, the user has to click "Show image" to
  *      load it, so a false positive just shows an inert button.
  *   2. These hosts only serve media; even if the specific path turns
  *      out to be HTML or a different content type, the <img> would
@@ -1055,7 +1055,7 @@ const IMAGE_HOST_RE =
 /**
  * Generic "image format encoded in the query string" detector. Catches
  * URLs like `https://host/media/abc?format=jpg` regardless of the
- * hostname — handy for the long tail of CDNs that hash their paths
+ * hostname, handy for the long tail of CDNs that hash their paths
  * but stamp the format in a query param. Mirrors the extension list
  * above so adding a new format upstream stays a one-line change.
  */
@@ -1063,7 +1063,7 @@ const IMAGE_QUERY_FORMAT_RE = /[?&]format=(?:png|jpe?g|gif|webp|avif)\b/i;
 
 /**
  * "Does this URL probably point at an image we should offer to
- * preview?" — three signals, any of which is enough:
+ * preview?", three signals, any of which is enough:
  *   1. Path ends in a known image extension (most cases).
  *   2. Hostname is a known image-only CDN (Twitter media, etc.).
  *   3. Query string explicitly names an image format.
@@ -1083,12 +1083,12 @@ function looksLikeImageUrl(url: string): boolean {
 }
 
 interface VideoEmbed {
-  /** Which provider this URL belongs to — drives the iframe title for a11y. */
+  /** Which provider this URL belongs to, drives the iframe title for a11y. */
   provider: "youtube" | "vimeo";
   /**
    * The fully-formed embed URL we'll drop into the iframe `src`. Always
    * constructed from a parsed video id (and, for unlisted Vimeo videos, the
-   * required hash) — never the raw user URL — so an attacker can't smuggle
+   * required hash), never the raw user URL, so an attacker can't smuggle
    * `?autoplay=1&jsapi=1&...` style payloads into the iframe by pasting a
    * crafted link.
    */
@@ -1104,7 +1104,7 @@ const VIMEO_HASH_RE = /^[\w-]{4,}$/;
 /**
  * Detect embeddable video URLs and return a sanitized embed src, or null
  * when the URL isn't a recognized video link. Mirrors `IMAGE_EXT_RE`'s role
- * in `UrlOrMedia` — gates whether the "Show video" toggle appears.
+ * in `UrlOrMedia`, gates whether the "Show video" toggle appears.
  *
  * Supported shapes:
  *   YouTube watch:   https://(www.|m.)youtube.com/watch?v=ID[&...]
@@ -1131,7 +1131,7 @@ export function parseVideoEmbed(url: string): VideoEmbed | null {
   if (u.protocol !== "https:" && u.protocol !== "http:") return null;
   const host = u.hostname.replace(/^www\./, "").toLowerCase();
 
-  // YouTube — short link form.
+  // YouTube, short link form.
   if (host === "youtu.be") {
     const id = u.pathname.slice(1).split("/")[0] ?? "";
     if (VIDEO_ID_RE.test(id)) {
@@ -1140,7 +1140,7 @@ export function parseVideoEmbed(url: string): VideoEmbed | null {
     return null;
   }
 
-  // YouTube — long-form watch / shorts / direct embed.
+  // YouTube, long-form watch / shorts / direct embed.
   if (host === "youtube.com" || host === "m.youtube.com") {
     if (u.pathname === "/watch") {
       const id = u.searchParams.get("v") ?? "";
@@ -1160,7 +1160,7 @@ export function parseVideoEmbed(url: string): VideoEmbed | null {
     return null;
   }
 
-  // Vimeo — public video page (and unlisted videos that carry a hash in the
+  // Vimeo, public video page (and unlisted videos that carry a hash in the
   // path after the numeric id, like vimeo.com/123456789/abcd1234).
   if (host === "vimeo.com") {
     const parts = u.pathname.split("/").filter(Boolean);
@@ -1175,7 +1175,7 @@ export function parseVideoEmbed(url: string): VideoEmbed | null {
     return null;
   }
 
-  // Vimeo — direct player URL (already an embed). Rebuild from the parsed
+  // Vimeo, direct player URL (already an embed). Rebuild from the parsed
   // id rather than passing the user URL through, so query/fragment payloads
   // can't piggy-back into the iframe src.
   if (host === "player.vimeo.com") {
@@ -1196,7 +1196,7 @@ export function parseVideoEmbed(url: string): VideoEmbed | null {
 
 /**
  * Truncate a URL to a readable display form for autolinks. The full URL
- * stays in the `href` (and in the `title` tooltip) — only the visible
+ * stays in the `href` (and in the `title` tooltip), only the visible
  * text shrinks. Right-click → "Copy link" still copies the full URL.
  *
  * Heuristic:
@@ -1206,10 +1206,10 @@ export function parseVideoEmbed(url: string): VideoEmbed | null {
  *     `host` + an ellipsis-tailed path. The host is what users
  *     actually identify ("oh, that's a youtube link"); the path tail
  *     usually carries the slug or id that hints at the content.
- *   - On parse failure (rare — bare autolinks already pass URL_RE),
+ *   - On parse failure (rare, bare autolinks already pass URL_RE),
  *     fall back to a simple first-N + … + last-N truncation.
  *
- * Threshold picked at 60 — fits comfortably on a 360px mobile viewport
+ * Threshold picked at 60, fits comfortably on a 360px mobile viewport
  * in the chat font without forcing wrap, while leaving most "normal"
  * pasted URLs unshortened.
  */
@@ -1242,7 +1242,7 @@ interface UrlOrMediaProps {
   /**
    * When true, treat as image regardless of file extension. Triggered by
    * `![...](...)` syntax where the user has explicitly asked for an image.
-   * Suppresses video detection — the explicit syntax wins.
+   * Suppresses video detection, the explicit syntax wins.
    */
   forceImage?: boolean;
 }
@@ -1272,11 +1272,11 @@ interface UrlOrMediaProps {
 function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
   const [shown, setShown] = useState(false);
   const looksLikeImage = forceImage || looksLikeImageUrl(url);
-  // Skip video detection when the URL is already claimed by an image — saves
+  // Skip video detection when the URL is already claimed by an image, saves
   // a URL-parse on every chat line, and respects `forceImage` from `![](...)`.
   const video = !looksLikeImage ? parseVideoEmbed(url) : null;
   // Only compact bare autolinks (no alt). Explicit `[label](url)` links go
-  // through tryToken's [link] branch — they never reach UrlOrMedia. An
+  // through tryToken's [link] branch, they never reach UrlOrMedia. An
   // `![alt](image-url)` does reach here with alt set, and we leave the alt
   // text alone since the author chose it deliberately.
   const display = alt || compactUrl(url);
@@ -1357,7 +1357,7 @@ function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
             some YouTube videos. `allowFullScreen` lets the user pop the
             video out without leaving the page.
 
-            LazyMediaEmbed's offscreen-detach is the bigger win here —
+            LazyMediaEmbed's offscreen-detach is the bigger win here,
             an autoplay YouTube iframe keeps the player running (and
             consuming CPU + bandwidth) when scrolled away unless we
             tear it down. The remount on scroll-back restarts the
@@ -1385,7 +1385,7 @@ function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
  * of the inline 24px sprite. Mirrors the inline-emoticon regex in
  * parseInline above, but anchored with `$` so trailing prose (or
  * a second emoticon) opts the message OUT of sticker treatment.
- * Trim is intentional — common chat ergonomics is "hit enter on
+ * Trim is intentional, common chat ergonomics is "hit enter on
  * a lone emoji", so trailing whitespace shouldn't disqualify.
  */
 export function solitaryEmoticonToken(body: string): { slug: string; cellIndex: number } | null {
@@ -1395,7 +1395,7 @@ export function solitaryEmoticonToken(body: string): { slug: string; cellIndex: 
 }
 
 /* =============================================================
- *  InlineEmoticon — renders a `:slug:idx:` token as the matching
+ *  InlineEmoticon, renders a `:slug:idx:` token as the matching
  *  sprite, or falls through to the literal text when the sheet
  *  isn't in the emoticon store (admin removed it, or the sheet
  *  index hasn't loaded yet on a cold start). The component
@@ -1403,7 +1403,7 @@ export function solitaryEmoticonToken(body: string): { slug: string; cellIndex: 
  *  through to existing message bodies without a refresh.
  * ============================================================= */
 /* =============================================================
- *  UiRouteChip — inline button for `{rules}` / `{modal:earning}` /
+ *  UiRouteChip, inline button for `{rules}` / `{modal:earning}` /
  *  `{scriptorium:latest}` etc. The catalog entry is resolved before
  *  this component renders (the parser hands us the resolved entry)
  *  so we don't re-look-up. Click → `openUiRoute(token)` →
@@ -1443,7 +1443,7 @@ function UiRouteChip({ entry }: { entry: UiRoute }) {
       onClick={(e) => {
         // Prevent the click from bubbling to a parent message bubble's
         // tap-to-reveal-timestamp handler (DM bubbles, scene banners)
-        // — the chip is its own interaction.
+        //, the chip is its own interaction.
         e.stopPropagation();
         openUiRoute(entry.token);
       }}
@@ -1471,7 +1471,7 @@ function InlineEmoticon({ slug, cellIndex }: { slug: string; cellIndex: number }
 }
 
 /* =============================================================
- *  InlineEmoji — wraps a Unicode emoji grapheme so the shared
+ *  InlineEmoji, wraps a Unicode emoji grapheme so the shared
  *  `.inline-emoji` CSS can apply the same hover-zoom affordance
  *  sticker emoticons get. Without this, raw Unicode emoji fell
  *  through as plain text nodes and stayed tiny + un-zoomable,

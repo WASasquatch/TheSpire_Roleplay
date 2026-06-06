@@ -6,7 +6,7 @@
 -- the fallback for every gradient stop. That worked fine for users
 -- who'd purchased + configured the style (their --user-color-*
 -- vars override the fallbacks) but made the admin Live Preview
--- and the Earning store's Available cards render monochrome — all
+-- and the Earning store's Available cards render monochrome, all
 -- gradient stops collapsed to whatever the surrounding text color
 -- happened to be, so Aurora Pan looked like a faint outlined word
 -- instead of a tropical sliding gradient. Owned previews looked

@@ -28,7 +28,7 @@ const RAIL_WIDTH_STORAGE_KEY = "tk_userlist_width";
  * Hydrate the rail width from localStorage with a sanity-clamped
  * fallback. Reading inside the `useState` initializer (not a
  * `useEffect`) means the first render already uses the saved width
- * — no visible "snap from default to saved" flash on mount.
+ *, no visible "snap from default to saved" flash on mount.
  */
 function loadRailWidth(): number {
   try {
@@ -36,7 +36,7 @@ function loadRailWidth(): number {
     if (!raw) return DEFAULT_RAIL_WIDTH;
     const n = parseInt(raw, 10);
     if (Number.isFinite(n) && n >= MIN_RAIL_WIDTH && n <= MAX_RAIL_WIDTH) return n;
-  } catch { /* private-mode — fall through to default */ }
+  } catch { /* private-mode, fall through to default */ }
   return DEFAULT_RAIL_WIDTH;
 }
 
@@ -50,14 +50,14 @@ interface Props {
    * incognito) apart from a transient server-side race in
    * `currentOccupants`. Without this signal the guard treated every
    * fresh empty as a race and kept the viewer's stale row in the
-   * rail for the full 1200ms guard window — which manifested as
+   * rail for the full 1200ms guard window, which manifested as
    * "I'm still in my own userlist after /incognito" until the cache
    * timed out. Null while the user isn't signed in.
    */
   selfUserId: string | null;
   /** When set, the Tools panel's identity dropdown adopts an in-character label + "Leave Character" row. */
   activeCharacterId?: string | null;
-  /** Display name of the active character — used by the identity button label. */
+  /** Display name of the active character, used by the identity button label. */
   activeCharacterName?: string | null;
   onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
   onNameClick: (userId: string, displayName: string, characterId?: string | null) => void;
@@ -81,8 +81,8 @@ interface Props {
   /**
    * Same 0–3 reading-size step the Tools menu cycles for the chat
    * surface. Applied to the rail's root container as a font-size in
-   * em so descendants — userlist names, icon glyphs sized with `em`,
-   * room headers — scale together with the chat lines. Default 1
+   * em so descendants, userlist names, icon glyphs sized with `em`,
+   * room headers, scale together with the chat lines. Default 1
    * (medium) when omitted keeps the rail at its historic size.
    */
   fontStep?: 0 | 1 | 2 | 3;
@@ -138,7 +138,7 @@ export function RoomsTree({
   }, [rooms, currentRoomId]);
 
   // Desktop-only horizontal resize for the rail. The user drags the
-  // left edge — pulling LEFT widens the rail (eats into the chat
+  // left edge, pulling LEFT widens the rail (eats into the chat
   // column), pulling RIGHT narrows it. Value persists per-browser
   // via localStorage so the choice rides along with the tab.
   // Mobile keeps the fixed w-72 drawer width since "drag to resize"
@@ -146,12 +146,12 @@ export function RoomsTree({
   const [railWidth, setRailWidth] = useState<number>(loadRailWidth);
   useEffect(() => {
     try { window.localStorage.setItem(RAIL_WIDTH_STORAGE_KEY, String(railWidth)); }
-    catch { /* private-mode — width still works for this session */ }
+    catch { /* private-mode, width still works for this session */ }
   }, [railWidth]);
 
   // Drag state lives on a ref (not React state) so each pointermove
   // doesn't trigger a re-render of the closure. We re-render via
-  // `setRailWidth` once per frame's worth of movement — React batches
+  // `setRailWidth` once per frame's worth of movement, React batches
   // the updates so the userlist re-paint stays smooth even on long
   // occupant lists.
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -207,9 +207,9 @@ export function RoomsTree({
         ["--keep-rail-width" as string]: `${railWidth}px`,
         // The Tools-menu font-size cycle drives the chat surface via
         // an em font-size on MessageList. Mirror it here so the rail
-        // — userlist rows, room headers, all the descendants that
+        //, userlist rows, room headers, all the descendants that
         // inherit `font-size` and the em-sized icons in
-        // [UserNameTag.tsx](./UserNameTag.tsx) — scale in lockstep.
+        // [UserNameTag.tsx](./UserNameTag.tsx), scale in lockstep.
         // Items in the rail still using rem-based Tailwind sizes
         // (text-xs etc.) stay fixed, which is the intended floor:
         // labels stay readable even at the smallest step.
@@ -221,7 +221,7 @@ export function RoomsTree({
           feels natural. `cursor-ew-resize` is the bidirectional
           east-west arrow conventionally used for column resizing.
           The hover/active tints are subtle so the rail doesn't feel
-          like a UI element at rest — the cursor change is the
+          like a UI element at rest, the cursor change is the
           primary affordance. Pointer-capture (via setPointerCapture
           in `startResize`) keeps the drag tracking even when the
           cursor strays outside the handle's thin hit area. */}
@@ -311,13 +311,13 @@ function RoomGroup({
    * userlist doesn't vanish for the brief window where a /rooms
    * refetch (triggered by every `presence:update` / `rooms:tree-
    * changed` server event) momentarily sees the room with zero
-   * occupants — typically caused by the sending socket's tab being
+   * occupants, typically caused by the sending socket's tab being
    * mid-broadcast when `currentOccupants` calls `fetchSockets()`.
    *
    * We cache the most-recent non-empty occupants list and stamp the
    * moment it was last "seen full." If a render brings in an empty
    * list within {@link FLICKER_GUARD_MS}, we keep showing the cached
-   * value instead. Past the window we accept the empty state — a
+   * value instead. Past the window we accept the empty state, a
    * room that genuinely emptied (the actual last person left) will
    * still render "empty" after the guard expires.
    *
@@ -333,8 +333,8 @@ function RoomGroup({
   }
   // Skip the cache fallback when the cached list contained only the
   // viewing user. A fresh empty list in that case is legitimate (self
-  // left the room, switched away, or — the case this branch was added
-  // for — went incognito) and bridging it back to the cached self-row
+  // left the room, switched away, or, the case this branch was added
+  // for, went incognito) and bridging it back to the cached self-row
   // produced the visible bug where the user stayed in their own
   // userlist for the full 1200ms guard window after /incognito until
   // the cache timed out. The server-race the guard was originally
@@ -353,7 +353,7 @@ function RoomGroup({
       ? lastNonEmptyRef.current.list
       : room.occupants;
   // Per migration 0187 the userlist no longer groups by primary
-  // world — primary-world is gone now that memberships are
+  // world, primary-world is gone now that memberships are
   // per-identity, and the grouping was the surface that leaked
   // characters back to their master's affiliations. The userlist is
   // a flat alphabetical list sorted by display name.
@@ -361,7 +361,7 @@ function RoomGroup({
     a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()),
   );
   // Active theme drives the legibility nudge that keeps the staff
-  // icons readable against the rail bg — even on a custom palette
+  // icons readable against the rail bg, even on a custom palette
   // where the natural slot color would land too close to the chat
   // background to read. The rail container uses `bg-keep-bg`, so we
   // contrast each icon's slot color against `theme.bg`.
@@ -394,7 +394,7 @@ function RoomGroup({
               src="/assets/icons/board.png"
               alt=""
               aria-hidden
-              title="threaded conversations — replies persist as forum-style threads"
+              title="threaded conversations, replies persist as forum-style threads"
               className="mr-1 inline-block shrink-0 select-none align-middle"
               // em-sized so the icon scales with the rail's fontSize
               // (driven by the Tools-menu font-step setting). 1.4em is
@@ -408,7 +408,7 @@ function RoomGroup({
               src="/assets/icons/scroll.png"
               alt=""
               aria-hidden
-              title="flat chat — chronological, ephemeral feel"
+              title="flat chat, chronological, ephemeral feel"
               className="mr-1 inline-block shrink-0 select-none align-middle"
               style={{ minWidth: "1.4em", minHeight: "1.4em", width: "1.4em", height: "1.4em" }}
               draggable={false}
@@ -424,7 +424,7 @@ function RoomGroup({
       ) : (
         <ul className="pb-1">
           {sortedOccupants.map((o) => {
-            // Composite key — a single account voicing two different
+            // Composite key, a single account voicing two different
             // characters in two tabs renders as two occupant rows
             // (one per identity). Keying on userId alone would
             // dup-React-key in that case.
@@ -435,7 +435,7 @@ function RoomGroup({
                       // Idle ghosts (tab closed / refreshed within the
                       // admin-configured grace window) dim to 50% so
                       // they read as "still around but inactive." Live
-                      // and live+/away rows stay at full opacity — the
+                      // and live+/away rows stay at full opacity, the
                       // /away message is shown via the existing
                       // UserNameTag tooltip, so we don't compound the
                       // signals.
@@ -451,14 +451,14 @@ function RoomGroup({
                           too, keeping the icon proportional to the
                           name rather than dwarfing it.
 
-                          Deliberately NOT `truncate` on this wrapper —
+                          Deliberately NOT `truncate` on this wrapper,
                           UserNameTag's name button already applies
                           `overflow-clip text-ellipsis` internally when
                           `truncate` is passed, so the long-name
                           ellipsis still works. Adding `overflow: hidden`
                           here as well clipped the avatar's VFX bleed
                           (Phoenix feathers, Aurora glow, etc.) at the
-                          row's edge — the new in-place template
+                          row's edge, the new in-place template
                           renderer relies on this wrapper staying
                           overflow:visible so decoration can paint
                           into the row gutter. */}
@@ -470,26 +470,26 @@ function RoomGroup({
                           away={o.away}
                           awayMessage={o.awayMessage ?? null}
                           ooc={o.characterId === null}
-                          // Userlist rank sigil — drives from the live
+                          // Userlist rank sigil, drives from the live
                           // occupant's pool rank (per-character when
                           // attached, master pool otherwise). Slightly
                           // larger glyph than the chat-line sigil since
                           // the rail has room. Userlist uses the
                           // abridged `gem` variant (gem_rank_1.png …
-                          // gem_rank_6.png) — one icon per top-level
-                          // rank, tier ignored — because the rail row
+                          // gem_rank_6.png), one icon per top-level
+                          // rank, tier ignored, because the rail row
                           // has no room for the per-tier chevron detail
                           // and the rank category alone is enough.
                           rankKey={o.rankKey ?? null}
                           tier={o.tier ?? null}
                           rankSigilSize="md"
                           rankIconVariant="gem"
-                          // Active name style — live from the occupant
+                          // Active name style, live from the occupant
                           // payload, so style edits update the rail
                           // instantly on the next presence broadcast.
                           nameStyleKey={o.activeNameStyleKey ?? null}
                           nameStyleConfig={o.nameStyleConfig ?? null}
-                          // Phase 4 — inline-avatar cosmetic swaps the
+                          // Phase 4, inline-avatar cosmetic swaps the
                           // gender-icon click target for a bordered
                           // avatar. UserNameTag honors `inlineAvatar`
                           // only when an avatarUrl is also available
@@ -512,7 +512,7 @@ function RoomGroup({
                         />
                         {o.idle ? (
                           // Adjacent suffix instead of folding "(idle)"
-                          // into the displayName prop — that would pick
+                          // into the displayName prop, that would pick
                           // up the user's chat-color and name-style
                           // decoration, which we don't want on a system
                           // marker. Classes match the `(ooc)` suffix
@@ -521,7 +521,7 @@ function RoomGroup({
                           // they're both present on a row.
                           <span
                             className="ml-1 shrink-0 text-[10px] text-keep-muted"
-                            title="Idle — tab closed or refreshed, may return"
+                            title="Idle, tab closed or refreshed, may return"
                           >
                             (idle)
                           </span>
@@ -583,7 +583,7 @@ interface StaffChip {
  *   admin         → trophy + base icon in the action slot (sitewide
  *                   moderation)
  *   mod / owner   → trophy outline icon in the system slot (either
- *                   site-mod, per-room mod, or per-room owner — all
+ *                   site-mod, per-room mod, or per-room owner, all
  *                   three carry moderation powers and a user asking
  *                   for help doesn't care which flavor)
  *   user/trusted  → no icon
@@ -595,7 +595,7 @@ interface StaffChip {
  * the bg gets nudged toward legibility before the icon paints.
  */
 function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
-  // EVERY staff/role badge is suppressed on character rows — they go
+  // EVERY staff/role badge is suppressed on character rows, they go
   // fully incognito so an admin/mod can RP without the public
   // signaling "this character belongs to staff" or "this character's
   // master owns this room." The OOC ↔ character partition is meant
@@ -605,7 +605,7 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
   // This includes the per-room owner/mod badges. They're keyed on
   // user_id (the master), not per-identity, so a masteradmin owning
   // OOC Lobby would otherwise tag THEIR character row with a Room
-  // owner chip — exactly the giveaway we're trying to avoid. Anyone
+  // owner chip, exactly the giveaway we're trying to avoid. Anyone
   // who wants to claim their staff or room-mod badge can voice the
   // master to do so.
   const isMasterRow = o.characterId === null;
@@ -617,7 +617,7 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
       Icon: MasterAdminIcon,
       color: legibleAgainstBg(theme.accent, theme.bg),
       title:
-        "Master admin — site-wide authority including settings, branding, and account management.",
+        "Master admin, site-wide authority including settings, branding, and account management.",
     };
   }
   if (o.accountRole === "admin") {
@@ -625,7 +625,7 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
       label: "Admin",
       Icon: AdminIcon,
       color: legibleAgainstBg(theme.action, theme.bg),
-      title: "Site admin — site-wide moderation across every room.",
+      title: "Site admin, site-wide moderation across every room.",
     };
   }
   // Site-mod beats per-room badges in label / tooltip if both apply
@@ -644,10 +644,10 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
       color: legibleAgainstBg(theme.system, theme.bg),
       title:
         isSiteMod
-          ? "Site moderator — moderation across every room."
+          ? "Site moderator, moderation across every room."
           : o.role === "owner"
-          ? "Room owner — moderation authority in this room."
-          : "Room moderator — moderation authority in this room.",
+          ? "Room owner, moderation authority in this room."
+          : "Room moderator, moderation authority in this room.",
     };
   }
   return null;

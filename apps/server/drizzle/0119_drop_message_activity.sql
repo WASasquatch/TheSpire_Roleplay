@@ -4,7 +4,7 @@
 -- 24h" beacon stable when retention sweeps deleted messages out of
 -- the 24h window. That problem doesn't apply on installs whose global
 -- retention is longer than 24h AND whose per-room expiry overrides
--- (if any) are also longer than 24h — the messages stay in the
+-- (if any) are also longer than 24h, the messages stay in the
 -- `messages` table for the full beacon window and a direct
 -- `count(*) WHERE created_at >= now - 24h` reports the true volume.
 --
@@ -18,7 +18,7 @@
 --
 -- The admin's Message Expiry panel (added alongside this work) makes
 -- it easy to spot and clear any aggressive per-room expiry that would
--- chew into the 24h window — so the rare install that wanted ledger-
+-- chew into the 24h window, so the rare install that wanted ledger-
 -- backed accuracy can just bump per-room expiry up instead. If a
 -- future need re-introduces the ledger, do it with a boot-time
 -- backfill from `messages` so the count is correct on deploy day.

@@ -60,7 +60,7 @@ export async function resolveIdentityByName(db: Db, name: string): Promise<Ident
   const trimmed = name.trim();
   if (!trimmed) return null;
 
-  // Space-insensitive match — NBSP and ASCII space are equivalent on
+  // Space-insensitive match, NBSP and ASCII space are equivalent on
   // lookup so a /title or /whois argument typed with a regular space
   // resolves a master stored with NBSP (the master-username canonical
   // form).
@@ -135,7 +135,7 @@ type SubjectGender = "male" | "female" | "nonbinary" | "other" | "undisclosed";
  *                            F → "female"
  *                            N → "nonbinary" / "other" / "undisclosed"
  *                         Lets a single asymmetric kind ship the
- *                         entire matrix in two format strings — e.g.
+ *                         entire matrix in two format strings, e.g.
  *                         a "parent ↔ child" kind has
  *                           formatA = "{gender:Father|Mother|Parent} of {target}"
  *                           formatB = "{gender:Son|Daughter|Child} of {target}"
@@ -154,7 +154,7 @@ function renderFormat(
   otherDisplayName: string,
   subjectGender: SubjectGender,
 ): string {
-  // {gender:M|F|N} — parse three pipe-separated parts and pick by
+  // {gender:M|F|N}, parse three pipe-separated parts and pick by
   // subject gender. The regex tolerates whitespace around the parts
   // so admins can space them out for readability in the editor.
   const withGender = format.replace(
@@ -175,7 +175,7 @@ function renderFormat(
  * over the master OOC gender; missing/invalid falls back to OOC).
  */
 async function resolveSubjectGender(db: Db, identity: Identity): Promise<SubjectGender> {
-  // Master profile — read user.gender directly.
+  // Master profile, read user.gender directly.
   if (identity.characterId === null) {
     const u = (await db
       .select({ gender: users.gender })
@@ -184,7 +184,7 @@ async function resolveSubjectGender(db: Db, identity: Identity): Promise<Subject
       .limit(1))[0];
     return (u?.gender as SubjectGender | undefined) ?? "undisclosed";
   }
-  // Character profile — character stats.gender wins; user.gender is the
+  // Character profile, character stats.gender wins; user.gender is the
   // fallback when the character row doesn't set one.
   const c = (await db
     .select({ statsJson: characters.statsJson })
@@ -606,7 +606,7 @@ export async function dissolveTitle(
 
   // The prompt goes to the side opposite the initiator. The preview shows
   // the title text from THAT side's profile (so they see what would be
-  // removed) — which means the gender token resolves against the
+  // removed), which means the gender token resolves against the
   // RECIPIENT's gender, not the initiator's.
   const recipientFormat = initiatorSide === "a" ? kind.formatB : kind.formatA;
   const recipientUserId = initiatorSide === "a" ? row.bUserId : row.aUserId;

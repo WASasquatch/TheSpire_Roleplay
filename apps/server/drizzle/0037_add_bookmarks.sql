@@ -1,6 +1,6 @@
 -- User-scoped bookmarks on chat messages. Lightweight: a single row per
 -- (user, message) pair carrying an optional free-form category string and
--- note. Categories aren't normalized into their own table — they're
+-- note. Categories aren't normalized into their own table, they're
 -- user-defined tags, and the small dataset doesn't justify the schema
 -- weight. The unique index makes re-bookmarking idempotent (UPSERT-style
 -- updates re-use the existing row).
@@ -8,7 +8,7 @@
 -- Cascades: dropping the user takes their bookmarks with them; dropping
 -- a message via hard-delete (admin sweep) auto-removes orphaned
 -- bookmark rows so no dangling references survive. Soft-deletes don't
--- touch this table — the bookmark stays, the modal renders
+-- touch this table, the bookmark stays, the modal renders
 -- "[message removed]" in place of the body.
 CREATE TABLE `bookmarks` (
   `id` text PRIMARY KEY NOT NULL,

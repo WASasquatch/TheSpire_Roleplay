@@ -4,25 +4,25 @@ import { useEffect, useState } from "react";
  * Display + per-metric privacy toggles. Five self-saving checkboxes
  * that hit PUT /me/profile on each flip:
  *
- *   show-rank-in-userlist — when off, the user's userlist row drops
+ *   show-rank-in-userlist, when off, the user's userlist row drops
  *     back to the gender glyph (server nulls the rank fields on the
  *     occupant payload, and the existing UserNameTag conditional
  *     handles the fallback). Re-broadcasts presence on save so the
  *     change shows up in every viewer's rail without a reload.
- *   show-rank-in-chat — when off, future chat messages from this
+ *   show-rank-in-chat, when off, future chat messages from this
  *     user persist with null rank fields so no gem renders next to
  *     the line. Past messages keep whatever was snapshotted at send
- *     time — toggling the flag never rewrites history.
+ *     time, toggling the flag never rewrites history.
  *
  *   hide-chat-message-count / hide-forum-topic-count
- *   hide-forum-reply-count — when on, the matching ProfileMetrics
+ *   hide-forum-reply-count, when on, the matching ProfileMetrics
  *     field is returned as null from /profile, and the modal
  *     renders "private" in place of the number.
  *
  * Each row optimistically updates local state and reverts on save
- * failure — same pattern CurrencyPrivacyRow uses.
+ * failure, same pattern CurrencyPrivacyRow uses.
  *
- * Surfaced in two places (1:1 parity is intentional — the same
+ * Surfaced in two places (1:1 parity is intentional, the same
  * toggles, same labels, same hints, same on-save behavior):
  *   - Profile Editor → Privacy tab
  *   - Earning Modal  → Settings tab

@@ -3,11 +3,11 @@
  *
  * Two callers:
  *
- *   1. ProfileModal — clicking a Collection or Pets pin on a profile
+ *   1. ProfileModal, clicking a Collection or Pets pin on a profile
  *      opens this overlay over the profile modal (z:60 sits above
  *      the profile modal's z:50).
  *
- *   2. App.tsx — the `/item <name>` chat command emits an
+ *   2. App.tsx, the `/item <name>` chat command emits an
  *      `open-item` UiHint; the app-level handler mounts this same
  *      overlay so users can summon any item's full view from chat
  *      without first navigating to a profile that has it pinned.
@@ -16,7 +16,7 @@
  * via a document-level listener so the overlay doesn't need
  * keyboard focus to receive the key.
  *
- * Designed to be device-universal — on desktop it's a click-to-
+ * Designed to be device-universal, on desktop it's a click-to-
  * magnify, on mobile it's the "tapped that little icon, give me a
  * bigger view" interaction. The same shape powers both surfaces so
  * the look is consistent regardless of how the user got there.
@@ -53,7 +53,7 @@ export function ItemZoomView({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={`${entry.name} — full view`}
+      aria-label={`${entry.name}, full view`}
       onClick={onClose}
       className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 bg-black/85 p-6 backdrop-blur-sm"
     >

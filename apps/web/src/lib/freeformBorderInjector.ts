@@ -1,6 +1,6 @@
 /**
  * Inject the admin-authored CSS for free-form (non-rank-tied) avatar
- * borders into the document once. Parallel to nameStyleInjector — the
+ * borders into the document once. Parallel to nameStyleInjector, the
  * two systems use the same scoping pattern (CSS rules namespaced
  * under a per-row class) and the same per-response CSP nonce.
  *
@@ -54,7 +54,7 @@ function getCspNonce(): string | null {
  * is the inner avatar circle. The 84/76 ratio yields a 4px native
  * frame ring, which scales to ~6.5px at the xl showcase tier
  * (TEMPLATE_TARGET_AVATAR_PX.xl / 76 ≈ 1.63 → 4 × 1.63 ≈ 6.5px) and
- * ~2-3px at inline tiers — readable at glance distance instead of
+ * ~2-3px at inline tiers, readable at glance distance instead of
  * the sub-pixel 1.4px the original 82/76 ratio produced at sm.
  *
  * Border authors can override `.av { width / height }` on their own

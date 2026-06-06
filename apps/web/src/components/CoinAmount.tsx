@@ -1,5 +1,5 @@
 /**
- * CoinAmount — small inline pairing of coin.png + a numeric amount.
+ * CoinAmount, small inline pairing of coin.png + a numeric amount.
  *
  * Used everywhere Currency is shown as a value (purchase costs,
  * send/receive notifications, ledger deltas) so the icon stays

@@ -2,10 +2,10 @@
  * Shared types + caps for the two profile-customization Flair
  * features added in migration 0192:
  *
- *   `flair_profile_visitors` — counter widget that surfaces distinct
+ *   `flair_profile_visitors`, counter widget that surfaces distinct
  *     daily viewer counts split into members + external traffic.
  *
- *   `flair_profile_marquee` — rotating-quote strip between the
+ *   `flair_profile_marquee`, rotating-quote strip between the
  *     profile header and the bio/stats grid. Owner configures up to
  *     {@link PROFILE_MARQUEE_MAX_QUOTES} short bodies, each capped at
  *     {@link PROFILE_MARQUEE_QUOTE_MAX_LEN} chars.
@@ -14,7 +14,7 @@
 export const FLAIR_PROFILE_VISITORS_KEY = "flair_profile_visitors";
 export const FLAIR_PROFILE_MARQUEE_KEY = "flair_profile_marquee";
 
-/** Hard limit on configured quotes — anything beyond reads as a wall
+/** Hard limit on configured quotes, anything beyond reads as a wall
  *  of text and the rotation loses meaning at the marquee's cadence. */
 export const PROFILE_MARQUEE_MAX_QUOTES = 10;
 /** Per-quote char cap. Short enough to render on one line of a
@@ -58,7 +58,7 @@ export interface ProfileMarqueeConfig {
 
 /**
  * Pure parser for the JSON column. Returns an empty array on null /
- * undefined / malformed JSON / wrong shape — the column is admin-
+ * undefined / malformed JSON / wrong shape, the column is admin-
  * settable in theory and we don't want a malformed write to crash
  * every profile render.
  */
@@ -76,7 +76,7 @@ export function parseProfileMarqueeQuotes(raw: string | null | undefined): strin
 }
 
 /**
- * Reverse — used by the editor save path. Trims, drops empties, caps
+ * Reverse, used by the editor save path. Trims, drops empties, caps
  * at {@link PROFILE_MARQUEE_MAX_QUOTES}. Returns null when the
  * resulting array is empty so the storage shape is "explicitly
  * cleared" rather than `"[]"`.

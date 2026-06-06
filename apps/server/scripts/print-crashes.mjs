@@ -117,7 +117,7 @@ for (const e of entries) {
   const when = new Date(e.ts).toISOString();
   const color = colorForKind(e.kind);
   console.log("");
-  console.log(`${color(e.kind)} — ${when} (uptime ${e.uptimeSec}s, pid ${e.pid})`);
+  console.log(`${color(e.kind)}, ${when} (uptime ${e.uptimeSec}s, pid ${e.pid})`);
   if (e.flyMachineId) {
     console.log(dim(`  fly: ${e.flyApp || "?"} / ${e.flyRegion || "?"} / ${e.flyMachineId}`));
   }

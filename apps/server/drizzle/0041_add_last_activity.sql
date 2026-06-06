@@ -4,7 +4,7 @@
 -- from the existing reply rows so old topics get the right ordering
 -- on first page load.
 --
--- Only meaningful for top-level topics in nested-mode rooms — the
+-- Only meaningful for top-level topics in nested-mode rooms, the
 -- topics endpoint filters on `reply_to_id IS NULL` and orders by this
 -- column. Replies and flat-room messages carry the column too but the
 -- value is unused.

@@ -4,10 +4,10 @@
  * Templates are admin-authored HTML strings that wrap a user's display
  * name in custom markup. The placeholder vocabulary is:
  *
- *   {username}       — the display name as a plain text run, HTML-escaped.
+ *   {username}      , the display name as a plain text run, HTML-escaped.
  *                      Works in any context that accepts text.
  *
- *   {username-span}  — the display name split into one `<span>` per
+ *   {username-span} , the display name split into one `<span>` per
  *                      character, each with a `data-i="N"` attribute
  *                      pointing at its zero-based position. Lets a
  *                      template's CSS target individual characters via
@@ -45,7 +45,7 @@ function escapeHtml(s: string): string {
  * emoji, supplementary-plane scripts) survive as one unit rather than
  * getting torn in half. ZWJ-combined sequences (multi-codepoint
  * grapheme clusters) will still split into their component code
- * points — acceptable for the typical username case, and avoiding
+ * points, acceptable for the typical username case, and avoiding
  * the heavier `Intl.Segmenter` keeps this hot in chat rendering.
  */
 export function buildUsernameSpan(displayName: string): string {

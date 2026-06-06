@@ -11,8 +11,8 @@ import type { Db } from "../db/index.js";
 
 /**
  * Two report shapes share one endpoint. The discriminant is `kind`:
- *   - kind: "message"  — room-content report; `messageId` required.
- *   - kind: "dm"       — direct-message report; `directMessageId`
+ *   - kind: "message" , room-content report; `messageId` required.
+ *   - kind: "dm"      , direct-message report; `directMessageId`
  *                        required. The reporter must be one of the
  *                        two participants. The route snapshots the
  *                        body at report-time so the admin queue can
@@ -114,7 +114,7 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
     const dm = (await db.select().from(directMessages).where(eq(directMessages.id, parsed.directMessageId)).limit(1))[0];
     if (!dm) { reply.code(404); return { error: "message not found" }; }
     if (dm.senderUserId === me.id) { reply.code(400); return { error: "you can't report your own message" }; }
-    // Participant check — reporter must be one of the two parties on
+    // Participant check, reporter must be one of the two parties on
     // the conversation. Non-participants don't see DMs at all (the
     // history endpoint also 404s for them), so a request here from
     // someone else is treated the same: 404, no info leak.

@@ -24,7 +24,7 @@ export default defineConfig({
       "/health": "http://localhost:3001",
       "/users": "http://localhost:3001",
       "/site": "http://localhost:3001",
-      // `/rules` is NOT proxied — it's a public SPA route rendering the
+      // `/rules` is NOT proxied, it's a public SPA route rendering the
       // RulesPage component. The JSON endpoint moved to `/api/rules`
       // (covered by the `/api` proxy below). Keeping `/rules` here
       // would forward dev-mode page navigations to the backend, which
@@ -40,7 +40,7 @@ export default defineConfig({
       // reaction toggles drop on the floor.
       "/emoticons": "http://localhost:3001",
       "/reactions": "http://localhost:3001",
-      // Public marquee banners endpoint — the chat shell fetches this
+      // Public marquee banners endpoint, the chat shell fetches this
       // unauthenticated to populate the rotating bar. Without the
       // proxy entry the request hit Vite's SPA fallback and returned
       // index.html, which parsed as 200 OK with no `banners` field

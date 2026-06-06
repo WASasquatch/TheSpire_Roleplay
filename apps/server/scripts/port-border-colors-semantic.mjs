@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
  * Re-port every built-in border's literal colors to `--c-*` CSS
- * variables — this time using SEMANTIC names derived from the
+ * variables, this time using SEMANTIC names derived from the
  * selector + CSS property that wraps each color, not the generic
  * `c1..cN` scheme the first pass used.
  *
  * Naming derivation:
  *   1. Tokenize the CSS into rules (split on `}`).
  *   2. For each rule, look at the rightmost class in the selector
- *      (the part after the border-class prefix) — that's the
+ *      (the part after the border-class prefix), that's the
  *      "element role" (`ring`, `feather`, `ember`, `wing`, `petal`,
  *      `log`, etc.). Pseudo-elements collapse to `aura`/`shine`.
  *   3. For each literal color in the rule's body, look at the CSS
@@ -159,7 +159,7 @@ function propertyRoleFor(ruleBody, colorIndex) {
   return PROPERTY_ROLE.get(propName) ?? "color";
 }
 
-/** Returns `[bodies, finishers]` — the rule bodies and the stuff
+/** Returns `[bodies, finishers]`, the rule bodies and the stuff
  *  between them (selectors + `{`). When we rebuild we interleave
  *  them. Bodies don't include the trailing `}`. */
 function splitRules(css) {
@@ -189,7 +189,7 @@ function splitRules(css) {
 function port(styleCss) {
   // Round-trip strip: collapse any existing `var(--c-X, FALLBACK)`
   // back to FALLBACK so we re-derive names from a clean slate. Run
-  // repeatedly until the string stops changing — borders that were
+  // repeatedly until the string stops changing, borders that were
   // ported twice (once with semantic names, once by the generic
   // c1..cN pass) end up doubly-wrapped like
   // `var(--c-ring-main, var(--c-c1, #b71c1c))` and need two strip

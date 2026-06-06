@@ -17,7 +17,7 @@ const MAX_HITS = 8;
 /**
  * Live message-search input. Renders inline at the bottom of its host (the
  * tools drawer); the results popup floats above the input with most-
- * relevant hit nearest the bar — that's the spatial-proximity-to-action
+ * relevant hit nearest the bar, that's the spatial-proximity-to-action
  * convention requested in the spec, so the user's finger/cursor doesn't
  * have to travel for the most likely target.
  *
@@ -98,7 +98,7 @@ export function SearchBar({ roomId, onJump, onClose }: Props) {
   // Reverse-relevance ordering: server returns most-relevant first, but
   // the popup renders ascending so the top entry is least relevant and
   // the bottom (closest to the input) is most relevant. See plan.md
-  // Phase 1 design — the spatial proximity to the input matches the
+  // Phase 1 design, the spatial proximity to the input matches the
   // user's intent: "the most likely thing I want is one tap away".
   const ordered = hits.slice().reverse();
 
@@ -157,7 +157,7 @@ export function SearchBar({ roomId, onJump, onClose }: Props) {
 
 /**
  * Trim the message body to a window around the first match (case-insensitive)
- * and bold the matched substring. Pure render — server already filtered the
+ * and bold the matched substring. Pure render, server already filtered the
  * row to one we can see, so we just style what's there.
  */
 function Snippet({ body, query }: { body: string; query: string }) {

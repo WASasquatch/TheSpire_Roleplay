@@ -2,7 +2,7 @@
 -- complete_avatar_borders.html into the `freeform_borders` catalog.
 --
 -- All rows ship as `is_builtin = 1` so admin DELETE refuses them
--- (the editor must disable rather than remove — disabling hides
+-- (the editor must disable rather than remove, disabling hides
 -- the row from the picker while keeping any user equip slots
 -- intact). Costs are placeholders tuned by tier; admins re-price
 -- via the Flair admin tab without a code change.
@@ -10,16 +10,16 @@
 -- Templates omit the placeholder `.pic` letter from the demo HTML
 -- and substitute `{avatar}` which the renderer expands to the
 -- viewer's avatar `<img>` (or initials fallback when no avatar).
--- `.av` + `.pic` base styles live in the injector preamble — each
+-- `.av` + `.pic` base styles live in the injector preamble, each
 -- row only carries its own `.b-<key>` chain so the SQL stays bounded.
 --
 -- Idempotent: INSERT OR IGNORE on the primary key (`key`) protects
 -- re-runs after a baseline skip on an older install. Admins who
 -- edit a seeded row's CSS / template via the admin UI keep their
--- changes — subsequent migration runs don't overwrite.
+-- changes, subsequent migration runs don't overwrite.
 
 -- =========================================================
--- RARE — refined
+-- RARE, refined
 -- =========================================================
 
 INSERT OR IGNORE INTO `freeform_borders`
@@ -89,7 +89,7 @@ VALUES
 --> statement-breakpoint
 
 -- =========================================================
--- EPIC — elemental
+-- EPIC, elemental
 -- =========================================================
 
 INSERT OR IGNORE INTO `freeform_borders`
@@ -208,7 +208,7 @@ VALUES
 --> statement-breakpoint
 
 -- =========================================================
--- LEGENDARY — prestige
+-- LEGENDARY, prestige
 -- =========================================================
 
 INSERT OR IGNORE INTO `freeform_borders`
@@ -307,7 +307,7 @@ VALUES
 --> statement-breakpoint
 
 -- =========================================================
--- MYTHIC — godlike
+-- MYTHIC, godlike
 -- =========================================================
 
 INSERT OR IGNORE INTO `freeform_borders`
@@ -431,7 +431,7 @@ VALUES
 --> statement-breakpoint
 
 -- =========================================================
--- EXOTIC — beyond rarity
+-- EXOTIC, beyond rarity
 -- =========================================================
 
 INSERT OR IGNORE INTO `freeform_borders`
@@ -523,7 +523,7 @@ VALUES
 --> statement-breakpoint
 
 -- =========================================================
--- ATMOSPHERIC — ambient
+-- ATMOSPHERIC, ambient
 -- =========================================================
 
 INSERT OR IGNORE INTO `freeform_borders`

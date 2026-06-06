@@ -1,5 +1,5 @@
 /**
- * EarningStatsStrip — small, glanceable Earning read-out for the
+ * EarningStatsStrip, small, glanceable Earning read-out for the
  * chat composer area.
  *
  * Shows three at-a-glance facts: current rank (text), coin pouch +
@@ -13,7 +13,7 @@
  *
  * Always renders (even before the snapshot loads, or for accounts with
  * no Earning row yet) so the system is discoverable from a fresh
- * login — zero-state reads "Unranked · 0 · 0 XP" with the icons.
+ * login, zero-state reads "Unranked · 0 · 0 XP" with the icons.
  *
  * Live deltas: when `earning:earned` fires, the store updates the
  * matching pool (master or per-character). The strip selects the
@@ -21,7 +21,7 @@
  * character's own pool when in character) and diffs against the
  * previous render's totals, popping a floating `+N XP` / `+N coin`
  * chip that bounces up and fades out (~3.2s). Lighter than toasts,
- * in-context next to the totals they belong to — matches the project
+ * in-context next to the totals they belong to, matches the project
  * ethos of "no video-game toasts." Clicking the strip opens the
  * dashboard. Switching characters resets the diff baseline so a
  * cross-pool delta doesn't pop a spurious burst.
@@ -33,7 +33,7 @@ import { useChat } from "../state/store.js";
 
 interface Props {
   onOpenEarning: () => void;
-  /** Optional className for the wrapper — used to control md+/mobile visibility. */
+  /** Optional className for the wrapper, used to control md+/mobile visibility. */
   className?: string;
 }
 
@@ -51,7 +51,7 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
   // characters flips the readout (xp/currency/rank) to that character's
   // pool; OOC / master falls back to snapshot.master. Without this the
   // strip stayed pinned to master and never reflected per-character
-  // progression — and the burst chip never popped on character-scope
+  // progression, and the burst chip never popped on character-scope
   // earnings because it was diffing the wrong totals.
   const activeCharacterId = useChat((s) => s.activeCharacterId);
   const pool = useMemo(() => {
@@ -74,7 +74,7 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
   // chip doesn't pile up off-screen.
   //
   // Identity-switch handling: prevRef is keyed on the pool's ownerId so
-  // switching characters resets the comparison baseline cleanly — the
+  // switching characters resets the comparison baseline cleanly, the
   // first render under the new identity is treated as a fresh settle
   // (no spurious "+1000 XP" burst from the cross-pool delta), then
   // subsequent earned events bump from there.
@@ -88,7 +88,7 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
     const prev = prevRef.current;
     prevRef.current = { ownerId: pool.ownerId, xp: pool.xp, currency: pool.currency };
     // First settle for THIS identity (either initial mount, or just
-    // switched characters): no burst — we don't want a "+N" pop on
+    // switched characters): no burst, we don't want a "+N" pop on
     // load or on /char switch.
     if (!prev || prev.ownerId !== pool.ownerId) return;
     const xpDelta = pool.xp - prev.xp;
@@ -132,14 +132,14 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
   const currency = pool?.currency ?? 0;
 
   // Resolved title for the wrapper. Surfacing a clear loading/error
-  // hint here makes it easy to debug a stuck "zero" state — a fetch
+  // hint here makes it easy to debug a stuck "zero" state, a fetch
   // 401 or 500 used to silently render the same all-zeros UI as a
   // genuinely fresh account, with no signal which case you were in.
   const title = error
     ? `Earning fetch failed: ${error}`
     : loading && !snapshot
       ? "Loading your Earning…"
-      : "Open your Earning — XP, Currency, ranks, cosmetics";
+      : "Open your Earning, XP, Currency, ranks, cosmetics";
 
   return (
     <button
@@ -154,12 +154,12 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
         // visible dark partition so the rank / coin / XP triad reads
         // as its own grouped panel against the formatting-toolbar row,
         // rather than three free-floating chips. Hover still flips to
-        // `keep-banner/40` so the affordance stays — the dark base
+        // `keep-banner/40` so the affordance stays, the dark base
         // just makes the resting state legible without it.
         `relative flex items-center gap-2 rounded bg-black/10 px-[15px] py-0.5 text-[11px] leading-tight text-keep-muted hover:bg-keep-banner/40 hover:text-keep-text ${className ?? ""}`
       }
     >
-      {/* Rank text — uppercase tracked, matches other meta chips. */}
+      {/* Rank text, uppercase tracked, matches other meta chips. */}
       <span className="hidden font-action uppercase tracking-widest text-keep-text sm:inline">
         {rankLabel}
       </span>
@@ -204,7 +204,7 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
       </span>
       {/* Faint vertical divider between currency and XP bar. */}
       <span aria-hidden className="h-4 w-px shrink-0 bg-keep-rule/60" />
-      {/* XP bar — thin, fills the available width on mobile,
+      {/* XP bar, thin, fills the available width on mobile,
           fixed-ish width on desktop. */}
       <span className="flex min-w-[80px] flex-1 items-center gap-1.5 sm:min-w-[120px] sm:max-w-[180px]">
         <span className="h-1.5 flex-1 overflow-hidden rounded bg-keep-rule/40">
@@ -230,7 +230,7 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
             ))}
         </span>
       </span>
-      {/* Error dot — visible when /earning/me failed so the all-zeros
+      {/* Error dot, visible when /earning/me failed so the all-zeros
           read-out doesn't masquerade as a fresh account. Hover the
           strip to see the underlying error message in the title. */}
       {error ? (

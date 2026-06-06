@@ -1,11 +1,11 @@
 /**
- * Earning — public + self routes.
+ * Earning, public + self routes.
  *
  * - `GET /earning/me` returns the caller's wallet + active-character
  *   earning + unacknowledged rank-up notifications + the catalog
  *   slice the dashboard needs (ranks, tiers, name styles, cosmetics).
  *
- * - `GET /earning/users/:id` returns the public slice — rank/tier
+ * - `GET /earning/users/:id` returns the public slice, rank/tier
  *   and currency (currency hidden when the target has
  *   `hideCurrencyCount = 1`).
  *
@@ -74,7 +74,8 @@ import {
   resolveTodayFlashSale,
 } from "../earning/flashSale.js";
 import { buildRankings } from "../earning/rankings.js";
-// creditPool is no longer called directly here — purchase endpoints
+import { buildGameRankings } from "../earning/gameRankings.js";
+// creditPool is no longer called directly here, purchase endpoints
 // run their own sqlite transaction (see `runPurchaseTxn` below) for
 // atomicity. The award engine still imports it for the live earn
 // paths (chat / forum / presence).
@@ -87,7 +88,7 @@ const patchSettingsBody = z.object({
   selectedBorderRankKey: z.string().nullable().optional(),
   /**
    * Equip slot for a FREE-FORM border (migration 0149). Independent
-   * of `selectedBorderRankKey` — both columns can be set; the
+   * of `selectedBorderRankKey`, both columns can be set; the
    * renderer prefers freeform when present. Set null to drop the
    * freeform slot back to the rank-tier fallback.
    */
@@ -120,11 +121,11 @@ interface PoolView {
   maxRankKeyEverHeld: string | null;
   maxTierEverHeld: number | null;
   selectedBorderRankKey: string | null;
-  /** Freeform border equip slot — independent of the rank-tier slot.
+  /** Freeform border equip slot, independent of the rank-tier slot.
    *  Resolution precedence (BorderedAvatar): freeform first, rank
    *  border as fallback. Null means no freeform border equipped. */
   selectedFreeformBorderKey: string | null;
-  /** Only emitted on master pool — character pools cascade off this flag. */
+  /** Only emitted on master pool, character pools cascade off this flag. */
   hideCurrencyCount?: boolean;
   /** Only emitted on master pool. Mirrors hideCurrencyCount for XP. */
   hideXpCount?: boolean;
@@ -251,7 +252,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    * Re-broadcast occupant presence in every room the user has a live
    * socket in. Called after any change that affects how the user's
    * name renders to peers (name-style equip, border equip, inline-
-   * avatar toggle, name-style color config) — those cosmetics ride
+   * avatar toggle, name-style color config), those cosmetics ride
    * the occupant cache, not the message wire, so without a presence
    * refresh other tabs / peers don't see the change until something
    * else triggers a broadcast (a join, a /char switch). Mirrors the
@@ -274,7 +275,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    * Full earning snapshot for the caller. Drives the Earning
    * dashboard wallet + ledger sections + the catalog + own
    * notifications. Cacheable on the catalog slice (everyone sees the
-   * same catalog) — the wallet/ledger slices are per-user.
+   * same catalog), the wallet/ledger slices are per-user.
    */
   app.get("/earning/me", async (req, reply) => {
     const me = await getSessionUser(req, db);
@@ -288,7 +289,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     // earning row. We include zero-XP characters too if they have a
     // row at all, so the dashboard can show characters the user has
     // started but not yet earned on. Cap at 50 just to bound payload
-    // — a user with 100 characters is an edge case worth bounding.
+    //, a user with 100 characters is an edge case worth bounding.
     const charsOfMine = await db
       .select({ id: characters.id, name: characters.name })
       .from(characters)
@@ -302,7 +303,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
 
     // Owned cosmetics + currently-equipped state. Per-identity:
     // master rows from user_owned_*, character rows from
-    // character_owned_*. Each set is independent — a master who
+    // character_owned_*. Each set is independent, a master who
     // bought Embers does NOT make their character own it, and vice
     // versa.
     const ownedStyleRows = await db
@@ -326,7 +327,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           .from(characterOwnedBorders)
           .where(inArray(characterOwnedBorders.characterId, charIdsForOwnership))
       : [];
-    // Free-form border ownership — parallel to rank-tier borders. Two
+    // Free-form border ownership, parallel to rank-tier borders. Two
     // independent ledgers per the migration 0149 comment.
     const ownedFreeformBorderRows = await db
       .select()
@@ -427,7 +428,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     const characterTypingPhraseOwnership = new Set(
       typingPhraseOwnerRows.filter((r) => r.scope === "character").map((r) => r.ownerId),
     );
-    // Phase 6 — Lurking Master Flair. Same ownership-lookup shape
+    // Phase 6, Lurking Master Flair. Same ownership-lookup shape
     // as the banner / typing-phrase rows above.
     const lurkingOwnerRows = await db
       .select({
@@ -448,7 +449,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     const characterLurkingOwnership = new Set(
       lurkingOwnerRows.filter((r) => r.scope === "character").map((r) => r.ownerId),
     );
-    // Phase 7 (migration 0161) — room-presence Flair ownership. Same
+    // Phase 7 (migration 0161), room-presence Flair ownership. Same
     // lookup shape; gates the Flair tab's "Custom Room Entrance"
     // editor + the broadcaster's template substitution.
     const roomPresenceOwnerRows = await db
@@ -470,7 +471,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     const characterRoomPresenceOwnership = new Set(
       roomPresenceOwnerRows.filter((r) => r.scope === "character").map((r) => r.ownerId),
     );
-    // Session-presence is master-only — no character lookup needed.
+    // Session-presence is master-only, no character lookup needed.
     const masterOwnsSessionPresence = (await db
       .select({ ownerId: earningLedger.ownerId })
       .from(earningLedger)
@@ -480,7 +481,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         eq(earningLedger.ownerId, me.id),
       ))
       .limit(1)).length > 0;
-    // Migration 0192 — profile visitors counter + quote marquee
+    // Migration 0192, profile visitors counter + quote marquee
     // flairs. Same ownership-lookup shape; the CosmeticsTab card
     // reads `*Owned` to flip between Buy and Equip CTAs, and the
     // ProfileEditor Flair tab reads it independently for editor
@@ -523,7 +524,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     // omitted so the dashboard's Available list stays in sync with
     // what users can actually equip. Built-in rows ship with the
     // catalog regardless of `enabled` (admin can disable a seed
-    // style temporarily) — `enabled: false` filters them out from
+    // style temporarily), `enabled: false` filters them out from
     // both the rendering map and the buy list, which is what we
     // want.
     const styleRows = await db
@@ -533,7 +534,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .orderBy(asc(nameStyles.order));
 
     // Free-form borders catalog. Same enabled-only filter as name
-    // styles — disabled rows still resolve on the renderer side
+    // styles, disabled rows still resolve on the renderer side
     // (owned but admin-disabled rows keep displaying), but they're
     // hidden from the buy list.
     const freeformBorderRows = await db
@@ -545,7 +546,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     // Items catalog. We ship ALL items (enabled or not) so the
     // inventory view can still resolve display data for items the
     // admin disabled after a user acquired them. The client filters
-    // the Shop view down to `purchasable=true`. Payload is small —
+    // the Shop view down to `purchasable=true`. Payload is small,
     // typically <50 rows.
     const itemRows = await db
       .select()
@@ -564,7 +565,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .from(identityInventory)
       .where(sql`(${identityInventory.ownerScope} = 'user' AND ${identityInventory.ownerId} = ${me.id})
         OR (${identityInventory.ownerScope} = 'character' AND ${identityInventory.ownerId} IN (${
-        // Empty IN () is invalid SQL — guard with a sentinel that
+        // Empty IN () is invalid SQL, guard with a sentinel that
         // can't match any real character id when the user has none.
         charIdSet.size > 0
           ? sql.join(Array.from(charIdSet).map((id) => sql`${id}`), sql`, `)
@@ -581,7 +582,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       }
     }
 
-    // Per-identity Collection — 10-slot pinned showcase keyed by
+    // Per-identity Collection, 10-slot pinned showcase keyed by
     // (ownerScope, ownerId). Same partitioning as inventory; each
     // identity's pins are independent. The client renders sparse
     // slot maps directly, so we ship the rows as-is rather than
@@ -606,7 +607,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       }
     }
 
-    // Pet Collection — separate 5-slot table for items with
+    // Pet Collection, separate 5-slot table for items with
     // category='pet'. Same partition structure; client renders these
     // under a distinct "Pets" sub-view in the Items tab and as a
     // distinct section on the profile.
@@ -664,7 +665,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           isBuiltin: !!r.isBuiltin,
           order: r.order,
         })),
-        // Free-form borders catalog — shipped alongside name styles so
+        // Free-form borders catalog, shipped alongside name styles so
         // the client can inject any template+CSS rows once on the
         // dashboard open. `image_url` rows render as overlay <img>;
         // `template`+`style_css` rows feed the catalog CSS injector
@@ -721,12 +722,12 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       })),
       // Per-identity inventory. `inventory` is the master/OOC pool;
       // `inventoryByCharacter[characterId]` is the character pool.
-      // Every identity is fully isolated — moving items across them
+      // Every identity is fully isolated, moving items across them
       // requires `/give` between two of the user's own identities, the
       // only legal cross-partition transfer.
       inventory: inventoryMaster,
       inventoryByCharacter,
-      // Per-identity Collection pins (10-slot showcase) — same
+      // Per-identity Collection pins (10-slot showcase), same
       // partition rules as inventory. Slots are sparse; each entry
       // carries `slot` (0..9) + `itemKey`. Items pinned here have
       // category != 'pet'; pets live in `petCollection`.
@@ -734,12 +735,12 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       collectionByCharacter,
       // Per-identity Pet Collection pins (5-slot showcase). Same
       // partition rules. Only items with `category='pet'` are
-      // pinnable here — the PUT endpoint validates and rejects
+      // pinnable here, the PUT endpoint validates and rejects
       // mismatches with a 403.
       petCollection: petCollectionMaster,
       petCollectionByCharacter,
       activeCosmetics: {
-        // Master / OOC slot. Same shape as before — the existing
+        // Master / OOC slot. Same shape as before, the existing
         // dashboard reads these two fields directly for the master
         // identity tab.
         inlineAvatarEnabled: !!activeCosmeticsRow?.inlineAvatarEnabled,
@@ -749,17 +750,17 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         // column is only writable through PATCH /earning/me/banner.
         profileBannerUrl: activeCosmeticsRow?.profileBannerUrl ?? null,
         profileBannerOwned: masterOwnsBanner,
-        // Phase 5 custom typing phrase — same per-identity pattern
+        // Phase 5 custom typing phrase, same per-identity pattern
         // as the banner. Null phrase = use the default "is typing…"
         // suffix. The Flair tab uses `typingPhraseOwned` to gate
         // the editor between "Buy" and "Set phrase".
         typingPhrase: masterEarningRow?.typingPhrase ?? null,
         typingPhraseOwned: masterOwnsTypingPhrase,
-        // Phase 6 Lurking Master Flair — when true, the typing
+        // Phase 6 Lurking Master Flair, when true, the typing
         // indicator hides this user from non-admin receivers.
         lurkingMasterEnabled: !!activeCosmeticsRow?.lurkingMasterEnabled,
         lurkingMasterOwned: masterOwnsLurking,
-        // Phase 7 (migration 0161) — custom room-presence templates
+        // Phase 7 (migration 0161), custom room-presence templates
         // for the master/OOC identity. The Flair tab uses
         // `roomPresenceOwned` to gate the editor between Buy / Set;
         // the broadcaster reads these column values to substitute
@@ -767,12 +768,12 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         roomJoinTemplate: masterEarningRow?.roomJoinTemplate ?? null,
         roomLeaveTemplate: masterEarningRow?.roomLeaveTemplate ?? null,
         roomPresenceOwned: masterOwnsRoomPresence,
-        // Session-presence (master only). No per-character mirror —
+        // Session-presence (master only). No per-character mirror,
         // characters are sub-identities of the account session.
         sessionConnectTemplate: masterEarningRow?.sessionConnectTemplate ?? null,
         sessionExitTemplate: masterEarningRow?.sessionExitTemplate ?? null,
         sessionPresenceOwned: masterOwnsSessionPresence,
-        // Migration 0192 — profile flairs. `*Owned` gates the
+        // Migration 0192, profile flairs. `*Owned` gates the
         // CosmeticsTab Buy/Equip CTA; the per-identity values + the
         // editor live on the actual profile-flair endpoints (this
         // snapshot only carries the ownership flag for the catalog).
@@ -798,7 +799,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               roomJoinTemplate: r.roomJoinTemplate ?? null,
               roomLeaveTemplate: r.roomLeaveTemplate ?? null,
               roomPresenceOwned: characterRoomPresenceOwnership.has(r.characterId),
-              // Migration 0192 — per-character profile flair ownership.
+              // Migration 0192, per-character profile flair ownership.
               profileVisitorsOwned: characterProfileVisitorsOwnership.has(r.characterId),
               profileMarqueeOwned: characterProfileMarqueeOwnership.has(r.characterId),
             },
@@ -819,7 +820,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   // The endpoint takes a userId in the path and an OPTIONAL
   // `?characterId=` query. The identity rule is the project's
   // load-bearing contract: a character is its own account from the
-  // earning system's perspective — distinct pool row, distinct rank,
+  // earning system's perspective, distinct pool row, distinct rank,
   // distinct cosmetics, distinct privacy flags. Reading the master
   // pool to render a character profile leaks the OOC owner's XP /
   // currency / border / rank onto a fresh character that should be
@@ -830,7 +831,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   //
   // We still validate the character against `users.id` in the path
   // so callers can't ask for "user X's pool for character Y" when Y
-  // belongs to a different account — that'd be a per-identity
+  // belongs to a different account, that'd be a per-identity
   // ownership leak in the other direction.
   app.get<{ Params: { id: string }; Querystring: { characterId?: string } }>(
     "/earning/users/:id",
@@ -895,7 +896,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       //
       // The equip endpoints already validate ownership on WRITE, so a
       // valid path can't persist a border the identity doesn't own.
-      // BUT — admin revokes, migrations, manual SQL, and any future
+      // BUT, admin revokes, migrations, manual SQL, and any future
       // bug can leave a stale `selected_*_border_*` value pointing at
       // a key that's no longer in the identity's ownership table. If
       // we returned the stale key, the BorderedAvatar client renderer
@@ -984,7 +985,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         username: target.username,
         ...(character ? { characterId: character.id } : {}),
         // Both XP and Currency honor independent privacy flags. Rank +
-        // tier + sigil stay public regardless — rank is the identity's
+        // tier + sigil stay public regardless, rank is the identity's
         // public tag.
         xp: showXp ? view.xp : null,
         currency: showCurrency ? view.currency : null,
@@ -1001,7 +1002,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   );
 
   /**
-   * Public leaderboards across the nine earning boards. No auth —
+   * Public leaderboards across the nine earning boards. No auth,
    * the dashboard's Rankings tab paints this for anyone with the
    * modal open. Per-pool privacy filters (`hideCurrencyCount`,
    * `hideXpCount`, `users.isPublic = false`, soft-delete) live
@@ -1009,6 +1010,24 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    */
   app.get("/earning/rankings", async () => {
     return await buildRankings(db);
+  });
+
+  /**
+   * Public per-game rankings for the social-game system. Returns one
+   * leaderboard per game_kind that has any data, plus an "overall"
+   * combined leaderboard summing wins across all games. The set of
+   * games is derived from the `game_stats` table at read time, so a
+   * newly added social game lights up here automatically the moment
+   * its first winner is recorded.
+   *
+   * Friendly labels: known game kinds get hand-tuned labels; unknown
+   * kinds fall back to titlecasing the kind itself. Both `wins` and
+   * `points` are surfaced per row so the UI can offer the right
+   * sort for accumulating-score games (scramble) vs binary-win
+   * games (rps, trivia, duel, raffle).
+   */
+  app.get("/earning/game-rankings", async () => {
+    return await buildGameRankings(db);
   });
 
   /**
@@ -1074,7 +1093,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    * Per-user privacy + display settings. Currently:
    *   - hideCurrencyCount: hide Currency total from others
    *   - selectedBorderRankKey: equip one of the user's owned borders
-   *     (validated against `user_owned_borders` — caller can't equip
+   *     (validated against `user_owned_borders`, caller can't equip
    *     what they don't own)
    */
   app.patch<{ Body: unknown }>("/earning/me/settings", async (req, reply) => {
@@ -1128,7 +1147,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         let value: string | null = null;
         if (body.selectedFreeformBorderKey !== null) {
           // Ownership check against character_owned_freeform_borders.
-          // Master's ownership doesn't satisfy — borders here are
+          // Master's ownership doesn't satisfy, borders here are
           // per-identity even when the underlying catalog row is the
           // same. Same per-identity partition as rank-tier borders.
           const owned = (await db
@@ -1154,7 +1173,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       return { ok: true };
     }
 
-    // Master path — unchanged behavior.
+    // Master path, unchanged behavior.
     await db.insert(userEarning).values({ userId: me.id }).onConflictDoNothing();
 
     const update: Partial<typeof userEarning.$inferInsert> = { updatedAt: new Date() };
@@ -1199,13 +1218,13 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         update.selectedFreeformBorderKey = body.selectedFreeformBorderKey;
       }
     }
-    if (Object.keys(update).length === 1) return { ok: true }; // only updatedAt — nothing to do
+    if (Object.keys(update).length === 1) return { ok: true }; // only updatedAt, nothing to do
     await db.update(userEarning).set(update).where(eq(userEarning.userId, me.id));
     // Border equip changes the bordered-avatar rendering on every line
     // this user appears on, so peers need a fresh occupant snapshot to
     // see it without a refresh. hideCurrencyCount / hideXpCount only
     // affect the dashboard view (not occupants), so the broadcast is a
-    // no-op for those — cheap regardless since the function early-exits
+    // no-op for those, cheap regardless since the function early-exits
     // when the user has no live sockets.
     if (body.selectedBorderRankKey !== undefined || body.selectedFreeformBorderKey !== undefined) {
       await rebroadcastPresenceForUser(me.id);
@@ -1242,7 +1261,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   });
 
   /**
-   * Catalog endpoint — what's available to buy / equip. Public so the
+   * Catalog endpoint, what's available to buy / equip. Public so the
    * dashboard can render previews to users who haven't bought
    * anything yet. Returns enabled name styles + cosmetics, but
    * filters disabled rows so the UI doesn't accidentally let users
@@ -1293,7 +1312,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    * effective discount % per pick and a hydrated catalog snippet
    * so the client can render the Overview section without a
    * second fetch (name + base price → discounted price). Anonymous
-   * callers get the same payload — sale info is public so the
+   * callers get the same payload, sale info is public so the
    * "Currency 25% off Embers today" banner can show on the splash.
    *
    * The resolver lazily writes today's row on first read, so this
@@ -1365,7 +1384,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   });
 
   /* =========================================================
-   *  Name styles — purchase / config / equip
+   *  Name styles, purchase / config / equip
    *
    *  Three endpoints back the dashboard's Name Styles section:
    *
@@ -1378,7 +1397,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    *
    *    PATCH /earning/me/name-styles/:key/config
    *      Persist the per-user color / glow / etc. picks for an
-   *      already-owned style. Body is opaque JSON — the renderer
+   *      already-owned style. Body is opaque JSON, the renderer
    *      interprets the shape per style.
    *
    *    POST /earning/me/active-name-style { styleKey | null }
@@ -1392,7 +1411,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
      * Currency pool and writes to `user_owned_name_styles` (the
      * master/OOC's owned list). A character id debits that
      * character's pool and writes to `character_owned_name_styles`.
-     * Each identity owns separately — Kaal buying Embers does NOT
+     * Each identity owns separately, Kaal buying Embers does NOT
      * make WAS own it, and vice versa. Caller must own the character.
      */
     characterId: z.string().nullable().optional(),
@@ -1416,7 +1435,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   }).strict();
   const equipInlineAvatarBody = z.object({
     enabled: z.boolean(),
-    /** Same scoping rule as equipStyleBody — null/omitted = master. */
+    /** Same scoping rule as equipStyleBody, null/omitted = master. */
     characterId: z.string().nullable().optional(),
   }).strict();
 
@@ -1443,7 +1462,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
 
       // Resolve today's flash sale OUTSIDE the txn (resolveTodayFlashSale
       // may lazy-insert the day's row, which has to be async). Inside
-      // validate() the lookup against this snapshot is a pure compare —
+      // validate() the lookup against this snapshot is a pure compare,
       // if the user is buying today's pick, the discount applies.
       const flashSale = await resolveTodayFlashSale(db);
       // Entire purchase runs in one sqlite transaction so the funds
@@ -1470,7 +1489,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             if (already) return { ok: false, status: 409, error: "already owned" };
           }
           // Flash-sale discount: only when this exact key is today's
-          // pick. Server-authoritative — the client's "Buy" button
+          // pick. Server-authoritative, the client's "Buy" button
           // shows the discounted price for UX, but the actual cost
           // is recomputed here so a stale client can't claim a
           // discount on a row that isn't on sale.
@@ -1584,7 +1603,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       // character reads character_owned_name_styles. The same
       // styleKey can be owned by one identity and not the other
       // since migration 0086, so a master's purchase does NOT let
-      // a character equip the same style — they have to buy it
+      // a character equip the same style, they have to buy it
       // from their own pool.
       if (body.characterId) {
         const owned = (await db
@@ -1613,7 +1632,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     }
 
     if (body.characterId) {
-      // Character scope — validate the caller actually owns the
+      // Character scope, validate the caller actually owns the
       // character before writing. The /char switch flow already
       // enforces this, but the equip endpoint accepts a raw id from
       // the request body so an attacker could otherwise flip
@@ -1638,7 +1657,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           set: { activeNameStyleKey: body.styleKey, updatedAt: new Date() },
         });
     } else {
-      // Master/OOC scope — lazy upsert on user_active_cosmetics.
+      // Master/OOC scope, lazy upsert on user_active_cosmetics.
       const existing = (await db
         .select()
         .from(userActiveCosmetics)
@@ -1657,21 +1676,21 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       }
     }
     // Refresh occupant presence so every room the user is parked in
-    // picks up the new style on the next render — without this the
+    // picks up the new style on the next render, without this the
     // equip didn't take effect until peers refreshed.
     await rebroadcastPresenceForUser(me.id);
     return { ok: true };
   });
 
   /* =========================================================
-   *  Cosmetics — inline_avatar (Phase 4)
+   *  Cosmetics, inline_avatar (Phase 4)
    *
    *  Two endpoints back the dashboard's Cosmetics section:
    *
    *    POST /earning/me/cosmetics/inline_avatar/purchase
    *      Atomic Currency debit + grants the right to equip. We
    *      record ownership by setting `inline_avatar_enabled = 1`
-   *      lazily on first purchase — there's no separate "owned but
+   *      lazily on first purchase, there's no separate "owned but
    *      not equipped" state for this cosmetic (per plan.md), so
    *      buying is implicitly equipping. The user can later toggle
    *      off via the equip endpoint without losing the purchase
@@ -1690,7 +1709,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
 
   const equipCosmeticBody = z.object({
     enabled: z.boolean(),
-    /** Same scoping rule as the name-style equip endpoint —
+    /** Same scoping rule as the name-style equip endpoint,
      *  null/omitted writes the master/OOC slot on
      *  user_active_cosmetics; a character id writes that
      *  character's character_earning row. */
@@ -1700,7 +1719,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   /**
    * Helper: has this identity (master user OR character) ever
    * purchased this cosmetic? We use the ledger as the source of
-   * truth — `scope` + `ownerId` partition by identity, so each
+   * truth, `scope` + `ownerId` partition by identity, so each
    * character has its own "ever purchased" history. Admin grants
    * and free promo cosmetics still flow through the same ledger
    * insert.
@@ -1735,7 +1754,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    * grant-side side-effect in the switch below.
    */
   /** Cosmetics buyable through the standard /earning/me/cosmetics/
-   *  :key/purchase endpoint. Each one is a ONE-TIME unlock —
+   *  :key/purchase endpoint. Each one is a ONE-TIME unlock,
    *  re-purchase returns 409. `flair_reaction_sheet` is NOT in
    *  this set on purpose: each submission re-pays via its own
    *  endpoint (POST /me/emoticon-submissions), so the standard
@@ -1748,7 +1767,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     "flair_lurking_master",
     "flair_room_presence",
     "flair_session_presence",
-    // Migration 0192 — profile-customization flairs. Without these
+    // Migration 0192, profile-customization flairs. Without these
     // in the allowlist, the catalog row + admin card + ledger
     // schema all exist but the POST /earning/me/cosmetics/:key/
     // purchase handler's first gate returns "unknown cosmetic key"
@@ -1792,7 +1811,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           if (!cosmetic || !cosmetic.enabled) return { ok: false, status: 404, error: "cosmetic not found or disabled" };
           // Per-identity ownership check. Master's prior purchase
           // does NOT count as ownership for a character (and vice
-          // versa) — each identity has its own ledger trail.
+          // versa), each identity has its own ledger trail.
           const existingPurchase = characterId
             ? tx.select({ id: earningLedger.id }).from(earningLedger).where(and(
                 eq(earningLedger.scope, "character"),
@@ -1901,13 +1920,13 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       const key = req.params.key;
       if (!TOGGLEABLE_COSMETIC_KEYS.has(key)) {
         // Distinct from the purchase endpoint's identical-looking
-        // 404 — the equip surface is a narrower allowlist (only
+        // 404, the equip surface is a narrower allowlist (only
         // cosmetics with a boolean equip slot belong here). Phrasing
         // it separately so future "unknown cosmetic key" debugging
         // doesn't conflate the two paths: a purchase-side miss
         // means the catalog forgot the SKU, an equip-side miss
         // means the SKU exists but isn't toggleable (configured via
-        // dedicated PATCH endpoints instead — e.g. the profile
+        // dedicated PATCH endpoints instead, e.g. the profile
         // flairs land on /me/profile-flair, not here).
         reply.code(404);
         return { error: "cosmetic is not toggleable" };
@@ -1916,7 +1935,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       let body: z.infer<typeof equipCosmeticBody>;
       try { body = equipCosmeticBody.parse(req.body); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
-      // Per-identity purchase check — character-scoped equip requires
+      // Per-identity purchase check, character-scoped equip requires
       // the CHARACTER to have purchased; master-scoped requires master.
       if (body.characterId) {
         const c = (await db
@@ -1961,10 +1980,10 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         }
       }
       // Toggle changes whether the avatar tile renders next to the
-      // user's name on every chat line — peers need a fresh occupant
+      // user's name on every chat line, peers need a fresh occupant
       // snapshot or the change waits until the next presence event.
-      // (Lurking Master doesn't affect occupants directly — its
-      // effect is on the typing-indicator broadcast — but
+      // (Lurking Master doesn't affect occupants directly, its
+      // effect is on the typing-indicator broadcast, but
       // rebroadcasting is harmless and keeps the code path uniform.)
       await rebroadcastPresenceForUser(me.id);
       return { ok: true };
@@ -1972,7 +1991,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   );
 
   /* =========================================================
-   *  Profile Banner — set / clear the URL slot
+   *  Profile Banner, set / clear the URL slot
    *
    *  Gated by ownership of the `flair_profile_banner` cosmetic on
    *  the identity being written. Per-identity: master writes its own
@@ -1982,7 +2001,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    *  Validation:
    *    - URL must be empty (clears) or absolute http/https
    *    - HEAD-sniff content-type begins with `image/` (soft check;
-   *      5s timeout, network failure does NOT block — many image
+   *      5s timeout, network failure does NOT block, many image
    *      hosts reject HEAD or hot-link checks, and we'd rather let
    *      the user equip a working image than fail closed on a
    *      finicky CDN).
@@ -2022,7 +2041,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     const trimmed = (body.url ?? "").trim();
     const final: string | null = trimmed.length === 0 ? null : trimmed;
     if (final !== null) {
-      // Cheap shape check before we even consider the network sniff —
+      // Cheap shape check before we even consider the network sniff,
       // bare paths, javascript:, data:, and other non-http URLs are
       // rejected here so we don't hand them to the URL parser at all.
       if (!/^https?:\/\//i.test(final)) {
@@ -2056,7 +2075,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           return { error: `URL doesn't appear to be an image (Content-Type: ${ct})` };
         }
       } catch {
-        // Network blip, CORS, abort, server hates HEAD — allow.
+        // Network blip, CORS, abort, server hates HEAD, allow.
       }
     }
     if (characterId) {
@@ -2088,7 +2107,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   });
 
   /* =========================================================
-   *  Custom Typing Phrase — set / clear the phrase slot
+   *  Custom Typing Phrase, set / clear the phrase slot
    *
    *  Twin of the banner endpoint above. Gated by ownership of
    *  `flair_typing_phrase` on the identity being written. Per-
@@ -2100,7 +2119,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    *    - Non-empty trimmed length must be 1..60 chars.
    *    - Linebreaks, NUL, and other control characters are
    *      stripped (the indicator strip is a single inline run).
-   *    - No HTML — the renderer text-escapes everything.
+   *    - No HTML, the renderer text-escapes everything.
    *
    *  Returns the post-write phrase so the client can update store
    *  optimistically and discover any server-side normalization
@@ -2152,7 +2171,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         return { error: `phrase must be ${TYPING_PHRASE_MAX} characters or fewer` };
       }
       // Ownership gate only when SETTING (clearing is always allowed
-      // — a user whose flair was revoked can still drop their stale
+      //, a user whose flair was revoked can still drop their stale
       // phrase). Same pattern as the banner.
       const scope: "user" | "character" = characterId ? "character" : "user";
       const ownerId = characterId ?? me.id;
@@ -2184,7 +2203,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   /* =========================================================
    *  Presence broadcast templates (migration 0161).
    *
-   *  Two endpoints — one per Flair — each accepting an OPTIONAL
+   *  Two endpoints, one per Flair, each accepting an OPTIONAL
    *  partial update of the pair it owns. Omit a field to leave that
    *  slot unchanged; pass null to clear it (renderer falls back to
    *  the default phrasing). Pass a non-empty string to set.
@@ -2195,7 +2214,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    *  banner / typing-phrase clears use.
    * ========================================================= */
 
-  /** Local helper — apply the shared validator + normalizer to a
+  /** Local helper, apply the shared validator + normalizer to a
    *  single field. `undefined` means "field omitted in body"; `null`
    *  means "clear the slot"; a string means "validate + normalize +
    *  set". Returns the resolved value or an error string. */
@@ -2256,7 +2275,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (join.value !== undefined) updates.roomJoinTemplate = join.value;
     if (leave.value !== undefined) updates.roomLeaveTemplate = leave.value;
-    // No-op when neither field was supplied — still return the
+    // No-op when neither field was supplied, still return the
     // current row so the client can sync without a follow-up GET.
     if (characterId) {
       if (Object.keys(updates).length > 1) {
@@ -2349,7 +2368,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   });
 
   /* =========================================================
-   *  Borders — per-rank Tier IV purchase + equip
+   *  Borders, per-rank Tier IV purchase + equip
    *
    *  Eligibility: the user must have *ever* held Tier IV of the
    *  target rank, tracked by user_earning.maxRankKeyEverHeld /
@@ -2501,11 +2520,11 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   );
 
   /* =========================================================
-   *  Free-form borders — purchase + auto-equip
+   *  Free-form borders, purchase + auto-equip
    *
    *  Companion to the rank-tier border endpoint above. The catalog
    *  lives in `freeform_borders` (independent of `rank_tiers`) and
-   *  has no eligibility gate — anyone with Currency can buy. Pricing
+   *  has no eligibility gate, anyone with Currency can buy. Pricing
    *  comes off `freeform_borders.cost`. Flash-sale support is
    *  intentionally omitted on the first cut; borders aren't in the
    *  rotation today and adding it later only requires extending the
@@ -2633,7 +2652,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   /* =========================================================
    *  Free-form border color customization (migration 0158).
    *
-   *  Mirror of /earning/me/name-styles/:key/config — per-identity
+   *  Mirror of /earning/me/name-styles/:key/config, per-identity
    *  JSON map of CSS custom-property values. The catalog row's CSS
    *  references customizable colors via `var(--c-<name>, <fallback>)`;
    *  this endpoint writes the user's override values into
@@ -2685,7 +2704,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
 
       // Build the filtered config. Drop unknown keys silently
       // (client may know about more vars than the current CSS
-      // declares — e.g. after an admin edit that removed a slot),
+      // declares, e.g. after an admin edit that removed a slot),
       // and validate each remaining value.
       let cleaned: Record<string, string> | null = null;
       if (body.config) {
@@ -2701,7 +2720,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           if (count >= FREEFORM_CONFIG_MAX_ENTRIES) break;
         }
         // An entirely-empty config after filtering is the same as
-        // null — store null so the snapshot view can render "no
+        // null, store null so the snapshot view can render "no
         // overrides" without distinguishing between the two states.
         if (count === 0) cleaned = null;
       }
@@ -2761,7 +2780,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   );
 
   /* =========================================================
-   *  Items — shop purchase
+   *  Items, shop purchase
    *
    *  POST /earning/me/items/:key/buy
    *    Body: { quantity, characterId? }
@@ -2773,7 +2792,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    *  Partitioning: `characterId` selects which identity buys. Null /
    *  omitted = master/OOC (scope='user', ownerId=me.id). A character
    *  id (after ownership check) = scope='character', ownerId=charId.
-   *  Currency and inventory both partition cleanly — buying as
+   *  Currency and inventory both partition cleanly, buying as
    *  Character A only debits A's pool and only stocks A's inventory.
    * ========================================================= */
 
@@ -2827,7 +2846,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           }
           // Stack-cap check against the buying identity's current
           // holdings. Reject the whole transaction rather than
-          // partial-buying — the client should disable the Buy button
+          // partial-buying, the client should disable the Buy button
           // when at cap, so a 409 here is a defensive backstop.
           const existing = tx.select({ qty: identityInventory.quantity })
             .from(identityInventory)
@@ -2844,7 +2863,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               error: `would exceed stack limit (${item.stackLimit})`,
             };
           }
-          // Flash-sale discount applies per UNIT (not per stack) — a
+          // Flash-sale discount applies per UNIT (not per stack), a
           // bulk-buy of an on-sale item gets the discount on every
           // unit. Done after the stack-cap check so the discounted
           // cost reflects the actual quantity going through.
@@ -2918,7 +2937,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   );
 
   /* =========================================================
-   *  Collection — per-identity 10-slot pinned showcase.
+   *  Collection, per-identity 10-slot pinned showcase.
    *
    *  PUT /earning/me/collection
    *    Body: { slots: Array<{ slot, itemKey | null }>, characterId? }
@@ -2951,7 +2970,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     try { body = setCollectionBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
 
-    // Reject duplicate slot indexes in the same request — the slot
+    // Reject duplicate slot indexes in the same request, the slot
     // is part of the PK, so writing 2x slot=3 in one go would race
     // with itself even inside a transaction.
     const slotSet = new Set<number>();
@@ -3009,7 +3028,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               throw new Error(`__pin_not_owned__:${k}`);
             }
           }
-          // Category guard — pets belong in identity_pet_collection,
+          // Category guard, pets belong in identity_pet_collection,
           // not here. Read the relevant category rows once and
           // reject any pet keys before the writes start.
           const catRows = tx.select({ key: items.key, category: items.category })
@@ -3055,7 +3074,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       }
       if (msg.startsWith("__pin_wrong_collection__:")) {
         reply.code(403);
-        return { error: `"${msg.slice("__pin_wrong_collection__:".length)}" is a pet — pin it to your Pet Collection instead.` };
+        return { error: `"${msg.slice("__pin_wrong_collection__:".length)}" is a pet, pin it to your Pet Collection instead.` };
       }
       throw err;
     }
@@ -3064,7 +3083,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   });
 
   /* =========================================================
-   *  Pet Collection — 5-slot pinned pet showcase
+   *  Pet Collection, 5-slot pinned pet showcase
    *
    *  PUT /earning/me/pet-collection
    *    Body: { slots: Array<{ slot, itemKey | null }>, characterId? }
@@ -3135,7 +3154,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               throw new Error(`__pin_not_owned__:${k}`);
             }
           }
-          // Inverse category guard — only pets allowed here.
+          // Inverse category guard, only pets allowed here.
           const catRows = tx.select({ key: items.key, category: items.category })
             .from(items)
             .where(inArray(items.key, itemKeysToCheck))
@@ -3150,7 +3169,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         // we can preserve them when the same pet is moved to a different
         // slot. The PUT body is a slot-keyed diff, so "move Whiskers
         // from slot 0 to slot 2" comes in as { slot:0, itemKey:null }
-        // + { slot:2, itemKey:'maine_coon' } — without this snapshot the
+        // + { slot:2, itemKey:'maine_coon' }, without this snapshot the
         // delete at slot 0 would drop the nickname and the insert at
         // slot 2 would re-pin the pet anonymous. Re-pinning a DIFFERENT
         // itemKey in a slot still drops the nickname because it
@@ -3200,7 +3219,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       }
       if (msg.startsWith("__pin_wrong_collection__:")) {
         reply.code(403);
-        return { error: `"${msg.slice("__pin_wrong_collection__:".length)}" isn't a pet — pin it to your Item Collection instead.` };
+        return { error: `"${msg.slice("__pin_wrong_collection__:".length)}" isn't a pet, pin it to your Item Collection instead.` };
       }
       throw err;
     }
@@ -3216,7 +3235,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    *    Sets or clears the owner's nickname for the pet pinned in
    *    `slot`. Owner-only (the route resolves the pool from the
    *    session; non-owners can't reach this endpoint). The slot must
-   *    actually hold a pet — renaming an empty slot is a no-op error
+   *    actually hold a pet, renaming an empty slot is a no-op error
    *    so the client can't silently lose a nickname write.
    * ========================================================= */
   const renamePetBody = z.object({
@@ -3316,7 +3335,7 @@ function parseItemMessages(json: string | null | undefined): string[] {
  * Computes the derived `purchasable` boolean from the layered
  * enabled / forSale / sale-window switches so the client doesn't
  * reimplement the rule. `availableCommands` lists which of
- * give/throw/drop have non-empty message arrays — the dashboard +
+ * give/throw/drop have non-empty message arrays, the dashboard +
  * command help use it to show which commands work on the item.
  */
 function shapeItemCatalogRow(row: typeof items.$inferSelect, nowMs: number) {
@@ -3360,7 +3379,7 @@ function shapeItemCatalogRow(row: typeof items.$inferSelect, nowMs: number) {
 /**
  * Bucket character-owned rows into a `{ [characterId]: T[] }` map.
  * Used by `/earning/me` to ship per-character ownership lists in
- * one round trip — the dashboard reads the map indexed by the
+ * one round trip, the dashboard reads the map indexed by the
  * currently-active character id, falling back to the master fields
  * when no character is active.
  */
@@ -3431,7 +3450,7 @@ function runPurchaseTxn(
      * character's currency pool (`character_earning`) and tags the
      * ledger row with scope='character'. The caller is responsible
      * for validating that the character belongs to `userId` BEFORE
-     * calling — this helper just routes the pool. When null/omitted
+     * calling, this helper just routes the pool. When null/omitted
      * the original master-pool behavior runs.
      */
     characterId?: string | null;
@@ -3478,7 +3497,7 @@ function runPurchaseTxn(
         },
       };
     }
-    // Master pool path — unchanged from the original behavior.
+    // Master pool path, unchanged from the original behavior.
     tx.insert(userEarning).values({ userId }).onConflictDoNothing().run();
     const earning = tx.select().from(userEarning).where(eq(userEarning.userId, userId)).limit(1).all()[0];
     const balance = earning?.currency ?? 0;
@@ -3516,7 +3535,7 @@ function runPurchaseTxn(
 /**
  * Emit `earning:earned` to every live socket of the recipient user.
  * Used by the post-commit step of the transactional purchase helpers
- * — the engine's own creditPool path emits this internally, so route
+ *, the engine's own creditPool path emits this internally, so route
  * handlers that bypass creditPool (because they did their own
  * transactional debit) call this helper to keep the wire shape
  * consistent.

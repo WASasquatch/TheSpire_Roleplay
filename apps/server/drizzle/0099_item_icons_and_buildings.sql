@@ -6,23 +6,23 @@
 --    placeholder for each. With real PNGs in place the UI now shows
 --    proper icons in the shop, inventory list, profile Collection
 --    block, and the dashboard's Collection slot grid. `gold_coin`
---    stays placeholder-only — no asset shipped for it yet.
+--    stays placeholder-only, no asset shipped for it yet.
 --
 -- 2. Add seven new builtin items from the same asset drop:
---      tiara              — small jeweled crown variant
---      cake               — wholesale dessert, separate from pie
---      hammock_of_cake    — meme item: a hammock made of cake
---      house              — modest portable home
---      mansion            — manor scale
---      castle             — palace scale, drawbridge included
---      fortress           — the Keep itself, with `keep` aliased
+--      tiara             , small jeweled crown variant
+--      cake              , wholesale dessert, separate from pie
+--      hammock_of_cake   , meme item: a hammock made of cake
+--      house             , modest portable home
+--      mansion           , manor scale
+--      castle            , palace scale, drawbridge included
+--      fortress          , the Keep itself, with `keep` aliased
 --                           so the joke `/drop kaal 1 keep` lands
 --
 -- Alias cleanup paired with #2: the existing `crown` row had
 -- `tiara` + `circlet` in its aliases, and the existing `pie` row
 -- had `cake` in its aliases. Now that those words name actual
 -- items, leaving them on the older rows would make findItem's
--- json_each match ambiguous (LIMIT 1 picks an arbitrary winner —
+-- json_each match ambiguous (LIMIT 1 picks an arbitrary winner,
 -- a `/give kaal cake` could resolve to pie OR cake on different
 -- runs). Strip the conflicting aliases off the older rows so each
 -- alias resolves deterministically.
@@ -53,7 +53,7 @@ UPDATE `items` SET `aliases_json` = '["coronet"]' WHERE `key` = 'crown';
 UPDATE `items` SET `aliases_json` = '["tart"]'    WHERE `key` = 'pie';
 --> statement-breakpoint
 
--- New builtin items. Pricing escalates with absurdity — tiara/cake
+-- New builtin items. Pricing escalates with absurdity, tiara/cake
 -- in the regular range, hammock_of_cake mid-premium, buildings on
 -- a steep curve so they read as aspirational trophy items rather
 -- than casual ammo. Stack limits drop with rarity for the same
@@ -63,7 +63,7 @@ INSERT INTO `items` (`key`, `name`, `name_plural`, `description`, `icon_url`, `p
   'tiara',
   'Tiara',
   'tiaras',
-  'A delicate jeweled tiara. Royal-adjacent — like a crown that doesn''t commit.',
+  'A delicate jeweled tiara. Royal-adjacent, like a crown that doesn''t commit.',
   '/assets/items/tiara.png',
   800,
   5,
@@ -153,7 +153,7 @@ INSERT INTO `items` (`key`, `name`, `name_plural`, `description`, `icon_url`, `p
   1,
   '["{sender} hands {target} the deed to {num} {item_name}. Defend it well.","{sender} entrusts {target} with {num} {item_name}. The Keep stands. For now."]',
   '["{sender} catapults {num} {item_name} at {target}. The siege has reversed.","{sender} flings {num} {item_name} at {target}. Battlements first."]',
-  '["{sender} drops {num} {item_name} on {target}. The Keep has fallen — directly on {target}."]',
+  '["{sender} drops {num} {item_name} on {target}. The Keep has fallen, directly on {target}."]',
   '["keep","citadel","bastion"]',
   1, 170
 );

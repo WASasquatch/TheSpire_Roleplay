@@ -2,7 +2,7 @@
  * Flash-sale resolver.
  *
  * One row per UTC date in `flash_sales`. Written lazily on the first
- * read of the day — no background cron, no scheduled job. The
+ * read of the day, no background cron, no scheduled job. The
  * resolver picks (random per category, unless an admin override row
  * for that date exists in `flash_sale_overrides`), upserts the
  * resolved picks into `flash_sales`, and returns the row.
@@ -13,9 +13,9 @@
  * server that's idle at midnight doesn't burn anything, the
  * resolution is deterministic per day (a second reader gets the same
  * picks via the row that's now in the table), and we never have to
- * babysit a long-running interval. The downside — a stale process
+ * babysit a long-running interval. The downside, a stale process
  * could in theory pick at 23:59 and then the date rolls over at
- * 00:00:01 — is bounded to one second per day and self-corrects on
+ * 00:00:01, is bounded to one second per day and self-corrects on
  * the next read.
  *
  * Snapshotting discount: the effective discount % is stored on the
@@ -52,12 +52,12 @@ export interface FlashSaleRow {
 
 /**
  * Today's date in UTC, as 'YYYY-MM-DD'. Pure UTC so the rollover is
- * the same instant for every server in every region — admins who
+ * the same instant for every server in every region, admins who
  * queue an override "for tomorrow" don't need to think about which
  * timezone the resolver will run in.
  */
 export function todayUtc(now: Date = new Date()): string {
-  // toISOString returns 'YYYY-MM-DDTHH:mm:ss.sssZ' — slice the date.
+  // toISOString returns 'YYYY-MM-DDTHH:mm:ss.sssZ', slice the date.
   return now.toISOString().slice(0, 10);
 }
 
@@ -80,7 +80,7 @@ export function dateOffsetUtc(days: number, now: Date = new Date()): string {
  *
  * "Eligible" rules per catalog:
  *   - name_styles: enabled, cost > 0 (free styles aren't worth
- *     flash-saling — no discount to apply).
+ *     flash-saling, no discount to apply).
  *   - items: enabled, for_sale, cost > 0, and within any
  *     existing sale_starts_at/sale_ends_at window if set.
  *   - cosmetics: enabled, cost > 0.
@@ -89,7 +89,7 @@ export function dateOffsetUtc(days: number, now: Date = new Date()): string {
  * SELECT-then-INSERT path. The INSERT uses ON CONFLICT DO NOTHING
  * on (for_date); the loser's INSERT is a no-op, and both readers
  * re-SELECT the winner's row before returning. Same pattern
- * `ensureConversation` uses elsewhere — single round trip on the
+ * `ensureConversation` uses elsewhere, single round trip on the
  * happy path, safe under concurrent first-message races.
  */
 export async function resolveTodayFlashSale(
@@ -104,14 +104,14 @@ export async function resolveTodayFlashSale(
     .where(eq(flashSales.forDate, forDate))
     .limit(1))[0];
   if (existing) {
-    // Today's row is frozen once written — return it verbatim, NULL
+    // Today's row is frozen once written, return it verbatim, NULL
     // slots and all. We deliberately do NOT lazy-backfill missing
     // categories here.
     //
     // Why: the catalog FKs on this table use `ON DELETE SET NULL`
     // (see `flashSales` in db/schema.ts). Any deploy that runs a
     // migration deleting a catalog row referenced by today's pick
-    // cascades that slot to NULL — and a lazy backfill would then
+    // cascades that slot to NULL, and a lazy backfill would then
     // re-roll a random replacement, mid-day. That's exactly the
     // "the lineup changed after I deployed" bug.
     //
@@ -149,7 +149,7 @@ export async function resolveTodayFlashSale(
   const freeformBordersOn = settings?.flashSaleFreeformBordersEnabled ?? true;
 
   // Per-category pick. `pickCategory` returns the target key and
-  // the effective discount (snapshotted) — null target means "no
+  // the effective discount (snapshotted), null target means "no
   // pick today" (category disabled or catalog empty).
   const stylePick = await pickCategory(db, "name_style", stylesOn, overrides, defaultPct);
   const itemPick = await pickCategory(db, "item", itemsOn, overrides, defaultPct);
@@ -205,7 +205,7 @@ async function pickCategory(
 ): Promise<{ targetKey: string | null; discountPct: number | null }> {
   if (!enabled) return { targetKey: null, discountPct: null };
 
-  // Override beats random — even if the override points at a row
+  // Override beats random, even if the override points at a row
   // that's currently disabled. Admins are explicit; the resolver
   // doesn't second-guess. Discount lookup falls back to default
   // when the override didn't specify one.
@@ -278,7 +278,7 @@ async function pickEligibleRow(db: Db, category: FlashSaleCategory): Promise<str
 /**
  * Apply a flash-sale discount to a base price. Floors at 0 (a 100%
  * sale + 1 Currency cost shouldn't refund money) and rounds to
- * the nearest integer — Currency is whole numbers everywhere
+ * the nearest integer, Currency is whole numbers everywhere
  * else in the system, no fractional pricing.
  */
 export function applyDiscount(basePrice: number, discountPct: number | null): number {

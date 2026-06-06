@@ -1,5 +1,5 @@
 /**
- * Emoticon system — sticker-sheet reactions for chat, DMs, and (later)
+ * Emoticon system, sticker-sheet reactions for chat, DMs, and (later)
  * forum posts.
  *
  * A sheet is a single 4×4 sprite-sheet image. Cells are addressed by
@@ -38,7 +38,7 @@ export function isEmoticonCellEmpty(label: string | null | undefined): boolean {
  *  always free. */
 export const COMMUNITY_EMOTICON_USE_COST = 1;
 
-/** Public catalog shape — what `GET /emoticons` returns. The picker
+/** Public catalog shape, what `GET /emoticons` returns. The picker
  *  loads this once on app boot and caches in the zustand store. */
 export interface EmoticonSheet {
   id: string;
@@ -51,7 +51,7 @@ export interface EmoticonSheet {
   sortOrder: number;
   /** "system" = admin-seeded, free to use. "community" = approved
    *  user submission; each use MAY cost `COMMUNITY_EMOTICON_USE_COST`
-   *  and routes to the creator's master pool — `commerceEnabled`
+   *  and routes to the creator's master pool, `commerceEnabled`
    *  decides whether the toll applies. The picker tab UX branches on
    *  this. */
   kind: "system" | "community";
@@ -68,7 +68,7 @@ export interface EmoticonSheet {
    *  surfaces a coin badge only when this is true. System sheets
    *  hard-code this to false (they're always free). */
   commerceEnabled: boolean;
-  /** Lifetime usage tally for the sheet — every successful pick of
+  /** Lifetime usage tally for the sheet, every successful pick of
    *  any cell bumps this server-side. Powers the "Top used" sort in
    *  the community tab. System sheets currently leave this at 0
    *  since the community-use endpoint is the only writer. */
@@ -88,7 +88,7 @@ export function emoticonKey(sheetSlug: string, cellIndex: number): EmoticonKey {
 }
 
 /** Parse an emoticon key back into its parts. Returns null when the
- *  shape is wrong — call sites should treat that as "unknown emoticon"
+ *  shape is wrong, call sites should treat that as "unknown emoticon"
  *  and skip the chip rather than throwing. */
 export function parseEmoticonKey(key: string): { sheetSlug: string; cellIndex: number } | null {
   const idx = key.lastIndexOf(":");
@@ -99,13 +99,13 @@ export function parseEmoticonKey(key: string): { sheetSlug: string; cellIndex: n
   return { sheetSlug: slug, cellIndex: n };
 }
 
-/** Reaction reference — what kind of emoji a reaction points at.
+/** Reaction reference, what kind of emoji a reaction points at.
  *  Discriminated by `kind` so consumers can branch with full
  *  type-safety. `sheet` is the legacy shape (sticker-sheet cell);
  *  `unicode` is the new shape that holds a raw Unicode codepoint
  *  string (browser-native rendering, no catalog lookup needed).
  *
- *  Exactly one of the two variants is set on every reaction —
+ *  Exactly one of the two variants is set on every reaction,
  *  enforced at the wire level and at the DB level via the COALESCE
  *  unique index added in migration 0181. */
 export type ReactionRef =
@@ -119,7 +119,7 @@ export type ReactionRef =
  *
  *  Defensive: returns a sentinel when `ref` is missing or malformed.
  *  This guards the entire reaction-rendering pipeline against an
- *  in-flight legacy payload (the wire format added `ref` in 0181 —
+ *  in-flight legacy payload (the wire format added `ref` in 0181,
  *  any cached/stale entry serialized before that ships without it).
  *  Crashing the picker / message list for the whole user because one
  *  reaction is shaped wrong is not worth it; a "?" entry that just
@@ -133,7 +133,7 @@ export function reactionRefKey(ref: ReactionRef | null | undefined): string {
 
 /** Convenience predicate so call sites can write
  *  `if (isUnicodeReaction(entry.ref))` and TypeScript narrows.
- *  Same defensive null-tolerance as `reactionRefKey` — returns false
+ *  Same defensive null-tolerance as `reactionRefKey`, returns false
  *  for a missing/malformed ref so call sites don't have to add their
  *  own pre-check. */
 export function isUnicodeReaction(
@@ -145,7 +145,7 @@ export function isUnicodeReaction(
 /** One distinct emoji reaction on a single target, plus the list of
  *  identities that placed it. The ReactionBar renders one chip per
  *  entry. The `ref` field carries the discriminator + ref data; the
- *  legacy `sheetSlug`/`cellIndex` flat fields are gone — call sites
+ *  legacy `sheetSlug`/`cellIndex` flat fields are gone, call sites
  *  branch on `entry.ref.kind`. */
 export interface ReactionEntry {
   ref: ReactionRef;
@@ -156,7 +156,7 @@ export interface ReactionEntry {
    *  available. */
   label: string;
   /** Tooltip + expanded list source. Sorted by reactedAt asc so the
-   *  "first to react" appears first — Discord's behavior. */
+   *  "first to react" appears first, Discord's behavior. */
   reactors: Array<{
     userId: string;
     characterId: string | null;

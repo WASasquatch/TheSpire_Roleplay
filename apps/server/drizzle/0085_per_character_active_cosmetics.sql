@@ -11,7 +11,7 @@
 -- currency / rank / border). When a character is the active identity,
 -- the renderer reads its slot; when the user is OOC/master, it falls
 -- back to `user_active_cosmetics` (which is reinterpreted as the
--- master-only slot — semantic shift, no row movement needed).
+-- master-only slot, semantic shift, no row movement needed).
 --
 -- Existing characters start with both columns null/false. Users will
 -- equip per-character explicitly via the dashboard going forward;

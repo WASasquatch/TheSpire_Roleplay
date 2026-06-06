@@ -29,26 +29,26 @@ import { recordAudit } from "../audit.js";
 /**
  * Two profile-customization Flair surfaces (migration 0192):
  *
- *   `flair_profile_visitors` — profile view tracking + a counter
+ *   `flair_profile_visitors`, profile view tracking + a counter
  *     widget the owner can show or hide on their public profile.
  *
- *   `flair_profile_marquee` — rotating-quote strip between the
+ *   `flair_profile_marquee`, rotating-quote strip between the
  *     profile header and the body sections.
  *
  * Endpoints here are split into three layers:
  *
  *   - **Public read**   (`GET /profiles/:name/marquee`,
- *     `GET /profiles/:name/visitor-stats`) — viewer-facing fetches
+ *     `GET /profiles/:name/visitor-stats`), viewer-facing fetches
  *     the client paints on the public profile. Respect the owner's
  *     visibility toggle for the visitor count; the marquee fetch
  *     simply returns empty when the owner doesn't own the flair.
  *
- *   - **Public write**  (`POST /profiles/:name/view`) — log the
+ *   - **Public write**  (`POST /profiles/:name/view`), log the
  *     viewer once per day per identity. Always-on regardless of
  *     whether the owner has the flair, so the counter has data
  *     the moment they equip it.
  *
- *   - **Owner CRUD**    (`GET / PUT /me/profile-flair`) — bundle
+ *   - **Owner CRUD**    (`GET / PUT /me/profile-flair`), bundle
  *     ownership + current quotes + visibility + stats in one shot
  *     for the editor. Save accepts a single PUT that updates both
  *     the marquee body + visibility toggle on the right identity
@@ -85,7 +85,7 @@ export async function registerProfileFlairRoutes(
   );
 
   // Visitor counts. The owner's visibility toggle gates the
-  // PUBLIC payload — when off, non-owner callers see `visible:
+  // PUBLIC payload, when off, non-owner callers see `visible:
   // false` and zero counts. Same visibility gate as the marquee
   // above so a private profile doesn't leak a "5 people viewed"
   // signal through the API even when the owner has flipped the
@@ -125,7 +125,7 @@ export async function registerProfileFlairRoutes(
       const identity = await resolveProfileIdentity(db, req.params.name, req.query.characterId ?? null);
       if (!identity) return { ok: false as const, reason: "not_found" };
       const me = await getSessionUser(req, db);
-      // Owner self-view never counts — keeps the metric honest.
+      // Owner self-view never counts, keeps the metric honest.
       if (me && me.id === identity.userId) return { ok: true as const, self: true as const };
       // Embed profile context (master vs which character) into the
       // viewer key so the UNIQUE constraint can dedupe a master
@@ -154,7 +154,7 @@ export async function registerProfileFlairRoutes(
           })
           .onConflictDoNothing();
       } catch {
-        /* swallow — log-only path; client shouldn't see this */
+        /* swallow, log-only path; client shouldn't see this */
       }
       return { ok: true as const };
     },
@@ -189,7 +189,7 @@ export async function registerProfileFlairRoutes(
     },
   );
 
-  // Owner save — combined PUT covers both quotes + visibility.
+  // Owner save, combined PUT covers both quotes + visibility.
   // Each field is independently optional + each gated on its OWN
   // flair ownership. So an owner of just the marquee can still
   // PUT a quotes update; the visibility field rejects (gracefully)
@@ -232,7 +232,7 @@ export async function registerProfileFlairRoutes(
       // the patch shape on existing rows.
       await upsertEarningRow(db, identity, patch);
 
-      // Audit — one row per touched surface so the log reflects the
+      // Audit, one row per touched surface so the log reflects the
       // owner's exact intent rather than a vague "they saved their
       // profile flair." Lets admins separate marquee vandalism
       // reports from visibility-toggle abuse without re-reading
@@ -343,7 +343,7 @@ async function resolveOwnerIdentity(
  * `restricted && !me` rule: a non-public OR NSFW-flagged profile
  * is invisible to anonymous callers, so its derived flair surfaces
  * (marquee, visitor counter) must also stay invisible. The owner
- * themselves AND any signed-in viewer pass through — same posture
+ * themselves AND any signed-in viewer pass through, same posture
  * the main profile endpoint uses for the "members can see" tier.
  *
  * Reads the row's flags off the master (`users.isPublic` /
@@ -376,7 +376,7 @@ async function callerMayReadProfile(
   return !!u.isPublic && !u.isNsfw;
 }
 
-/** Ownership check — looks for the `purchase_<key>` ledger row
+/** Ownership check, looks for the `purchase_<key>` ledger row
  *  scoped to the right pool. Mirrors the convention every other
  *  flair uses. */
 async function ownsFlair(db: Db, key: string, identity: ProfileIdentity): Promise<boolean> {
@@ -449,7 +449,7 @@ async function upsertEarningRow(
         .set(patch)
         .where(eq(characterEarning.characterId, identity.characterId));
     } else {
-      // Bare insert — the earning row carries lots of NOT-NULL
+      // Bare insert, the earning row carries lots of NOT-NULL
       // columns with defaults, so the patch keys + the FK key are
       // enough for SQLite to fill the rest from column defaults.
       await db.insert(characterEarning).values({
@@ -487,7 +487,7 @@ async function computeVisitorStats(db: Db, identity: ProfileIdentity): Promise<P
         isNull(profileViews.profileCharacterId),
       );
 
-  // SQLite count via raw SQL — drizzle's count helper would need
+  // SQLite count via raw SQL, drizzle's count helper would need
   // a separate filtered subquery for each bucket.
   const memberRow = await db
     .select({ n: sql<number>`count(distinct ${profileViews.viewerKey})` })

@@ -71,7 +71,7 @@ UPDATE `users` SET
   );
 --> statement-breakpoint
 
--- Characters backfill — same shape, scoped to messages tagged with
+-- Characters backfill, same shape, scoped to messages tagged with
 -- the character_id (so a master/OOC message under no character
 -- doesn't increment any character's counter).
 UPDATE `characters` SET

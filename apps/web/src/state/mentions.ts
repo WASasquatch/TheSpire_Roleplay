@@ -8,16 +8,16 @@
  * and batches lookups for unknown names.
  *
  * Three sets:
- *   - known   — names confirmed to resolve to a real profile
- *   - unknown — names confirmed to NOT resolve (also cached so we
+ *   - known  , names confirmed to resolve to a real profile
+ *   - unknown, names confirmed to NOT resolve (also cached so we
  *               don't keep re-asking about every typo on every render)
- *   - pending — names currently in flight; suppresses duplicate
+ *   - pending, names currently in flight; suppresses duplicate
  *               requests when multiple messages contain the same name
  *               in the same tick
  *
  * Caller flow from the renderer:
  *   1. As each message renders, collect its mention names.
- *   2. Push the names through `requestMentionResolve(names)` — this
+ *   2. Push the names through `requestMentionResolve(names)`, this
  *      schedules a debounced batch POST for any that aren't in known
  *      OR unknown OR pending.
  *   3. Render gates the chip on `isKnownMention(name)`. The first
@@ -56,7 +56,7 @@ const BATCH_MAX = 64;
  * space. Mirrors the server-side helper in
  * `apps/server/src/lib/nameLookup.ts` so a mention typed as
  * `@John Doe` (ASCII space) and a mention typed as `@John Doe`
- * (NBSP) — both pointing at the same master account — share one
+ * (NBSP), both pointing at the same master account, share one
  * cache entry and one round trip.
  */
 function canonicalizeMention(name: string): string {
@@ -121,7 +121,7 @@ async function flushBatch(): Promise<void> {
     }
     useMentionsCache.setState({ version: next.version + 1 });
   } catch {
-    // Network blip / 401 — drop from pending so a later render can
+    // Network blip / 401, drop from pending so a later render can
     // retry. Don't poison the unknown set with transient failures.
     const next = useMentionsCache.getState();
     for (const n of batch) next.pending.delete(n);
@@ -146,7 +146,7 @@ export function isKnownMention(name: string): boolean {
 
 /**
  * Seed the cache directly with names that are already known to be
- * valid — used by the composer autocomplete when the user picks a
+ * valid, used by the composer autocomplete when the user picks a
  * suggestion from the server-backed search. Lets the resulting
  * `@name` mention render as a chip on the FIRST render, skipping
  * the round-trip through `/mentions/resolve` that would otherwise

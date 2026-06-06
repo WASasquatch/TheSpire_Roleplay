@@ -1,18 +1,18 @@
 -- Two-tier admin role split.
 --
 -- Before: a single `admin` role granted full god-mode over the
--- site — branding, settings, user disable, role escalation, every
+-- site, branding, settings, user disable, role escalation, every
 -- destructive lever. That meant every promoted admin had to be
 -- 100% trusted to never abuse those controls, which kept the
 -- moderator bench thin.
 --
 -- After: two tiers.
---   `masteradmin` — full god-mode. Includes the new branding /
+--   `masteradmin`, full god-mode. Includes the new branding /
 --                   settings / rules controls + the ability to
 --                   promote others to masteradmin. Only granted by
 --                   another masteradmin. The first registered user
 --                   bootstraps in as masteradmin (see auth.ts).
---   `admin`       — moderation-grade global admin. Can do every
+--   `admin`      , moderation-grade global admin. Can do every
 --                   moderation thing (kick / mute / ban / room
 --                   delete / message moderation / reports / audit
 --                   read / custom commands / room categories /

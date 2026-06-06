@@ -4,7 +4,7 @@
 -- max zoom. Bump to 3-5px radii and let each particle's gradient
 -- reach full opacity at center (the 70% transparent stop in 0082 ate
 -- most of the visible dot anyway). Slightly taller rise distance so
--- the embers travel a meaningful path before fading — at the larger
+-- the embers travel a meaningful path before fading, at the larger
 -- radius they'd otherwise barely move before disappearing.
 --
 -- Positions on each pseudo stay roughly the same so the staggered-

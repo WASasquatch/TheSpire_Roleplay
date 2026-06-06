@@ -2,7 +2,7 @@ import type { CommandContext, CommandHandler } from "../types.js";
 import { findItem } from "./items.js";
 
 /**
- * /item <name> — open the full-screen item zoom view for a catalog item.
+ * /item <name>, open the full-screen item zoom view for a catalog item.
  *
  * The lookup uses the same alias-aware resolver `/give /throw /drop`
  * use (see `findItem` in items.ts), so users can type the canonical
@@ -14,13 +14,13 @@ import { findItem } from "./items.js";
  * catalog row inline so the client can render the zoom overlay
  * without a second roundtrip. The overlay itself is the same
  * component that powers tap-to-zoom on profile Collection / Pet
- * pins (`ItemZoomView`) — same layout, same close behaviour, same
+ * pins (`ItemZoomView`), same layout, same close behaviour, same
  * keyboard shortcut. The point of this command is to let users
  * summon any item's full view from chat without first finding
  * someone who has it pinned.
  *
  * Disabled items (admin pulled them from the catalog) still resolve
- * — the zoom view is informational, not transactional. Items can be
+ *, the zoom view is informational, not transactional. Items can be
  * collectibles long after they're retired from the shop.
  */
 function notice(ctx: CommandContext, code: string, message: string) {

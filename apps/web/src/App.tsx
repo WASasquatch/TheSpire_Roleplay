@@ -28,6 +28,7 @@ import { BannerMarquee } from "./components/BannerMarquee.js";
 import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanners.js";
 import { onUiRouteOpen } from "./lib/uiRouteOpen.js";
 import { fetchLatestPublishedStory } from "./lib/latestStory.js";
+import { loadForumDraft, pruneStaleForumDrafts, saveForumDraft } from "./lib/forumDrafts.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
 import { ThreadModal } from "./components/ThreadModal.js";
 import { UsersModal } from "./components/UsersModal.js";
@@ -105,7 +106,7 @@ export function App() {
     let cancelled = false;
     fetch("/auth/me")
       .then(async (r) => {
-        // Clear a stale token immediately on 401 — otherwise the next
+        // Clear a stale token immediately on 401, otherwise the next
         // tab open inherits a dead token and the user wonders why every
         // request bounces them back to the splash.
         if (r.status === 401) clearSessionToken();
@@ -132,7 +133,7 @@ export function App() {
           // user has the flair). Without this, returning users who
           // re-enter via an existing cookie got the watcher ping
           // ("X is online") in their friends' rooms but their own
-          // room never saw an arrival message — the Wallace re-entry
+          // room never saw an arrival message, the Wallace re-entry
           // bug. `hasSessionBeenAnnounced` reads a tab-sticky
           // sessionStorage flag that `markLoginIntent` sets, so a
           // page reload within the SAME tab is silent (sessionStorage
@@ -169,7 +170,7 @@ export function App() {
     return () => { cancelled = true; };
   }, [setMe, setAuthChecked]);
 
-  // Earning — refresh the cached snapshot when a user signs in (so
+  // Earning, refresh the cached snapshot when a user signs in (so
   // the Banner indicator dot and the dashboard load with up-to-date
   // wallets + unack rank-ups), reset to the empty state on sign-out
   // so the next account doesn't briefly see the previous user's
@@ -182,7 +183,7 @@ export function App() {
     }
   }, [me?.id]);
 
-  // Name styles — inject the catalog's CSS into <head> whenever the
+  // Name styles, inject the catalog's CSS into <head> whenever the
   // snapshot lands or admins reload it. Idempotent re-injection: the
   // helper rewrites the shared <style> tag only when the concatenated
   // CSS actually changed. Subscription via Zustand's hook so the
@@ -193,7 +194,7 @@ export function App() {
     if (nameStyleCatalog) injectNameStyles(nameStyleCatalog);
   }, [nameStyleCatalog]);
 
-  // Free-form borders — same idempotent CSS-injection pattern as
+  // Free-form borders, same idempotent CSS-injection pattern as
   // name styles. Only the `template`+`style_css` rows contribute
   // rules; image-based rows render via overlay <img> in
   // BorderedAvatar and have no CSS to ship.
@@ -213,7 +214,7 @@ export function App() {
   //
   // The same fetch also carries the post-deploy version-drift check (see
   // `probeVersion` below). Up to 60s is fine for the session-TTL purpose,
-  // but it's a long lag for "the site just updated, please refresh" —
+  // but it's a long lag for "the site just updated, please refresh",
   // so we ALSO probe on tab focus and on socket reconnect (see effects
   // below). A deploy reliably triggers the socket reconnect path, so in
   // practice the banner now surfaces within a couple of seconds of the
@@ -257,7 +258,7 @@ export function App() {
           useChat.getState().setStaleVersion(j.version, j.updateMessage ?? null);
         }
         // Refresh me.permissions on every poll so a matrix edit lands
-        // on the affected user's tab within a minute — but only call
+        // on the affected user's tab within a minute, but only call
         // setMe when something actually changed. Calling setMe with a
         // new object reference on every poll re-renders every
         // subscriber of `me` (banner, message list, composer, etc.),
@@ -341,7 +342,7 @@ export function App() {
   // standalone shell regardless of auth state (so an off-site share is a
   // stable artifact, not a chat overlay). Cleared the first time the user
   // dismisses or the verdict comes back as 404. Detailed effect-by-effect
-  // explanation lives at the world-state block below — declared up here
+  // explanation lives at the world-state block below, declared up here
   // so the profile fetch effect can call its setter.
   const [arrivedViaDeepLink, setArrivedViaDeepLink] = useState<boolean>(() => {
     return parseProfileFromUrl() !== null || parseWorldFromUrl() !== null;
@@ -375,7 +376,7 @@ export function App() {
       .then((j) => {
         if (cancelled) return;
         if (!j) {
-          // 404 / fetch failure — drop the pending state and exit
+          // 404 / fetch failure, drop the pending state and exit
           // standalone view (if we were in it) so the normal app flow can
           // take over. The URL stays /p/<name> in the address bar; the
           // user can navigate away or refresh.
@@ -394,7 +395,7 @@ export function App() {
   }, [pendingProfile]);
 
   // Once we have a fetched profile, open the modal. Public profiles open
-  // for everyone (including anonymous visitors — the point is that profile
+  // for everyone (including anonymous visitors, the point is that profile
   // links are hotlinkable off-site). Private stubs require auth; for those
   // we leave the pending state set so the AuthGate hint stays visible until
   // the user logs in, then re-fetch with credentials to get the full data.
@@ -466,7 +467,7 @@ export function App() {
    *
    * The point of these URLs is that they're shareable off-site: someone
    * pastes a profile or world link into Discord / a forum / wherever, and
-   * the recipient lands on a clean view of that content — not the full
+   * the recipient lands on a clean view of that content, not the full
    * chat with the modal floating over it. This applies regardless of auth
    * state: an authed user clicking a shared link should also get the
    * standalone view rather than chat-with-overlay, since the URL is meant
@@ -476,7 +477,7 @@ export function App() {
    * link. While that flag is set, App renders the PublicViewerShell with
    * the resolved modal(s). The first time the user closes a modal or the
    * fetch resolves to "no content" (404), we drop the flag and fall
-   * through to the normal app for the rest of the session — so in-app
+   * through to the normal app for the rest of the session, so in-app
    * navigation (clicking a name in chat, etc.) keeps the modal-over-chat
    * behavior the rest of the codebase expects.
    *
@@ -509,7 +510,7 @@ export function App() {
       .then((j) => {
         if (cancelled) return;
         if (!j) {
-          // 404 / fetch failure — drop standalone mode and let normal app
+          // 404 / fetch failure, drop standalone mode and let normal app
           // flow take over. URL stays /w/<slug> in the address bar; the
           // user can navigate away or refresh.
           setPendingPublicWorld(null);
@@ -555,7 +556,7 @@ export function App() {
     ? pendingPublicWorld.data
     : null;
 
-  // Public Rules page — wins over every other branch (deep-link,
+  // Public Rules page, wins over every other branch (deep-link,
   // splash, AuthGate, chat) because the route is intentionally
   // available without auth and we don't want any other surface to
   // intercept it. Back link pops history to "/" so a visitor lands
@@ -573,7 +574,7 @@ export function App() {
     );
   }
 
-  // Deep-link still resolving — show the standalone shell with a loading
+  // Deep-link still resolving, show the standalone shell with a loading
   // indicator so authed users don't see Chat flash for ~100ms before the
   // modal pops in. Without this, the render between auth-check completion
   // and verdict-fetch completion would briefly land on Chat.
@@ -591,7 +592,7 @@ export function App() {
   }
 
   // Standalone hotlink view. Triggered by direct navigation to /p/<X> or
-  // /w/<X> for ANY auth state — the URL is meant to be a stable shareable
+  // /w/<X> for ANY auth state, the URL is meant to be a stable shareable
   // artifact, so an authed user clicking a shared link sees the modal
   // alone too, not chat-with-overlay. Once the user dismisses, we drop
   // out to the normal app for the rest of the session.
@@ -680,7 +681,7 @@ export function App() {
  */
 /** Order-insensitive permission-set equality. The server returns
  *  permissions in catalog order, so identical sets are also
- *  identical arrays — but we sort defensively to avoid spurious
+ *  identical arrays, but we sort defensively to avoid spurious
  *  inequality from any future re-ordering on the wire. Cheap at
  *  catalog size (~75 keys). */
 function samePermissions(
@@ -721,7 +722,7 @@ function UnauthRouter(props: {
   // which URL slot they happen to be on.
   const hasDeepLinkHint = !!(props.pendingProfileHint || props.pendingWorldHint);
 
-  // Scriptorium public surfaces — render the catalog / reader inside
+  // Scriptorium public surfaces, render the catalog / reader inside
   // the standalone PublicViewerShell so anonymous visitors can browse
   // and read up to R-rated stories without an account. NC-17 cards
   // surface in the catalog but the reader returns a login-prompt
@@ -776,7 +777,7 @@ function UnauthRouter(props: {
  * Anonymous-side reader wrapper. Resolves `@handle/slug` to a story
  * id via the canonical /stories/@h/s endpoint, then mounts the reader
  * with that id. NC-17 stories return a `private: true` stub from the
- * server — we surface a "log in to read this story" card instead of
+ * server, we surface a "log in to read this story" card instead of
  * crashing the modal.
  */
 function AnonymousStoryReader({
@@ -876,7 +877,7 @@ function AnonymousStoryReader({
  * Standalone shell for direct-link content viewing. Applies the site's
  * default theme so the modal renders against the configured palette and
  * pins a small action link in the corner so the visitor has a clear path
- * forward — sign-in for anonymous viewers, or "open chat" for already-
+ * forward, sign-in for anonymous viewers, or "open chat" for already-
  * authed users who landed here from a shared link.
  */
 function PublicViewerShell({
@@ -962,6 +963,7 @@ function Chat() {
   // Forum-pagination store actions.
   const setForumTopicsPage = useChat((s) => s.setForumTopicsPage);
   const appendForumTopicsPage = useChat((s) => s.appendForumTopicsPage);
+  void appendForumTopicsPage; // legacy hookup kept for back-compat; new code uses goToForumPage.
   const setForumTopicsLoading = useChat((s) => s.setForumTopicsLoading);
   const prependOwnForumTopic = useChat((s) => s.prependOwnForumTopic);
   const queuePendingForumTopic = useChat((s) => s.queuePendingForumTopic);
@@ -990,7 +992,7 @@ function Chat() {
    * of a boolean lets `ui:hint { kind: "open-earning", tab, itemSubTab }`
    * deep-link straight into the Shop / Collection / Pets sub-tabs
    * from the `/shop` / `/collection` / `/pets` builtin commands. An
-   * empty object opens on the default Overview tab — the same shape
+   * empty object opens on the default Overview tab, the same shape
    * the "Your Earning" tools-panel entry uses.
    */
   type EarningOpenSpec = {
@@ -1007,20 +1009,20 @@ function Chat() {
   const [openItem, setOpenItem] = useState<ItemZoomEntry | null>(null);
   const [helpOpen, setHelpOpen] = useState<{ filter?: string } | null>(null);
   const [usersOpen, setUsersOpen] = useState<{ query?: string } | null>(null);
-  // Server-emitted info modal — server commands like /list and /find
+  // Server-emitted info modal, server commands like /list and /find
   // populate this with a title + multi-line body that the user can
   // read at leisure (toast is too transient for list output).
   const [infoOpen, setInfoOpen] = useState<{ title: string; body: string } | null>(null);
   /**
    * Unified Messages modal toggle. Replaces the older split-up trio
    * (FriendsModal + DmListModal + DmFloatingPanel). The Tools
-   * drawer's "Messages" and "Friends" entries both flip this on —
+   * drawer's "Messages" and "Friends" entries both flip this on,
    * the modal handles friends + requests + conversations in one
    * place. Fetches fresh on each open.
    */
   const [messagesOpen, setMessagesOpen] = useState(false);
   const [bookmarksOpen, setBookmarksOpen] = useState(false);
-  // Password prompt for private rooms — set when the server emits a
+  // Password prompt for private rooms, set when the server emits a
   // `prompt-room-password` ui:hint (rail click → server says "needs
   // password"). Cleared on cancel or successful join.
   const [pwPrompt, setPwPrompt] = useState<{ roomId: string; roomName: string } | null>(null);
@@ -1034,7 +1036,7 @@ function Chat() {
   const [worldViewerId, setWorldViewerId] = useState<string | null>(() => parseWorldFromUrl());
   // Set by the `world-application-prompt` ui:hint (paired with an
   // `open-world` hint from the `/world join <slug>` slash command).
-  // The id is matched against worldViewerId at viewer mount time —
+  // The id is matched against worldViewerId at viewer mount time,
   // when they agree, the viewer auto-opens the ApplicationFormModal
   // on top of itself, mirroring the catalog's Apply path. Cleared
   // back to null once the viewer is closed so the form doesn't
@@ -1054,7 +1056,7 @@ function Chat() {
   const [navLinksVersion, setNavLinksVersion] = useState(0);
 
   /**
-   * UI route dispatcher — `{rules}` / `{modal:earning:items:shop}` /
+   * UI route dispatcher, `{rules}` / `{modal:earning:items:shop}` /
    * `{scriptorium:latest}` chips dispatched from chat lines, the
    * banner marquee, or scheduled-announcement bodies route through
    * a single `tk:open-ui-route` event the shell listens for. The
@@ -1080,19 +1082,19 @@ function Chat() {
       case "modal-admin":      setAdminOpen(true); return;
       case "nav-scriptorium":
         // Sort is the catalog's default-newest-first sort, so the
-        // `sort: "latest"` variant doesn't need a query param — it
+        // `sort: "latest"` variant doesn't need a query param, it
         // matches what the catalog already lands on. If we add an
         // alternative sort later, fork on `t.sort` here.
         setScriptoriumOpen({});
         return;
       case "nav-scriptorium-latest-story": {
-        // Dynamic chip — resolve the latest published story id at
+        // Dynamic chip, resolve the latest published story id at
         // click time and pop the StoryReader directly to it. The chip
         // label was already resolved at render via the shared
         // fetcher; this re-call hits the same TTL cache so there's
         // no extra round-trip in the common case. Falls back to
         // opening the catalog (the static `{scriptorium:latest}`
-        // surface) when nothing is published — better than a no-op
+        // surface) when nothing is published, better than a no-op
         // click on a chip that already promised a destination.
         void fetchLatestPublishedStory().then((r) => {
           if (r?.id) setStoryReader({ storyId: r.id });
@@ -1103,23 +1105,86 @@ function Chat() {
     }
   }), [openEditor]);
   const [composerText, setComposerText] = useState("");
+  // Live mirror of composerText used by the topic-draft auto-save
+  // cleanup. The effect that owns the activeTopicId watcher needs to
+  // read the LATEST text inside its cleanup so it can save the
+  // half-written reply against the topic that is about to be swapped
+  // away from, closure-capturing composerText at effect-create time
+  // would freeze the text at "what was typed when activeTopicId
+  // became X", losing every keystroke since.
+  const composerTextRef = useRef<string>("");
+  composerTextRef.current = composerText;
   // Per-room cached thread categories. Populated lazily for nested rooms
   // on join; the Composer's category picker reads from this. Stale
   // entries (after admin edits) refresh on the next room-join cycle.
   const [threadCategoriesByRoom, setThreadCategoriesByRoom] = useState<Record<string, ThreadCategory[]>>({});
-  // Forum-mode state. Both reset whenever the active room changes —
+  // Forum-mode state. Both reset whenever the active room changes,
   // navigating away from a thread shouldn't leave the composer thinking
   // it's still replying to the previous room's topic.
-  //   activeTopicId   — id of the topic the user is currently reading
+  //   activeTopicId  , id of the topic the user is currently reading
   //                      (and replying to). null = no topic selected,
   //                      composer is disabled in forum rooms.
-  //   topicCreateMode — composer is in "start a new topic" mode (title
+  //   topicCreateMode, composer is in "start a new topic" mode (title
   //                      input visible). After successful create, this
   //                      flips back to false and activeTopicId points
   //                      at the new topic.
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
   const [topicCreateMode, setTopicCreateMode] = useState(false);
-  // "Preferred category for the next + New topic" — set when the user
+
+  // One-time prune of stale forum-reply drafts on app mount. Cheap,
+  // walks just the namespaced `forum-draft:*` keys in localStorage
+  // and drops anything past the stale ceiling or unparseable. Keeps
+  // the per-user storage footprint bounded without needing a
+  // background sweeper.
+  useEffect(() => {
+    pruneStaleForumDrafts();
+  }, []);
+
+  // Per-topic reply drafts. Save the in-flight composer text against
+  // the active topic id on every change AND eagerly on a topic
+  // switch (the cleanup runs before the effect re-fires with the new
+  // id, so it captures the text that belonged to the OUTGOING
+  // topic). Loading runs once per id flip: when activeTopicId
+  // becomes a topic, we read whatever the user had been typing
+  // before and seed the composer with it; when it becomes null
+  // (room change, /leave-thread, etc.), the composer empties.
+  //
+  // Partition: keyed by topic id, so switching topic X → Y empties
+  // the composer (loading Y's saved text if any), and switching
+  // back to X restores X's text. Multi-topic users can keep several
+  // half-finished replies in flight without losing any of them.
+  //
+  // The save runs on EVERY composerText change as well so a
+  // browser-tab-crash or a page refresh mid-typing doesn't lose the
+  // current text, the cleanup-on-switch handles the partition
+  // boundary, the per-change save handles surprise teardown.
+  useEffect(() => {
+    if (!activeTopicId) {
+      setComposerText("");
+      return;
+    }
+    setComposerText(loadForumDraft(activeTopicId));
+    const draftTopicId = activeTopicId;
+    return () => {
+      // Cleanup runs AFTER the next render's composerText has
+      // landed in the ref but BEFORE the new activeTopicId's load
+      // effect-body runs. So `composerTextRef.current` here is the
+      // text the user had typed in the OUTGOING topic.
+      saveForumDraft(draftTopicId, composerTextRef.current);
+    };
+  }, [activeTopicId]);
+  // Per-keystroke save (debounced) so a tab close mid-typing
+  // doesn't lose the draft, the cleanup-on-switch above only fires
+  // when activeTopicId actually changes. Skip when no topic is
+  // active (there's nothing to key against).
+  useEffect(() => {
+    if (!activeTopicId) return;
+    const handle = window.setTimeout(() => {
+      saveForumDraft(activeTopicId, composerText);
+    }, 500);
+    return () => { window.clearTimeout(handle); };
+  }, [activeTopicId, composerText]);
+  // "Preferred category for the next + New topic", set when the user
   // clicks a category section header in the forum view. Tristate where
   // `undefined` means "no signal yet" (composer falls back to its own
   // persisted localStorage default), `null` is the Uncategorized
@@ -1129,7 +1194,7 @@ function Chat() {
   // Pop-out modal target. Independent of activeTopicId: clicking the
   // ⤢ icon on a topic card opens the focused-view modal AND also sets
   // activeTopicId (so the underlying list view expands to match), but
-  // closing the modal leaves activeTopicId alone — the user stays
+  // closing the modal leaves activeTopicId alone, the user stays
   // focused on the same topic in the list. Resets on room change.
   const [poppedTopicId, setPoppedTopicId] = useState<string | null>(null);
   // Rooms drawer on mobile (md breakpoint and below). Always-open on desktop.
@@ -1138,7 +1203,7 @@ function Chat() {
   const [roomsTreeVersion, setRoomsTreeVersion] = useState(0);
   // Theme resolution layers. `activeTheme` is derived (not stored) below
   // as `characterTheme || userTheme || branding.defaultTheme`, so changing
-  // ANY of the three causes the active theme to refresh — including when
+  // ANY of the three causes the active theme to refresh, including when
   // admin pushes a new site-wide default to `branding`. Storing them
   // separately avoids the previous bug where activeTheme was set in a
   // one-shot effect that only re-ran on `themeVersion` bumps, leaving
@@ -1173,7 +1238,7 @@ function Chat() {
   // below. Null = inherit the chain (master → theme-pinned → site).
   const [characterStyleKey, setCharacterStyleKey] = useState<string | null>(null);
   // Per-user / per-character public-profile backdrop image. Used as
-  // the chat-shell backdrop when the resolved style is "glass" — the
+  // the chat-shell backdrop when the resolved style is "glass", the
   // glass design reveals whatever image the user picked for their
   // public profile, falling back to the Spire artwork. Mirrored from
   // the same `publicProfileBgUrl/Mode` columns that drive the profile
@@ -1221,7 +1286,7 @@ function Chat() {
 
   /**
    * Route-aware tab title. Mirrors the per-route SEO that the server
-   * renders for crawlers — so the user sees the same name in their
+   * renders for crawlers, so the user sees the same name in their
    * browser tab whether they arrived via deep link (server-rendered)
    * or by navigating inside the SPA (client-rendered). Falls back to
    * the admin-configured site name plus a roleplay-chat tagline at
@@ -1255,7 +1320,7 @@ function Chat() {
    */
   /**
    * First-load seed only. `/me/profile.activeCharacterId` is the user's
-   * DB-level default and is the right answer ONCE per session — at the
+   * DB-level default and is the right answer ONCE per session, at the
    * moment this tab connects. Subsequent updates flow through
    * `me:character-update` events (per-tab) so a sibling tab's /char
    * doesn't override this tab's identity through a backend poll.
@@ -1311,13 +1376,13 @@ function Chat() {
             // Prefer this tab's sessionStorage cache over the DB default.
             // The DB row (`users.activeCharacterId`) is account-global,
             // so on a refresh the value may have been mutated by a
-            // sibling tab on another device — using it directly is what
+            // sibling tab on another device, using it directly is what
             // caused the phone-refresh-picks-up-desktop's-character bug.
             // The cache survives reload (sessionStorage) but is per-tab.
             // Three states from loadTabCharacter:
             //   undefined → no cache; fall back to DB (new tab / first
             //               load / private-mode failure)
-            //   null      → explicit OOC sentinel — honor it
+            //   null      → explicit OOC sentinel, honor it
             //   string    → cached character id; use it. We still need
             //               the name, which the DB-default name field
             //               doesn't cover. The character-theme effect
@@ -1334,7 +1399,7 @@ function Chat() {
               setActiveCharacterId(null);
               setActiveCharacterName(null);
             } else if (cached === u.activeCharacterId) {
-              // Cache agrees with DB — same seed path as no-cache, but
+              // Cache agrees with DB, same seed path as no-cache, but
               // we can trust the name field that came back with the
               // profile fetch instead of waiting on a /characters lookup.
               setActiveCharacterId(u.activeCharacterId);
@@ -1343,7 +1408,7 @@ function Chat() {
               // Cache disagrees with DB (the multi-device case). Apply
               // the cached id immediately; the character-theme effect
               // below will fetch the row and patch in the name once it
-              // arrives. Leaving the name null briefly is fine —
+              // arrives. Leaving the name null briefly is fine,
               // nothing renders the active character name on first
               // paint that would visibly flicker.
               setActiveCharacterId(cached);
@@ -1412,7 +1477,7 @@ function Chat() {
   }, [themeVersion]);
 
   /**
-   * Character theme load — keyed on the LOCAL `activeCharacterId` so a
+   * Character theme load, keyed on the LOCAL `activeCharacterId` so a
    * per-tab switch (via me:character-update) re-fetches this tab's
    * theme without dragging in the DB default from `/me/profile`. Runs
    * on the initial seed too because the seed effect above sets
@@ -1444,7 +1509,7 @@ function Chat() {
         }
         if (!cancelled) {
           setCharacterTheme(fetched);
-          // Same null-coalesce shape as the master styleKey above —
+          // Same null-coalesce shape as the master styleKey above,
           // null + undefined both mean "no override on this character".
           setCharacterStyleKey(cr.styleKey ?? null);
           setCharacterBgUrl(typeof cr.publicProfileBgUrl === "string" && cr.publicProfileBgUrl.trim() !== "" ? cr.publicProfileBgUrl.trim() : null);
@@ -1466,12 +1531,12 @@ function Chat() {
   }, [activeCharacterId, themeVersion]);
 
   // Derived active theme. Recomputes whenever ANY of the three layers
-  // changes — including when admin pushes a new site default to the
+  // changes, including when admin pushes a new site default to the
   // branding store via /admin/settings save. Previously this was a
   // one-shot state set inside the load() above, so admin palette
   // changes only landed for the user after a manual reload.
   const activeTheme = useMemo<Theme>(() => {
-    // A character is its own identity — distinct theme bucket from
+    // A character is its own identity, distinct theme bucket from
     // OOC. Voicing a character that hasn't picked a theme yet falls
     // straight through to the SITE default, NOT the master account's
     // theme. The legacy fallthrough (`characterTheme ?? userTheme`)
@@ -1494,11 +1559,11 @@ function Chat() {
   useEffect(() => {
     // Apply the palette first so the ornament generator can read the
     // resulting CSS vars. Style resolution priority (highest wins):
-    //   1. Character override (characters.style_key) — set when active
+    //   1. Character override (characters.style_key), set when active
     //      character has its own pinned design.
-    //   2. Master override (users.style_key) — user picked a personal
+    //   2. Master override (users.style_key), user picked a personal
     //      design in their master profile.
-    //   3. Theme-pinned design — when the active palette matches a
+    //   3. Theme-pinned design, when the active palette matches a
     //      named preset, look up its admin-configured pinned design
     //      in themeDesignMap. Custom palettes (no preset match) skip
     //      this tier and fall through to the site default.
@@ -1512,7 +1577,7 @@ function Chat() {
     //
     // Gated on `me` being signed in: while the splash is showing
     // (me === null pre-auth-check, or after sign-out) `activeTheme`
-    // falls through to `branding.defaultTheme` — the light Spire
+    // falls through to `branding.defaultTheme`, the light Spire
     // Modern fallback. Writing THAT to the cache would clobber the
     // user's actual last-active palette and bounce them into the
     // light splash on the next visit even though their last real
@@ -1537,13 +1602,13 @@ function Chat() {
       : (userStyleKey || pinnedForPreset || builtinForPreset || siteStyleKey || DEFAULT_STYLE_KEY);
     applyStyle(activeTheme, resolvedStyle);
 
-    // Glass shell-bg URL — character > master > Spire artwork
+    // Glass shell-bg URL, character > master > Spire artwork
     // (light or dark variant by palette luminance). Published as
     // CSS vars on `<html>`; the actual paint happens via a CSS rule
     // on `.keep-bg-overlay` (a fixed full-viewport div INSIDE the
     // chat shell). Painting on the html element directly leaked the
     // image past the chat shell whenever a browser extension /
-    // devtools UI shifted the document — the strip above the shell
+    // devtools UI shifted the document, the strip above the shell
     // exposed html's image. Painting inside the shell means any
     // shift takes the image with it; the gap shows only the theme
     // bg-color, not the artwork.
@@ -1569,7 +1634,7 @@ function Chat() {
       // white). Using the palette's own panel/bg at the same alpha
       // both ways produces a uniformly-gray look on light themes
       // because the heavy backdrop-filter blur averages bright +
-      // dark backdrop pixels into a midtone — the user reports this
+      // dark backdrop pixels into a midtone, the user reports this
       // as "too dark for light mode."
       // Light themes get aggressive white-overlay alpha because the
       // backdrop image's dark regions (corners of a typical nebula
@@ -1603,7 +1668,7 @@ function Chat() {
 
   // Per-user font/size accessibility. Independent of the palette effect
   // above because font preferences don't layer through character/room
-  // overrides — they're user-level and apply once. Re-runs on every
+  // overrides, they're user-level and apply once. Re-runs on every
   // bump of `themeVersion` (which is also what triggers the /me/profile
   // re-fetch, so any save in the editor surfaces immediately).
   useEffect(() => {
@@ -1681,7 +1746,7 @@ function Chat() {
 
   /**
    * System-announcement-style chat line whenever a NEW friend request
-   * lands. The pendingFriendRequests array is the canonical source —
+   * lands. The pendingFriendRequests array is the canonical source,
    * we diff its membership against the previous render and emit one
    * system message per newly-appeared sender id.
    *
@@ -1773,8 +1838,8 @@ function Chat() {
       // from useChat.occupants, so without this direct write the rail
       // would keep showing the stale userlist until the /rooms refetch
       // triggered by the version bump below landed (~200–500ms). That
-      // delay was visible whenever someone entered, left, or — most
-      // pointedly — went incognito: their chat-side leave broadcast
+      // delay was visible whenever someone entered, left, or, most
+      // pointedly, went incognito: their chat-side leave broadcast
       // fired instantly, but their userlist row lingered until the
       // refetch caught up. Mirror the server-side sort so the rail's
       // ordering matches what the /rooms response would have brought
@@ -1796,7 +1861,7 @@ function Chat() {
       // changed too (e.g. another user just left a room to join ours), and
       // /char switch broadcasts presence - refetch the active theme too.
       // The /rooms refetch the version bump triggers is now a backstop,
-      // not the primary update path — it corrects for anything the
+      // not the primary update path, it corrects for anything the
       // direct write above couldn't see (a brand-new room the rail
       // doesn't know about yet, etc.).
       setRoomsTreeVersion((v) => v + 1);
@@ -1818,13 +1883,13 @@ function Chat() {
     // could change the rooms tree the user sees. Debounced because a
     // flurry of presence updates (mass reconnect, restart) would
     // otherwise hammer /rooms.
-    // Scriptorium prose chip — `@world:slug` mention in chapter HTML
+    // Scriptorium prose chip, `@world:slug` mention in chapter HTML
      // was clicked. The chip dispatches a CustomEvent so the chapter
      // body can stay decoupled from the App-level modal state.
     function onWorldChip(e: Event) {
       const detail = (e as CustomEvent<{ slug: string }>).detail;
       if (!detail?.slug) return;
-      // setWorldViewerId accepts either an id or a slug — the viewer
+      // setWorldViewerId accepts either an id or a slug, the viewer
       // resolves it via the worlds route.
       setWorldViewerId(detail.slug);
     }
@@ -1840,10 +1905,10 @@ function Chat() {
     });
 
     /**
-     * Scriptorium — a story you follow just published a new chapter.
+     * Scriptorium, a story you follow just published a new chapter.
      * Surfaces as a one-line system message in the user's current room
      * (mirrors the friend-online pattern). Quiet by design: no toast,
-     * no sound — the project's no-daily-grind ethos extends to
+     * no sound, the project's no-daily-grind ethos extends to
      * passive author/reader interactions.
      */
     socket.on("story:chapter-published", (ev) => {
@@ -1862,7 +1927,7 @@ function Chat() {
       });
     });
     socket.on("message:new", (msg: ChatMessage) => {
-      // Append to the chat backlog regardless of mode — replies and
+      // Append to the chat backlog regardless of mode, replies and
       // flat-chat messages live here, and the forum reply view reads
       // replies from this buffer.
       appendMessage(msg);
@@ -1871,7 +1936,7 @@ function Chat() {
       //   announce → alert.mp3   (admin megaphone)
       //   whisper  → whisper.mp3 (1:1 private contact in-room. Has
       //                           its own dedicated sound now that
-      //                           we ship a fourth audio file —
+      //                           we ship a fourth audio file,
       //                           previously folded into the DM
       //                           ping. Distinct from DM so a
       //                           whisper "they spoke to me here"
@@ -1879,9 +1944,9 @@ function Chat() {
       //                           outside" feel different even though
       //                           both are 1:1.)
       //   anything else (except system + our own) → tap.mp3
-      // System notices (joins/kicks/topic changes) stay silent — they
+      // System notices (joins/kicks/topic changes) stay silent, they
       // would dogpile on a busy room. Our own outbound messages stay
-      // silent — the user already knows they sent something. Recipient
+      // silent, the user already knows they sent something. Recipient
       // gate on whispers: msg.toUserId must match meId so the sender's
       // own outgoing whisper doesn't ping itself (the sender's tab
       // already sees the line they composed).
@@ -1926,7 +1991,7 @@ function Chat() {
         // lands a beat later via `room:history_meta` (sent by the
         // server immediately after the bulk). Defaulting to TRUE
         // here means the brief gap between the two events never
-        // shows a false "start of history" — at worst the user
+        // shows a false "start of history", at worst the user
         // sees a "Scroll up for earlier messages" hint that the
         // meta event then clears. Counting msgs.length >= 50 used
         // to seed this and was unreliable: server-side filtering
@@ -1939,7 +2004,7 @@ function Chat() {
       // Authoritative paginator state from the server's backlog
       // query. Lands right after `message:bulk` on every room join
       // (and again on relocate-to-room after kick/ban). When false,
-      // the MessageList renders "— start of history —"; when true,
+      // the MessageList renders "start of history"; when true,
       // scrolling within 200px of the top triggers the load-older
       // fetch and prepends another page.
       useChat.getState().setRoomHistoryHasMore(roomId, hasMore);
@@ -1957,7 +2022,7 @@ function Chat() {
     });
     socket.on("watch:online", ({ username, displayName }) => {
       // Show ONLY the public-facing display name. When the watched
-      // user is in-character, `displayName` is the character name —
+      // user is in-character, `displayName` is the character name,
       // appending " (master_username)" outed the OOC account to
       // every watcher's room, breaking the same per-identity privacy
       // contract that protects DMs / friends / userlists. The
@@ -2102,7 +2167,7 @@ function Chat() {
      * button, profile-modal action). We update local activeCharacterId
      * + name in place and bump themeVersion so the theme re-resolves
      * against the new character. We deliberately do NOT poll
-     * /me/profile here — that endpoint serves the user-level DB default
+     * /me/profile here, that endpoint serves the user-level DB default
      * which may not match THIS tab's identity in a multi-tab session.
      */
     socket.on("me:character-update", ({ activeCharacterId: aci, activeCharacterName: acn }) => {
@@ -2119,7 +2184,7 @@ function Chat() {
     });
 
     /**
-     * Incognito state push — fired by the server whenever the user's
+     * Incognito state push, fired by the server whenever the user's
      * `/incognito` command flips the mode bit or changes the alias.
      * Updates `me.incognitoMode` / `me.incognitoAlias` in the store
      * synchronously so the menu's "Go Incognito" / "Leave Incognito"
@@ -2146,7 +2211,7 @@ function Chat() {
      * `dm:read` advances the OTHER party's seen marker.
      *
      * Conversations the client hasn't seen before are pulled in via
-     * a single `/me/dms` refetch — cheaper than threading a partial
+     * a single `/me/dms` refetch, cheaper than threading a partial
      * "new conversation" payload through the socket event, and the
      * conversation list response already carries the metadata
      * (otherDisplayName, avatar, unread, online) the rail needs.
@@ -2154,7 +2219,7 @@ function Chat() {
     /**
      * On every (re)connect: pull /me/dms so the conversation list
      * reflects anything that happened while we were disconnected
-     * (most importantly, DMs from other users — those arrive as
+     * (most importantly, DMs from other users, those arrive as
      * `dm:new` to live sockets, so an offline window means missed
      * events. The DB has them, but the local store doesn't until we
      * refetch). We also bump dmReseedTick so any open ThreadPane
@@ -2179,7 +2244,7 @@ function Chat() {
           if (j && Array.isArray(j.requests)) useChat.getState().setPendingFriendRequests(j.requests);
         })
         .catch(() => {});
-      // Per-identity inbox counts — drives the chat-shell ✉ badge so
+      // Per-identity inbox counts, drives the chat-shell ✉ badge so
       // unread DMs on every identity (not just the currently-active
       // one) bump the count. Without this initial pull, the badge
       // would stay at zero on cold-load until the user opened the
@@ -2192,7 +2257,7 @@ function Chat() {
       // viewing /p/<name>. The initial `room:state` / `message:bulk`
       // went out before Chat's listeners existed; without this resync
       // Chat would render blank after dismissal. Cheap on the normal
-      // (no-deep-link) path — same socket emits the server already
+      // (no-deep-link) path, same socket emits the server already
       // sent on join, just received again.
       socket.emit("me:resync");
     }
@@ -2202,7 +2267,7 @@ function Chat() {
     socket.on("connect", onConnect);
     // If the socket is already connected at the moment this effect
     // mounts (e.g. StrictMode double-mount, hot reload), `connect`
-    // won't fire again — run the sync once eagerly.
+    // won't fire again, run the sync once eagerly.
     if (socket.connected) onConnect();
 
     socket.on("dm:new", ({ message }) => {
@@ -2211,7 +2276,7 @@ function Chat() {
       // bumps even when the DM is for an identity that isn't the
       // currently-active one. `dmConversations` is identity-scoped
       // and the refetch below only repopulates it for the viewer's
-      // current characterId — a DM pinned to Char B while the viewer
+      // current characterId, a DM pinned to Char B while the viewer
       // is on Char A would otherwise never bump any visible counter
       // and the recipient would have no signal that a message
       // arrived for one of their other identities.
@@ -2222,7 +2287,7 @@ function Chat() {
       const meIdForDm = useChat.getState().me?.id ?? null;
       if (message.senderId !== meIdForDm) {
         playPing();
-        // Desktop notification when the tab is hidden — matches the
+        // Desktop notification when the tab is hidden, matches the
         // message:new path's policy. Without this DMs were silent on
         // a backgrounded tab even with browser notification permission
         // granted, leaving users with only the OS push (which the
@@ -2241,15 +2306,15 @@ function Chat() {
               body: message.body.length > 140 ? `${message.body.slice(0, 140)}…` : message.body,
               icon: "/favicon.ico",
               // Tag groups by sender so a chatty DM partner doesn't
-              // stack a dozen toasts — the latest replaces prior.
+              // stack a dozen toasts, the latest replaces prior.
               tag: `tk-dm-${message.senderId}`,
             });
             n.onclick = () => { window.focus(); n.close(); };
-          } catch { /* construction failure — non-fatal */ }
+          } catch { /* construction failure, non-fatal */ }
         }
       }
       // Pull the conversation list if we don't already know this
-      // conversation — otherwise the rail won't surface it. Cheap;
+      // conversation, otherwise the rail won't surface it. Cheap;
       // /me/dms is bounded by the user's own DM count.
       const known = useChat.getState().dmConversations[message.conversationId];
       if (!known) {
@@ -2264,7 +2329,7 @@ function Chat() {
         // Decide whether this DM counts as a new unread.
         //
         // Three cases that should NOT bump the badge:
-        //   1. We sent it — the server fans our own send back to our
+        //   1. We sent it, the server fans our own send back to our
         //      sockets too, but the user obviously read what they
         //      typed.
         //   2. The user is currently viewing this conversation in the
@@ -2290,7 +2355,7 @@ function Chat() {
           // pinned to THIS conversation (echoed back from the server
           // in `myCharacterId`), NOT the global `activeCharacterId`.
           // The chip filter in the open messenger can differ from the
-          // user's globally-active character — sending the global id
+          // user's globally-active character, sending the global id
           // 404'd whenever the user was reading a chip-filtered inbox
           // that wasn't their current voice, which meant the read
           // marker never advanced and the unread badge snapped back
@@ -2343,7 +2408,7 @@ function Chat() {
         void state.refreshInboxCounts();
       }
     });
-    // Emoticon reactions — merge the delta into the cached
+    // Emoticon reactions, merge the delta into the cached
     // reactions store. Chat + DM rendering both pull from the same
     // map keyed by (targetKind, targetId), so a single listener
     // covers both surfaces.
@@ -2351,7 +2416,7 @@ function Chat() {
       const viewerId = useChat.getState().me?.id ?? null;
       useEmoticons.getState().applyReactionEvent(event, viewerId);
     });
-    // Admin replaced / added / deleted an emoticon sheet — refetch
+    // Admin replaced / added / deleted an emoticon sheet, refetch
     // the catalog. Cheap (one round trip, no auth required), and
     // refetching beats trying to incrementally apply a partial
     // payload the server didn't ship.
@@ -2379,20 +2444,20 @@ function Chat() {
         .catch(() => {});
       // Bump the friends-version counter so MessagesModal's
       // refreshLists effect re-fires (it keys on this). Covers
-      // every echo cause — accept by the other party, decline
-      // echo, unfriend echo, new request — so the modal's local
+      // every echo cause, accept by the other party, decline
+      // echo, unfriend echo, new request, so the modal's local
       // friends + conversations + pending-inbox state stays in
       // lockstep with whatever just changed server-side, even
       // when the user wasn't the one who initiated the action.
       useChat.getState().bumpFriendsVersion();
-      // Per-identity counts refresh — the pending friend-request
+      // Per-identity counts refresh, the pending friend-request
       // half of the chat-shell badge needs to track new requests on
       // ANY of the user's identities (a friend request to Char B
       // while the viewer is on Char A should still bump the badge).
       void useChat.getState().refreshInboxCounts();
       // Soft notice in the banner so the user gets a glance signal
       // even when the chat prompt is offscreen (e.g. they're deep in
-      // the forum view). Phrasing keeps it neutral — the actual
+      // the forum view). Phrasing keeps it neutral, the actual
       // accept/decline UI lives in the prompt cards.
       setNotice({
         code: "FRIEND_UPDATE",
@@ -2401,13 +2466,13 @@ function Chat() {
     });
     // Admin edited a custom command. Bump the shared version so the
     // Composer's autocomplete cache and the HelpModal both refetch
-    // `/commands` on their next render — they key their fetch effect
+    // `/commands` on their next render, they key their fetch effect
     // on this value. Cheap to fan out (rare event, single fetch per
     // receiver).
     socket.on("commands:updated", () => {
       useChat.getState().bumpCommandsVersion();
     });
-    // Earning — wallet/rank live updates. The store's apply* actions
+    // Earning, wallet/rank live updates. The store's apply* actions
     // are no-ops when the snapshot hasn't loaded yet, so a credit that
     // lands before the user opens the dashboard just gets reconciled
     // by the next /earning/me fetch.
@@ -2417,19 +2482,19 @@ function Chat() {
     socket.on("earning:rankup", (payload) => {
       useEarning.getState().applyRankUp(payload);
     });
-    // Inventory delta — sender / receiver of /give /throw /drop +
+    // Inventory delta, sender / receiver of /give /throw /drop +
     // shop purchases + admin grants. Payload is informational only;
     // we just re-fetch /earning/me so the dashboard's Items tab
     // (inventory list + shop "you own X/Y" line) reflects the new
-    // authoritative state. Cheap when the dashboard isn't open —
+    // authoritative state. Cheap when the dashboard isn't open,
     // the store keeps a single snapshot regardless.
     socket.on("earning:inventory_changed", () => {
       void useEarning.getState().refresh();
     });
-    // Chat-line side effect — currently only `kind: "struck"` fires
+    // Chat-line side effect, currently only `kind: "struck"` fires
     // (target of /throw /drop). The runner branches on kind, so
     // adding a new effect kind is one line here + the runner. We
-    // never trigger the effect for the SENDER's own client — the
+    // never trigger the effect for the SENDER's own client, the
     // server scopes the emit to the target's sockets only.
     socket.on("chat:effect", (payload) => {
       if (payload.kind === "struck") {
@@ -2485,7 +2550,7 @@ function Chat() {
       ...(opts?.threadTitle ? { threadTitle: opts.threadTitle } : {}),
       ...(opts?.replyToId ? { replyToId: opts.replyToId } : {}),
       // Authoritative per-send identity claim. This tab's React state
-      // for activeCharacterId is the source of truth — sending it on
+      // for activeCharacterId is the source of truth, sending it on
       // every chat:input closes the cross-tab race where the server's
       // socket-scoped tabCharId can drift from the UI (reconnect
       // re-seed from DB, sibling tab's /char clear updating the
@@ -2509,7 +2574,7 @@ function Chat() {
   // "+ New Topic" on a different section while your own older topic is
   // sitting in the buffer would instantly satisfy the "found my own
   // topic" check and silently flip you into reply mode for that older
-  // topic — defeating the whole point of opening the create form.
+  // topic, defeating the whole point of opening the create form.
   const topicCreateModeAt = useRef(0);
   useEffect(() => {
     if (topicCreateMode) topicCreateModeAt.current = Date.now();
@@ -2574,7 +2639,7 @@ function Chat() {
         if (cancelled || !j) return;
         setThreadCategoriesByRoom((cur) => ({ ...cur, [currentRoomId]: j.categories }));
       })
-      .catch(() => { /* non-fatal — picker just stays empty */ });
+      .catch(() => { /* non-fatal, picker just stays empty */ });
     return () => { cancelled = true; };
   }, [currentRoomId, rooms, threadCategoriesByRoom]);
 
@@ -2586,19 +2651,19 @@ function Chat() {
    * there; the topics endpoint accepts `category=<id>` or `category=""`
    * (meaning uncategorized) to scope the page.
    *
-   * Skipped per-category when that bucket already has a topics array —
+   * Skipped per-category when that bucket already has a topics array,
    * lets a user navigate away and back into the same room without
    * re-fetching everything (they'll just keep what's loaded).
    */
   // Narrow the dep on rooms to JUST the reply-mode of the current
   // room. Putting the whole `rooms` record in the deps caused the
   // forum-topics fetch to be cancelled on every `room:state` event
-  // (presence change, /char, etc.) — `rooms` is a new object
+  // (presence change, /char, etc.), `rooms` is a new object
   // reference per zustand `set()`, so any unrelated room mutation
   // would tear down the in-flight topics fetch via the effect
   // cleanup, leaving every bucket stuck in "Loading topics…".
   const currentReplyMode = rooms[currentRoomId ?? ""]?.replyMode ?? null;
-  // Same posture for threadCategoriesByRoom — only the current room's
+  // Same posture for threadCategoriesByRoom, only the current room's
   // list matters for THIS effect, and only its presence/absence at
   // that. We still need to react when categories arrive for the first
   // time, but not when an unrelated room's category list mutates.
@@ -2622,11 +2687,22 @@ function Chat() {
     // setForumTopicsLoading below would mutate the store, retrigger
     // this effect, run the cleanup (flipping `cancelled = true` on the
     // closure the in-flight fetches are bound to), and those fetches
-    // would silently bail after resolving — leaving every bucket
+    // would silently bail after resolving, leaving every bucket
     // stuck in `loading: true` with no topics. Reading from getState
     // here gives us a fresh snapshot per effect fire without re-firing
     // on every store mutation.
     const buckets = useChat.getState().forumTopicsByRoom[currentRoomId] ?? {};
+    // Wire-shape of GET /rooms/:id/topics, the server returns the
+    // new offset-pagination fields alongside the legacy
+    // {topics, hasMore} pair so older clients mid-deploy still work.
+    type ForumTopicsPageResponseInline = {
+      topics: ChatMessage[];
+      hasMore: boolean;
+      page: number | null;
+      perPage: number;
+      totalPages: number;
+      totalCount: number;
+    };
     // Build the list of bucket keys to populate: every category id +
     // the uncategorized bucket. Skip ones already loaded.
     const keys: string[] = [];
@@ -2640,12 +2716,20 @@ function Chat() {
     for (const key of keys) {
       setForumTopicsLoading(currentRoomId, key, true);
       const categoryParam = key === "_uncat" ? "" : key;
-      const url = `/rooms/${encodeURIComponent(currentRoomId)}/topics?category=${encodeURIComponent(categoryParam)}&limit=20`;
+      // First-page fetch, `page=1` triggers the offset-paginated
+      // branch on the server. No `perPage` override; the server
+      // uses the admin-set `forumTopicsPerPage`.
+      const url = `/rooms/${encodeURIComponent(currentRoomId)}/topics?category=${encodeURIComponent(categoryParam)}&page=1`;
       fetch(url, { credentials: "include" })
-        .then((res) => (res.ok ? (res.json() as Promise<{ topics: ChatMessage[]; hasMore: boolean }>) : null))
+        .then((res) => (res.ok ? (res.json() as Promise<ForumTopicsPageResponseInline>) : null))
         .then((j) => {
           if (cancelled || !j) return;
-          setForumTopicsPage(currentRoomId, key, j.topics, j.hasMore);
+          setForumTopicsPage(currentRoomId, key, j.topics, {
+            currentPage: j.page ?? 1,
+            totalPages: j.totalPages || 1,
+            totalCount: j.totalCount || 0,
+            perPage: j.perPage || 20,
+          });
         })
         .catch(() => {
           if (cancelled) return;
@@ -2658,32 +2742,40 @@ function Chat() {
   }, [currentRoomId, currentReplyMode, currentCategoriesLoaded, setForumTopicsLoading, setForumTopicsPage]);
 
   /**
-   * "Load older topics" handler for the forum view. Fetches the next
-   * page for a category, using the oldest-loaded topic's
-   * `lastActivityAt` as the cursor. The store appends the result; the
-   * button shows a busy state while in flight.
-   *
-   * Passed down to MessageList → ForumView so each category section
-   * can wire its own button without each one fetching independently.
+   * Navigate a category's forum bucket to the given page number.
+   * Replaces the bucket's topics + pagination metadata in one shot.
+   * No-op when the target page is already showing OR out of range.
+   * Used by the per-category pagination strip (Prev / 1 2 … N /
+   * Next), replaces the old "Load older" cursor flow entirely.
    */
-  async function loadOlderTopics(categoryKey: string): Promise<void> {
+  async function goToForumPage(categoryKey: string, targetPage: number): Promise<void> {
     if (!currentRoomId) return;
     const bucket = forumTopicsByRoom[currentRoomId]?.[categoryKey];
-    if (!bucket || !bucket.hasMore || bucket.loading) return;
-    const oldest = bucket.topics[bucket.topics.length - 1];
-    if (!oldest) return;
-    const cursor = oldest.lastActivityAt ?? oldest.createdAt;
+    if (!bucket || bucket.loading) return;
+    if (targetPage < 1 || targetPage > bucket.totalPages) return;
+    if (targetPage === bucket.currentPage) return;
     setForumTopicsLoading(currentRoomId, categoryKey, true);
     try {
       const categoryParam = categoryKey === "_uncat" ? "" : categoryKey;
-      const url = `/rooms/${encodeURIComponent(currentRoomId)}/topics?category=${encodeURIComponent(categoryParam)}&before=${cursor}&limit=20`;
+      const url = `/rooms/${encodeURIComponent(currentRoomId)}/topics?category=${encodeURIComponent(categoryParam)}&page=${targetPage}`;
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const j = (await res.json()) as { topics: ChatMessage[]; hasMore: boolean };
-      appendForumTopicsPage(currentRoomId, categoryKey, j.topics, j.hasMore);
+      const j = (await res.json()) as {
+        topics: ChatMessage[];
+        page: number | null;
+        perPage: number;
+        totalPages: number;
+        totalCount: number;
+      };
+      setForumTopicsPage(currentRoomId, categoryKey, j.topics, {
+        currentPage: j.page ?? targetPage,
+        totalPages: j.totalPages || 1,
+        totalCount: j.totalCount || 0,
+        perPage: j.perPage || 20,
+      });
     } catch (err) {
       setForumTopicsLoading(currentRoomId, categoryKey, false);
-      setNotice({ code: "LOAD_OLDER_FAILED", message: err instanceof Error ? err.message : "Couldn't load older topics." });
+      setNotice({ code: "FORUM_PAGE_FAILED", message: err instanceof Error ? err.message : "Couldn't load that page." });
     }
   }
 
@@ -2705,8 +2797,8 @@ function Chat() {
    * Decide whether a userlist / chat-line click on `(userId, displayName)`
    * targets THIS tab's currently-voicing identity. The naive
    * `userId === me.id` check matches any identity that belongs to
-   * me — including OTHER characters of mine that aren't active in
-   * this tab — which produced a real bug: clicking the icon of
+   * me, including OTHER characters of mine that aren't active in
+   * this tab, which produced a real bug: clicking the icon of
    * Character B while voicing Character A in this tab opened the
    * profile editor bound to A's session, so saves leaked Character
    * B's intended edits onto Character A.
@@ -2715,7 +2807,7 @@ function Chat() {
    * SESSION's active identity," because each tab voices at most one
    * identity at a time and its display name is unique within the
    * session (per-character name uniqueness per owner + the OOC
-   * username slot are mutually exclusive in the userlist — you only
+   * username slot are mutually exclusive in the userlist, you only
    * see one identity per tab).
    */
   function isSelfActiveIdentity(userId: string, displayName: string): boolean {
@@ -2731,7 +2823,7 @@ function Chat() {
    * aren't active in this tab), open the read-only profile view.
    * (Slash-command equivalents: /whois <name> and /profile.)
    *
-   * `characterId` is the identity row the click landed on — a
+   * `characterId` is the identity row the click landed on, a
    * character id when the click targeted a character, null for the
    * master/OOC row. Used to open the profile of the EXACT identity
    * clicked rather than letting profile:fetch fall back to a master
@@ -2789,7 +2881,7 @@ function Chat() {
    * Open the unified Messages modal with a specific user pre-selected.
    * Routed from ProfileModal's "💬 Message" button and any other
    * "send a DM to this person" entry points. `otherCharacterId` pins
-   * the target to the right per-identity thread — null routes to the
+   * the target to the right per-identity thread, null routes to the
    * master/OOC conversation; a character id opens the thread for that
    * character. Without the character id the modal would surface
    * whichever (userId, _) conversation happened to land first in the
@@ -2838,7 +2930,7 @@ function Chat() {
   //
   //  - Forum rooms: the chronological-window model doesn't compose
   //    with the per-category topic buckets, so we go a different
-  //    route — fetch the topic the hit belongs to (the hit itself if
+  //    route, fetch the topic the hit belongs to (the hit itself if
   //    it's a topic, or its parent if it's a reply) plus the full
   //    reply chain, merge them into the local stores, and open
   //    `ThreadModal` centered on the topic with `highlightMessageId`
@@ -2858,7 +2950,7 @@ function Chat() {
       });
     }
 
-    // Re-read the room's replyMode AFTER the join completes — the
+    // Re-read the room's replyMode AFTER the join completes, the
     // local store updates when `room:state` lands. For same-room
     // jumps the value is already current.
     const isForum = useChat.getState().rooms[roomId]?.replyMode === "nested";
@@ -2873,7 +2965,7 @@ function Chat() {
           { credentials: "include" },
         );
         if (!r.ok) {
-          setNotice({ code: "JUMP_FAILED", message: "Couldn't open that thread — it may have been removed." });
+          setNotice({ code: "JUMP_FAILED", message: "Couldn't open that thread, it may have been removed." });
           return;
         }
         const j = (await r.json()) as { topic: ChatMessage; replies: ChatMessage[] };
@@ -2886,8 +2978,8 @@ function Chat() {
         const categoryKey = j.topic.threadCategoryId ?? "_uncat";
         prependOwnForumTopic(roomId, categoryKey, j.topic);
 
-        // Merge the replies into `messagesByRoom` so the modal — which
-        // reads replies from the chat buffer — sees them. We use
+        // Merge the replies into `messagesByRoom` so the modal, which
+        // reads replies from the chat buffer, sees them. We use
         // appendMessage in a loop (with the store's own de-dup) so
         // existing buffer entries aren't clobbered.
         for (const r of j.replies) appendMessage(r);
@@ -2912,7 +3004,7 @@ function Chat() {
           { credentials: "include" },
         );
         if (!r.ok) {
-          setNotice({ code: "JUMP_FAILED", message: "Couldn't load that message — it may have been removed." });
+          setNotice({ code: "JUMP_FAILED", message: "Couldn't load that message, it may have been removed." });
           return;
         }
         const j = (await r.json()) as { messages: ChatMessage[] };
@@ -2926,7 +3018,7 @@ function Chat() {
     setHighlightMessageId(messageId);
   }
 
-  // "Return to live" — refresh the buffer with the recent backlog and
+  // "Return to live", refresh the buffer with the recent backlog and
   // drop the historical-view flag. Re-issues room:join, which on the
   // server returns the standard last-50 message:bulk we get on connect.
   function returnToLive() {
@@ -2964,7 +3056,7 @@ function Chat() {
   const isForumRoom = room?.replyMode === "nested";
   // Viewer-side moderator gate. Used to expose Lock/Unlock + cross-
   // author Delete in the forum UI. The server is authoritative on
-  // every action — this only controls UI affordance visibility. Gates
+  // every action, this only controls UI affordance visibility. Gates
   // on the granular Phase-2 permission keys (which fold in role grants
   // + per-user overrides) instead of the legacy tier check, so a user
   // explicitly granted just `delete_others_message` via the matrix
@@ -2990,13 +3082,32 @@ function Chat() {
   const hasAnyAdminAccess = !!me && me.permissions.some((k) => k.startsWith("view_admin_"));
   const activeTopic = useMemo(() => {
     if (!activeTopicId) return null;
-    const m = messages.find((x) => x.id === activeTopicId);
+    // Lookup precedence: the room's live message buffer first (covers
+    // a topic whose body the viewer is actively scrolling), then the
+    // forum buckets for this room (covers Reply clicked from a topic
+    // card that's loaded into the category list but whose body isn't
+    // in the message buffer, the common case on a fresh forum-room
+    // visit). Without the bucket fallback the composer stayed in
+    // "pick a topic" disabled state even after Reply set
+    // activeTopicId, because `messages` is only the chat backlog,
+    // not the topic catalog.
+    let m = messages.find((x) => x.id === activeTopicId);
+    if (!m && currentRoomId) {
+      const roomBuckets = forumTopicsByRoom[currentRoomId];
+      if (roomBuckets) {
+        for (const bucket of Object.values(roomBuckets)) {
+          m = bucket.topics.find((x) => x.id === activeTopicId)
+            ?? bucket.pending.find((x) => x.id === activeTopicId);
+          if (m) break;
+        }
+      }
+    }
     if (!m) return null;
     return { id: m.id, title: m.title ?? null, body: m.body, locked: !!m.lockedAt };
-  }, [activeTopicId, messages]);
+  }, [activeTopicId, messages, currentRoomId, forumTopicsByRoom]);
   // Pop-out modal data. We look up the topic message itself + the
   // replies that target it (id-matched). Replies stay in their
-  // original chronological order — same as the inline forum view.
+  // original chronological order, same as the inline forum view.
   // If the topic was deleted server-side after the modal opened, we
   // return null and the modal effect below auto-closes.
   const poppedTopic = useMemo(() => {
@@ -3019,7 +3130,7 @@ function Chat() {
 
   return (
     // ActiveThemeContext exposes `activeTheme` to descendants that need to
-    // inspect the palette imperatively at render time — currently the
+    // inspect the palette imperatively at render time, currently the
     // message renderers that nudge a player's chosen text color toward a
     // legible variant against the current background. The CSS-var path
     // (set by applyTheme above) still drives all standard styling; this
@@ -3053,7 +3164,7 @@ function Chat() {
       <BannerMarquee />
       <StaleVersionBanner />
       <IncognitoBanner />
-      {/* Earning — persistent rank-up ribbon. Only renders when the
+      {/* Earning, persistent rank-up ribbon. Only renders when the
           user has unacknowledged rank-ups. Tucked under the version
           banner so deploy nags still take precedence. */}
       <EarningRibbon onOpenEarning={() => setEarningOpen({})} />
@@ -3069,7 +3180,7 @@ function Chat() {
             <span className="font-semibold normal-case tracking-normal">{room.linkedWorld.name}</span>
             <span className="text-[10px] text-keep-muted">by {room.linkedWorld.ownerUsername}</span>
           </button>
-          {/* Dismiss × — absolutely positioned so it doesn't push the
+          {/* Dismiss ×, absolutely positioned so it doesn't push the
               centered label off-axis. Reserved right-side padding on
               the wrapper (`pr-10`) keeps the chip clear of the label
               even at narrow widths, and the chip itself sits inside
@@ -3120,7 +3231,7 @@ function Chat() {
           this one from the matching rail above the composer so the
           scifi style can paint it in a darker blue/purple (no bg
           bloom underneath this rail's bright end, so a flat magenta
-          peak read as a bare neon strip floating on its own — the
+          peak read as a bare neon strip floating on its own, the
           purple lets it sink into the ambient instead). */}
       <div aria-hidden className="keep-accent-rail" data-rail="header" />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
@@ -3133,15 +3244,15 @@ function Chat() {
             features merged into one surface. */}
         {/* `min-w-0` is non-negotiable: by default a flex child's
             `min-width` is `auto` (= its intrinsic content width), so a
-            wide descendant — a long topic title, an action button strip,
-            anything with non-wrapping content — forces <main> to grow
+            wide descendant, a long topic title, an action button strip,
+            anything with non-wrapping content, forces <main> to grow
             beyond the viewport. The parent's `overflow-hidden` then
             clips the right edge visually, which is what produced the
             "everything pushed off-screen" bug in mobile forum view.
             `min-w-0` lets the flex child shrink to its allocated slot
             and forces descendants to honor their own truncation rules. */}
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* "Viewing older history" only applies to flat rooms — for
+          {/* "Viewing older history" only applies to flat rooms, for
               forum rooms the topic buckets paginate independently and
               there's no single "live" chronological view to return to.
               The forum jump path opens ThreadModal and never sets
@@ -3156,7 +3267,7 @@ function Chat() {
               title="Reload the recent backlog and return to live chat"
             >
               <span aria-hidden>↓</span>
-              Viewing older history — click to return to live
+              Viewing older history, click to return to live
             </button>
           ) : null}
           {/* Relative wrapper so the TypingIndicator inside can anchor
@@ -3164,7 +3275,7 @@ function Chat() {
               padding (see MessageList's `pb-6`). This is the Discord
               pattern: chat reserves a small strip at the bottom that
               stays empty when nobody's typing and gets overlaid with
-              the typing strip when someone is — no layout shift, no
+              the typing strip when someone is, no layout shift, no
               composer jitter, no chat space lost while typing. */}
           <div className="relative flex min-h-0 flex-1 flex-col">
           <MessageList
@@ -3184,7 +3295,7 @@ function Chat() {
               // in this room. Reuses the same flow bookmarks use; the
               // helper handles both flat-room scroll + forum-modal
               // expand-and-flash. No-op when there's no current room
-              // (shouldn't happen — MessageList only renders inside
+              // (shouldn't happen, MessageList only renders inside
               // one).
               if (currentRoomId) void jumpToMessage(currentRoomId, id);
             }}
@@ -3208,7 +3319,7 @@ function Chat() {
             {...(isForumRoom && currentRoomId && forumTopicsByRoom[currentRoomId]
               ? { forumBuckets: forumTopicsByRoom[currentRoomId] }
               : {})}
-            onLoadOlderTopics={loadOlderTopics}
+            onGoToForumPage={goToForumPage}
             onFlushPendingTopics={(categoryKey) => {
               if (!currentRoomId) return;
               flushPendingForumTopics(currentRoomId, categoryKey);
@@ -3216,7 +3327,7 @@ function Chat() {
             activeTopicId={activeTopicId}
             onSetActiveTopic={(id) => {
               setActiveTopicId(id);
-              // Picking a topic implicitly cancels topic-create mode —
+              // Picking a topic implicitly cancels topic-create mode,
               // the user just told us they want to read/reply rather
               // than start a new thread.
               if (id) setTopicCreateMode(false);
@@ -3252,7 +3363,7 @@ function Chat() {
             socket={socket}
             onError={(n) => setNotice(n)}
           />
-          {/* Scriptorium collaborator invites — Accept | Decline cards
+          {/* Scriptorium collaborator invites, Accept | Decline cards
               mirroring MutualPrompts. The persistent counterpart lives
               on the catalog's My Stories tab. */}
           <StoryInvitePrompts
@@ -3262,16 +3373,16 @@ function Chat() {
           {/* Inline friend-request prompts. Sit alongside the mutual-
               title prompts so any inbound social ask lands in one
               consistent slot above the composer. Cards dispatch
-              /accept or /decline via the existing send() pipe — the
+              /accept or /decline via the existing send() pipe, the
               server emits a fresh friend:request echo when the row
               flips, which clears the card via the store re-sync. */}
           <FriendRequestPrompts />
-          {/* Second accent rail — sits between the message stream and
+          {/* Second accent rail, sits between the message stream and
               the composer. Same base class as the header rail, but
               `data-rail="footer"` lets the scifi style keep the
               canonical magenta peak here because the body's bottom-
               right accent bloom sits directly under this rail's
-              bright end — so the rail genuinely emits into the
+              bright end, so the rail genuinely emits into the
               bloom rather than floating on bare ambient. */}
           <div aria-hidden className="keep-accent-rail" data-rail="footer" />
           <Composer
@@ -3292,7 +3403,7 @@ function Chat() {
               ? { preferredCategoryId: activeForumCategoryId }
               : {})}
             onStartTopicCreate={() => {
-              // Leaving a thread to start a new topic is the natural UX —
+              // Leaving a thread to start a new topic is the natural UX,
               // the composer can only be in one forum-state at a time.
               setActiveTopicId(null);
               setTopicCreateMode(true);
@@ -3318,7 +3429,7 @@ function Chat() {
           activeCharacterName={activeCharacterName}
           onIconClick={onIconClick}
           onNameClick={(uid, dn, cid) => {
-            // Forward characterId verbatim — a rail click on a
+            // Forward characterId verbatim, a rail click on a
             // CHARACTER row would otherwise lose its identity here
             // and downstream `identityArgFor` would fall back to
             // `@id:<userId>`, routing the whisper to the master
@@ -3385,7 +3496,7 @@ function Chat() {
                   // the whisper. `identityArgFor` picks `@cid:` when the
                   // profile is a character, `@id:` for the master, and
                   // falls back to the NBSP-escaped name only if neither
-                  // id is available (shouldn't happen here — the
+                  // id is available (shouldn't happen here, the
                   // profile carries both).
                   const targetArg = identityArgFor({
                     userId: openProfile.profile.userId,
@@ -3427,7 +3538,7 @@ function Chat() {
                 },
               }
             : {})}
-          // Active-character action — only renders on profiles the viewer
+          // Active-character action, only renders on profiles the viewer
           // owns. Three cases:
           //   * master profile + viewer has an active char → "Switch to OOC"
           //     (clears active character)
@@ -3500,9 +3611,9 @@ function Chat() {
           // (those return the caller's own data) and edits the named
           // character via the admin-allowed `/characters/:id`
           // endpoints. Conditional spread is exactOptionalPropertyTypes-
-          // friendly — we don't pass `undefined` through.
+          // friendly, we don't pass `undefined` through.
           {...(editor.adminContext ? { adminContext: editor.adminContext } : {})}
-          // Optional initial tab from the editor open-state — lets
+          // Optional initial tab from the editor open-state, lets
           // deep-links like the shop's flair-buy CTA land on the
           // Flair tab instead of the default Description.
           {...(editor.initialTab ? { initialTab: editor.initialTab } : {})}
@@ -3514,7 +3625,7 @@ function Chat() {
           // target is the identity this tab is currently voicing.
           // Otherwise the bump triggers App's theme effect, which
           // pulls activeTheme from the active identity (not the one
-          // being edited) and clobbers the editor's live preview —
+          // being edited) and clobbers the editor's live preview,
           // making "Save" look like it reverted the theme to OOC.
           // Saving the active identity still gives the live-update
           // experience the comment originally promised.
@@ -3755,10 +3866,10 @@ function Chat() {
  * the user dismissed, so the banner reappears automatically when the
  * admin edits either one (a fresh value won't match the stored
  * dismissal). When the user leaves the room and comes back the
- * decision persists — sessionStorage would lose it on refresh, which
+ * decision persists, sessionStorage would lose it on refresh, which
  * we explicitly don't want for chrome the user has actively hidden.
  *
- * Returns `[dismissed, dismiss]` — `dismissed` is true only when
+ * Returns `[dismissed, dismiss]`, `dismissed` is true only when
  * `currentValue` is present AND matches the cached value, so a null
  * `currentValue` (no world linked, no topic set) never reads as
  * dismissed and rendering the banner conditionally on
@@ -3798,7 +3909,7 @@ function useRoomBannerDismissal(
     try {
       if (typeof localStorage !== "undefined") localStorage.setItem(storageKey, currentValue);
     } catch {
-      // Quota or private-mode — best effort; the dismissal still
+      // Quota or private-mode, best effort; the dismissal still
       // sticks for the current session via the React state below.
     }
     setStored(currentValue);
@@ -3838,7 +3949,7 @@ function Toast({ notice, onDismiss }: { notice: { code: string; message: string 
  * users see across the top of the page when a drift is detected. The
  * Refresh button does a hard reload so the browser pulls the new
  * index.html and (transitively) the new asset bundle. The banner
- * stays put until refresh — no dismiss button on purpose, because
+ * stays put until refresh, no dismiss button on purpose, because
  * dismissing it would just hide the very thing the user needs to act
  * on. The 60s /auth/me poll keeps the comparison fresh, so a deploy
  * surfaces this within a minute of landing.
@@ -3846,7 +3957,7 @@ function Toast({ notice, onDismiss }: { notice: { code: string; message: string 
 /**
  * Standing reminder rendered while the viewer is incognito. Without
  * this, a mod who toggles /incognito and then forgets has no signal
- * that everyone else is treating them as gone — they might type a
+ * that everyone else is treating them as gone, they might type a
  * normal chat line expecting their name on it and instead drop a
  * "System" message into the room. The banner sits directly under the
  * deploy notice so it shares the same eye-line as other "site state"
@@ -3884,7 +3995,7 @@ function StaleVersionBanner() {
   const staleVersion = useChat((s) => s.staleVersion);
   const staleUpdateMessage = useChat((s) => s.staleUpdateMessage);
   const siteName = useChat((s) => s.branding.siteName);
-  // Persistent close — keyed by the specific stale-version string so a
+  // Persistent close, keyed by the specific stale-version string so a
   // viewer who dismisses "please update to 0.20.4" still re-sees the
   // banner when 0.20.5 ships. The key joins the version into the
   // dismissed-set entry so a future stale version triggers a fresh
@@ -3894,7 +4005,7 @@ function StaleVersionBanner() {
   // The banner itself keeps the original `.keep-notice-accent` chrome
   // (theme-style-aware accent tint + gradient + border). Only the
   // optional ADMIN-AUTHORED release-note paragraph needs its color
-  // nudged for legibility — the default `text-keep-muted` washes out
+  // nudged for legibility, the default `text-keep-muted` washes out
   // against the accent tint on glass / scifi themes where the chat
   // shell's bg image bleeds through. We nudge JUST that fragment
   // against the panel slot (which is what the accent tint blends
@@ -3924,7 +4035,7 @@ function StaleVersionBanner() {
       >
         Refresh
       </button>
-      {/* Persistent close — the version-keyed dismiss stays in effect
+      {/* Persistent close, the version-keyed dismiss stays in effect
           until a newer stale version arrives, at which point the
           banner re-shows with the new key. */}
       <button

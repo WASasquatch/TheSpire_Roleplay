@@ -71,7 +71,7 @@ sock.emit("chat:input", { roomId, text: "/char switch Sigrid" }, (ack) => {
 });
 await new Promise((res) => setTimeout(res, 400));
 
-// /me again — should now display as "Sigrid"
+// /me again, should now display as "Sigrid"
 sock.emit("chat:input", { roomId, text: "/she draws a long sword from its scabbard" }, (ack) => {
   console.log("ack /she:", ack);
 });

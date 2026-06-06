@@ -11,7 +11,7 @@
  * Reads route through `getSettings()` which calls `parseEarningConfig`
  * on the stored JSON. Parse failures or NULL fall back to
  * `DEFAULT_EARNING_CONFIG`, so an empty or corrupt config row never
- * brings the earning engine down — earning just behaves as if no
+ * brings the earning engine down, earning just behaves as if no
  * admin override were in place.
  */
 
@@ -66,7 +66,7 @@ export interface EarningConfig {
    * Length bonus rewards effort on action / scene RP posts. The award
    * engine multiplies the per-kind XP+Currency by a linearly-
    * interpolated factor between 1.0x at `floorChars` and `maxMultiplier`
-   * at `ceilChars`. Messages above `ceilChars` clamp to the max — no
+   * at `ceilChars`. Messages above `ceilChars` clamp to the max, no
    * "infinite wall of text" exploit. Disabled per-kind = always 1.0x.
    *
    * Spam detection drops the award to 0 for messages that fail any of
@@ -80,7 +80,7 @@ export interface EarningConfig {
    */
   messageQuality: {
     /** Per-message-kind length bonus. Action defaults to a steeper
-     *  curve than say — RP posts get the reward, casual chat gets a
+     *  curve than say, RP posts get the reward, casual chat gets a
      *  flatter multiplier. Whisper inherits action's settings but is
      *  effectively no-op while whisper award is 0. */
     lengthBonus: {
@@ -88,12 +88,12 @@ export interface EarningConfig {
       action: LengthBonusSpec;
       whisper: LengthBonusSpec;
     };
-    /** Spam detection — applied AFTER the length multiplier (so a
+    /** Spam detection, applied AFTER the length multiplier (so a
      *  100-word spammy wall of text still earns 0). */
     spam: {
       enabled: boolean;
       /** Below this many trimmed chars, skip every heuristic (short
-       *  messages like "yes" are not spam — they just earn the base
+       *  messages like "yes" are not spam, they just earn the base
        *  rate). */
       minLengthToCheck: number;
       /** Reject messages where (unique chars / total chars) is below
@@ -165,13 +165,13 @@ export const DEFAULT_EARNING_CONFIG: EarningConfig = {
   bodyFloorChars: 5,
   messageQuality: {
     lengthBonus: {
-      // Casual chat — gentle curve. A heart-felt one-liner shouldn't
+      // Casual chat, gentle curve. A heart-felt one-liner shouldn't
       // be punished, but a paragraph reply gets a small bump.
       say: { enabled: true, floorChars: 40, ceilChars: 240, maxMultiplier: 1.5 },
-      // RP action posts — steeper curve. A descriptive paragraph
+      // RP action posts, steeper curve. A descriptive paragraph
       // earns ~2x; a long scene-setting block earns 3x.
       action: { enabled: true, floorChars: 60, ceilChars: 600, maxMultiplier: 3.0 },
-      // Whispers default to whatever the action curve is — moot
+      // Whispers default to whatever the action curve is, moot
       // while the whisper award is 0, but the knob is there if an
       // admin enables whisper rewards.
       whisper: { enabled: false, floorChars: 60, ceilChars: 600, maxMultiplier: 1.0 },
@@ -207,13 +207,13 @@ export const DEFAULT_EARNING_CONFIG: EarningConfig = {
     maxTransferAmount: 1000,
   },
   backfill: {
-    // 5 XP per historical message — same scale as the live `action`
+    // 5 XP per historical message, same scale as the live `action`
     // award (5 XP). The system gets dropped onto installs that
     // already have months/years of message history, and the previous
     // 1 XP/message was too thin to put longtime regulars anywhere
     // near the ranks the new (raised) thresholds expect. At 5/msg a
     // user with ~5000 lifetime posts lands around the bottom of
-    // Recognized — proportional to the activity they actually had.
+    // Recognized, proportional to the activity they actually had.
     // Admins can still tune via the Awards tab; this is just the
     // seeded default for fresh installs.
     xpPerHistoricalMessage: 5.0,
@@ -244,7 +244,7 @@ function lengthBonus(input: unknown, fallback: LengthBonusSpec): LengthBonusSpec
     enabled: bool(src.enabled, fallback.enabled),
     floorChars: Math.max(0, num(src.floorChars, fallback.floorChars)),
     ceilChars: Math.max(0, num(src.ceilChars, fallback.ceilChars)),
-    // Clamp to a sane upper bound — 10x on a 5XP base = 50XP per
+    // Clamp to a sane upper bound, 10x on a 5XP base = 50XP per
     // message, which is already extreme. Beyond that is almost
     // certainly an admin typo.
     maxMultiplier: Math.max(1.0, Math.min(10.0, num(src.maxMultiplier, fallback.maxMultiplier))),

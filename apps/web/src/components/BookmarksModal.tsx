@@ -274,7 +274,7 @@ function EditForm({
         value={category}
         onChange={(e) => setCategory(e.target.value)}
         maxLength={60}
-        placeholder="Category (e.g. 'plot threads' — leave empty for Uncategorized)"
+        placeholder="Category (e.g. 'plot threads', leave empty for Uncategorized)"
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
         // eslint-disable-next-line jsx-a11y/no-autofocus
         autoFocus

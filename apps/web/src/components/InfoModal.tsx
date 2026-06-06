@@ -8,14 +8,14 @@ interface Props {
 }
 
 /**
- * InfoModal — a persistent display for server-emitted informational
+ * InfoModal, a persistent display for server-emitted informational
  * payloads that are too long for the auto-dismissing toast.
  *
  * Used by commands that produce multi-line structured output the
  * user wants to scan / re-scan at leisure (e.g. `/list` of public
  * rooms, `/find <name>` for partial-match room search). The toast
  * channel is reserved for single-line transient feedback (errors,
- * one-shot confirmations) — anything with a header line + bullet
+ * one-shot confirmations), anything with a header line + bullet
  * list belongs here.
  *
  * Renders the body inside a `<pre>` with `whitespace-pre-wrap` and

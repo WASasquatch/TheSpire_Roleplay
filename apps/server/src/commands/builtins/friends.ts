@@ -13,7 +13,7 @@ import type { CommandContext, CommandHandler } from "../types.js";
  * so the command body can short-circuit with a bare `return`.
  *
  * Friend commands key on `Identity` (per-identity friendships), so
- * this wrapper drops the richer ResolvedTarget down to that pair —
+ * this wrapper drops the richer ResolvedTarget down to that pair,
  * the displayName/masterUsername are looked up later through
  * resolveDisplayName for the success copy.
  */
@@ -48,7 +48,7 @@ function notice(ctx: CommandContext, code: string, message: string) {
 /** Emit a one-shot system message visible only to the caller (not broadcast). */
 async function whisperToSelf(ctx: CommandContext, body: string): Promise<void> {
   // Re-uses the message:new event channel; not persisted to DB. addSystemMessage
-  // is room-wide, which is the wrong scope here — friend-list output is
+  // is room-wide, which is the wrong scope here, friend-list output is
   // private to the caller.
   ctx.socket.emit("message:new", {
     id: `friend-${Date.now()}`,
@@ -86,7 +86,7 @@ async function emitFriendRequestTo(
 }
 
 /**
- * Symmetric friendship. `/friend` now sends a friend REQUEST — the
+ * Symmetric friendship. `/friend` now sends a friend REQUEST, the
  * row is created with `status='pending'`, the target gets a `friend:
  * request` socket event, and the friendship becomes effective only
  * after the target runs `/accept <username>`. `/decline <username>`
@@ -100,7 +100,7 @@ async function emitFriendRequestTo(
  *
  * Aliases: `/watch`, `/unwatch`, `/watching` still resolve to /friend,
  * /unfriend, /friends respectively, so existing tutorials + muscle
- * memory keep working. The asymmetric-watch semantics are gone — a
+ * memory keep working. The asymmetric-watch semantics are gone, a
  * pre-existing /watch row was grandfathered to `status='accepted'` by
  * the 0051 migration.
  */
@@ -109,7 +109,7 @@ export const friendCommand: CommandHandler = {
   aliases: ["watch", "follow"],
   usage: "/friend <name>",
   description:
-    "Send a friend request. The friendship is tied to whoever's active right now — if you're in-character, the request comes from that character; the other party never sees your OOC handle through this request.",
+    "Send a friend request. The friendship is tied to whoever's active right now, if you're in-character, the request comes from that character; the other party never sees your OOC handle through this request.",
   async run(ctx) {
     const targetName = ctx.argsText.trim();
     if (!targetName) return notice(ctx, "FRIEND_USAGE", "Usage: /friend <name>");
@@ -123,7 +123,7 @@ export const friendCommand: CommandHandler = {
     }
 
     // Idempotency over the IDENTITY PAIR. Two characters of mine can
-    // each have their own friendship with the same target — only the
+    // each have their own friendship with the same target, only the
     // exact same identity pair (either direction) collides.
     const existing = (await ctx.db
       .select()
@@ -141,7 +141,7 @@ export const friendCommand: CommandHandler = {
       }
       if (existing.frienderUserId === me.userId
           && (existing.frienderCharacterId ?? null) === me.characterId) {
-        return whisperToSelf(ctx, `Friend request to ${targetName} is still pending — wait for them to /accept.`);
+        return whisperToSelf(ctx, `Friend request to ${targetName} is still pending, wait for them to /accept.`);
       }
       // Existing pending request from THEM to us; calling /friend on
       // them is the natural way to accept.
@@ -243,7 +243,7 @@ export const unfriendCommand: CommandHandler = {
     const me = meIdentity(ctx);
     // Delete the row for THIS identity pair in either direction. Other
     // characters of the same user keep their own friendships with the
-    // same target — only this active identity unfriends.
+    // same target, only this active identity unfriends.
     const r = await ctx.db
       .delete(friends)
       .where(or(
@@ -286,7 +286,7 @@ export const friendsCommand: CommandHandler = {
     if (rows.length === 0) {
       return whisperToSelf(ctx, "Friends list is empty for this identity. Use /friend <name> to send a request.");
     }
-    // Resolve each other-side identity to a human-readable name —
+    // Resolve each other-side identity to a human-readable name,
     // character name if the friendship was tagged to a character,
     // master username otherwise.
     const names = await Promise.all(rows.map(async (r) => {
@@ -301,7 +301,7 @@ export const friendsCommand: CommandHandler = {
   },
 };
 
-// Keep `addSystemMessage` import alive — it's part of the broadcast
+// Keep `addSystemMessage` import alive, it's part of the broadcast
 // toolkit and harmless to retain even if unused locally; matches the
 // posture of the previous watch.ts.
 void addSystemMessage;

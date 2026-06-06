@@ -21,7 +21,7 @@ interface Props {
   onOpenRules: () => void;
   /** Opens the Earning dashboard modal. */
   onOpenEarning: () => void;
-  /** Opens the Scriptorium catalog. Signed-in only — anonymous splash
+  /** Opens the Scriptorium catalog. Signed-in only, anonymous splash
    *  visitors can browse via FeaturedStoriesStrip + the `/stories/...`
    *  shareable links instead. */
   onOpenScriptorium: () => void;
@@ -43,12 +43,12 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
   const branding = useChat((s) => s.branding);
-  // Earning indicator dot — small marker next to the link when the
+  // Earning indicator dot, small marker next to the link when the
   // user has unacknowledged rank-up notifications. Reads from the
   // store directly so it stays live with `earning:rankup` socket
   // events without prop drilling.
   const earningHasNew = useEarning((s) => s.unackRankUps.length > 0);
-  // Pending Scriptorium invite count — surfaces a small dot on the
+  // Pending Scriptorium invite count, surfaces a small dot on the
   // Scriptorium nav entry so the recipient sees it without opening
   // the catalog. The hook itself always runs (Rules of Hooks); the
   // value is only surfaced in the UI when signed in.
@@ -158,7 +158,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
 
   // Click handlers that fire the action then close the mobile dropdown.
   // Dropdown stays alive past the click on desktop (it isn't rendered
-  // there), so these no-op the close on md+ — the inline nav doesn't
+  // there), so these no-op the close on md+, the inline nav doesn't
   // need it.
   function fireRules() { onOpenRules(); setMenuOpen(false); }
   function fireAdmin() { if (onOpenAdmin) onOpenAdmin(); setMenuOpen(false); }
@@ -177,7 +177,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
       <h1 style={logoStyle} className="font-action text-xl tracking-wide">
         {/* `siteUrl` is the admin-configured canonical home for the
             site (often a marketing landing page on a sibling domain).
-            When set, wrap the logo in an anchor — `color:inherit` +
+            When set, wrap the logo in an anchor, `color:inherit` +
             `no-underline` keep the chip visually identical to the
             unwrapped form so the logo still reads as a logo. The
             `rel="home"` hint helps screen readers and crawlers
@@ -244,7 +244,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
             <span className="text-keep-rule">|</span>
           </span>
         ) : null}
-        {/* Only render the Earning link for signed-in users — the
+        {/* Only render the Earning link for signed-in users, the
             dashboard requires auth and the link itself shouldn't tease
             anonymous splash visitors. */}
         {me ? (
@@ -253,7 +253,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               type="button"
               onClick={onOpenEarning}
               className="relative uppercase tracking-widest text-keep-muted hover:text-keep-text"
-              title="Your Earning — XP, Currency, ranks, and cosmetics"
+              title="Your Earning, XP, Currency, ranks, and cosmetics"
             >
               Earning
               {/* Tiny dot when there's an unacknowledged rank-up. Sits
@@ -305,7 +305,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
         >
           Rules
         </button>
-        {/* Admin button visibility is fully gated by the parent — it
+        {/* Admin button visibility is fully gated by the parent, it
             only passes `onOpenAdmin` when the viewer holds at least
             one `view_admin_*` permission. Banner just trusts the
             presence of the callback. */}
@@ -351,7 +351,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
           so tapping the chat closes the menu. The panel itself sits
           absolutely under the header, right-aligned, with stacked
           rows. The themed banner CSS sets `isolation: isolate`, which
-          creates a stacking context — so the header itself carries
+          creates a stacking context, so the header itself carries
           `z-30` above to lift the whole context above the chat
           `<main>` sibling; otherwise the dropdown's z-40 would be
           trapped inside the banner's context and paint *under* the
@@ -402,7 +402,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               </>
             ) : null}
             {/* These are menu items, not buttons. Drop the `keep-button`
-                class so they don't pick up the pill/lift styling — they
+                class so they don't pick up the pill/lift styling, they
                 render as flat link-style rows matching the <a> siblings
                 above. The shared <nav> already gives them a rounded outer
                 container; individual items have no border-radius. */}
@@ -470,7 +470,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
 /**
  * Logo content shared between the linked and unlinked banner paths.
  * Pulled out into its own component so the `branding.siteUrl ? <a>…</a>
- * : <>…</>` ternary in the header stays readable — without it the
+ * : <>…</>` ternary in the header stays readable, without it the
  * image-vs-text branch would be duplicated under both arms of the
  * outer ternary.
  */

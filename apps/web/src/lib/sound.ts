@@ -5,7 +5,7 @@
  *   - ping    → inbound DM (any conversation). Cross-room 1:1.
  *   - whisper → inbound whisper directed at the viewer in a room.
  *     Distinct from DM so the two feel different even when both
- *     are 1:1 attention requests — DM is "someone is reaching out
+ *     are 1:1 attention requests, DM is "someone is reaching out
  *     from outside this room", whisper is "someone in this room is
  *     speaking just to you."
  *   - tap     → inbound chat / action in a room (excluding whispers)
@@ -22,7 +22,7 @@
  * preferences are honored immediately on toggle.
  *
  * Browser autoplay policies require a prior user gesture before any
- * `Audio.play()` resolves. We don't try to satisfy that ourselves —
+ * `Audio.play()` resolves. We don't try to satisfy that ourselves,
  * by the time a sound fires, the user has signed in, picked a room,
  * and (almost certainly) clicked something. The play() promise's
  * AbortError / NotAllowedError rejection is swallowed silently; we'd
@@ -30,7 +30,7 @@
  *
  * Volume is set per-event: ping/tap are subtle (0.5), alert is louder
  * (0.7) since it's user-summoning. These match the medium-density,
- * "ambient chat" feel — the app isn't a slot machine.
+ * "ambient chat" feel, the app isn't a slot machine.
  */
 import { useChat } from "../state/store.js";
 
@@ -50,7 +50,7 @@ const VOLUMES: Record<SoundEvent, number> = {
   whisper: 0.5,
   tap: 0.5,
   alert: 0.7,
-  // Struck audio sits a hair above the ambient chat tier — being the
+  // Struck audio sits a hair above the ambient chat tier, being the
   // target of /throw or /drop is a directed action, more attention-
   // worthy than a passing room message, but still not user-summoning
   // alert volume. 0.6 lands between tap (0.5) and alert (0.7).
@@ -81,7 +81,7 @@ function getAudio(event: SoundEvent): HTMLAudioElement {
 /**
  * True when THIS TAB's voiced identity is /away in the current room.
  *
- * Away is now per-identity on the server (see realtime/awayState.ts) —
+ * Away is now per-identity on the server (see realtime/awayState.ts),
  * a /away on Char A doesn't mark a sibling tab voicing Char B as
  * away, so the sound gate has to match the same tuple the broadcast
  * does. We resolve the occupant row that matches both this tab's
@@ -89,7 +89,7 @@ function getAudio(event: SoundEvent): HTMLAudioElement {
  * row's `away` flag mutes sound for this tab.
  *
  * Sibling tab voicing a different identity reads its own row and
- * stays unmuted — correct, since that tab hasn't been marked away.
+ * stays unmuted, correct, since that tab hasn't been marked away.
  */
 function isUserAway(): boolean {
   const s = useChat.getState();
@@ -116,7 +116,7 @@ function isEnabled(event: SoundEvent): boolean {
   if (event === "ping") return prefs.dm;
   if (event === "whisper") return prefs.whisper;
   if (event === "tap") return prefs.chat;
-  // Struck sounds piggyback on the chat-events preference for now —
+  // Struck sounds piggyback on the chat-events preference for now,
   // users who've muted ambient chat sounds almost certainly want
   // their action-strike sounds muted too. If a future user
   // preference emerges for "muted chat, but I still want to hear
@@ -128,7 +128,7 @@ function isEnabled(event: SoundEvent): boolean {
 
 function play(event: SoundEvent): void {
   if (!isEnabled(event)) return;
-  // SSR guard — module is imported by code that runs during the Vite
+  // SSR guard, module is imported by code that runs during the Vite
   // dev pre-bundle in some setups; bail before touching the Audio API.
   if (typeof window === "undefined") return;
   try {
@@ -141,7 +141,7 @@ function play(event: SoundEvent): void {
     // Either way there's nothing useful to do, so swallow.
     void el.play().catch(() => { /* autoplay blocked / decode error */ });
   } catch {
-    /* element construction or volume set failed — non-fatal */
+    /* element construction or volume set failed, non-fatal */
   }
 }
 

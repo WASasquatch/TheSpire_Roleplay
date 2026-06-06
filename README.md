@@ -61,7 +61,7 @@ The Messages modal has a resizable two-pane layout (drag the divider, double-cli
 - **`/bookmarks`** - save a message for later. The Bookmarks modal lists every save with a jump-to-message link and a freeform note field.
 - **`/refresh [N]`** - re-fetch the userlist + topic. Pass `N` (5–3600) to set an auto-refresh interval; `/refresh off` disables it.
 - **Custom commands** - admins author their own slash commands at runtime (`/blush`, `/grin`, `/tea`, etc.) with a small template language. They appear in `/help` alongside built-ins, and can default to a custom color.
-- **Inline `!cmd` expansion** - drop a command into the middle of a sentence with a `!` prefix. `She rolls perception !roll:1d20+3 and waits` expands the `!roll:1d20+3` token in place to `( rolls 🎲 1d20+3: 17 + 3 = 20 )`, leaving the rest of the line untouched. `!roll` with no `:arg` defaults to `1d20`. Custom commands opt in to inline form too — admins flag them inline-eligible and they expand on the same `!name[:arg]` token shape. Expansions carry a server-side verification marker so the renderer paints a ✓ tooltip — confirmation that the result really came from the command, not a writer faking output. Escape with `\!cmd` (literal) or put the token inside `` `code` `` / a fenced code block to suppress expansion.
+- **Inline `!cmd` expansion** - drop a command into the middle of a sentence with a `!` prefix. `She rolls perception !roll:1d20+3 and waits` expands the `!roll:1d20+3` token in place to `( rolls 🎲 1d20+3: 17 + 3 = 20 )`, leaving the rest of the line untouched. `!roll` with no `:arg` defaults to `1d20`. Custom commands opt in to inline form too, admins flag them inline-eligible and they expand on the same `!name[:arg]` token shape. Expansions carry a server-side verification marker so the renderer paints a ✓ tooltip, confirmation that the result really came from the command, not a writer faking output. Escape with `\!cmd` (literal) or put the token inside `` `code` `` / a fenced code block to suppress expansion.
 
 Type `/help` for the full searchable reference with subcommand options. `/help <command>` jumps to a specific command's card. The Help modal also has a Guides tab with plain-language walkthroughs of every major feature, and a Formatting tab that doubles as the HTML allow-list reference for profile + world bios.
 
@@ -214,12 +214,12 @@ When you `/request`, Bob sees an inline Accept | Decline card above the chat com
 
 Titles attach to **identities**, not accounts. Master-Alice married to Master-Bob is a separate relationship from Char-Alice married to Char-Bob, so the system follows whichever face you were wearing when you sent the request. The catalog is admin-managed (Admin → Titles), supporting both symmetric kinds (marriage, partner) and asymmetric ones (mentor / apprentice).
 
-### Earning — XP, ranks & cosmetics
+### Earning, XP, ranks & cosmetics
 
-Posting in chat earns **XP** and **Currency**. Both pools accumulate independently at your master OOC level and per character — your characters earn their own progression alongside your account total.
+Posting in chat earns **XP** and **Currency**. Both pools accumulate independently at your master OOC level and per character, your characters earn their own progression alongside your account total.
 
-- **Ranks** are tiered progression bands (Tier I → IV within each rank). Reaching Tier IV in any rank unlocks **borders** — cosmetic frames around your avatar that you can then purchase with Currency.
-- **Earning lookups are private to you** — `/exp` and `/currency` reply only to the caller; no broadcast to the room.
+- **Ranks** are tiered progression bands (Tier I → IV within each rank). Reaching Tier IV in any rank unlocks **borders**, cosmetic frames around your avatar that you can then purchase with Currency.
+- **Earning lookups are private to you**, `/exp` and `/currency` reply only to the caller; no broadcast to the room.
 - **Currency transfers** are gated by admin-configurable daily caps and account-age requirements to limit gold-farming abuse.
 
 | Action | Command |
@@ -233,7 +233,7 @@ Posting in chat earns **XP** and **Currency**. Both pools accumulate independent
 
 ### Items, shop, pets & collections
 
-Each identity (master + each character) keeps its own item inventory. Catalog items — cookies, plushies, tools, weapons, pets, etc. — are admin-curated; you acquire them from the Shop with Currency or as gifts from other players.
+Each identity (master + each character) keeps its own item inventory. Catalog items, cookies, plushies, tools, weapons, pets, etc., are admin-curated; you acquire them from the Shop with Currency or as gifts from other players.
 
 | Action | Command |
 | --- | --- |
@@ -245,9 +245,9 @@ Each identity (master + each character) keeps its own item inventory. Catalog it
 | Throw an item at someone (flavor; consumed) | `/throw <name> [num] <item>` |
 | Drop an item on someone (flavor; consumed) | `/drop <name> [num] <item>` |
 
-`/give` is the only legal cross-identity transfer. Master inventory and each character's inventory are partitioned by design — your character can't reach into your master's pockets and vice versa. If you want to consolidate, `/give` to yourself between identities.
+`/give` is the only legal cross-identity transfer. Master inventory and each character's inventory are partitioned by design, your character can't reach into your master's pockets and vice versa. If you want to consolidate, `/give` to yourself between identities.
 
-`/throw` and `/drop` consume the item for flavor — the target doesn't receive anything. Each item ships with its own random throw / drop lines (set by admins); an item that has no lines for an action refuses that action. Both share a 4-second per-sender cooldown so the room doesn't turn into a flicker of system messages.
+`/throw` and `/drop` consume the item for flavor, the target doesn't receive anything. Each item ships with its own random throw / drop lines (set by admins); an item that has no lines for an action refuses that action. Both share a 4-second per-sender cooldown so the room doesn't turn into a flicker of system messages.
 
 The pinned **Collection** (items) and **Pets** showcases appear on your profile so other players can see what you've curated. Per-identity: each character pins their own; the master account has its own pair too.
 

@@ -1,7 +1,7 @@
 /**
  * URL shape helpers for the public Rules page.
  *
- *   /rules — public landing page that mounts BEFORE auth, so a
+ *   /rules, public landing page that mounts BEFORE auth, so a
  *            registration-form visitor can read the house rules
  *            without signing up first.
  *

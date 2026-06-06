@@ -22,11 +22,11 @@ interface Props {
  * the form surfaces the existing pending application so the user
  * isn't stuck staring at "you already applied" with no out.
  *
- * Empty question list is legal — an application with no Q&A just
+ * Empty question list is legal, an application with no Q&A just
  * captures the applicant's intent-to-join. The Submit button stays
  * enabled in that case because the server doesn't require any text.
  *
- * UX posture: no "Save draft" / "Continue later" — applications are
+ * UX posture: no "Save draft" / "Continue later", applications are
  * short enough that a single-shot fill-and-submit is the right
  * shape. Closing the modal mid-fill loses the draft, same as every
  * other one-off form in the app.
@@ -56,7 +56,7 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
         if ("private" in detail) {
           // Catalog already filtered for visibility, but if a race
           // makes a private stub land here, surface it cleanly.
-          setError("This world is private — you'd need to sign in or be invited.");
+          setError("This world is private, you'd need to sign in or be invited.");
           setQuestions([]);
           setAnswers([]);
           return;
@@ -87,7 +87,7 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
         body: JSON.stringify({ answers: answers.map((a) => a.trim()) }),
       });
       if (!r.ok) {
-        // 409 means a pending application already exists — fetch
+        // 409 means a pending application already exists, fetch
         // the world detail again to populate it so the user sees
         // their current state instead of a dead-end error.
         if (r.status === 409) {
@@ -115,7 +115,7 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
       );
       if (!r.ok) throw new Error(await readError(r));
       // After withdraw, drop the existing-pending state so the form
-      // shows fresh — the user can re-fill and submit again.
+      // shows fresh, the user can re-fill and submit again.
       setExistingPending(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "withdraw failed");
@@ -167,7 +167,7 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
                   </li>
                 ))}
                 {existingPending.questions.length === 0 ? (
-                  <li className="italic text-keep-muted">No questions — just intent to join.</li>
+                  <li className="italic text-keep-muted">No questions, just intent to join.</li>
                 ) : null}
               </ul>
               <div className="flex gap-2">
@@ -192,7 +192,7 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
             <>
               {questions.length === 0 ? (
                 <p className="text-keep-text">
-                  The owner hasn't set any questions — submit to register your interest in joining.
+                  The owner hasn't set any questions, submit to register your interest in joining.
                 </p>
               ) : (
                 <ul className="space-y-2">

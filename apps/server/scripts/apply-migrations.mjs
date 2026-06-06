@@ -28,7 +28,7 @@ if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
  *  apps/server/src/crashLog.ts)
  *
  *  This script runs BEFORE the server starts, so its crashes are
- *  the most-invisible class — Fly's "Logs from previous starts" tab
+ *  the most-invisible class, Fly's "Logs from previous starts" tab
  *  goes empty after 10 restarts and an admin investigating a
  *  migration loop has no way to see what blew up.
  *
@@ -134,7 +134,7 @@ for (const file of files) {
     recordApplied.run(file);
   } catch (err) {
     if (err instanceof Error && ALREADY_APPLIED.test(err.message)) {
-      console.log(`  (already-applied detected — baselining ${file})`);
+      console.log(`  (already-applied detected, baselining ${file})`);
       recordApplied.run(file);
       continue;
     }

@@ -1,5 +1,5 @@
 /**
- * Modal-opening / nav shortcut catalog — the `{token}` syntax used in
+ * Modal-opening / nav shortcut catalog, the `{token}` syntax used in
  * announcements (banner marquee + scheduled `/announce`) and chat
  * bodies to drop in clickable chips that open a modal or navigate to
  * a page.
@@ -22,7 +22,7 @@
  *   - Server: `validateAuthorUiRouteTokens(body, role)` rejects unknown
  *     or unauthorized tokens at save time on every announcement +
  *     chat surface that accepts user-authored text. The token text
- *     stays in the body verbatim so the storage shape is one thing —
+ *     stays in the body verbatim so the storage shape is one thing,
  *     the client extracts and renders.
  *   - Client (markdown chat): `parseInline` recognizes `{token}` and
  *     emits a `UiRouteChip` node.
@@ -37,7 +37,7 @@
 import type { Role } from "./profile.js";
 import { roleRank } from "./profile.js";
 
-/** Earning dashboard tabs — mirrors the `EarningOpenSpec` in apps/web. */
+/** Earning dashboard tabs, mirrors the `EarningOpenSpec` in apps/web. */
 export type UiRouteEarningTab =
   | "overview"
   | "ledger"
@@ -46,7 +46,7 @@ export type UiRouteEarningTab =
   | "cosmetics"
   | "items"
   | "settings";
-/** Items sub-tabs — mirrors `EarningOpenSpec.itemSubTab`. */
+/** Items sub-tabs, mirrors `EarningOpenSpec.itemSubTab`. */
 export type UiRouteItemSubTab = "inventory" | "shop" | "collection" | "pets";
 
 /**
@@ -64,7 +64,7 @@ export type UiRouteTarget =
   | { kind: "modal-admin"; tab?: string }
   | { kind: "nav-scriptorium"; sort?: "latest" }
   /**
-   * DYNAMIC chip — the catalog entry's static label is the fallback
+   * DYNAMIC chip, the catalog entry's static label is the fallback
    * shown before / when the lookup fails; the chip's actual label
    * AND the click target both resolve at render time from the
    * `/stories/splash?limit=1` endpoint via the shared
@@ -93,14 +93,14 @@ export interface UiRoute {
   /** Minimum role required to SEE the rendered chip (default:
    *  anyone). Lets the catalog include admin-only shortcuts in
    *  scheduled announcements without showing them to non-admin
-   *  viewers — the chip simply doesn't render for them. */
+   *  viewers, the chip simply doesn't render for them. */
   viewerRole?: Role;
   /** What the runtime handler does when the chip is clicked. */
   target: UiRouteTarget;
 }
 
 /**
- * The catalog itself. Add new routes here — every other surface
+ * The catalog itself. Add new routes here, every other surface
  * (parser, validator, renderer, dispatcher) picks them up
  * automatically. Token strings MUST be lowercase + use the
  * `[a-z][a-z0-9-]*(?::[a-z0-9-]+)*` shape; the parser regex won't
@@ -140,7 +140,7 @@ export const UI_ROUTES: ReadonlyArray<UiRoute> = [
   { token: "earning:settings", label: "Earning settings", icon: "⚙️", description: "Open Earning → Settings.", target: { kind: "modal-earning", tab: "settings" } },
 
   // ----- Items sub-tabs (bare + nested forms; the bare forms read more
-  //                       naturally inline — "check out the {shop}!") -----
+  //                       naturally inline, "check out the {shop}!") -----
   { token: "items", label: "Items", icon: "🧰", description: "Open Earning → Items.", target: { kind: "modal-earning", tab: "items" } },
   { token: "earning:items", label: "Items", icon: "🧰", description: "Open Earning → Items.", target: { kind: "modal-earning", tab: "items" } },
   { token: "earnings:items", label: "Items", icon: "🧰", description: "Open Earning → Items.", target: { kind: "modal-earning", tab: "items" } },
@@ -221,7 +221,7 @@ export type UiRouteValidationResult = UiRouteValidationFailure | UiRouteValidati
 /**
  * Save-time guard for user-authored bodies. Walks every `{token}`
  * occurrence and rejects on the first KNOWN token whose author-role
- * gate the caller doesn't clear — so a regular user can't smuggle
+ * gate the caller doesn't clear, so a regular user can't smuggle
  * `{modal:admin}` into a chat line and have the chip render for
  * mods downstream.
  *
@@ -231,10 +231,10 @@ export type UiRouteValidationResult = UiRouteValidationFailure | UiRouteValidati
  * curly-brace usage in roleplay ("{nervously}", "{stage
  * direction}") that predates this feature and shouldn't suddenly
  * start rejecting saves. The editor's live preview is the feedback
- * channel for "did my token resolve?" — if no chip renders, the
+ * channel for "did my token resolve?", if no chip renders, the
  * token didn't match the catalog.
  *
- * Pure: no DB or HTTP — just regex + catalog lookup + role-rank
+ * Pure: no DB or HTTP, just regex + catalog lookup + role-rank
  * comparison.
  */
 export function validateAuthorUiRouteTokens(
@@ -244,7 +244,7 @@ export function validateAuthorUiRouteTokens(
   const authorRank = roleRank(authorRole);
   for (const token of findUiRouteTokens(body)) {
     const entry = resolveUiRoute(token);
-    if (!entry) continue; // unknown — treat as literal text
+    if (!entry) continue; // unknown, treat as literal text
     if (entry.authorRole && authorRank < roleRank(entry.authorRole)) {
       return {
         ok: false,
@@ -259,7 +259,7 @@ export function validateAuthorUiRouteTokens(
 /**
  * Viewer-side gate. Returns true when the viewer's role meets the
  * entry's `viewerRole` threshold (or no threshold was declared).
- * Used by the renderer to hide chips a viewer shouldn't see — the
+ * Used by the renderer to hide chips a viewer shouldn't see, the
  * raw `{token}` text falls back as plain text in that case so a
  * scheduled announcement targeted at mods doesn't reveal admin
  * tooling to a regular user.
@@ -271,7 +271,7 @@ export function canViewerSeeUiRoute(entry: UiRoute, viewerRole: Role | null): bo
 }
 
 /**
- * Split a body into alternating text + token segments — the building
+ * Split a body into alternating text + token segments, the building
  * block both the markdown chat renderer and the HTML-body
  * post-processor share. Each token segment carries the original
  * lowercase token; consumers resolve via {@link resolveUiRoute}.
@@ -297,7 +297,7 @@ export function splitOnUiRouteTokens(body: string): UiRouteSegment[] {
   return out;
 }
 
-/** HTML-attribute-safe escape — used by {@link renderUiRouteChipsInHtml}
+/** HTML-attribute-safe escape, used by {@link renderUiRouteChipsInHtml}
  *  so the inserted chip markup can't smuggle a token's label into
  *  attribute context. The catalog labels are all hardcoded today,
  *  but the contract should hold if a future entry pulls its label
@@ -321,7 +321,7 @@ function escapeHtml(s: string): string {
  * Post-process server-sanitized HTML to swap every recognized
  * `{token}` text occurrence for an interactive `<button>` chip. Used
  * by the BannerMarquee + the announce-kind renderer's `bodyHtml`
- * branch — both surfaces render trusted HTML and would otherwise
+ * branch, both surfaces render trusted HTML and would otherwise
  * leave the token as literal `{rules}` text inside a `<p>`.
  *
  * The chip carries `data-tk-ui-route="<token>"`; a delegated click
@@ -335,7 +335,7 @@ function escapeHtml(s: string): string {
  */
 /**
  * Marker tag for the post-mount hydration helper. A chip whose target
- * resolves dynamically (e.g. "latest published story" — title only
+ * resolves dynamically (e.g. "latest published story", title only
  * known at render time) gets stamped with this attribute so the
  * helper can scan, fetch the resolved label, and rewrite the chip's
  * `.tk-ui-route-chip-label` span in place. Static targets return
@@ -372,14 +372,14 @@ export function renderUiRouteChipsInHtml(html: string): string {
     return (
       `<button type="button" data-tk-ui-route="${safeToken}"${dynamicAttr} title="${safeTitle}" aria-label="${safeTitle}"` +
       // Chip size matches the surrounding text (`text-[1em]`) instead
-      // of the previous 0.85em shrink — at chat-line scale the
+      // of the previous 0.85em shrink, at chat-line scale the
       // smaller pill read as a footnote, and inside the marquee
       // (text-sm wrapper) it looked visibly under-scaled next to
       // the rest of the body. Em-relative so a future surface that
       // sets a different base font (e.g. an `<h2>`-sized scheduled
       // announce) also gets a proportionally-sized chip.
       // Spacing posture: `mx-1.5` keeps the chip from kissing the
-      // adjacent text — the previous `mx-0.5` left the bracketed
+      // adjacent text, the previous `mx-0.5` left the bracketed
       // body wrapping the chip with no visual breathing room.
       // `px-1` trims the internal padding back from the pill
       // pre-bump so the chip doesn't read as oversized vs.

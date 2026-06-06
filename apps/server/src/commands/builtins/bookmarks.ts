@@ -13,7 +13,7 @@ export const bookmarksCommand: CommandHandler = {
   name: "bookmarks",
   aliases: ["saved", "marks"],
   usage: "/bookmarks",
-  description: "Open your bookmarks — chat messages and threads you've saved for later.",
+  description: "Open your bookmarks, chat messages and threads you've saved for later.",
   run(ctx) {
     if (ctx.argsText.trim()) {
       ctx.socket.emit("error:notice", {

@@ -1,5 +1,5 @@
 /**
- * UI-route dispatch — the in-process event bus that connects a
+ * UI-route dispatch, the in-process event bus that connects a
  * `{token}` chip click (in chat, in the banner marquee, or in a
  * scheduled-announcement body) to the matching modal setter on the
  * Chat shell.
@@ -8,7 +8,7 @@
  * every consumer (markdown chip, HTML chip delegate listener) calls
  * `openUiRoute(token)` and the resolution + dispatch happens in one
  * place. Adding a new modal target = adding one branch to the Chat
- * listener AND one row to the shared catalog — no per-call wiring.
+ * listener AND one row to the shared catalog, no per-call wiring.
  *
  * Custom-event indirection (instead of, say, threading a setter prop
  * down through the markdown renderer) means every render surface
@@ -26,7 +26,7 @@ export const UI_ROUTE_EVENT = "tk:open-ui-route";
 export interface UiRouteOpenDetail {
   /** The raw token the chip carried (already lowercase). */
   token: string;
-  /** Resolved catalog entry — handlers narrow on `entry.target.kind`. */
+  /** Resolved catalog entry, handlers narrow on `entry.target.kind`. */
   entry: UiRoute;
 }
 
@@ -46,7 +46,7 @@ export function openUiRoute(token: string): boolean {
 }
 
 /**
- * Convenience for the Chat shell's `useEffect` listener — typed
+ * Convenience for the Chat shell's `useEffect` listener, typed
  * helper around `addEventListener` so the consumer doesn't have to
  * widen-then-narrow the event detail every time.
  */
@@ -67,7 +67,7 @@ export type { UiRouteTarget };
 
 /**
  * Attribute the HTML-chip generator stamps on every rendered
- * `<button>` — used by the delegated click handler to recognize the
+ * `<button>`, used by the delegated click handler to recognize the
  * chip when its surrounding markup was rendered through
  * `dangerouslySetInnerHTML` (banner marquee, scheduled-announce
  * bodyHtml branch). React's synthetic event system can't bind
@@ -77,7 +77,7 @@ export type { UiRouteTarget };
 export const UI_ROUTE_DATA_ATTR = "data-tk-ui-route";
 
 /**
- * Delegated click handler factory — pass the result to a wrapping
+ * Delegated click handler factory, pass the result to a wrapping
  * element's `onClick` prop. Inspects the click target chain for a
  * `[data-tk-ui-route]` ancestor and, if found, dispatches the open
  * event and prevents the default chain from continuing (so a banner

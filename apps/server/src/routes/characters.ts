@@ -29,9 +29,9 @@ const CHAR_NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
 /**
  * Mirrors `normalizeCharName` in commands/builtins/char.ts. Folds NBSP
  * (U+00A0) to ASCII space before the regex test so a name typed with a
- * "fake space" — autocorrect on macOS / iOS, paste from a NBSP-using
+ * "fake space", autocorrect on macOS / iOS, paste from a NBSP-using
  * source, or a click on an existing master-username link whose
- * canonical storage IS NBSP — lands without a confusing BAD_CHAR_NAME
+ * canonical storage IS NBSP, lands without a confusing BAD_CHAR_NAME
  * error. Keep the two normalizers in sync.
  */
 function normalizeCharName(input: string): string {
@@ -65,8 +65,8 @@ const themeSchema = z.object({
 // Vibe axes: bipolar 0..100 or null (unset). Each shared axis key
 // gets its own optional+nullable number slot. Listing the axes
 // explicitly here (rather than reflecting off CHARACTER_VIBE_AXES
-// dynamically) keeps the Zod inference clean — z.object built from a
-// computed record loses the per-key type info — and adding a new axis
+// dynamically) keeps the Zod inference clean, z.object built from a
+// computed record loses the per-key type info, and adding a new axis
 // is still a two-touch change (shared catalog + this object), which is
 // the right tradeoff for a security-relevant validator.
 // Unknown axis keys are dropped by `.strict()` rather than echoed back
@@ -101,7 +101,7 @@ const attributeRowSchema = z.object({
   { message: "value must satisfy min <= value <= max" },
 );
 
-// Visibility map mirrors the shared `CharacterStatsVisibility` shape —
+// Visibility map mirrors the shared `CharacterStatsVisibility` shape,
 // each known field is an optional boolean (undefined = show by default,
 // false = hide on the rendered profile, true = show).
 const visibilitySchema = z.object({
@@ -134,7 +134,7 @@ const statsSchema = z.object({
       // React-key collisions on the renderer side AND let a duplicate
       // post quietly overwrite an older row's data on re-save (since
       // the editor finds rows by id). Reject the whole save rather
-      // than silently dedupe — a duplicate is a real bug somewhere
+      // than silently dedupe, a duplicate is a real bug somewhere
       // upstream and the operator wants to see the 400.
       (rows) => new Set(rows.map((r) => r.id)).size === rows.length,
       { message: "attribute row ids must be unique" },
@@ -162,7 +162,7 @@ const hexColor = z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "color
 /** Avatar zoom / pan / focal-point validator. The shared
  *  `clampAvatarCrop` snaps wild numbers to safe ranges on the way out,
  *  but we still hand-validate inputs here so a malformed body returns
- *  a 400 instead of silently snapping to defaults — clearer error
+ *  a 400 instead of silently snapping to defaults, clearer error
  *  feedback for the editor when something is off. */
 const avatarCropSchema = z.object({
   zoom: z.number().min(1.0).max(4.0),
@@ -187,7 +187,7 @@ const updateBody = z.object({
    * Per-character chat color override. Null = inherit the master
    * account's chat color (existing behavior). When set, messages
    * authored AS this character render in this color regardless of the
-   * tab's `/color` state — so Character A and Character B can keep
+   * tab's `/color` state, so Character A and Character B can keep
    * distinct chat colors under one account without having to
    * re-issue `/color` after every `/char switch`.
    */
@@ -204,10 +204,10 @@ const updateBody = z.object({
   /** NSFW gate: forces non-public to anonymous + adds a viewer warning splash. */
   isNsfw: z.boolean().optional(),
   /**
-   * Public-profile backdrop image URL. Same validator as avatarUrl —
+   * Public-profile backdrop image URL. Same validator as avatarUrl,
    * http(s), length-capped. Null clears the override (profile modal
    * falls back to the default spire splash). Empty string also reads
-   * as "clear" — normalized to null on write so the column stays
+   * as "clear", normalized to null on write so the column stays
    * single-shaped.
    */
   publicProfileBgUrl: httpUrl.nullable().optional(),
@@ -219,7 +219,7 @@ const updateBody = z.object({
    * conversations were backfilled to true by migration 0183. Editing
    * this from the profile editor flips the visibility of this
    * character to friend-request lookups and DM recipient pickers
-   * across the whole site — see characters.directMessengerEnabled
+   * across the whole site, see characters.directMessengerEnabled
    * column comment for the gate semantics.
    */
   directMessengerEnabled: z.boolean().optional(),
@@ -228,7 +228,7 @@ const updateBody = z.object({
 const masterUpdateBody = z.object({
   bioHtml: z.string().max(BIO_HARD_CAP).optional(),
   avatarUrl: httpUrl.nullable().optional(),
-  /** Same shape as the character schema's avatarCrop. Optional —
+  /** Same shape as the character schema's avatarCrop. Optional,
    *  omit to keep the existing crop. */
   avatarCrop: avatarCropSchema.optional(),
   /** OOC-side counterpart of the character flag; same semantics. */
@@ -238,14 +238,14 @@ const masterUpdateBody = z.object({
   theme: themeSchema.nullable().optional(),
   /**
    * Per-user theme style override. Null clears the override (user falls
-   * back to the site default). Bounded to a reasonable length — actual
+   * back to the site default). Bounded to a reasonable length, actual
    * validity against the registered style catalog is checked client-
    * side; the server stores whatever string the user picked.
    */
   styleKey: z.string().min(1).max(64).nullable().optional(),
   /**
    * Free-form CSS font-family stack. Null clears the override. Capped at
-   * 200 chars — long enough for any reasonable stack with multiple
+   * 200 chars, long enough for any reasonable stack with multiple
    * fallbacks, short enough to refuse pathological pasted blobs. Stored
    * verbatim; CSS rejects unknown families silently, so a bad value just
    * degrades to the next font in the stack on the client side.
@@ -269,7 +269,7 @@ const masterUpdateBody = z.object({
   /**
    * Input-behavior opt-outs. Default off (= features stay on) so
    * existing users don't notice a change until they tick the box.
-   * Both are account-wide — switching characters doesn't reset them.
+   * Both are account-wide, switching characters doesn't reset them.
    */
   disableInputHistory: z.boolean().optional(),
   disableThesaurus: z.boolean().optional(),
@@ -285,9 +285,9 @@ const masterUpdateBody = z.object({
     .max(50)
     .optional(),
   /**
-   * Userlist display preference — render the rank sigil instead of
+   * Userlist display preference, render the rank sigil instead of
    * the gender glyph in rooms-tree rows. Self-hides when the user
-   * has no resolved rank. Default false. (Legacy field — kept for
+   * has no resolved rank. Default false. (Legacy field, kept for
    * back-compat; the actual rank-icon swap is now unconditional.)
    */
   useRankAsUserlistIcon: z.boolean().optional(),
@@ -331,7 +331,7 @@ const updatePortraitBody = z.object({
   /** Allow URL edits in place so the card-based editor can repair
    *  typos without forcing a delete + re-add (which would invalidate
    *  the row id and break any references). Same validator as the
-   *  POST body — http(s) only, length-capped. */
+   *  POST body, http(s) only, length-capped. */
   url: httpUrl.optional(),
   label: z.string().max(60).nullable().optional(),
   sortOrder: z.number().int().min(0).max(1000).optional(),
@@ -422,7 +422,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       // If the character's chat color changed, every room this user is
       // currently parked in needs its userlist re-broadcast so other
       // viewers see the new color metadata on the occupant row. Mirrors
-      // the broadcast the /color slash command already does — without
+      // the broadcast the /color slash command already does, without
       // this, a color set via the editor only shows up to others on
       // their next message-driven render.
       if (body.chatColor !== undefined) {
@@ -454,7 +454,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       reply.code(403);
       return { error: "not yours - use /profiles/:name to view another character's public profile" };
     }
-    // This endpoint feeds the bio editor's textarea — undo the
+    // This endpoint feeds the bio editor's textarea, undo the
     // paragraph-break `<br>` tags the save pass adds so the writer sees
     // clean source text instead of literal `<br>` strings. Viewer-facing
     // profile reads go through /profiles/:name and keep the persisted
@@ -503,7 +503,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       return { error: "Character name must be 1-40 chars: letters, numbers, spaces, _ - '" };
     }
 
-    // Space-insensitive dup check — uses the same helper the friend /
+    // Space-insensitive dup check, uses the same helper the friend /
     // DM / whisper paths use, so a creating user can't sneak around an
     // existing "William Wallace" by retyping it with NBSP between the
     // words (or vice-versa). Pairs with `normalizeCharName` above which
@@ -575,7 +575,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     // character (set via socket /char or me:switch-character). Sweep
     // every owner socket, clear the tab override on any that match, and
     // notify each so its React state drops to OOC without a poll. Same
-    // sweep also feeds the presence rebroadcast — a tombstoned name
+    // sweep also feeds the presence rebroadcast, a tombstoned name
     // shouldn't linger in any occupant list the owner was visible in.
     const sockets = await io.fetchSockets();
     const affectedRooms = new Set<string>();
@@ -646,7 +646,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       awayMessage: u.awayMessage,
       activeCharacterId: u.activeCharacterId,
       activeCharacterName,
-      // Strict parse — returns null when the user has no theme of
+      // Strict parse, returns null when the user has no theme of
       // their own so the client can fall through to the live
       // `branding.defaultTheme` instead of freezing a snapshot of the
       // site default at fetch time. (Previously this used the resolving
@@ -656,10 +656,10 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       theme: parseOwnThemeJson(u.themeJson),
       // Per-user style override. Null means "follow the site default";
       // the client resolves user > site > hard-coded fallback. Style is
-      // orthogonal to `theme` above — they compose.
+      // orthogonal to `theme` above, they compose.
       styleKey: u.styleKey,
       // Per-user UI font + size accessibility preferences. Null on either
-      // means "use the application default" — the client resolves both
+      // means "use the application default", the client resolves both
       // independently and applies them via CSS variables on <html>.
       uiFontFamily: u.uiFontFamily,
       uiFontScale: u.uiFontScale,
@@ -1057,7 +1057,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         ...(body.hideForumTopicCount !== undefined ? { hideForumTopicCount: body.hideForumTopicCount } : {}),
         ...(body.hideForumReplyCount !== undefined ? { hideForumReplyCount: body.hideForumReplyCount } : {}),
         // Master chat color. Mirrors the `/color` slash command's
-        // master-scope write — this is the value that drives OOC
+        // master-scope write, this is the value that drives OOC
         // messages and acts as the fallback for any character whose
         // own override is null. Partial update (null clears, hex sets,
         // absent leaves alone).
@@ -1076,7 +1076,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       body.useRankAsUserlistIcon !== undefined ||
       body.showRankInUserlist !== undefined
     ) {
-      // Same userlist re-broadcast as the character PUT does — keeps
+      // Same userlist re-broadcast as the character PUT does, keeps
       // every viewer's occupant row in sync with the new metadata.
       // useRankAsUserlistIcon needs the same treatment: a fresh toggle
       // has to repaint every viewer's rail (the rank sigil takes over

@@ -8,7 +8,7 @@
 --
 -- Per the consolidation plan, existing user picks are reset to NULL so
 -- everyone falls back to the site default. The site default itself is
--- coerced to one of the three known roots — anything else maps to
+-- coerced to one of the three known roots, anything else maps to
 -- 'medieval'.
 UPDATE `users` SET `style_key` = NULL;
 --> statement-breakpoint

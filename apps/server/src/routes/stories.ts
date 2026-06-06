@@ -224,7 +224,7 @@ const createReplyBody = z.object({
 }).strict();
 
 const applauseToggleBody = z.object({
-  /** Optional — null/omitted toggles applause on the whole story. */
+  /** Optional, null/omitted toggles applause on the whole story. */
   chapterId: z.string().nullable().optional(),
 }).strict();
 
@@ -454,7 +454,7 @@ async function viewerMayRead(
   }
 
   // Anonymous viewers can read up through R (PUBLIC_READABLE_RATINGS).
-  // Only NC-17 is gated behind the login wall — the rest is
+  // Only NC-17 is gated behind the login wall, the rest is
   // publicly readable so the Scriptorium has the bulk of its catalog
   // open to share off-site.
   const publicReadable = (PUBLIC_READABLE_RATINGS as readonly string[]).includes(story.rating);
@@ -546,7 +546,7 @@ type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 /**
  * Sync, transactional twin of `recountStoryTotals`. Use inside a
  * `db.transaction(...)` block when chapter mutations + story totals
- * must commit atomically — otherwise a crash between the chapter
+ * must commit atomically, otherwise a crash between the chapter
  * UPDATE and the totals UPDATE leaves the story row claiming a word
  * count that doesn't match its chapters.
  */
@@ -586,7 +586,7 @@ async function appendChapterVersion(
  * commit atomically with surrounding chapter / story writes.
  *
  * Picks the next version number via a SUBQUERY in the INSERT so the
- * "read MAX, then INSERT MAX+1" race is eliminated — two concurrent
+ * "read MAX, then INSERT MAX+1" race is eliminated, two concurrent
  * saves under the SQLite write lock would otherwise both read the
  * same MAX and the loser would 500 on the `(chapter_id, version)`
  * unique index. The subquery evaluates inside the same transaction
@@ -659,7 +659,7 @@ async function isOwnIdentity(db: Db, userId: string, characterId: string | null)
  *
  * Returns an object the caller can spot-check (`perm.editChapters`,
  * `perm.publish`, `perm.manageCollaborators`, etc.). The view-side
- * `viewerMayRead` gate is separate and runs first — this helper only
+ * `viewerMayRead` gate is separate and runs first, this helper only
  * answers "what does this viewer get to MUTATE."
  */
 async function effectiveStoryPermissions(
@@ -868,7 +868,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
   /* ---------- Splash bookshelf (anonymous-safe) ----------
    *
    * Picks every public, non-draft, non-abandoned story regardless
-   * of rating — including NC-17. The splash bookshelf renderer
+   * of rating, including NC-17. The splash bookshelf renderer
    * paints the lock overlay + "Log in or register to read" hint
    * on NC-17 entries (same pattern as the catalog card tile), and
    * the body-open route returns the login-required private-stub
@@ -945,7 +945,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     //     step (splash warning before display), not at catalog
     //     listing time.
     //   - Anonymous viewers ALSO see every rating, including NC-17,
-    //     in the listing — the card-tile renderer paints a
+    //     in the listing, the card-tile renderer paints a
     //     lock overlay + "Log in or register to read" hint on
     //     NC-17 entries, and the body-open route returns the
     //     login-required private-stub for NC-17 to anonymous.
@@ -1310,7 +1310,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       try { body = updateChapterBody.parse(req.body); }
       catch { reply.code(400); return { error: "invalid body" }; }
 
-      // Pre-sanitize HTML outside the transaction — sanitize-html runs
+      // Pre-sanitize HTML outside the transaction, sanitize-html runs
       // a full parse and is the heaviest synchronous work on the path.
       // Keeping it outside means the write lock is held for the
       // minimum window (just the DB writes).
@@ -1319,7 +1319,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
 
       // Atomic write phase. Story status promotion, chapter UPDATE,
       // version append, and totals recount all commit or all roll back
-      // together — a crash between any pair would otherwise leave the
+      // together, a crash between any pair would otherwise leave the
       // story claiming "in_progress" with no actually-published
       // chapter, or a chapter saved with no corresponding version
       // history row.
@@ -1362,7 +1362,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
 
         const publishingNow = body.status === "published" && c.status !== "published";
         if (body.status !== undefined) {
-          // Publishing is gated separately from editing — editors can
+          // Publishing is gated separately from editing, editors can
           // save changes but only co_authors / owners can flip the
           // chapter live.
           if (publishingNow && !perm.publish) {
@@ -1371,7 +1371,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
           update.status = body.status;
           if (publishingNow) {
             update.publishedAt = new Date();
-            // Strip margin notes on publish — collaborator-side
+            // Strip margin notes on publish, collaborator-side
             // drafting annotations MUST NOT survive into the public
             // chapter. Both body and author's notes can carry them.
             const strippedBody = stripMarginNotes(nextBody);
@@ -1556,7 +1556,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       try { body = upsertReadingPositionBody.parse(req.body ?? {}); }
       catch { reply.code(400); return { error: "invalid body" }; }
 
-      // A reader can't pin a position to a chapter outside this story —
+      // A reader can't pin a position to a chapter outside this story,
       // otherwise the client could spray cross-story chapter ids through
       // the column and leak existence.
       if (body.lastChapterId) {
@@ -1600,7 +1600,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
           lastAnchorId: body.lastAnchorId ?? null,
           percentThrough: percentX10,
         });
-        // Atomic increment — read-modify-write would under-count under
+        // Atomic increment, read-modify-write would under-count under
         // concurrent first-reads from the same reader (rare) or, more
         // realistically, double-count when retried.
         await db
@@ -1650,7 +1650,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
    * directions: second call removes the row. Returns the post-toggle
    * total + viewer state.
    *
-   * Author cannot see WHO applauded — only the rollup count.
+   * Author cannot see WHO applauded, only the rollup count.
    */
   app.post<{ Params: { id: string }; Body: unknown }>("/stories/:id/applause", async (req, reply) => {
     const me = await getSessionUser(req, db);
@@ -1661,7 +1661,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       reply.code(409);
       return { error: "author has applause disabled for this story" };
     }
-    // Authors can't applaud their own work — mirrors the self-review
+    // Authors can't applaud their own work, mirrors the self-review
     // block and stops the rollup from being inflated by the creator.
     if (s.authorUserId === me.id) {
       reply.code(403);
@@ -1745,7 +1745,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       const me = await getSessionUser(req, db);
       const s = (await db.select().from(stories).where(eq(stories.id, req.params.id)).limit(1))[0];
       if (!s) { reply.code(404); return { error: "not found" }; }
-      // Mirrors the read gate on the rest of the story surface — otherwise
+      // Mirrors the read gate on the rest of the story surface, otherwise
       // this endpoint leaks applauseCount + existence for private/unlisted.
       const access = await viewerMayRead(s, me?.id ?? null, me?.role ?? null, db);
       if (!access.ok) {
@@ -1850,7 +1850,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       reviews.push(reviewRowToWire(row, reviewer, replies));
     }
 
-    // Keep `total` aligned with what the viewer actually sees — the
+    // Keep `total` aligned with what the viewer actually sees, the
     // stored rollup counts only public reviews, but author/admin/own
     // views surface hidden ones too. avgRating is recomputed from the
     // same visible set so the displayed stars don't disagree with the
@@ -1941,7 +1941,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
 
   /**
    * Edit your own review during the 60-second grace window. After
-   * grace, returns 409 — the wire is honest: this isn't a quiet no-op.
+   * grace, returns 409, the wire is honest: this isn't a quiet no-op.
    */
   app.patch<{ Params: { id: string; rid: string }; Body: unknown }>(
     "/stories/:id/reviews/:rid",
@@ -2045,7 +2045,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       const update: Partial<typeof storyReviews.$inferInsert> = { updatedAt: new Date() };
       if (body.pinnedByAuthor !== undefined) {
         update.pinnedByAuthor = body.pinnedByAuthor ? 1 : 0;
-        // Only one pinned review per story — clear any previous pin.
+        // Only one pinned review per story, clear any previous pin.
         if (body.pinnedByAuthor) {
           await db
             .update(storyReviews)
@@ -2062,7 +2062,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
   );
 
   /**
-   * Reply to a review. The chain is one level deep — replies to
+   * Reply to a review. The chain is one level deep, replies to
    * replies aren't supported (matches the spec). The story author
    * replying is a common case; we don't gate by "are you the author"
    * here since any reader can leave a reply.
@@ -2146,7 +2146,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
    * ===================================================== */
 
   /**
-   * Toggle follow on a story. POST is idempotent in both directions —
+   * Toggle follow on a story. POST is idempotent in both directions,
    * second call removes the row. Optional `pushEnabled` in the body
    * lets the same call opt into web-push at follow time; otherwise
    * use PATCH below to flip it later without un-following.
@@ -2212,7 +2212,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       if (!s) { reply.code(404); return { error: "not found" }; }
       // A reader who lost access to a story (visibility flipped to
       // private after they subscribed) shouldn't be able to flap push
-      // settings any further — same gate the POST already enforces.
+      // settings any further, same gate the POST already enforces.
       const access = await viewerMayRead(s, me.id, me.role, db);
       if (!access.ok) { reply.code(403); return { error: "forbidden" }; }
       const existing = (await db
@@ -2578,7 +2578,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
           .set({
             role: body.role as StoryCollaboratorRole,
             invitedByUserId: me.id,
-            // Don't reset acceptedAt — an active collaborator's role
+            // Don't reset acceptedAt, an active collaborator's role
             // change is immediate; a pending invite stays pending.
           })
           .where(and(
@@ -2694,7 +2694,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       .limit(1))[0];
     if (!row) { reply.code(404); return { error: "no pending invite" }; }
     if (row.acceptedAt) {
-      // Idempotent — already accepted, return ok.
+      // Idempotent, already accepted, return ok.
       return { ok: true };
     }
     await db
@@ -2720,7 +2720,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       ))
       .limit(1))[0];
     if (!row) { reply.code(404); return { error: "no pending invite" }; }
-    // Already-accepted rows can also be declined here — that's just
+    // Already-accepted rows can also be declined here, that's just
     // "leave this collaboration" via the invites surface, equivalent
     // to DELETE /stories/:id/collaborators/:me.id. Symmetry is nice.
     await db
@@ -2779,7 +2779,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
   /* ===================================================== *
    *  Chapter soft-lock (Phase 5)
    *
-   *  Advisory — "force edit" still saves; the lock just surfaces a
+   *  Advisory, "force edit" still saves; the lock just surfaces a
    *  banner. Lease is STORY_CHAPTER_LOCK_LEASE_MS since last refresh;
    *  the client heartbeats every STORY_CHAPTER_LOCK_HEARTBEAT_MS.
    * ===================================================== */
@@ -2819,19 +2819,19 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       if (existing) {
         const expired = +existing.lastRefreshAt + STORY_CHAPTER_LOCK_LEASE_MS < now;
         if (existing.userId === me.id) {
-          // Caller's own lock — refresh the lease.
+          // Caller's own lock, refresh the lease.
           await db
             .update(storyChapterLocks)
             .set({ lastRefreshAt: new Date() })
             .where(eq(storyChapterLocks.chapterId, c.id));
         } else if (expired) {
-          // Stale holder — take over.
+          // Stale holder, take over.
           await db
             .update(storyChapterLocks)
             .set({ userId: me.id, acquiredAt: new Date(), lastRefreshAt: new Date() })
             .where(eq(storyChapterLocks.chapterId, c.id));
         } else {
-          // Active foreign holder — return their state without acquiring.
+          // Active foreign holder, return their state without acquiring.
           const holder = await loadLockHolder(db, existing.userId);
           const payload: StoryChapterLockState = {
             chapterId: c.id,
@@ -2867,7 +2867,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
 
   /**
    * Release a lock the caller owns. No-op if the caller isn't the
-   * holder (foreign locks aren't releasable from this endpoint —
+   * holder (foreign locks aren't releasable from this endpoint,
    * they expire naturally).
    */
   app.delete<{ Params: { id: string; chapterId: string } }>(
@@ -2924,7 +2924,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       const now = Date.now();
       const expired = +existing.lastRefreshAt + STORY_CHAPTER_LOCK_LEASE_MS < now;
       if (expired) {
-        // Lazy GC, scoped to the holder we just observed — otherwise a
+        // Lazy GC, scoped to the holder we just observed, otherwise a
         // concurrent takeover could be deleted by a stale-state request.
         await db
           .delete(storyChapterLocks)
@@ -2972,7 +2972,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
    *  Reports (Phase 10)
    *
    *  Single-table moderation queue keyed by (targetKind, targetId).
-   *  Filing is idempotent — second click silently no-ops thanks to
+   *  Filing is idempotent, second click silently no-ops thanks to
    *  the (reporterUserId, targetKind, targetId) unique index.
    * ===================================================== */
 
@@ -3028,7 +3028,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
           snapshotJson: JSON.stringify(snapshot),
         });
       } catch {
-        // Likely the unique index — second-click silently no-ops.
+        // Likely the unique index, second-click silently no-ops.
         return { ok: true, alreadyReported: true };
       }
       reply.code(201);
@@ -3040,7 +3040,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
 
   /**
    * Admin: list reports filtered by status / kind / story. Default sort
-   * is open-first then newest. Cap at 100 per call — large queues should
+   * is open-first then newest. Cap at 100 per call, large queues should
    * paginate via the `before` cursor.
    */
   app.get<{ Querystring: { status?: string; targetKind?: string; storyId?: string; limit?: string } }>(
@@ -3165,7 +3165,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
    * Admin: force-rate a story (override author's rating). Audit-logged.
    * Useful when a reporter flags a story as mis-rated (e.g., reads as
    * R but the author shipped PG-13). The author cannot revert this
-   * without a new admin review — that gate is enforced in the UI, not
+   * without a new admin review, that gate is enforced in the UI, not
    * here (the route accepts patches from authors too; admins set a
    * `force_locked` flag in a future iteration if we need hard lock).
    */
@@ -3255,13 +3255,13 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
 }
 
 /* =========================================================
- *  Module-level helpers — called from inside the route registration
+ *  Module-level helpers, called from inside the route registration
  *  function as fire-and-forget after publish events.
  * ========================================================= */
 
 /**
  * Push a `story:invite` event to every live socket owned by `userId`.
- * Mirrors `emitMutualPrompt` for collaborator invites — Accept |
+ * Mirrors `emitMutualPrompt` for collaborator invites, Accept |
  * Decline card lands above the chat composer the same way mutual
  * titles do.
  */
@@ -3442,7 +3442,7 @@ async function notifyPublish(
 /**
  * Daily-publish XP trickle. Per the project ethos memory: NO daily
  * streaks, NO grinding. This grants a small one-shot XP per UTC day
- * regardless of how many chapters the author publishes — once per day,
+ * regardless of how many chapters the author publishes, once per day,
  * no chaining. The cap is enforced by looking back at the earning
  * ledger for any prior `scriptorium_daily_publish` row in the current
  * UTC day; if one exists, the call no-ops.

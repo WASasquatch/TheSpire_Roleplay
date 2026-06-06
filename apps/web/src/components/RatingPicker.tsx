@@ -7,7 +7,7 @@ interface Props {
   /** Optional id-prefix for the radio inputs so two pickers on the same
    *  page (e.g. New Story wizard + an open editor) don't share names. */
   name?: string;
-  /** Compact mode trims the description text — used inside the New
+  /** Compact mode trims the description text, used inside the New
    *  Story wizard where vertical space is tighter. */
   compact?: boolean;
 }
@@ -17,7 +17,7 @@ interface Props {
  * full rating catalog as a stack of selectable cards, each with the
  * rating chip + short label + descriptive copy explaining what the
  * tier covers. Drops the previous `<select>` because writers were
- * picking the wrong tier without the inline guidance — the line
+ * picking the wrong tier without the inline guidance, the line
  * between R and NC-17 in particular is "depicted vs. graphic" and
  * needs to be spelled out.
  *
@@ -112,7 +112,7 @@ function RatingCard({
 }
 
 /* =============================================================
- *  Per-tier color accents — applied only when the card is selected.
+ *  Per-tier color accents, applied only when the card is selected.
  *  Tailwind class strings (not inline styles) so the theme variables
  *  flow through opacity modifiers correctly.
  * ============================================================= */

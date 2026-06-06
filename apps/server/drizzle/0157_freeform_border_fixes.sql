@@ -1,20 +1,20 @@
 -- Targeted fixes to four borders after the 0156 compact pass:
 --
---   Quantum drift — the orbit math in 0156 was wrong. Dots were
+--   Quantum drift, the orbit math in 0156 was wrong. Dots were
 --     positioned at `left: -1px` / `right: -1px` / `top: -1px` and
 --     then orbited via `rotate(R) translateX(42) rotate(-R)`. That
 --     transform rotates around the dot's OWN center, so the orbit
 --     was centered on the dot's starting position (offset from
---     .av center) instead of the avatar's center — dots reached
+--     .av center) instead of the avatar's center, dots reached
 --     ~42px past the .av edge in the rotation direction opposite
 --     to their starting side. Refactored to position dots AT the
 --     .av center via `top:50% left:50% margin:-1.5px`, then orbit
 --     at a controlled radius. All three dots now share one orbit,
 --     spaced via `animation-delay` so they sit at different angles.
 --
---   Hologram — the original used two animations on `.pic`
+--   Hologram, the original used two animations on `.pic`
 --     (hoCounter + hoShift) that BOTH set `transform`, which made
---     the second one always clobber the first — the avatar
+--     the second one always clobber the first, the avatar
 --     ended up spinning with the parent instead of staying still,
 --     and the scanline overlay sat BEHIND the avatar (pseudo-
 --     elements default below the .pic z-index: 10) so there were
@@ -23,12 +23,12 @@
 --     avatar via z-index 11 + screen blend, chromatic glitch via
 --     filter on .pic.
 --
---   Phoenix plumage — feathers translated -44px from .av center
+--   Phoenix plumage, feathers translated -44px from .av center
 --     left the feather tips ~8px past the frame edge at native
 --     (≈13px at xl). Pulled to -34px so the crown sits at or
 --     just past the frame edge.
 --
---   Seraph — rays' transform-origin was 48px below the ray top,
+--   Seraph, rays' transform-origin was 48px below the ray top,
 --     pivoting at avatar center, but the ray top at `-7px` meant
 --     the outer tip orbited at radius 48 from center (7px past
 --     the .av edge). Pulled top to -3px and origin to 44px so the
@@ -71,7 +71,7 @@ SET `style_css` = '.b-holo {
   background: conic-gradient(from 0deg, #00bcd4, #e040fb, #00e5ff, #ff4081, #00bcd4);
   box-shadow: 0 0 10px rgba(0,229,255,.5);
 }
-/* Scanlines OVER the avatar — z-index 11 puts this above .pic
+/* Scanlines OVER the avatar, z-index 11 puts this above .pic
    (z=10 from the preamble); screen blend keeps the portrait
    visible underneath. */
 .b-holo::before {
@@ -91,7 +91,7 @@ SET `style_css` = '.b-holo {
   pointer-events: none;
   mix-blend-mode: screen;
 }
-/* Outer chromatic glitch ring — sits on top of everything. */
+/* Outer chromatic glitch ring, sits on top of everything. */
 .b-holo::after {
   content: "";
   position: absolute;
@@ -102,7 +102,7 @@ SET `style_css` = '.b-holo {
   z-index: 12;
   pointer-events: none;
 }
-/* Avatar stays stable — only a periodic chromatic-aberration
+/* Avatar stays stable, only a periodic chromatic-aberration
    flicker via filter (no transform, so it doesnt fight with the
    preamble or rotate weirdly). */
 .b-holo .pic {

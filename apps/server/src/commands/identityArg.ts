@@ -6,7 +6,7 @@
  * characters table. Two failure modes leaked through that pattern:
  *
  *   1. Name collisions. Multiple characters can share a given name
- *      ("Jagger") and the lookup just returned the first hit — which
+ *      ("Jagger") and the lookup just returned the first hit, which
  *      meant a click on one Jagger in the userlist could end up
  *      whispering / kicking / friending another Jagger entirely.
  *
@@ -19,8 +19,8 @@
  * This module is the shared resolver every name-keyed command routes
  * through. Two new token shapes the parser recognizes:
  *
- *   @id:<userId>        — addresses the user / master.
- *   @cid:<characterId>  — addresses the character. The server reads
+ *   @id:<userId>       , addresses the user / master.
+ *   @cid:<characterId> , addresses the character. The server reads
  *                          the row to discover the owning userId.
  *
  * For tokens, the caller is asserting the id they hold; we validate
@@ -28,12 +28,12 @@
  * unique result.
  *
  * For bare names, we run the existing NBSP-aware lookup and collect
- * EVERY match (master + character rows) — when more than one falls
+ * EVERY match (master + character rows), when more than one falls
  * out, the caller emits an ambiguous-result notice so the user can
  * paste the right token. That replaces the previous silent "first
  * hit wins" behavior with a "tell me which Jagger" prompt.
  *
- * Token format is intentionally opaque to end users — the click
+ * Token format is intentionally opaque to end users, the click
  * handlers and (Phase 2) the mention autocomplete insert these
  * directly so a user rarely needs to type one by hand.
  */
@@ -43,7 +43,7 @@ import type { Db } from "../db/index.js";
 import { characters, users } from "../db/schema.js";
 import type { CommandContext } from "./types.js";
 
-/** Token recognizer literals — the only two prefixes we accept. */
+/** Token recognizer literals, the only two prefixes we accept. */
 const USER_TOKEN_PREFIX = "@id:";
 const CHARACTER_TOKEN_PREFIX = "@cid:";
 
@@ -54,7 +54,7 @@ const CHARACTER_TOKEN_PREFIX = "@cid:";
  * ones like friend requests).
  *
  * `displayName` is the user-facing label for the identity the caller
- * specified — character name when scope is character, master username
+ * specified, character name when scope is character, master username
  * otherwise. `masterUsername` is always populated so the caller can
  * disambiguate in audit / notification copy ("Jagger (E D Erin)").
  */
@@ -66,10 +66,10 @@ export interface ResolvedTarget {
 }
 
 /**
- * `unique` — exactly one identity matched (token or name).
- * `ambiguous` — name matched more than one identity; the caller emits a
+ * `unique`, exactly one identity matched (token or name).
+ * `ambiguous`, name matched more than one identity; the caller emits a
  *               disambig notice listing the matches with their tokens.
- * `none` — no match (no user / no character, or disabled / soft-deleted).
+ * `none`, no match (no user / no character, or disabled / soft-deleted).
  */
 export type ResolveResult =
   | { kind: "unique"; target: ResolvedTarget }
@@ -84,7 +84,7 @@ export type ParsedToken =
 /**
  * Inspect `raw` and return its parsed shape if it's a token, or null
  * if it should be treated as a plain name. We do NOT validate the id
- * is real here — that's the resolver's job. Whitespace inside an id
+ * is real here, that's the resolver's job. Whitespace inside an id
  * rejects the token (nanoids never contain spaces); a trailing slice
  * with no body (e.g. bare `@id:`) also rejects.
  */
@@ -106,7 +106,7 @@ export function parseIdentityToken(raw: string): ParsedToken | null {
 /**
  * Build a display token a user can paste back into chat to reach a
  * specific identity unambiguously. Used by the ambiguous-result
- * disambig system message: `Multiple Jaggers — Jagger [@cid:abc],
+ * disambig system message: `Multiple Jaggers, Jagger [@cid:abc],
  * Jagger [@id:def]`.
  */
 export function formatTokenFor(target: ResolvedTarget): string {
@@ -141,7 +141,7 @@ export async function resolveIdentityArg(
 /**
  * Validate a parsed token against the DB. Returns `unique` when the
  * row exists and is in good standing, `none` otherwise. Tokens never
- * produce `ambiguous` — the caller asserted a specific id.
+ * produce `ambiguous`, the caller asserted a specific id.
  */
 async function resolveToken(db: Db, token: ParsedToken): Promise<ResolveResult> {
   if (token.kind === "user") {
@@ -162,7 +162,7 @@ async function resolveToken(db: Db, token: ParsedToken): Promise<ResolveResult> 
     };
   }
   // Character token. Resolve through to the owner row so the caller
-  // gets both ids in one shot — many commands operate on the user
+  // gets both ids in one shot, many commands operate on the user
   // account (whisper delivery, kick, ban) even when the click landed
   // on a character row.
   const row = (await db
@@ -192,7 +192,7 @@ async function resolveToken(db: Db, token: ParsedToken): Promise<ResolveResult> 
 
 /**
  * Name-based fallback. Mirrors the legacy NBSP-aware lookups across
- * users + characters but DOESN'T short-circuit on the first hit —
+ * users + characters but DOESN'T short-circuit on the first hit,
  * collects every viable match so the caller can decide whether the
  * result is unique or ambiguous.
  *
@@ -262,7 +262,7 @@ async function resolveByName(db: Db, raw: string): Promise<ResolveResult> {
  * Surface an ambiguous-identity disambiguation prompt via the
  * persistent info modal. Every command that resolves an identity arg
  * (`/whois`, `/whisper`, `/ignore`, `/friends`, `/mod ...`) calls this
- * when the user-typed name maps to more than one identity — the user
+ * when the user-typed name maps to more than one identity, the user
  * needs to read the candidate list carefully, pick the right token,
  * and re-run with that exact token. The 6-second toast was too short
  * for that workflow.
@@ -271,8 +271,8 @@ async function resolveByName(db: Db, raw: string): Promise<ResolveResult> {
  * `@id:` token at the end, ready to copy verbatim into the re-run.
  *
  * Example modal body for `/whisper Jagger`:
- *   `  • Jagger (E D Erin) — @cid:abc123
- *     • Jagger (Sigrid) — @cid:def456`
+ *   `  • Jagger (E D Erin), @cid:abc123
+ *     • Jagger (Sigrid), @cid:def456`
  *
  * The title carries the count + typed-name context so the modal
  * header is self-describing without the body needing to repeat it.
@@ -288,7 +288,7 @@ export function emitAmbiguousIdentityModal(
     const label = m.characterId
       ? `${m.displayName} (${m.masterUsername})`
       : m.displayName;
-    return `  • ${label} — ${formatTokenFor(m)}`;
+    return `  • ${label}, ${formatTokenFor(m)}`;
   });
   ctx.socket.emit("ui:hint", {
     kind: "open-info-modal",

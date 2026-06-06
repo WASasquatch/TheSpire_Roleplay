@@ -2,15 +2,15 @@
 --
 -- Three groups:
 --
---   1. Iconic-figure plushies (gift category, $1500, stack 3) — same
+--   1. Iconic-figure plushies (gift category, $1500, stack 3), same
 --      pricing as kaal_dragon_plushie / deina_plushie so the shop reads
 --      the named-character plushies as a coherent tier. Includes three
 --      special character plushies whose descriptions came from the
 --      user verbatim (king_dragon_plushie / levert_plushie /
 --      vitality_plushie) and twelve classic pop-culture characters.
 --
---   2. Weapons (weapon category) in three tiers — basic / knights /
---      embelished — plus a few specials (shuriken, war hammer, two
+--   2. Weapons (weapon category) in three tiers, basic / knights /
+--      embelished, plus a few specials (shuriken, war hammer, two
 --      sceptors). Pricing scales with tier:
 --        basic      :   400 (stack 5)
 --        knights    :  2500 (stack 3)
@@ -35,7 +35,7 @@
 -- collision (e.g. someone already added their own `pretzel` or
 -- `basic_sword`) would otherwise abort this migration AND block
 -- every subsequent migration. `OR IGNORE` lets the admin's row win
--- silently — they lose the new seed for that one key (admin items
+-- silently, they lose the new seed for that one key (admin items
 -- panel surfaces the discrepancy) but the rest of the catalog +
 -- later migrations still apply cleanly.
 
@@ -241,7 +241,7 @@ INSERT OR IGNORE INTO `items` (`key`, `name`, `name_plural`, `description`, `ico
 
 /* ---------- Weapons (weapon / tiered pricing) ---------- */
 
--- Basic tier — 400 / stack 5
+-- Basic tier, 400 / stack 5
 INSERT OR IGNORE INTO `items` (`key`, `name`, `name_plural`, `description`, `icon_url`, `price`, `stack_limit`, `give_messages_json`, `throw_messages_json`, `drop_messages_json`, `aliases_json`, `category`, `is_builtin`, `order`) VALUES
 (
   'basic_sword',
@@ -325,7 +325,7 @@ INSERT OR IGNORE INTO `items` (`key`, `name`, `name_plural`, `description`, `ico
   'basic_war_sceptor',
   'Basic War Sceptor',
   'basic war sceptors',
-  'A blunt, hexed sceptor — half cudgel, half catalyst.',
+  'A blunt, hexed sceptor, half cudgel, half catalyst.',
   '/assets/items/basic_war_sceptor.png',
   500, 5,
   '["{sender} hands {target} {num} {icon} {item_name}. *faint hum*","{sender} entrusts {target} with {num} {icon} {item_name}."]',
@@ -336,7 +336,7 @@ INSERT OR IGNORE INTO `items` (`key`, `name`, `name_plural`, `description`, `ico
 );
 --> statement-breakpoint
 
--- Knights tier — 2500 / stack 3
+-- Knights tier, 2500 / stack 3
 INSERT OR IGNORE INTO `items` (`key`, `name`, `name_plural`, `description`, `icon_url`, `price`, `stack_limit`, `give_messages_json`, `throw_messages_json`, `drop_messages_json`, `aliases_json`, `category`, `is_builtin`, `order`) VALUES
 (
   'knights_sword',
@@ -418,7 +418,7 @@ INSERT OR IGNORE INTO `items` (`key`, `name`, `name_plural`, `description`, `ico
 );
 --> statement-breakpoint
 
--- Embelished tier — 8000 / stack 2
+-- Embelished tier, 8000 / stack 2
 INSERT OR IGNORE INTO `items` (`key`, `name`, `name_plural`, `description`, `icon_url`, `price`, `stack_limit`, `give_messages_json`, `throw_messages_json`, `drop_messages_json`, `aliases_json`, `category`, `is_builtin`, `order`) VALUES
 (
   'embelished_sword',
@@ -437,7 +437,7 @@ INSERT OR IGNORE INTO `items` (`key`, `name`, `name_plural`, `description`, `ico
   'embelished_axe',
   'Embellished Axe',
   'embellished axes',
-  'A ceremonial axe — etched bit, jewelled boss, heirloom haft.',
+  'A ceremonial axe, etched bit, jewelled boss, heirloom haft.',
   '/assets/items/embelished_axe.png',
   8000, 2,
   '["{sender} hands {target} {num} {icon} {item_name}. Heirloom haft.","{sender} entrusts {target} with {num} {icon} {item_name}."]',
@@ -532,7 +532,7 @@ INSERT OR IGNORE INTO `items` (`key`, `name`, `name_plural`, `description`, `ico
   'archmage_sceptor',
   'Archmage''s Sceptor',
   'archmage sceptors',
-  'A sceptor of an archmage — gemstone head, runic shaft, faintly humming with stored ætherwork.',
+  'A sceptor of an archmage, gemstone head, runic shaft, faintly humming with stored ætherwork.',
   '/assets/items/archmage_sceptor.png',
   12000, 1,
   '["{sender} hands {target} {num} {icon} {item_name}. *audible hum*","{sender} entrusts {target} with {num} {icon} {item_name}. The runes brighten."]',

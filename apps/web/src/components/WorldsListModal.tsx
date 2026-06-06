@@ -43,7 +43,7 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
   }
   useEffect(() => { load(); }, []);
 
-  // setPrimary was removed in migration 0187 — primary-world is gone
+  // setPrimary was removed in migration 0187, primary-world is gone
   // alongside the userlist's world-bucket grouping that used to make
   // a "headline affiliation" meaningful.
 
@@ -198,7 +198,7 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
                         <span className="font-semibold">{m.worldName}</span>
                         <span className="ml-2 text-[11px] text-keep-muted">/{m.worldSlug}</span>
                         <span className="ml-2 text-[11px] text-keep-muted">by {m.ownerUsername}</span>
-                        {/* Identity badge — characters and OOC each
+                        {/* Identity badge, characters and OOC each
                             join independently per migration 0187, so
                             the same world can appear twice (or more)
                             in this list. The pill makes which face

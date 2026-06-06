@@ -2,16 +2,16 @@
 --
 -- Two independent tables for two distinct surfaces:
 --
---   `announcement_banners` — admin-curated rows that render in the
+--   `announcement_banners`, admin-curated rows that render in the
 --     chat-top marquee. The client fetches the enabled set on mount,
 --     listens for a `announcements:banners-changed` socket push, and
 --     rotates through them one at a time with a fade transition.
 --     Body is sanitized HTML (Markdown is converted client-side
 --     before save and stored as HTML so the read path is one shape).
---     Closed-state persistence lives in the viewer's localStorage —
+--     Closed-state persistence lives in the viewer's localStorage,
 --     no server-side per-user mute.
 --
---   `scheduled_announcements` — cron-like rows that fire via the same
+--   `scheduled_announcements`, cron-like rows that fire via the same
 --     code path the in-chat `/announce` builtin uses. Each row carries
 --     either a one-shot `run_at` (epoch ms) or a recurring
 --     `interval_ms` (parsed from a human-readable spec like "1d8h" or

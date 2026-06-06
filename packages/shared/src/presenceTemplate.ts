@@ -12,7 +12,7 @@
  * when the slot is null, and refuses to render anything that looks
  * structurally HTML (angle brackets are stripped at write time).
  *
- * Validation is intentionally cheap — no full template language, no
+ * Validation is intentionally cheap, no full template language, no
  * conditionals. The slot is a vibe customization, not a scripting
  * surface. Keep the surface area narrow.
  */
@@ -23,7 +23,7 @@
  *  ashes off her cloak.") while typing phrases are stub-form. */
 export const PRESENCE_TEMPLATE_MAX = 100;
 
-/** Default phrasings — what the server emits when the template slot
+/** Default phrasings, what the server emits when the template slot
  *  is null. Centralized so both the server (broadcaster) and the
  *  client (Flair settings preview) speak the same baseline. */
 export const DEFAULT_PRESENCE_TEMPLATES = {
@@ -52,7 +52,7 @@ export const PRESENCE_PLACEHOLDERS = {
  *
  * Rejects:
  *   - oversize input (> PRESENCE_TEMPLATE_MAX)
- *   - control characters (NUL, etc. — sanitizers downstream catch
+ *   - control characters (NUL, etc., sanitizers downstream catch
  *     these too, but earlier rejection beats silent corruption)
  *   - angle brackets (no HTML injection surface; these lines render
  *     through the chat message pipeline which strips tags, but the
@@ -67,7 +67,7 @@ export function validatePresenceTemplate(value: string): string | null {
     return "template contains control characters";
   }
   if (/[<>]/.test(value)) {
-    return "template contains angle brackets — use plain text only";
+    return "template contains angle brackets, use plain text only";
   }
   return null;
 }
@@ -87,7 +87,7 @@ export function normalizePresenceTemplate(value: string | null | undefined): str
 /**
  * Substitute `{name}` and (optionally) `{room}` into a template.
  * Falls back to the supplied default when the template is null /
- * empty. Placeholder substitution is literal text — no escaping
+ * empty. Placeholder substitution is literal text, no escaping
  * needed because the consumer is the chat message body, which is
  * already plain-text and gets rendered with the standard sanitizer.
  *

@@ -118,7 +118,7 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
 
   async function resolve(status: "reviewed" | "dismissed") {
     if (busy) return;
-    const note = window.prompt(`${status === "reviewed" ? "Mark reviewed" : "Dismiss"} — optional note`);
+    const note = window.prompt(`${status === "reviewed" ? "Mark reviewed" : "Dismiss"}, optional note`);
     if (note === null) return;
     setBusy(true);
     setErr(null);
@@ -237,7 +237,7 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
         <b>{report.reporterUsername}</b>
         {report.reason ? (
           <>
-            {" "}— <span className="italic">{report.reason}</span>
+            {" "}<span className="italic">· {report.reason}</span>
           </>
         ) : null}
       </div>

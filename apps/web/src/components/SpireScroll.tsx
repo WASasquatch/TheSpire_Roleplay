@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * Splash-page "What Awaits You" scroll — an animated parchment
+ * Splash-page "What Awaits You" scroll, an animated parchment
  * unfurled between two brass-capped wooden rods. The rods slide
  * apart, the parchment expands between them, then a quill flies
  * down the list typing out each feature in turn.
@@ -9,10 +9,10 @@ import { useEffect, useRef, useState } from "react";
  * Plays automatically on mount. A small "Replay" button beneath
  * lets a curious visitor watch the sequence again without a page
  * reload. The list itself is plain text after the animation
- * finishes — readable, copyable, and screen-reader friendly.
+ * finishes, readable, copyable, and screen-reader friendly.
  *
  * Visual palette is intentionally fixed (antique parchment, deep
- * wood, brass) rather than themed — the scroll reads as a single
+ * wood, brass) rather than themed, the scroll reads as a single
  * piece of medieval ephemera regardless of which theme the
  * visitor's system prefers (dark or light, modern or fantasy).
  */
@@ -21,13 +21,13 @@ import { useEffect, useRef, useState } from "react";
  *  first letter becomes a small drop cap that floats left, with
  *  the rest of the title and the description flowing around it
  *  as one paragraph (and wrapping cleanly below after the cap's
- *  height clears) — classic illuminated-manuscript layout.
+ *  height clears), classic illuminated-manuscript layout.
  *  Order: identity → setting → talk-channels → write →
  *  presence → economy. */
 const FEATURES: ReadonlyArray<{ title: string; desc: string }> = [
   { title: "Characters",    desc: "Personas with bios, portraits, stats, and inventory." },
   { title: "Worlds",        desc: "Canonical settings with wikis and lore pages." },
-  { title: "Public Rooms",  desc: "Open chambers for drop-in scenes — anyone can wander in." },
+  { title: "Public Rooms",  desc: "Open chambers for drop-in scenes, anyone can wander in." },
   { title: "Private Rooms", desc: "Invite-only chambers for tight RP circles, no random walk-ins." },
   { title: "Forums",        desc: "Long-form threads that persist between sessions." },
   { title: "Messages",      desc: "Per-character DMs keep IC and OOC strictly separate." },
@@ -77,7 +77,7 @@ export function SpireScroll() {
 
       // Short pause for the content fade-in to register before the
       // quill drops in. Sped up because the typing itself is now
-      // the main beat — a long pre-typing hold dragged the splash.
+      // the main beat, a long pre-typing hold dragged the splash.
       await sleep(220);
       if (cancelRef.current) return;
 
@@ -117,11 +117,11 @@ export function SpireScroll() {
       });
       // Wait one paint so the just-typed char is in the DOM, then
       // measure where its right edge lands and aim the quill nib
-      // there — the quill follows the writing tip as it moves
+      // there, the quill follows the writing tip as it moves
       // across (and down) the paper.
       await new Promise<void>((r) => requestAnimationFrame(() => r()));
       moveQuillToCursor(idx);
-      // Tight per-char delay with a touch of jitter — fast enough
+      // Tight per-char delay with a touch of jitter, fast enough
       // to respect the "short attention span" ask but not so robotic
       // that it loses the handwritten cadence.
       await sleep(4 + Math.random() * 6);
@@ -130,9 +130,9 @@ export function SpireScroll() {
 
   /** Position the quill so its tip (bottom-left of the SVG) lands
    *  just to the right of the last character typed into item `i`'s
-   *  description. The desc span renders as TWO text nodes — the
-   *  literal " — " prefix from the JSX and the typed content from
-   *  `{typed[i]}` — so we can't just collapse a range at the end
+   *  description. The desc span renders as TWO text nodes, the
+   *  literal ", " prefix from the JSX and the typed content from
+   *  `{typed[i]}`, so we can't just collapse a range at the end
    *  of `firstChild` (that lands at the boundary between them).
    *  `selectNodeContents` + `collapse(false)` collapses to the end
    *  of the LAST text node, which is always the typed cursor. */
@@ -167,7 +167,7 @@ export function SpireScroll() {
     }
     if (rect.height === 0 && rect.width === 0 && rect.top === 0) return;
     const stageRect = stage.getBoundingClientRect();
-    // Quill nib offset — tuned empirically to land the visible
+    // Quill nib offset, tuned empirically to land the visible
     // writing point exactly at the cursor. The bottom-left of the
     // SVG (where the path renders the nib) sits further from the
     // CSS element's edge than the viewBox math alone suggested,
@@ -216,7 +216,7 @@ export function SpireScroll() {
                       <span className="scroll-feature-cap" aria-hidden>{cap}</span>
                       <span className="scroll-feature-title">{titleShown ? titleRest : ""}</span>
                       {typed[i] ? (
-                        <span className="scroll-feature-desc"> — {typed[i]}</span>
+                        <span className="scroll-feature-desc">, {typed[i]}</span>
                       ) : null}
                     </p>
                   </li>
@@ -238,7 +238,7 @@ export function SpireScroll() {
 }
 
 /* ============================================================ *
- *  Rod SVG — wood shaft, brass collars, pommel knobs. Inlined as
+ *  Rod SVG, wood shaft, brass collars, pommel knobs. Inlined as
  *  JSX so the gradient IDs are scoped to the React component
  *  rather than competing globally with another scroll. `id` prop
  *  postfixes the linearGradient IDs ("wood-L" / "wood-R") so two
@@ -284,7 +284,7 @@ function RodSvg({ id }: { id: string }) {
         </linearGradient>
       </defs>
 
-      {/* TOP DECORATIVE END (0..45) — shorter than the MVP's 80px
+      {/* TOP DECORATIVE END (0..45), shorter than the MVP's 80px
        *  so the rod ends don't create dead vertical space above /
        *  below the parchment. */}
       <ellipse cx="24" cy="4" rx="10" ry="3" fill={brassFill} stroke={rim} strokeWidth="0.5" />

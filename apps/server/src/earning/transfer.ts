@@ -12,7 +12,7 @@
  *
  * Source pool follows the sender's currently-active identity (master
  * if posting as OOC, the active character otherwise). Target is
- * resolved by explicit name lookup — character first (RP framing),
+ * resolved by explicit name lookup, character first (RP framing),
  * user second; a collision (same name as a user) surfaces as a
  * `did_you_mean` error code the command handler renders as a
  * disambiguator prompt.
@@ -43,7 +43,7 @@ export interface TransferTarget {
   kind: TransferTargetKind;
   /** The pool's owner id (userId for kind='user', characterId for kind='character'). */
   ownerId: string;
-  /** Master user that owns the pool — used for self-send checks and event emission. */
+  /** Master user that owns the pool, used for self-send checks and event emission. */
   userId: string;
   displayName: string;
 }
@@ -123,7 +123,7 @@ export async function resolveTransferTarget(
       ok: false,
       error: {
         code: "did_you_mean",
-        message: `"${trimmed}" matches a character and a user — be more specific.`,
+        message: `"${trimmed}" matches a character and a user, be more specific.`,
         suggestions: [...characterCandidates, userCandidate],
       },
     };
@@ -136,7 +136,7 @@ export async function resolveTransferTarget(
       ok: false,
       error: {
         code: "did_you_mean",
-        message: `"${trimmed}" matches multiple characters — be more specific.`,
+        message: `"${trimmed}" matches multiple characters, be more specific.`,
         suggestions: characterCandidates,
       },
     };
@@ -214,7 +214,7 @@ export interface TransferInput {
 /**
  * Perform the transfer. Either returns the structured result on success
  * or a structured error code the command handler renders to the user.
- * Always ephemeral on the wire — caller is responsible for not leaking
+ * Always ephemeral on the wire, caller is responsible for not leaking
  * the result to the room.
  */
 export async function transferCurrency(input: TransferInput): Promise<{ ok: true; result: TransferResult } | { ok: false; error: TransferError }> {
@@ -299,7 +299,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
     }
 
     // Account-age gates (sender + recipient). Recipient age is checked on the
-    // master account regardless of whether the target is a character — a
+    // master account regardless of whether the target is a character, a
     // brand-new account can't take advantage of an old character's age.
     const senderRow = (await input.db.select({ createdAt: users.createdAt }).from(users).where(eq(users.id, source.userId)).limit(1))[0];
     const recipRow = (await input.db.select({ createdAt: users.createdAt }).from(users).where(eq(users.id, target.userId)).limit(1))[0];

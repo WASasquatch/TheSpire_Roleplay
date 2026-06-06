@@ -2,7 +2,7 @@
 --
 -- The original six seeded name styles (migration 0065) used a single
 -- background-clip-text gradient with optional drop-shadow. Visually
--- mediocre and hard to read on a busy chat line — the user feedback
+-- mediocre and hard to read on a busy chat line, the user feedback
 -- was that the styles weren't worth buying at any price. This
 -- migration replaces the CSS for each style with a richer treatment
 -- that combines gradient masks with text-shadow outline stacks and
@@ -18,7 +18,7 @@
 -- ladder rewards months of engagement, not days. Border prices
 -- get the same treatment on the tier-IV rank_tiers rows.
 --
--- Existing owned rows are untouched — users who already purchased
+-- Existing owned rows are untouched, users who already purchased
 -- a style at the old price keep ownership.
 
 -- name_styles: richer CSS + new prices (keys + templates unchanged
@@ -73,7 +73,7 @@ UPDATE `name_styles`
 -- rank_tiers: tier-IV border costs rebalanced exponentially. The
 -- prior 100 / 250 / 500 / 1000 / 2000 / 5000 progression let an
 -- active user buy a few borders in a week. The new curve makes the
--- top borders aspirational — months of engagement rather than days.
+-- top borders aspirational, months of engagement rather than days.
 UPDATE `rank_tiers` SET `border_cost` = 5000   WHERE `id` = 'rt_new_arrival_4';
 --> statement-breakpoint
 UPDATE `rank_tiers` SET `border_cost` = 15000  WHERE `id` = 'rt_active_4';

@@ -15,7 +15,7 @@ import { useChat } from "../state/store.js";
  *
  * Why endpoints instead of slash commands: `/accept <name>` /
  * `/decline <name>` resolve the sender by name, and the server's
- * `resolveIdentityByName` checks master usernames first — so when a
+ * `resolveIdentityByName` checks master usernames first, so when a
  * request was sent FROM a character whose name happens to collide
  * with a master account, the slash-command path never matched the
  * row, left it pending, and the banner re-popped every refresh.
@@ -23,7 +23,7 @@ import { useChat } from "../state/store.js";
  * (frienderUserId, frienderCharacterId, friendedCharacterId) tuple
  * carried in the inbox payload, so there's nothing to disambiguate.
  *
- * Optimistic removal on click — we yank the row from the store
+ * Optimistic removal on click, we yank the row from the store
  * immediately so the card doesn't stick around waiting for the
  * server echo. The next live event resyncs canonical state.
  */

@@ -1,4 +1,4 @@
--- Neon Sign — give the outer glow its own subtle pulse, independent
+-- Neon Sign, give the outer glow its own subtle pulse, independent
 -- of the main on/off flicker.
 --
 -- Two animations run side-by-side on the same element:
@@ -7,7 +7,7 @@
 --     Controls color + text-shadow. Sharp on/off transitions.
 --     ALSO sets `filter: none` during the dead-tube blips so the
 --     outer glow vanishes when the bulb pops. Does NOT specify
---     `filter` during the lit keyframes — the underlying base
+--     `filter` during the lit keyframes, the underlying base
 --     filter rule applies there.
 --
 --   ns-neon-glow  (1.7s, ease-in-out)

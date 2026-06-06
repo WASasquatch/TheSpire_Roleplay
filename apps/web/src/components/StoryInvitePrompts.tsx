@@ -20,7 +20,7 @@ interface Props {
  * MutualPrompts pattern so all in-app "someone wants something from
  * you" affordances live in one visual cluster.
  *
- * Cards are ephemeral local state — a page reload drops them, and the
+ * Cards are ephemeral local state, a page reload drops them, and the
  * recipient can act on the same invite later via the catalog's My
  * Stories tab (the Pending invites surface there is the persistent
  * counterpart).
@@ -32,7 +32,7 @@ export function StoryInvitePrompts({ socket, onError }: Props) {
   useEffect(() => {
     function onInvite(p: StoryCollaboratorInvite) {
       setInvites((curr) => {
-        // De-dupe on storyId — re-invites from the owner replace the
+        // De-dupe on storyId, re-invites from the owner replace the
         // existing card rather than stacking.
         const idx = curr.findIndex((x) => x.storyId === p.storyId);
         if (idx >= 0) {

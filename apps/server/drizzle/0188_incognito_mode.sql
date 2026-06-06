@@ -1,7 +1,7 @@
 -- Incognito (ghost) mode for moderation observation.
 --
 -- New surface that lets a mod or admin slip out of the userlist
--- without disconnecting — for the use case of joining a private
+-- without disconnecting, for the use case of joining a private
 -- room mid-argument and observing the situation without their
 -- presence biasing what the participants say next.
 --
@@ -25,25 +25,25 @@ ON CONFLICT (`role`, `permission_key`) DO NOTHING;
 
 -- Persistent incognito state on the user row.
 --
---   incognito_mode (0/1)         — whether the user is currently
+--   incognito_mode (0/1)        , whether the user is currently
 --                                  hidden from userlists and presence.
 --                                  Defaults to 0 so existing rows
 --                                  are visible by default.
 --
---   incognito_alias              — display name to use for any chat
+--   incognito_alias             , display name to use for any chat
 --                                  messages the user sends while
 --                                  incognito. Null = use the literal
 --                                  fallback "System". The /incognito
 --                                  <name> subcommand updates this AND
 --                                  flips mode on in one step.
 --
---   incognito_exit_message       — admin-customised "X has left the
+--   incognito_exit_message      , admin-customised "X has left the
 --                                  chat" line broadcast at the moment
 --                                  they go incognito. Null = use the
 --                                  default phrasing built from the
 --                                  user's display name.
 --
---   incognito_return_message     — symmetric "X has joined the chat"
+--   incognito_return_message    , symmetric "X has joined the chat"
 --                                  line broadcast when they /incognito
 --                                  off (or click Leave Incognito).
 --                                  Null = default phrasing.

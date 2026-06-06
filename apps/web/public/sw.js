@@ -1,13 +1,13 @@
 /* eslint-disable no-restricted-globals */
 /**
- * The Spire — service worker for Web Push notifications.
+ * The Spire, service worker for Web Push notifications.
  *
  * Privacy contract: payloads from the server contain no message bodies, only
  * generic copy ("You have a whisper waiting" / "You were mentioned in
  * chat"). The lockscreen preview never leaks chat content.
  *
  * No offline caching; this worker exists purely as the push delivery channel.
- * Treat it as a thin shim — the real notification logic lives server-side.
+ * Treat it as a thin shim, the real notification logic lives server-side.
  */
 
 self.addEventListener("install", (event) => {

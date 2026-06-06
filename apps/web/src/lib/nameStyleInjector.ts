@@ -17,7 +17,7 @@
  * admin Name-Styles editor's live preview can mutate freely without
  * clobbering the real catalog stylesheet. (Previously both wrote to
  * one tag, and any preview keystroke wiped every `.ns-*` rule the
- * Earning modal depended on — that's why "available" cards in the
+ * Earning modal depended on, that's why "available" cards in the
  * dashboard rendered as plain dark text after touching the editor.)
  */
 
@@ -28,7 +28,7 @@ const PREVIEW_TAG_ATTR = "data-name-style-preview";
 
 /**
  * Idempotently inject the CSS for the live catalog into the shared
- * catalog `<style>` tag. Safe to call on every render / store update —
+ * catalog `<style>` tag. Safe to call on every render / store update,
  * when the concatenated CSS is unchanged this is a no-op.
  */
 export function injectNameStyles(styles: readonly NameStyleCatalogRow[]): void {
@@ -55,7 +55,7 @@ export function clearNameStylePreview(): void {
 /**
  * Read the per-response CSP nonce surfaced by the server in a meta
  * tag. Dynamic `<style>` elements need this attribute to satisfy a
- * strict `style-src 'self' 'nonce-…'` policy — without it the
+ * strict `style-src 'self' 'nonce-…'` policy, without it the
  * browser silently drops every catalog rule on prod (name styles
  * stop applying entirely, even though local dev works because there's
  * no CSP header). Returns null when there's no nonce meta (dev mode,

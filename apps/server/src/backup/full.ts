@@ -1,5 +1,5 @@
 /**
- * Full-database snapshot — atomic SQLite copy bundled with the
+ * Full-database snapshot, atomic SQLite copy bundled with the
  * uploads tree inside a ZIP envelope (format v3+).
  *
  * Two operations:
@@ -70,7 +70,7 @@ export function pendingRestorePath(): string {
 
 /**
  * Path to the worker script. Resolved relative to THIS module so
- * it survives bundling/copying — the worker is a sibling .mjs file
+ * it survives bundling/copying, the worker is a sibling .mjs file
  * inside the same backup/ directory. Computed once at module-load
  * because workers respawn on every snapshot request and re-deriving
  * the path each call would mean redundant `fileURLToPath` work.
@@ -87,7 +87,7 @@ const WORKER_PATH = fileURLToPath(new URL("./full-worker.mjs", import.meta.url))
  * event loop stays unblocked. On a multi-hundred-MB DB the VACUUM
  * can take seconds; doing it on the main thread would freeze chat
  * for everyone the snapshot's duration. The worker holds its OWN
- * read-only better-sqlite3 handle on the same file — SQLite's WAL
+ * read-only better-sqlite3 handle on the same file, SQLite's WAL
  * mode lets readers proceed alongside the VACUUM's writer.
  *
  * Returns the absolute path + size of the new snapshot .zip.
@@ -159,7 +159,7 @@ function runVacuumWorker(sourcePath: string, destPath: string): Promise<void> {
  * Validates the envelope, extracts the inner database.sqlite to a
  * temp path, opens it read-only to check schema-shape + row counts.
  *
- * Returns `{ ok: false, ...empty }` on any open/validation failure —
+ * Returns `{ ok: false, ...empty }` on any open/validation failure,
  * the caller surfaces that to the admin as "this doesn't look like a
  * valid Spire backup archive."
  */
@@ -184,13 +184,13 @@ export async function inspectFullBackup(
     return empty;
   }
   if (peek.kind !== "full") {
-    // Wrong kind — the inspect call should route to the content
+    // Wrong kind, the inspect call should route to the content
     // inspector instead. Returning ok:false surfaces that.
     return { ...empty, sizeBytes: peek.archiveBytes };
   }
 
   // Extract the inner .sqlite to a sibling temp slot for read-only
-  // inspection. We never open it in-place from the archive — JSZip
+  // inspection. We never open it in-place from the archive, JSZip
   // doesn't expose the entry as a seekable file descriptor.
   const tempInnerDb = join(dirname(uploadZipPath), `.inspect-inner-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.sqlite`);
   try {
@@ -212,7 +212,7 @@ export async function inspectFullBackup(
     // browser's IndexedDB dump, etc.) would pass the magic-byte
     // check, get staged for restore, and on next boot every
     // migration in `drizzle/` would try to run against a totally
-    // foreign schema — corrupting the install. The presence of the
+    // foreign schema, corrupting the install. The presence of the
     // `users` table + the seed-time 'system' sentinel row is the
     // cheapest "this came from a Spire install" gate; both are
     // guaranteed by ensureSystemSeeds on every fresh DB.
@@ -299,7 +299,7 @@ function safeCount(db: Database.Database, table: string): number {
  *   4. Return 200 to the admin and exit the process so the container
  *      restarts.
  *
- * Implementation — two-phase to avoid the "DB swap but no uploads
+ * Implementation, two-phase to avoid the "DB swap but no uploads
  * swap" half-restore failure mode:
  *   Phase 1 (extract both to TEMP slots):
  *     - Extract database.sqlite to a sibling temp file.
@@ -313,7 +313,7 @@ function safeCount(db: Database.Database, table: string): number {
  *     - Rename temp uploads dir into the pending-uploads slot.
  *     These are same-filesystem renames so each is atomic. The
  *     ordering means a crash between the two leaves the pending
- *     .sqlite written but no pending uploads — which the boot
+ *     .sqlite written but no pending uploads, which the boot
  *     script handles fine: the .sqlite gets swapped, uploads stay
  *     untouched (mismatched but recoverable via the safety
  *     snapshot the caller took first). The phase-1 design makes
@@ -333,7 +333,7 @@ export async function stagePendingRestore(
   const tempDb = join(dirname(dbDest), `.thekeep-pending-restore.${tag}.sqlite.staging`);
   const tempUploads = join(dirname(uploadsDest), `.thekeep-pending-uploads.${tag}.staging`);
 
-  // Phase 1 — extract both to temp slots.
+  // Phase 1, extract both to temp slots.
   let uploadsFileCount = 0;
   try {
     await extractFullDatabase({ zipPath: uploadZipPath, destDbPath: tempDb });
@@ -345,7 +345,7 @@ export async function stagePendingRestore(
     throw err;
   }
 
-  // Phase 2 — swap temps into the pending slots. POSIX rename(2)
+  // Phase 2, swap temps into the pending slots. POSIX rename(2)
   // overwrites by default; Windows fs.renameSync does not (throws
   // EEXIST). Explicit unlink/rmSync keeps behavior identical across
   // hosts and survives a leftover pending slot from a previous
@@ -355,7 +355,7 @@ export async function stagePendingRestore(
   if (existsSync(uploadsDest)) rmSync(uploadsDest, { recursive: true, force: true });
   renameSync(tempUploads, uploadsDest);
 
-  // The upload .zip is consumed — it's been split into the pending
+  // The upload .zip is consumed, it's been split into the pending
   // .sqlite + pending uploads dir. Leaving it around would clutter
   // /data with duplicated bytes.
   try { unlinkSync(uploadZipPath); } catch { /* nothing useful to do */ }
@@ -368,7 +368,7 @@ export async function stagePendingRestore(
 }
 
 /**
- * Path for a temp file used during a backup .zip upload — sits next
+ * Path for a temp file used during a backup .zip upload, sits next
  * to the snapshots so the rename-into-place into the pending slot is
  * an atomic move on the same filesystem. The filename includes a
  * random suffix so concurrent admin attempts don't clobber each
@@ -387,7 +387,7 @@ export function newUploadTempPath(): string {
  * snapshot filename convention.
  *
  * `kind` is required because the same call site handles uploads of
- * both content and full archives — mis-classifying mixes the two
+ * both content and full archives, mis-classifying mixes the two
  * kinds in the Snapshots panel and breaks the bucket display.
  */
 export function archiveUpload(tempPath: string, kind: "full" | "content"): string {

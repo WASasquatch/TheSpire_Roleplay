@@ -4,7 +4,7 @@
 -- empty value instead of the codepoint. The route validation
 -- (zod min(1)) now prevents new ones, the loader in
 -- apps/server/src/reactions.ts skips them defensively, and the
--- client ReactionGlyph falls back to "?" — this migration just
+-- client ReactionGlyph falls back to "?", this migration just
 -- removes the stragglers so the unique index doesn't carry orphan
 -- placeholders.
 --

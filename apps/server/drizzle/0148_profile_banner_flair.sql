@@ -8,7 +8,7 @@
 --
 -- Why URL-only at this stage: no upload pipeline, no image hosting,
 -- no admin moderation queue. Validation is "looks like http(s) + HEAD
--- sniff says image/*" — soft, but enough for a v1. Admin keeps a
+-- sniff says image/*", soft, but enough for a v1. Admin keeps a
 -- "clear this user's banner" lever for abuse reports.
 
 -- Per-identity URL slot. Nullable so unsetting clears cleanly. The
@@ -25,7 +25,7 @@ ALTER TABLE `character_earning`
 
 -- Seed the new Flair catalog row. Idempotent: re-running the migration
 -- (e.g. after a baseline-skip on an older install) doesn't double-
--- insert. Cost is a placeholder — admins tune via the Flair admin tab.
+-- insert. Cost is a placeholder, admins tune via the Flair admin tab.
 INSERT OR IGNORE INTO `cosmetics`
   (`key`, `name`, `description`, `cost`, `enabled`, `config_json`)
 VALUES

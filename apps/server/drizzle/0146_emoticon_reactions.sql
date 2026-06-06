@@ -1,4 +1,4 @@
--- Emoticon system — sticker-sheet based reactions for chat, DMs, and
+-- Emoticon system, sticker-sheet based reactions for chat, DMs, and
 -- (future) forum posts.
 --
 -- Sheets are 4×4 grids (16 cells); each cell carries a label. Cells
@@ -15,7 +15,7 @@
 -- best-effort cleanup on delete) to remove orphan reactions.
 --
 -- Uniqueness: (target_kind, target_id, user_id, sheet_id, cell_index)
--- is the Discord rule — one user, one emoticon, one message. The
+-- is the Discord rule, one user, one emoticon, one message. The
 -- same user reacting with a DIFFERENT emoticon on the same message
 -- inserts a separate row.
 
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS `message_reactions` (
 );
 --> statement-breakpoint
 
--- Hot read path: "give me every reaction for this message" — used
+-- Hot read path: "give me every reaction for this message", used
 -- to render the ReactionBar under every visible chat / DM row.
 CREATE INDEX IF NOT EXISTS `message_reactions_target_idx`
   ON `message_reactions` (`target_kind`, `target_id`);

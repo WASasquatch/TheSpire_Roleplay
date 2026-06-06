@@ -6,9 +6,11 @@ import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import {
   auditLog,
+  builtinCommandConfig,
   characters,
   customCommandAliases,
   customCommands,
+  items as itemsTable,
   messages,
   mutualTitles,
   reports,
@@ -72,7 +74,7 @@ export async function registerAdminRoutes(
 
   // Authentication-only preHandler. Earlier drafts tried to gate
   // every /admin/* request on "user holds at least one view_admin_*
-  // key" — convenient as a coarse filter, but it broke matrix-
+  // key", convenient as a coarse filter, but it broke matrix-
   // customized roles that hold only a `manage_*` or `grant_*` key
   // without a corresponding view-tab key (e.g. a delegate with
   // `hard_delete_user` alone). The per-route `requirePermission`
@@ -90,14 +92,14 @@ export async function registerAdminRoutes(
     (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser = user;
   });
 
-  // Earning — admin endpoints (Awards + Ranks tabs). Both tiers can
+  // Earning, admin endpoints (Awards + Ranks tabs). Both tiers can
   // read; the PUT awards handler enforces masteradmin-only on the
   // multi-character divisor + backfill rate fields internally. The
   // Ranks endpoints accept asset uploads under the shared
   // `uploads/ranks/` directory served by the static handler.
   registerAdminEarningRoutes(app, { db, io, uploadsRoot, getSessionUser });
 
-  // Backups — masteradmin-only. Mounts /admin/backup/* endpoints for
+  // Backups, masteradmin-only. Mounts /admin/backup/* endpoints for
   // creating, inspecting, importing, and managing full-DB and
   // content snapshots on the persistent volume. The backup module
   // owns its own gate (every handler calls masterAdminOnly internally
@@ -106,17 +108,17 @@ export async function registerAdminRoutes(
   // under /admin/*).
   registerAdminBackupRoutes(app, { db, uploadsRoot });
 
-  // Roles & Permissions matrix — Phase 2. Mounts /admin/permissions
+  // Roles & Permissions matrix, Phase 2. Mounts /admin/permissions
   // GET (matrix snapshot), PATCH /roles (per-role grant flip), PATCH
   // /users (per-user override upsert / clear), plus the /users/search
   // typeahead + per-user detail endpoints the By-user sub-tab uses.
   // Each handler enforces `view_admin_permissions` or
-  // `manage_permissions` internally — both default to masteradmin-only
+  // `manage_permissions` internally, both default to masteradmin-only
   // via the migration seed but are matrix-grantable so a senior admin
   // can manage the matrix on the masteradmin's behalf.
   registerAdminPermissionRoutes(app, { db });
 
-  // Announcements — admin Banners + Scheduled CRUD. The scheduler
+  // Announcements, admin Banners + Scheduled CRUD. The scheduler
   // tick that fires due rows is launched separately at boot via
   // `startAnnouncementScheduler` in apps/server/src/index.ts so it
   // runs once per process, not once per route registration.
@@ -141,7 +143,7 @@ export async function registerAdminRoutes(
    * Login series caveat: `sessions` rows are purged on expiry, so the
    * loginsPerDay buckets only stay accurate while the configured session
    * TTL is at least the chart's lookback (7d here, 30d for MAU). Past that
-   * the older days will undercount — fine for a dashboard, called out so
+   * the older days will undercount, fine for a dashboard, called out so
    * future-us doesn't chase a phantom bug.
    */
   /* ---------- crash diagnostics ----------
@@ -191,13 +193,13 @@ export async function registerAdminRoutes(
     const since7d = new Date(now - 7 * dayMs);
     const since30d = new Date(now - 30 * dayMs);
     // Caller's timezone offset in minutes (JS `Date.getTimezoneOffset()`
-    // convention — positive = west of UTC). Used to align the day
+    // convention, positive = west of UTC). Used to align the day
     // buckets (sparkline + day-grouped widgets) with the viewer's
     // local "Today / Yesterday" rather than the server's. Without
     // this, a registration around midnight ended up in one bucket
     // on the panel ("Yesterday") and another on the chart
     // ("Today") depending on which side of UTC midnight it landed
-    // on — exactly the desync that surfaced as "Today says 0 but
+    // on, exactly the desync that surfaced as "Today says 0 but
     // the chart shows 1."
     //
     // Clamp to a generous ±14h range so a malformed input can't
@@ -211,7 +213,7 @@ export async function registerAdminRoutes(
     // the viewer's local date.
     const tzShiftSec = -tzOffsetMin * 60;
 
-    // Currently-connected users — dedupe by userId across sockets.
+    // Currently-connected users, dedupe by userId across sockets.
     const sockets = await io.fetchSockets();
     const onlineUsers = new Set<string>();
     for (const s of sockets) {
@@ -235,7 +237,7 @@ export async function registerAdminRoutes(
       .from(users)
       .where(and(notSystem, gte(users.createdAt, since30d)));
 
-    // Recent registrations — the actual rows, newest first, for the
+    // Recent registrations, the actual rows, newest first, for the
     // dashboard breakdown. Capped at 50 so an absurd signup spike doesn't
     // bloat the overview payload; admins drop into the Users tab for the
     // full list anyway.
@@ -252,7 +254,7 @@ export async function registerAdminRoutes(
       .orderBy(desc(users.createdAt))
       .limit(50);
 
-    // DAU/WAU/MAU derived from sessions.createdAt — every login mints a row,
+    // DAU/WAU/MAU derived from sessions.createdAt, every login mints a row,
     // so distinct user IDs in each window approximate active-user counts.
     const [dauRow] = await db
       .select({ n: sql<number>`count(distinct ${sessions.userId})` })
@@ -268,7 +270,7 @@ export async function registerAdminRoutes(
       .where(gte(sessions.createdAt, since30d));
 
     // Rooms by type (public/private). The public /stats endpoint uses the
-    // same shape — kept consistent so cards look the same across both views.
+    // same shape, kept consistent so cards look the same across both views.
     const roomCounts = await db
       .select({ type: rooms.type, n: sql<number>`count(*)` })
       .from(rooms)
@@ -285,7 +287,7 @@ export async function registerAdminRoutes(
     // `/rooms/:id/topics` (routes/rooms.ts): scoped to nested-mode rooms,
     // kind="say" only (the forum composer's wire format), not deleted.
     // Detecting topics via `title IS NOT NULL` would miss legacy topics
-    // created before the title column was added in migration 0039 —
+    // created before the title column was added in migration 0039,
     // they're still real topics, the renderer falls back to a body
     // excerpt for the header.
     const nestedRooms = await db
@@ -293,7 +295,7 @@ export async function registerAdminRoutes(
       .from(rooms)
       .where(eq(rooms.replyMode, "nested"));
     const nestedRoomIds = nestedRooms.map((r) => r.id);
-    // When no forum rooms exist yet, all forum metrics collapse to zero —
+    // When no forum rooms exist yet, all forum metrics collapse to zero,
     // `inArray` on an empty list would otherwise produce invalid SQL.
     const inForum = nestedRoomIds.length > 0
       ? inArray(messages.roomId, nestedRoomIds)
@@ -386,7 +388,7 @@ export async function registerAdminRoutes(
 
     // Build dayKeys in the CALLER's local time so the labels match
     // the SQL buckets above. We shift `now` by the offset before
-    // slicing the ISO date — same math `tzShiftSec` applies to the
+    // slicing the ISO date, same math `tzShiftSec` applies to the
     // strftime expression.
     const dayKeys: string[] = [];
     for (let i = 6; i >= 0; i--) {
@@ -477,7 +479,7 @@ export async function registerAdminRoutes(
         // global `messageRetentionMs` setting. The admin's Message
         // Expiry panel renders this either as the room's explicit value
         // or as "global (Xd)" when null. Forum/nested rooms are exempt
-        // from BOTH sweeps and surface as "never expires" — that's a
+        // from BOTH sweeps and surface as "never expires", that's a
         // render-time decision in the panel, not a server filter.
         messageExpiryMinutes: r.messageExpiryMinutes,
       })),
@@ -557,7 +559,7 @@ export async function registerAdminRoutes(
     description: z.string().max(5000).nullable().optional(),
     /** Defaults to true - admin-created rooms are permanent unless explicitly opted out. */
     isSystem: z.boolean().optional(),
-    /** When true, this room becomes the default landing — any existing default is automatically cleared first. */
+    /** When true, this room becomes the default landing, any existing default is automatically cleared first. */
     isDefault: z.boolean().optional(),
     /** "flat" = chronological chat; "nested" = forum-style threads with persistent top-level posts and grouped replies. Enables thread-category management. */
     replyMode: z.enum(["flat", "nested"]).optional(),
@@ -577,7 +579,7 @@ export async function registerAdminRoutes(
     /**
      * Per-room message expiry override in minutes. Null clears the
      * override (room falls back to global `messageRetentionMs`).
-     * Bounded to 1..43200 (30 days) — same range the user-facing
+     * Bounded to 1..43200 (30 days), same range the user-facing
      * `/expiry` command accepts. Mirrors the column comment on
      * `rooms.message_expiry_minutes`.
      */
@@ -729,7 +731,7 @@ export async function registerAdminRoutes(
    * Bulk-set the per-room message-expiry override across many rooms in
    * one round-trip. Used by the admin's Message Expiry panel for batch
    * tagging (e.g. "all OOC rooms get a 1h window"). Single transaction
-   * via Drizzle's update-with-IN — atomic from the client's POV: either
+   * via Drizzle's update-with-IN, atomic from the client's POV: either
    * every targeted row updates or none do.
    *
    * Forum/nested rooms accept the value but the sweep ignores them (the
@@ -761,7 +763,7 @@ export async function registerAdminRoutes(
    * and shown a notice; cascade FKs (room_members, messages, bans,
    * invites) clean up. Even private/password rooms can be deleted (admin
    * moderation overrides the privacy contract because messages are still
-   * never read — only removed wholesale).
+   * never read, only removed wholesale).
    */
   app.delete<{ Params: { id: string } }>("/admin/rooms/:id", async (req, reply) => {
     if (!(await requirePermission(req, reply, "delete_room"))) return;
@@ -809,7 +811,7 @@ export async function registerAdminRoutes(
     }
     // A room vanished from the world; every connected rail needs to know,
     // not just the ones who happened to be inside it. broadcastRoomState
-    // above only fires when the deleted room had live occupants — an empty
+    // above only fires when the deleted room had live occupants, an empty
     // archived room going away would otherwise be invisible until the 20s
     // backstop poll.
     io.emit("rooms:tree-changed");
@@ -842,7 +844,7 @@ export async function registerAdminRoutes(
     siteName: z.string().min(0).max(60).optional(),
     /**
      * Canonical site URL the banner logo links to. Empty string clears
-     * the wrapping (logo renders bare). Non-empty must be http/https —
+     * the wrapping (logo renders bare). Non-empty must be http/https,
      * the Zod `.url()` refinement rejects bare hostnames or other
      * schemes, and a max-length cap keeps a runaway paste from getting
      * persisted.
@@ -893,8 +895,15 @@ export async function registerAdminRoutes(
     maxDirectMessageLength: z.number().int().min(100).max(50_000).optional(),
     /** 100..50000 chars per forum post body (topic OR reply). */
     maxForumPostLength: z.number().int().min(100).max(50_000).optional(),
-    /** 10..500 chars on a forum topic title — keep titles list-renderable. */
+    /** 10..500 chars on a forum topic title, keep titles list-renderable. */
     maxForumTopicTitleLength: z.number().int().min(10).max(500).optional(),
+    /**
+     * 5..100 topics-per-page on the forum's numbered pagination strip
+     * (migration 0193). Picks reasonable bounds: under 5 makes the
+     * page strip unreadable, over 100 defeats the whole point of
+     * pagination on long-running categories.
+     */
+    forumTopicsPerPage: z.number().int().min(5).max(100).optional(),
     /**
      * Author-edit / author-delete grace window in ms for chat + DM
      * messages. 0..7 days. Mods and admins bypass the gate. Forum
@@ -906,7 +915,7 @@ export async function registerAdminRoutes(
     /** Master switch for /auth/register. */
     registrationOpen: z.boolean().optional(),
     // Long-form HTML fields. Caps tuned for "fully comprehensive rules,
-    // ToS, and privacy disclosure" — admins shouldn't bump against these
+    // ToS, and privacy disclosure", admins shouldn't bump against these
     // for any realistic document. Each is independently capped so a
     // huge rules doc doesn't lock the admin out of editing the smaller
     // welcome blurb (or vice versa). Sanitizer (sanitizeBio) has no
@@ -937,8 +946,8 @@ export async function registerAdminRoutes(
     /** Sanitized HTML for the post-login welcome modal. Empty string clears the welcome. Same 50KB cap as other rich-text settings. */
     newUserWelcomeHtml: z.string().max(50_000).optional(),
     /**
-     * Default theme STYLE key — 'medieval', 'modern', or 'scifi'. Users
-     * who haven't picked an override inherit this. Stored verbatim — the
+     * Default theme STYLE key, 'medieval', 'modern', or 'scifi'. Users
+     * who haven't picked an override inherit this. Stored verbatim, the
      * client validates against its registered style catalog and falls
      * back to 'medieval' if the value is unknown.
      */
@@ -976,6 +985,7 @@ export async function registerAdminRoutes(
       maxDirectMessageLength: s.maxDirectMessageLength,
       maxForumPostLength: s.maxForumPostLength,
       maxForumTopicTitleLength: s.maxForumTopicTitleLength,
+      forumTopicsPerPage: s.forumTopicsPerPage,
       editGraceMs: s.editGraceMs,
       maxBioLength: s.maxBioLength,
       registrationOpen: s.registrationOpen,
@@ -1008,7 +1018,7 @@ export async function registerAdminRoutes(
     //   - If the patch ONLY touches branding fields (site name + URL,
     //     banner cover CSS, logo color/font/URL, splash welcome HTML,
     //     SEO meta description, custom head HTML, theme-design map,
-    //     default style key/theme) — `edit_branding` suffices. This
+    //     default style key/theme), `edit_branding` suffices. This
     //     lets a masteradmin delegate "edit the splash + theming"
     //     without handing out the broader keymaster role.
     //
@@ -1056,6 +1066,7 @@ export async function registerAdminRoutes(
     if (body.maxDirectMessageLength !== undefined) patch.maxDirectMessageLength = body.maxDirectMessageLength;
     if (body.maxForumPostLength !== undefined) patch.maxForumPostLength = body.maxForumPostLength;
     if (body.maxForumTopicTitleLength !== undefined) patch.maxForumTopicTitleLength = body.maxForumTopicTitleLength;
+    if (body.forumTopicsPerPage !== undefined) patch.forumTopicsPerPage = body.forumTopicsPerPage;
     if (body.editGraceMs !== undefined) patch.editGraceMs = body.editGraceMs;
     if (body.maxBioLength !== undefined) patch.maxBioLength = body.maxBioLength;
     if (body.registrationOpen !== undefined) patch.registrationOpen = body.registrationOpen;
@@ -1123,7 +1134,7 @@ export async function registerAdminRoutes(
    * under /uploads/logos/<sha>.<ext>, and persists the served path
    * onto `site_settings.logo_url`. Content-hash filenames make the
    * 1-year immutable cache (set on the /uploads static route) safe
-   * even when admins replace the logo — the URL changes.
+   * even when admins replace the logo, the URL changes.
    *
    * Plain JSON body (no multipart plugin) keeps the dep surface small;
    * 8MB cap is plenty for any reasonable logo and well under the
@@ -1133,7 +1144,7 @@ export async function registerAdminRoutes(
     dataUrl: z.string().min(32).max(8 * 1024 * 1024),
   });
 
-  // Image signatures we accept. Keep this short on purpose — any new
+  // Image signatures we accept. Keep this short on purpose, any new
   // entry has to round-trip through DOMPurify-safe rendering and the
   // CSP image-src allow-list. Each entry maps to the file extension
   // we write so the browser content-type sniff matches the blob.
@@ -1157,7 +1168,7 @@ export async function registerAdminRoutes(
   }
 
   app.post<{ Body: unknown }>("/admin/upload/logo", async (req, reply) => {
-    // Branding upload — gated on the granular `upload_logo` key
+    // Branding upload, gated on the granular `upload_logo` key
     // (masteradmin-default but matrix-grantable, same pattern as
     // `edit_site_settings`).
     if (!(await requirePermission(req, reply, "upload_logo"))) return;
@@ -1224,11 +1235,11 @@ export async function registerAdminRoutes(
     allowInline: z.boolean().optional(),
     /** Optional alternate template for the inline path. Null clears
      *  back to the fallback (use `template`). Same length cap as the
-     *  main template — both end up rendered through the same engine. */
+     *  main template, both end up rendered through the same engine. */
     inlineTemplate: z.string().max(2000).nullable().optional(),
     /** Optional CSS declaration list applied to the rendered body. Stored
      *  as raw text (e.g. `font-weight: bold; color: #4a8;`) and validated
-     *  on save against {@link sanitizeCustomCmdCss} — any property not in
+     *  on save against {@link sanitizeCustomCmdCss}, any property not in
      *  the typography/color allow-list, or any value that doesn't match
      *  the per-property regex, is dropped before persistence. Pass null
      *  to clear. */
@@ -1270,7 +1281,7 @@ export async function registerAdminRoutes(
     }
     const id = nanoid();
     const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
-    // CSS gets sanitized here on write — any property not in the allow-
+    // CSS gets sanitized here on write, any property not in the allow-
     // list (or any value that fails its per-property regex) is dropped,
     // so the persisted value is always already safe to feed straight
     // back to the renderer.
@@ -1294,7 +1305,7 @@ export async function registerAdminRoutes(
       );
     }
     await registry.reloadCustom(db);
-    // Hot-reload every connected client's autocomplete + help cache —
+    // Hot-reload every connected client's autocomplete + help cache,
     // otherwise a brand-new command stays invisible until each user
     // refreshes their tab.
     io.emit("commands:updated");
@@ -1391,6 +1402,222 @@ export async function registerAdminRoutes(
     });
     return { ok: true };
   });
+
+  /* ---------- builtin command config (social-game tuning) ----------
+   * Per-command admin overrides for the built-in social games.
+   * Each entry in the static `BUILTIN_COMMAND_CATALOG` exposes a
+   * code-default duration and a description shown in the admin
+   * panel; the live `builtin_command_config` row (if any) carries
+   * the admin's chosen reward + duration. Game modules read merged
+   * values via `getBuiltinCommandConfig` at game-start.
+   *
+   * Authorization: shares the `manage_custom_commands` key with
+   * the custom-command CRUD endpoints, both surfaces live in the
+   * same admin Commands tab and an admin who can manage one should
+   * be able to manage the other. Read uses
+   * `view_admin_custom_commands` for the same reason.
+   */
+  interface BuiltinCommandCatalogEntry {
+    name: string;
+    label: string;
+    description: string;
+    /** Code default for the duration (ms). Shown as the placeholder
+     *  in the admin UI; admins who leave the field blank get this. */
+    defaultDurationMs: number;
+    /** Friendly duration label so admins pick a value that matches
+     *  the game's window (e.g. "round window" for RPS, "claim
+     *  window" for raffles). */
+    durationLabel: string;
+    /** Some commands (raffles) deliberately ignore the reward
+     *  fields, their prize IS the host's stake. Set to false to
+     *  hide the reward inputs in the admin UI. */
+    supportsReward: boolean;
+    /** Out-of-the-box reward when no admin row exists yet. Surfaced
+     *  to the admin UI as placeholder values so admins can see what
+     *  users currently earn even before they touch the panel. The
+     *  moment an admin saves the row, their values (including
+     *  explicit zeros) take precedence over these defaults. */
+    defaultRewardXp: number;
+    defaultRewardCurrency: number;
+  }
+  const BUILTIN_COMMAND_CATALOG: ReadonlyArray<BuiltinCommandCatalogEntry> = [
+    {
+      name: "rps",
+      label: "Rock-paper-scissors",
+      description: "30-second round in the current room. Every winner of the round mints the reward in full. Leave fields blank to use the ship default reward.",
+      defaultDurationMs: 30_000,
+      durationLabel: "Round window",
+      supportsReward: true,
+      defaultRewardXp: 8,
+      defaultRewardCurrency: 3,
+    },
+    {
+      name: "trivia",
+      label: "Trivia",
+      description: "60-second trivia round. The first /answer that matches the host's hidden answer wins. Leave fields blank to use the ship default reward.",
+      defaultDurationMs: 60_000,
+      durationLabel: "Round window",
+      supportsReward: true,
+      defaultRewardXp: 12,
+      defaultRewardCurrency: 5,
+    },
+    {
+      name: "storydice",
+      label: "Story Dice",
+      description: "3-minute round. Server picks four prompt words; players /storydice <text> to submit. Room votes the winner. Leave fields blank to use the ship default reward.",
+      defaultDurationMs: 180_000,
+      durationLabel: "Submission window",
+      supportsReward: true,
+      defaultRewardXp: 20,
+      defaultRewardCurrency: 10,
+    },
+    {
+      name: "scramble",
+      label: "Word Scramble",
+      description: "Multi-round word-find game. The duration setting is PER ROUND (default 60s); host picks 1–5 rounds at start. Winner's reward is scaled by their accumulated points via the round-game multiplier (XP / Currency only; items unscaled). Leave fields blank to use the ship default reward.",
+      defaultDurationMs: 60_000,
+      durationLabel: "Per-round window",
+      supportsReward: true,
+      defaultRewardXp: 10,
+      defaultRewardCurrency: 4,
+    },
+    {
+      name: "duel",
+      label: "Duel",
+      description: "Class-based 1v1 turn combat. The window setting controls how long opponents have to accept the challenge. Reward is scaled by damage dealt / damage taken; the loser also earns XP at 0.25× their own performance (no currency or items). Leave fields blank to use the ship default reward.",
+      defaultDurationMs: 60_000,
+      durationLabel: "Challenge accept window",
+      supportsReward: true,
+      defaultRewardXp: 15,
+      defaultRewardCurrency: 5,
+    },
+    {
+      name: "raffle",
+      label: "Room raffle",
+      description: "60-second item / Currency raffle in the host's room. Reward fields are ignored, the prize IS the host's stake.",
+      defaultDurationMs: 60_000,
+      durationLabel: "Claim window",
+      supportsReward: false,
+      defaultRewardXp: 0,
+      defaultRewardCurrency: 0,
+    },
+    {
+      name: "announceraffle",
+      label: "Sitewide raffle",
+      description: "3-minute admin-only sitewide raffle. Reward fields are ignored, the prize IS the host's stake.",
+      defaultDurationMs: 180_000,
+      durationLabel: "Claim window",
+      supportsReward: false,
+      defaultRewardXp: 0,
+      defaultRewardCurrency: 0,
+    },
+  ];
+  const configurableCommandNames = new Set(BUILTIN_COMMAND_CATALOG.map((c) => c.name));
+
+  app.get("/admin/builtin-commands", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_admin_custom_commands"))) return;
+    const rows = await db.select().from(builtinCommandConfig);
+    const rowByName = new Map(rows.map((r) => [r.commandName, r]));
+    return {
+      commands: BUILTIN_COMMAND_CATALOG.map((entry) => {
+        const row = rowByName.get(entry.name);
+        return {
+          name: entry.name,
+          label: entry.label,
+          description: entry.description,
+          defaultDurationMs: entry.defaultDurationMs,
+          durationLabel: entry.durationLabel,
+          supportsReward: entry.supportsReward,
+          defaultRewardXp: entry.defaultRewardXp,
+          defaultRewardCurrency: entry.defaultRewardCurrency,
+          // Whether the admin has saved any config for this command.
+          // The UI uses this to decide between rendering the ACTUAL
+          // values (admin-set, possibly explicit zeros) vs the
+          // SHIP DEFAULTS as placeholders, so an admin who hasn't
+          // touched the panel sees what users are actually earning.
+          hasAdminConfig: !!row,
+          rewardXp: row?.rewardXp ?? 0,
+          rewardCurrency: row?.rewardCurrency ?? 0,
+          rewardItemKey: row?.rewardItemKey ?? null,
+          rewardItemCount: row?.rewardItemCount ?? 0,
+          durationMs: row?.durationMs ?? null,
+          updatedAt: row?.updatedAt ? +row.updatedAt : null,
+        };
+      }),
+    };
+  });
+
+  const builtinCommandPatchBody = z.object({
+    rewardXp: z.number().int().min(0).max(1_000_000).optional(),
+    rewardCurrency: z.number().int().min(0).max(1_000_000).optional(),
+    /** Null clears the item; empty string is treated like null. Any
+     *  non-null string is verified against the items catalog. */
+    rewardItemKey: z.string().nullable().optional(),
+    rewardItemCount: z.number().int().min(0).max(1000).optional(),
+    /** Null clears the override → game uses the code default. */
+    durationMs: z.number().int().min(1000).max(30 * 60_000).nullable().optional(),
+  }).strict();
+
+  app.put<{ Params: { name: string }; Body: unknown }>(
+    "/admin/builtin-commands/:name",
+    async (req, reply) => {
+      if (!(await requirePermission(req, reply, "manage_custom_commands"))) return;
+      const me = await getSessionUser(req);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      const name = req.params.name.toLowerCase();
+      if (!configurableCommandNames.has(name)) {
+        reply.code(404); return { error: "not a configurable built-in command" };
+      }
+      const body = builtinCommandPatchBody.parse(req.body);
+
+      // Item-key validation: when the admin sets a non-null key,
+      // verify the item actually exists. Empty string normalizes to
+      // null (matches the "clear" semantics).
+      let normalizedItemKey: string | null | undefined = body.rewardItemKey;
+      if (typeof normalizedItemKey === "string") {
+        const trimmed = normalizedItemKey.trim();
+        if (!trimmed) {
+          normalizedItemKey = null;
+        } else {
+          const itemRow = (await db.select().from(itemsTable).where(eq(itemsTable.key, trimmed)).limit(1))[0];
+          if (!itemRow) {
+            reply.code(400);
+            return { error: `unknown item key "${trimmed}"` };
+          }
+          normalizedItemKey = trimmed;
+        }
+      }
+
+      // Upsert. We don't trust the partial body to carry every
+      // field, so we merge with the existing row.
+      const existing = (await db
+        .select()
+        .from(builtinCommandConfig)
+        .where(eq(builtinCommandConfig.commandName, name))
+        .limit(1))[0];
+      const merged = {
+        commandName: name,
+        rewardXp: body.rewardXp ?? existing?.rewardXp ?? 0,
+        rewardCurrency: body.rewardCurrency ?? existing?.rewardCurrency ?? 0,
+        rewardItemKey: normalizedItemKey !== undefined ? normalizedItemKey : (existing?.rewardItemKey ?? null),
+        rewardItemCount: body.rewardItemCount ?? existing?.rewardItemCount ?? 0,
+        durationMs: body.durationMs !== undefined ? body.durationMs : (existing?.durationMs ?? null),
+        updatedAt: new Date(),
+        updatedByUserId: me.id,
+      };
+      if (existing) {
+        await db.update(builtinCommandConfig).set(merged).where(eq(builtinCommandConfig.commandName, name));
+      } else {
+        await db.insert(builtinCommandConfig).values(merged);
+      }
+      await recordAudit(db, {
+        actorUserId: me.id,
+        action: "builtin_command_config_update",
+        metadata: { name, ...merged, updatedAt: undefined, updatedByUserId: undefined },
+      });
+      return { ok: true };
+    },
+  );
 
   /* ---------- title kinds (mutual-title catalog) ----------
    * CRUD over the title_kinds table. Slug is the user-facing keyword for
@@ -1535,7 +1762,7 @@ export async function registerAdminRoutes(
    *   ?limit=200              → cap rows (default 200, max 500)
    */
   app.get<{ Querystring: Record<string, string | undefined> }>("/admin/audit", async (req, reply) => {
-    // Single key now — `view_admin_audit` covers BOTH the panel tab
+    // Single key now, `view_admin_audit` covers BOTH the panel tab
     // visibility AND the data-fetch gate. The previous split between
     // `view_audit_log` and `view_admin_audit` caused a mismatch: mod
     // saw the tab but got 403 on the data fetch. Migration 0182

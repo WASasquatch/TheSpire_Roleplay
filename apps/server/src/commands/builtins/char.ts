@@ -12,14 +12,14 @@ const NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
 /**
  * Normalize a typed character name to the storage form before the
  * regex check. The regex itself only accepts ASCII space (U+0020),
- * but real users routinely hand us NBSP (U+00A0) inside names —
+ * but real users routinely hand us NBSP (U+00A0) inside names,
  * keyboard autocorrect ("smart" typography on macOS / iOS), pasting
  * from a source that uses NBSP for layout, or clicking an existing
  * master-username link (whose canonical storage IS NBSP and which the
  * client surfaces verbatim into the composer). Folding NBSP to ASCII
  * space here turns a confusing "Character name must be 1-40 chars:
- * letters, numbers, spaces, _ - '" failure — the error message
- * literally promises spaces work — into the expected behavior, while
+ * letters, numbers, spaces, _ - '" failure, the error message
+ * literally promises spaces work, into the expected behavior, while
  * keeping the regex narrow enough to reject genuine whitespace junk
  * like tabs and newlines.
  *
@@ -36,7 +36,7 @@ function notice(ctx: CommandContext, code: string, message: string) {
 }
 
 async function findCharacter(ctx: CommandContext, name: string) {
-  // Space-/case-insensitive lookup — same helper the friend / DM /
+  // Space-/case-insensitive lookup, same helper the friend / DM /
   // whisper paths use. Tolerates NBSP-vs-ASCII-space mismatches between
   // the typed query and whatever's stored, regardless of which form the
   // user used when creating the character.
@@ -146,7 +146,7 @@ async function deleteSubcommand(ctx: CommandContext, rawName: string) {
     .set({ deletedAt: new Date() })
     .where(eq(characters.id, c.id));
 
-  // Char deletion is a global action — every tab that was voicing this
+  // Char deletion is a global action, every tab that was voicing this
   // character has to drop to OOC, not just the calling tab. Find every
   // live socket for this user whose `tabCharId` matches the deletion
   // and clear it. Each affected socket gets its own me:character-update
@@ -165,7 +165,7 @@ async function deleteSubcommand(ctx: CommandContext, rawName: string) {
     const r = (s.data as { roomId?: string }).roomId;
     if (r) affectedRooms.add(r);
   }
-  // Update the calling socket's in-memory user too — it may not be in
+  // Update the calling socket's in-memory user too, it may not be in
   // the io.fetchSockets() iteration if we're mid-event-handler.
   if (ctx.user.activeCharacterId === c.id) {
     ctx.user.activeCharacterId = null;
@@ -241,7 +241,7 @@ export const charCommand: CommandHandler = {
           .where(and(eq(characters.userId, ctx.user.id), isNull(characters.deletedAt)));
         const names = list.map((c) => c.name).sort();
         // Reference content the user might want to read or copy
-        // (especially with many characters) — persistent modal beats
+        // (especially with many characters), persistent modal beats
         // the 6-second toast.
         if (names.length === 0) {
           ctx.socket.emit("ui:hint", {

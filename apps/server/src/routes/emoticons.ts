@@ -46,7 +46,7 @@ type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 const SLUG_RX = /^[a-z0-9](?:[a-z0-9-]{0,40}[a-z0-9])?$/;
 
 /* =====================================================================
- *  Image upload helpers — same posture as admin/upload/logo: small
+ *  Image upload helpers, same posture as admin/upload/logo: small
  *  whitelist of magic bytes, content-hashed filenames so a re-upload
  *  of the same bytes deduplicates and a replaced image necessarily
  *  produces a fresh URL (busting any stale picker cache).
@@ -81,7 +81,7 @@ function sheetRowToWire(
   row: typeof emoticonSheets.$inferSelect,
   creatorUsername: string | null = null,
 ): WireEmoticonSheet {
-  // System vs community classification on the way out — `createdByUserId`
+  // System vs community classification on the way out, `createdByUserId`
   // null = admin-seeded system sheet (free to use); non-null = a
   // moderator-approved user submission (paid per use via the
   // /emoticons/community/:sheetId/use route).
@@ -96,7 +96,7 @@ function sheetRowToWire(
     kind: isCommunity ? "community" : "system",
     creatorUserId: isCommunity ? row.createdByUserId : null,
     creatorUsername: isCommunity ? creatorUsername : null,
-    // System sheets ignore commerce — they're always free regardless
+    // System sheets ignore commerce, they're always free regardless
     // of the column value. Community sheets honor the toggle.
     commerceEnabled: isCommunity ? !!row.commerceEnabled : false,
     useCount: row.useCount ?? 0,
@@ -105,7 +105,7 @@ function sheetRowToWire(
 }
 
 /* =====================================================================
- *  Authorization — does this viewer have read access to a target so
+ *  Authorization, does this viewer have read access to a target so
  *  they can place a reaction on it? Chat messages: must be in the
  *  room. DMs: must be a participant.
  * ===================================================================== */
@@ -124,7 +124,7 @@ async function viewerMayReactOn(
     // visible to any authenticated user; private-room messages are
     // protected by the room membership which the existing chat
     // backlog endpoint already enforces. The reaction endpoint
-    // trusts the same posture — if a user has seen the message id,
+    // trusts the same posture, if a user has seen the message id,
     // they may react. (A defense-in-depth room-membership check
     // could be added later if private rooms become reaction-sensitive.)
     return { ok: true };
@@ -144,7 +144,7 @@ async function viewerMayReactOn(
 }
 
 /* =====================================================================
- *  Realtime fan-out — chat reactions go to the room socket-room; DM
+ *  Realtime fan-out, chat reactions go to the room socket-room; DM
  *  reactions go to both participants' sockets.
  * ===================================================================== */
 async function broadcastReaction(
@@ -191,21 +191,21 @@ async function broadcastReaction(
 const toggleReactionBody = z.object({
   targetKind: z.enum(["chat_message", "dm", "forum_post"]),
   targetId: z.string().min(1).max(64),
-  // Sheet ref — both fields optional individually, presence-validated
+  // Sheet ref, both fields optional individually, presence-validated
   // together below.
   sheetSlug: z.string().min(1).max(64).optional(),
   cellIndex: z.number().int().min(0).max(EMOTICON_SHEET_CELL_COUNT - 1).optional(),
   // Unicode ref. 16 chars is the catalog ceiling for compound RGI
   // sequences (ZWJ families etc.); we cap here too so the column
   // constraint matches the API contract. The `.refine` rejects
-  // whitespace-only strings — `z.string().min(1)` only checks
+  // whitespace-only strings, `z.string().min(1)` only checks
   // length, so a single " " or a lone zero-width joiner used to
   // sneak through and render as a blank chip on the client.
   unicodeChar: z.string().min(1).max(16).refine(
     (s) => s.trim() !== "",
     { message: "unicodeChar must contain a visible codepoint" },
   ).optional(),
-  /** Identity to react as — null = master handle, otherwise a
+  /** Identity to react as, null = master handle, otherwise a
    *  character id the caller owns. Mirrors how `chat:input` picks an
    *  identity at send time. */
   asCharacterId: z.string().min(1).max(64).nullable().optional(),
@@ -263,7 +263,7 @@ export async function registerEmoticonRoutes(
    *
    * Approved-only filter (migration 0151). Pending and rejected
    * user submissions live in the same table but must NEVER surface
-   * in the picker — pending rows aren't live, and rejected rows
+   * in the picker, pending rows aren't live, and rejected rows
    * exist only as moderation history with their image files
    * already deleted.
    */
@@ -384,7 +384,7 @@ export async function registerEmoticonRoutes(
     const current = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.id, req.params.id)).limit(1))[0];
     if (!current) { reply.code(404); return { error: "not found" }; }
 
-    // Phase 3 — DELETE refuses to touch pending submissions. Those
+    // Phase 3, DELETE refuses to touch pending submissions. Those
     // rows hold the submitter's paid Currency until the moderation
     // queue resolves them; a blind DELETE here would orphan the
     // payment with no refund. Force the admin through the
@@ -399,7 +399,7 @@ export async function registerEmoticonRoutes(
     }
 
     // FK ON DELETE CASCADE on message_reactions.sheet_id wipes any
-    // reactions placed with this sheet. That's intentional — pulling
+    // reactions placed with this sheet. That's intentional, pulling
     // a sheet means every emoticon from it disappears everywhere.
     // For rejected rows the image file is already gone (Phase 3
     // reject path deletes it); the unlink below is a no-op then.
@@ -439,7 +439,7 @@ export async function registerEmoticonRoutes(
       // name→char reverse lookup first. The picker has been sending
       // the codepoint correctly for a while, but an older client
       // path stored the catalog NAME ("100") in place of the
-      // codepoint ("💯") — guarding here makes the route resilient
+      // codepoint ("💯"), guarding here makes the route resilient
       // to any stale client + retroactively repairs a re-toggle of
       // an old broken row. Anything not in the curated catalog
       // (free-form OS-picker paste) falls through unchanged.
@@ -449,7 +449,7 @@ export async function registerEmoticonRoutes(
     } else {
       // Sheet path. Resolve slug → row, validate the cell isn't
       // "empty" (those cells aren't pickable). Pending and rejected
-      // sheets (migration 0151) are NOT reactable — the picker
+      // sheets (migration 0151) are NOT reactable, the picker
       // filters them out, but a client could in principle know the
       // slug of a friend's pending submission and try to bypass;
       // reject server-side too.
@@ -492,7 +492,7 @@ export async function registerEmoticonRoutes(
     // (target_kind, target_id, user_id, COALESCE(sheet_id||':'||cell_index, unicode_char))
     // gives us "one user, one emoji, one target" across both ref
     // shapes. We branch the lookup WHERE clause on which ref this
-    // request carries — the COALESCE expression isn't easy to
+    // request carries, the COALESCE expression isn't easy to
     // re-execute through Drizzle, so we just match the same columns
     // the application set.
     const existing = ref.kind === "sheet"
@@ -591,7 +591,7 @@ export async function registerEmoticonRoutes(
   );
 
   /* =========================================================
-   *  User submissions — Phase 3 of the cosmetic expansion.
+   *  User submissions, Phase 3 of the cosmetic expansion.
    *
    *  Flow:
    *    1. User submits a custom 4×4 reaction sheet via POST
@@ -655,7 +655,7 @@ export async function registerEmoticonRoutes(
     }
 
     // Cap concurrent pending submissions across ALL of the user's
-    // identities — the abuse concern is per-account, not per-pool.
+    // identities, the abuse concern is per-account, not per-pool.
     // We include both master-paid (submitter_pool_id = me.id) AND
     // character-paid pending rows owned by this user's characters.
     const myCharIds = (await db
@@ -678,7 +678,7 @@ export async function registerEmoticonRoutes(
     // Look up the current submission cost. The `flair_reaction_sheet`
     // cosmetic row is seeded by migration 0151; admins can tune the
     // price via the Flair admin tab. Per-submission (NOT a one-time
-    // purchase) — each upload re-pays.
+    // purchase), each upload re-pays.
     const costRow = (await db
       .select({ cost: cosmetics.cost, enabled: cosmetics.enabled })
       .from(cosmetics)
@@ -750,7 +750,7 @@ export async function registerEmoticonRoutes(
           name: body.name,
           imageUrl: imageResult.url,
           cells: JSON.stringify(body.cells),
-          // Pending submissions don't compete for the sortOrder slot —
+          // Pending submissions don't compete for the sortOrder slot,
           // admins decide where it sits when they approve. Start at 0;
           // the approve endpoint reorders to the tail.
           sortOrder: 0,
@@ -792,7 +792,7 @@ export async function registerEmoticonRoutes(
    * Currency and credits the creator's master pool 1 Currency. The
    * buyer's identity (master or character) selects which pool pays.
    * System sheets (createdByUserId IS NULL) are free and don't
-   * accept this endpoint — clients should never call it for them.
+   * accept this endpoint, clients should never call it for them.
    *
    * Transaction: balance read + debit + credit + two ledger rows
    * land in a single sqlite write lock so a concurrent submission
@@ -861,7 +861,7 @@ export async function registerEmoticonRoutes(
       const commerceOn = !!sheet.commerceEnabled;
 
       // Free path: commerce disabled by the owner. Skip the debit /
-      // credit / ledger entries entirely — there's no transfer to
+      // credit / ledger entries entirely, there's no transfer to
       // make. Still bump `use_count` below so the "Top used" sort
       // reflects every use regardless of payment status. Return the
       // same shape callers expect (`charged: 0`).
@@ -943,7 +943,7 @@ export async function registerEmoticonRoutes(
             createdAt: new Date(),
           }).run();
           // Bump the sheet's lifetime usage tally. Same transaction so
-          // counter + ledger move together — a partial commit can't
+          // counter + ledger move together, a partial commit can't
           // leave a credited revenue row without its matching tally
           // bump or vice versa.
           tx.update(emoticonSheets)
@@ -964,7 +964,7 @@ export async function registerEmoticonRoutes(
       // real time without a manual refresh. We re-read the new
       // currency totals from the just-committed transaction so the
       // wire payload carries the correct value. Failure here is
-      // non-fatal — the charge has landed and the next normal earning
+      // non-fatal, the charge has landed and the next normal earning
       // fetch will reconcile.
       try {
         const buyerNow = scopeCharacterId
@@ -1012,7 +1012,7 @@ export async function registerEmoticonRoutes(
   /* ---------- Sheet owner: toggle commerce on/off ----------
    *
    * Only the sheet's `createdByUserId` (or an admin) can flip this.
-   * Flipping doesn't refund any prior uses — it just decides what
+   * Flipping doesn't refund any prior uses, it just decides what
    * happens to FUTURE use calls.
    */
   const toggleCommerceBody = z.object({
@@ -1166,7 +1166,7 @@ export async function registerEmoticonRoutes(
    * sheet surfaces last in the picker (admin can reorder later via
    * the existing sheet PATCH), records audit, broadcasts the
    * `emoticons:updated` pulse so every connected client re-fetches.
-   * No Currency movement — the submission cost was debited at
+   * No Currency movement, the submission cost was debited at
    * submission time and stays spent.
    */
   app.post<{ Params: { id: string } }>(
@@ -1211,7 +1211,7 @@ export async function registerEmoticonRoutes(
    * Flips status='rejected', refunds the snapshotted cost to the
    * paying identity, deletes the image file, records audit. The
    * row is retained for the moderation audit trail (with the
-   * imageUrl pointing at a now-deleted file — clients filter by
+   * imageUrl pointing at a now-deleted file, clients filter by
    * status='approved' so this never reaches them).
    */
   const rejectSubmissionBody = z.object({
@@ -1286,7 +1286,7 @@ export async function registerEmoticonRoutes(
           .where(eq(emoticonSheets.id, row.id))
           .run();
       });
-      // Delete the asset file outside the txn. Best-effort — a stale
+      // Delete the asset file outside the txn. Best-effort, a stale
       // file on disk after a successful reject is a janitor problem,
       // not a correctness issue (the row is rejected, picker won't
       // see it, the URL is dead from the client's perspective).

@@ -30,7 +30,7 @@ export type BodyPart = TextPart | MentionPart | WorldMentionPart;
 
 /**
  * Split a message body into alternating text and mention parts. The output
- * preserves all original characters — concatenating every `text`/`raw`
+ * preserves all original characters, concatenating every `text`/`raw`
  * (or `@world:slug` for world mentions) back together reproduces the input,
  * minus any backslash an author placed to escape an `@`.
  *
@@ -47,7 +47,7 @@ export function splitMentions(body: string): BodyPart[] {
   const out: BodyPart[] = [];
   for (const seg of splitOnCode(body)) {
     if (seg.kind === "code") {
-      // Code regions pass through verbatim — downstream `parseInline`
+      // Code regions pass through verbatim, downstream `parseInline`
       // re-tokenizes the backticks and renders them as <code>.
       out.push({ kind: "text", text: seg.raw });
       continue;
@@ -73,7 +73,7 @@ function extractFromTextSegment(text: string, out: BodyPart[]): void {
     if (textChunk) out.push({ kind: "text", text: textChunk });
     if (escaped) {
       // The matched span (after the prefix we already dropped) is the
-      // `@name` or `@world:slug` itself — emit it as literal text.
+      // `@name` or `@world:slug` itself, emit it as literal text.
       out.push({ kind: "text", text: matched.slice(prefix.length) });
     } else if (worldSlug) {
       out.push({ kind: "world-mention", slug: worldSlug.toLowerCase() });

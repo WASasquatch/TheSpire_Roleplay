@@ -13,7 +13,7 @@ import { readError } from "../lib/http.js";
  * Self-contained editor for the two profile-customization Flair
  * surfaces. Fetches its own data via `/me/profile-flair` so it
  * doesn't depend on the earning-snapshot wiring inside
- * `ProfileEditor` — drop it into any owner-side panel and it
+ * `ProfileEditor`, drop it into any owner-side panel and it
  * handles ownership gating, save persistence, and live preview on
  * its own.
  *
@@ -174,7 +174,7 @@ function buildUrl(characterId: string | null): string {
 
 /**
  * Standalone "Show visitors counter on public profile" toggle for
- * the Privacy tab — mirrors the checkbox in {@link ProfileFlairEditor}
+ * the Privacy tab, mirrors the checkbox in {@link ProfileFlairEditor}
  * so users who instinctively look for visibility toggles under
  * Privacy find it there too. Self-saving: fires PUT
  * `/me/profile-flair` immediately on change.
@@ -182,7 +182,7 @@ function buildUrl(characterId: string | null): string {
  * Renders nothing when the viewer doesn't own
  * `flair_profile_visitors` for the given identity, so it doesn't
  * clutter the privacy tab for accounts that haven't bought the
- * flair. The actual count breakdown stays on the Flair tab — this
+ * flair. The actual count breakdown stays on the Flair tab, this
  * row is just the public-visibility switch.
  */
 export function VisitorsVisibilityToggleRow({ characterId }: { characterId: string | null }) {
@@ -235,7 +235,7 @@ export function VisitorsVisibilityToggleRow({ characterId }: { characterId: stri
     }
   }
 
-  // Hidden when the user doesn't own the flair — the row is a
+  // Hidden when the user doesn't own the flair, the row is a
   // visibility control, not a purchase prompt. The shop already
   // does that job.
   if (!loaded || !ownsFlair) return null;

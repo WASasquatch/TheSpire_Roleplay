@@ -12,7 +12,7 @@ import type { Db } from "./db/index.js";
 /**
  * Parse the JSON-encoded `cells` column of an emoticon_sheets row.
  * Tolerant: a corrupted value returns an empty 16-slot grid instead
- * of throwing — the picker / sprite renderer treats those as hidden.
+ * of throwing, the picker / sprite renderer treats those as hidden.
  */
 export function parseSheetCells(raw: string): string[] {
   let parsed: unknown;
@@ -63,7 +63,7 @@ export async function loadReactionsForTargets(
     .where(and(eq(messageReactions.targetKind, kind), inArray(messageReactions.targetId, targetIds)))
     .orderBy(asc(messageReactions.createdAt));
   if (rows.length === 0) return out;
-  // Batched sheet lookup — only fires when at least one row is a
+  // Batched sheet lookup, only fires when at least one row is a
   // sheet-kind reaction. Unicode-only payloads don't need the
   // sheet table at all.
   const sheetIds = [...new Set(rows.map((r) => r.sheetId).filter((v): v is string => v != null))];
@@ -91,7 +91,7 @@ export async function loadReactionsForTargets(
     let ref: ReactionRef;
     let label: string;
     // Empty / whitespace `unicodeChar` rows render as blank chips on
-    // the client — they slipped past the route validation at some
+    // the client, they slipped past the route validation at some
     // point (likely a pre-rename catalog path that wrote the
     // shorthand name field by mistake; can also be a manual DB edit).
     // Treat them as if `unicodeChar` were NULL so the loader either

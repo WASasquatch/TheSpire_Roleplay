@@ -35,7 +35,7 @@ import { EmoticonSprite } from "./EmoticonSprite.js";
  * onSelect / onInput listeners attached to the textarea element.
  *
  * Mount this beside the `<textarea>` and pass the ref + value + onChange
- * setter — the same triple the parent already uses for its own typing
+ * setter, the same triple the parent already uses for its own typing
  * pipeline. The hook coordinates the cursor position via `selectionStart`
  * so the parent's `onChange` model stays canonical.
  */
@@ -48,7 +48,7 @@ const MAX_QUERY_LEN = 32;
 
 interface SheetSuggestion {
   kind: "sheet";
-  /** Display label — the sheet cell's label (e.g. "smile_big"). */
+  /** Display label, the sheet cell's label (e.g. "smile_big"). */
   name: string;
   /** Insertion token. The composer renders `:slug:N:` as the sheet
    *  sprite via the existing inline-emoticon path. */
@@ -62,7 +62,7 @@ interface UnicodeSuggestion {
   kind: "unicode";
   /** Display label (e.g. "smile", "joy"). */
   name: string;
-  /** Insertion text — the raw Unicode codepoint(s). */
+  /** Insertion text, the raw Unicode codepoint(s). */
   char: string;
 }
 
@@ -75,7 +75,7 @@ interface ActiveTrigger {
   /** Caret position when the trigger was last computed. */
   end: number;
   /** The lowercase query (chars between `:` and the caret). Empty
-   *  string when only `:` has been typed — we still surface a small
+   *  string when only `:` has been typed, we still surface a small
    *  default suggestion set so the popup hints at usefulness. */
   query: string;
 }
@@ -83,7 +83,7 @@ interface ActiveTrigger {
 /**
  * Best-effort regex that detects a `:trigger` at the end of the text
  * preceding the caret. The trigger only fires when the `:` is
- * preceded by start-of-string, whitespace, or another newline — so
+ * preceded by start-of-string, whitespace, or another newline, so
  * `http:` doesn't trigger, `12:30` doesn't trigger, and the legacy
  * `:slug:idx:` token typed by the picker doesn't accidentally
  * recurse (the `:idx:` half starts with a digit run after `:`, not
@@ -137,7 +137,7 @@ export function EmoticonTypeahead({
     if (!active) return [];
     const q = active.query.toLowerCase();
     if (q.length === 0) {
-      // Bare-`:` sampler — surfaces the picker's intent without
+      // Bare-`:` sampler, surfaces the picker's intent without
       // forcing the user to type a query.
       const sample: Suggestion[] = [];
       for (const e of UNICODE_EMOJI_FLAT.slice(0, 6)) {
@@ -330,7 +330,7 @@ export function EmoticonTypeahead({
       className="keep-panel pointer-events-auto fixed z-[210] max-h-64 w-60 overflow-y-auto rounded-lg border border-keep-rule shadow-xl"
       style={{ top: pos.top, left }}
       // Stop mousedown so clicking a suggestion doesn't steal focus
-      // from the textarea — the caret needs to stay where it is so
+      // from the textarea, the caret needs to stay where it is so
       // setSelectionRange in `accept` lands correctly.
       onMouseDown={(e) => e.preventDefault()}
     >
@@ -371,7 +371,7 @@ export function EmoticonTypeahead({
  * the caret inside a <textarea>. The standard workaround is to mount
  * a hidden mirror <div> with the same text + styles up to the caret
  * index, drop a zero-width sentinel span there, and read the span's
- * offset. The mirror is reused across calls — we just reset its
+ * offset. The mirror is reused across calls, we just reset its
  * content per measurement.
  * ============================================================= */
 let mirrorEl: HTMLDivElement | null = null;
@@ -437,7 +437,7 @@ function measureCaretOffset(
 }
 
 /**
- * Unused export to keep the file tree-shakable — components that
+ * Unused export to keep the file tree-shakable, components that
  * mount the typeahead should also clean up the global mirror on
  * teardown if they're the last mount. In practice the mirror is
  * cheap to keep around (one hidden div per page).

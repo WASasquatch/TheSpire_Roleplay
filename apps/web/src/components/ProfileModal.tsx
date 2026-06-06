@@ -26,7 +26,7 @@ interface Props {
    * Open the DM floating panel keyed to the profile's owner. Phase 4
    * surface for the Direct Messages feature. The parent hides this
    * action when the viewer is anonymous OR equals the profile owner
-   * OR the target has `dmsEnabled === false` — same gate posture as
+   * OR the target has `dmsEnabled === false`, same gate posture as
    * Whisper. The handler receives the target's userId since the DM
    * routing is user-based, not name-based.
    */
@@ -114,7 +114,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   //     their own profile view too, which reads as data loss rather
   //     than a visibility tweak.
   //   - Site admins (mod+), since the owner contract is "hide from
-  //     strangers, not from staff" — see the docstring on
+  //     strangers, not from staff", see the docstring on
   //     `CharacterStats.visibility` in shared/profile.ts.
   // The detection runs lazily via useChat below; the helper short-
   // circuits to "no bypass" when nobody's signed in (anonymous
@@ -127,7 +127,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   // Stat entries that actually have a value - empty fields are dropped so
   // a half-filled character doesn't show a row of dashes.
   const statEntries = stats ? collectStatEntries(stats, bypassVisibility) : [];
-  // Portraits live on the character profile only — master profiles don't
+  // Portraits live on the character profile only, master profiles don't
   // carry a gallery, so master views fall back to length 0. The blank
   // check counts them as "filled out" so a character with only gallery
   // images (no bio/stats/avatar) still shows the gallery instead of the
@@ -144,7 +144,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   // Owner-configured public-profile background. When set, the Modal's
   // backdrop (the area outside the card) paints this image with the
   // chosen sizing strategy. The backdrop's own `onClick={onClose}`
-  // stays intact — clicking outside the card still dismisses the
+  // stays intact, clicking outside the card still dismisses the
   // modal exactly like the default backdrop, so logged-in viewers
   // landing on a profile from chat can still tap-out back to the
   // shell. Backdrop also keeps its `bg-black/40` darken color, which
@@ -183,7 +183,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   // when this component unmounts. But a "the profile's custom CSS
   // bled into the login modal after closing the public profile"
   // report pinned a path where a leftover block was still being
-  // matched against the next mounted tree — likely a Strict-mode
+  // matched against the next mounted tree, likely a Strict-mode
   // double-mount or the SPA route swap destroying and recreating the
   // host shell on the same tick. Running the sweep here on unmount
   // (after React's own removal) guarantees that no marker-tagged
@@ -198,7 +198,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   // Always-on contract (independent of profile BG image): fully opaque
   // glass tints. Every theme-style's `.keep-frame` / `.keep-panel`
   // rule reads `--keep-glass-panel-tint` / `--keep-glass-bg-tint`
-  // (the few that don't — scifi's flat 0.5-alpha — are also overridden
+  // (the few that don't, scifi's flat 0.5-alpha, are also overridden
   // by the inline `backgroundColor` on the card div below). Forcing
   // these to 1.0 alpha means the owner's theme actually renders
   // against the owner's `bg`, NOT a 50% blend with whatever's behind
@@ -229,7 +229,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
     // color toward the opposite extreme so contrast is guaranteed
     // regardless of which neon hue is blooming behind the panel.
     // Mid-luminance BGs (0.35..0.6) leave the theme default alone
-    // — those are already neutral enough for the theme to win.
+    //, those are already neutral enough for the theme to win.
     if (bgLuminance !== null) {
       if (bgLuminance > 0.6) {
         legibilityVars["--keep-text"] = "20 20 20";
@@ -245,7 +245,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
     <Modal
       onClose={onClose}
       variant="mobile-fullscreen"
-      // Conditional spread, not `prop={maybeUndef}` — `exactOptionalPropertyTypes`
+      // Conditional spread, not `prop={maybeUndef}`, `exactOptionalPropertyTypes`
       // in tsconfig rejects `undefined` as a value for optional props.
       {...(backdropStyle ? { backdropStyle } : {})}
       {...(zIndex !== undefined ? { zIndex } : {})}
@@ -257,7 +257,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
           only get those design treatments via an ANCESTOR carrying
           the attribute. In overlay mode (chat mounted) the viewer's
           `applyStyle` writes the attribute onto `<html>` and the
-          modal card coincidentally matches via that ancestor — with
+          modal card coincidentally matches via that ancestor, with
           the VIEWER's design, not the owner's. On a deep-link
           refresh the standalone shell is rendered (Chat never
           mounts, `applyStyle` never runs), `<html>` carries no
@@ -283,12 +283,12 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
         // Mobile: full-viewport sheet (h-dvh handles the iOS address-bar
         // shrink so the close button stays reachable). No border / rounded
         // corners since we sit edge-to-edge. Dismiss is via the close
-        // button only — backdrop tap doesn't reach us at this size.
+        // button only, backdrop tap doesn't reach us at this size.
         // Desktop (md+): 75vw on widescreens with a ceiling so it doesn't
         // become absurd on ultra-wide monitors, capped at 85vh tall, with
         // the original border / rounded / shadow treatment.
         // Inline `backgroundColor` defeats the scifi `.keep-frame`
-        // rule that paints the modal at 50% panel-alpha — that bleed
+        // rule that paints the modal at 50% panel-alpha, that bleed
         // was the source of the "viewer's theme leaks through and
         // collapses contrast" bug. Inline beats every `[data-theme-
         // style="…"] .keep-frame` selector since none of them use
@@ -350,7 +350,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
 }
 
 /* ============================================================ *
- *  useBgLuminance — sample the average perceived luminance of a
+ *  useBgLuminance, sample the average perceived luminance of a
  *  remote image. Returns null while loading, on error, or on
  *  CORS-tainted canvas (cross-origin images without the right
  *  headers throw on getImageData). Callers fall back to safer
@@ -378,7 +378,7 @@ function useBgLuminance(url: string | null): number | null {
         let total = 0;
         const samples = data.length / 4;
         for (let i = 0; i < data.length; i += 4) {
-          // Rec. 709 perceived luminance — weights human eye
+          // Rec. 709 perceived luminance, weights human eye
           // sensitivity to green much higher than red/blue, so a
           // neon-cyan BG reads as bright (forces dark text) where
           // a deep navy reads as dark (forces light text).
@@ -386,7 +386,7 @@ function useBgLuminance(url: string | null): number | null {
         }
         if (!cancelled) setLum(total / samples / 255);
       } catch {
-        // CORS-tainted canvas — getImageData throws. Leave null so
+        // CORS-tainted canvas, getImageData throws. Leave null so
         // callers fall back to the opacity-tightening path.
         if (!cancelled) setLum(null);
       }
@@ -455,7 +455,7 @@ function ProfileBody({
   journal: NonNullable<Extract<ProfileView, { kind: "character" }>["profile"]["journalEntries"]>;
   statEntries: Array<[string, string]>;
   /** True when the viewer is the profile owner or a mod+ admin viewer
-   *  — those classes see all sections regardless of `visibility`. */
+   * , those classes see all sections regardless of `visibility`. */
   bypassVisibility: boolean;
   isCompletelyBlank: boolean;
   onClose: () => void;
@@ -472,16 +472,16 @@ function ProfileBody({
   // Viewer's role drives the mod-tools row: mod+ sees copy-id chips so
   // moderation flows (kick/ban/disable, admin tab lookups) can grab
   // the raw user/character ids without retyping. Read directly off
-  // the chat store — ProfileModal can be opened from many surfaces
+  // the chat store, ProfileModal can be opened from many surfaces
   // and a dedicated prop would just be parent-prop-drilling.
   const viewerRole = useChat((s) => s.me?.role ?? null);
   const isModViewer = viewerRole !== null && roleRank(viewerRole) >= roleRank("mod");
-  // Earning — fetch the IDENTITY's own pool so the hero shows the
+  // Earning, fetch the IDENTITY's own pool so the hero shows the
   // right XP / currency / rank / border. Character profiles must
   // pass their character id; without it the endpoint returns the
   // master/OOC pool and a fresh character would inherit the owner's
   // accumulated XP, currency, and equipped border (the project's
-  // "a character is its own account" contract — nothing is shared
+  // "a character is its own account" contract, nothing is shared
   // between OOC and a character).
   const characterIdForEarning = isChar
     ? (profile.profile as { id: string }).id
@@ -491,7 +491,7 @@ function ProfileBody({
     let cancelled = false;
     fetchPublicEarning(profile.profile.userId, characterIdForEarning)
       .then((r) => { if (!cancelled) setEarning(r); })
-      .catch(() => { /* unranked / not-found / network — hide the chip */ });
+      .catch(() => { /* unranked / not-found / network, hide the chip */ });
     return () => { cancelled = true; };
   }, [profile.profile.userId, characterIdForEarning]);
   const freeformConfig = useMemo(() => {
@@ -523,11 +523,11 @@ function ProfileBody({
   //     full-width segmented bar BELOW the avatar/content row so the
   //     primary actions are thumb-reachable and the buttons line up
   //     edge-to-edge with the band.
-  //   - desktop (≥640px): original layout preserved — XL avatar,
+  //   - desktop (≥640px): original layout preserved, XL avatar,
   //     XP/Currency as the prominent chip pair, action buttons inline
   //     beneath the meta.
   const hasActions = !!(onWhisper || onMessage || onIgnore || activeCharacterAction);
-  // Profile banner — the URL slot the owner equipped via the Flair
+  // Profile banner, the URL slot the owner equipped via the Flair
   // tab. Renders as a 3:1 hero strip ABOVE the existing avatar/name
   // hero band. Falls through to nothing when the URL is null (slot
   // empty, cosmetic not owned, or admin cleared an abusive link).
@@ -551,7 +551,7 @@ function ProfileBody({
               A previous version used `aspect-[3/1]` which aggressively
               cropped anything non-banner-shaped; a follow-up bumped
               the cap to 40vh which let the banner dominate ~half the
-              modal on wide desktops — 220px is the sweet spot where
+              modal on wide desktops, 220px is the sweet spot where
               the strip reads as a hero band, not the whole hero.
               onError hides the img on a broken link so visitors don't
               see the browser's "missing image" icon. */}
@@ -576,9 +576,9 @@ function ProfileBody({
         {/* Mobile banner backdrop + scrim. The owner's profile banner
             doubles as the hero band's background on mobile (sm:hidden)
             so we don't burn 220px of vertical space on a dedicated
-            banner strip on a phone. The scrim is `bg-keep-bg/75` —
+            banner strip on a phone. The scrim is `bg-keep-bg/75`,
             the theme's bg color at 75% opacity, which naturally reads
-            dark on dark themes and light on light themes — keeping the
+            dark on dark themes and light on light themes, keeping the
             avatar / name / chips legible over whatever image the user
             picked. `pointer-events-none` so the scrim doesn't steal
             clicks from anything that might extend behind it. */}
@@ -599,7 +599,7 @@ function ProfileBody({
                 `bg-keep-bg/*` class) on purpose: the glass theme's
                 stylesheet matches `[class*="bg-keep-bg"]` and stamps
                 a heavy `backdrop-filter: blur(18px) saturate(1.3)`
-                onto anything carrying that class — which on top of a
+                onto anything carrying that class, which on top of a
                 translucent overlay reduced the banner to a featureless
                 blur. Inline `style` keeps the theme-aware bg-color
                 tint (var(--keep-bg) is dark on dark themes, light on
@@ -630,7 +630,7 @@ function ProfileBody({
               tier IV AND equipped that rank's border via the Earning
               dashboard. Dual-render so mobile gets a tighter `lg`
               footprint (64px / 96px framed) and desktop keeps the
-              full showcase size — BorderedAvatar's size is fixed at
+              full showcase size, BorderedAvatar's size is fixed at
               render time so a single instance can't responsively
               swap. The cached image bytes are reused across both
               renders. */}
@@ -662,13 +662,13 @@ function ProfileBody({
                 viewports. The earlier layout had everything in a
                 single flex-wrap, which meant one chip could land on
                 the name line while the other wrapped to the next
-                row — visually unbalanced and prone to clipping the
+                row, visually unbalanced and prone to clipping the
                 name. Splitting into two siblings (with the chips in
                 their own flex container) keeps the chips together
                 regardless of viewport width while still wrapping
                 cleanly when the name is long. */}
             <div className="flex flex-wrap items-center gap-2">
-              {/* Name style cosmetics surface here too — a styled name
+              {/* Name style cosmetics surface here too, a styled name
                   is a show-off cosmetic, not just chat decoration, so
                   the profile hero paints it the same way chat does.
                   Falls back to plain text when no style is equipped.
@@ -690,7 +690,7 @@ function ProfileBody({
               >
                 {genderGlyph(gender).icon}
               </span>
-              {/* Desktop rank — sits inline with the name (lg+) with a
+              {/* Desktop rank, sits inline with the name (lg+) with a
                   pipe separator. Mobile keeps its own dedicated rank
                   lockup row below the name (the `lg:hidden` block
                   further down); the right-edge desktop lockup that
@@ -711,7 +711,7 @@ function ProfileBody({
             </div>
             {/* Earning chips (desktop). Live on their own row below the
                 name so they never split across rows (XP on the name
-                line, Currency wrapped — the broken UX before this
+                line, Currency wrapped, the broken UX before this
                 change). Hidden on mobile in favor of an inline meta
                 line that wraps everything together. */}
             {earning?.xp != null || earning?.currency != null ? (
@@ -744,7 +744,7 @@ function ProfileBody({
                 ) : null}
               </div>
             ) : null}
-            {/* Mobile rank lockup — uses the gem variant (same icon
+            {/* Mobile rank lockup, uses the gem variant (same icon
                 set chat lines + the userlist render) so the rank
                 reads as the compact "identity tag" it does
                 everywhere else on the site. The tier chevron (used
@@ -767,7 +767,7 @@ function ProfileBody({
                 Desktop keeps the original `text-xs` cadence with
                 XP/currency as their own chips above this row. */}
             <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] uppercase tracking-widest text-keep-muted sm:text-xs">
-              {/* XP + currency inline (mobile only — desktop has the
+              {/* XP + currency inline (mobile only, desktop has the
                   chip pair above). Hidden when the user hasn't earned
                   anything yet so the meta line doesn't lead with a
                   zero. */}
@@ -808,7 +808,7 @@ function ProfileBody({
                   ) : profile.profile.role === "trusted" ? (
                     <span className="ml-1 italic text-keep-system" title="Trusted account - elevated rate limits earned through participation.">· Trusted</span>
                   ) : null}
-                  {/* Scriptorium passive author tier — surfaces alongside
+                  {/* Scriptorium passive author tier, surfaces alongside
                       the role chip. Counted from the master account's
                       published-story count; same value on master and
                       character views. */}
@@ -830,7 +830,7 @@ function ProfileBody({
               ) : null}
               <span aria-hidden>·</span>
               <CopyProfileLink name={name} />
-              {/* Visitor counter — renders only when the owner owns
+              {/* Visitor counter, renders only when the owner owns
                   `flair_profile_visitors` AND has flipped visibility
                   on. Returns null otherwise, so the meta line is
                   unchanged for everyone else. */}
@@ -849,7 +849,7 @@ function ProfileBody({
                 Either condition surfaces the row; if both are absent
                 we render nothing so non-mod viewers see no chrome.
                 The MOD chip is a visual reminder that this is
-                privileged info — don't screen-share it carelessly. */}
+                privileged info, don't screen-share it carelessly. */}
             {(profile.kind === "character" && profile.profile.ownerUsername) || isModViewer ? (
               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-keep-muted">
                 <span
@@ -877,7 +877,7 @@ function ProfileBody({
                 ) : null}
                 {/* Id chips. User id always renders for mod viewers;
                     character id only on character profiles. Both copy
-                    the full nanoid to the clipboard on click — the
+                    the full nanoid to the clipboard on click, the
                     label "user id" / "character id" stays distinct so
                     a mod copying into /disable vs /ban-by-character
                     can't grab the wrong one. */}
@@ -891,7 +891,7 @@ function ProfileBody({
                 ) : null}
               </div>
             ) : null}
-            {/* Action row — desktop only. Mobile moves the same
+            {/* Action row, desktop only. Mobile moves the same
                 actions into the full-width segmented bar that sits
                 below the avatar/content row (see further down). Self-
                 views (App suppresses whisper/ignore) still surface
@@ -949,7 +949,7 @@ function ProfileBody({
               focused on identity + rank and the personality bars get
               their own deliberate column of vertical space. Mobile
               and desktop both render the body version. The `ml-auto`
-              that this slot used to enforce is gone too — the rank
+              that this slot used to enforce is gone too, the rank
               inline above already pushes the close button right via
               its own flex math. */}
           {/* `self-start` anchors the close affordance to the top of
@@ -958,7 +958,7 @@ function ProfileBody({
               with it. */}
           <CloseButton onClick={onClose} className="ml-auto self-start" />
         </div>
-        {/* Mobile action bar — full-width segmented row pinned to the
+        {/* Mobile action bar, full-width segmented row pinned to the
             bottom of the hero band on phones. Each visible button
             takes an equal share via `flex-1`, separator borders sit
             between them, and the row carries a top border so it reads
@@ -1014,7 +1014,7 @@ function ProfileBody({
         ) : null}
         </div>
 
-        {/* Profile-flair surfaces — the quote marquee (when the
+        {/* Profile-flair surfaces, the quote marquee (when the
             owner has flair_profile_marquee + configured quotes)
             sits between the hero band and the scrolling body so
             it reads as part of the profile chrome. The visitor
@@ -1104,19 +1104,19 @@ function ProfileBody({
 
                   <AttributesSection stats={stats} bypassVisibility={bypassVisibility} />
 
-                  {/* Activity counters — lifetime totals computed server-side
+                  {/* Activity counters, lifetime totals computed server-side
                       at fetch time. Scoped per identity: character profile
                       shows that character's posts; master profile shows
                       everything authored under the user account. Zero is a
                       legitimate value (brand-new account, never posted) so
                       the section always renders rather than hiding when
-                      totals are 0 — "0 posts" IS information.
+                      totals are 0, "0 posts" IS information.
 
                       Per-metric privacy: when the user has the matching
                       hide-flag set on /me/profile, the server returns null
                       for that field and we render "private" instead of the
                       number. The tile still renders so the user's intent
-                      ("I am opting out") is visible to viewers — silently
+                      ("I am opting out") is visible to viewers, silently
                       hiding the whole tile would read as "they never
                       posted any forum topics" which is a different claim. */}
                   <Section title="Activity">
@@ -1152,7 +1152,7 @@ function ProfileBody({
                   </Section>
                 </div>
 
-                {/* Disposition column — 25% on desktop, full-width
+                {/* Disposition column, 25% on desktop, full-width
                     stacked below on mobile. Hidden entirely when the
                     character has no visible axes; wrapping in the
                     standard Section gives it the same header rhythm
@@ -1186,19 +1186,19 @@ function ProfileBody({
               ) : null}
 
               {/* Collection + Pets sit ABOVE the bio because they read
-                  as the visual marquee of the profile — a glance-able
+                  as the visual marquee of the profile, a glance-able
                   showcase of what the identity owns, the way a pinned
                   Tweet or a "now playing" widget tops a personal page.
                   The bio is the long-form prose below it. Each section
                   is hidden when empty so a fresh profile doesn't show
                   empty rails. */}
 
-              {/* Collection showcase — pinned items from the identity's
+              {/* Collection showcase, pinned items from the identity's
                   10-slot Collection. Each identity (OOC + each
                   character) has its own pin set; viewing this profile
                   shows ONLY this identity's pins (a character profile
                   never inherits the OOC's pins and vice versa).
-                  Sparse — a user can pin slots 0, 3, 7 and leave the
+                  Sparse, a user can pin slots 0, 3, 7 and leave the
                   rest empty; we collapse empty slots so the renderer
                   shows only filled tiles. Section hidden entirely
                   when nothing is pinned. */}
@@ -1219,12 +1219,12 @@ function ProfileBody({
                 </Section>
               ) : null}
 
-              {/* Pet Collection — separate 5-slot showcase scoped to
+              {/* Pet Collection, separate 5-slot showcase scoped to
                   items with category='pet'. Same identity partitioning
                   as the item collection above; rendered directly
                   under it so visitors see the pin sets together. The
                   section header reads "Pets" rather than "Pet
-                  Collection" — the modal already has "Collection"
+                  Collection", the modal already has "Collection"
                   for items, so the simpler noun keeps the two
                   sections visually distinct without verbose repetition. */}
               {profile.profile.petCollection.length > 0 ? (
@@ -1251,7 +1251,7 @@ function ProfileBody({
                   // writer-authored CSS like `.list-card { ... }`
                   // (which the server stored as
                   // `.user-html-scope .list-card { ... }`) wouldn't
-                  // match anything — the wrapper class is the
+                  // match anything, the wrapper class is the
                   // contract.
                   <div
                     className={`prose prose-sm max-w-none break-words ${USER_HTML_SCOPE_CLASS}`}
@@ -1265,7 +1265,7 @@ function ProfileBody({
               </Section>
 
               {/* Additional portraits gallery. Character profiles and
-                  master / OOC profiles both render this — the master
+                  master / OOC profiles both render this, the master
                   gallery lives in user_portraits (added in migration
                   0113), the character gallery in character_portraits;
                   both ship the same wire shape so a single component
@@ -1304,7 +1304,7 @@ function ProfileBody({
           )}
         </div>
       {/* Tap-to-zoom overlay. Mounted at the fragment's end so it's
-          a sibling of the scrolling body — fixed positioning + z:60
+          a sibling of the scrolling body, fixed positioning + z:60
           puts it above the profile card (z:50) regardless of where
           it sits in the DOM. Closes on any click, Esc, or when the
           parent modal unmounts. */}
@@ -1367,9 +1367,9 @@ function NsfwGate({
 
 /**
  * Display label + tint for the Scriptorium passive author tier. Three
- * tiers, three colors — same palette family as the role chips above
+ * tiers, three colors, same palette family as the role chips above
  * so the author badge feels native to the profile header. The full
- * `(N stories)` count is in the title attribute (hover/tap) — we
+ * `(N stories)` count is in the title attribute (hover/tap), we
  * don't crowd the inline text with it.
  */
 function scriptoriumTierLabel(tier: "author" | "storyteller" | "loremaster"): string {
@@ -1440,7 +1440,7 @@ function CopyId({ label, id }: { label: string; id: string }) {
       window.prompt("Copy this id:", id);
     }
   }
-  // Show only the first segment to keep the chip narrow — full id
+  // Show only the first segment to keep the chip narrow, full id
   // rides on the title attribute. nanoid ids run ~21 chars, so a
   // 6-char prefix is enough to disambiguate at a glance without
   // crowding the meta row.
@@ -1466,7 +1466,7 @@ function Avatar({ url, name }: { url: string | null; name: string }) {
       <img
         src={url}
         alt={name}
-        // Round portrait — matches the chat-line + userlist treatment so
+        // Round portrait, matches the chat-line + userlist treatment so
         // the head avatar reads the same everywhere. The "full size"
         // gallery view further down in the modal keeps its natural
         // rectangular crop; only this hero is circular.
@@ -1544,8 +1544,8 @@ function CollectionPin({
       className="flex w-full flex-col items-center gap-1 rounded border border-keep-rule/60 bg-keep-bg/40 p-2 text-center text-[11px] transition hover:border-keep-action hover:bg-keep-banner"
       title={
         entry.nickname
-          ? `${entry.nickname} (${entry.name})${entry.description ? ` — ${entry.description}` : ""}`
-          : entry.description ? `${entry.name} — ${entry.description}` : entry.name
+          ? `${entry.nickname} (${entry.name})${entry.description ? `, ${entry.description}` : ""}`
+          : entry.description ? `${entry.name}, ${entry.description}` : entry.name
       }
     >
       {entry.iconUrl ? (
@@ -1668,7 +1668,7 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
           {/* Expanded gallery preview is capped at 70% of the profile
               width and centered, so a tall portrait doesn't dominate
               the modal at every viewport size. The thumbnail strip
-              below is the navigation surface — the centered preview
+              below is the navigation surface, the centered preview
               is for "study one image at a time" without crowding the
               rest of the profile. */}
           <div className="relative block w-full max-w-[70%]">
@@ -1700,7 +1700,7 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
           preview above, not a full-width row that clings to the
           modal edges. `auto-fit` (not auto-fill) collapses any
           unused 88px tracks so `justify-center` actually centers
-          the populated tiles — `auto-fill` left phantom tracks on
+          the populated tiles, `auto-fill` left phantom tracks on
           the right and pushed the visible row to the left. */}
       <div className="mx-auto grid max-w-[70%] grid-cols-[repeat(auto-fit,88px)] justify-center gap-2">
         {portraits.map((p) => {
@@ -1719,7 +1719,7 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
                 }
                 setActiveId((prev) => (prev === p.id ? null : p.id));
               }}
-              title={p.nsfw ? `${p.label ?? "Portrait"} (NSFW — click to reveal)` : p.label ?? "Portrait"}
+              title={p.nsfw ? `${p.label ?? "Portrait"} (NSFW, click to reveal)` : p.label ?? "Portrait"}
               className={`relative aspect-square overflow-hidden rounded transition ${
                 activeId === p.id ? "ring-2 ring-keep-action" : "hover:ring-2 hover:ring-keep-action/50"
               }`}
@@ -1748,7 +1748,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <section className="mb-5 last:mb-0">
       {/* Header uses `text-keep-text` (not `text-keep-muted`) so it
           inherits the profile owner's theme nudged for full 4.5:1
-          contrast — `muted` only nudges to 3:1, which at 12px uppercase
+          contrast, `muted` only nudges to 3:1, which at 12px uppercase
           rendered as borderline-invisible on user-picked palettes that
           sat close to bg. Bumped to `text-sm` (14px) for parity with
           chat headers + so the labels read as section dividers, not
@@ -1852,7 +1852,7 @@ function EmptyProfile({ name, kind }: { name: string; kind: "master" | "characte
  * is free-form text - only normalize the canonical labels).
  */
 /**
- * View tracker wrapper — wires `useTrackProfileView` from
+ * View tracker wrapper, wires `useTrackProfileView` from
  * ProfileFlairSurfaces against the viewer's identity so a self-view
  * doesn't bump the counter. Pulls the viewer id from the chat store
  * since ProfileModal already lives inside the same context.
@@ -1908,7 +1908,7 @@ function collectStatEntries(
     const v = stats[k];
     if (typeof v === "string" && v.trim()) out.push([k, v]);
   }
-  // Custom block is gated as a whole — the owner can hide every
+  // Custom block is gated as a whole, the owner can hide every
   // free-form row at once via `visibility.custom = false` without
   // having to delete each entry. Visibility takes effect at render
   // time only; the saved blob still carries the data.
@@ -1941,7 +1941,7 @@ function collectVibeAxes(
     // Defensive clamp to [0, 100] before the renderer uses it as a
     // `left: ${value}%` offset. The Zod schema bounds new writes, but
     // any pre-validator data already in the column could in theory
-    // carry an out-of-range value — clamping keeps the dot on the
+    // carry an out-of-range value, clamping keeps the dot on the
     // track instead of pushing it off either edge.
     const clamped = Math.max(0, Math.min(100, v));
     out.push({ key: axis.key, lowLabel: axis.lowLabel, highLabel: axis.highLabel, value: clamped });
@@ -1963,7 +1963,7 @@ function statsFromProfile(p: ProfileView) {
 }
 
 /**
- * Personality vibe block — eight bipolar bars (low label ◄ dot ►
+ * Personality vibe block, eight bipolar bars (low label ◄ dot ►
  * high label). Each bar's dot sits at the stored 0..100 value as a
  * % offset along the track; unset axes are dropped at collection
  * time so the bar list only carries axes the owner explicitly
@@ -1978,11 +1978,11 @@ function VibeSection({
   stats: NonNullable<ReturnType<typeof statsFromProfile>> | null;
   bypassVisibility: boolean;
   /**
-   * "section" — body block wrapped in the standard
+   * "section", body block wrapped in the standard
    * `<Section title="Vibe">` chrome. Mobile-friendly grid that
    * scales from 1 → 2 columns as the viewport widens.
    *
-   * "compact" — hero-sidecar variant. Drops the Section wrapper +
+   * "compact", hero-sidecar variant. Drops the Section wrapper +
    * VIBE heading, locks the inner grid to 2 columns regardless of
    * viewport (the parent slot is a fixed 380px wide at lg+, so
    * responsive breakpoints would over-fit), and tightens the row
@@ -2018,7 +2018,7 @@ function VibeSection({
           <div className="relative h-1.5 w-full rounded-full bg-keep-rule/40">
             {/* Accent glow under the dot. A 60px-wide horizontal
                 linear gradient with solid accent in the middle and
-                transparent fades on each end — gives the dot a
+                transparent fades on each end, gives the dot a
                 soft "this region of the axis" highlight that reads
                 even at a glance, without coloring the whole bar
                 (which would lose the position signal). Stops at
@@ -2049,12 +2049,12 @@ function VibeSection({
 }
 
 /**
- * Numeric attribute sheet — D&D ability scores, HP gauges, or any
+ * Numeric attribute sheet, D&D ability scores, HP gauges, or any
  * custom labeled stats the owner added. Each row paints the label
  * on the left, the number on the right, and a fill-bar underneath
  * showing where the value sits within its own [min, max] range. The
  * per-row range keeps a "STR 14 (1-20)" bar from sharing scale with
- * a "HP 75 (0-200)" bar — different stat systems live side by side
+ * a "HP 75 (0-200)" bar, different stat systems live side by side
  * without distorting each other.
  */
 function AttributesSection({
@@ -2072,7 +2072,7 @@ function AttributesSection({
       <ul className="space-y-2">
         {rows.map((row) => {
           // Defensive against a stored row whose min/max somehow ended
-          // up equal — division would NaN. The server schema's
+          // up equal, division would NaN. The server schema's
           // `min <= value <= max` guard prevents that for new saves,
           // but old data could in theory carry the degenerate case.
           // Pin to 100% in that case so the bar still paints something
@@ -2085,7 +2085,7 @@ function AttributesSection({
             <li key={row.id} className="text-xs">
               <div className="mb-1 flex items-baseline justify-between gap-2">
                 <span className="font-semibold uppercase tracking-widest text-keep-text/85">
-                  {row.label || "—"}
+                  {row.label || "-"}
                 </span>
                 <span className="text-keep-muted tabular-nums">
                   {row.value}

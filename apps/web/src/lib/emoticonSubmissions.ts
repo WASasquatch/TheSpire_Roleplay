@@ -18,7 +18,7 @@ export interface MyEmoticonSubmission {
   name: string;
   /** Relative URL under /uploads/emoticons/. Still set even after
    *  rejection (the row is retained for audit), but the image file
-   *  itself has been deleted on rejection — the client should not
+   *  itself has been deleted on rejection, the client should not
    *  attempt to render it for rejected rows. */
   imageUrl: string;
   cells: string[];
@@ -39,14 +39,14 @@ export interface MyEmoticonSubmission {
    *  meaningful once the row is approved; pending/rejected rows
    *  carry the current value but it has no effect. */
   commerceEnabled: boolean;
-  /** Lifetime usage tally — every successful pick of any cell bumps
+  /** Lifetime usage tally, every successful pick of any cell bumps
    *  this server-side, regardless of whether commerce was on for that
    *  use. Powers the "Top used" sort + per-row analytics in the
    *  uploader's row. */
   useCount: number;
 }
 
-/** Admin view — includes a pre-resolved human-readable label for the
+/** Admin view, includes a pre-resolved human-readable label for the
  *  submitter so the queue doesn't render bare uuids. */
 export interface AdminEmoticonSubmission extends MyEmoticonSubmission {
   submitterLabel: string;

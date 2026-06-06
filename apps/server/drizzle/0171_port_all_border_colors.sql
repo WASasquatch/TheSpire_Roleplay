@@ -1,7 +1,7 @@
 -- Port every literal color in remaining built-in borders to
 -- `--c-*` CSS variables so the per-identity color picker can
 -- customize every visible color. Names use a stable `c1..cN`
--- scheme rather than ad-hoc semantic labels — labels would
+-- scheme rather than ad-hoc semantic labels, labels would
 -- diverge between borders and become unmemorable; numbered
 -- slots are honest about "this is slot 3 in source order."
 -- Identical colors collapse to a single slot so changing one
@@ -154,7 +154,7 @@ SET `style_css` = '.b-holo {
   background: conic-gradient(from 0deg, var(--c-c1, #00bcd4), var(--c-c2, #e040fb), var(--c-c3, #00e5ff), var(--c-c4, #ff4081), var(--c-c1, #00bcd4));
   box-shadow: 0 0 10px var(--c-c5, rgba(0,229,255,.5));
 }
-/* Scanlines OVER the avatar — z-index 11 puts this above .pic
+/* Scanlines OVER the avatar, z-index 11 puts this above .pic
    (z=10 from the preamble); screen blend keeps the portrait
    visible underneath. */
 .b-holo::before {
@@ -174,7 +174,7 @@ SET `style_css` = '.b-holo {
   pointer-events: none;
   mix-blend-mode: screen;
 }
-/* Outer chromatic glitch ring — sits on top of everything. */
+/* Outer chromatic glitch ring, sits on top of everything. */
 .b-holo::after {
   content: "";
   position: absolute;
@@ -185,7 +185,7 @@ SET `style_css` = '.b-holo {
   z-index: 12;
   pointer-events: none;
 }
-/* Avatar stays stable — only a periodic chromatic-aberration
+/* Avatar stays stable, only a periodic chromatic-aberration
    flicker via filter (no transform, so it doesnt fight with the
    preamble or rotate weirdly). */
 .b-holo .pic {

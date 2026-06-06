@@ -13,7 +13,7 @@ interface Props {
   cellIndex: number;
   /** Pixel size of the rendered cell (square). 24 by default. */
   size?: number;
-  /** Optional alt text — falls back to the cell label from the catalog. */
+  /** Optional alt text, falls back to the cell label from the catalog. */
   title?: string;
   /** Extra Tailwind classes (positioning, etc.). */
   className?: string;
@@ -24,7 +24,7 @@ interface Props {
  * sheet image is a 4×4 grid regardless of resolution: we set
  * `backgroundSize: 400% 400%` (4x in each axis) and `backgroundPosition`
  * to the negative offset of the target cell. That keeps the renderer
- * resolution-independent — a 256×256 sheet and a 2048×2048 sheet
+ * resolution-independent, a 256×256 sheet and a 2048×2048 sheet
  * crop the same cell with no code changes.
  *
  * When the slug doesn't resolve (sheet pruned between catalog fetch
@@ -41,7 +41,7 @@ export function EmoticonSprite({ sheetSlug, cellIndex, size = 24, title, classNa
     const col = cellIndex % EMOTICON_SHEET_GRID_COLS;
     const row = Math.floor(cellIndex / EMOTICON_SHEET_GRID_COLS);
     // backgroundPosition X/Y are PERCENTAGES of the area NOT covered
-    // by the image — counter-intuitively `0%` is leftmost AND `100%`
+    // by the image, counter-intuitively `0%` is leftmost AND `100%`
     // is rightmost only when the bg is larger than the container. With
     // size 400% × 400% (image scaled to 4× container), the % range
     // for each cell becomes 0%, 33.33%, 66.66%, 100%.
@@ -68,7 +68,7 @@ export function EmoticonSprite({ sheetSlug, cellIndex, size = 24, title, classNa
       // can't "Save image as..." the underlying sheet, AND
       // `draggable={false}` blocks drag-to-desktop / drag-to-tab
       // (the other one-click image grab vector). Both are friction
-      // only — the sheet PNG is still public at
+      // only, the sheet PNG is still public at
       // `/assets/emoticons/<slug>_emoticon_sheet.png` and anyone
       // with devtools can pull the URL out of the computed
       // `background-image`. Centralizing here covers every render

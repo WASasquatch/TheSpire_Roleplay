@@ -1,13 +1,13 @@
 /**
- * Modern — Flat
+ * Modern, Flat
  *
  * Clean, minimal 2025-web aesthetic. SVG-based for crisp lines at any
  * resolution. Visual vocabulary:
  *
- *  - **Texture**: essentially none — barely-perceptible vertical
+ *  - **Texture**: essentially none, barely-perceptible vertical
  *    gradient hint to give panels a sense of light direction
  *    without committing to a heavy treatment.
- *  - **Corners**: thin geometric L-brackets — single 1px stroke,
+ *  - **Corners**: thin geometric L-brackets, single 1px stroke,
  *    no fills, no ornament. Reads as a Bauhaus-style frame.
  *  - **Divider**: hairline rule with a small accent-color square
  *    at the center.
@@ -34,7 +34,7 @@ export const modern: StyleGenerator = {
 };
 
 function makeTexture(p: OrnamentPalette): string {
-  // Faintest possible vertical hint — purely tonal, no grain.
+  // Faintest possible vertical hint, purely tonal, no grain.
   const light = p.panel[1] ?? "#ffffff";
   const dark = p.panel[3] ?? "#aaaaaa";
   const svg = `

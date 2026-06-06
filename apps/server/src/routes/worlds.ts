@@ -84,7 +84,7 @@ const pacingEnum = z.enum([
 const contentWarningEnum = z.enum(CONTENT_WARNINGS as unknown as [string, ...string[]]);
 
 // Tags: each entry must look like a slug-ish kebab token. The canonical
-// list is curated and short, but owners can add custom tags — this regex
+// list is curated and short, but owners can add custom tags, this regex
 // gates the *shape* (lowercase letters / digits / hyphens, 1-32 chars),
 // not the membership. Empty input arrays are allowed (no tags).
 const TAG_RX = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
@@ -103,7 +103,7 @@ const cwArraySchema = z
   .max(CONTENT_WARNINGS.length)
   .transform((arr) => parseTagList(arr.join(",")));
 
-// Restrict cover image URLs to http(s) — same posture as character
+// Restrict cover image URLs to http(s), same posture as character
 // avatars (the URL constructor rejects malformed input; we additionally
 // gate the protocol).
 const httpUrl = z.string().min(1).max(2000).refine(
@@ -113,7 +113,7 @@ const httpUrl = z.string().min(1).max(2000).refine(
 
 /**
  * Vibe-stat axis Zod schema. 0..100 inclusive integer, OR null to
- * clear an axis back to "unset". The shape mirrors WorldVibeStats —
+ * clear an axis back to "unset". The shape mirrors WorldVibeStats,
  * every axis key is optional in the request body; only the keys the
  * author actually touched are sent over the wire.
  */
@@ -145,7 +145,7 @@ const createWorldBody = z.object({
   slug: z.string().max(60).optional(),
   description: z.string().max(2000).nullable().optional(),
   visibility: visibilityEnum.optional(),
-  // Catalog metadata — all optional on create so the world can be filled
+  // Catalog metadata, all optional on create so the world can be filled
   // out incrementally; defaults match the DB column defaults so missing
   // fields land in the catalog's "Other" bucket without an extra step.
   genre: genreEnum.optional(),
@@ -186,7 +186,7 @@ const updateWorldBody = z.object({
  * Per-axis min/max query param schema. Catalog passes `min_combat=40&
  * max_combat=80` and the route uses these to clip the catalog to
  * worlds whose tuned value sits in the closed interval. NULL stat
- * columns are EXCLUDED from filtered results — once any range is
+ * columns are EXCLUDED from filtered results, once any range is
  * applied, "unset" worlds drop out, since the user is filtering by
  * vibe and "no opinion" doesn't match.
  *
@@ -303,7 +303,7 @@ async function memberListFor(db: Db, worldId: string): Promise<WorldMemberRef[]>
   // Privacy filter: only members whose master profile is BOTH public
   // and not NSFW make the list. A user who flipped their profile to
   // private explicitly opted out of being publicly affiliated, so they
-  // shouldn't appear in any world's member gallery either — including
+  // shouldn't appear in any world's member gallery either, including
   // their characters' affiliations, since exposing those publicly
   // would chain back to the master.
   //
@@ -353,7 +353,7 @@ async function memberListFor(db: Db, worldId: string): Promise<WorldMemberRef[]>
       displayName: isCharacter ? (r.characterName ?? r.username) : r.username,
       // OOC ↔ character partition: NEVER fall back to the master's
       // avatar on a character row. A character with no portrait
-      // renders as initials of their OWN display name — surfacing
+      // renders as initials of their OWN display name, surfacing
       // the master's avatar would expose the link "this character
       // belongs to that master," which is exactly the leak the
       // identity partition is supposed to prevent.
@@ -361,7 +361,7 @@ async function memberListFor(db: Db, worldId: string): Promise<WorldMemberRef[]>
       // Crop columns on `characters` are NOT NULL with defaults
       // (1.0 zoom, 50/50 offsets), so when the leftJoin's column
       // types widen to allow null we just coalesce back to those
-      // schema-level defaults — never to the master's crop, even
+      // schema-level defaults, never to the master's crop, even
       // when the character row has no avatar set.
       avatarUrl: isCharacter
         ? (r.characterAvatarUrl ?? null)
@@ -431,7 +431,7 @@ type AppRow = typeof worldApplications.$inferSelect;
 async function applicationToWire(
   db: Db,
   row: AppRow,
-  /** The world's current question list — snapshot in the row's
+  /** The world's current question list, snapshot in the row's
    *  answers length, but the questions themselves are read live so
    *  the owner sees the prompts that the user actually saw at submit
    *  time (we don't snapshot questions today; future hardening). */
@@ -814,7 +814,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     }
     // Vibe-stat range filters. For each axis the user constrained, the
     // world's tuned value must sit inside the [min, max] closed
-    // interval — AND the column must be non-null. "Unset" worlds drop
+    // interval, AND the column must be non-null. "Unset" worlds drop
     // out of any filtered view because "no opinion" doesn't satisfy a
     // specific user constraint; with NO filter applied (the default),
     // unset worlds remain visible because no `conds.push` runs.
@@ -896,7 +896,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
 
     // `featured` is admin-curated only; silently downgrade to `active`
     // when an owner attempts to self-promote on create. We don't error
-    // here because the rest of the body is valid — the surprise of a
+    // here because the rest of the body is valid, the surprise of a
     // 400 over a single forbidden enum value would be hostile when the
     // owner's intent is clearly "publish this world."
     let initialStatus: WorldStatus = body.status ?? "active";
@@ -941,7 +941,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     const w = await resolveWorld(db, req.params.idOrSlug, me?.id ?? null, me?.role ?? null);
     if (!w) {
       // Anonymous deep-link to a private world: surface a "private" stub so
-      // the splash can render a "this world is private — sign in to view"
+      // the splash can render a "this world is private, sign in to view"
       // hint, mirroring the profile flow. We deliberately return HTTP 200
       // so a fetch() doesn't treat it as an error; the discriminating shape
       // is the `private: true` field. Truly missing slugs still 404.
@@ -983,8 +983,8 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       : null;
     // Collaborator surface. Always loaded so the client can show the
     // wiki-editor's owner-only "Collaborators" panel without a second
-    // round trip. Non-owners get the same list — handy for "who else
-    // can edit this" transparency on a shared wiki — but the client
+    // round trip. Non-owners get the same list, handy for "who else
+    // can edit this" transparency on a shared wiki, but the client
     // gates the add/remove controls on viewerIsOwner.
     const collaborators = await collaboratorListFor(db, w.id);
     const viewerIsOwner = !!me && w.ownerUserId === me.id;
@@ -1044,7 +1044,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       if (!me) { reply.code(401); return { error: "auth" }; }
       const w = await resolveWorld(db, req.params.idOrSlug, me.id, me.role);
       if (!w) { reply.code(404); return { error: "not found" }; }
-      // Owner OR admin only — collaborators can't promote others.
+      // Owner OR admin only, collaborators can't promote others.
       if (w.ownerUserId !== me.id && !(await hasPermission(me, "edit_others_world", db))) {
         reply.code(403); return { error: "owner only" };
       }
@@ -1419,7 +1419,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
    * Joining is per-identity (migration 0187): the membership row
    * carries the caller's currently-voiced character_id (or null for
    * OOC). Avery can be in Halcyon City without dragging the master's
-   * OOC face — or the master's other characters — along.
+   * OOC face, or the master's other characters, along.
    *
    * Owners can join their own world as any of their identities;
    * admins with edit_others_world can join any world. Everyone else
@@ -1483,7 +1483,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
    * registers the CALLER as a member), this endpoint registers a NAMED
    * target identity that the owner picked. The two paths sit together
    * because they hit the same `worldMembers` table, but the auth model
-   * and identity resolution differ — invites are owner/admin only and
+   * and identity resolution differ, invites are owner/admin only and
    * the target comes from a free-form name OR an unambiguous identity
    * token (`@id:` / `@cid:`) the same shared resolver every other
    * identity-keyed command uses.
@@ -1492,8 +1492,8 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
    * specific character (`@cid:`), the membership row is bound to that
    * character; addressing a master (`@id:` or a bare master name)
    * inserts an OOC membership with `characterId = null`. The owner can
-   * invite both a master AND any of their characters separately — same
-   * as the catalog Join flow — by re-running the invite with each
+   * invite both a master AND any of their characters separately, same
+   * as the catalog Join flow, by re-running the invite with each
    * identity token.
    *
    * Useful for ALL three join modes:
@@ -1527,7 +1527,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
         // uses on the chat side, just over HTTP.
         reply.code(409);
         return {
-          error: `"${body.data.target}" matches ${resolution.matches.length} identities — re-run with a specific token`,
+          error: `"${body.data.target}" matches ${resolution.matches.length} identities, re-run with a specific token`,
           candidates: resolution.matches.map((m) => ({
             displayName: m.displayName,
             masterUsername: m.masterUsername,
@@ -1567,7 +1567,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       // as the self-join path.
       await rebroadcastUserOccupancy(io, db, target.userId);
       // Fire-and-forget web-push to the invitee. Without this, the
-      // direct-add flow was completely silent — the invitee only
+      // direct-add flow was completely silent, the invitee only
       // discovered the membership by stumbling on the member list,
       // which made invite-only worlds borderline unusable. Matches
       // the whisper / mention push posture in `broadcast.pushTriggers`:
@@ -1609,7 +1609,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
    *
    * Each row carries the identity that joined (`characterId` null =
    * OOC, non-null = the character) plus a resolved `identityDisplayName`
-   * so the My Worlds list can render "as Avery — Halcyon City" without
+   * so the My Worlds list can render "as Avery, Halcyon City" without
    * a second lookup. Soft-deleted characters drop out.
    */
   app.get("/me/worlds/memberships", async (req, reply) => {
@@ -1656,7 +1656,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
    */
   app.get<{ Params: { userId: string } }>("/users/:userId/world-memberships", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    // Visibility model — runs identically for anonymous and logged-in
+    // Visibility model, runs identically for anonymous and logged-in
     // viewers, with the viewer's identity only affecting which PRIVATE
     // worlds are unblanked:
     //
@@ -1675,7 +1675,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     // to that character's memberships; `?characterId=ooc` returns the
     // master's OOC memberships only; omit the param to return ALL
     // identities. The profile modal scopes the request to whichever
-    // identity it's rendering — character profile passes the character
+    // identity it's rendering, character profile passes the character
     // id, master profile passes "ooc".
     const q = req.query as { characterId?: string } | undefined;
     const filterChar = q?.characterId;
@@ -1733,12 +1733,12 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
   });
 
   /* =========================================================
-   *  Application routes — joinMode === "application" flow
+   *  Application routes, joinMode === "application" flow
    *
-   *  POST   /worlds/:idOrSlug/applications        — applicant submits
-   *  GET    /worlds/:idOrSlug/applications        — owner lists (pending + recent)
-   *  PATCH  /worlds/:idOrSlug/applications/:appId — owner approves / rejects
-   *  DELETE /worlds/:idOrSlug/applications/:appId — applicant withdraws their own
+   *  POST   /worlds/:idOrSlug/applications       , applicant submits
+   *  GET    /worlds/:idOrSlug/applications       , owner lists (pending + recent)
+   *  PATCH  /worlds/:idOrSlug/applications/:appId, owner approves / rejects
+   *  DELETE /worlds/:idOrSlug/applications/:appId, applicant withdraws their own
    * ========================================================= */
 
   // Applicant submits an application. Refused when:
@@ -1767,7 +1767,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       // Per-identity scope: the applying face is the caller's
       // currently-voiced character (or OOC if no character is
       // active). Other identities of the same master have their
-      // own membership / application state — they don't block
+      // own membership / application state, they don't block
       // this one and approving this one doesn't auto-join them.
       const applicantCharId = me.activeCharacterId;
       const identityMatch = applicantCharId === null
@@ -1799,7 +1799,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       const appIdentityMatch = applicantCharId === null
         ? sql`${worldApplications.characterId} IS NULL`
         : eq(worldApplications.characterId, applicantCharId);
-      // Single-pending guard PER IDENTITY — the partial unique index
+      // Single-pending guard PER IDENTITY, the partial unique index
       // enforces this at the DB layer too, but checking first lets
       // us return a friendlier 409 with the existing pending
       // application id.
@@ -1943,7 +1943,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
       // The UPDATE's WHERE includes `status = 'pending'` so a
       // concurrent reviewer can't flip an already-decided row. We
       // detect a lost race via `changes === 0` and skip the
-      // membership insert — otherwise a T1=approve / T2=reject race
+      // membership insert, otherwise a T1=approve / T2=reject race
       // could leave the applicant added as a member while the app
       // row reads "rejected." The pre-transaction check above is
       // still useful (early friendly 409 in the common case), but
@@ -1970,9 +1970,9 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
           // Approval binds to the APPLYING IDENTITY: the membership
           // row carries the application's characterId (null = OOC).
           // Other identities of the same master are NOT auto-joined
-          // — they have their own application paths.
+          //, they have their own application paths.
           //
-          // ON CONFLICT DO NOTHING — if the (world, user, identity)
+          // ON CONFLICT DO NOTHING, if the (world, user, identity)
           // membership row already exists (admin tooling seeded it,
           // or a parallel approve raced through), the status flip
           // above is the only side-effect we need. Drizzle doesn't
@@ -2017,7 +2017,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
   );
 
   // Applicant withdraws their own pending application. Owners CANNOT
-  // withdraw on behalf of an applicant — they reject instead (which
+  // withdraw on behalf of an applicant, they reject instead (which
   // preserves the audit signal "owner declined" vs "applicant changed
   // their mind").
   app.delete<{ Params: { idOrSlug: string; appId: string } }>(

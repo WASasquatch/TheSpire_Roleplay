@@ -3,7 +3,7 @@
 -- the categories and users pick one when starting a new thread.
 --
 -- A SET NULL FK on messages.thread_category_id means deleting a category
--- doesn't lose its threads — they fall back to the "Uncategorized" bucket
+-- doesn't lose its threads, they fall back to the "Uncategorized" bucket
 -- that the client renders for null values.
 CREATE TABLE `room_thread_categories` (
   `id` text PRIMARY KEY NOT NULL,

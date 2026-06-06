@@ -35,7 +35,7 @@ interface EmoticonState {
   dropReactions: (kind: ReactionTargetKind, targetId: string) => void;
   /** Merge a realtime add/remove into the cache. */
   applyReactionEvent: (event: ReactionEvent, viewerUserId: string | null) => void;
-  /** Lookup helper — sheet by slug. */
+  /** Lookup helper, sheet by slug. */
   getSheetBySlug: (slug: string) => EmoticonSheet | undefined;
 }
 
@@ -50,7 +50,7 @@ export const useEmoticons = create<EmoticonState>((set, get) => ({
   setSheets: (sheets) => set({ sheets, loaded: true }),
   primeReactions: (kind, targetId, entries) => {
     if (!entries || entries.length === 0) {
-      // Don't touch the cache for empty primes — if the user reacted
+      // Don't touch the cache for empty primes, if the user reacted
       // and our cache shows the bar, a backlog payload with the field
       // absent (server only ships the field when non-empty) shouldn't
       // wipe their fresh reaction.
@@ -94,8 +94,8 @@ function mergeReactionEvent(
   event: ReactionEvent,
   viewerUserId: string | null,
 ): ReactionEntry[] {
-  // Match by normalized ref key — same string the server's COALESCE
-  // unique index uses — so the merge correctly identifies the same
+  // Match by normalized ref key, same string the server's COALESCE
+  // unique index uses, so the merge correctly identifies the same
   // emoji across the two ref shapes.
   const eventKey = reactionRefKey(event.ref);
   const idx = current.findIndex((e) => reactionRefKey(e.ref) === eventKey);

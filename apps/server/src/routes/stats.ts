@@ -71,14 +71,14 @@ export async function registerStatsRoutes(
     }
 
     // Rolling 24-hour message count for the splash beacon. Direct
-    // query against the `messages` table — accurate as long as the
+    // query against the `messages` table, accurate as long as the
     // global retention window (and any per-room expiry overrides)
     // stay longer than 24h, which is the default + the recommended
     // floor surfaced in the admin's Message Expiry panel. Filter
     // out `kind='system'` (connect/disconnect, room descriptions)
     // so a reconnect-storm can't inflate the activity number;
     // soft-deleted user messages (`deletedAt IS NOT NULL`) DO count
-    // — the message was posted in the window, the author later
+    //, the message was posted in the window, the author later
     // removed it; the activity still happened.
     const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
     const last24hRows = await db

@@ -1,15 +1,15 @@
 /**
- * Admin — Roles & Permissions matrix.
+ * Admin, Roles & Permissions matrix.
  *
  * Two sub-tabs sit inside this single AdminPanel tab:
  *
- *   By role  — the canonical matrix. Roles down the left, permission
+ *   By role , the canonical matrix. Roles down the left, permission
  *              keys grouped by feature area across the top. Click a
  *              cell to toggle the role grant. Masteradmin row is
  *              locked-all-on (bypass is hardcoded server-side, and
  *              writing the row would be a no-op anyway).
  *
- *   By user  — per-user overrides. Search a user, then toggle each
+ *   By user , per-user overrides. Search a user, then toggle each
  *              permission through three states:
  *
  *                "from role" (greyed)        → falls back to role grant
@@ -188,7 +188,7 @@ export function AdminPermissionsTab() {
         </div>
         {!canEdit ? (
           <p className="rounded border border-keep-rule bg-keep-banner/40 p-2 text-xs italic text-keep-muted">
-            Read-only — you can view the matrix but not edit it. Editing requires the
+            Read-only, you can view the matrix but not edit it. Editing requires the
             <code className="mx-1 rounded bg-keep-bg px-1 font-mono text-[10px]">manage_permissions</code>
             key.
           </p>
@@ -289,7 +289,7 @@ function ByRole({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
   const toggle = useCallback(async (role: Role, key: PermissionKey, granted: boolean) => {
     setBusy(`${role}:${key}`);
     setError(null);
-    // Optimistic update — flip the cell in the snapshot immediately so
+    // Optimistic update, flip the cell in the snapshot immediately so
     // the click feels instant. Roll back on failure.
     setSnapshot((prev) => {
       if (!prev) return prev;
@@ -386,7 +386,7 @@ function ByRole({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
       </div>
 
       <p className="text-[11px] italic text-keep-muted">
-        Masteradmin row is locked-on by definition — the bypass is hardcoded in the
+        Masteradmin row is locked-on by definition, the bypass is hardcoded in the
         server. Toggling any cell takes effect immediately; affected users see the new
         permissions on their next /auth/me poll (within 60 seconds, no re-login).
         Click the <span className="not-italic">log</span> button next to a permission
@@ -430,7 +430,7 @@ function GroupRows({
               <code className="font-mono text-[11px]">{key}</code>
               {PRIVACY_SENSITIVE_KEYS.has(key) ? (
                 <span
-                  title="Privacy-sensitive — granting this key reveals other users' private content."
+                  title="Privacy-sensitive, granting this key reveals other users' private content."
                   className="rounded border border-keep-accent/60 bg-keep-accent/15 px-1 text-[9px] uppercase tracking-widest text-keep-accent"
                 >
                   privacy
@@ -613,7 +613,7 @@ function ByUser({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
 
   return (
     <div className="space-y-3">
-      {/* Search lands at the top — typeahead is the primary entry
+      {/* Search lands at the top, typeahead is the primary entry
           point for the By-user tab. "Active overrides" sits below
           as a secondary affordance for browsing the customized set. */}
       <div className="rounded border border-keep-rule bg-keep-bg p-2">
@@ -961,7 +961,7 @@ function PermissionAuditFeed({
   }
 
   // Render the panel even when empty so the filter inputs stay
-  // available — collapsing on the empty state would hide them once
+  // available, collapsing on the empty state would hide them once
   // a too-narrow filter zeroes the rows.
   const count = entries?.length ?? 0;
   const hasAnyFilter = !!(keyFilter || roleFilter || userId);
@@ -972,7 +972,7 @@ function PermissionAuditFeed({
       onToggle={(e) => {
         // `e.currentTarget` is the <details>; its `open` property
         // reflects the post-toggle state. We only flip our own state
-        // forward (to true) — closing the panel doesn't reset
+        // forward (to true), closing the panel doesn't reset
         // anything, so the filter values persist if the user toggles
         // it back open.
         if ((e.currentTarget as HTMLDetailsElement).open) setOpened(true);
@@ -1071,7 +1071,7 @@ function PermissionAuditFeed({
               <span className="text-[10px] text-keep-muted">
                 {new Date(e.createdAt).toLocaleString()}
               </span>
-              {" — "}
+              {", "}
               <span className="font-action">{e.actorUsername}</span>
               {" "}
               <code className="font-mono text-[10px]">{e.action.replace(/_/g, " ")}</code>
@@ -1098,7 +1098,7 @@ function PermissionAuditFeed({
  *     details containing the per-group rollup and a list of every
  *     failure (rule, role, key, expected vs actual).
  *
- * Idle until clicked — no auto-run on mount. The endpoint is cheap
+ * Idle until clicked, no auto-run on mount. The endpoint is cheap
  * (in-memory walk of a small cache) but reading every time the tab
  * opens would just add noise.
  * ============================================================= */
@@ -1181,7 +1181,7 @@ function DiagnosticsPanel() {
 
 function DiagnosticsResultView({ result }: { result: DiagnosticsResult }) {
   // Pre-bucket failures by group so the expanded details renders one
-  // section per group rather than a flat list — easier to scan when
+  // section per group rather than a flat list, easier to scan when
   // failures cluster in one feature area.
   const failuresByGroup = useMemo(() => {
     const m = new Map<DiagnosticGroup, DiagnosticFailure[]>();
@@ -1196,7 +1196,7 @@ function DiagnosticsResultView({ result }: { result: DiagnosticsResult }) {
   if (result.ok) {
     return (
       <p className="mt-2 rounded border border-emerald-700 bg-emerald-950/40 p-2 text-emerald-200">
-        <span className="font-action">All passed</span> — {result.checksRun} checks across
+        <span className="font-action">All passed</span>, {result.checksRun} checks across
         {" "}{result.byGroup.length} groups.
       </p>
     );
@@ -1206,7 +1206,7 @@ function DiagnosticsResultView({ result }: { result: DiagnosticsResult }) {
     <div className="mt-2">
       <p className="rounded border border-red-700 bg-red-950/40 p-2 text-red-200">
         <span className="font-action">{result.failures.length} failed</span>
-        {" — "}{result.checksRun - result.failures.length}/{result.checksRun} checks passed.
+        {", "}{result.checksRun - result.failures.length}/{result.checksRun} checks passed.
       </p>
       <details className="mt-2 rounded border border-keep-rule bg-keep-bg/60 p-2">
         <summary className="cursor-pointer font-action text-keep-muted">
@@ -1230,7 +1230,7 @@ function DiagnosticsResultView({ result }: { result: DiagnosticsResult }) {
                         <span className="font-action text-keep-fg">{f.rule}</span>
                         {f.expected !== undefined || f.actual !== undefined ? (
                           <span className="ml-2 text-[10px] text-keep-muted">
-                            expected={String(f.expected ?? "—")} actual={String(f.actual ?? "—")}
+                            expected={String(f.expected ?? "-")} actual={String(f.actual ?? "-")}
                           </span>
                         ) : null}
                       </div>
@@ -1258,7 +1258,7 @@ function DiagnosticsResultView({ result }: { result: DiagnosticsResult }) {
                     <span className="text-red-300">✗</span>
                   )}{" "}
                   {DIAG_GROUP_LABEL[row.group]}
-                  {" — "}
+                  {", "}
                   {row.run - row.failed}/{row.run}
                 </li>
               ))}
@@ -1274,7 +1274,7 @@ function DiagnosticsResultView({ result }: { result: DiagnosticsResult }) {
  * SENSITIVE GRANTS ADVISORY
  *
  * Informational catalog: who currently holds the privacy-sensitive
- * + high-impact permission keys. Not pass/fail — the matrix
+ * + high-impact permission keys. Not pass/fail, the matrix
  * intentionally allows a masteradmin to extend these to anyone they
  * trust. The point of this panel is to give a periodic eyeball
  * check: "yep, those are still the people I want holding these."
@@ -1289,7 +1289,7 @@ function DiagnosticsResultView({ result }: { result: DiagnosticsResult }) {
  * Idle until clicked, same as the diagnostics panel. Each row shows
  * the key + group + description, role badges for roles holding it,
  * and user badges for individual override grants. A key with no
- * holders renders as a muted "none" — that's noteworthy on its own
+ * holders renders as a muted "none", that's noteworthy on its own
  * (nobody currently has hard_delete_user is fine to know).
  * ============================================================= */
 
@@ -1311,7 +1311,7 @@ interface SensitiveGrantsResponse {
 /** Buckets the by-key advisory response into a by-actor shape:
  *  for every role and every user, the set of sensitive keys they
  *  hold (split by privacy vs high-impact). This is the lens the
- *  advisory exists to provide — "what does each actor hold?" —
+ *  advisory exists to provide, "what does each actor hold?",
  *  rather than the inverse "who holds this key?". */
 interface ActorHolding {
   /** Keys held, partitioned by category for the per-actor display. */
@@ -1410,7 +1410,7 @@ function SensitiveGrantsAdvisory() {
         <div className="mt-3 space-y-3">
           <p className="rounded border border-keep-rule/60 bg-keep-bg/40 p-2 text-[11px] text-keep-muted">
             <span className="font-action text-keep-fg">Masteradmin</span> holds every permission by
-            bypass — including all keys listed below — and is not enumerated here.
+            bypass, including all keys listed below, and is not enumerated here.
           </p>
 
           {pivot.byRole.length === 0 && pivot.byUser.length === 0 ? (

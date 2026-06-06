@@ -22,7 +22,7 @@ interface Props {
  * paginated list (pinned first), an inline composer for the viewer
  * (signed-in non-author), and reply chains under each review.
  *
- * Self-contained — owns its own fetches + state so the reader modal
+ * Self-contained, owns its own fetches + state so the reader modal
  * doesn't have to thread review props through every render.
  */
 export function StoryReviewsPanel({ storyId, authorUserId, allowReviews }: Props) {
@@ -45,7 +45,7 @@ export function StoryReviewsPanel({ storyId, authorUserId, allowReviews }: Props
 
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [storyId]);
 
-  // Reviews disabled by the author — render nothing. Silently absent
+  // Reviews disabled by the author, render nothing. Silently absent
   // beats a "no reviews here" footer the reader has to look at.
   if (!allowReviews) return null;
 
@@ -279,7 +279,7 @@ function ReviewCard({
 
   const authorName = review.reviewer.characterName ?? review.reviewer.masterUsername;
   // OOC ↔ character partition: a review posted under a character
-  // voice never falls back to the master's avatar — initials of the
+  // voice never falls back to the master's avatar, initials of the
   // character's name render instead. The character name above DOES
   // cleanly fall back to the master username because the master
   // username IS the OOC display name (no leak); the avatar would
@@ -389,7 +389,7 @@ function ReviewCard({
           dangerouslySetInnerHTML={{ __html: review.bodyHtml }}
         />
       ) : (
-        <p className="text-xs italic opacity-60">(No prose — rating only.)</p>
+        <p className="text-xs italic opacity-60">(No prose, rating only.)</p>
       )}
 
       {review.replies.length > 0 ? (
@@ -608,7 +608,7 @@ function ReplyRow({
   const name = reply.replyer.characterName ?? reply.replyer.masterUsername;
   // OOC ↔ character partition (see authorAvatar above): replies
   // posted under a character voice render initials when the
-  // character has no portrait — never the master's avatar.
+  // character has no portrait, never the master's avatar.
   const avatar = reply.replyer.characterName
     ? (reply.replyer.characterAvatarUrl ?? null)
     : (reply.replyer.masterAvatarUrl ?? null);

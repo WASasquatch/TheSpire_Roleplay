@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
  * `overflow-y-auto` pane (not the window), so a bare `<a href="#...">`
  * jump only moves the document scroll position and the modal stays put.
  * We also need to force-open the target `<details>` because everything
- * past the first guide ships collapsed — landing on a closed disclosure
+ * past the first guide ships collapsed, landing on a closed disclosure
  * with no visible content reads as "the link is broken."
  *
  * scrollIntoView walks up to the nearest scrollable ancestor (the
@@ -209,7 +209,7 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode }> = [
             Same controls.
           </li>
           <li>
-            Typing <K>!</K> mid-message opens an autocomplete popup of <b>inline commands</b> —
+            Typing <K>!</K> mid-message opens an autocomplete popup of <b>inline commands</b>,
             these splice their result into the sentence instead of running as a standalone command.
             <K>!roll</K> drops in a dice roll, <K>!roll:3d6</K> with a custom dice spec, and admins
             can mark their own custom commands as inline. Real expansions show a small ✓ that names
@@ -970,6 +970,20 @@ foot of the mountains. Speaks little. Watches everything.</p>
             <K>/expiry</K> for bulletin-style rooms.
           </li>
         </Bullets>
+        <Heading>Forum-style rooms: pages within categories</Heading>
+        <P>
+          When a room is in nested mode it behaves like a forum: every top-level message is a
+          topic, replies group underneath, and topics are sorted by most-recent activity. Inside
+          each category you get a numbered pagination strip at the bottom, <b>Prev</b>, a list
+          of page numbers, then <b>Next</b>. Stickies always sit at the top of page 1 and don't
+          count against the per-page total.
+        </P>
+        <P>
+          The page size is admin-set, so the strip will reflect whatever the staff team has tuned
+          for your community. A new topic always lands on page 1, and if you're reading page 3
+          when one arrives, the "X new topics" pill stays quiet until you return, flipping a page
+          isn't disrupted by live activity.
+        </P>
         <Tip>
           A scene banner is just dressing. It does not lock the room down or limit who can post;
           it sets the stage and everyone keeps writing as usual.
@@ -1253,7 +1267,7 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <P>
           Earning is the long-term reward layer for being part of the community. Every chat
           message, forum post, and quiet stretch of presence in a room earns you{" "}
-          <b>Experience (XP)</b> and <b>Currency</b> in parallel — XP grows your <b>rank</b>{" "}
+          <b>Experience (XP)</b> and <b>Currency</b> in parallel, XP grows your <b>rank</b>{" "}
           (the sigil shown next to your name), Currency stays in your wallet for spending on
           name styles, avatar borders, and other cosmetics.
         </P>
@@ -1265,14 +1279,14 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <Heading>How you earn</Heading>
         <Bullets>
           <li>
-            <b>Chat messages</b> in a room — the body has to be a few characters long, so a
+            <b>Chat messages</b> in a room, the body has to be a few characters long, so a
             single "ok" doesn't count.
           </li>
           <li>
             <b>Forum posts and replies</b> in nested-mode rooms.
           </li>
           <li>
-            <b>Presence</b> — staying active in a room awards a small amount every few minutes,
+            <b>Presence</b>, staying active in a room awards a small amount every few minutes,
             capped per day. "Active" means you posted or scrolled history in that block.
           </li>
         </Bullets>
@@ -1285,22 +1299,22 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <Heading>Slash commands</Heading>
         <Bullets>
           <li>
-            <K>/currency</K> — show your wallet (master + active character).
+            <K>/currency</K>, show your wallet (master + active character).
           </li>
           <li>
-            <K>/currency [user]</K> — peek at another user's balance (honors their privacy
+            <K>/currency [user]</K>, peek at another user's balance (honors their privacy
             toggle).
           </li>
           <li>
-            <K>/currency send [target] [amount]</K> — send Currency to another user OR
+            <K>/currency send [target] [amount]</K>, send Currency to another user OR
             character. Subject to daily caps and account-age gates set by the admin.
           </li>
           <li>
-            <K>/exp</K> — show your XP, rank, and tier. If you've reached the capstone of any
+            <K>/exp</K>, show your XP, rank, and tier. If you've reached the capstone of any
             rank (Tier IV: Verified), the line also lists which borders you can buy.
           </li>
           <li>
-            <K>/exp [user]</K> — look up another user's rank. Rank is always public.
+            <K>/exp [user]</K>, look up another user's rank. Rank is always public.
           </li>
         </Bullets>
 
@@ -1308,41 +1322,41 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <P>
           The ladder has six ranks shipped by default: New Arrival, Active, Recognized,
           Established, Distinguished, Legacy Member. Each has four tiers (I, II, III, IV:
-          Verified — the capstone). Crossing into a new tier surfaces a quiet ribbon at the top
+          Verified, the capstone). Crossing into a new tier surfaces a quiet ribbon at the top
           of the chat ("you've reached Recognized III") that you can dismiss. Reaching Tier IV
           of any rank unlocks that rank's <b>border frame</b> for purchase.
         </P>
         <P>
-          Your <b>sigil</b> — the small badge next to your name in chat, the userlist, and on
-          forum posts — always tracks your current rank/tier. It updates automatically.
+          Your <b>sigil</b>, the small badge next to your name in chat, the userlist, and on
+          forum posts, always tracks your current rank/tier. It updates automatically.
         </P>
 
         <Heading>Cosmetics you can buy</Heading>
         <Bullets>
           <li>
-            <b>Name styles</b> — gradient, glow, pulsing, panning, etc. Buy in the Earning
+            <b>Name styles</b>, gradient, glow, pulsing, panning, etc. Buy in the Earning
             dashboard's Name Styles section, customize the colors, and equip. Your styled name
             shows in chat, the userlist, and forum posts. Colors stay legible against both
             light and dark themes.
           </li>
           <li>
-            <b>Rank borders</b> — circular frames that wrap your avatar. Available only after
+            <b>Rank borders</b>, circular frames that wrap your avatar. Available only after
             you've reached Tier IV of a given rank. You can own multiple and pick which one
             you display.
           </li>
           <li>
-            <b>Free-form borders</b> — decorative borders that don't require a rank gate. Sold in
+            <b>Free-form borders</b>, decorative borders that don't require a rank gate. Sold in
             the Earning dashboard's <b>Borders</b> tab in their own Free-form section, alongside
             the rank borders. They have their own effects (phoenix feathers, hearth flame, and
             so on) and equip independently from rank borders.
           </li>
           <li>
-            <b>Inline avatar in chat</b> — once bought, your round avatar shows after the
+            <b>Inline avatar in chat</b>, once bought, your round avatar shows after the
             timestamp on every chat line. It also replaces the gender icon in the userlist as
             the click-target for opening your profile.
           </li>
           <li>
-            <b>Profile flair</b> — the quote marquee, visitor counter, and typing phrase are all
+            <b>Profile flair</b>, the quote marquee, visitor counter, and typing phrase are all
             small Currency purchases that customize your profile. See the Building a profile
             guide for what each one does.
           </li>
@@ -1350,7 +1364,7 @@ foot of the mountains. Speaks little. Watches everything.</p>
 
         <Heading>Spending on items and community emoticons</Heading>
         <P>
-          Currency also funds the Item Shop (cookies, plushies, pets, and other collectibles —
+          Currency also funds the Item Shop (cookies, plushies, pets, and other collectibles,
           see the Items guide) and pays creators in the Emoticon Marketplace (one Currency per use
           of any sheet whose artist has commerce enabled). The shop and the emoticon picker make
           the cost visible up front so nothing is silent.
@@ -1359,7 +1373,7 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <Heading>Privacy</Heading>
         <P>
           Open <b>Earning → Settings</b> to hide your Currency total from other users (or via
-          the profile editor's Privacy tab). Your rank and XP stay visible — rank is meant as a
+          the profile editor's Privacy tab). Your rank and XP stay visible, rank is meant as a
           public identity tag.
         </P>
 
@@ -1377,7 +1391,7 @@ foot of the mountains. Speaks little. Watches everything.</p>
     body: (
       <>
         <P>
-          Currency from earning is spent on <b>items</b> in the Shop — cookies, plushies, tools,
+          Currency from earning is spent on <b>items</b> in the Shop, cookies, plushies, tools,
           pets, and whatever else the admin team has put on the shelves. Items live in a
           per-identity inventory: your master account and each of your characters each keep their
           own.
@@ -1386,11 +1400,11 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <Heading>Browsing & buying</Heading>
         <Bullets>
           <li>
-            <K>/shop</K> — opens the Shop tab inside the Earnings panel. Same as Earnings ▸
+            <K>/shop</K>, opens the Shop tab inside the Earnings panel. Same as Earnings ▸
             Items ▸ Shop.
           </li>
           <li>
-            <K>/item &lt;name&gt;</K> — pop the full-screen item card for any catalog item.
+            <K>/item &lt;name&gt;</K>, pop the full-screen item card for any catalog item.
             Matches the slug ("cookie"), display name, plural, or any admin-set alias.
           </li>
         </Bullets>
@@ -1398,19 +1412,19 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <Heading>Using items in chat</Heading>
         <Bullets>
           <li>
-            <K>/give &lt;name&gt; [num] &lt;item&gt;</K> — hand items to another user in the
+            <K>/give &lt;name&gt; [num] &lt;item&gt;</K>, hand items to another user in the
             room. They land in the recipient's currently-active identity. Quantity defaults to 1.
-            This is the only way to move items between two of your own identities — just give to
+            This is the only way to move items between two of your own identities, just give to
             yourself.
           </li>
           <li>
-            <K>/throw &lt;name&gt; [num] &lt;item&gt;</K> — toss an item at someone. Flavor only:
+            <K>/throw &lt;name&gt; [num] &lt;item&gt;</K>, toss an item at someone. Flavor only:
             the item is consumed from your inventory; the target gets nothing. Each item ships
             its own random throw lines (set by admins); items without throw lines refuse the
             action.
           </li>
           <li>
-            <K>/drop &lt;name&gt; [num] &lt;item&gt;</K> — same shape as throw, different flavor.
+            <K>/drop &lt;name&gt; [num] &lt;item&gt;</K>, same shape as throw, different flavor.
             Both share a 4-second per-sender cooldown so the room doesn't flicker.
           </li>
         </Bullets>
@@ -1421,16 +1435,25 @@ foot of the mountains. Speaks little. Watches everything.</p>
         </P>
         <Bullets>
           <li>
-            <K>/collection</K> — opens your 10-slot Collection showcase. Pin any item.
+            <K>/collection</K>, opens your 10-slot Collection showcase. Pin any item.
           </li>
           <li>
-            <K>/pets</K> — opens your 5-slot Pets showcase. Pets only.
+            <K>/pets</K>, opens your 5-slot Pets showcase. Pets only.
           </li>
         </Bullets>
         <P>
-          Both pin sets are per-identity — your character's Collection is separate from your
+          Both pin sets are per-identity, your character's Collection is separate from your
           master's. Tap a pinned item on someone's profile to open its card (same as
           <K>/item &lt;name&gt;</K>).
+        </P>
+
+        <Heading>Hoarding is allowed</Heading>
+        <P>
+          There is no cap on how many of an item you can own. Buy a thousand cookies, stockpile
+          five hundred plushies, hold every roll of yarn the shop has ever sold. The Shop won't
+          stop you, <K>/give</K> won't reject a recipient for "stack full", and raffle winners
+          receive the full prize regardless of what they already had. The same applies to
+          Currency in your wallet.
         </P>
 
         <Tip>
@@ -1443,12 +1466,301 @@ foot of the mountains. Speaks little. Watches everything.</p>
   },
 
   {
+    id: "social-games",
+    title: "Social games: RPS, trivia, story dice, duels, and raffles",
+    body: (
+      <>
+        <P>
+          A set of chat-time mini-games for hanging out, writing together, sparring, and giving
+          things away. None of them require setup, all of them follow the per-identity rule that
+          the rest of the site uses, and every action posts a chat line so spectators can follow
+          along.
+        </P>
+        <P>
+          <b>Rewards:</b> the admin team can optionally attach XP, Currency, or an item from the
+          Shop as the winner's prize for any of these games. The reward shows up in the result
+          line so the room sees what the winner earned. Raffles are the exception, their prize is
+          already what the host put up.
+        </P>
+        <Tip>
+          <K>/games</K> prints a private quick reference of every social game and how to start
+          one. Only you see the output, so you can pop it up mid-chat without spamming the room.
+        </Tip>
+        <P>
+          <b>Round-based games and the point bonus:</b> for games that span multiple rounds (Word
+          Scramble below), the winner's accumulated points scale the XP and Currency payouts. A
+          player who racked up 200 points earns 2× the base reward, 500 points earns 5×, and so on
+          up to a 10× cap. Item rewards (if configured) are flat: you either win the item or you
+          don't.
+        </P>
+
+        <Heading>Rock-paper-scissors</Heading>
+        <P>
+          A 30-second round in the current room. Anyone can open one; anyone can join.
+        </P>
+        <Bullets>
+          <li>
+            <K>/rps</K> opens a round and announces it. You can then run <K>/rps rock</K>,{" "}
+            <K>/rps paper</K>, or <K>/rps scissors</K> any time before the timer ends. Short
+            forms work too: <K>r</K>, <K>p</K>, <K>s</K>.
+          </li>
+          <li>
+            <K>/rps {`<throw>`}</K> works as a one-shot. If a round is live, your throw enters it.
+            If no round is live, your throw opens a new one with you counted as the first player.
+          </li>
+          <li>
+            Switching your mind is fine. Running <K>/rps</K> again with a different throw
+            overwrites your last pick. Whatever you last submitted before the timer ends is what
+            counts.
+          </li>
+        </Bullets>
+        <P>
+          <b>How the round is scored:</b> throws are grouped by value. With two groups present,
+          the one whose throw beats the other wins (paper beats rock, rock beats scissors,
+          scissors beats paper) and every member of the winning group counts as a winner. With
+          all three throws present, nobody wins and the round cancels. With everyone throwing the
+          same, it's a tie. The result message lists every entrant and their throw so the room
+          sees the full transcript.
+        </P>
+
+        <Heading>Trivia</Heading>
+        <P>
+          A 60-second trivia round where the host hides an answer and the room races to guess it.
+        </P>
+        <Bullets>
+          <li>
+            <K>/trivia {`<question>`} | {`<answer>`}</K> opens a round. The pipe (|) is the
+            separator. The question is announced; the answer stays hidden.
+          </li>
+          <li>
+            <K>/answer {`<text>`}</K> submits a guess. Wrong guesses get a quiet private notice;
+            correct ones end the round immediately, reveal the answer publicly, and surface the
+            winner. The match is forgiving, case-insensitive with leading "the / a / an"
+            stripped, so "Eiffel Tower" and "the eiffel tower" both count.
+          </li>
+        </Bullets>
+        <P>
+          At round end the result line lists every guess so spectators see who tried what. If
+          nobody got it, the answer is revealed when the timer runs out.
+        </P>
+
+        <Heading>Story Dice</Heading>
+        <P>
+          A 3-minute creative-writing prompt round. The server picks four random words; players
+          write short IC posts weaving all four in. The room votes the winner with 👍 reactions,
+          there's no host pick.
+        </P>
+        <Bullets>
+          <li>
+            <K>/storydice</K> opens a round. The four prompt words are revealed in the start
+            line, things like <i>lantern, oath, rust, river</i>.
+          </li>
+          <li>
+            <K>/storydice {`<your post>`}</K> submits a paragraph. Your post goes into chat as a
+            regular line attributed to you, with a seeded 👍 reaction already on it so the voting
+            chip is right there for tappers.
+          </li>
+          <li>
+            One submission per identity. Once you post you're committed, so put your best foot
+            forward.
+          </li>
+        </Bullets>
+        <P>
+          <b>Voting:</b> tap the 👍 chip on any submission you like (or any combination of them
+          you want to support). At the end of the round, whichever submission has the most 👍
+          reactions wins, ties share the prize, and the result line lists every entry with its
+          vote count. Submissions that didn't weave all four prompts in are marked but still
+          eligible to win if the room loved them.
+        </P>
+
+        <Heading>Word Scramble</Heading>
+        <P>
+          A word is picked, its letters get shuffled, and the room races to find as many
+          dictionary words as they can in the letters. Points scale with length, and exact matches
+          on the source word double the score.
+        </P>
+        <Bullets>
+          <li>
+            <K>/scramble</K> starts a 3-round game in the current room. Each round runs for about
+            a minute and rolls a new word.
+          </li>
+          <li>
+            <K>/scramble {`<rounds>`}</K> picks the number of rounds, 1 through 5. Difficulty
+            climbs with the round number, so a 5-round game ends on a much longer source word
+            than it started with.
+          </li>
+          <li>
+            <K>/scramble {`<rounds>`} {`<word1>`} {`<word2>`} ...</K> lets the host pick the
+            source words for each round. For example, <K>/scramble 3 forward accelerate hyperspace</K>{" "}
+            runs three rounds with those exact words. Provide fewer words than rounds and the
+            remaining rounds are picked for you. Words must be 4 to 12 letters, letters only.
+          </li>
+          <li>
+            <K>/scramble {`<word1>`} {`<word2>`} ...</K> without a leading number runs one round
+            per word you supplied.
+          </li>
+          <li>
+            <K>/scramble {`<word>`}</K> during a live round claims points for a word you spotted.
+            Your word has to be at least three letters, only use letters present in the scramble
+            (counting duplicates), and appear in the game's dictionary. Repeat guesses in the same
+            round don't score twice.
+          </li>
+          <li>
+            <K>/scramble status</K> reprints the current letters and time left, privately to you.
+          </li>
+          <li>
+            <K>/scramble cancel</K> ends your own game early. Host only.
+          </li>
+        </Bullets>
+        <P>
+          <b>Scoring:</b> 3-letter words are worth 1 point, climbing through 3, 6, 10, 15, 21,
+          and 28 for nine-letter-plus finds. Typing the unscrambled source word itself doubles
+          your points for that find, which is usually the biggest single play of the round.
+        </P>
+        <P>
+          <b>Multi-round:</b> the timer chain runs round to round automatically. Each round-end
+          posts a quick standings line so spectators can follow who's ahead. At the final round
+          end, the top score wins (ties share the prize), and the round-game point bonus from the
+          intro applies to the winner's XP and Currency.
+        </P>
+
+        <Heading>Duels</Heading>
+        <P>
+          Turn-based 1v1 combat with classes, HP, and dice-resolved actions. Every roll is
+          logged to chat so the fight reads like a transcript.
+        </P>
+        <Bullets>
+          <li>
+            <K>/duel {`<opponent>`}</K> challenges someone with the default class (knight). The
+            opponent has 60 seconds to respond.
+          </li>
+          <li>
+            <K>/duel {`<opponent>`} as {`<class>`}</K> challenges someone and sets <i>your</i>{" "}
+            class for the fight. Example: <K>/duel Casey as mage</K> takes on Casey as a mage.
+            Add <K>vs {`<class>`}</K> to suggest a class for your opponent too: <K>/duel Casey
+            as mage vs knight</K>.
+          </li>
+          <li>
+            If two players share the same name (a character and a different account's character),
+            the system shows you a short picker with each match's identity token. Paste the
+            matching token back into the command to lock onto the right person.
+          </li>
+          <li>
+            <K>/duel accept [class]</K> takes the challenge. Pick your own class, knight,
+            archer, mage, or gunslinger (short forms <K>k</K>, <K>a</K>, <K>m</K>, <K>g</K>).
+          </li>
+          <li>
+            <K>/duel decline</K> refuses the challenge.
+          </li>
+          <li>
+            On your turn, choose <K>/duel attack</K>, <K>/duel defend</K>, <K>/duel parry</K>, or{" "}
+            <K>/duel rest</K>. Each action logs its dice rolls publicly. You have 60 seconds per
+            turn or you forfeit.
+          </li>
+          <li>
+            <K>/duel status</K> prints HP, classes, whose turn it is, and the timer.{" "}
+            <K>/duel forfeit</K> surrenders.
+          </li>
+        </Bullets>
+        <P>
+          <b>The classes:</b> the knight has the most HP and a sword (1d10+5 damage). The archer
+          has +to-hit and a bow (1d8+3). The mage has the highest damage dice (1d12) but the
+          least HP. The gunslinger crits on a 19 or 20, most-likely-to-spike for a finishing
+          blow.
+        </P>
+        <P>
+          <b>Combat math, briefly:</b> attacks roll 1d20 + class hit modifier against the
+          target's defense (12 base, +5 when defending, +3 when parrying). Crits double the
+          damage roll. Parry succeeds when the parrier's 1d20 beats the attacker's natural, on
+          success the attack is negated AND the parrier counters for half damage. Defend halves
+          the damage taken. Rest recovers 2d6 HP but skips your attack.
+        </P>
+        <P>
+          <b>Defend vs parry, hidden from your opponent:</b> when you defend or parry, the room
+          only sees "you take a guarded stance", they can't tell which one you picked. You see
+          the specific mechanics in a private confirmation line. This way your opponent has to
+          guess: attacking into a parry triggers the contest and counter, but you also waste your
+          stance if they choose to rest or stance up themselves.
+        </P>
+
+        <Heading>Room raffles</Heading>
+        <P>
+          Put an item or some Currency up for grabs. The prize leaves your active inventory or
+          wallet immediately and lives in the raffle while it runs. People type <K>/claim</K> in
+          the next minute to enter. At the end, one entrant is picked at random and gets the
+          prize. With zero claimants, the prize comes back to you.
+        </P>
+        <Bullets>
+          <li>
+            <K>/raffle item {`<name>`} [count]</K> raffles an item. Name can be the slug,
+            display name, or any admin alias, same as <K>/give</K>. Count defaults to one.
+          </li>
+          <li>
+            <K>/raffle currency {`<amount>`}</K> raffles Currency from your active wallet.
+          </li>
+          <li>
+            <K>/raffle cancel</K> ends your own raffle early and refunds the prize. Host only.
+          </li>
+          <li>
+            <K>/raffle status</K> shows the active raffle's prize, claimant count, and time left.
+          </li>
+        </Bullets>
+        <P>
+          The draw is uniform and random. Even a multi-count prize ("five cookies") goes to one
+          winner, not split. Self-entry by the host is allowed, you put up the stake, you can
+          win it back.
+        </P>
+
+        <Heading>Claiming</Heading>
+        <P>
+          <K>/claim</K> (or <K>/enter</K>) puts you in the active raffle. The room's own raffle
+          takes precedence: if the room you're in has a live raffle, <K>/claim</K> binds to that
+          one. If the room has no raffle but a sitewide raffle is running, <K>/claim</K> enters
+          the sitewide one instead. Running <K>/claim</K> a second time is a no-op; one entry
+          per identity per raffle.
+        </P>
+
+        <Heading>Sitewide raffles (admin)</Heading>
+        <P>
+          Admins can open a sitewide raffle with <K>/announceraffle item {`<name>`} [count]</K>{" "}
+          or <K>/announceraffle currency {`<amount>`}</K>. The announce broadcasts to every
+          room, the window is three minutes (so people in busy rooms have time to see it), and
+          <K>/claim</K> works from any room that doesn't have its own live raffle. Same
+          random-draw and refund-on-empty rules.
+        </P>
+
+        <Heading>One game at a time per room</Heading>
+        <P>
+          Only one social-game session can run in a room at any moment. A rock-paper-scissors
+          round and a raffle can't overlap, and two raffles can't run side by side. The same
+          rule holds for the sitewide slot, one announce-raffle at a time across the whole
+          site.
+        </P>
+
+        <Heading>Identity rules</Heading>
+        <P>
+          Everything is per-identity, like the rest of the system. Your master account and each
+          character can each enter once per round. Items and Currency come out of the active
+          identity's pool; the winner gets credited to whichever identity they entered as. If
+          you want to raffle a character's plushie, switch to that character before starting.
+        </P>
+
+        <Tip>
+          Going incognito disables hosting and entering. Both the start announce and the result
+          line print names, which would defeat the point of <K>/incognito</K>. Drop back to
+          visible first if you want in.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
     id: "scriptorium",
     title: "Scriptorium: long-form fiction",
     body: (
       <>
         <P>
-          The Scriptorium is the long-form writing surface — short stories, serialized novels,
+          The Scriptorium is the long-form writing surface, short stories, serialized novels,
           fanfiction. Stories sit outside the chat: they have chapters, an optional codex,
           collaborators, reviews, applause, and a subscriber list.
         </P>
@@ -1456,32 +1768,32 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <Heading>Authoring</Heading>
         <Bullets>
           <li>
-            <K>/write</K> — opens the editor on your most recently-edited draft.
+            <K>/write</K>, opens the editor on your most recently-edited draft.
           </li>
           <li>
-            <K>/write new</K> — launches the New Story wizard. Pick a title, genre, rating, and
+            <K>/write new</K>, launches the New Story wizard. Pick a title, genre, rating, and
             visibility.
           </li>
           <li>
-            <K>/write &lt;slug&gt;</K> — edits one of your stories by URL slug.
+            <K>/write &lt;slug&gt;</K>, edits one of your stories by URL slug.
           </li>
         </Bullets>
         <P>
           Each chapter has its own publish state (draft / published / abandoned) with autosaved
           version history. If a collaborator is already in a chapter, a soft lock surfaces "Alice
-          is editing — open read-only?" so you don't overwrite each other.
+          is editing, open read-only?" so you don't overwrite each other.
         </P>
 
         <Heading>Visibility & ratings</Heading>
         <Bullets>
           <li>
-            <b>Private</b> — only you and invited collaborators can see it.
+            <b>Private</b>, only you and invited collaborators can see it.
           </li>
           <li>
-            <b>Unlisted</b> — anyone with the URL can read it. Not in catalogs.
+            <b>Unlisted</b>, anyone with the URL can read it. Not in catalogs.
           </li>
           <li>
-            <b>Public</b> — listed in the Story Catalog and on the splash bookshelf, readable
+            <b>Public</b>, listed in the Story Catalog and on the splash bookshelf, readable
             per the rating gate.
           </li>
         </Bullets>
@@ -1496,15 +1808,15 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <Heading>Reading</Heading>
         <Bullets>
           <li>
-            <K>/scriptorium</K> — opens the catalog. Tabs: <b>Find Stories</b> (everything),
+            <K>/scriptorium</K>, opens the catalog. Tabs: <b>Find Stories</b> (everything),
             <b> My Stories</b> (your drafts + published), <b>Reading</b> (resumes where you left
             off), <b>Following</b> (your subscriptions).
           </li>
           <li>
-            <K>/story &lt;slug&gt;</K> — open a story in the reader.
+            <K>/story &lt;slug&gt;</K>, open a story in the reader.
           </li>
           <li>
-            <K>/story &lt;slug&gt; chapter &lt;N&gt;</K> — jump to a specific chapter.
+            <K>/story &lt;slug&gt; chapter &lt;N&gt;</K>, jump to a specific chapter.
           </li>
         </Bullets>
         <P>
@@ -1517,16 +1829,16 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <Heading>Reader engagement</Heading>
         <Bullets>
           <li>
-            <b>Reviews + applause</b> — one review per (reader, story) with 1–5 stars and an
+            <b>Reviews + applause</b>, one review per (reader, story) with 1–5 stars and an
             optional prose body. 60-second edit grace mirrors chat. Reviews support replies.
             Applause is one-tap, one per reader.
           </li>
           <li>
-            <b>Subscribe</b> — follow a story so new-chapter publishes drop you an in-app
+            <b>Subscribe</b>, follow a story so new-chapter publishes drop you an in-app
             notification.
           </li>
           <li>
-            <b>Codex</b> — authors can publish a per-story bible (characters, places, plot points)
+            <b>Codex</b>, authors can publish a per-story bible (characters, places, plot points)
             that lives alongside the story. Useful for tracking continuity without putting it in
             the prose.
           </li>
@@ -1559,31 +1871,31 @@ foot of the mountains. Speaks little. Watches everything.</p>
         </P>
         <P>
           A message that's <i>just</i> a single emoticon (no other words) renders at sticker
-          size — 84px — instead of the inline 24px sprite. Messenger / Discord / Telegram style.
+          size, 84px, instead of the inline 24px sprite. Messenger / Discord / Telegram style.
         </P>
 
         <Heading>Reactions</Heading>
         <Bullets>
           <li>
-            <b>Where</b> — chat messages, DMs, and forum posts all accept reactions.
+            <b>Where</b>, chat messages, DMs, and forum posts all accept reactions.
           </li>
           <li>
-            <b>How</b> — the <K>+ 😊</K> trigger lives in the floating right-side message-tool
+            <b>How</b>, the <K>+ 😊</K> trigger lives in the floating right-side message-tool
             row (next to Edit on chat lines, in the action toolbar on forum posts). It surfaces
             on hover (desktop) or row tap (mobile), so empty chat rows aren't littered with
             buttons.
           </li>
           <li>
-            <b>Chips</b> — each unique reaction groups into a round chip showing the sprite + a
+            <b>Chips</b>, each unique reaction groups into a round chip showing the sprite + a
             count. Tap a chip to add or remove your own reaction.
           </li>
           <li>
-            <b>Tooltip</b> — hover any chip to see a larger preview of the sprite and a prose
+            <b>Tooltip</b>, hover any chip to see a larger preview of the sprite and a prose
             list of who reacted ("Alice and Bob reacted with happy", "Alice, Bob, and 3 others
             reacted with happy").
           </li>
           <li>
-            <b>Caps</b> — 4 visible chips on mobile, 10 on desktop. Past that, a <b>+N more</b>
+            <b>Caps</b>, 4 visible chips on mobile, 10 on desktop. Past that, a <b>+N more</b>
             {" "}button opens the full reactor list grouped by emoticon.
           </li>
         </Bullets>
@@ -1610,7 +1922,7 @@ foot of the mountains. Speaks little. Watches everything.</p>
 
         <Tip>
           Emoticon tokens (<K>:slug:idx:</K>) don't trigger the <K>:</K> /me action shortcut, so
-          a message that starts with an emoticon sends as a normal chat line — no italic action
+          a message that starts with an emoticon sends as a normal chat line, no italic action
           framing.
         </Tip>
       </>

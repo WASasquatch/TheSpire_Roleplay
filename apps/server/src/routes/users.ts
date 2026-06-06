@@ -46,7 +46,7 @@ export async function registerUsersRoutes(
     const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit ?? "100", 10) || 100));
     // Optional rank filter (master pool rank). Empty string / missing
     // disables the filter. We don't validate against the rank catalog
-    // here — an unknown key just returns zero matches, which is the
+    // here, an unknown key just returns zero matches, which is the
     // same shape an admin-disabled rank would produce.
     const rankFilter = (req.query.rank ?? "").trim();
     // Sort mode. Default mirrors the historic behavior: online first,
@@ -62,7 +62,7 @@ export async function registerUsersRoutes(
     // character names. Disabled accounts (disabledAt set) and the
     // system sentinel are excluded. Comparison is space-insensitive
     // (NBSP folds to ASCII space) so typing `john d` matches a master
-    // stored as `John Doe` (NBSP) — the user-directory and add-friend
+    // stored as `John Doe` (NBSP), the user-directory and add-friend
     // autocomplete both flow through this endpoint, so the fold here
     // is what makes Alt+0160 names findable without the searcher
     // having to know to type Alt+0160 themselves.
@@ -112,7 +112,7 @@ export async function registerUsersRoutes(
         if (allMasters.length > MAX_INMEMORY_SORT_USERS) {
           reply.code(413);
           return {
-            error: `directory has more than ${MAX_INMEMORY_SORT_USERS} users — narrow with ?q= or use ?sort=name/joined`,
+            error: `directory has more than ${MAX_INMEMORY_SORT_USERS} users, narrow with ?q= or use ?sort=name/joined`,
           };
         }
         matchedUserIds = allMasters.map((r) => r.id);
@@ -147,7 +147,7 @@ export async function registerUsersRoutes(
     // Incognito moderators are stripped from the online set so the
     // directory + mention autocomplete + friends list all report them
     // as offline. The incognito feature's contract is "global invisible
-    // — no trace"; surfacing them with an online dot here would directly
+    //, no trace"; surfacing them with an online dot here would directly
     // contradict that. We could resolve this with a per-user DB lookup
     // for every socket, but the cardinality is small (typical staff
     // on at one time is < 5) and a single batched SELECT keeps it cheap
@@ -176,7 +176,7 @@ export async function registerUsersRoutes(
 
     if (matchedUserIds.length === 0) return { users: [], total: 0, offset, limit };
 
-    // Rank lookup (master pool only — character pools cascade
+    // Rank lookup (master pool only, character pools cascade
     // independently and would confuse a single "rank" column on a
     // user row). Joined in via a separate query rather than a SQL
     // join so the matched-user-ids list stays the size driver and
@@ -193,7 +193,7 @@ export async function registerUsersRoutes(
 
     // Filter by rank AFTER the lookup so the SQL doesn't have to
     // INNER JOIN (which would silently drop unranked users). Users
-    // with no earning row never match a rank filter — same outcome
+    // with no earning row never match a rank filter, same outcome
     // as "rank ≠ requested".
     if (rankFilter) {
       matchedUserIds = matchedUserIds.filter((uid) => rankByUser.get(uid)?.rankKey === rankFilter);
@@ -208,7 +208,7 @@ export async function registerUsersRoutes(
       };
     }
 
-    // Lifetime message count per user — single GROUP BY for the
+    // Lifetime message count per user, single GROUP BY for the
     // matched set. Same kind set the profile `chatMessages` counter
     // uses, plus topics/replies, so the row's number matches "all
     // visible posts you've ever made" without forcing the user to
@@ -242,7 +242,7 @@ export async function registerUsersRoutes(
         lastLoginAt: users.lastLoginAt,
         // Per-element privacy flags. Pulled here so we can null the
         // summed `messageCount` for users who've opted any of the
-        // three categories private — the sum would leak the bulk
+        // three categories private, the sum would leak the bulk
         // even if every per-category count on the profile is hidden.
         hideChatMessageCount: users.hideChatMessageCount,
         hideForumTopicCount: users.hideForumTopicCount,
@@ -292,7 +292,7 @@ export async function registerUsersRoutes(
     }]));
 
     // When the no-search SQL-paginated path was used, `userRows` is
-    // ALREADY the right page in the right order — restore that order
+    // ALREADY the right page in the right order, restore that order
     // (the IN() fetch above doesn't preserve it) and skip the
     // in-memory sort + slice entirely. The `total` returned to the
     // client is the SELECT COUNT(*) we ran during pagination.
@@ -305,7 +305,7 @@ export async function registerUsersRoutes(
           switch (sortMode) {
             case "messages": {
               // Highest message count first. Privacy-hidden users sort as
-              // 0 so they don't accidentally float to the top — opting
+              // 0 so they don't accidentally float to the top, opting
               // into privacy means accepting demoted directory ordering.
               // Ties break alphabetically so the list stays stable for
               // users at the same level.
@@ -329,7 +329,7 @@ export async function registerUsersRoutes(
             }
             case "online":
             default: {
-              // Historic default — online users first, then offline,
+              // Historic default, online users first, then offline,
               // alphabetical within each band.
               const aOn = onlineUserIds.has(a.id) ? 0 : 1;
               const bOn = onlineUserIds.has(b.id) ? 0 : 1;
@@ -362,7 +362,7 @@ export async function registerUsersRoutes(
         rankTier: rank?.tier ?? null,
         // Lifetime visible-post count (chat + forum). Powers the
         // "Most active" sort + the per-row badge in UsersModal.
-        // Null when ANY per-element hide flag is set — the directory
+        // Null when ANY per-element hide flag is set, the directory
         // sum would otherwise leak the bulk the user is trying to
         // keep private. Renderer should display "private" in place.
         messageCount: effectiveCount(u.id, u.hideChatMessageCount, u.hideForumTopicCount, u.hideForumReplyCount),
@@ -390,7 +390,7 @@ export async function registerUsersRoutes(
     const q = (req.query.q ?? "").trim().toLowerCase();
     const offset = Math.max(0, parseInt(req.query.offset ?? "0", 10) || 0);
     const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit ?? "100", 10) || 100));
-    // Optional IP filter — when set, scopes the result to every user
+    // Optional IP filter, when set, scopes the result to every user
     // who has at least one session row from this IP. Used by the
     // UsersTab's "alts on this IP" click affordance so an admin can
     // pivot from one user's IP chip to every other account that
@@ -428,7 +428,7 @@ export async function registerUsersRoutes(
           : undefined,
     );
 
-    // Total count + page in two queries — was: SELECT all, sort in
+    // Total count + page in two queries, was: SELECT all, sort in
     // memory, slice. That pattern returned every non-system user on
     // every admin-panel open; at 10× current population it would ship
     // multi-MB and stall the event loop on the .sort() pass.
@@ -477,7 +477,7 @@ export async function registerUsersRoutes(
     // Per-user IP aggregation. Pulls every session row (with non-null
     // IP) for users in the current page, sorted newest-first; we then
     // dedupe by IP and keep the top 5 per user. SQLite doesn't have a
-    // clean per-group LIMIT so the dedup happens in app code — at
+    // clean per-group LIMIT so the dedup happens in app code, at
     // page sizes of ≤100 users with bounded session counts, the
     // result-set is tiny and the in-memory reduce is cheap.
     //
@@ -590,17 +590,17 @@ export async function registerUsersRoutes(
    * Admin user editor. Two-tier gating:
    *   * Both `admin` and `masteradmin` reach this endpoint.
    *   * Plain `admin` may rename a user and may promote/demote within
-   *     {user, trusted, mod, admin} — they can build the moderation
+   *     {user, trusted, mod, admin}, they can build the moderation
    *     team but can't mint another masteradmin and can't demote one
    *     either.
-   *   * `email` and `disabled` mutations are master-only — both are
+   *   * `email` and `disabled` mutations are master-only, both are
    *     "damage" levers (account lockout, identity reassignment).
    *   * Promoting TO masteradmin or demoting FROM masteradmin is
    *     master-only by definition; a plain admin attempting either
    *     gets 403 so they can't escalate themselves through a chained
    *     promotion or kneecap the only top-tier admin.
    *
-   * Password reset is intentionally out of scope here — users go
+   * Password reset is intentionally out of scope here, users go
    * through their own password-recovery flow for that.
    */
   app.patch<{ Params: { id: string }; Body: unknown }>("/admin/users/:id", async (req, reply) => {
@@ -614,7 +614,7 @@ export async function registerUsersRoutes(
     const canDisableEnable = (await hasPermission(me, "disable_user", db))
       && (await hasPermission(me, "enable_user", db));
     // Masteradmin promotion / demotion is hardcoded masteradmin-only
-    // (per the plan's hardcoded-exceptions list) — there is NO
+    // (per the plan's hardcoded-exceptions list), there is NO
     // catalog key for it, so a misclick on the matrix can't grant
     // it. We check for the underlying tier here.
     const canTouchMasteradminTier = me.role === "masteradmin";
@@ -627,7 +627,7 @@ export async function registerUsersRoutes(
     const { MASTER_USERNAME_RX, MASTER_USERNAME_RULE_MESSAGE } = await import("./auth.js");
     // Mirror the master-username rule from /auth/register so admins editing a
     // user's name can't introduce a Unicode-confusable identifier. Import
-    // the regex + message from auth.ts so both paths stay in sync — a
+    // the regex + message from auth.ts so both paths stay in sync, a
     // duplicated regex here would drift the moment one side gets relaxed.
     const masterUsernameSchema = z
       .string()
@@ -657,14 +657,14 @@ export async function registerUsersRoutes(
     }
     // Role transitions that touch the masteradmin tier are
     // hardcoded masteradmin-only (per plan.md's hardcoded exceptions).
-    // No catalog key — putting it on the matrix would let a misclick
+    // No catalog key, putting it on the matrix would let a misclick
     // strand the install with no top-tier authority.
     if ((body.role === "masteradmin" || target.role === "masteradmin") && !canTouchMasteradminTier) {
       reply.code(403); return { error: "master admin only: changing the masteradmin role" };
     }
     // Role-hierarchy gate. The granular `edit_user_basic` key makes
     // the endpoint callable, but the actor still can't grant a role
-    // higher than their own (matrix-laddering refusal — see plan.md's
+    // higher than their own (matrix-laddering refusal, see plan.md's
     // hardcoded exceptions). Applies in both directions: setting a
     // target TO a higher tier and demoting a target FROM a higher
     // tier are both refused unless the actor outranks the change.
@@ -749,7 +749,7 @@ export async function registerUsersRoutes(
    * disconnects any live sockets that account had so they're forced
    * to re-authenticate with the new password.
    *
-   * Master-admin only — handing out password resets is the most
+   * Master-admin only, handing out password resets is the most
    * destructive single-user lever (effectively account takeover from
    * the admin chair). Plain admins can't reach it.
    */
@@ -823,7 +823,7 @@ export async function registerUsersRoutes(
    *
    * Used by the message renderer so a mention chip only lights up
    * when the name actually resolves to a master username OR the
-   * active-character name of an existing user — typos and dangling
+   * active-character name of an existing user, typos and dangling
    * `@bobs` stay as plain text instead of dressing up as a clickable
    * (but-broken) chip.
    *
@@ -832,7 +832,7 @@ export async function registerUsersRoutes(
    * input name not in the response is implicitly invalid (the client
    * treats it as such).
    *
-   * Hard cap of 64 names per call — a single message can only
+   * Hard cap of 64 names per call, a single message can only
    * contain so many mentions, and most messages have ≤2. The renderer
    * batches across visible messages but won't exceed the cap.
    */
@@ -846,7 +846,7 @@ export async function registerUsersRoutes(
     // mention typed as `@John Doe` (ASCII space) matches a master
     // stored as `John Doe` (NBSP). The response also speaks the
     // canonical form so the client can compare its own canonicalized
-    // mention strings against `valid` directly — see
+    // mention strings against `valid` directly, see
     // apps/web/src/state/mentions.ts which canonicalizes on the read
     // side too. Dedupe via Set so duplicate or NBSP/space variants of
     // the same name collapse to one query argument.
@@ -857,7 +857,7 @@ export async function registerUsersRoutes(
     )).slice(0, 64);
     if (canonicals.length === 0) return { valid: [] };
 
-    // Master usernames first — globally unique, fast hit. NB: only
+    // Master usernames first, globally unique, fast hit. NB: only
     // non-disabled accounts (the system sentinel + any deactivated
     // accounts shouldn't surface as clickable mentions).
     const userMatches = await db
@@ -872,12 +872,12 @@ export async function registerUsersRoutes(
       );
     const valid = new Set(userMatches.map((u) => canonicalizeNameForLookup(u.username)));
 
-    // Character names — match against any non-deleted character of
+    // Character names, match against any non-deleted character of
     // a non-disabled owner. The active-character constraint that the
     // push pipeline (broadcast.ts) applies is intentionally NOT used
     // here: that gate is about whether a mention should ping someone
     // RIGHT NOW. The renderer's question is "is this a real name with
-    // a clickable profile?" — and an inactive character still has a
+    // a clickable profile?", and an inactive character still has a
     // profile.
     const remaining = canonicals.filter((n) => !valid.has(n));
     if (remaining.length > 0) {
@@ -903,7 +903,7 @@ export async function registerUsersRoutes(
    *
    * The legacy `/users` endpoint rolled character matches up under
    * their owning master so the UI ended up rendering "MasterName as
-   * CharacterName" — a privacy leak that violated the project's
+   * CharacterName", a privacy leak that violated the project's
    * "characters are their own accounts" contract. This endpoint
    * returns each matching identity as its own row instead, so a
    * user typing `King` sees the character `KingArthur` and the
@@ -965,7 +965,7 @@ export async function registerUsersRoutes(
     ]);
 
     // Online lookup once, keyed by master userId. Used to surface the
-    // online dot regardless of which identity matched — being online
+    // online dot regardless of which identity matched, being online
     // is a USER property; a master sitting on Character A still
     // means Character B is "reachable" from a DM perspective.
     const sockets = await io.fetchSockets();
@@ -980,7 +980,7 @@ export async function registerUsersRoutes(
       userId: string;
       characterId: string | null;
       displayName: string;
-      /** The master username — used only by the server-side caller
+      /** The master username, used only by the server-side caller
        *  filter; the client should NOT render this on the suggestion
        *  row, since exposing it leaks the OOC/character relationship
        *  the partition is meant to hide. */

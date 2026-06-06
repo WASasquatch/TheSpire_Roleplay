@@ -11,7 +11,7 @@ function notice(ctx: CommandContext, code: string, message: string) {
 /**
  * Caller must be the room owner, a room mod, or hold the site-wide
  * `edit_any_room_metadata` (matrix-grantable; admin-default by seed).
- * /scene is a director-shaped feature — random users shouldn't be able
+ * /scene is a director-shaped feature, random users shouldn't be able
  * to drop scene banners into someone else's room.
  */
 async function canMarkScene(ctx: CommandContext): Promise<boolean> {
@@ -57,7 +57,7 @@ function validateSceneImageUrl(raw: string): string | null {
  *
  * The image arg is opt-in: titles without a `|` separator render
  * exactly as before. A blank URL after the pipe is treated as
- * "user typed the separator and changed their mind" — same banner,
+ * "user typed the separator and changed their mind", same banner,
  * no image, no error. An invalid URL after the pipe rejects the
  * whole send so the director knows their link didn't take (the
  * silent-drop alternative would publish a title-only banner and

@@ -76,7 +76,7 @@ export function SplashLanding({ onNavigate }: Props) {
   // pushState + manual popstate keeps the bundle warm and preserves
   // theme/state across the transition.
   function go(e: React.MouseEvent, path: string) {
-    // Honor cmd/ctrl/middle-click for "open in new tab" — the browser's
+    // Honor cmd/ctrl/middle-click for "open in new tab", the browser's
     // default handles that case; we only intercept the plain left-click.
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     e.preventDefault();
@@ -90,7 +90,7 @@ export function SplashLanding({ onNavigate }: Props) {
       style={themeStyle(splashTheme)}
       className="relative min-h-screen w-full overflow-hidden bg-keep-bg text-keep-text"
     >
-      {/* Background art — mirrors SplashShell so the visual identity stays
+      {/* Background art, mirrors SplashShell so the visual identity stays
           consistent between the landing and the auth pages. Same dark-
           mode swap (resolved palette → bg image variant + corner glows).
           NB: `fixed inset-0` (not `absolute`) so `bg-cover` sizes against
@@ -129,7 +129,7 @@ export function SplashLanding({ onNavigate }: Props) {
           stack + scroll inside. The whole column scrolls with the
           window rather than the card scrolling internally. */}
       <div className="relative flex min-h-screen flex-col items-center justify-start py-8 lg:py-10">
-        {/* HERO — over the spire BG, ABOVE the card. The wordmark
+        {/* HERO, over the spire BG, ABOVE the card. The wordmark
             reads as the page banner this way instead of feeling
             tucked into the card content. */}
         <header className="splash-hero-outside mx-4 mb-6 w-[min(1280px,92vw)] text-center lg:mb-8">
@@ -211,7 +211,7 @@ export function SplashLanding({ onNavigate }: Props) {
           />
 
           <div className="px-6 py-6 sm:px-10 sm:py-8 lg:px-14 lg:py-10">
-            {/* CONDENSED CTA — button + login link inline so the
+            {/* CONDENSED CTA, button + login link inline so the
                 action stack reads as one tight block at the top of
                 the card. Stats + welcome live just below it and the
                 scroll takes the full width beneath. */}
@@ -246,7 +246,7 @@ export function SplashLanding({ onNavigate }: Props) {
               </a>
             </div>
 
-            {/* OPTIONAL LIVE SIGNALS — admin-gated stats. The 24h
+            {/* OPTIONAL LIVE SIGNALS, admin-gated stats. The 24h
                 hero number is compact here (smaller than before)
                 since the CTA above it owns the visual anchor. */}
             {branding.splashMessages24hEnabled && stats && typeof stats.messages24h === "number" ? (
@@ -296,7 +296,7 @@ export function SplashLanding({ onNavigate }: Props) {
               </p>
             ) : null}
 
-            {/* ADMIN WELCOME — only renders when set. Centered text
+            {/* ADMIN WELCOME, only renders when set. Centered text
                 that spans the card so it doesn't sit as a narrow
                 column inside the now-1280px-wide card. */}
             {branding.welcomeHtml.trim() ? (
@@ -306,7 +306,7 @@ export function SplashLanding({ onNavigate }: Props) {
               />
             ) : null}
 
-            {/* SPIRE SCROLL — full container width below the CTA.
+            {/* SPIRE SCROLL, full container width below the CTA.
                 With the wider canvas, descriptions fit on one line
                 and the scroll's overall height is shorter. */}
             <div className="mt-8">
@@ -314,13 +314,13 @@ export function SplashLanding({ onNavigate }: Props) {
             </div>
           </div>
 
-          {/* SOCIAL PROOF — worlds orb + bookshelf, side-by-side on
+          {/* SOCIAL PROOF, worlds orb + bookshelf, side-by-side on
               wide viewports so a first-time visitor sees both the
               "play in these worlds" and "read these stories" pitches
               above the fold without needing to scroll. `auto-fit`
               with a 450px min collapses the layout to a single
               stacked column on narrower viewports (or when the
-              orb is hidden because there are no featured worlds —
+              orb is hidden because there are no featured worlds,
               the bookshelf naturally fills the row alone). Each
               child owns its own panel container so the segments
               read as distinct surfaces. */}
@@ -329,7 +329,7 @@ export function SplashLanding({ onNavigate }: Props) {
             // `min(450px, 100%)` lets each column shrink below 450px
             // when the parent card itself is narrower than 450px
             // (every mobile viewport). The previous bare `minmax(450px, 1fr)`
-            // forced a 450px floor on every column — on a 360px-wide
+            // forced a 450px floor on every column, on a 360px-wide
             // viewport the grid was 450px wide and the orb + bookshelf
             // both bled past the splash card's right edge, off-screen.
             // At >= 450px parent widths the `min()` resolves to the

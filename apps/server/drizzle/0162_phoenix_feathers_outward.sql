@@ -4,14 +4,14 @@
 --
 -- Before: feathers were 5x10px positioned at radius 44px from center.
 -- The .av frame has radius 42px (84px diameter from the preamble), so
--- each feather sat only 2px outside the frame edge — well within the
+-- each feather sat only 2px outside the frame edge, well within the
 -- orange ring + box-shadow bloom, which made them visually merge into
 -- the glow at every render size. With a real avatar inside the .pic,
 -- the user can see the ring but not the feathers that are supposed to
 -- circle it.
 --
 -- After: feathers are 6x14px positioned at radius 52px from center.
--- That's 10px outside the .av edge — comfortably beyond the box-
+-- That's 10px outside the .av edge, comfortably beyond the box-
 -- shadow falloff. The larger silhouette and slightly bolder drop-
 -- shadow keep them legible at the inline sm/md scale while still
 -- looking sharp at xl showcase scale.

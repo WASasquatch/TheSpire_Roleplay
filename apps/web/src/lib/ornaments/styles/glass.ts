@@ -1,5 +1,5 @@
 /**
- * Glass — Frosted glass / liquid glass
+ * Glass, Frosted glass / liquid glass
  *
  * Translucent panels over the user's chosen backdrop image, with soft
  * frost bevels and outer ambient shadows. The visual language sits
@@ -8,7 +8,7 @@
  *
  * Visual vocabulary:
  *  - **Ornaments are deliberately sparse.** The whole design lives in
- *    CSS — backdrop-filter blur, inset highlight + dark bevels, soft
+ *    CSS, backdrop-filter blur, inset highlight + dark bevels, soft
  *    radial outer shadow. Adding L-bracket corners or neon dividers
  *    here would fight the frost recipe, so we skip them entirely.
  *  - **bg-overlay**: a faint two-stop diagonal tint in the palette's
@@ -36,7 +36,7 @@ function makeBgOverlay(p: OrnamentPalette): string {
   // Two faint radial blooms in the palette's action + accent colors.
   // Sits between the backdrop image and the chat shell, so the
   // palette tints the artwork without obscuring it. Kept at very low
-  // alpha — the darkening rectangle in CSS does the bulk of the
+  // alpha, the darkening rectangle in CSS does the bulk of the
   // contrast lift; this is purely color memory.
   const action = p.action[2] ?? "#3aa";
   const accent = p.accent[2] ?? "#d3a";

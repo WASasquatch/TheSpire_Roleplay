@@ -12,7 +12,7 @@
 -- the speaker's voice. A character roleplaying as a stoic dwarf
 -- should be able to say "grunts thoughtfully…" while their master
 -- account uses the default suffix. Same partition rules as every
--- other earning cosmetic — purchase + slot scoped to (user|character).
+-- other earning cosmetic, purchase + slot scoped to (user|character).
 --
 -- Why only when exactly one user is typing: joint forms ("Alice and
 -- Bob are typing…") read poorly if we splice "Embers smolder…" in
@@ -33,7 +33,7 @@ ALTER TABLE `character_earning`
 --> statement-breakpoint
 
 -- Seed the new Flair catalog row. Idempotent re-run protection via
--- INSERT OR IGNORE on the primary key. Cost is a placeholder —
+-- INSERT OR IGNORE on the primary key. Cost is a placeholder,
 -- admins tune via the Flair admin tab. Sat at the same tier as the
 -- profile-banner purchase since both follow the same "buy unlock,
 -- then supply your own content" pattern.

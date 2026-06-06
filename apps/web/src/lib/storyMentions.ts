@@ -7,7 +7,7 @@
  *   1. `decorateMentionsIn(root)` mutates the DOM in place, replacing
  *      qualifying text nodes with anchor spans that carry the chip
  *      target as data attributes. Skips text inside existing anchors,
- *      <code> blocks, and <style>/<script> (paranoia — sanitizer
+ *      <code> blocks, and <style>/<script> (paranoia, sanitizer
  *      should have dropped script already).
  *   2. The caller wires a click handler on the article element that
  *      reads `dataset.chipKind` + `dataset.chipSlug` and dispatches
@@ -34,11 +34,11 @@ const SKIP_TAG_NAMES = new Set([
 
 /**
  * Walk every text descendant of `root` and replace mention patterns
- * with anchor spans. Idempotent — re-running on already-decorated HTML
+ * with anchor spans. Idempotent, re-running on already-decorated HTML
  * is a no-op (the `<a class="story-chip">` is in SKIP_TAG_NAMES).
  */
 export function decorateMentionsIn(root: HTMLElement): void {
-  // collectTextNodes first, then mutate — mutating during a tree walk
+  // collectTextNodes first, then mutate, mutating during a tree walk
   // breaks the iterator on some browsers.
   const nodes: Text[] = [];
   collectTextNodes(root, nodes);
@@ -90,7 +90,7 @@ function decorateTextNode(node: Text): void {
       chip.textContent = `@${kind}:${sl}`;
       frag.appendChild(chip);
     } else {
-      // Unknown kind — preserve as literal text.
+      // Unknown kind, preserve as literal text.
       frag.appendChild(doc.createTextNode(`@${kind}:${sl}`));
     }
     lastIndex = mentionStart + 1 + kind.length + 1 + sl.length;
@@ -111,7 +111,7 @@ function chipHrefFor(kind: StoryChipKind, slug: string): string {
   if (kind === "world") return `/w/${encodeURIComponent(slug)}`;
   // For story-scoped char chips, the href is just a hash anchor into
   // the codex appendix block. Hash routing is local to the open story
-  // — the chip's click handler does the smooth-scroll.
+  //, the chip's click handler does the smooth-scroll.
   return `#codex-character-${encodeURIComponent(slug)}`;
 }
 
@@ -128,7 +128,7 @@ function chipHrefFor(kind: StoryChipKind, slug: string): string {
  */
 export function makeChipClickHandler(): (e: MouseEvent) => void {
   return (e: MouseEvent) => {
-    // Honor cmd/ctrl/middle/shift — let the browser handle "open in
+    // Honor cmd/ctrl/middle/shift, let the browser handle "open in
     // new tab" with the natural href fallback.
     if (e.metaKey || e.ctrlKey || e.shiftKey || (e instanceof MouseEvent && e.button !== 0)) return;
     const target = (e.target as Element | null)?.closest<HTMLAnchorElement>("a.story-chip");
@@ -145,7 +145,7 @@ export function makeChipClickHandler(): (e: MouseEvent) => void {
       // Scroll to the codex appendix entry. The appendix renders each
       // entry with an `id="codex-character-{slug}"` anchor below.
       const id = `codex-character-${slug}`;
-      // Search in the document — the appendix lives outside the
+      // Search in the document, the appendix lives outside the
       // chapter's article element in pageless mode and inside it in
       // book mode, so a document-wide lookup covers both.
       const el = document.getElementById(id);

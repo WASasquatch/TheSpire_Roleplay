@@ -3,7 +3,7 @@
 -- The picker discovers slots by scanning the row's style_css for
 -- `--c-<name>` references; whatever the CSS doesn't reference can't
 -- be customized. Previously only ring + glow + coal-glow were
--- exposed — the flame body, flame drop-shadows, log wood, haze,
+-- exposed, the flame body, flame drop-shadows, log wood, haze,
 -- pic shadow, and ring inner shadows were all hardcoded.
 --
 -- Convention: every literal color now lives in a `var(--c-<name>,

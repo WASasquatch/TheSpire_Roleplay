@@ -10,7 +10,7 @@ import type { CommandHandler } from "../types.js";
  *
  * Scoping (per the per-identity contract used everywhere else in the
  * app): away is keyed on (userId, activeCharacterId), where the
- * character id is the one the calling SOCKET is voicing — already
+ * character id is the one the calling SOCKET is voicing, already
  * resolved per-tab by the chat:input dispatcher. So /away in a tab
  * voicing Character A doesn't bleed into a sibling tab voicing OOC
  * or Character B. State lives in `realtime/awayState.ts`; the chat

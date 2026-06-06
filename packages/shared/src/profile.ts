@@ -10,7 +10,7 @@ export interface CharacterStats {
   /** Free-form key/value extras, max 20 entries, each value <= 200 chars (validated server-side). */
   custom?: Record<string, string>;
   /**
-   * Personality vibe — eight bipolar axes painted as "low label ◄
+   * Personality vibe, eight bipolar axes painted as "low label ◄
    * dot ► high label" bars on the profile. Each value is 0..100 or
    * null (unset, doesn't render). The axis catalog is fixed
    * server-side ({@link CHARACTER_VIBE_AXES}); unknown keys are
@@ -24,7 +24,7 @@ export interface CharacterStats {
    */
   vibe?: Partial<Record<CharacterVibeAxisKey, number | null>>;
   /**
-   * Numeric attribute sheet — D&D-style ability scores ("STR 14"),
+   * Numeric attribute sheet, D&D-style ability scores ("STR 14"),
    * HP / SP, any-RPG attribute system. Each row is a user-defined
    * label plus a value clamped to a per-row min/max. Capped at 20
    * rows server-side; labels <= 40 chars; values / bounds are
@@ -45,7 +45,7 @@ export interface CharacterStats {
    * (key omitted or undefined) is SHOW. A `false` value hides that
    * section from the profile renderer; the editor still surfaces it
    * so the owner can flip it back on. Hiding takes effect at render
-   * time only — admins still see the full stats via the admin user
+   * time only, admins still see the full stats via the admin user
    * detail panel.
    */
   visibility?: CharacterStatsVisibility;
@@ -75,7 +75,7 @@ export interface CharacterStatsVisibility {
 }
 
 /**
- * Character vibe axis catalog. Each axis is bipolar — `lowLabel` is
+ * Character vibe axis catalog. Each axis is bipolar, `lowLabel` is
  * at 0, `highLabel` at 100, with the dot rendered at the stored value.
  * Order is the display order on the profile + the editor.
  *
@@ -99,7 +99,7 @@ export const CHARACTER_VIBE_AXES = [
   { key: "social",     lowLabel: "Reserved",   highLabel: "Outgoing" },
   // `boldness` is named after the HIGH end (Risqué reads as boldness
   // in the sexual / social-provocation register). Earlier draft used
-  // `modesty` here — that named the axis after the LOW end and broke
+  // `modesty` here, that named the axis after the LOW end and broke
   // the high-label-as-key convention every other concrete axis above
   // follows. Storage-key change only; the rendered labels stay
   // `Modest ↔ Risqué`.
@@ -158,7 +158,7 @@ export interface CharacterPortrait {
 }
 
 /**
- * A solo writing entry attached to a character — backstory fragment,
+ * A solo writing entry attached to a character, backstory fragment,
  * in-world diary, world notes. Public entries are visible on the
  * character's profile to anyone; private entries are only included in
  * the response when the viewer owns the character.
@@ -191,7 +191,7 @@ export interface ProfileLink {
 /**
  * Activity counters surfaced on profile views. Each field is a
  * lifetime aggregate computed at profile-fetch time so the numbers
- * are always fresh — no denormalized column to drift, no janitor
+ * are always fresh, no denormalized column to drift, no janitor
  * job to maintain.
  *
  * Scoped per identity:
@@ -202,16 +202,16 @@ export interface ProfileLink {
  *
  * Each count excludes server-side soft-deleted rows so a moderation
  * hide doesn't suddenly drop a user's lifetime number, but the
- * original author still gets credit for "having posted" — the
+ * original author still gets credit for "having posted", the
  * post existed, the user typed it.
  */
 /**
  * One pinned slot on a profile's Collection block. Surfaced in
  * profile lookup responses so the client renders the showcase
- * without a second round trip — every entry bundles the slot index
+ * without a second round trip, every entry bundles the slot index
  * (0..9), the catalog key, and the visible item fields (display
  * name + description + icon URL). Slots not pinned by the identity
- * are simply absent from the array — the renderer paints them as
+ * are simply absent from the array, the renderer paints them as
  * empty placeholders or collapses them per its layout.
  *
  * Item display values are snapshot from the live catalog at
@@ -230,7 +230,7 @@ export interface ProfileCollectionEntry {
    * entries from the pet collection; item-collection entries always
    * have this as null/undefined). Renderer convention: show the
    * nickname as the primary label with the catalog `name` as a smaller
-   * secondary subtitle. Null when the owner hasn't named the pet —
+   * secondary subtitle. Null when the owner hasn't named the pet,
    * renderer falls back to showing the catalog name alone, same as
    * the pre-nickname behavior.
    */
@@ -249,7 +249,7 @@ export interface ProfileMetrics {
   /**
    * Chat-shaped lines in flat-mode rooms (`say` / `me` / `ooc` /
    * `roll` / `scene` / `npc`). Null when the user has set
-   * `hideChatMessageCount` — the renderer shows "private" in place
+   * `hideChatMessageCount`, the renderer shows "private" in place
    * of a number.
    */
   chatMessages: number | null;
@@ -262,12 +262,12 @@ export interface ProfileMetrics {
 /**
  * Scriptorium passive author tier. Identity-level badge surfaced on
  * profile views once an author crosses one of the canonical
- * thresholds. Tiers are purely passive — no XP, no streaks, no daily
+ * thresholds. Tiers are purely passive, no XP, no streaks, no daily
  * grind (per the participation ethos).
  *
- *   "author"      — first story published
- *   "storyteller" — 5 published stories
- *   "loremaster"  — 25 published stories
+ *   "author"     , first story published
+ *   "storyteller", 5 published stories
+ *   "loremaster" , 25 published stories
  *
  * Null = no stories published yet; no badge rendered.
  */
@@ -290,7 +290,7 @@ export function resolveScriptoriumAuthorTier(publishedStories: number): Scriptor
 }
 
 /**
- * Wire shape embedded on identity profiles (master + character —
+ * Wire shape embedded on identity profiles (master + character,
  * value is the same regardless, since stories are owned by the master
  * account). Surfaces a small "Author" / "Storyteller" / "Loremaster"
  * badge in the profile header.
@@ -349,7 +349,7 @@ export interface CharacterProfile {
   /** Lifetime activity counters scoped to this character. */
   metrics: ProfileMetrics;
   /**
-   * Scriptorium passive author tier — populated from the OWNING
+   * Scriptorium passive author tier, populated from the OWNING
    * master account's published-story count, so a character profile
    * inherits the same badge as the owner's master profile. Null when
    * no story has been published yet (no badge rendered).
@@ -357,7 +357,7 @@ export interface CharacterProfile {
   scriptoriumAuthor: ScriptoriumAuthorBadge | null;
   /**
    * Pinned NON-PET items from this character's Collection (up to 10).
-   * Sparse — a character can pin slots 0, 3, 7 and leave the rest
+   * Sparse, a character can pin slots 0, 3, 7 and leave the rest
    * empty. Each pin is independent of every OTHER identity's
    * Collection: this character's pins do not appear on the OOC
    * profile or on any other character's profile.
@@ -373,7 +373,7 @@ export interface CharacterProfile {
   /**
    * Equipped name-style key for THIS identity. Drives the rendered
    * username in the profile hero so a name style isn't just a chat
-   * cosmetic — it shows wherever the user's identity is on display.
+   * cosmetic, it shows wherever the user's identity is on display.
    * Each identity (master + each character) holds its own
    * equipped style; switching characters paints a different
    * profile name. Null when nothing is equipped (renders plain).
@@ -386,7 +386,7 @@ export interface CharacterProfile {
    */
   nameStyleConfig: Record<string, unknown> | null;
   /**
-   * Profile banner URL — wide hero strip rendered at the top of the
+   * Profile banner URL, wide hero strip rendered at the top of the
    * profile modal. Equipped via the `flair_profile_banner` Flair
    * purchase; this character's owner pastes any public https image
    * URL. Null when the slot is empty.
@@ -398,19 +398,19 @@ export interface CharacterProfile {
    * card) paints this image so visitors landing on /p/<character>
    * see the owner's chosen image instead of the default spire
    * splash. Null URL = no override (default backdrop). The mode
-   * picks the CSS sizing strategy — see PublicProfileBgMode for
+   * picks the CSS sizing strategy, see PublicProfileBgMode for
    * the table.
    */
   publicProfileBgUrl: string | null;
   publicProfileBgMode: PublicProfileBgMode;
   /**
-   * Master account username of the user who owns this character —
+   * Master account username of the user who owns this character,
    * surfaced ONLY when the viewer is a mod/admin/masteradmin. Lets
    * moderation staff see "this character is voiced by user X"
    * without having to skim the userlist for the correlation.
    * Omitted entirely (field absent) for non-mod viewers; the
    * server gates this on viewer role, so the field's presence is
-   * itself a privileged signal — never derive `kind: "character"`
+   * itself a privileged signal, never derive `kind: "character"`
    * behavior from its absence on the client.
    */
   ownerUsername?: string;
@@ -422,26 +422,26 @@ export interface CharacterProfile {
  * rate limits, `mod` / `admin` / `masteradmin` are manually granted.
  *
  * The two admin tiers exist because the historical single `admin` role
- * was god-mode — branding, settings, user disable, role escalation, every
+ * was god-mode, branding, settings, user disable, role escalation, every
  * destructive lever. That kept the moderator bench thin because every
  * promotion was an all-or-nothing trust transfer.
  *
- *   `mod`         — room-level moderation only (kick / mute / ban in
+ *   `mod`        , room-level moderation only (kick / mute / ban in
  *                   rooms they moderate). No global powers.
- *   `admin`       — global moderation: every `mod` power site-wide,
+ *   `admin`      , global moderation: every `mod` power site-wide,
  *                   plus room delete / message moderation / report
  *                   triage / custom commands / world admin / title
  *                   kinds / audit read. Can promote others to `admin`
  *                   and below. CANNOT touch branding, site settings,
  *                   rules HTML, user emails / passwords / disable,
  *                   and CANNOT promote anyone to `masteradmin`.
- *   `masteradmin` — full god-mode. Everything `admin` does plus the
+ *   `masteradmin`, full god-mode. Everything `admin` does plus the
  *                   destructive levers listed above. The first
  *                   registered user bootstraps in as masteradmin.
  *                   New masteradmins are only mintable by other
  *                   masteradmins from the admin panel's user editor.
  *
- * Single source of truth — every server route, web component, and API
+ * Single source of truth, every server route, web component, and API
  * response that types a `role` field must import from here so the tiers
  * stay in lockstep. Adding a new tier means changing one symbol and
  * letting the compiler surface every site that needs to handle it.
@@ -454,12 +454,12 @@ export interface CharacterProfile {
  */
 export type Role = "user" | "trusted" | "mod" | "admin" | "masteradmin";
 
-/** True for both admin tiers — the standard "is this user privileged?" check. */
+/** True for both admin tiers, the standard "is this user privileged?" check. */
 export function isAdminRole(role: Role): boolean {
   return role === "admin" || role === "masteradmin";
 }
 
-/** True only for the top tier — guards destructive endpoints (settings, branding, user disable, masteradmin promotion). */
+/** True only for the top tier, guards destructive endpoints (settings, branding, user disable, masteradmin promotion). */
 export function isMasterAdminRole(role: Role): boolean {
   return role === "masteradmin";
 }
@@ -468,7 +468,7 @@ export function isMasterAdminRole(role: Role): boolean {
  * Numeric rank so the moderation code can ask "does this caller
  * outrank this target?" without enumerating every tier. Higher number
  * = more authority. Used to block a lower-tier admin from kicking /
- * muting / banning a higher-tier one — e.g. a plain admin can't
+ * muting / banning a higher-tier one, e.g. a plain admin can't
  * kick a masteradmin, and a mod can't kick either admin tier.
  */
 export function roleRank(role: Role): number {
@@ -487,14 +487,14 @@ export function roleRank(role: Role): number {
  * becomes the visible circle, without re-hosting or modifying the
  * source bytes.
  *
- *   * `zoom`    — multiplier on top of the natural cover-fit. 1.0 =
+ *   * `zoom`   , multiplier on top of the natural cover-fit. 1.0 =
  *                 legacy centered cover render (the default for every
  *                 user pre-migration-0178); higher = zoomed in.
  *                 Clamped to [1.0, 4.0] by `clampAvatarCrop` below.
- *   * `offsetX` — 0..100, percent. Maps directly to CSS
+ *   * `offsetX`, 0..100, percent. Maps directly to CSS
  *                 `object-position` X axis. 0 = far left of source
  *                 visible, 100 = far right, 50 = centered.
- *   * `offsetY` — same but vertical.
+ *   * `offsetY`, same but vertical.
  *
  * Renderer convention: `transform-origin` is set to the same
  * (offsetX, offsetY) as `object-position` so the zoom appears to zoom
@@ -551,7 +551,7 @@ export interface MasterProfile {
   avatarCrop: AvatarCrop;
   /**
    * Additional portrait gallery for the master / OOC profile. Same
-   * shape as CharacterProfile.portraits — sorted by the owner's
+   * shape as CharacterProfile.portraits, sorted by the owner's
    * chosen order. Renders as the "Gallery" section on the profile
    * modal, below the bio. Empty array when the user hasn't added
    * any extra portraits.
@@ -561,7 +561,7 @@ export interface MasterProfile {
   gender: "male" | "female" | "nonbinary" | "other" | "undisclosed";
   /** Owner's chosen UI theme - applied to the profile modal when others view it. */
   theme: Theme;
-  /** Resolved design style key — same semantics as `CharacterProfile.styleKey`. */
+  /** Resolved design style key, same semantics as `CharacterProfile.styleKey`. */
   styleKey: string;
   /** Mutual titles bound to this master account (separate from any character titles). */
   titles: ProfileTitle[];
@@ -582,7 +582,7 @@ export interface MasterProfile {
   scriptoriumAuthor: ScriptoriumAuthorBadge | null;
   /**
    * Pinned NON-PET items from this master account's Collection (up
-   * to 10). Independent from every character's Collection — items
+   * to 10). Independent from every character's Collection, items
    * pinned on a character do not appear here, and vice versa.
    */
   collection: ProfileCollectionEntry[];
@@ -599,7 +599,7 @@ export interface MasterProfile {
   nameStyleKey: string | null;
   nameStyleConfig: Record<string, unknown> | null;
   /**
-   * Profile banner URL — wide hero strip rendered at the top of the
+   * Profile banner URL, wide hero strip rendered at the top of the
    * profile modal. Equipped via the `flair_profile_banner` Flair
    * purchase; the user pastes any public https image URL. Null when
    * the slot is empty (no purchase, cleared by user, or admin
@@ -608,7 +608,7 @@ export interface MasterProfile {
   profileBannerUrl: string | null;
   /**
    * Public-profile background image URL + display mode. Same
-   * semantics as `CharacterProfile.publicProfileBgUrl/Mode` — each
+   * semantics as `CharacterProfile.publicProfileBgUrl/Mode`, each
    * identity (master + each character) holds its own backdrop, so a
    * user can paint the OOC profile differently from each
    * character's profile.
@@ -619,10 +619,10 @@ export interface MasterProfile {
 
 /**
  * CSS sizing strategy for the public-profile backdrop image:
- *   "cover"    — image fills viewport, cropped to fit (default)
- *   "contain"  — image fits inside viewport, letterboxed
- *   "tile"     — image repeats to fill viewport
- *   "stretch"  — image stretched to exact viewport dimensions
+ *   "cover"   , image fills viewport, cropped to fit (default)
+ *   "contain" , image fits inside viewport, letterboxed
+ *   "tile"    , image repeats to fill viewport
+ *   "stretch" , image stretched to exact viewport dimensions
  * Stored as the literal key; the client maps to `background-size`
  * + `background-repeat` pairs at render time.
  */

@@ -26,7 +26,7 @@
 # Flags:
 #   -m, --message TEXT   Commit message (positional arg also works).
 #                        If TEXT is the path to an existing regular file,
-#                        the file's contents are used as the message —
+#                        the file's contents are used as the message,
 #                        handy for keeping a multi-paragraph log in
 #                        commit.md and shipping it with --commit commit.md.
 #   --commit TEXT        Alias for --message. Reads more naturally when
@@ -250,7 +250,7 @@ if [[ "$HAS_CHANGES" -eq 1 ]]; then
   else
     # Narrow stage with two complementary passes:
     #
-    #   1. `git add -u` — stages MODIFICATIONS + DELETIONS for every
+    #   1. `git add -u`, stages MODIFICATIONS + DELETIONS for every
     #      tracked file in the repo. Catches edits to root-level
     #      deploy / build infra (fly.toml, Dockerfile, .dockerignore,
     #      pnpm-workspace.yaml, tsconfig.base.json, scripts/*.sh,
@@ -260,7 +260,7 @@ if [[ "$HAS_CHANGES" -eq 1 ]]; then
     #      root are still gated to --all so a stray .env or scratch
     #      file in the project root never sneaks into a commit.
     #
-    #   2. `git add apps packages` — picks up NEW untracked files
+    #   2. `git add apps packages`, picks up NEW untracked files
     #      under apps/+packages/ (the only places where new source
     #      should land). New files at root keep needing --all.
     #
@@ -275,7 +275,7 @@ if [[ "$HAS_CHANGES" -eq 1 ]]; then
     # the explicit add handles the brand-new-clone edge case where the
     # file exists but isn't yet tracked.
     if [[ -f README.md ]]; then git add README.md; fi
-    # pnpm-lock.yaml + root package.json — already covered by
+    # pnpm-lock.yaml + root package.json, already covered by
     # `git add -u` when modified. Kept here as explicit no-ops so the
     # intent ("workspace edits ALWAYS ship with their lockfile bump")
     # stays loud in the script. Without the matching lockfile,

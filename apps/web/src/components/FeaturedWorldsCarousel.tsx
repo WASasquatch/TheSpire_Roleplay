@@ -5,7 +5,7 @@ import { useChat } from "../state/store.js";
 const ROTATE_MS = 7000;
 
 /**
- * Splash-page world carousel — a scrying-orb framing of the open
+ * Splash-page world carousel, a scrying-orb framing of the open
  * worlds catalog. The orb is canvas-rendered (aura, pulse rings,
  * inner gradient, motion-keyed particles, glass rim + highlights);
  * the world's name / blurb / meta float over the center with
@@ -13,7 +13,7 @@ const ROTATE_MS = 7000;
  * color is blooming inside the sphere.
  *
  * When a world has a cover image, that image is drawn as the
- * INSIDE-SPHERE background — clipped to the orb circle, cover-fit
+ * INSIDE-SPHERE background, clipped to the orb circle, cover-fit
  * to fill the diameter, with the orb effects (swirl, particles,
  * highlight, rim) layered on top so the image still reads as
  * "scryed through glass" rather than a flat hero. Without a cover
@@ -67,7 +67,7 @@ function readTriple(root: HTMLElement, name: string): [number, number, number] {
 /** Curated jewel-tone accent pairs. Each world is mapped to one via a
  *  stable hash of its id, so cycling between worlds yields a different
  *  scrying tint each time without the orb feeling random. accent ↔
- *  accent2 is a lighter / deeper of the same hue — used as the
+ *  accent2 is a lighter / deeper of the same hue, used as the
  *  gradient base / pulse rim / particle color. The set mirrors the
  *  MVP's curated swatches (sky / emerald / violet / coral / teal /
  *  lime / amber / indigo / tangerine). */
@@ -187,7 +187,7 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
   }, [items]);
 
   // The render loop. Starts once when the canvas is in the DOM
-  // (which only happens after items resolves with entries — the
+  // (which only happens after items resolves with entries, the
   // early-return below gates the section). The loop reads refs so
   // it picks up theme + index changes without needing to restart.
   const hasItems = items !== null && items.length > 0;
@@ -201,7 +201,7 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
     const H = canvas.height;
     const cx = W / 2;
     const cy = H / 2;
-    // orbR 320 inside a 900×900 canvas — combined with a slightly
+    // orbR 320 inside a 900×900 canvas, combined with a slightly
     // tighter aura factor (1.4× instead of 1.6×) so 1.4 * 320 = 448
     // still fits inside the 450px half-width and the glow renders
     // fully without the rectangular clip. Bumped up from 280 so the
@@ -285,7 +285,7 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
       const prev = items && items.length > 0 ? items[Math.min(prevIdxRef.current, items.length - 1)]! : null;
 
       // Theme palette as fallback (only used when there's no
-      // active world — e.g. while the initial fetch is in flight).
+      // active world, e.g. while the initial fetch is in flight).
       // When a world is active, accent + accent2 come from the
       // curated jewel-tone palette indexed by the world's id hash
       // so each scrying surfaces a different tint.
@@ -307,7 +307,7 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
       time += 1;
       ctx!.clearRect(0, 0, W, H);
 
-      // Outer aura — sized so the radial reach stays inside the
+      // Outer aura, sized so the radial reach stays inside the
       // canvas half-width and the glow fades to alpha=0 well before
       // the canvas edge. Two-pass: a bright accent halo right at
       // the orb's edge, then a softer falloff out to the full
@@ -359,7 +359,7 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
       const currImg = curr?.coverImageUrl ? cache.get(curr.coverImageUrl) ?? null : null;
       const prevImg = prev?.coverImageUrl ? cache.get(prev.coverImageUrl) ?? null : null;
 
-      // Base gradient — used both as the no-image fallback AND as a
+      // Base gradient, used both as the no-image fallback AND as a
       // tinted backdrop behind the image (so themed color shows in
       // any transparent regions of the cover art).
       const baseGrad = ctx!.createRadialGradient(cx, cy, 0, cx, cy, orbR);
@@ -373,7 +373,7 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
       if (prevImg && tEase < 1) drawCover(prevImg, 1 - tEase);
       if (currImg) drawCover(currImg, tEase);
 
-      // Inner swirling clouds — accent-tinted, kept toward the rim
+      // Inner swirling clouds, accent-tinted, kept toward the rim
       for (let c = 0; c < 3; c++) {
         const t2 = time * 0.005 + c * 2.0;
         const swx = cx + Math.cos(t2) * orbR * 0.55;
@@ -423,7 +423,7 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
         ctx!.fill();
       }
 
-      // Orbiting energy points — accent-tinted, near rim
+      // Orbiting energy points, accent-tinted, near rim
       for (const o of orbits) {
         o.angle += o.speed;
         const ox = cx + Math.cos(o.angle) * o.radius * Math.cos(o.tilt);
@@ -438,7 +438,7 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
         ctx!.fill();
       }
 
-      // Center darkening vignette — text legibility. Slightly stronger
+      // Center darkening vignette, text legibility. Slightly stronger
       // when an image is shown so bright covers don't bleed the title.
       const vignetteAlpha = currImg ? 0.5 : 0.35;
       const vignette = ctx!.createRadialGradient(cx, cy, 0, cx, cy, TEXT_RADIUS * 1.1);
@@ -541,7 +541,7 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
           <span className="line" />
         </div>
         <h3 className="orb-section-title font-action">Worlds to Peer Into</h3>
-        <p className="orb-section-subtitle">— scry through the crystal at each realm —</p>
+        <p className="orb-section-subtitle">scry through the crystal at each realm</p>
       </header>
 
       <div className="orb-stage">
@@ -556,7 +556,7 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
           </button>
         ) : null}
 
-        {/* The sphere itself is the link target — clicking anywhere
+        {/* The sphere itself is the link target, clicking anywhere
             on the orb (canvas or text overlay) navigates to the
             active world. Keyboard support: tab to focus, Enter or
             Space to activate. The previous "Enter this realm" CTA
@@ -633,7 +633,7 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
 /** Chevron icon for the orb's prev / next buttons. SVG instead of a
  *  unicode glyph (`‹` / `›`) because text-based chevrons sit at the
  *  baseline of a font's line-box, which doesn't visually center
- *  inside a round button — they always render a hair high. An SVG
+ *  inside a round button, they always render a hair high. An SVG
  *  with a centered viewBox centers cleanly via the button's flex
  *  alignment. */
 function ChevronIcon({ direction }: { direction: "left" | "right" }) {

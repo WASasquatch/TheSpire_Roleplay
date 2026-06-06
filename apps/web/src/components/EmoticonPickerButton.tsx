@@ -18,7 +18,7 @@ export function EmoticonPickerButton({
   title = "Insert emoticon",
 }: {
   onPick: (sheetSlug: string, cellIndex: number) => void;
-  /** Optional — when provided the picker surfaces a Unicode tab and
+  /** Optional, when provided the picker surfaces a Unicode tab and
    *  this callback receives the raw character (e.g. "😀") for
    *  insertion at the caret. Call sites that only support sheet-based
    *  tokens omit it. */
@@ -43,7 +43,7 @@ export function EmoticonPickerButton({
         title={title}
         aria-label={title}
         // `onMouseDown preventDefault` so the click doesn't steal focus
-        // from the input — the picker's onPick callback can then act on
+        // from the input, the picker's onPick callback can then act on
         // the input's current selection without the browser refocusing
         // first and resetting the caret.
         onMouseDown={(e) => e.preventDefault()}

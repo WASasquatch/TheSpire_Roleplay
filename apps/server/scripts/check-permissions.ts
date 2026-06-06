@@ -3,7 +3,7 @@
  *
  * Thin wrapper around `runPermissionsDiagnostics` in
  * `src/auth/permissionsDiagnostics.ts`. The same engine powers the
- * admin Permissions tab's "Run integrity check" button — keeping the
+ * admin Permissions tab's "Run integrity check" button, keeping the
  * two callers in lockstep means a check that passes in CI cannot
  * mysteriously fail in production (or vice versa).
  *
@@ -14,7 +14,7 @@
  *     The cache built this way matches what a fresh-install resolver
  *     would see right after migration.
  *   - We additionally cover the "fresh-install with empty grants
- *     table" case by running a separate pass with `fallback: true` —
+ *     table" case by running a separate pass with `fallback: true`,
  *     the admin endpoint observes whatever the live cache is, but the
  *     CLI proves the fallback path itself is sound (sensitive keys
  *     stay locked, admins still see the moderation surface).
@@ -85,7 +85,7 @@ function loadSeed(): Map<Role, Set<PermissionKey>> {
     grants.set(role, set);
   }
   if (grants.size === 0) {
-    throw new Error("Seed parser found zero (role, key) tuples — check regex");
+    throw new Error("Seed parser found zero (role, key) tuples, check regex");
   }
   return grants;
 }
@@ -96,7 +96,7 @@ function loadSeed(): Map<Role, Set<PermissionKey>> {
  * Seed baseline: each (role, key) pair must match what the migration
  * declares. Catches a future seed edit that doesn't update the
  * fallback set, or a rename mismatch between catalog and SQL. The
- * admin endpoint can't run this — live grants legitimately drift from
+ * admin endpoint can't run this, live grants legitimately drift from
  * the seed once admins start using the matrix UI.
  */
 function checkSeedBaseline(seed: PermissionsCache): DiagnosticFailure[] {
@@ -206,7 +206,7 @@ function report(
   rollup: Array<{ group: DiagnosticGroup; run: number; failed: number }>,
   failures: DiagnosticFailure[],
 ): void {
-  console.log(bold("\nGranular permission system — self-check\n"));
+  console.log(bold("\nGranular permission system, self-check\n"));
 
   let totalRun = 0;
   let totalFailed = 0;
@@ -221,10 +221,10 @@ function report(
   if (failures.length > 0) {
     console.log(bold(red(`\nFailures (${failures.length}):\n`)));
     for (const f of failures.slice(0, 50)) {
-      const where = [f.role, f.key, f.userId].filter(Boolean).join(" × ") || "—";
+      const where = [f.role, f.key, f.userId].filter(Boolean).join(" × ") || "-";
       const exp = f.expected === undefined ? "" : ` expected=${f.expected}`;
       const act = f.actual === undefined ? "" : ` actual=${f.actual}`;
-      console.log(`  ${red("✗")} [${f.group}] ${f.rule}: ${where}${exp}${act}${f.note ? ` — ${f.note}` : ""}`);
+      console.log(`  ${red("✗")} [${f.group}] ${f.rule}: ${where}${exp}${act}${f.note ? `, ${f.note}` : ""}`);
     }
     if (failures.length > 50) {
       console.log(dim(`  …and ${failures.length - 50} more`));
@@ -233,7 +233,7 @@ function report(
 
   console.log(
     bold(
-      `\n${totalFailed === 0 ? green("ALL GREEN") : red(`${totalFailed} FAILED`)} — ${totalRun - totalFailed}/${totalRun} checks passed\n`,
+      `\n${totalFailed === 0 ? green("ALL GREEN") : red(`${totalFailed} FAILED`)}, ${totalRun - totalFailed}/${totalRun} checks passed\n`,
     ),
   );
 }
@@ -248,7 +248,7 @@ function main(): void {
     fallback: false,
   };
 
-  // Run the shared diagnostics engine first — same checks the admin
+  // Run the shared diagnostics engine first, same checks the admin
   // endpoint runs against the live cache.
   const shared = runPermissionsDiagnostics({ cache: seed });
 

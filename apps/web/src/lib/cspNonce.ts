@@ -6,7 +6,7 @@
  * the value on the tag so the strict `style-src 'self' 'nonce-{N}'`
  * CSP doesn't reject the element.
  *
- * Captured once at module load — the nonce is stable for the life of
+ * Captured once at module load, the nonce is stable for the life of
  * the page (it rotates per server response). Returns an empty string
  * in non-browser environments (tests, SSR-mounted compute) so callers
  * can fall through without conditional guards.

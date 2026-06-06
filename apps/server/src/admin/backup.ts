@@ -1,5 +1,5 @@
 /**
- * Admin Backups routes — produces and consumes ZIP-envelope backups
+ * Admin Backups routes, produces and consumes ZIP-envelope backups
  * (format v3+) that bundle the database payload AND the entire
  * `/data/uploads/` tree.
  *
@@ -40,7 +40,7 @@
  *                                                queues process exit. Body
  *                                                must be the result of a
  *                                                recent /full/inspect that
- *                                                confirmed ok=true — we
+ *                                                confirmed ok=true, we
  *                                                re-inspect the staged file
  *                                                too as a safety step.
  *   GET    /admin/backup/snapshots            → list every snapshot in
@@ -109,7 +109,7 @@ type ReqWithSession = FastifyRequest & { sessionUser?: SessionUserCtx };
  * `hasContentTypeParser` so a double-call from a future second call
  * site is a no-op instead of a throw.
  *
- * Both `application/octet-stream` and `application/zip` route here —
+ * Both `application/octet-stream` and `application/zip` route here,
  * browsers vary on which content-type they send for a File picked
  * via <input type="file" accept=".zip"> depending on the OS mime
  * registry, so we accept either.
@@ -133,7 +133,7 @@ function ensureBinaryParsers(app: FastifyInstance): void {
 /**
  * Body-size caps. The ZIP envelope holds the full database payload
  * (the .sqlite for a full backup runs into hundreds of MB on busy
- * installs) AND every uploaded image. Allow 4 GB for both kinds —
+ * installs) AND every uploaded image. Allow 4 GB for both kinds,
  * the same cap covers both because v3 content backups now carry
  * upload binaries too, not just the JSON table dump.
  */
@@ -147,7 +147,7 @@ export function registerAdminBackupRoutes(
   ensureBinaryParsers(app);
 
   // Granular permission gate. All backup endpoints are routed through
-  // `manage_backups` (masteradmin-default but matrix-grantable — the
+  // `manage_backups` (masteradmin-default but matrix-grantable, the
   // destructive-restore semantics are why the seed pins this to
   // masteradmin only). Thin closure over the shared
   // `requireSessionPermission` helper so call sites don't have to
@@ -312,7 +312,7 @@ export function registerAdminBackupRoutes(
       // Inspect is read-only on the live DB, but it competes with
       // import for the same /data/backups/ slots (archives the
       // upload on success), and a large upload can take a while to
-      // stream to disk — so we serialize behind the same lock that
+      // stream to disk, so we serialize behind the same lock that
       // gates create/import.
       const locked = await withLock("full_import", "Receiving + inspecting upload…", async () => {
         const tempPath = newUploadTempPath();
@@ -550,7 +550,7 @@ export function registerAdminBackupRoutes(
           if (exited) return;
           exited = true;
           // eslint-disable-next-line no-console
-          console.log("[backup] full-restore staged — exiting for boot swap");
+          console.log("[backup] full-restore staged, exiting for boot swap");
           process.exit(0);
         };
       })();
@@ -576,7 +576,7 @@ export function registerAdminBackupRoutes(
         reply.code(404);
         return { error: "snapshot not found" };
       }
-      // Every snapshot is a .zip in v3+ — both kinds share one mime
+      // Every snapshot is a .zip in v3+, both kinds share one mime
       // so the download Content-Type doesn't depend on the kind.
       reply.header("content-type", "application/zip");
       reply.header("content-length", String(streamInfo.sizeBytes));

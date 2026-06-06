@@ -2,14 +2,14 @@
 -- (1 XP / message) to 5 XP / message. The system gets dropped onto
 -- installs that already have months / years of message history, and
 -- 1 XP/message was too thin to put longtime regulars anywhere near
--- the (now-raised) rank thresholds — a 5000-post regular landed in
+-- the (now-raised) rank thresholds, a 5000-post regular landed in
 -- the bottom of New Arrival, which under-reads their actual activity.
 -- At 5/msg the same regular lands roughly at the bottom of
 -- Recognized, proportional to the time they've put in.
 --
 -- Gated so we only touch installs that:
 --   1. Still hold the 1.0 seed value (admin hasn't tuned it).
---   2. Haven't yet RUN the backfill (`completedAt` is null) — once a
+--   2. Haven't yet RUN the backfill (`completedAt` is null), once a
 --      backfill has executed, the historical XP is already booked
 --      and changing the rate retroactively would either double-credit
 --      on a re-run or leave the rate cosmetically inconsistent with

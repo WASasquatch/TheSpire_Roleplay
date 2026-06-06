@@ -215,14 +215,14 @@ function BannerForm({
   // Round-trip note: existing rows store sanitized HTML, so the
   // editor seeds the textarea with that HTML directly. Admins who
   // originally typed markdown will see the converted HTML on edit
-  // — acceptable trade for keeping the storage shape one thing.
+  //, acceptable trade for keeping the storage shape one thing.
   const [body, setBody] = useState(initial?.bodyHtml ?? "");
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [sortOrder, setSortOrder] = useState(initial?.sortOrder ?? 0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Live HTML preview — runs the markdown converter so an admin
+  // Live HTML preview, runs the markdown converter so an admin
   // typing `**bold**` sees the rendered output. Raw HTML in the
   // input passes through unchanged.
   const previewHtml = useMemo(() => renderUiRouteChipsInHtml(sanitizeUserHtml(markdownToHtml(body))), [body]);
@@ -342,7 +342,7 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
   const [editing, setEditing] = useState<ScheduledAnnouncement | null>(null);
   const [adding, setAdding] = useState(false);
   // Active theme bg so list-row + form previews use the same color
-  // resolver the chat renderer uses — theme tokens turn into CSS
+  // resolver the chat renderer uses, theme tokens turn into CSS
   // vars, and hex literals get nudged for legibility against the
   // viewer's current palette. Without this the previews only
   // painted literal `#rrggbb` colors and silently fell through for
@@ -415,7 +415,7 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
     }
   }
 
-  // Manual fire — broadcasts immediately without touching the
+  // Manual fire, broadcasts immediately without touching the
   // schedule's bookkeeping (last_run_at / next_run_at). Lets the
   // admin verify content + target before the natural tick fires.
   async function fireNow(row: ScheduledAnnouncement) {
@@ -476,7 +476,7 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
                   <div
                     className="prose prose-sm max-w-none [&_p]:m-0"
                     style={(() => {
-                      // Same resolver chat uses — theme tokens become
+                      // Same resolver chat uses, theme tokens become
                       // CSS vars, hex literals get nudged for
                       // legibility. Without this the row faked a
                       // "no color" preview for `theme:<slot>` rows.
@@ -551,7 +551,7 @@ function ScheduledForm({
 }: {
   initial?: ScheduledAnnouncement;
   /** Lifted from `ScheduledSection` so the form + table use one
-   *  fetch — and the table can resolve `targetRoomId` to a room
+   *  fetch, and the table can resolve `targetRoomId` to a room
    *  name without duplicate requests. */
   rooms: Array<{ id: string; name: string }>;
   onCancel: () => void;
@@ -564,7 +564,7 @@ function ScheduledForm({
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Resolved color the chat renderer would actually paint — feeds
+  // Resolved color the chat renderer would actually paint, feeds
   // the preview block below so admins see the EXACT swatch their
   // viewers will get. Pure: `theme:<slot>` → `rgb(var(--keep-X))`,
   // `#rrggbb` → contrast-nudged hex, null → undefined (no override).

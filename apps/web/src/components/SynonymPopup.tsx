@@ -28,7 +28,7 @@ export function SynonymPopup({
   value: string;
   onChange: (next: string) => void;
 }) {
-  // Per-user opt-out — when set, this component does nothing: no
+  // Per-user opt-out, when set, this component does nothing: no
   // listeners, no fetches, no popup. Lives in the chat store so a
   // toggle in the profile editor takes effect immediately.
   const disableThesaurus = useChat((s) => s.inputPrefs.disableThesaurus);
@@ -63,7 +63,7 @@ export function SynonymPopup({
   }
 
   // Watch for selection changes. The browser fires `selectionchange`
-  // on `document` for any selection change anywhere — we filter to
+  // on `document` for any selection change anywhere, we filter to
   // selections inside our input. Debounce + a stable-selection check
   // avoid firing a network request for every keystroke while the user
   // drags a selection.
@@ -125,7 +125,7 @@ export function SynonymPopup({
 
   // Keyboard navigation. Attached to the input via capture-phase
   // window listener so the popup can preempt the input's own
-  // Enter/Tab handling — same trick the @ mention completer uses.
+  // Enter/Tab handling, same trick the @ mention completer uses.
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
@@ -198,7 +198,7 @@ export function SynonymPopup({
           <button
             type="button"
             // onMouseDown so the click lands before the input's blur
-            // (Safari quirk — see the UsernameAutocomplete component
+            // (Safari quirk, see the UsernameAutocomplete component
             // for the same trick).
             onMouseDown={(e) => { e.preventDefault(); accept(s); }}
             onMouseEnter={() => setHighlightedIdx(i)}

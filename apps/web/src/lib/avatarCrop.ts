@@ -59,7 +59,7 @@ export function cropStyleAttr(
   crop: AvatarCrop | null | undefined,
 ): string {
   if (!crop || isDefaultAvatarCrop(crop)) return "";
-  // Inline CSS — kept single-quoted on values that may contain a
+  // Inline CSS, kept single-quoted on values that may contain a
   // quote-safe payload (percent + scalar), and the attribute itself
   // is double-quoted. The downstream DOMPurify pass in TemplateAvatar
   // accepts `style` on `<img>` (it's in the FREEFORM_SANITIZER_ATTRS

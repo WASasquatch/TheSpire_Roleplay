@@ -42,7 +42,7 @@ export function WelcomeModal({ html, hash, onDismissed }: Props) {
   }
 
   return (
-    // Backdrop click and Esc are both disabled — this is intentional. The
+    // Backdrop click and Esc are both disabled, this is intentional. The
     // server records `hash` only when the user clicks "Got it", so a
     // dismissive Esc/backdrop tap could leave them in a state where the
     // welcome re-renders next page load. The button is the only path out.

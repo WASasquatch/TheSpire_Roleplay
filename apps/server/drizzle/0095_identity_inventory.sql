@@ -6,7 +6,7 @@
 -- `character_owned_name_styles` / `character_owned_borders`.
 --
 -- One row per (identity, item_key). Rows are deleted entirely when
--- quantity drops to 0 — empty stacks don't linger.
+-- quantity drops to 0, empty stacks don't linger.
 
 CREATE TABLE `identity_inventory` (
   `owner_scope`  TEXT NOT NULL,

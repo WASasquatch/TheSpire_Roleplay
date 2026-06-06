@@ -4,7 +4,7 @@ import { cropStyleFor } from "../lib/avatarCrop.js";
 
 /**
  * Identity suggestion from `/identities/autocomplete`. Each entry is
- * its OWN account from the picker's perspective — character matches
+ * its OWN account from the picker's perspective, character matches
  * are first-class rows, not nested under their owning master.
  *
  * `masterUsername` is intentionally NOT rendered on the suggestion
@@ -31,7 +31,7 @@ interface Suggestion {
  * CompleterPopup? CompleterPopup is tied to the textarea + caret-
  * position model used by `@mentions` mid-message. The Messenger inputs
  * are single-purpose identity entry fields where the WHOLE value is
- * the target — caret slicing isn't applicable. A tighter, focused
+ * the target, caret slicing isn't applicable. A tighter, focused
  * component reads more clearly than bending the chat completer.
  *
  * Behavior:
@@ -43,7 +43,7 @@ interface Suggestion {
  *     friend-request POST with explicit `targetCharacterId`, etc.)
  *     without a follow-up name-resolution round-trip.
  *   - The text input is updated to the picked identity's
- *     displayName as a visual confirmation (NOT used downstream —
+ *     displayName as a visual confirmation (NOT used downstream,
  *     parents should route off the onPick identity, not the input
  *     value).
  */
@@ -57,7 +57,7 @@ export function UsernameAutocomplete({
   value: string;
   onChange: (v: string) => void;
   /** Called when the user explicitly picks a suggestion. Carries the
-   *  full identity tuple — kind, userId, characterId, displayName. */
+   *  full identity tuple, kind, userId, characterId, displayName. */
   onPick: (identity: Suggestion) => void;
   placeholder?: string;
   disabled?: boolean;
@@ -151,7 +151,7 @@ export function UsernameAutocomplete({
           {suggestions.map((s, i) => {
             // Identity-correct key. Two suggestions can share a
             // displayName (the whole point of this refactor), so we
-            // can't key on it alone — pair with the id tuple.
+            // can't key on it alone, pair with the id tuple.
             const rowKey = `${s.kind}:${s.characterId ?? s.userId}`;
             const cropStyle = cropStyleFor(s.avatarCrop);
             return (
@@ -188,7 +188,7 @@ export function UsernameAutocomplete({
                 {/* Per the project's "characters are their own
                     accounts" contract, the suggestion shows ONLY the
                     identity's display name. No `as <master>` qualifier
-                    even when the identity is a character — exposing
+                    even when the identity is a character, exposing
                     that label would leak the OOC/character relationship
                     a privacy-conscious user has every reason to keep
                     separate from public surfaces. */}

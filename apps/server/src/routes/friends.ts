@@ -12,7 +12,7 @@ import { eqNameInsensitive } from "../lib/nameLookup.js";
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
 /**
- * Result of `/me/friend-resolve?name=X` — every identity (master and
+ * Result of `/me/friend-resolve?name=X`, every identity (master and
  * character) that the name could refer to. Lets the friend-add UI
  * disambiguate before sending an actual request. Empty array when
  * nothing matches.
@@ -26,9 +26,9 @@ export interface FriendResolveMatch {
   userId: string;
   /** Character id when kind === 'character'; null for master matches. */
   characterId: string | null;
-  /** What to display in the picker — character name or master username. */
+  /** What to display in the picker, character name or master username. */
   displayName: string;
-  /** The master username — used as the disambiguator tag on character
+  /** The master username, used as the disambiguator tag on character
    *  rows ("Jagger (E D Erin)") and as the primary text for master rows. */
   masterUsername: string;
   avatarUrl: string | null;
@@ -45,7 +45,7 @@ export interface FriendListEntry {
    * when they're friended via their master/OOC handle. Per-identity
    * partition contract: if you friended @Aphelios (a character), this
    * row carries Aphelios's character id and the DM thread it opens
-   * stays bound to that character forever — no OOC crossover. The
+   * stays bound to that character forever, no OOC crossover. The
    * client uses this as `targetCharacterId` when seeding a fresh DM
    * conversation so the first message lands in the right pinned
    * thread.
@@ -54,7 +54,7 @@ export interface FriendListEntry {
   /** Character name when characterId is set, else the master username. */
   displayName: string;
   /**
-   * Handle the UI shows under the displayName — character name when
+   * Handle the UI shows under the displayName, character name when
    * the friendship is pinned to a character, master username
    * otherwise. Distinct from `username` so the per-character privacy
    * contract holds: a character-pinned friend NEVER leaks the
@@ -71,8 +71,8 @@ export interface FriendListEntry {
   /**
    * False when this friend is a character-pinned identity whose owner
    * has flipped the per-character Direct Messenger toggle OFF. The
-   * friendship row stays — we don't delete history when someone goes
-   * opt-out — but the client uses this flag to grey-out the "Message"
+   * friendship row stays, we don't delete history when someone goes
+   * opt-out, but the client uses this flag to grey-out the "Message"
    * action and surface a "DM unavailable" badge. Master-pinned
    * friendships are always reachable (master DM toggle is a separate
    * preference handled elsewhere), so this is `true` for them.
@@ -81,7 +81,7 @@ export interface FriendListEntry {
 }
 
 export interface FriendRequestEntry {
-  /** The user who SENT the request — the one whose pending row points at me. */
+  /** The user who SENT the request, the one whose pending row points at me. */
   userId: string;
   username: string;
   displayName: string;
@@ -95,7 +95,7 @@ export interface FriendRequestEntry {
    */
   frienderCharacterId: string | null;
   /**
-   * The RECEIVER's (caller's) character id this request was sent to —
+   * The RECEIVER's (caller's) character id this request was sent to,
    * mirrors the `?characterId` the inbox was queried with. Echoed
    * back per entry so a later accept/decline click doesn't have to
    * thread the per-fetch identity through the UI state.
@@ -105,12 +105,12 @@ export interface FriendRequestEntry {
 }
 
 /**
- * `/me/friends` and `/me/friend-requests` — the data backing the
+ * `/me/friends` and `/me/friend-requests`, the data backing the
  * unified Messages modal's left pane.
  *
  * Symmetric friendship semantics (since migration 0051):
  *   - A row exists in `friends` for each directed edge ever created.
- *   - `status='accepted'` rows are MUTUAL — both parties see the other
+ *   - `status='accepted'` rows are MUTUAL, both parties see the other
  *     in their friends list regardless of which side originated.
  *   - `status='pending'` rows are one-way pending requests; they
  *     surface only in the FRIENDED user's `/me/friend-requests`
@@ -122,12 +122,12 @@ export interface FriendRequestEntry {
  *     so the join target depends on which side I'm on.
  *   - `/me/friend-requests` is one-direction-only: rows where I'm the
  *     friended party and status is pending. The friender's side gets
- *     no inbox entry — they're the one who sent it.
+ *     no inbox entry, they're the one who sent it.
  *   - Online state is computed once per request via a single socket-
  *     list scan + Set lookup, so the per-row cost is constant.
  */
 export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
-  /* ---------- /me/friend-resolve — disambiguation -----------
+  /* ---------- /me/friend-resolve, disambiguation -----------
    *
    * Given a free-text `name`, return every identity it could refer
    * to: at most one master (usernames are unique) plus zero-or-more
@@ -179,7 +179,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
 
     // Character matches. Pull all live characters with this name,
     // joined to their owners for the disambiguator label. Caller's
-    // own characters are excluded — friending yourself is silly.
+    // own characters are excluded, friending yourself is silly.
     // Characters with `direct_messenger_enabled = false` are filtered
     // out at the SQL layer so a user looking up a name doesn't even
     // see them as a possible recipient (matches the spec: opt-in
@@ -308,7 +308,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
       // separate gate further down the send path).
       const recipientDmEnabled = usingChar ? !!c!.directMessengerEnabled : true;
       // Character-pinned rows must NOT fall back to the master's
-      // avatar — that fallback leaks the OOC owner's portrait into
+      // avatar, that fallback leaks the OOC owner's portrait into
       // the friends rail for any character whose own avatar slot is
       // empty. Null falls through to the initials placeholder
       // client-side, which is the privacy-correct rendering.
@@ -352,14 +352,14 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
    * asked you). Mirrors the `/friend <name>` slash-command logic in
    * commands/builtins/friends.ts but returns a structured success /
    * error response so the Messages modal can show inline confirmation
-   * — the slash-command path emits its results as room system
+   *, the slash-command path emits its results as room system
    * messages, which the modal can't easily surface.
    *
    * Response shape:
    *   201 { ok: true, status: "sent" | "accepted" | "already_friends" | "already_pending" }
-   *   404 { error: "no_user" }            — username doesn't exist or disabled
-   *   400 { error: "self" }               — friending yourself is silly
-   *   400 { error: "username required" }  — body empty
+   *   404 { error: "no_user" }           , username doesn't exist or disabled
+   *   400 { error: "self" }              , friending yourself is silly
+   *   400 { error: "username required" } , body empty
    */
   app.post<{ Body: { username?: string; characterId?: string; targetUserId?: string; targetCharacterId?: string | null } }>("/me/friend-requests", async (req, reply) => {
     const me = await getSessionUser(req, db);
@@ -382,7 +382,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     //      path for the slash command and legacy clients. Tries
     //      master-first, then character-by-name. Ambiguous (same
     //      name as both a master and a character) silently picks
-    //      the master — the new disambiguation flow exists precisely
+    //      the master, the new disambiguation flow exists precisely
     //      because this resolution order isn't always what the user
     //      meant.
     let targetIdentity: Identity | null = null;
@@ -414,7 +414,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
       const username = (req.body?.username ?? "").trim();
       if (!username) { reply.code(400); return { error: "username required" }; }
       // Space-insensitive match so a slash-command `/friend John Doe`
-      // resolves a master stored as `John Doe` (NBSP) — same fold the
+      // resolves a master stored as `John Doe` (NBSP), same fold the
       // /me/friend-resolve picker uses above.
       const masterRow = (await db
         .select()
@@ -526,7 +526,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     const meIdentity: Identity = { userId: me.id, characterId: charId };
 
     // Pending rows where I (this identity) am the friended side.
-    // Surface the FRIENDER's identity — the user only ever sees the
+    // Surface the FRIENDER's identity, the user only ever sees the
     // character that sent the request, not the master handle behind it.
     const rows = await db
       .select({
@@ -563,14 +563,14 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
         // master's avatar when the request was sent FROM a character.
         avatarUrl: usingChar ? (c!.avatarUrl ?? null) : (u?.avatarUrl ?? null),
         // Surface the exact friender identity so accept/decline can
-        // identify the row unambiguously — a master and a character
+        // identify the row unambiguously, a master and a character
         // can share a name, and `resolveIdentityByName` resolves
         // master-first, so name-only matching strands rows whose
         // friender_character_id is set.
         frienderCharacterId: r.frienderCharacterId ?? null,
         // Friended (receiver) side identity that this request was
         // sent TO. Always equal to the inbox's characterId since
-        // the query filters on it — but echoed back per-row so the
+        // the query filters on it, but echoed back per-row so the
         // client doesn't have to remember which inbox the entry
         // came from when it later fires accept/decline.
         friendedCharacterId: charId,
@@ -583,7 +583,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
   });
 
   /**
-   * Accept (`/accept`) and decline (`/decline`) — but routed by EXACT
+   * Accept (`/accept`) and decline (`/decline`), but routed by EXACT
    * identity instead of by name. The Messages-modal Accept/Decline
    * buttons and the FriendRequestPrompts banner both call these so
    * they can clear the canonical pending row even when:
@@ -630,7 +630,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
 
       // Flip status pending → accepted on the exact pair. r.changes ===
       // 0 means the row's already been resolved (other tab accepted,
-      // sender canceled, etc.) — we treat that as success so the client
+      // sender canceled, etc.), we treat that as success so the client
       // can still clear its local optimistic state instead of looping
       // on a stuck banner. The /me/friend-requests refetch the client
       // does next will reflect the actual current state.
@@ -659,7 +659,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
       // Without this echo, accepting via the in-chat
       // FriendRequestPrompts banner (or while the inbox modal is on
       // another viewer's tab) left the acceptor's friends list stale
-      // — the only refresh path was the local `refreshKey` bump
+      //, the only refresh path was the local `refreshKey` bump
       // inside MessagesModal's own `acceptRequest`, which doesn't fire
       // for the banner path or for sibling tabs. Payload identifies
       // the original SENDER (now a friend) so the soft notice reads
@@ -710,7 +710,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
           eqIdentity(friends.friendedUserId, friends.friendedCharacterId, meIdentity),
           eq(friends.status, "pending"),
         ));
-      // Sender stays unnotified per the existing decline contract —
+      // Sender stays unnotified per the existing decline contract,
       // mirrors the slash-command behavior and avoids a passive-
       // aggressive "they declined you" signal.
       return { ok: true };

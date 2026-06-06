@@ -17,7 +17,7 @@ interface Props {
   selfUserId: string | null;
   /** Viewer identities (master + active char) for self-mention highlighting inside post bodies. */
   selfNames: ReadonlyArray<string>;
-  /** Reporting gate — report button only renders in public rooms. */
+  /** Reporting gate, report button only renders in public rooms. */
   roomType: "public" | "private" | null;
   /** Viewer is a moderator. Passed through to ForumPostBody so cross-author Delete + Lock buttons appear in the modal's toolbars. */
   canModerate: boolean;
@@ -25,7 +25,7 @@ interface Props {
   canPin: boolean;
   /** Viewer is an admin. Adds the cross-author Edit button to every post's toolbar. */
   canAdminEdit: boolean;
-  /** Room occupants — only used to derive gender + admin flags for the rendered posts so styling matches the inline forum view. */
+  /** Room occupants, only used to derive gender + admin flags for the rendered posts so styling matches the inline forum view. */
   occupants: RoomOccupant[];
   /** Standard click handlers shared with the main forum view; passed through to ForumPostBody.
    *  `characterId` lets the handler emit a `@cid:` identity token so a same-named character on
@@ -54,7 +54,7 @@ interface Props {
 
 /**
  * Focused-view modal for a single forum topic. Renders the topic post
- * + every reply (no NESTED_VISIBLE_REPLIES cap — the whole point of
+ * + every reply (no NESTED_VISIBLE_REPLIES cap, the whole point of
  * popping out is to read the thread in one place) + a sticky reply
  * composer. The modal does NOT own its own copy of the messages:
  * `topic` and `replies` are passed in fresh on every parent render,
@@ -93,7 +93,7 @@ export function ThreadModal({
   onHighlightDone,
 }: Props) {
   // Reply composer's text state lives here so it's scoped to the
-  // modal instance — closing and reopening on a different topic
+  // modal instance, closing and reopening on a different topic
   // starts with a clean draft. The Composer is controlled; this
   // value is whatever the user has typed for *this* topic.
   const [draft, setDraft] = useState("");
@@ -115,7 +115,7 @@ export function ThreadModal({
   // tree, find the row's DOM node via `data-message-id`, scroll it
   // to center of the scrollable body, and paint a transient accent
   // tint. Cleared via `onHighlightDone` after the flash. Suppresses
-  // the bottom-anchored auto-scroll on new replies — the highlight
+  // the bottom-anchored auto-scroll on new replies, the highlight
   // owns the scroll position while it's playing.
   useEffect(() => {
     if (!highlightMessageId) return;
@@ -197,7 +197,7 @@ export function ThreadModal({
               {topic.lockedAt ? (
                 <span
                   aria-label="Locked"
-                  title="This topic is locked — no new replies."
+                  title="This topic is locked, no new replies."
                   className="shrink-0 text-keep-muted"
                 >
                   🔒
@@ -216,7 +216,7 @@ export function ThreadModal({
                   "rounded font-semibold text-keep-action hover:underline " +
                   // Staff italic only when OOC. Character voices stay
                   // un-italicized even when authored by a staff account
-                  // — preserves the OOC ↔ character partition.
+                  //, preserves the OOC ↔ character partition.
                   (topic.characterId === null && adminUserIds.has(topic.userId) ? "italic" : "")
                 }
                 style={topicAuthorColor ? { color: topicAuthorColor } : undefined}
@@ -240,7 +240,7 @@ export function ThreadModal({
         </header>
 
         {/* Scrollable thread body. Topic post first, then the reply
-            chain, all expanded (no NESTED_VISIBLE_REPLIES cap — the
+            chain, all expanded (no NESTED_VISIBLE_REPLIES cap, the
             modal is the focused reading view). */}
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           <div className="mb-3 rounded border border-keep-rule/40 bg-keep-banner/20 p-3">
@@ -301,7 +301,7 @@ export function ThreadModal({
                                   then the composer (mods bypass the
                                   server-side reply lock).
               - unlocked:         the composer.
-            The server is authoritative on the lock gate — this is
+            The server is authoritative on the lock gate, this is
             purely UX. If the topic flips to locked while the modal is
             open, the composer disappears (or swaps to the override
             variant for mods) on the next render. */}
@@ -315,14 +315,14 @@ export function ThreadModal({
             {topic.lockedAt && canModerate ? (
               <div className="flex shrink-0 items-center gap-2 border-t border-keep-rule bg-keep-accent/10 px-3 py-2 text-xs text-keep-accent">
                 <span aria-hidden>🔒</span>
-                <span>This topic is locked — your reply will post as a moderator notice.</span>
+                <span>This topic is locked, your reply will post as a moderator notice.</span>
               </div>
             ) : null}
             {/* Reuses the main `<Composer>` so `/command` autocomplete,
                 `@mention` autocomplete, history (Up/Down), multi-line
                 auto-grow, and the mobile newline button all work the
                 same as the chat input below. We pass `isForumRoom=false`
-                so the composer DOESN'T render its tri-mode forum hints —
+                so the composer DOESN'T render its tri-mode forum hints,
                 the modal is already the focused reply context; an inline
                 "Replying to" indicator would duplicate the header above.
                 The placeholder override tells the user where their text

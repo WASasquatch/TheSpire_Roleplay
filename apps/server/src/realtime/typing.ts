@@ -1,11 +1,11 @@
 /**
- * Phase 4 — per-room typing indicator tracker.
+ * Phase 4, per-room typing indicator tracker.
  *
  * Pure in-memory state. The wire shape is intentionally small:
  *   - Client emits `chat:typing` (just `{ roomId }`) on keystroke,
  *     throttled to roughly once every 2s.
  *   - Server records the entry with a ~5s expiry and broadcasts
- *     `chat:typing:update` to the room — but ONLY when the room's
+ *     `chat:typing:update` to the room, but ONLY when the room's
  *     typer SET actually changed. Re-pings from a still-typing user
  *     extend their entry's expiry without re-broadcasting.
  *
@@ -16,12 +16,12 @@
  * (sentence finished, user walked away) without the client having
  * to remember to send a "stopped" pulse.
  *
- * Per-receiver ignore filtering happens at broadcast time — each
+ * Per-receiver ignore filtering happens at broadcast time, each
  * subscribed socket gets a payload with the typers it can actually
  * see, mirroring how chat messages are filtered.
  *
  * Not persisted. A server restart resets every room's typer set,
- * which is fine — within a couple of seconds the next keystrokes
+ * which is fine, within a couple of seconds the next keystrokes
  * rebuild the right state.
  */
 
@@ -59,7 +59,7 @@ const ENTRY_TTL_MS = 5_000;
 const SWEEP_INTERVAL_MS = 1_500;
 
 /** Per-room typer state. Keyed by roomId, then by userId (one row
- *  per identity slot — a user voicing two different characters on
+ *  per identity slot, a user voicing two different characters on
  *  two tabs in the same room would show as ONE row keyed by
  *  userId, with whichever displayName was most recently reported). */
 const roomTypers = new Map<string, Map<string, RoomTyperEntry>>();
@@ -68,7 +68,7 @@ const roomTypers = new Map<string, Map<string, RoomTyperEntry>>();
 let sweepHandle: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Start the periodic sweep. Idempotent — repeat calls are a no-op,
+ * Start the periodic sweep. Idempotent, repeat calls are a no-op,
  * which lets the integration site call it from a connection handler
  * without tracking startup state.
  */
@@ -77,7 +77,7 @@ export function startTypingTracker(io: Io, db: Db): void {
   sweepHandle = setInterval(() => {
     sweepExpired(io, db);
   }, SWEEP_INTERVAL_MS);
-  // Don't keep the Node process alive just for the sweep — tests
+  // Don't keep the Node process alive just for the sweep, tests
   // and graceful shutdowns shouldn't have to manually unref this.
   // `unref` is missing in some test envs; guard with `as any` cast
   // is overkill so a typeof check is enough.
@@ -145,7 +145,7 @@ export function clearTyperFromRoom(
 
 /**
  * Remove a user from ALL rooms' typer sets. Used on disconnect /
- * me:exit — we don't always know every room they were typing in,
+ * me:exit, we don't always know every room they were typing in,
  * so we sweep the lot. Cheap: the outer map is bounded by active
  * rooms.
  */
@@ -218,11 +218,11 @@ async function broadcastTyperSet(io: Io, db: Db, roomId: string): Promise<void> 
   // user editing their phrase OR toggling Lurking Master mid-
   // session sees the change land on the next set-change broadcast.
   // The lurking map is kept SEPARATE from `TypingEntry` because
-  // the lurking flag is server-internal filtering metadata — the
+  // the lurking flag is server-internal filtering metadata, the
   // wire only carries entries the receiver is allowed to see.
   const lurkingTypers = new Set<string>(); // userIds of typers currently lurking
 
-  // Phase 5 + Phase 6 — splice typing-phrase + lurking flags into
+  // Phase 5 + Phase 6, splice typing-phrase + lurking flags into
   // per-typer state. Two batched queries (one per scope) keep this
   // cheap even with several typers. Master scope reads phrase from
   // user_earning AND lurking from user_active_cosmetics (different
@@ -279,7 +279,7 @@ async function broadcastTyperSet(io: Io, db: Db, roomId: string): Promise<void> 
   const sockets = await io.in(`room:${roomId}`).fetchSockets();
   // Pre-pull every (ignorer, ignored) pair where the ignored side
   // is one of the current typers. Same shape as `emitFiltered` for
-  // chat messages — one DB query, filter in-memory. Skipped when
+  // chat messages, one DB query, filter in-memory. Skipped when
   // the typer set is empty (broadcast goes to everyone as a "clear
   // indicator" wire).
   let ignorersByTyper = new Map<string, Set<string>>();
@@ -298,7 +298,7 @@ async function broadcastTyperSet(io: Io, db: Db, roomId: string): Promise<void> 
   for (const s of sockets) {
     const receiverId = (s.data as { userId?: string }).userId;
     if (!receiverId) continue;
-    // Phase 6 — Lurking Master receivers: holders of
+    // Phase 6, Lurking Master receivers: holders of
     // `view_deleted_message_body` always see the full set (the matrix
     // ships this admin-by-default but it's a usable proxy for "this
     // user has moderation visibility"); other receivers don't see

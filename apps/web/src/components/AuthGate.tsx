@@ -50,7 +50,7 @@ export function SplashShell({
   // Live stats so visitors see the chat is alive before they log in.
   // /stats is unauthenticated; we refresh every 30s to track ebb and
   // flow. Skipped entirely when BOTH the activity-feed master toggle
-  // and the 24h-message sub-toggle are off — the splash has nothing
+  // and the 24h-message sub-toggle are off, the splash has nothing
   // to surface and the fetch would be wasted (cold-start posture so
   // empty counters don't telegraph "dead community" to first visitors).
   // Either toggle being on is enough to start polling; the render path
@@ -116,7 +116,7 @@ export function SplashShell({
         // the SpireScroll + any below-the-fold content, so absolute-
         // positioned cover would scale the 2.65:1 panoramic art up to
         // span the full page height and crop everything but a thin
-        // center band — the "zoomed in" look. Fixed pins the layer to
+        // center band, the "zoomed in" look. Fixed pins the layer to
         // the viewport so cover sizes against the visible window.
         className="fixed inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
         style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
@@ -133,7 +133,7 @@ export function SplashShell({
       />
       {/* Dark-mode corner glows. Cyan top-left echoes the spire star's
           neon halo in the artwork; moon-white bottom-right echoes the
-          moonlit ridge highlight. Pure decorative overlays — pointer
+          moonlit ridge highlight. Pure decorative overlays, pointer
           events disabled so they never intercept clicks. Painted only
           when the resolved splash palette reads as dark (Darkness
           preset, Twilight, Ember, Ocean, etc.); the light artwork
@@ -158,11 +158,11 @@ export function SplashShell({
         card in the right third of the viewport (its center sits at
         ~75% horizontal), so it floats over the parchment-fade side of
         the bg image while the spire art stays clear on the left. The
-        `right` offset is computed as `max(2rem, 25% - 17.5rem)` —
+        `right` offset is computed as `max(2rem, 25% - 17.5rem)`,
         17.5rem is half the 560px card width, and the floor of 2rem
         keeps the card from clipping when 25% of the viewport would
-        otherwise leave no room. Below lg — portrait phones, landscape
-        phones, small tablets — we fall back to centered flex layout
+        otherwise leave no room. Below lg, portrait phones, landscape
+        phones, small tablets, we fall back to centered flex layout
         (with a 2-column landscape-phone grid handled by the card's
         own classes). The previous `md:left-[75%]` math clipped at
         landscape-phone widths because half the card extended past the
@@ -212,13 +212,13 @@ export function SplashShell({
           />
 
           <div className="px-6 py-6 sm:px-8 sm:py-8 max-lg:landscape:p-4 max-lg:landscape:grid max-lg:landscape:grid-cols-2 max-lg:landscape:gap-x-6 max-lg:landscape:gap-y-2">
-            {/* INFO COLUMN — title, stats, meta, welcome blurb. Stays
+            {/* INFO COLUMN, title, stats, meta, welcome blurb. Stays
                 left in landscape phones; stacks above the form in
                 portrait / wide-desktop layouts. */}
             <div className="max-lg:landscape:min-w-0">
               {/* Header - site name, theme-tinted */}
               <div className="mb-3 text-center max-lg:landscape:mb-1">
-                {/* Brass-diamond rule above the wordmark — matches
+                {/* Brass-diamond rule above the wordmark, matches
                     the splash + bookshelf chrome so the antique
                     library motif carries through the sign-in
                     journey. Hidden on landscape phones where every
@@ -233,7 +233,7 @@ export function SplashShell({
                   className="font-action text-3xl tracking-wide text-keep-text sm:text-4xl max-lg:landscape:text-2xl"
                 >
                   {branding.logoUrl ? (
-                    // The splash gets a larger logo than the banner —
+                    // The splash gets a larger logo than the banner,
                     // welcome card has the vertical real estate. `mx-auto`
                     // keeps it centered inside the text-aligned <h1>;
                     // alt = siteName so screen-readers + SEO still see
@@ -253,7 +253,7 @@ export function SplashShell({
                 </div>
               </div>
 
-              {/* Live stats strip — omitted entirely when neither activity
+              {/* Live stats strip, omitted entirely when neither activity
                   toggle is on, so the splash sells the IDEA of the place
                   rather than its (potentially empty) current activity.
                   Either toggle being on is enough to mount the strip;
@@ -279,7 +279,7 @@ export function SplashShell({
               )}
             </div>
 
-            {/* FORM COLUMN — the actual sign-in / register UI. Right
+            {/* FORM COLUMN, the actual sign-in / register UI. Right
                 column in landscape phones; below the info in other
                 layouts. */}
             <div className="max-lg:landscape:min-w-0">
@@ -330,8 +330,8 @@ function SplashStats({ stats }: { stats: SiteStats | null }) {
   const siteName = useChat((s) => s.branding.siteName);
   // Two independent toggles. `activityFeedsEnabled` gates the
   // online/registered/room cluster (the original chip-row). The
-  // 24h-message toggle gates a separate HERO block — large number
-  // with an uppercase label below — because admins surfacing chat
+  // 24h-message toggle gates a separate HERO block, large number
+  // with an uppercase label below, because admins surfacing chat
   // volume want it to anchor the eye, not get lost in a stat row.
   // When both are on, the hero sits above the chip row so the
   // headline reads first and the smaller numbers contextualize it.
@@ -354,7 +354,7 @@ function SplashStats({ stats }: { stats: SiteStats | null }) {
   const onlineNoun = stats.online === 1 ? "user online" : "users online";
   // Only surface the 24h count when (a) the admin opted in AND (b) the
   // server populated the field (forward-compat with old servers that
-  // didn't ship `messages24h`). A zero value still renders — it's a
+  // didn't ship `messages24h`). A zero value still renders, it's a
   // real "no activity in the window" signal, not a missing-data case,
   // and the admin already opted into seeing it.
   const renderMessages24h =
@@ -402,12 +402,12 @@ function SplashStats({ stats }: { stats: SiteStats | null }) {
 }
 
 /**
- * Hero treatment for the rolling 24h message count — the prominent
+ * Hero treatment for the rolling 24h message count, the prominent
  * splash stat the admin opted into via Settings → Activity feeds →
  * Messages in last 24h. Centered, large tabular-nums number with a
  * small uppercase label below; brand color when there's activity in
  * the window, neutral text when the count is zero. Tasteful rather
- * than loud — sized to anchor the eye without elbowing past the logo
+ * than loud, sized to anchor the eye without elbowing past the logo
  * + title above it.
  */
 function Messages24hHero({ count }: { count: number }) {
@@ -635,7 +635,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           // Zod validation failures arrive as `{ error: "validation",
           // issues: [{ path, message }] }`. Surfacing just `error` left
           // the user staring at the word "validation" with no idea
-          // which field failed — prefer the first issue's message.
+          // which field failed, prefer the first issue's message.
           const body = await res.json().catch(() => ({} as { error?: string; issues?: Array<{ path?: string; message: string }> }));
           const firstIssue = body.issues?.[0];
           const detail = firstIssue
@@ -644,7 +644,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           throw new Error(detail ?? body.error ?? "register failed");
         }
         const j = await res.json();
-        // Persist the per-tab bearer token before flipping `me` — the
+        // Persist the per-tab bearer token before flipping `me`, the
         // moment AuthGate unmounts, the chat shell fires its mount-time
         // /me/profile + /me/dms fetches and they need the header
         // already in place.
@@ -717,7 +717,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
     setMode(next);
     // Reflect the toggle in the address bar so /login and /register are
     // both bookmarkable and the back button rewinds between them. Only
-    // when a parent supplied a navigator — internal callers (deep-link
+    // when a parent supplied a navigator, internal callers (deep-link
     // gates) that don't pass one keep the legacy state-only behavior.
     if (onNavigate) {
       onNavigate(next === "register" ? "/register" : "/login");
@@ -954,7 +954,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             : mode === "login" ? "Log in" : "Register"}
         </button>
 
-        {/* Rules link — register-mode only. Opens the public /rules
+        {/* Rules link, register-mode only. Opens the public /rules
             page in a new tab so the half-filled registration form
             isn't lost when the visitor wants to read the rules
             before agreeing to the disclaimer above. The page is

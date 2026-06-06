@@ -8,14 +8,14 @@ interface Props {
 }
 
 /**
- * Splash bookshelf — replaces the old FeaturedStoriesStrip card grid
+ * Splash bookshelf, replaces the old FeaturedStoriesStrip card grid
  * with a 3D library shelf. Each volume rests upright on the shelf
  * showing its spine; hovering or focusing a book draws it out and
  * rotates the cover toward the viewer. Click on a drawn book opens
  * the story (anonymous users can read up to R; NC-17 reroutes through
  * /login).
  *
- * Always renders at least MIN_BOOKS volumes — empty slots are filled
+ * Always renders at least MIN_BOOKS volumes, empty slots are filled
  * with a "Write Your Story" placeholder that points to /register. So
  * a fresh install with zero stories still presents a full shelf and
  * an invitation, rather than a sad single volume.
@@ -34,7 +34,7 @@ interface Props {
 
 const MIN_BOOKS = 8;
 
-/** Per-spine HSL pair — dark-theme jewel-tone vs light-theme pastel.
+/** Per-spine HSL pair, dark-theme jewel-tone vs light-theme pastel.
  *  CSS `light-dark()` at render time picks the right entry based on
  *  the document's `color-scheme`, so the same book renders as
  *  saturated oxblood on a dark theme and a soft rose pastel on a
@@ -73,7 +73,7 @@ function bookColorVars(p: SpinePalette): Record<string, string> {
   };
 }
 
-/** Placeholder palette — a warm tan on light themes (so the
+/** Placeholder palette, a warm tan on light themes (so the
  *  dark-red spine title reads cleanly against it) and a muted
  *  neutral gray on dark themes (so empty slots clearly recede
  *  behind real story spines). */
@@ -132,7 +132,7 @@ export function BookshelfStrip({ onNavigate }: Props) {
   // the CSS `:hover` rules handle the cover-reveal and a click goes
   // straight to the story. On touch devices there's no hover, so
   // the user needs a way to PREVIEW a cover before committing to a
-  // navigation — first tap pulls the book; second tap on the same
+  // navigation, first tap pulls the book; second tap on the same
   // book opens it; tap elsewhere puts it back. `pulledId` is the
   // book currently flying forward (null when none).
   const [pulledId, setPulledId] = useState<string | null>(null);
@@ -143,7 +143,7 @@ export function BookshelfStrip({ onNavigate }: Props) {
   //
   // The detection deliberately AND's `(hover: hover)` with
   // `(pointer: fine)`. Chrome on Android lies about `hover: hover`
-  // for legacy-site compatibility — many older sites broke when
+  // for legacy-site compatibility, many older sites broke when
   // mobile reported `hover: none`, so Android Chrome opted to keep
   // the `hover: hover` answer even though no actual hover exists.
   // `(pointer: fine)` is the honest signal: it's `coarse` on any
@@ -172,7 +172,7 @@ export function BookshelfStrip({ onNavigate }: Props) {
   // shelf wood, off the shelf entirely), put the book back. Listens
   // on the capture phase so a tap on a SIBLING book triggers
   // dismissal BEFORE that sibling's own `onTap` handler runs to
-  // pull it forward — net effect of tap-on-other-book is "swap
+  // pull it forward, net effect of tap-on-other-book is "swap
   // which one is pulled" rather than "two pulled at once for a
   // frame."
   useEffect(() => {
@@ -224,7 +224,7 @@ export function BookshelfStrip({ onNavigate }: Props) {
     onNavigate(`/scriptorium/@${encodeURIComponent(handle)}/${encodeURIComponent(card.slug)}`);
   }
 
-  // Loading skeleton — keep the silhouette so the visual weight of
+  // Loading skeleton, keep the silhouette so the visual weight of
   // the splash doesn't pop after the fetch resolves.
   if (items === null) {
     return (
@@ -289,7 +289,7 @@ function BookshelfHeader({ onBrowse }: { onBrowse: () => void }) {
         <span className="line" />
       </div>
       <h3 className="bookshelf-title font-action">From the Scriptorium</h3>
-      <p className="bookshelf-subtitle">— hover or tap a volume to draw it from the shelf —</p>
+      <p className="bookshelf-subtitle">hover or tap a volume to draw it from the shelf</p>
       <button type="button" onClick={onBrowse} className="bookshelf-browse">
         Browse the catalog →
       </button>
@@ -339,7 +339,7 @@ function StoryBook({
       className={`bookshelf-book ${lean}`}
       style={styleVars}
       tabIndex={0}
-      aria-label={`${card.title} by ${author} — ${ratingInfo.short}${isPulled ? " (tap again to open)" : ""}`}
+      aria-label={`${card.title} by ${author}, ${ratingInfo.short}${isPulled ? " (tap again to open)" : ""}`}
     >
       <span className="float-wrap">
         <span className="book-3d">
@@ -393,7 +393,7 @@ function PlaceholderBook({
   isPulled,
   onTap,
 }: BookProps & { isPulled: boolean; onTap: () => void }) {
-  // Mirrors StoryBook's structure exactly — same markup, same classes,
+  // Mirrors StoryBook's structure exactly, same markup, same classes,
   // same chip slot. Only the text + click handler differ. Title is
   // intentionally short ("Your Story") so it lays out like a real
   // story title (e.g. "TIGERLORD") on the cover face instead of
@@ -401,8 +401,8 @@ function PlaceholderBook({
   // carries the longer "Write Your Story" string because the spine
   // axis has room to spare.
   //
-  // The placeholder palette is a dark NEUTRAL gray — low saturation
-  // + low lightness — so empty slots clearly recede behind the
+  // The placeholder palette is a dark NEUTRAL gray, low saturation
+  // + low lightness, so empty slots clearly recede behind the
   // colored real story spines on both light and dark themes. The
   // earlier ochre/tan picked up on the antique scroll motif but
   // looked too warm against the dark BG.
@@ -421,12 +421,12 @@ function PlaceholderBook({
       // across the whole shelf: first tap pulls the book forward,
       // second tap on the same book navigates (to /register here).
       // On desktop the hover-capable check short-circuits straight
-      // to navigation — same as StoryBook.
+      // to navigation, same as StoryBook.
       data-pulled={isPulled ? "true" : undefined}
       className={`bookshelf-book ${lean}`}
       style={styleVars}
       tabIndex={0}
-      aria-label={`Write your story — sign in or register${isPulled ? " (tap again to register)" : ""}`}
+      aria-label={`Write your story, sign in or register${isPulled ? " (tap again to register)" : ""}`}
     >
       <span className="float-wrap">
         <span className="book-3d">
@@ -470,7 +470,7 @@ function GlyphArt({ seed }: { seed: string }) {
 }
 
 function Bookend({ side }: { side: "left" | "right" }) {
-  // Spire-silhouette bookend — mirrors the BG art. The body is
+  // Spire-silhouette bookend, mirrors the BG art. The body is
   // dark stone (panel-500 + warm shadow) and the peak/cross at
   // the top glows with the theme accent via an SVG Gaussian blur
   // halo, so the bookend reads as "spire on the horizon at dusk"
@@ -481,7 +481,7 @@ function Bookend({ side }: { side: "left" | "right" }) {
     <span className={`bookshelf-bookend bookshelf-bookend-${side}`} aria-hidden>
       <svg viewBox="0 0 48 380" preserveAspectRatio="xMidYMax meet" xmlns="http://www.w3.org/2000/svg">
         <defs>
-          {/* Stone gradient — slight cylinder shading so the spire
+          {/* Stone gradient, slight cylinder shading so the spire
            *  isn't a flat silhouette. CSS vars on the parent feed
            *  the stop colors so the bookend retones with the theme. */}
           <linearGradient id={stoneId} x1="0" y1="0" x2="1" y2="0">
@@ -491,7 +491,7 @@ function Bookend({ side }: { side: "left" | "right" }) {
             <stop offset="85%"  style={{ stopColor: "var(--bookend-stone-mid)" }} />
             <stop offset="100%" style={{ stopColor: "var(--bookend-stone-deep)" }} />
           </linearGradient>
-          {/* Peak glow — Gaussian blur of the source rendered
+          {/* Peak glow, Gaussian blur of the source rendered
            *  underneath the source itself, producing an accent
            *  halo around the cross + spire tip only. */}
           <filter id={glowId} x="-100%" y="-100%" width="300%" height="300%">
@@ -513,7 +513,7 @@ function Bookend({ side }: { side: "left" | "right" }) {
         <path d="M 14 354 L 14 60 L 16 50 L 32 50 L 34 60 L 34 354 Z" fill={`url(#${stoneId})`} />
         <rect x="22" y="80" width="4" height="260" fill="rgba(0,0,0,0.55)" />
 
-        {/* Trefoil cutouts — punched holes in the stone */}
+        {/* Trefoil cutouts, punched holes in the stone */}
         {[110, 200, 290].map((y) => (
           <g key={y} transform={`translate(24 ${y})`} fill="rgba(0,0,0,0.7)">
             <circle cx="0"  cy="-4" r="3" />
@@ -522,7 +522,7 @@ function Bookend({ side }: { side: "left" | "right" }) {
           </g>
         ))}
 
-        {/* Quatrefoil near the top — punched hole */}
+        {/* Quatrefoil near the top, punched hole */}
         <g transform="translate(24 70)" fill="rgba(0,0,0,0.7)">
           <circle cx="0"  cy="-5" r="3.2" />
           <circle cx="0"  cy="5"  r="3.2" />
@@ -534,7 +534,7 @@ function Bookend({ side }: { side: "left" | "right" }) {
         {/* Pointed arch finial cap (dark stone) */}
         <path d="M 16 50 L 16 38 Q 16 30 24 22 Q 32 30 32 38 L 32 50 Z" fill={`url(#${stoneId})`} />
 
-        {/* GLOWING PEAK — the only accent-colored elements. The
+        {/* GLOWING PEAK, the only accent-colored elements. The
             spire blade, the orb directly below the cross, and the
             cross itself all sit inside the glow filter so they
             radiate the accent like the spire's tip in the BG art. */}
@@ -545,12 +545,12 @@ function Bookend({ side }: { side: "left" | "right" }) {
           <rect x="21" y="2" width="6" height="1.5" fill="currentColor" />
         </g>
 
-        {/* Subtle accent ribbon down the shaft — a thin line of
+        {/* Subtle accent ribbon down the shaft, a thin line of
             accent so the bookend still ties to the theme without
             shouting. Much fainter than before. */}
         <rect x="23.5" y="60" width="1" height="294" fill="currentColor" opacity="0.22" />
 
-        {/* Decorative crossbars — dark stone, faint accent rim */}
+        {/* Decorative crossbars, dark stone, faint accent rim */}
         {[148, 238, 328].map((y) => (
           <rect
             key={y}

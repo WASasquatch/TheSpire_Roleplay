@@ -1,6 +1,6 @@
 -- Permission-system cleanup: catalog consolidations.
 --
--- Two consolidations land here. Both are forward-only — existing
+-- Two consolidations land here. Both are forward-only, existing
 -- installs that already ran 0179 with the old keys need a cleanup
 -- pass; fresh installs running an updated 0179 with the new keys
 -- are no-ops for the affected rows.
@@ -11,7 +11,7 @@
 --     `view_audit_log` (the route's actual gate), so mod saw the
 --     Audit tab and got a 403 the moment the panel tried to fetch.
 --     There's no operational reason to split tab visibility from
---     audit-read access — both fully gate "can see the audit feed."
+--     audit-read access, both fully gate "can see the audit feed."
 --     Resolution: the route now gates on `view_admin_audit`; the
 --     `view_audit_log` key is removed from the catalog and any
 --     existing grants/overrides are dropped here.

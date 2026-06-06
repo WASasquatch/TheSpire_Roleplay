@@ -40,7 +40,7 @@ let cookie;
       process.exit(1);
     }
     cookie = (reg.headers.getSetCookie?.()[0] ?? reg.headers.get("set-cookie") ?? "").split(";")[0];
-    console.log("registered. NOTE: not yet admin — promote with scripts/promote-admin.mjs");
+    console.log("registered. NOTE: not yet admin, promote with scripts/promote-admin.mjs");
     if (!args.skipAdminCheck) process.exit(0);
   }
 }

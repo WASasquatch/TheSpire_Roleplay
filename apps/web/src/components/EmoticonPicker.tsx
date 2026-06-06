@@ -13,7 +13,7 @@ interface Props {
   /** Called when the user picks a sheet cell. */
   onPick: (sheetSlug: string, cellIndex: number) => void;
   /** Called when the user picks a Unicode emoji from the Unicode tab.
-   *  Optional — call sites that haven't wired up Unicode insertion
+   *  Optional, call sites that haven't wired up Unicode insertion
    *  (e.g. the reaction bar, which keys reactions on sheet+cell) can
    *  omit this and the Unicode tab will stay hidden. */
   onPickUnicode?: (char: string) => void;
@@ -29,7 +29,7 @@ interface Props {
 const PANEL_WIDTH = 380;
 /** Upper bound on the picker's height regardless of how much viewport
  *  room is available. The Unicode tab carries hundreds of entries, so
- *  letting the panel grow to fill a 1080+px screen is overwhelming —
+ *  letting the panel grow to fill a 1080+px screen is overwhelming,
  *  500px gives ~10 rows of emoji visible at once, which scrolls
  *  comfortably with a mouse wheel or trackpad. Tall viewports still
  *  benefit because the panel WON'T cover most of the chat behind it. */
@@ -38,9 +38,9 @@ const PANEL_MAX_HEIGHT = 500;
  *  Sized so the body grid always has room for at least two full rows
  *  of cells AFTER the toolbar (~50), recent strip (~120), and search
  *  bar (~40) take their slice. Without this floor a picker opened
- *  against the latest chat message — where roomAbove can be ~200px
+ *  against the latest chat message, where roomAbove can be ~200px
  *  and roomBelow is whatever's left between the message and the
- *  composer — clamped to that tiny slice and the user saw the search
+ *  composer, clamped to that tiny slice and the user saw the search
  *  field plus a single emoji row, with the rest of the grid scrolled
  *  off below the panel. The layout below allows the panel to overlap
  *  the anchor when both sides are tighter than this; covering the
@@ -117,9 +117,9 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
     | { kind: "unicode" };
   // Default landing view. When the parent wired an `onPickUnicode`
   // callback (composer, formatting toolbar) the Unicode emoji panel
-  // is the natural landing — that's the surface most chat apps open
+  // is the natural landing, that's the surface most chat apps open
   // to by default. When `onPickUnicode` is absent (reactions are
-  // sheet-based — see ReactionBar) we fall back to the system sheet
+  // sheet-based, see ReactionBar) we fall back to the system sheet
   // grid so the picker stays useful there too.
   const [view, setView] = useState<View>(() => {
     if (onPickUnicode) return { kind: "unicode" };
@@ -150,7 +150,7 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
       // independent of the panel's intrinsic content height. The panel
       // gets an explicit height (not just a ceiling) so the body's
       // `flex-1 overflow-y-auto` has a fixed parent to grow into and
-      // internal scroll actually engages on long grids — the Unicode
+      // internal scroll actually engages on long grids, the Unicode
       // tab in particular needs that or the cells just spill past the
       // visible area.
       const roomBelow = Math.max(0, window.innerHeight - ar.bottom - gap - margin);
@@ -172,7 +172,7 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
       // down to one row of cells. Capped at the panel ceiling and at
       // the viewport so we never clip off-screen. When the floor
       // exceeds the chosen side's room, the position math below shifts
-      // the panel until it fits — which means it overlaps the anchor
+      // the panel until it fits, which means it overlaps the anchor
       // button. That tradeoff is fine: the user just clicked that
       // button to open the picker, so re-covering it doesn't hide
       // anything they were trying to keep visible.
@@ -185,7 +185,7 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
       if (placeBelow) {
         top = ar.bottom + gap;
         // If the panel would spill past the viewport bottom, shift it
-        // up — even into the anchor's row — so the entire panel sits
+        // up, even into the anchor's row, so the entire panel sits
         // on-screen and stays usable.
         const overflowBottom = top + height - (window.innerHeight - margin);
         if (overflowBottom > 0) top -= overflowBottom;
@@ -205,14 +205,14 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
       setPos({ top, left, width, height, placeBelow });
     }
     layout();
-    // Resize stays — a window resize legitimately changes the
+    // Resize stays, a window resize legitimately changes the
     // viewport bounds, and the picker needs to reflow inside the
     // new frame.
     //
     // Scroll is INTENTIONALLY NOT tracked: chat panels reflow as
     // new messages arrive, which scrolls the anchor button under
     // a stationary picker. If we re-ran layout() on every scroll
-    // event, the picker would chase the anchor mid-click — the
+    // event, the picker would chase the anchor mid-click, the
     // user goes to tap an emoji, a new message arrives, the chat
     // scrolls, the anchor button moves, the picker re-anchors to
     // the new position, and the click lands on a different cell
@@ -334,7 +334,7 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Header zone — toolbar + recents + error notice. `shrink-0`
+      {/* Header zone, toolbar + recents + error notice. `shrink-0`
           pins them at the top so they stay visible while the body
           scrolls (important for the Unicode grid where the user
           might scroll through hundreds of entries and still need the
@@ -378,7 +378,7 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
         ) : null}
       </div>
 
-      {/* Body zone — the actual grid. `flex-1 min-h-0 overflow-y-auto`
+      {/* Body zone, the actual grid. `flex-1 min-h-0 overflow-y-auto`
           clamps the body to the leftover panel height and scrolls
           inside. */}
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -482,7 +482,7 @@ function SheetToolbar({
           );
         })}
       </div>
-      {/* Unicode button — between the scrolling system tabs and the
+      {/* Unicode button, between the scrolling system tabs and the
           Community button. Hidden when the parent didn't pass an
           `onPickUnicode` callback (reactions are sheet-based so the
           ReactionBar omits the prop). Same chip styling as Community
@@ -575,7 +575,7 @@ function RecentRow({
         {recents.slice(0, MAX_VISIBLE_RECENT).map((r) => {
           // Look up the entry's sheet so paid community emoticons
           // surface the same hover-overlay treatment they get in
-          // the sheet-specific grid below — without this, picking
+          // the sheet-specific grid below, without this, picking
           // from Recent would burn coins with no advance warning
           // because the dispatcher routes Recent clicks through the
           // standard spend flow. Sheets pruned from the catalog
@@ -688,7 +688,7 @@ function CommunityIndex({
     <section>
       <header className="keep-section-header flex flex-wrap items-center justify-between gap-1 bg-keep-panel-200/30 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-muted">
         <span>Community sheets</span>
-        {/* Sort control. Three small segmented pills — keeps the
+        {/* Sort control. Three small segmented pills, keeps the
             header compact and lets the viewer flip cheaply. The
             "Top" sort reads from the server-side useCount tally. */}
         <div className="flex items-center gap-0.5 font-normal normal-case tracking-normal">
@@ -744,7 +744,7 @@ function CommunityIndex({
                   by @{s.creatorUsername}
                 </span>
               ) : null}
-              {/* Hover cost / free overlay — matches the per-cell
+              {/* Hover cost / free overlay, matches the per-cell
                   treatment so the entire community surface reads with
                   one visual vocabulary. Paid: currency icon + cost.
                   Free: muted "Free" chip. The default state is bare
@@ -820,7 +820,7 @@ function CommunityGrid({
                   extra owner-only note about who actually pays. A
                   hardcoded "yours, free" used to ride here for any
                   owner-view, which read as the sheet being free even
-                  when the owner had it set to paid — exactly the
+                  when the owner had it set to paid, exactly the
                   contradiction the thumbnail's coin badge revealed. */}
               {sheet.commerceEnabled
                 ? isOwnSheet
@@ -841,7 +841,7 @@ function CommunityGrid({
             // The overlay is keyed off the SHEET's commerce setting
             // alone, not the viewer's relationship to it. The owner
             // viewing their own paid sheet still sees the cost overlay
-            // on hover — it's a preview of what visitors get, which
+            // on hover, it's a preview of what visitors get, which
             // gives the owner a quick way to confirm their commerce
             // toggle is doing what they think. The actual charge path
             // in `pickCommunity` still short-circuits for the owner
@@ -891,7 +891,7 @@ function CommunityGrid({
 }
 
 /* =============================================================
- *  Unicode emoji grid — categorized + searchable. Renders the raw
+ *  Unicode emoji grid, categorized + searchable. Renders the raw
  *  character; the browser's system emoji font handles the glyph,
  *  matching the user's OS rendering (iOS/Android/Win/Linux each
  *  look native). The catalog lives in `@thekeep/shared`

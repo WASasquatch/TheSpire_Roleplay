@@ -2,10 +2,10 @@
 -- messages table to support the topic+reply model that those rooms now
 -- present:
 --
---   `title`      — non-null on top-level "topic" posts (the master thread
+--   `title`     , non-null on top-level "topic" posts (the master thread
 --                  the replies live under). Null on replies and on every
 --                  message in flat-mode rooms.
---   `avatar_url` — snapshot of the author's avatar at send time so a
+--   `avatar_url`, snapshot of the author's avatar at send time so a
 --                  later rename or character delete doesn't blank out
 --                  past forum posts. The forum renderer uses this for
 --                  the avatar slot beside each post; flat-mode chat

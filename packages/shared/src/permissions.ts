@@ -10,13 +10,13 @@
  * client's `me.permissions` array (Phase 2) mirrors the resolved set
  * for UI gating.
  *
- * **Adding a permission:** add it to `PERMISSION_KEYS` (a tuple — the
+ * **Adding a permission:** add it to `PERMISSION_KEYS` (a tuple, the
  * `as const` is what gives `PermissionKey` its precise type), then to
  * `PERMISSION_DESCRIPTIONS` (the matrix tooltip copy), then call
  * `hasPermission(user, "<new_key>")` from the code site, then update
  * the seed defaults in `apps/server/drizzle/0179_permission_grants.sql`
  * (or a follow-up migration). The compiler will surface every
- * missing piece — there's no string-typed back door.
+ * missing piece, there's no string-typed back door.
  *
  * **Masteradmin bypass** is hardcoded in `hasPermission`; the master-
  * admin tier has no row in `role_permission_grants` and the matrix
@@ -384,7 +384,7 @@ export type PermissionGroup =
 /**
  * Keys flagged in the matrix UI with a yellow "privacy-sensitive"
  * chip. Toggling them on should be a deliberate decision, not a
- * casual click. The set is intentionally small — broad flags would
+ * casual click. The set is intentionally small, broad flags would
  * desensitize the warning.
  */
 export const PRIVACY_SENSITIVE_KEYS: ReadonlySet<PermissionKey> = new Set<PermissionKey>([

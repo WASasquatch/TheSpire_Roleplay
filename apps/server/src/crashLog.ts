@@ -1,5 +1,5 @@
 /**
- * Durable crash diagnostics — survive Fly's "10 restarts → purged
+ * Durable crash diagnostics, survive Fly's "10 restarts → purged
  * logs" loop so we can actually see what killed the process.
  *
  * Problem this solves: when a Fly machine crashes 10 times in a
@@ -73,7 +73,7 @@ export interface CrashEntry {
   kind: CrashKind;
   /** Signal name when kind === "signal" (SIGTERM, SIGINT, …). */
   signal?: string;
-  /** Short human-readable message — the Error.message, the migration filename, etc. */
+  /** Short human-readable message, the Error.message, the migration filename, etc. */
   message?: string;
   /** Full stack trace if available. */
   stack?: string;
@@ -98,13 +98,13 @@ function rotateIfTooLarge(): void {
     if (size < ROTATE_AT_BYTES) return;
     try { if (existsSync(PREV_LOG_PATH)) unlinkSync(PREV_LOG_PATH); } catch { /* best effort */ }
     renameSync(CRASH_LOG_PATH, PREV_LOG_PATH);
-  } catch { /* best effort — never throw from inside a crash handler */ }
+  } catch { /* best effort, never throw from inside a crash handler */ }
 }
 
 /**
  * Synchronously append one crash entry. Safe to call from
  * `uncaughtException` / `unhandledRejection` / signal handlers.
- * Never throws — even if the disk is full or the volume is missing,
+ * Never throws, even if the disk is full or the volume is missing,
  * the worst case is a console.error and the original crash still
  * unwinds normally.
  */
@@ -135,7 +135,7 @@ export function writeCrashEntry(
 }
 
 /**
- * Install global handlers. Idempotent — calling twice is fine but
+ * Install global handlers. Idempotent, calling twice is fine but
  * only the first call binds. Returns the resolved log path so the
  * caller can log it on boot for sanity.
  *
@@ -175,14 +175,14 @@ export function installCrashHandlers(): string {
   // behavior, so if we just log and return, the event loop keeps
   // running (Fastify is still listening on the port) and Ctrl+C in
   // dev hangs until tsx sends SIGKILL after ~5s. We exit with code
-  // 0 because a signal-driven shutdown is graceful, not a crash —
+  // 0 because a signal-driven shutdown is graceful, not a crash,
   // distinguishing "Fly stopped me" / "user pressed Ctrl+C" from a
   // real uncaughtException.
   //
   // The setImmediate gives in-flight microtasks (a Fastify response
   // body being written, a pending DB write) a single tick to finish
-  // before the process drops. Not a full graceful drain — Fastify
-  // doesn't know we're shutting down — but enough to avoid cutting
+  // before the process drops. Not a full graceful drain, Fastify
+  // doesn't know we're shutting down, but enough to avoid cutting
   // off a response mid-flush in the common case.
   for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
     process.on(sig, () => {
@@ -199,7 +199,7 @@ export function installCrashHandlers(): string {
  *   boot-start → migration-fail | boot-fail | boot-ok → ... → exit
  *
  * If you see a stretch of `boot-start` entries with no matching
- * `boot-ok`, the server isn't getting to listen — usually a
+ * `boot-ok`, the server isn't getting to listen, usually a
  * migration or top-level import failure.
  */
 export function recordBootStart(): void {
@@ -227,7 +227,7 @@ export function recordBootFailure(err: unknown, context?: Record<string, unknown
  * Read the most-recent-first N entries from both the current log
  * and (if needed) the rotated `.prev` log. Each line is parsed
  * independently; a malformed line is skipped silently rather than
- * tanking the whole read — the log writer should never produce them
+ * tanking the whole read, the log writer should never produce them
  * but a partial write during a power loss could.
  */
 export function readRecentCrashes(limit = 100): CrashEntry[] {

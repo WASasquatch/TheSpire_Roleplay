@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# local-deploy.sh — boot the local stack (Vite + Fastify in dev, or
+# local-deploy.sh, boot the local stack (Vite + Fastify in dev, or
 # Fastify-only serving the built SPA in prod).
 #
 # Wraps `pnpm dev` (or `pnpm --filter @thekeep/server run start` with
@@ -23,7 +23,7 @@
 #      into the repo without the local SQLite file picking them up;
 #      the next server boot then dies on a `no such column` error.
 #      `pnpm db:push` runs before the boot so the local DB always
-#      catches up — cheap when already current (the apply script
+#      catches up, cheap when already current (the apply script
 #      skips files recorded in `_migrations`). `--no-migrate`
 #      skips the step for the rare case where you want to boot
 #      against a deliberately stale DB.
@@ -31,7 +31,7 @@
 #   4. In --prod mode: build the web SPA (`pnpm --filter @thekeep/web
 #      run build`) so apps/web/dist exists, then boot the server with
 #      NODE_ENV=production. The server's fastify-static plugin serves
-#      the built dist directly — no Vite, no proxy. This mirrors what
+#      the built dist directly, no Vite, no proxy. This mirrors what
 #      Fly.io runs and is the right setup for testing production-only
 #      code paths (CSP nonces, prerendered SEO, asset hashing,
 #      WebSocket upgrade without Vite in the middle, etc.).
@@ -48,8 +48,8 @@
 #   bash local-deploy.sh               # same, explicit bash
 #
 # Ports:
-#   dev   — Vite at http://localhost:5173 (proxies API to Fastify on 3001)
-#   prod  — Fastify on http://localhost:3001 serves everything itself
+#   dev  , Vite at http://localhost:5173 (proxies API to Fastify on 3001)
+#   prod , Fastify on http://localhost:3001 serves everything itself
 
 set -euo pipefail
 
@@ -111,7 +111,7 @@ fi
 if [[ "$MODE" == "prod" ]]; then
   # Rebuild the SPA every time so the served dist always matches the
   # current source. Skipping the rebuild would silently serve stale
-  # JS/CSS on the next boot — the kind of "I changed it but nothing's
+  # JS/CSS on the next boot, the kind of "I changed it but nothing's
   # different" footgun that's worse than a few extra seconds here.
   echo "==> Building web SPA (pnpm --filter @thekeep/web run build)..."
   pnpm --filter @thekeep/web run build

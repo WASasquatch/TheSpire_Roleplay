@@ -1,5 +1,5 @@
 /**
- * Code-region segmentation — shared between the server (inline-command
+ * Code-region segmentation, shared between the server (inline-command
  * expansion) and the client (mention splitter, forum block pre-pass) so
  * "what counts as code" is decided in exactly one place. Markdown
  * interpreters that follow have to agree on which character ranges are
@@ -8,14 +8,14 @@
  * `<code>` styling implied it shouldn't.
  *
  * Three flavors recognized:
- *   ```fenced``` — triple-backtick fence, may span newlines. An optional
+ *   ```fenced```, triple-backtick fence, may span newlines. An optional
  *                  language hint after the opening ``` (until the next
  *                  newline) is part of the code segment so it round-trips
  *                  verbatim. Unmatched opener falls through as text so a
  *                  stray ``` doesn't swallow the rest of the message.
- *   `inline`     — single-backtick span, same-line only. Empty (` `` `)
+ *   `inline`    , single-backtick span, same-line only. Empty (` `` `)
  *                  and unmatched openers fall through as text.
- *   verification — server-authored inline-command output bracketed by
+ *   verification, server-authored inline-command output bracketed by
  *                  the U+2063 markers (see ./inlineMark.ts). Treated as
  *                  opaque for the purpose of mention extraction so the
  *                  `@name` inside "( rolls 🎲 1d20: 12 )" can't be
@@ -27,7 +27,7 @@
  * tokenized as three single-backtick spans.
  *
  * Backslash escapes for the backtick itself are deliberately NOT
- * supported here — they'd add complexity for a rare case and aren't
+ * supported here, they'd add complexity for a rare case and aren't
  * part of the user-facing escape contract for mentions / commands /
  * markdown (which all rely on this utility to identify code).
  */
@@ -40,13 +40,13 @@ export interface CodeSegment {
 }
 export type CodeMaskSegment = TextSegment | CodeSegment;
 
-/** U+2063 — the opener/closer for verification markers. Cheap fast-path
+/** U+2063, the opener/closer for verification markers. Cheap fast-path
  *  check before reaching for the full {@link VMARK_SPAN_RE}. Kept here as
  *  a local constant so this module stays import-free (avoids the
  *  cross-file load order quirks the shared package has hit in the past). */
 const VMARK_SEPARATOR = "⁣";
 
-/** Inline-marker span pattern — duplicated from ./inlineMark.ts so this
+/** Inline-marker span pattern, duplicated from ./inlineMark.ts so this
  *  module has zero internal dependencies. If the bracket choice (or the
  *  optional `|encoded-css(|encoded-color)?` payload) changes in
  *  inlineMark.ts, this regex needs to follow. */
@@ -66,7 +66,7 @@ export function splitOnCode(body: string): CodeMaskSegment[] {
   };
 
   while (i < len) {
-    // Verification marker — the server's strip-before-expand pass means
+    // Verification marker, the server's strip-before-expand pass means
     // any `⁣` we see here belongs to a real expansion. Capture the
     // whole span (marker + content + closing marker) as a single code
     // segment so the downstream mention/parser passes treat it as
@@ -81,7 +81,7 @@ export function splitOnCode(body: string): CodeMaskSegment[] {
         textStart = i;
         continue;
       }
-      // Stray / malformed marker — emit as text and keep scanning so
+      // Stray / malformed marker, emit as text and keep scanning so
       // the user still sees the literal characters instead of a silent
       // truncation.
       i += 1;
@@ -99,13 +99,13 @@ export function splitOnCode(body: string): CodeMaskSegment[] {
         textStart = i;
         continue;
       }
-      // Unmatched opening fence — fall through and let the rest render
+      // Unmatched opening fence, fall through and let the rest render
       // as plain text so users see what they typed.
       i += 3;
       continue;
     }
 
-    // Inline `code` — single-line, requires a non-empty body. A backtick
+    // Inline `code`, single-line, requires a non-empty body. A backtick
     // followed by another backtick (empty span) or a newline before the
     // close means the opener was incidental; emit it as text.
     if (body[i] === "`") {
@@ -118,7 +118,7 @@ export function splitOnCode(body: string): CodeMaskSegment[] {
         textStart = i;
         continue;
       }
-      // No valid close on this line — leave the backtick as text and
+      // No valid close on this line, leave the backtick as text and
       // resume scanning from the next character.
       i += 1;
       continue;

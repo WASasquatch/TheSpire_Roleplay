@@ -17,9 +17,9 @@ interface ModalProps {
   zIndex?: number;
   /**
    * Layout for the backdrop wrapper.
-   *   "centered" (default) — flex-centered with consistent padding on
+   *   "centered" (default), flex-centered with consistent padding on
    *     every size.
-   *   "mobile-fullscreen" — child fills the viewport edge-to-edge on
+   *   "mobile-fullscreen", child fills the viewport edge-to-edge on
    *     small screens (no padding); centers with padding on md+. Used
    *     by ProfileModal and WorldViewerModal so the in-header close
    *     button is reachable on mobile without a backdrop margin.
@@ -28,7 +28,7 @@ interface ModalProps {
   /**
    * Inline-style escape hatch for the backdrop div (the click-to-close
    * surface). Used by ProfileModal to paint the owner's chosen public-
-   * profile background image — the backdrop CSS gets merged onto the
+   * profile background image, the backdrop CSS gets merged onto the
    * same div that owns the dismiss handler, so the override changes
    * how the backdrop looks without breaking how it behaves (clicks
    * still bubble to `onClose`). `zIndex` always wins over anything
@@ -47,7 +47,7 @@ const VARIANT_CLASS = {
   // Content modals: edge-to-edge fill on mobile (no padding, child
   // expands via `w-full h-full`), then centered with breathing room
   // on `lg+`. Pinned to `lg` so it matches the rest of the chat shell's
-  // mobile/desktop boundary — at 768–1023px we still want the modal
+  // mobile/desktop boundary, at 768–1023px we still want the modal
   // to behave like mobile (the chat itself is in drawer-rail mode
   // there). Pair with the `MODAL_CARD_CONTENT` helper below for the
   // standard 75vw desktop sizing.
@@ -61,7 +61,7 @@ const VARIANT_CLASS = {
  * actually get the proportional width instead of a 1000px box.
  *
  * Each modal still owns its own background / border / shadow class
- * (themes differ between parchment-card and bg-keep-bg shells) —
+ * (themes differ between parchment-card and bg-keep-bg shells),
  * this constant is purely the sizing recipe. Spread it into the
  * card's className alongside whatever decoration the modal uses.
  *
@@ -69,7 +69,7 @@ const VARIANT_CLASS = {
  *
  * NOT for small input prompts (room password, "new character" name
  * entry, etc.). Those keep their own tight `w-[20rem]` / `max-w-md`
- * sizing — a 75vw modal asking "what's the name?" reads as
+ * sizing, a 75vw modal asking "what's the name?" reads as
  * disproportionate.
  */
 export const MODAL_CARD_CONTENT =
@@ -110,7 +110,7 @@ export function Modal({
   // `filter`, `backdrop-filter`, `perspective`, etc.) gets clipped
   // to that ancestor's box, since those properties make the
   // ancestor the containing block for fixed descendants. This bit
-  // the nested EmoticonSubmissionModal in glass theme — the
+  // the nested EmoticonSubmissionModal in glass theme, the
   // dashboard's `.keep-frame` has `backdrop-filter: blur(...)`,
   // so the submission modal's `fixed inset-0` rendered only over
   // the dashboard card and its stacking context trapped the

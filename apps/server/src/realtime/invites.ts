@@ -10,7 +10,7 @@ export async function invite(ctx: CommandContext, username: string): Promise<voi
     return;
   }
 
-  // Anyone currently in the room can invite — owners and mods aren't
+  // Anyone currently in the room can invite, owners and mods aren't
   // always around when a friend needs to be pulled into a private
   // session. The caller's presence in the room is already implicit
   // via `ctx.roomId` (commands only dispatch against the socket's

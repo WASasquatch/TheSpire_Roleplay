@@ -1,16 +1,16 @@
--- Neon Sign — flip the glow-pulse so the tube SITS at full brightness
+-- Neon Sign, flip the glow-pulse so the tube SITS at full brightness
 -- and only dips by a hair at two brief moments per cycle.
 --
 -- The previous keyframes (0089) walked 1.0 → 0.85 → 0.95 → 0.88 → 1.0,
 -- which with ease-in-out interpolation meant the glow was below 1.0
--- for the majority of the 1.7s cycle — the visual average sat
+-- for the majority of the 1.7s cycle, the visual average sat
 -- around 0.91, so the bulb LOOKED mostly dim with occasional
 -- bright moments. Wrong polarity for an energized tube.
 --
 -- Now: hold `--ns-glow-scale` at 1.0 across long stretches, with
 -- two short ease-in/out dips to 0.96 and 0.97 (vs the old 0.85 /
--- 0.88). Each dip is a hair — barely a 3–4% reduction in halo
--- radius — and the time spent at-full is the dominant state.
+-- 0.88). Each dip is a hair, barely a 3–4% reduction in halo
+-- radius, and the time spent at-full is the dominant state.
 -- Cycle stretched to 2.4s so the two dips feel like irregular
 -- breaths rather than a metronome.
 

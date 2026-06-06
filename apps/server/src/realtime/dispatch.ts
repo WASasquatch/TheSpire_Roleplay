@@ -93,7 +93,7 @@ export async function dispatchChatInput(args: {
   // Admin-configurable caps. Forum posts get a separate (typically
   // larger) ceiling because long-form forum bodies routinely exceed
   // chat's cap. We pick the ceiling here so a runaway paste hits the
-  // right limit early — the second forum-only post-length check
+  // right limit early, the second forum-only post-length check
   // farther down is the "did this specific forum send fit?" gate,
   // while this one is the "is this input even sane?" pre-filter.
   const settings = await getSettings(db);
@@ -116,7 +116,7 @@ export async function dispatchChatInput(args: {
   // budget; everyone else uses the default cap. The limiter applies to ALL
   // chat:input - slash commands included - because a flood of /me or /roll
   // is just as disruptive as a flood of plain text.
-  // Both admin tiers + mods bypass the rate limit — moderation
+  // Both admin tiers + mods bypass the rate limit, moderation
   // flurries (rapid kicks, mutes, /announce sequences) shouldn't get
   // throttled. Adding masteradmin via isAdminRole keeps both admin
   // tiers exempt without enumerating them here.
@@ -188,7 +188,7 @@ export async function dispatchChatInput(args: {
   //   - flat rooms: standard chronological chat (the historic behavior).
   //   - nested rooms: forum-style. Plain sends MUST be either a new
   //     topic (threadTitle set) or a reply under an existing topic
-  //     (replyToId set). Bare chat-style sends are rejected — the
+  //     (replyToId set). Bare chat-style sends are rejected, the
   //     composer enforces this client-side, but the server is
   //     authoritative.
   if (parsed.command === null) {
@@ -236,7 +236,7 @@ export async function dispatchChatInput(args: {
         return;
       }
       // Reply path. The parent must exist, be in the same room, and
-      // itself be a top-level topic (not a reply to a reply — forum
+      // itself be a top-level topic (not a reply to a reply, forum
       // structure is two-level: topic + flat reply chain). We
       // snapshot the parent author's name + a body excerpt for the
       // inline quote preview, same as the /reply slash command does.
@@ -256,7 +256,7 @@ export async function dispatchChatInput(args: {
           });
           return;
         }
-        // Deleted topics are hidden from end-user views — but a stale
+        // Deleted topics are hidden from end-user views, but a stale
         // client (or a determined one) could still submit a reply to a
         // remembered id. Reject with the same code the client uses for
         // missing-topics so the user sees a graceful message.
@@ -267,7 +267,7 @@ export async function dispatchChatInput(args: {
           });
           return;
         }
-        // Locked topics reject new replies for users — but holders of
+        // Locked topics reject new replies for users, but holders of
         // `bypass_topic_lock` (mod + admin by default seed) post past
         // the gate so they can drop verdicts / notices in the same
         // thread the lock applies to. Mirrors the slash-command path
@@ -289,7 +289,7 @@ export async function dispatchChatInput(args: {
         });
         return;
       }
-      // Neither a topic nor a reply — forum rooms don't accept loose
+      // Neither a topic nor a reply, forum rooms don't accept loose
       // chat. The composer is supposed to disable in this state; this
       // is the server's belt-and-suspenders.
       socket.emit("error:notice", {
@@ -340,7 +340,7 @@ export async function dispatchChatInput(args: {
   // mirrors the plain-reply path above; on any failure (room is
   // flat, parent missing/deleted/locked, parent is itself a reply)
   // we just leave replyContext undefined and the message goes
-  // through unchanged — that's the safe degrade for a stale client
+  // through unchanged, that's the safe degrade for a stale client
   // submitting against a topic the user can no longer reply to.
   let replyContext: CommandContext["replyContext"] | undefined;
   if (replyToId) {
@@ -401,8 +401,8 @@ export async function dispatchChatInput(args: {
  * Renamed from the original `hasPermission` to avoid a name collision
  * with `auth/permissions.ts:hasPermission`, which is the granular
  * (user, PermissionKey)-shaped check. The two helpers do unrelated
- * things — `hasRoleAtLeast` answers "is this user at least an admin?",
- * `hasPermission` answers "does this user have `kick_user`?" — so the
+ * things, `hasRoleAtLeast` answers "is this user at least an admin?",
+ * `hasPermission` answers "does this user have `kick_user`?", so the
  * rename trades a misleading shared name for two unambiguous ones.
  */
 function hasRoleAtLeast(user: SessionUser, required: Role): boolean {

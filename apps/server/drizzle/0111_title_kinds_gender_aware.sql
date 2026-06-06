@@ -16,19 +16,19 @@
 --      profile the chip is rendering on. So /request parent <child>
 --      lands "Father of Kaal" (or "Mother of Kaal") on the
 --      requester's profile and "Son of WAS" (or "Daughter of WAS")
---      on the recipient's. Exclusive flag is OFF — a character can
+--      on the recipient's. Exclusive flag is OFF, a character can
 --      legitimately have multiple parents and multiple children.
 --
 --   2. Retrofit "sibling" to be gender-aware. Pre-0111 it shipped
 --      a static "Sibling of {target}" on both sides; the same
 --      catalog row now reads "Brother of {target}" / "Sister of
 --      {target}" / "Sibling of {target}" depending on the viewer's
---      gender. Symmetric flag stays ON — both sides render with
+--      gender. Symmetric flag stays ON, both sides render with
 --      the same template, but the substitution picks per-side
 --      automatically.
 --
 -- Existing accepted/pending sibling rows continue to render
--- correctly without any data-row migration — only the format
+-- correctly without any data-row migration, only the format
 -- string changed; the per-relationship rows are unaffected.
 
 INSERT OR IGNORE INTO `title_kinds`

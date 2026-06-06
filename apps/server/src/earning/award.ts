@@ -1,5 +1,5 @@
 /**
- * Earning award engine — single entry point for crediting XP +
+ * Earning award engine, single entry point for crediting XP +
  * Currency onto a pool, writing the ledger row, recomputing rank
  * placement, and emitting the socket events.
  *
@@ -8,10 +8,10 @@
  * ledger ↔ earning ↔ notifications invariants live in one place.
  *
  * Higher-level helpers:
- *   - `awardForMessage` — the addMessage hook. Handles routing rule
+ *   - `awardForMessage`, the addMessage hook. Handles routing rule
  *     + multi-character fan-out + body floor + source toggles.
- *   - `awardForForum`  — forum topic / reply crediting.
- *   - `creditPool`     — the primitive every other helper composes.
+ *   - `awardForForum` , forum topic / reply crediting.
+ *   - `creditPool`    , the primitive every other helper composes.
  *
  * All writes are best-effort from the caller's perspective: failures
  * are logged but never thrown out of the engine, so a flaky earning
@@ -57,7 +57,7 @@ export interface CreditPoolInput {
   currencyDelta: number;
   reason: string;
   metadata?: Record<string, unknown> | null;
-  /** Master account id used to emit `earning:earned` / `earning:rankup` to the user's live sockets — same id for both scopes. */
+  /** Master account id used to emit `earning:earned` / `earning:rankup` to the user's live sockets, same id for both scopes. */
   notifyUserId: string;
 }
 
@@ -68,8 +68,8 @@ export interface CreditPoolInput {
  *
  * Idempotency: the caller is responsible for de-duplication. A second
  * call with the same `reason` + `metadata` writes a second ledger row.
- * (Anti-abuse caps for crediting paths that need them — daily-cap
- * social, periodic presence — are enforced in their respective
+ * (Anti-abuse caps for crediting paths that need them, daily-cap
+ * social, periodic presence, are enforced in their respective
  * helpers, not here.)
  *
  * Zero deltas are tolerated and short-circuit before the earning
@@ -84,7 +84,7 @@ export async function creditPool(
   try {
     // ALL state mutations live inside a single sync sqlite transaction
     // so two concurrent credits can't lose a write. Earlier versions
-    // did `read prior → compute new → write` outside a transaction —
+    // did `read prior → compute new → write` outside a transaction,
     // a classic read-modify-write race that lost increments under
     // bursty load (presence sweep, rapid forum replies). The
     // transaction below holds sqlite's write lock across the entire
@@ -113,7 +113,7 @@ export async function creditPool(
       const prior: PriorEarning = readPriorEarningSync(tx, input.scope, input.ownerId);
 
       // 3. Compute new totals + rank placement using pre-loaded rank/tier
-      //    rows (sync helpers — the async `resolveRankForXp` can't run
+      //    rows (sync helpers, the async `resolveRankForXp` can't run
       //    inside the transaction callback).
       const newXp = prior.xp + input.xpDelta;
       const newCurrency = Math.max(0, prior.currency + input.currencyDelta);
@@ -125,7 +125,7 @@ export async function creditPool(
         maxTierEverHeld: prior.maxTierEverHeld,
       }, placed);
 
-      // 4. Single UPDATE — xp, currency, rank, tier, peak in one
+      // 4. Single UPDATE, xp, currency, rank, tier, peak in one
       //    write. Atomic with the read above thanks to the
       //    transaction.
       if (input.scope === "user") {
@@ -150,7 +150,7 @@ export async function creditPool(
         }).where(eq(characterEarning.characterId, input.ownerId)).run();
       }
 
-      // 5. Ledger row — included in the same transaction so a crash
+      // 5. Ledger row, included in the same transaction so a crash
       //    between earning update and ledger insert can't lose the
       //    audit row.
       tx.insert(earningLedger).values({
@@ -167,7 +167,7 @@ export async function creditPool(
     });
 
     // 6. Post-commit: rank crossing detection + notification + socket
-    //    emit. These don't need to be transactional with the credit —
+    //    emit. These don't need to be transactional with the credit,
     //    a missed emit is recoverable on the next dashboard fetch,
     //    and the persisted notification row is the durable record.
     const { prior, newXp, newCurrency, placed, peak } = txResult;
@@ -222,7 +222,7 @@ export async function creditPool(
       }
     }
   } catch (err) {
-    // Log only — never surface to the caller. A earning-write failure
+    // Log only, never surface to the caller. A earning-write failure
     // must not break the message persistence path.
     // eslint-disable-next-line no-console
     console.error("[earning] creditPool failed", { input, err });
@@ -276,7 +276,7 @@ export interface AwardForMessageInput {
   db: Db;
   io: Io;
   userId: string;
-  /** Snapshot from the persisted message — the character the author was attached as at send time. */
+  /** Snapshot from the persisted message, the character the author was attached as at send time. */
   characterId: string | null;
   /** User's master-row active_character_id, used as the fallback for sockets without a per-tab override when fanning out. */
   defaultActiveCharacterId: string | null;
@@ -289,12 +289,12 @@ export interface AwardForMessageInput {
 /**
  * Award entry for a chat message. Called from `addMessage` after the
  * row has been persisted + emitted, on a fire-and-forget basis (the
- * caller `void`s the promise — failures stay inside the engine).
+ * caller `void`s the promise, failures stay inside the engine).
  *
  * Decides:
- *   1. Body floor — short messages award nothing.
+ *   1. Body floor, short messages award nothing.
  *   2. Source-kind config lookup (`say` / `action` / `whisper`).
- *   3. Per-pool enabled flags — XP and Currency are toggled
+ *   3. Per-pool enabled flags, XP and Currency are toggled
  *      independently per source.
  *   4. Routing (IC → character fan-out, OOC → master).
  *   5. Multi-character divisor application when fanning out.
@@ -351,7 +351,7 @@ export async function awardForMessage(input: AwardForMessageInput): Promise<void
     // with no bonus), skip the credit + ledger write entirely.
     // Writing a ledger row for a 0/0 award would just be noise.
     if (xp === 0 && currency === 0) {
-      // Don't update the echo cache here — only legitimately-awarded
+      // Don't update the echo cache here, only legitimately-awarded
       // messages prime it, see helper docstring.
       return;
     }
@@ -452,7 +452,7 @@ export async function awardForForum(input: {
 /**
  * Award entry for the presence sweep. Credits a single block tick. The
  * caller (`sweeps.ts`) handles cap-per-day enforcement and the IC vs
- * OOC scope decision — this helper just performs the credit.
+ * OOC scope decision, this helper just performs the credit.
  */
 export async function awardForPresence(input: {
   db: Db;

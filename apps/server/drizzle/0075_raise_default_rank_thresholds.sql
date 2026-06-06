@@ -2,7 +2,7 @@
 -- climbing the ladder takes weeks/months/years instead of "a single
 -- session". The starter values from 0065 were tuned during early
 -- prototyping and turned out to let active users hit Distinguished
--- inside a week of normal posting — not the rare achievement that
+-- inside a week of normal posting, not the rare achievement that
 -- name implies.
 --
 -- New ladder (for a moderately active user earning ~250-350 XP/day

@@ -128,7 +128,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const webDistPath = resolve(__dirname, "..", "..", "web", "dist");
 
 /**
- * Persistent uploads directory — sibling of the SQLite database file.
+ * Persistent uploads directory, sibling of the SQLite database file.
  * On Fly.io both live on the mounted /data volume so admin-uploaded
  * logos survive a container restart. The directory is created on
  * demand by the upload route; we just resolve the path here so the
@@ -168,7 +168,7 @@ async function main() {
   // 172.16.x.x internal address and the per-IP rate limiter
   // collapses everyone into one bucket. Safe to leave on for
   // Fly because the machine's listening port is only reachable
-  // through the edge proxy — there's no path for a direct client
+  // through the edge proxy, there's no path for a direct client
   // to spoof X-Forwarded-For. Local dev has no proxy hop at all,
   // so `req.ip` cleanly falls back to the socket remote address.
   const app = Fastify({
@@ -208,21 +208,21 @@ async function main() {
 
   /**
    * Baseline security headers applied to every response. The strict CSP
-   * (with a per-request nonce) lives on the HTML routes below — these
+   * (with a per-request nonce) lives on the HTML routes below, these
    * lighter directives belong on JSON + static-asset responses too so
    * an attacker can't bypass them by targeting a non-HTML endpoint:
    *
-   *   X-Content-Type-Options: nosniff — block MIME confusion attacks
+   *   X-Content-Type-Options: nosniff, block MIME confusion attacks
    *     where the browser is tricked into rendering JSON as HTML.
-   *   X-Frame-Options: DENY — clickjacking defense; older-browser
+   *   X-Frame-Options: DENY, clickjacking defense; older-browser
    *     analogue of the CSP `frame-ancestors 'none'` we set on HTML.
-   *   Referrer-Policy: strict-origin-when-cross-origin — leak only
+   *   Referrer-Policy: strict-origin-when-cross-origin, leak only
    *     the origin (not the full URL) when navigating to a different
    *     site. Sane modern default.
-   *   Cross-Origin-Opener-Policy: same-origin — isolates this origin
+   *   Cross-Origin-Opener-Policy: same-origin, isolates this origin
    *     from cross-origin window references; pairs with the strict
    *     CSP to defeat Spectre-class side-channels.
-   *   Permissions-Policy — opt out of every powerful browser API we
+   *   Permissions-Policy, opt out of every powerful browser API we
    *     don't use, so an admin-injected analytics script or a future
    *     bug can't quietly start using the camera/mic/geolocation/etc.
    *     `interest-cohort=()` opts out of Chrome's FLoC tracking.
@@ -270,7 +270,7 @@ async function main() {
   //
   // `private` keeps shared caches (corporate proxies, ISPs) from holding
   // user-scoped JSON; `no-store` forbids any cache from retaining it at
-  // all. Cheap to set — one header per request — and we're not relying on
+  // all. Cheap to set, one header per request, and we're not relying on
   // cacheable APIs anywhere.
   app.addHook("onSend", async (_req, reply, payload) => {
     if (!reply.getHeader("cache-control")) {
@@ -299,7 +299,7 @@ async function main() {
   const baseApp = app as unknown as FastifyInstance;
   await registerAuthRoutes(baseApp, db);
   await registerCommandsRoutes(baseApp, db, registry);
-  // Public marquee banners — unauthenticated; the splash + chat
+  // Public marquee banners, unauthenticated; the splash + chat
   // shell paint these for every viewer. Admin CRUD lives behind
   // /admin/announcements/* via the admin route module.
   await registerAnnouncementsRoutes(baseApp, db);
@@ -430,11 +430,11 @@ async function main() {
       // randomized slice of open worlds via /worlds/featured.
       featuredWorldsEnabled: s.featuredWorldsEnabled,
       // Independent toggle for the rolling 24h chat message count
-      // on the splash. Not gated by activityFeedsEnabled — either
+      // on the splash. Not gated by activityFeedsEnabled, either
       // can be on alone, and the splash renders only the sections
       // whose toggle is on. When both are on they share one row.
       splashMessages24hEnabled: s.splashMessages24hEnabled,
-      // Default theme STYLE — orthogonal to defaultTheme above. Users
+      // Default theme STYLE, orthogonal to defaultTheme above. Users
       // without a per-user style override inherit this. Seeded default
       // is 'medieval'; the catalog also includes 'modern' and 'scifi'.
       defaultStyleKey: s.defaultStyleKey,
@@ -448,7 +448,7 @@ async function main() {
   });
 
   /**
-   * Public rules JSON endpoint — returns the admin-configured house
+   * Public rules JSON endpoint, returns the admin-configured house
    * rules and the privacy/safety notice.
    *
    * Path moved from `/rules` to `/api/rules` in this revision because
@@ -478,12 +478,12 @@ async function main() {
   // idle ghost finally times out. We don't pass io through `registerIdleGhost`
   // every call because the timer outlives the call that scheduled it.
   setGhostSweepIo(io);
-  // Phase 4 typing indicator — kicks off the periodic sweep that
+  // Phase 4 typing indicator, kicks off the periodic sweep that
   // expires stale typer entries and re-broadcasts shrunken sets.
   // Idempotent if called more than once.
   startTypingTracker(io, db);
 
-  // Zombie-room sweep. Fires once 60s after boot — long enough that
+  // Zombie-room sweep. Fires once 60s after boot, long enough that
   // every client that was in a user-created room when the server
   // restarted has had a chance to reconnect and re-occupy it, but
   // not so long that the rooms tree drags around a dead room for
@@ -491,9 +491,9 @@ async function main() {
   // live sockets at sweep time gets archived (its config row
   // survives for resurrection on a fresh /create with the same
   // name). Without this, a user-created room whose owner closed
-  // the tab AND never came back inside the idle-grace window — or
+  // the tab AND never came back inside the idle-grace window, or
   // a room that was active when the server last shut down and
-  // nobody returned to — would linger in the tree forever as a
+  // nobody returned to, would linger in the tree forever as a
   // ghost entry with (0) occupants. The runtime triggers
   // (expireIfEmpty on exit / room-switch / ghost-sweep /
   // consume-pending-disconnect) only fire when there's a live
@@ -509,9 +509,9 @@ async function main() {
           .where(and(eq(rooms.isSystem, false), isNull(rooms.archivedAt)));
         for (const r of candidates) {
           try { await expireIfEmpty(io, db, r.id); }
-          catch { /* swallow — one bad row shouldn't stop the sweep */ }
+          catch { /* swallow, one bad row shouldn't stop the sweep */ }
         }
-      } catch { /* swallow — sweep failure shouldn't crash boot */ }
+      } catch { /* swallow, sweep failure shouldn't crash boot */ }
     })();
   }, ZOMBIE_SWEEP_DELAY_MS);
 
@@ -550,7 +550,7 @@ async function main() {
   // Serve admin-uploaded files (logos today, possibly more later).
   // Lives on the persistent data volume so deploys don't lose them.
   // Filenames are content-hashed by the upload route, so the
-  // 1-year immutable cache is safe — a replaced logo gets a new
+  // 1-year immutable cache is safe, a replaced logo gets a new
   // filename + URL, busting any stale cache automatically. Registered
   // BEFORE the SPA static below so /uploads/* never falls into the
   // SPA fallback in prod.
@@ -572,7 +572,7 @@ async function main() {
   });
 
   /**
-   * Socket auth handshake — pulls the session id from the client's
+   * Socket auth handshake, pulls the session id from the client's
    * `auth: { token: ... }` handshake field. That field is set by the
    * web client from sessionStorage, so a fresh tab without a token
    * gets rejected at connect time and the user lands back on the
@@ -580,7 +580,7 @@ async function main() {
    *
    * We accept the token at two well-known shapes: `auth.token` (our
    * canonical) or the legacy `auth.sid` (Socket.io's "set whatever
-   * key you like" surface — kept tolerant for future clients).
+   * key you like" surface, kept tolerant for future clients).
    */
   io.use(async (socket, next) => {
     try {
@@ -607,7 +607,7 @@ async function main() {
       // `intent === "login"` flags this connection as the one created
       // immediately after a fresh login / register submit. The client
       // consumes a one-shot sessionStorage marker so this is set on
-      // exactly the first socket connect after a form submit — never
+      // exactly the first socket connect after a form submit, never
       // on socket reconnects, never on page reloads. The join broadcast
       // gates the "X has connected." chat message on this flag so
       // mobile suspend / network blip / tab reload no longer spam the
@@ -615,18 +615,18 @@ async function main() {
       (socket.data as { loginIntent?: boolean }).loginIntent = a?.intent === "login";
       // Per-tab active character. Two seed sources, in order of priority:
       //
-      //   1. `auth.tabCharId` — the client's persisted per-tab identity,
+      //   1. `auth.tabCharId`, the client's persisted per-tab identity,
       //      replayed on every (re)connect from sessionStorage. The
       //      string value is a character id; `null` is an explicit OOC
       //      choice; undefined/missing means "no override, fall back to
       //      the DB". This is the multi-tab safety net: without it, a
       //      reconnect would re-seed from `users.activeCharacterId`,
-      //      which a sibling tab may have mutated — the reconnected tab
+      //      which a sibling tab may have mutated, the reconnected tab
       //      would then start posting messages tagged with the sibling
       //      tab's character even though its own UI still shows the
       //      original identity.
       //
-      //   2. `user.activeCharacterId` — the DB default, used on the
+      //   2. `user.activeCharacterId`, the DB default, used on the
       //      very first connect of a new tab before any /char has been
       //      issued. Always falls through to OOC when the user has no
       //      character set.
@@ -634,7 +634,7 @@ async function main() {
       // We validate any string id against `characters` to ensure the
       // user actually owns it (defensive: handshake auth is client-
       // supplied, so don't trust the id blind). Invalid ids degrade
-      // silently to the DB default — same behavior as a stale tab
+      // silently to the DB default, same behavior as a stale tab
       // whose character was deleted by another session.
       let tabCharId: string | null = user.activeCharacterId;
       if (typeof a?.tabCharId === "string") {
@@ -647,7 +647,7 @@ async function main() {
           tabCharId = c.id;
         }
       } else if (a?.tabCharId === null) {
-        // Explicit OOC handshake — the user's last action on this tab
+        // Explicit OOC handshake, the user's last action on this tab
         // was /char clear (or never switched in), and they want to
         // stay master-voiced even though the DB may default elsewhere.
         tabCharId = null;
@@ -658,7 +658,7 @@ async function main() {
       // puts it back where IT was, instead of inheriting whatever
       // `users.lastRoomId` happens to hold (an account-global slot that
       // multiple tabs on different devices race to write). Stored raw
-      // here — the connection handler validates existence /
+      // here, the connection handler validates existence /
       // public-vs-private / ban state before joining.
       if (typeof a?.tabRoomId === "string" && a.tabRoomId.length > 0) {
         (socket.data as { tabRoomId?: string }).tabRoomId = a.tabRoomId;
@@ -689,7 +689,7 @@ async function main() {
     //
     // Multi-tab sync: if this user already has another live socket parked
     // in some room, the new tab should follow that room instead of the
-    // landing default — otherwise opening a second tab silently drops you
+    // landing default, otherwise opening a second tab silently drops you
     // into The_Spire while your other tab is still in (say) Tavern. Pick
     // any sibling that's currently in a room: ties are unlikely (a single
     // user usually has one focused room) and harmless (siblings are by
@@ -720,11 +720,11 @@ async function main() {
     // Room-placement priority on (re)connect, highest wins:
     //
     //   1. This tab's per-tab cache (`socket.data.tabRoomId` from the
-    //      handshake) — replayed by the client from sessionStorage on
+    //      handshake), replayed by the client from sessionStorage on
     //      every reconnect. Survives server restarts, mobile suspend,
     //      and page reloads. Account-isolated: a desktop tab in Tavern
     //      and a phone tab in Library each keep their own value.
-    //      MUST run before the sibling-follow check below — otherwise a
+    //      MUST run before the sibling-follow check below, otherwise a
     //      mass reconnect (server restart, network blip on a desktop
     //      with several tabs open) collapses every tab onto whichever
     //      one's handshake landed first, because that one had no
@@ -732,12 +732,12 @@ async function main() {
     //      remembered room is always the correct answer when it has
     //      one; sibling-follow is only meaningful for a tab that has
     //      no memory of its own.
-    //   2. Sibling tab in this same browser — if there's another live
+    //   2. Sibling tab in this same browser, if there's another live
     //      socket for this user AND this tab had no remembered room,
     //      follow the sibling. Multi-tab UX: opening a brand-new tab
     //      silently lands you next to your existing tab instead of in
     //      the canonical landing.
-    //   3. `users.lastRoomId` — account-global slot updated on every
+    //   3. `users.lastRoomId`, account-global slot updated on every
     //      join. Useful for brand-new tabs on a new device that have
     //      no sessionStorage to replay yet AND no live siblings.
     //   4. The canonical landing (The_Spire / system-flagged default).
@@ -808,18 +808,18 @@ async function main() {
         Object.assign(user, fresh);
         // Identity resolution for this send, in priority order:
         //
-        //   1. `payload.asCharacterId` — the client's per-send claim
+        //   1. `payload.asCharacterId`, the client's per-send claim
         //      pulled from its React state. This is the source of
         //      truth: it's what the user's UI says they're voicing
         //      RIGHT NOW. Validated against the user's owned
         //      characters; invalid (deleted / not owned) degrades
         //      silently to (2) so a stale tab doesn't get its send
         //      rejected.
-        //   2. `socket.data.tabCharId` — the socket-scoped override
+        //   2. `socket.data.tabCharId`, the socket-scoped override
         //      from the handshake / last /char on this socket. The
         //      legacy path, kept as a fallback for older clients that
         //      don't ship `asCharacterId`.
-        //   3. `fresh.activeCharacterId` — the DB default, applied
+        //   3. `fresh.activeCharacterId`, the DB default, applied
         //      when neither of the above is set.
         //
         // Without (1), a multi-tab race could let the server hand
@@ -847,7 +847,7 @@ async function main() {
           // Explicit OOC claim.
           resolvedCharId = null;
         } else {
-          // No claim — legacy path (tabCharId fallback).
+          // No claim, legacy path (tabCharId fallback).
           const tabCharId = (socket.data as { tabCharId?: string | null }).tabCharId;
           if (tabCharId !== undefined) resolvedCharId = tabCharId;
         }
@@ -865,7 +865,7 @@ async function main() {
         // target room. Race condition: an admin can delete the category
         // between the user opening the picker and submitting. Rather
         // than reject the send, drop to null and let the message land
-        // in the "Uncategorized" bucket — discarding the message would
+        // in the "Uncategorized" bucket, discarding the message would
         // be a worse failure mode.
         let threadCategoryId: string | null = null;
         if (payload.threadCategoryId) {
@@ -879,7 +879,7 @@ async function main() {
             .limit(1))[0];
           if (cat) threadCategoryId = cat.id;
         }
-        // Forum payload — title (new topic) / replyToId (reply under
+        // Forum payload, title (new topic) / replyToId (reply under
         // an existing topic). dispatchChatInput validates the
         // structural constraints (reject "both", reject "neither" in
         // forum rooms); we just pass them through.
@@ -906,13 +906,13 @@ async function main() {
     });
 
     /**
-     * Typing pulse — see TypingTracker for the broadcast logic.
+     * Typing pulse, see TypingTracker for the broadcast logic.
      * Authentication piggybacks on the connection's session
      * (`user` captured above); we don't gate on
      * `checkAndExtendSession` here because typing pulses fire many
      * times during normal use and shouldn't pay the session-write
      * cost of a chat send. Sessions still expire on chat:input /
-     * presence:active / heartbeat — typing alone never extends them.
+     * presence:active / heartbeat, typing alone never extends them.
      *
      * Cheap rate-limit: drop pulses arriving faster than once every
      * 1.5s for the same room. The client throttles to ~2s already;
@@ -923,11 +923,11 @@ async function main() {
       const now = Date.now();
       if (now - lastTypingPulseAt < 1_500) return;
       lastTypingPulseAt = now;
-      // Reject pulses for rooms this socket isn't subscribed to —
+      // Reject pulses for rooms this socket isn't subscribed to,
       // typing in a room you can't see has no signal value and
       // would let a stale tab pollute another room's indicator.
       if (!socket.rooms.has(`room:${payload.roomId}`)) return;
-      // Resolve the typer's identity from the per-tab claim — same
+      // Resolve the typer's identity from the per-tab claim, same
       // pattern as chat:input. Without this, the indicator pulled
       // identity off the closure-captured `user.displayName`, which
       // a sibling tab's /char-switch could rewrite mid-conversation;
@@ -1092,13 +1092,13 @@ async function main() {
      * the HTTP `PUT /me/active-character` endpoint and synced every tab.
      *
      * Side effects on success:
-     *   1. socket.data.tabCharId is set — this socket's outgoing messages
+     *   1. socket.data.tabCharId is set, this socket's outgoing messages
      *      now carry the new identity.
      *   2. user.activeCharacterId + user.displayName mutate in-place so
      *      any in-flight handler on this socket sees the fresh value.
      *   3. users.activeCharacterId in the DB is updated so a *fresh* tab
      *      opened later defaults to this character. Already-connected
-     *      tabs are NOT touched — that's the entire point of the per-
+     *      tabs are NOT touched, that's the entire point of the per-
      *      socket scope.
      *   4. Presence in the current room is rebroadcast so the userlist
      *      reflects the new name on everyone's screen.
@@ -1164,7 +1164,7 @@ async function main() {
     // Intentional exit: client fires this immediately before
     // disconnecting via the Exit button. The flag tells the
     // disconnect handler to emit the "X has disconnected." chat
-    // broadcast — otherwise the disconnect is treated as transient
+    // broadcast, otherwise the disconnect is treated as transient
     // (mobile suspend, tab close, network drop) and stays silent.
     // No ack needed; the client doesn't wait for one (it disconnects
     // right after the emit).
@@ -1175,7 +1175,7 @@ async function main() {
     // Client-driven re-sync. Fires when the Chat component mounts onto a
     // socket that was already connected by an App-level effect (e.g.
     // the deep-link standalone shell created the socket while the user
-    // viewed /p/<name>, then they dismissed and Chat mounted late) —
+    // viewed /p/<name>, then they dismissed and Chat mounted late),
     // the initial join broadcasts went out before Chat's listeners were
     // attached, so the chat shell renders blank until we re-emit the
     // current room's state and backlog to this socket.
@@ -1219,7 +1219,7 @@ async function main() {
         : (user.activeCharacterId ?? null);
       // Snapshot the intentional-exit flag too. The Exit button emits
       // `me:exit` immediately before disconnecting, which sets this on
-      // socket.data — the disconnect handler reads it to decide between
+      // socket.data, the disconnect handler reads it to decide between
       // (a) firing "X has disconnected." + immediate cleanup, vs.
       // (b) ghosting the identity into the userlist as idle so a
       // returning tab doesn't churn the rail or the chat log.
@@ -1241,13 +1241,13 @@ async function main() {
             // (see realtime/broadcast.ts), so by the time we get here
             // the DB already holds the right value. We still write it
             // again as a backstop in case a future joinRoom path skips
-            // the update — idempotent, costs one indexed UPDATE.
+            // the update, idempotent, costs one indexed UPDATE.
             const lastRoomId = (socket.data as { roomId?: string }).roomId ?? null;
             if (lastRoomId) {
               await db.update(users).set({ lastRoomId }).where(eq(users.id, userId));
             }
             // Drop every per-identity away + mood mark for this
-            // user. Both are session signals — when the user has
+            // user. Both are session signals, when the user has
             // truly closed every tab and gone, the next login should
             // land them present with a clean mood slate, not carrying
             // a stale "brb" / "tired" from yesterday.
@@ -1259,7 +1259,7 @@ async function main() {
           //   - exitIntent (Exit button): fire the "has disconnected"
           //     line immediately (forum rooms suppress as before) and
           //     run the usual expireIfEmpty + broadcastPresence. No
-          //     ghosting — the user explicitly left.
+          //     ghosting, the user explicitly left.
           //   - non-exit (tab close, refresh, network drop): if this
           //     identity has no other live socket in the room, register
           //     an idle ghost. The userlist re-broadcast that follows
@@ -1283,7 +1283,7 @@ async function main() {
               const stillThere = await userHasSocketInRoom(io, userId, id);
               if (!stillThere) {
                 const r = (await db.select().from(rooms).where(eq(rooms.id, id)).limit(1))[0];
-                // Forum rooms suppress regardless of intent — the topic
+                // Forum rooms suppress regardless of intent, the topic
                 // feed isn't a chat log.
                 if (r?.replyMode !== "nested") {
                   await addSystemMessage(io, db, id, renderPresenceTemplate(
@@ -1316,7 +1316,7 @@ async function main() {
                 displayName,
               });
             }
-            // Broadcast presence regardless — the userlist either
+            // Broadcast presence regardless, the userlist either
             // gains the idle row (just ghosted) or rebroadcasts the
             // unchanged state (sibling kept the identity live). Skip
             // expireIfEmpty: a ghost is now holding the room, and
@@ -1384,7 +1384,7 @@ async function main() {
        * scripts and styles must carry the fresh nonce (or be loaded by
        * something that did, courtesy of `'strict-dynamic'` on scripts).
        * Inline `style="..."` attributes are governed by the separate
-       * `style-src-attr` directive — React's `style={{...}}` props
+       * `style-src-attr` directive, React's `style={{...}}` props
        * produce those and we can't reasonably hash them per render, so
        * we accept `'unsafe-inline'` *for attributes only*. Inline
        * `<style>` blocks still need the nonce.
@@ -1400,7 +1400,7 @@ async function main() {
        *   - `frame-src` lists only the embed origins that the markdown
        *     renderer's "Show video" toggle can build src URLs for (see
        *     `parseVideoEmbed` in apps/web/src/lib/markdown.tsx). Keep this
-       *     list in sync with the providers supported there — every new
+       *     list in sync with the providers supported there, every new
        *     provider needs both a parser branch AND a frame-src origin or
        *     the iframe will silently fail with a CSP violation.
        */
@@ -1448,14 +1448,14 @@ async function main() {
         // change on every build. If we let browsers (or any intermediary
         // cache: ISP, corporate proxy, Fly's edge) hold onto an old copy
         // of this HTML, a returning visitor's `index.html` will point at
-        // /assets/index-OLDHASH.js — which no longer exists on the new
-        // deploy — and the app silently breaks. Previously we shipped
+        // /assets/index-OLDHASH.js, which no longer exists on the new
+        // deploy, and the app silently breaks. Previously we shipped
         // `public, max-age=60`, which combined with Chrome's heuristic
         // cache extension routinely held the shell for hours and forced
         // users to clear history to recover. `no-cache` (NOT `no-store`)
         // permits caching but requires revalidation on every use, so the
         // hashed assets underneath still get their year-long immutable
-        // caching — only the thin HTML shell pays the round-trip cost.
+        // caching, only the thin HTML shell pays the round-trip cost.
         reply.header("cache-control", "no-cache, must-revalidate");
         return html;
       };
@@ -1468,25 +1468,25 @@ async function main() {
       // (alias) both open the profile modal; /w/<slug> opens a world
       // viewer. All three are parsed client-side on first paint (see
       // lib/profiles.ts and lib/worlds.ts). /login and /register are
-      // the bookmarkable entrance pages — the React app picks them off
+      // the bookmarkable entrance pages, the React app picks them off
       // window.location.pathname and mounts the right form. Without
       // these explicit handlers, the setNotFoundHandler below would
       // serve the themed 404 page and the React app would never boot.
-      // Single-segment params only — /p/foo/bar still falls through to
+      // Single-segment params only, /p/foo/bar still falls through to
       // the 404.
       app.get("/p/:name", publicLimit, serveSplash);
       app.get("/u/:name", publicLimit, serveSplash);
       app.get("/w/:slug", publicLimit, serveSplash);
       app.get("/login", publicLimit, serveSplash);
       app.get("/register", publicLimit, serveSplash);
-      // Scriptorium — public catalog of SFW stories + canonical story
+      // Scriptorium, public catalog of SFW stories + canonical story
       // permalinks. `/scriptorium` opens the catalog modal; the
       // `@handle/slug` form is the shareable per-story URL. The catalog
       // endpoint already enforces SFW-only for anonymous viewers, so the
       // page is safe to render to unauthenticated visitors.
       app.get("/scriptorium", publicLimit, serveSplash);
       app.get("/scriptorium/@:handle/:slug", publicLimit, serveSplash);
-      // Public Rules page — same anonymous-safe SPA route pattern. The
+      // Public Rules page, same anonymous-safe SPA route pattern. The
       // not-found handler's `apiPrefixes` block intentionally OMITS
       // `/rules` so the JSON moved to `/api/rules` doesn't get shadowed,
       // but that change alone left `/rules` hitting `setNotFoundHandler`
@@ -1529,7 +1529,7 @@ async function main() {
           reply.code(404);
           return reply.send({ error: "not found" });
         }
-        // `/rules` is intentionally NOT in this list — it's now a public
+        // `/rules` is intentionally NOT in this list, it's now a public
         // SPA route rendering a dedicated rules page. The JSON endpoint
         // moved to `/api/rules` (in the list below) so the SPA shell
         // doesn't shadow it.

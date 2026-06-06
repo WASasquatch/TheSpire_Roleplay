@@ -6,14 +6,14 @@
 --     don't see them flicker in and out for transient disconnects.
 --   * No "X has disconnected." chat broadcast fires.
 --   * A reconnect inside the window suppresses the "X has connected."
---     announcement too — the rejoin is silent end-to-end.
+--     announcement too, the rejoin is silent end-to-end.
 --   * The room they were in is held open against expireIfEmpty so a
 --     single-occupant private room doesn't archive while the ghost
 --     is still holding it.
 --
 -- The 30-minute default overrides the long sliding sessionTtlMs (30
 -- days by default) for *visible-presence* purposes only. Session
--- validity itself is untouched — a user who returns inside the
+-- validity itself is untouched, a user who returns inside the
 -- session TTL still resumes without re-login regardless of how long
 -- the ghost has been gone.
 --

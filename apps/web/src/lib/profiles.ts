@@ -18,8 +18,8 @@
 
 /**
  * Master usernames allow NBSP (Alt+0160) as a "fake space" inside the
- * name. To keep the shareable URL readable — and to avoid the ugly
- * `%C2%A0` byte sequence in the address bar — we present NBSP as a
+ * name. To keep the shareable URL readable, and to avoid the ugly
+ * `%C2%A0` byte sequence in the address bar, we present NBSP as a
  * regular space in the slug, then convert it back to NBSP on lookup
  * (see `slugToUsername`). The route regex therefore has to allow
  * regular spaces (which decode in from `%20`), plus the other
@@ -40,7 +40,7 @@ export function usernameToSlug(name: string): string {
 }
 
 /**
- * Reverse of `usernameToSlug` — restore NBSP from a URL slug before any
+ * Reverse of `usernameToSlug`, restore NBSP from a URL slug before any
  * client-side comparison. The server normalizes the same way before its
  * DB lookup; we mirror it client-side so things like "is this profile
  * me?" checks line up against the master username stored in `me`.
@@ -66,10 +66,10 @@ export function parseProfileFromUrl(): string | null {
   // `window.location.pathname` keeps non-ASCII bytes percent-encoded
   // (e.g. NBSP becomes `%C2%A0`). The regex below allows literal NBSP
   // but not `%`, so an NBSP-containing username deep link like
-  // `/p/The%C2%A0Doctor` failed to match — the SPA never fetched the
+  // `/p/The%C2%A0Doctor` failed to match, the SPA never fetched the
   // profile and the user just saw the splash. Decode first.
   let path = window.location.pathname;
-  try { path = decodeURI(path); } catch { /* malformed encoding — fall back to raw */ }
+  try { path = decodeURI(path); } catch { /* malformed encoding, fall back to raw */ }
   const m = path.match(PROFILE_URL_RX);
   return m?.[1] ?? null;
 }

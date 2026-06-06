@@ -1,7 +1,7 @@
 -- Fix hearth-flame: the per-flame static `transform: rotate(Ndeg)...`
 -- was being clobbered by the `hfFlicker` keyframes' transform, which
 -- referenced an undefined `--rot` CSS variable and resolved to 0deg
--- — collapsing all 8 flame tongues onto the top of the avatar.
+--, collapsing all 8 flame tongues onto the top of the avatar.
 --
 -- Pass the rotation through `--rot` per-element so both the initial
 -- transform AND the animated transform agree on which slot of the

@@ -54,21 +54,21 @@ const scheduledUpdateSchema = scheduledCreateSchema.partial();
 /**
  * CRUD + scheduler launcher for the two announcement surfaces.
  *
- *   - `announcement_banners` — admin-curated rotating banners the
+ *   - `announcement_banners`, admin-curated rotating banners the
  *     chat shell paints above the timeline. Markdown is converted to
  *     HTML client-side at save time; the storage shape is sanitized
  *     HTML so the read path is one shape.
  *
- *   - `scheduled_announcements` — cron-like rows the in-process
+ *   - `scheduled_announcements`, cron-like rows the in-process
  *     scheduler tick fires through the same `/announce` code path
  *     that the in-chat builtin uses. The spec is parsed at save
  *     time (server) AND re-parsed in the editor (client) so a
  *     malformed spec rejects with the same error text on both sides.
  *
  * Both expose three permission gates:
- *   - `view_admin_announcements` — admin tab visibility
- *   - `manage_banner_announcements` — banner CRUD
- *   - `manage_scheduled_announcements` — schedule CRUD
+ *   - `view_admin_announcements`, admin tab visibility
+ *   - `manage_banner_announcements`, banner CRUD
+ *   - `manage_scheduled_announcements`, schedule CRUD
  *
  * The public-banners route is mounted separately in
  * `routes/announcements.ts` so anonymous splash visitors can paint
@@ -108,7 +108,7 @@ export async function registerAdminAnnouncementRoutes(
     if (!(await requirePermission(req, reply, "manage_banner_announcements"))) return;
     const body = bannerCreateSchema.parse(req.body);
     const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
-    // UI route token guard — reject author-gated shortcuts the caller
+    // UI route token guard, reject author-gated shortcuts the caller
     // can't use (e.g. a community manager trying to embed
     // `{modal:admin}` in a banner). Unknown tokens pass through as
     // literal text; only KNOWN tokens with insufficient role fail.
@@ -240,7 +240,7 @@ export async function registerAdminAnnouncementRoutes(
       }
     }
     const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
-    // Validate UI route tokens in BOTH the html + markdown bodies —
+    // Validate UI route tokens in BOTH the html + markdown bodies,
     // the markdown is what the editor round-trips, the html is what
     // actually broadcasts. A token gated on `admin` rejects when a
     // mod-level delegate tries to schedule it (banner manager grant
@@ -376,7 +376,7 @@ export async function registerAdminAnnouncementRoutes(
     },
   );
 
-  // Manual fire — lets the admin verify their schedule's content +
+  // Manual fire, lets the admin verify their schedule's content +
   // target without waiting on the tick. Does NOT advance the
   // schedule's bookkeeping (lastRunAt / nextRunAt stay where they
   // are) so a test fire of an "every 3h" row doesn't push the next
@@ -436,7 +436,7 @@ function wireScheduled(r: typeof scheduledAnnouncements.$inferSelect) {
 }
 
 /* ============================================================
- *  Scheduler tick — fires due `scheduled_announcements` rows
+ *  Scheduler tick, fires due `scheduled_announcements` rows
  *  through the same code path the in-chat `/announce` builtin
  *  uses (`addMessageDirect`, which is the broadcast.ts shape
  *  that skips the slash-command parser and writes a message
@@ -445,7 +445,7 @@ function wireScheduled(r: typeof scheduledAnnouncements.$inferSelect) {
 
 /**
  * How often we poll for due rows. 15s gives a one-minute schedule
- * a worst-case ~15s slip past its target — fine for an
+ * a worst-case ~15s slip past its target, fine for an
  * admin-authored broadcast and short enough that a freshly-saved
  * `1m` interval ("does this even work?") fires within roughly a
  * minute instead of waiting two full 60s ticks. Sub-minute schedules
@@ -460,7 +460,7 @@ let schedulerTimer: NodeJS.Timeout | null = null;
 export function startAnnouncementScheduler(deps: { db: Db; io: Io }): () => void {
   const { db, io } = deps;
   if (schedulerTimer) {
-    // Idempotent — multiple boot paths (dev hot-reload, tests)
+    // Idempotent, multiple boot paths (dev hot-reload, tests)
     // shouldn't stack timers and double-fire every row.
     return () => stopAnnouncementScheduler();
   }
@@ -523,14 +523,14 @@ async function fireScheduled(
   now: number,
   opts: { skipAdvance?: boolean } = {},
 ): Promise<void> {
-  // Resolve the author display name once — the row stores the
+  // Resolve the author display name once, the row stores the
   // creator id, and we want the chat line to read with their
   // username (matching the audit-coherent posture every other
   // server-fired event uses).
   //
   // Fallback chain: row's `created_by_user_id` (alive) → the
   // 'system' sentinel user (lookup by username, NOT the literal
-  // string — `messages.user_id` is a FK to `users.id` and the
+  // string, `messages.user_id` is a FK to `users.id` and the
   // sentinel's id is a nanoid). If neither resolves we bail
   // silently rather than throw an FK violation that would tank
   // the entire tick.
@@ -552,7 +552,7 @@ async function fireScheduled(
     if (!sys) {
       // eslint-disable-next-line no-console
       console.error(
-        "[announcements] no creator and no system sentinel — skipping fire",
+        "[announcements] no creator and no system sentinel, skipping fire",
         { id: row.id },
       );
       return;
@@ -593,14 +593,14 @@ async function fireScheduled(
     manual: !!opts.skipAdvance,
   });
 
-  // Manual "Fire now" path — leave bookkeeping alone so the test
+  // Manual "Fire now" path, leave bookkeeping alone so the test
   // broadcast doesn't push the next automatic fire out.
   if (opts.skipAdvance) return;
 
   // Advance bookkeeping. Recurring rows arm the next fire one
   // interval out from NOW (not from the originally-planned firing
-  // time) so a missed tick — server restart, a long-running migration
-  // — doesn't catch up by hammering the chat with back-to-back
+  // time) so a missed tick, server restart, a long-running migration
+  //, doesn't catch up by hammering the chat with back-to-back
   // broadcasts. One-shots disable themselves and clear nextRunAt so
   // the scheduler never re-fetches them.
   if (row.kind === "interval" && row.intervalMs) {

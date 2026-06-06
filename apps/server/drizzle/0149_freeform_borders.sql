@@ -17,7 +17,7 @@
 -- existing rank-tier borders carry their pricing, eligibility, and
 -- ownership via the rank ladder. Merging them into a generic
 -- catalog would require backfill + FK-constraint rewrites on
--- live ownership tables — material risk for what's mostly
+-- live ownership tables, material risk for what's mostly
 -- presentational change. Parallel tables ship the new content type
 -- additively; the BordersTab UI merges the two sources into one
 -- visual catalog, which is what the user actually sees.
@@ -35,19 +35,19 @@ CREATE TABLE IF NOT EXISTS `freeform_borders` (
   `key`            TEXT NOT NULL PRIMARY KEY,
   `name`           TEXT NOT NULL,
   `description`    TEXT NOT NULL DEFAULT '',
-  -- Path A — image-based. PNG / APNG / WebP. Renders as an overlay.
+  -- Path A, image-based. PNG / APNG / WebP. Renders as an overlay.
   -- Mutually exclusive with `template`.
   `image_url`      TEXT,
-  -- Path B — DOM template with the literal `{avatar}` placeholder.
+  -- Path B, DOM template with the literal `{avatar}` placeholder.
   -- Wrap structure (e.g. `<div class="av b-X"><div class="pic">{avatar}</div></div>`)
   -- mirrors complete_avatar_borders.html. Mutually exclusive with
   -- `image_url`.
   `template`       TEXT,
   -- Scoped CSS for the `.b-<key>` class chain referenced by template.
-  -- Class scoping is the renderer's job — admins author rules under
+  -- Class scoping is the renderer's job, admins author rules under
   -- the catalog key namespace so cross-row leakage isn't possible.
   `style_css`      TEXT,
-  -- Rarity tier — drives the chip-strip filter in the user-facing
+  -- Rarity tier, drives the chip-strip filter in the user-facing
   -- BordersTab AND the color accent on the card. Open string (no
   -- CHECK constraint) so admins can introduce a new tier without a
   -- schema migration; the client falls back to the 'common' palette
@@ -97,7 +97,7 @@ ALTER TABLE `character_earning`
   REFERENCES `freeform_borders`(`key`) ON DELETE SET NULL;
 --> statement-breakpoint
 
--- Lookup indexes — ownership queries by user/character are the hot
+-- Lookup indexes, ownership queries by user/character are the hot
 -- path on dashboard open and BordersTab render.
 CREATE INDEX IF NOT EXISTS `user_owned_freeform_borders_user_idx`
   ON `user_owned_freeform_borders` (`user_id`);

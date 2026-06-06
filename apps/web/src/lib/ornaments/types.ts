@@ -1,5 +1,5 @@
 /**
- * Theme style system — types.
+ * Theme style system, types.
  *
  * A "style" is the orthogonal axis to the existing palette. Where palette
  * controls *what colors* the UI uses, style controls *what visual treatment*
@@ -10,7 +10,7 @@
  * Each style implements a `StyleGenerator` that, given the active palette
  * ramps, returns a set of ornament data URLs the CSS layer consumes via
  * `--orn-*` custom properties on <html>. The CSS contract is uniform
- * across all styles — only the visual output of each generator changes.
+ * across all styles, only the visual output of each generator changes.
  */
 
 /**
@@ -39,7 +39,7 @@ export type OrnamentKey =
 
 /**
  * Output of a `StyleGenerator`. Map from OrnamentKey to a CSS
- * `background-image` value — `url("data:image/png;base64,...")` for canvas
+ * `background-image` value, `url("data:image/png;base64,...")` for canvas
  * output, `url("data:image/svg+xml,...")` for vector output, or `"none"`
  * to suppress that ornament for this style.
  */

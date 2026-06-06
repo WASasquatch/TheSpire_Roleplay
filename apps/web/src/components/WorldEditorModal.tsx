@@ -295,7 +295,7 @@ function WorldMetaEditor({
   onDelete: () => void;
 }) {
   const w = detail.world;
-  // "Can manage collaborators" — computed client-side so the panel
+  // "Can manage collaborators", computed client-side so the panel
   // works even when the server response predates the viewerIsOwner
   // field. Two paths qualify: the actual owner (id match against the
   // world summary's ownerUserId), and any admin role. Mirrors the
@@ -323,7 +323,7 @@ function WorldMetaEditor({
   const [cws, setCws] = useState<string[]>(w.contentWarnings);
   const [coverImageUrl, setCoverImageUrl] = useState(w.coverImageUrl ?? "");
   const [pacing, setPacing] = useState<WorldPacing | "">(w.pacing ?? "");
-  // Vibe stats — eight 0..100 axes; null means "author hasn't tuned
+  // Vibe stats, eight 0..100 axes; null means "author hasn't tuned
   // this axis". State stays as a partial bag so per-axis "clear"
   // doesn't disturb other axes.
   const [vibeStats, setVibeStats] = useState<WorldVibeStats>(w.vibeStats);
@@ -372,7 +372,7 @@ function WorldMetaEditor({
       // changed. Null vs null is a no-op; null vs Theme (or vice versa) writes.
       if (JSON.stringify(theme) !== JSON.stringify(w.theme)) body.theme = theme;
       if (genre !== w.genre) body.genre = genre;
-      // Tag/CW arrays compare via canonical join — the server normalizes
+      // Tag/CW arrays compare via canonical join, the server normalizes
       // the same way (trim + lowercase + dedupe via parseTagList), so
       // a join() round-trip is the right yardstick for "changed."
       if (tags.join(",") !== w.tags.join(",")) body.tags = tags;
@@ -590,7 +590,7 @@ function WorldMetaEditor({
             <div className="mt-1">
               {/* Live preview at the same aspect the catalog card will use
                   (3:2). `referrerPolicy="no-referrer"` matches the inline
-                  image preview in chat — keeps the chat URL from leaking
+                  image preview in chat, keeps the chat URL from leaking
                   via Referer to whoever hosts the image. */}
               <img
                 src={coverImageUrl}
@@ -661,7 +661,7 @@ function WorldMetaEditor({
                     {axis.label}
                   </label>
                   {/* Live percentage readout doubles as a typeable
-                      number input — handy when you want an exact
+                      number input, handy when you want an exact
                       value (e.g. 73) without nudging the slider one
                       tick at a time. Empty string clears the axis;
                       out-of-range values clamp to 0..100. */}
@@ -1269,7 +1269,7 @@ function collectDescendants(pages: WorldPage[], rootId: string): Set<string> {
 }
 
 /* ------------------------------------------------------------ *
- *  InviteMemberPanel — owner directly adds a named identity to
+ *  InviteMemberPanel, owner directly adds a named identity to
  *  the world. Search-and-select shape: typing into the input
  *  hits `/users?q=...` debounced, results enumerate each
  *  identity (master OOC row + every character) so an owner can
@@ -1282,7 +1282,7 @@ function collectDescendants(pages: WorldPage[], rootId: string): Set<string> {
  *  master accounts CAN have a character with the same name, so
  *  free-text name-typing would force the server to return an
  *  ambiguous-candidates list and the owner to redo the dance.
- *  Picking from search results sidesteps that entirely — every
+ *  Picking from search results sidesteps that entirely, every
  *  row in the dropdown carries the unambiguous token.
  * ------------------------------------------------------------ */
 
@@ -1292,7 +1292,7 @@ interface InviteSearchRow {
   token: string;
   /** Display label rendered as the row's primary text. */
   label: string;
-  /** Sublabel — "OOC" for master rows, the master's username for
+  /** Sublabel, "OOC" for master rows, the master's username for
    *  character rows so owners can tell two Jaggers apart. */
   sublabel: string;
   /** Live online state from the directory; surfaced as a tiny
@@ -1315,7 +1315,7 @@ function InviteMemberPanel({
   const [searching, setSearching] = useState(false);
   const [inviting, setInviting] = useState<string | null>(null);
   // Successful invites get a one-line "Invited <name>" confirmation
-  // that auto-clears after a few seconds — same UX as a toast but
+  // that auto-clears after a few seconds, same UX as a toast but
   // anchored to the panel so the owner can see it next to the row
   // they just acted on.
   const [lastInvited, setLastInvited] = useState<string | null>(null);
@@ -1347,7 +1347,7 @@ function InviteMemberPanel({
             online: boolean;
             characters?: Array<{ id: string; name: string }>;
           }>) {
-            // Master OOC row — match if the username contains the
+            // Master OOC row, match if the username contains the
             // query. Substring (not prefix) so typing the middle of
             // a long handle still surfaces it.
             if (u.username.toLowerCase().includes(lc)) {
@@ -1364,7 +1364,7 @@ function InviteMemberPanel({
                 token: `@cid:${c.id}`,
                 label: c.name,
                 // Master parenthetical disambiguates same-named
-                // characters across accounts — the whole point of
+                // characters across accounts, the whole point of
                 // doing this through tokens.
                 sublabel: `Character · ${u.username}`,
                 online: u.online,
@@ -1467,7 +1467,7 @@ function InviteMemberPanel({
 }
 
 /* ------------------------------------------------------------ *
- *  ApplicationQuestionsEditor — author tunes the 0..5 prompt list
+ *  ApplicationQuestionsEditor, author tunes the 0..5 prompt list
  * ------------------------------------------------------------ */
 
 function ApplicationQuestionsEditor({
@@ -1562,7 +1562,7 @@ function ApplicationQuestionsEditor({
 }
 
 /* ------------------------------------------------------------ *
- *  PendingApplicationsPanel — owner reviews + approves / rejects
+ *  PendingApplicationsPanel, owner reviews + approves / rejects
  * ------------------------------------------------------------ */
 
 function PendingApplicationsPanel({

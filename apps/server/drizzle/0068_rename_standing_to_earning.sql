@@ -2,14 +2,14 @@
 --
 -- The XP / Currency / Rank pool was originally introduced under the
 -- "Standing" name (migrations 0063..0067). User feedback shifted the
--- public framing to "Earning" — every user-facing surface (tab label,
+-- public framing to "Earning", every user-facing surface (tab label,
 -- help copy, slash command, asset folder, etc.) now uses that name.
 -- This migration brings the schema into alignment so the codebase
 -- stops carrying two names for the same system.
 --
 -- Renamed in one go: four tables, one site_settings column, and three
 -- supporting indexes. Foreign keys, primary keys, and column data are
--- untouched — SQLite's RENAME TO / RENAME COLUMN updates all internal
+-- untouched, SQLite's RENAME TO / RENAME COLUMN updates all internal
 -- references automatically. Indexes can't be renamed in place, so we
 -- drop + recreate them against the renamed tables.
 

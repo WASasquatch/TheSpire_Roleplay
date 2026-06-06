@@ -27,7 +27,7 @@ export function FormattingToolbar({
   /** When set, renders a right-aligned `length / max` counter on the
    *  toolbar so the user can see how close they are to the cap. The
    *  caller is also responsible for blocking submit when over the
-   *  cap (this component is presentational only — it doesn't gate
+   *  cap (this component is presentational only, it doesn't gate
    *  the input). */
   maxLength,
 }: {
@@ -121,7 +121,7 @@ export function FormattingToolbar({
    */
   /**
    * Insert a literal string at the caret position (replacing any
-   * current selection). Used for inline emoticon tokens — no
+   * current selection). Used for inline emoticon tokens, no
    * wrapping, just paste-and-advance-the-caret.
    */
   function insertAtCursor(literal: string) {
@@ -178,17 +178,17 @@ export function FormattingToolbar({
       <FmtBtn label="Inline code (`text`)" onClick={() => wrap("`", "`", "code")} disabled={disabled}>
         <span className="font-mono">{`<>`}</span>
       </FmtBtn>
-      <FmtBtn label="Spoiler (||text|| — click to reveal)" onClick={() => wrap("||", "||", "spoiler")} disabled={disabled}>
+      <FmtBtn label="Spoiler (||text||, click to reveal)" onClick={() => wrap("||", "||", "spoiler")} disabled={disabled}>
         <span aria-hidden>👁</span>
       </FmtBtn>
-      <FmtBtn label="Blockquote — prefixes selected lines with '> '" onClick={() => prefixLines("> ")} disabled={disabled}>
+      <FmtBtn label="Blockquote, prefixes selected lines with '> '" onClick={() => prefixLines("> ")} disabled={disabled}>
         <span aria-hidden>❝</span>
       </FmtBtn>
       <span aria-hidden className="mx-1 h-3 w-px bg-keep-rule/60" />
-      <FmtBtn label="Link — [text](url)" onClick={insertLink} disabled={disabled}>
+      <FmtBtn label="Link, [text](url)" onClick={insertLink} disabled={disabled}>
         🔗
       </FmtBtn>
-      <FmtBtn label="Image — ![alt](url)" onClick={insertImage} disabled={disabled}>
+      <FmtBtn label="Image, ![alt](url)" onClick={insertImage} disabled={disabled}>
         🖼
       </FmtBtn>
       <span aria-hidden className="mx-1 h-3 w-px bg-keep-rule/60" />
@@ -210,7 +210,7 @@ export function FormattingToolbar({
 /** Right-aligned character counter rendered at the end of the
  *  formatting row. Three-tier tint mirrors the chat Composer's
  *  ComposerCharCount: muted at rest, amber past 80% of cap, accent
- *  + bold when over the cap. Presentational only — submit gating
+ *  + bold when over the cap. Presentational only, submit gating
  *  is the caller's responsibility. */
 function CharCount({ length, max }: { length: number; max: number }) {
   const over = length > max;
@@ -256,7 +256,7 @@ function FmtBtn({
       onClick={onClick}
       disabled={disabled}
       // `onMouseDown preventDefault` stops the button from stealing
-      // focus from the input — without it, the caret jumps and the
+      // focus from the input, without it, the caret jumps and the
       // selection math we set in setSelectionRange gets overwritten
       // by the browser refocusing the form after the button blurs.
       onMouseDown={(e) => e.preventDefault()}

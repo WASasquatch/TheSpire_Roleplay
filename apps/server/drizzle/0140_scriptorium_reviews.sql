@@ -6,14 +6,14 @@
 --             prose body (sanitized HTML). 60-second edit grace mirrors
 --             chat / DM grace. Author can pin one + hide individual
 --             reviews (per-story moderation; the reviewer still sees it
---             on their end — same shape as `/ignore`).
+--             on their end, same shape as `/ignore`).
 --
 -- Replies:    threaded one level under each review (the canonical
 --             "review → reply → author-reply" chain). Plain HTML.
 --
 -- Applause:   one tap per (reader, story[, chapter]). Idempotent toggle:
 --             second tap removes the row. Author cannot see WHO
---             applauded — the stories.applause_count rollup is the only
+--             applauded, the stories.applause_count rollup is the only
 --             surface. Cap rendering reads from the counter.
 --
 -- All bodies pass through the same `sanitizeBio` filter the rest of the
@@ -70,7 +70,7 @@ CREATE INDEX IF NOT EXISTS `story_review_replies_review_idx`
 -- Applause is a simple per-(reader, target) idempotent boolean. The
 -- target is either the whole story (chapter_id NULL) OR a specific
 -- chapter (chapter_id set). Uniqueness uses COALESCE so the
--- chapter-null case has a deterministic key — SQLite forbids
+-- chapter-null case has a deterministic key, SQLite forbids
 -- expressions inside PK/UNIQUE table constraints, so we lift it into
 -- a separate UNIQUE INDEX (expressions in indexes are allowed).
 CREATE TABLE IF NOT EXISTS `story_applause` (

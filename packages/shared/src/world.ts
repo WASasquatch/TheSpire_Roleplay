@@ -35,7 +35,7 @@ export type WorldGenre =
   | "other";
 
 /**
- * `featured` is admin-curated only — owners can't self-promote. The
+ * `featured` is admin-curated only, owners can't self-promote. The
  * splash carousel + catalog "Featured" filter both read this slot.
  * `archived` hides a world from default catalog views while keeping
  * member links + chat-history references valid.
@@ -69,7 +69,7 @@ export type WorldPacing =
 
 /**
  * Curated descriptive tags. Each is normalized to lowercase + kebab on
- * the way in. Admins can extend by adding entries here and shipping —
+ * the way in. Admins can extend by adding entries here and shipping,
  * no migration needed since tags live as comma-separated strings on
  * `worlds.tags`. Owners can also save free-form custom tags via the
  * editor; the canonical list just powers the filter chips + the
@@ -163,7 +163,7 @@ export interface WorldSummary {
   status: WorldStatus;
   coverImageUrl: string | null;
   pacing: WorldPacing | null;
-  /** Vibe stats — 0..100 per axis, or null when the author hasn't tuned it. */
+  /** Vibe stats, 0..100 per axis, or null when the author hasn't tuned it. */
   vibeStats: WorldVibeStats;
   /** How members join. See `WorldJoinMode`. */
   joinMode: WorldJoinMode;
@@ -185,7 +185,7 @@ export interface WorldSummary {
  * specific character. The same user can appear here multiple times
  * for the same world if their OOC and a character both joined.
  *
- * `isPrimary` was retired in 0187 — there's no per-master "primary
+ * `isPrimary` was retired in 0187, there's no per-master "primary
  * world" anymore (the userlist grouping it drove was the leak that
  * outed character→master linkage in the rail).
  */
@@ -208,7 +208,7 @@ export interface WorldMembership {
 /** Brief member entry rendered in a world's "Members" section.
  *
  *  Privacy: this list omits users whose master profile is private or
- *  NSFW-flagged — they explicitly opted out of public affiliation, so
+ *  NSFW-flagged, they explicitly opted out of public affiliation, so
  *  they shouldn't appear in any world's member gallery either. The
  *  server applies the filter in `memberListFor`; the client can take
  *  the wire list at face value.
@@ -216,7 +216,7 @@ export interface WorldMembership {
 /**
  * One occupant in a world's member gallery. Per migration 0187 this
  * is keyed by IDENTITY (not master), so the same userId can appear
- * twice — once for the OOC face, once for each character that
+ * twice, once for the OOC face, once for each character that
  * joined separately.
  *
  * Display rules:
@@ -225,11 +225,11 @@ export interface WorldMembership {
  *   - characterId !== null → a specific character. `displayName`
  *     is the character's display name, `avatarUrl` is the
  *     character's avatar (falling back to the master's avatar if
- *     the character has none — handled server-side).
+ *     the character has none, handled server-side).
  */
 export interface WorldMemberRef {
   userId: string;
-  /** Master username — surfaced for the "by" attribution on hover. */
+  /** Master username, surfaced for the "by" attribution on hover. */
   username: string;
   /** Identity slot: null for OOC, the character id otherwise. */
   characterId: string | null;
@@ -273,7 +273,7 @@ export interface WorldDetail {
   /**
    * True iff the viewer's CURRENT identity (the character they're
    * voicing, or OOC) is a member of this world. Other identities of
-   * the same master may also be members — this flag only reflects
+   * the same master may also be members, this flag only reflects
    * the current face. The catalog uses this to switch the action
    * button between Join / Apply / Joined.
    */
@@ -291,11 +291,11 @@ export interface WorldDetail {
   collaborators: WorldCollaborator[];
   /**
    * The viewer's most recent application against this world, if any.
-   * Drives the "Apply" / "Pending" / "Rejected — Re-apply" button
+   * Drives the "Apply" / "Pending" / "Rejected, Re-apply" button
    * state in the catalog and on the world page. Null when the viewer
    * has never applied OR when joinMode isn't "application".
    *
-   * Owner viewers don't get their own row populated here — they see
+   * Owner viewers don't get their own row populated here, they see
    * the full list via the editor's Applications pane instead.
    */
   viewerApplication: WorldApplicationEntry | null;
@@ -349,7 +349,7 @@ export interface WorldCatalogEntry {
   status: WorldStatus;
   coverImageUrl: string | null;
   pacing: WorldPacing | null;
-  /** Vibe stats — 0..100 per axis, null = unset (renders as muted "—"). */
+  /** Vibe stats, 0..100 per axis, null = unset (renders as muted "-"). */
   vibeStats: WorldVibeStats;
   /** Drives the catalog button label ("Join" / "Apply" / hidden for invite-only). */
   joinMode: WorldJoinMode;
@@ -377,7 +377,7 @@ export interface LinkedWorldRef {
 export const WORLD_PAGE_DEPTH_CAP = 10;
 
 /* ============================================================
- *  Vibe stats — fixed axis catalog
+ *  Vibe stats, fixed axis catalog
  * ============================================================ */
 
 /**
@@ -386,7 +386,7 @@ export const WORLD_PAGE_DEPTH_CAP = 10;
  * bars on each world card and offers min/max range filters per axis.
  *
  * The list is INTENTIONALLY FIXED so cross-world comparison stays
- * meaningful — a "high combat" world means the same thing in every
+ * meaningful, a "high combat" world means the same thing in every
  * card. Adding or removing an axis is a schema migration.
  *
  * Each axis carries:
@@ -411,7 +411,7 @@ export type WorldVibeAxisKey = (typeof WORLD_VIBE_AXES)[number]["key"];
 /**
  * Plain key→value bag for the eight axes. Server fills nulls for
  * axes the author hasn't tuned; the renderer treats null as a muted
- * "—" instead of a 0% bar so "deliberately none" and "not set" stay
+ * "-" instead of a 0% bar so "deliberately none" and "not set" stay
  * visually distinct.
  *
  * The accepted value range is 0..100 inclusive; the route layer
@@ -435,7 +435,7 @@ export type WorldVibeStats = {
  *                     the owner can add members (admin tooling or a
  *                     direct DB insert today).
  *
- * Orthogonal to `visibility` — a `private` world can still ask for
+ * Orthogonal to `visibility`, a `private` world can still ask for
  * applications from people who got the link, and a `public` world
  * can stay open-join.
  */
@@ -469,12 +469,12 @@ export interface WorldApplicationEntry {
   id: string;
   worldId: string;
   applicantUserId: string;
-  /** Master username — surfaced for transparency under the identity. */
+  /** Master username, surfaced for transparency under the identity. */
   applicantUsername: string;
   /**
    * Identity the application was filed under: null = OOC, non-null
    * = a specific character of the applicant. Owner reviewing the
-   * pending list sees the character's name (or OOC label) — the
+   * pending list sees the character's name (or OOC label), the
    * master is shown in muted text underneath for accountability.
    */
   applicantCharacterId: string | null;

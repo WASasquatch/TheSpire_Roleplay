@@ -2,10 +2,10 @@
  * Per-message quality analysis for the award engine.
  *
  * Two outputs:
- *   1. `multiplier` — linear length bonus applied to the per-kind
+ *   1. `multiplier`, linear length bonus applied to the per-kind
  *      XP/Currency amount. Long thoughtful RP gets the bigger reward;
  *      short messages stay at base rate.
- *   2. `flaggedSpam` — heuristic flags that drop the award to zero.
+ *   2. `flaggedSpam`, heuristic flags that drop the award to zero.
  *      Catches the common keysmash / token-repeat / echo patterns
  *      without dinging legitimate short emphatic posts.
  *
@@ -15,7 +15,7 @@
  *
  * The echo cache is a per-user ring buffer kept in memory. Bounded by
  * `MAX_ECHO_CACHE_PER_USER` so a single chatty user can't blow memory;
- * server restarts wipe it (false negatives only — a user repeating
+ * server restarts wipe it (false negatives only, a user repeating
  * the exact same post 5 seconds after restart wouldn't be caught for
  * one cycle, then the next post primes the cache and detection resumes).
  */
@@ -24,7 +24,7 @@ import type { EarningConfig, LengthBonusSpec } from "./config.js";
 
 /** Hard cap on the per-user echo buffer. Each entry is a trimmed
  *  body string; even at 1KB per message that's ~20KB per chatty user,
- *  which is bounded enough that 10k concurrent users is ~200MB — and
+ *  which is bounded enough that 10k concurrent users is ~200MB, and
  *  the cfg knob only ever looks at the last N (default 3), so most
  *  installs sit much lower. */
 const MAX_ECHO_CACHE_PER_USER = 20;
@@ -52,12 +52,12 @@ export interface QualityResult {
 /**
  * Analyze a message body for length-bonus + spam. Pure aside from
  * the echo-cache write (which only happens when the message would
- * otherwise have been awarded — see caller).
+ * otherwise have been awarded, see caller).
  *
- *   cfg          — EarningConfig.messageQuality block
- *   spec         — the per-kind LengthBonusSpec (cfg.lengthBonus.say/action/whisper)
- *   userId       — for echo-cache keying
- *   body         — raw message body (we trim inside)
+ *   cfg         , EarningConfig.messageQuality block
+ *   spec        , the per-kind LengthBonusSpec (cfg.lengthBonus.say/action/whisper)
+ *   userId      , for echo-cache keying
+ *   body        , raw message body (we trim inside)
  */
 export function analyzeMessageQuality(
   cfg: EarningConfig["messageQuality"],
@@ -88,7 +88,7 @@ export function analyzeMessageQuality(
 
 /**
  * Record a message body in the user's echo cache. Caller invokes this
- * AFTER deciding the message will be awarded — flagged-spam messages
+ * AFTER deciding the message will be awarded, flagged-spam messages
  * intentionally don't poison the cache (otherwise an attacker could
  * spam once to lock everyone else out of saying the same thing later).
  */
@@ -167,7 +167,7 @@ function hasDominantToken(body: string, cap: number): boolean {
 }
 
 /* ============================================================
- *  Test helper — exposed for unit tests / admin debug only.
+ *  Test helper, exposed for unit tests / admin debug only.
  * ============================================================ */
 
 /** Drop the entire echo cache. Used by `admin/earning/reset-user`

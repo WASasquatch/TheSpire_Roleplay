@@ -107,7 +107,7 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
 }
 
 /* =============================================================
- *  Find Stories tab — server-paged public catalog with filters.
+ *  Find Stories tab, server-paged public catalog with filters.
  * ============================================================= */
 
 interface FindFilters {
@@ -202,7 +202,7 @@ function FindStoriesTab({ onOpenStory, authed }: { onOpenStory: (id: string, car
 
         {!loading && entries.length === 0 ? (
           <p className="p-4 italic text-keep-muted">
-            {total === 0 ? "No stories match your filters." : "Nothing on this page — try Reset."}
+            {total === 0 ? "No stories match your filters." : "Nothing on this page, try Reset."}
           </p>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -212,7 +212,7 @@ function FindStoriesTab({ onOpenStory, authed }: { onOpenStory: (id: string, car
           </div>
         )}
 
-        {/* Sticky pagination — anchors to the bottom of the scrollable
+        {/* Sticky pagination, anchors to the bottom of the scrollable
             tab body so it stays visible regardless of how many cards
             are on screen. With one or two stories the bar no longer
             floats awkwardly mid-page; with a full grid it pins the
@@ -586,7 +586,7 @@ function inviteRoleClass(r: StoryCollaboratorRole): string {
 }
 
 /* =============================================================
- *  Reading tab — continue-reading list
+ *  Reading tab, continue-reading list
  * ============================================================= */
 
 function ReadingTab({ onOpenStory }: { onOpenStory: (id: string) => void }) {
@@ -610,7 +610,7 @@ function FollowingTab({ onOpenStory }: { onOpenStory: (id: string) => void }) {
 }
 
 /**
- * Shared list shape for Reading / Following — both endpoints return
+ * Shared list shape for Reading / Following, both endpoints return
  * `{ stories: StoryCard[] }`. Keeps the two tabs from duplicating
  * load/loading/empty state.
  */
@@ -678,7 +678,7 @@ function StoryCardTile({
   // NC-17 cards in the anonymous catalog get a lock overlay + a
   // hover tooltip explaining why; clicking still fires `onOpen` so
   // the parent can route to the login prompt. `useChat.me` is the
-  // canonical signal here — when the viewer is signed in, the
+  // canonical signal here, when the viewer is signed in, the
   // server-side opt-in already filtered out NSFW unless they asked
   // for it, so we trust the card's presence and skip the gate.
   const me = useChat((s) => s.me);
@@ -692,25 +692,25 @@ function StoryCardTile({
         //   - Portrait cover uploads (book-cover standard) display
         //     as portrait inside the landscape frame, letterboxed
         //     left/right against the bg-keep-bg tint. The image
-        //     STILL READS as portrait at its natural aspect — the
+        //     STILL READS as portrait at its natural aspect, the
         //     frame just doesn't grow to match.
         //   - Landscape covers fit the frame nearly edge to edge
         //     with a small top/bottom letterbox if the aspect
         //     doesn't quite match.
         // A previous attempt used a 2:3 portrait frame, but when
         // the grid drops to one or two columns the cell width is
-        // wide, and 2:3 made the cover ~1.5× column-width tall —
+        // wide, and 2:3 made the cover ~1.5× column-width tall,
         // the card's title + meta fell off the bottom of the
         // modal and forced scrolling per card. 3:2 keeps the card
         // compact and the title visible.
         className="relative block aspect-[3/2] w-full overflow-hidden bg-keep-bg/60 text-left"
-        title={lockedForAnon ? "Rated NC-17 — log in or register to read" : undefined}
+        title={lockedForAnon ? "Rated NC-17, log in or register to read" : undefined}
       >
         {card.coverImageUrl ? (
           <img
             src={card.coverImageUrl}
             alt={card.title}
-            // `object-contain` (not `object-cover`) — never crop
+            // `object-contain` (not `object-cover`), never crop
             // user-uploaded cover art. Aspect mismatch with the
             // landscape frame letterboxes against bg-keep-bg,
             // which reads as intentional framing rather than as
@@ -732,7 +732,7 @@ function StoryCardTile({
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-rose-950/60 px-4 text-center opacity-0 transition group-hover:opacity-100">
             <span className="text-2xl" aria-hidden>🔒</span>
             <span className="text-xs font-semibold uppercase tracking-widest text-rose-100">
-              NC-17 — explicit content
+              NC-17, explicit content
             </span>
             <span className="text-[11px] text-rose-100/85">
               Log in or register to read

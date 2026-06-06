@@ -4,7 +4,7 @@ import { DEFAULT_THEME, isDarkPalette, legibleThemePalette, THEME_PRESETS, type 
 import { loadCachedActiveTheme, type SiteBranding } from "../state/store.js";
 
 /**
- * Read access to the currently-active theme — the same value `applyTheme`
+ * Read access to the currently-active theme, the same value `applyTheme`
  * pushed into CSS variables on `<html>`. Components consume this when
  * they need to make a runtime decision based on the palette (e.g.
  * choosing a legible variant of a user-picked color against the current
@@ -68,7 +68,7 @@ const VAR_KEYS: ReadonlyArray<keyof Theme> = [
 /**
  * Pick the splash's effective palette. Priority chain (highest wins):
  *
- *   1. User's last-active theme — cached in localStorage after
+ *   1. User's last-active theme, cached in localStorage after
  *      authentication. A brief sign-out shouldn't bounce a Darkness
  *      user through a flash of Parchment splash.
  *   2. System `prefers-color-scheme: dark` → built-in Darkness preset.
@@ -92,7 +92,7 @@ const VAR_KEYS: ReadonlyArray<keyof Theme> = [
 export function resolveSplashTheme(_branding: SiteBranding): Theme {
   const cached = loadCachedActiveTheme();
   if (cached) return cached;
-  // matchMedia is undefined in SSR / non-DOM environments — defensive
+  // matchMedia is undefined in SSR / non-DOM environments, defensive
   // for tests; the splash only runs in a browser in practice.
   const systemDark =
     typeof window !== "undefined" &&
@@ -124,7 +124,7 @@ export function themeStyle(theme: Theme): CSSProperties {
     // Emit the same 5-step ramp `applyTheme` writes at :root. Without
     // these, a subtree that swaps in a different theme (a profile or
     // world modal showing the owner's palette) inherits the viewer's
-    // ramps — so rules like `[data-theme-style="scifi"] body` that
+    // ramps, so rules like `[data-theme-style="scifi"] body` that
     // reference `--keep-bg-500` resolve to the wrong color and the
     // owner's glass / neon effects don't read correctly.
     const ramp = buildRamp(base);
@@ -143,7 +143,7 @@ export function themeStyle(theme: Theme): CSSProperties {
 /**
  * User-facing `--theme-*` aliases. Same palette as the internal
  * `--keep-*` slots, but emitted as ready-to-use `rgb(r g b)` strings
- * — writers styling their profile bio with custom CSS can drop
+ *, writers styling their profile bio with custom CSS can drop
  * `color: var(--theme-accent)` straight into their stylesheet without
  * having to wrap with `rgb()` themselves. The `*-rgb` companion vars
  * hold the raw triple ("r g b") so the same writer can do
@@ -151,7 +151,7 @@ export function themeStyle(theme: Theme): CSSProperties {
  * variants (the scifi glow derivations) are exposed too so theming
  * matches whatever palette the owner picked.
  *
- * Names are stable user contract — any rename ripples through every
+ * Names are stable user contract, any rename ripples through every
  * user's saved CSS, so treat this list as additive only.
  */
 function themeUserVars(theme: Theme, legible: Theme): Record<string, string> {
@@ -177,14 +177,14 @@ function themeUserVars(theme: Theme, legible: Theme): Record<string, string> {
  * checkboxes) render in the matching light/dark variant.
  *
  * In addition to the 8 base slots, we emit a 5-step lightness ramp for
- * each — `--keep-<slot>-100/200/300/400/500`. 300 is the user-picked
+ * each, `--keep-<slot>-100/200/300/400/500`. 300 is the user-picked
  * value; 100/200 are lighter, 400/500 darker. Ramps give components a
  * way to layer depth (panel-200 highlights, panel-400 shadow rims)
  * without the renderer having to hard-code alpha-blended approximations.
  */
 export function applyTheme(theme: Theme): void {
   const root = document.documentElement;
-  // Nudge text + muted for legibility against bg — same guarantee as
+  // Nudge text + muted for legibility against bg, same guarantee as
   // themeStyle. A user who picks a theme with muted-on-muted contrast
   // (or who later darkens their bg until the existing muted disappears
   // into it) still gets readable body copy; the saved hex doesn't
@@ -201,7 +201,7 @@ export function applyTheme(theme: Theme): void {
   }
   // Derived neon variants for glow/halo treatments. Same hue as the
   // user's picked action / accent, but normalized to full saturation +
-  // mid-dark luminance — read as rich saturated neons regardless of
+  // mid-dark luminance, read as rich saturated neons regardless of
   // whether the user picked a washed-out pastel or a near-black accent.
   // Consumed by the scifi theme's tube-light rules; harmless on
   // medieval/modern (they don't reference these vars). Built from the
@@ -210,8 +210,8 @@ export function applyTheme(theme: Theme): void {
   root.style.setProperty("--keep-action-neon", buildNeon(theme.action));
   root.style.setProperty("--keep-accent-neon", buildNeon(theme.accent));
   // Mirror the user-facing `--theme-*` aliases that `themeStyle`
-  // emits on subtree elements, so any CSS — site chrome, admin
-  // surfaces, user-authored bios that escape their scope — can
+  // emits on subtree elements, so any CSS, site chrome, admin
+  // surfaces, user-authored bios that escape their scope, can
   // reference `var(--theme-accent)` from the document root.
   for (const [k, v] of Object.entries(themeUserVars(theme, legible))) {
     root.style.setProperty(k, v);
@@ -227,7 +227,7 @@ export function applyTheme(theme: Theme): void {
 /**
  * Discrete font-size tiers. Mapped to a px value applied as the document
  * font-size, which scales every rem-based Tailwind utility uniformly.
- * Kept as a closed set so the UI stays readable at every step — a
+ * Kept as a closed set so the UI stays readable at every step, a
  * free-numeric scale would invite both microscopic and unusable
  * settings.
  *
@@ -244,7 +244,7 @@ export type UiFontScale = "small" | "medium" | "large" | "xl";
 const FONT_SCALE_PX: Record<UiFontScale, { desktop: number; mobile: number }> = {
   // Mobile tiers run ~2px below desktop across the board. The
   // previous mobile floor (12px on "small") read as oversized
-  // chrome on actual phones — every utility chip, sidebar label,
+  // chrome on actual phones, every utility chip, sidebar label,
   // and timestamp ate more vertical space than a one-handed
   // viewport could afford. Pulling each tier down one notch lets
   // "small" land at a genuinely-compact 10px, "medium" at the
@@ -307,7 +307,7 @@ export function applyFontPrefs(prefs: {
   // changes via matchMedia so resizing the window (or rotating a
   // tablet) re-applies the right tier without a reload.
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    // SSR / non-DOM environment — apply the desktop fallback once
+    // SSR / non-DOM environment, apply the desktop fallback once
     // and return a no-op cleanup so callers can still treat the
     // return value uniformly.
     root.style.fontSize = `${fontScalePx(prefs.fontScale, false)}px`;
@@ -334,7 +334,7 @@ export function applyFontPrefs(prefs: {
  * Lightness offsets are applied in HSL space so hue + saturation are
  * preserved. Offsets are symmetric so light bases compress on the
  * lighter end (clamped at 95%) and dark bases compress on the darker
- * end (clamped at 5%) — graceful at the extremes.
+ * end (clamped at 5%), graceful at the extremes.
  *
  * Tuning rationale for the offsets:
  *   100/200: meaningful highlight steps (top bevel, hover lift)
@@ -354,7 +354,7 @@ export function applyFontPrefs(prefs: {
  *   lightness  → clamped to a 55% ceiling (already-darker picks pass
  *                through; brighter picks get pulled to the mid-tone)
  *
- * Both are CEILINGS, never floors — picking a muted slate or a deep
+ * Both are CEILINGS, never floors, picking a muted slate or a deep
  * burgundy leaves those characteristics intact. The clamp only fires
  * for picks that would otherwise bleach to near-white when blurred
  * (saturated accent #ff6b8a → muted dusty pink ≈ #c46a7e), giving the
@@ -362,7 +362,7 @@ export function applyFontPrefs(prefs: {
  * pick a soft pastel themselves.
  *
  * Returns "r g b" (space-separated, Tailwind-compatible). Falls back
- * to "0 0 0" on parse failure — same posture as the other helpers.
+ * to "0 0 0" on parse failure, same posture as the other helpers.
  */
 export function buildNeon(baseHex: string): string {
   const rgb = hexToRgb(baseHex);

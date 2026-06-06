@@ -21,7 +21,7 @@ type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 // configurable via `siteSettings.editGraceMs`. Each handler below
 // reads the current value via `getSettings(db)` so a runtime tweak
 // takes effect on the next attempt without restart. Forum rooms
-// (replyMode="nested") bypass the cap entirely — posts there are
+// (replyMode="nested") bypass the cap entirely, posts there are
 // long-lived and authors are expected to refine them indefinitely,
 // with the (edited) badge providing transparency.
 
@@ -39,7 +39,7 @@ const editBody = z.object({ body: z.string().min(1).max(20_000) }).strict();
 function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMessage {
   // Mirrors the row→ChatMessage shape used in broadcast.ts; if either side
   // adds fields, both should be updated. Snapshotted fields stay as-is on
-  // edit (mood, npcVoicedBy, replyTo*, etc.) — only `body` and `editedAt`
+  // edit (mood, npcVoicedBy, replyTo*, etc.), only `body` and `editedAt`
   // change.
   //
   // Deleted messages: the visible body is stripped to "" for everyone
@@ -47,7 +47,7 @@ function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMes
   // `view_deleted_message_body` permission additionally receive the
   // original body on a separate `originalBody` field so they can
   // audit what got hidden. Viewers without the permission don't get
-  // the field — gate is `viewerIsAdmin`, which the caller computes
+  // the field, gate is `viewerIsAdmin`, which the caller computes
   // from `hasPermission(viewer, "view_deleted_message_body")`. (The
   // parameter name is kept for back-compat; semantics moved to the
   // catalog key, but every existing call site passes the same boolean.)
@@ -86,7 +86,7 @@ function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMes
     ...(m.senderSelectedBorderRankKey ? { senderSelectedBorderRankKey: m.senderSelectedBorderRankKey } : {}),
     ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
     // Admin-only audit snapshot of who performed the delete. Mirrors
-    // the originalBody carve-out — site admins see who took the
+    // the originalBody carve-out, site admins see who took the
     // moderation action; mods and ordinary viewers don't. Falls back
     // to undefined when the snapshot isn't present (pre-0084 deletes).
     ...(viewerIsAdmin && m.deletedAt && m.deletedByUserId
@@ -114,7 +114,7 @@ export async function registerMessageRoutes(
    * touch-up.
    *
    * Replies: when a parent is edited the snapshot in the child's
-   * `replyToBodySnippet` is *not* rewritten — child snapshots remain frozen
+   * `replyToBodySnippet` is *not* rewritten, child snapshots remain frozen
    * at the moment they were created, which keeps the audit trail honest
    * and matches the "snapshot at send time" pattern used for displayName
    * and to_display_name.
@@ -171,7 +171,7 @@ export async function registerMessageRoutes(
 
     // Re-sanitise for kinds whose bodies feed renderers that trust them. We
     // don't currently render body via dangerouslySetInnerHTML on the chat
-    // line, but be defensive — sanitiseBio is the same routine used for bio
+    // line, but be defensive, sanitiseBio is the same routine used for bio
     // HTML and is safe to apply to plain text (it's a no-op for text-only).
     const safeBody = m.kind === "say" || m.kind === "me" || m.kind === "ooc" || m.kind === "scene"
       ? trimmed
@@ -190,7 +190,7 @@ export async function registerMessageRoutes(
     // whisper from another room (their bucket holds it under a
     // different roomId). Fan the update out to their sockets too so
     // the live edit lands wherever they're looking. Skips if recipient
-    // is already in the sender's room — the room broadcast above
+    // is already in the sender's room, the room broadcast above
     // already covered them, and the client's updateMessage is
     // idempotent on duplicate updates anyway.
     if (updated.kind === "whisper" && updated.toUserId) {
@@ -210,7 +210,7 @@ export async function registerMessageRoutes(
   /**
    * Soft-delete a message. Permitted for:
    *   * the author (within 60s in flat rooms, anytime in forum rooms)
-   *   * any moderator or admin (no time gate — moderation action)
+   *   * any moderator or admin (no time gate, moderation action)
    *
    * The body is preserved on the row server-side so admin/report review
    * can still see the original content; `toWire` returns body="" to all
@@ -248,7 +248,7 @@ export async function registerMessageRoutes(
     // render in chat can show who performed the delete (self vs
     // admin/mod). We snapshot `username` (the underlying account)
     // rather than the active character's displayName because
-    // moderation transparency is the goal — admins doing a delete
+    // moderation transparency is the goal, admins doing a delete
     // should be identifiable as their account, not as whatever
     // character they happened to be voicing at the time. Self-delete
     // detection at render time compares by userId, so the snapshot
@@ -265,7 +265,7 @@ export async function registerMessageRoutes(
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
     // Per-socket emit so site admins (admin / masteradmin) receive the
-    // original body alongside the deletion marker — they need to see
+    // original body alongside the deletion marker, they need to see
     // what got hidden in case the author was burying something. Mods,
     // room-owner mods, and ordinary viewers get the bare wire payload
     // (no `originalBody` field). This means the deleted content never
@@ -274,7 +274,7 @@ export async function registerMessageRoutes(
     const plainWire = toWire(updated, false);
     const roomSockets = await io.in(`room:${m.roomId}`).fetchSockets();
     if (roomSockets.length === 0) return { ok: true };
-    // Look the viewer roles up in one batch — typical room has ≤ 50
+    // Look the viewer roles up in one batch, typical room has ≤ 50
     // sockets, so a single SELECT keyed by userId beats per-socket
     // round-trips. Sockets with no resolvable userId (unauthenticated
     // edge cases) get the plain payload by default.
@@ -341,7 +341,7 @@ export async function registerMessageRoutes(
    *   * any mod or admin (moderation)
    *
    * Only works on top-level topics (`replyToId IS NULL`) in nested-mode
-   * rooms — locking a reply or a flat-chat message is a category error
+   * rooms, locking a reply or a flat-chat message is a category error
    * and is rejected with 400.
    */
   const lockBody = z.object({ locked: z.boolean() }).strict();
@@ -384,7 +384,7 @@ export async function registerMessageRoutes(
    * Pin or unpin a forum topic (admin-only). Sticky topics float to
    * the top of their category section regardless of `lastActivityAt`
    * ordering and stay loaded on every page of `/rooms/:id/topics`.
-   * Mods can lock/delete but NOT pin — pinning is a persistent
+   * Mods can lock/delete but NOT pin, pinning is a persistent
    * room-furniture decision reserved for site admins.
    *
    * Same shape as the lock route: forum rooms only, topics only,

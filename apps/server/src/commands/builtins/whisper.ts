@@ -78,7 +78,7 @@ export const whisperCommand: CommandHandler = {
       .limit(1))[0];
     if (!target) {
       // Resolver said unique but the row vanished between resolve and
-      // fetch — exceedingly rare race (admin disable mid-command).
+      // fetch, exceedingly rare race (admin disable mid-command).
       notice(ctx, "WHISPER_NO_USER", `No user named "${targetName}".`);
       return;
     }
@@ -86,8 +86,8 @@ export const whisperCommand: CommandHandler = {
     // Use the identity the caller actually addressed. `resolution.target.displayName`
     // is the character name when the caller passed `@cid:` (or typed a character
     // name) and the master username when they passed `@id:` (or typed a master
-    // handle). Falling back to the target's *current* active character — the
-    // previous behavior here — silently rewrote a click on the OOC handle as a
+    // handle). Falling back to the target's *current* active character, the
+    // previous behavior here, silently rewrote a click on the OOC handle as a
     // whisper to whichever character that user happened to be voicing right
     // now, which is exactly the leak the identity-token system was added to
     // prevent. The actual message delivery still routes by `target.id`
@@ -183,7 +183,7 @@ export const whisperCommand: CommandHandler = {
     // Offline-recipient push. pushTriggers internally checks userIsOnline
     // and skips when the recipient is connected, so calling unconditionally
     // is correct. Without this, whisper push notifications (Phase 4) never
-    // fire — whispers don't route through addMessage, so the in-line
+    // fire, whispers don't route through addMessage, so the in-line
     // pushTriggers call there doesn't see them.
     void pushTriggers(ctx.io, ctx.db, out, ctx.user, "whisper");
   },

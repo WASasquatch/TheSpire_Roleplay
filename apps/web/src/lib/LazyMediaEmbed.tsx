@@ -15,13 +15,13 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
  *
  *   3. Reloads cleanly when the placeholder scrolls back into range.
  *      For images we re-set the src (browser cache makes this cheap);
- *      for iframes the same — they're built to remount, and the
+ *      for iframes the same, they're built to remount, and the
  *      detach/remount cycle is what frees the embedded player.
  *
  * Layout stability: the wrapper renders a sized placeholder using the
  * caller-provided className + style so the chat scroll buffer doesn't
  * jump when the inner element appears/disappears. The placeholder is
- * still in the DOM the whole time — only the `<img>` / `<iframe>`
+ * still in the DOM the whole time, only the `<img>` / `<iframe>`
  * itself flips in and out.
  *
  * Used by:
@@ -61,7 +61,7 @@ export function LazyMediaEmbed({
   /** Sizing classes applied to BOTH the placeholder and the loaded
    *  element so the layout doesn't reflow on attach/detach. */
   className?: string;
-  /** Same intent as `className` — inline style fork for callers that
+  /** Same intent as `className`, inline style fork for callers that
    *  need viewport-relative caps that don't fit in a Tailwind class. */
   style?: CSSProperties;
   /** Short text shown while the placeholder is in DOM but the embed
@@ -113,7 +113,7 @@ export function LazyMediaEmbed({
         }
       },
       // `rootMargin` extends the observed area so we preload BEFORE
-      // the embed actually hits the viewport — eliminates the
+      // the embed actually hits the viewport, eliminates the
       // pop-in-on-scroll feel.
       { rootMargin: NEAR_VIEWPORT_MARGIN },
     );
@@ -143,7 +143,7 @@ export function LazyMediaEmbed({
   // `inline-block` (shrink-to-content) is the right wrapper for the
   // image case. Iframes have a tiny default intrinsic size (300x150)
   // and rely on the caller's `w-full aspect-video` class to be sized
-  // properly — so for iframes the wrapper has to stretch (`block`)
+  // properly, so for iframes the wrapper has to stretch (`block`)
   // and inherit width sizing from the caller's class so `w-full` on
   // the iframe resolves to the parent's actual width, not zero.
   const wrapperClass = kind === "iframe"

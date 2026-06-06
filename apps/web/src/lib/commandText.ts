@@ -4,7 +4,7 @@
  *
  * The server's command parser
  * (apps/server/src/commands/parser.ts) splits arguments on ASCII
- * whitespace but treats NBSP (U+00A0) as a normal word character — by
+ * whitespace but treats NBSP (U+00A0) as a normal word character, by
  * design, since master usernames are allowed to contain spaces and the
  * canonical storage form uses NBSP for the in-name separators. The
  * name-lookup helper (apps/server/src/lib/nameLookup.ts) normalizes
@@ -15,7 +15,7 @@
  * command (e.g. `/whisper Khalbir Dhor'ashiq Hello`) we MUST swap any
  * ASCII spaces inside the name for NBSPs first, otherwise the tokenizer
  * splits "Khalbir Dhor'ashiq" into two args and the command sees only
- * "Khalbir" — which is exactly the `[WHISPER_NO_USER] No user named
+ * "Khalbir", which is exactly the `[WHISPER_NO_USER] No user named
  * "Khalbir"` failure users have been hitting on multi-word handles.
  *
  * Double-quoting would also work syntactically (the tokenizer accepts
@@ -33,7 +33,7 @@ const NBSP = " ";
  * Replaces every run of ASCII spaces with a single NBSP so the server's
  * tokenizer keeps the name as one argument; non-space characters
  * (apostrophes, hyphens, dots, backticks, alphanumerics) pass through
- * untouched. Empty / whitespace-only input returns "" — callers that
+ * untouched. Empty / whitespace-only input returns "", callers that
  * care should validate before calling.
  */
 export function nameForCommand(name: string): string {
@@ -49,7 +49,7 @@ export function nameForCommand(name: string): string {
  *
  * Server-side `resolveIdentityArg` accepts both forms in the same
  * argument slot, so callers can switch to this helper without any
- * coordinated parser change — the token branch just skips the
+ * coordinated parser change, the token branch just skips the
  * name-lookup ambiguity check entirely.
  *
  * Use this for every click-driven command builder (chat-line whisper

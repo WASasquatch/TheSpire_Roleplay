@@ -5,7 +5,7 @@
 -- stored version. Lets us ship content updates to the default worlds
 -- without forcing admins to do anything manual on the next deploy.
 --
--- 0 means "never seeded with versioning" — first-version content is treated
+-- 0 means "never seeded with versioning", first-version content is treated
 -- as v1 implicitly, so existing installs jump straight to whatever the
 -- current code-side SEED_VERSION says.
 ALTER TABLE `site_settings`

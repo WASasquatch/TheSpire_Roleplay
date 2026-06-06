@@ -12,7 +12,7 @@ export interface ParsedInput {
  *
  * Master usernames are allowed to contain NBSP (the "Alt+0160" invisible
  * separator users use to fake spaces in names). JavaScript's default `\s`
- * and `\S` shortcuts include NBSP in the whitespace class — using them
+ * and `\S` shortcuts include NBSP in the whitespace class, using them
  * would split `The[NBSP]Watcher` into two tokens, breaking /whisper,
  * /char, and every other command that takes a name as its first arg.
  *
@@ -29,7 +29,7 @@ const TOKEN_RX = new RegExp(`"([^"]*)"|'([^']*)'|([^${WS}]+)`, "g");
  * Strip the first whitespace-delimited token (and its trailing
  * whitespace) from a string. Used by /whisper, /reply, /go, etc. to
  * recover the body text after the first positional argument. NBSP is
- * treated as a normal word character — same rationale as the
+ * treated as a normal word character, same rationale as the
  * tokenizer above.
  */
 export function stripFirstToken(argsText: string): string {
@@ -62,12 +62,12 @@ export function parseInput(raw: string): ParsedInput {
 
   /**
    * `:` action shortcut. ":walks in casually" is parsed as if the user
-   * had typed "/me walks in casually" — no space required after the
+   * had typed "/me walks in casually", no space required after the
    * colon, the action body is everything after it. Mirrors the muscle-
    * memory shortcut from older RP clients (IRC's `/me`, MUD `:`) so
    * pose-heavy users don't need a 3-character prefix per line.
    *
-   * "::text" escapes to a literal say starting with a single colon —
+   * "::text" escapes to a literal say starting with a single colon,
    * same posture as "//foo" escaping a literal slash. " :text" (with
    * a leading space) is ALSO a literal say, since the parser only
    * triggers shortcuts when the very first character is `:` or `/`.
@@ -77,7 +77,7 @@ export function parseInput(raw: string): ParsedInput {
       return { command: null, argsText: text.slice(1), args: [] };
     }
     // Inline emoticon tokens (`:slug:idx:`) collide with the `:`
-    // action shortcut — without this guard, sending an emoticon by
+    // action shortcut, without this guard, sending an emoticon by
     // itself (or as the very first thing in a message) gets parsed
     // as `/me slug:idx:` and renders as an italic third-person
     // action instead of a sprite. Keep the regex in lockstep with

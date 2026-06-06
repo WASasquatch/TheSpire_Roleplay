@@ -28,7 +28,7 @@ export type MessageSourceKind = "say" | "action" | "whisper" | "none";
 /**
  * Classify the kind for award lookup. Maps the broad MessageKind enum
  * down to the three buckets the awards config models. `cmd` and
- * `system` return "none" — they never earn anything.
+ * `system` return "none", they never earn anything.
  *
  * - say          → `say`
  * - me, scene,
@@ -71,7 +71,7 @@ export function messageSourceKind(kind: MessageKind): MessageSourceKind {
  *                             (a user posting OOC without an attached character)
  *
  * `characterId` here is the snapshot stored on the message row at
- * send time — same field the rest of the system uses for color /
+ * send time, same field the rest of the system uses for color /
  * avatar snapshots, so the routing decision is stable forever
  * regardless of later /char clears or character deletes.
  */

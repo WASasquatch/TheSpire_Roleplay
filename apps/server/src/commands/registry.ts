@@ -14,7 +14,7 @@ import type { CommandContext, CommandHandler, SessionUser } from "./types.js";
  * command map during `reloadCustom` (custom commands) and at builtin
  * registration time (builtins that expose an `inline` handler).
  *
- * The `render` closure unifies the two sources — custom commands run
+ * The `render` closure unifies the two sources, custom commands run
  * their template through `renderTemplateWithVars`, builtins run their
  * `inline()` callback. The `expandInlineCommands` site doesn't care
  * which kind it's invoking.
@@ -25,7 +25,7 @@ import type { CommandContext, CommandHandler, SessionUser } from "./types.js";
 export interface InlineCommandEntry {
   canonicalName: string;
   /** True when the entry came from a builtin (e.g. `/roll`); false for
-   *  admin-authored custom commands. Informational — currently only used
+   *  admin-authored custom commands. Informational, currently only used
    *  to gate things like "show this in the !palette but not the admin
    *  CSS editor." */
   builtin: boolean;
@@ -33,7 +33,7 @@ export interface InlineCommandEntry {
    *  builtin inlines; for custom commands it carries whatever the admin
    *  saved on the row (sanitized). */
   css: string | null;
-  /** Snapshotted color — either a `#rrggbb` hex literal or a
+  /** Snapshotted color, either a `#rrggbb` hex literal or a
    *  `theme:<slot>` token. Always null for builtin inlines (they
    *  inherit the chat's normal coloring); for custom commands it
    *  mirrors the value the admin set on the `/cmd` form. Rides through
@@ -79,7 +79,7 @@ export class CommandRegistry {
     }
     // Builtins that opted into inline expansion get folded into the
     // same inline registry as custom commands. The render shape is
-    // unified — `expandInlineCommands` doesn't know the difference.
+    // unified, `expandInlineCommands` doesn't know the difference.
     if (handler.inline) {
       const inlineFn = handler.inline;
       const entry: InlineCommandEntry = {
@@ -101,11 +101,11 @@ export class CommandRegistry {
   async reloadCustom(db: Db): Promise<void> {
     for (const name of this.customNames) this.byName.delete(name);
     this.customNames.clear();
-    // Drop ONLY custom inline entries — builtin inlines (`!roll`,
+    // Drop ONLY custom inline entries, builtin inlines (`!roll`,
     // `!dice`) were registered once at boot and aren't re-added by
     // this path, so a blanket clear killed them silently. The bug
     // manifested as "every custom-command admin edit makes `!roll`
-    // stop expanding" — the inline form rendered as literal text
+    // stop expanding", the inline form rendered as literal text
     // until the next server restart. We walk the map by entry and
     // delete only the rows whose `builtin: false` flag marks them
     // as coming from the DB. The matching canonical-name set is
@@ -149,7 +149,7 @@ export class CommandRegistry {
       // command whose name was shadowed wouldn't resolve via /name
       // either, so keeping its inline form would surprise authors).
       if (c.allowInline) {
-        // inline_template falls back to the standalone template — the
+        // inline_template falls back to the standalone template, the
         // admin only authors a second body when the wording differs.
         // We treat empty strings AND whitespace-only strings as
         // "missing" so a defensive direct DB write of "" doesn't
@@ -168,7 +168,7 @@ export class CommandRegistry {
           // Carry the admin's color onto inline expansions too. Without
           // this the inline `!check` chip rendered as plain inherited
           // text even though the admin set `color: theme:system` on
-          // the standalone `/check` form — only the standalone path
+          // the standalone `/check` form, only the standalone path
           // was applying it. The marker carries the snapshotted value
           // through to the FE which resolves theme tokens + nudges
           // hex against the viewer's theme bg.
@@ -257,7 +257,7 @@ function makeCustomHandler(
   },
   aliases: string[],
 ): CommandHandler {
-  // Defensive sanitization mirrors the admin POST/PATCH pass — keeps a
+  // Defensive sanitization mirrors the admin POST/PATCH pass, keeps a
   // direct DB write from sneaking a disallowed property into the live
   // broadcast.
   const safeCss = sanitizeCustomCmdCss(c.css ?? "") || null;
@@ -269,7 +269,7 @@ function makeCustomHandler(
       const rendered = renderTemplate(c.template, ctx);
       const { addMessage } = await import("../realtime/broadcast.js");
       // Custom commands always emit `kind: "cmd"` now. The renderer
-      // for cmd kind does NOT auto-prepend the display name — the
+      // for cmd kind does NOT auto-prepend the display name, the
       // template's `{sender}` placeholder controls placement. Legacy
       // installations are migrated by 0061 which prepends `{sender} `
       // to every template lacking the placeholder so historical
@@ -277,7 +277,7 @@ function makeCustomHandler(
       //
       // We still track the original action/say distinction via the
       // (untyped on the wire) command row, but the message itself no
-      // longer needs it — styling diverges by `kind: "cmd"` instead
+      // longer needs it, styling diverges by `kind: "cmd"` instead
       // of by the legacy "me"/"say" split.
       await addMessage(ctx, {
         kind: "cmd",
@@ -347,7 +347,7 @@ function renderTemplate(tpl: string, ctx: CommandContext): string {
 /**
  * Render a template node-by-node against an arbitrary vars dict. Shared
  * between the standalone `/cmd` path (above) and the inline `!cmd`
- * expansion path. Caller is responsible for producing the vars map —
+ * expansion path. Caller is responsible for producing the vars map,
  * inline expansion in particular has no `target`/`args` to plug in.
  */
 function renderTemplateWithVars(tpl: string, vars: Record<string, string>): string {
@@ -398,7 +398,7 @@ function commonVars(roomId: string): Record<string, string> {
  * modifiers (`!roll:1d20+5`, `!roll:2d6-1`) survive intact. Without
  * `+/-` the inline form silently truncated arg to `1d20` and dropped
  * the modifier, leaving the `+5` as plain text after the rendered
- * roll — exactly the failure mode an initiative+damage scene
+ * roll, exactly the failure mode an initiative+damage scene
  * surfaced. The `.` is included for future decimal-friendly args; no
  * builtin uses it today but adding it costs nothing and matches how
  * `parseFloat`-shaped command args are usually written.
@@ -408,8 +408,8 @@ const INLINE_TRIGGER_RE =
 
 /**
  * Expand every `!name[:arg]` token in a chat-message body using the
- * registry's inline-eligible commands. Unknown names — or names whose
- * command exists but isn't inline-enabled — are left as literal
+ * registry's inline-eligible commands. Unknown names, or names whose
+ * command exists but isn't inline-enabled, are left as literal
  * `!name[:arg]` text. The standalone slash-command path is unaffected.
  *
  * Suppression rules so a writer can show what a command LOOKS like
@@ -426,7 +426,7 @@ const INLINE_TRIGGER_RE =
  *     produced. This is what makes the renderer's ✓ tooltip claim
  *     ("this actually came from the server-side command") trustworthy.
  *
- * Inline calls accept an optional `:arg` payload after the name —
+ * Inline calls accept an optional `:arg` payload after the name,
  * `!roll:3d6`, `!flip:coin`, etc. Custom-command inline templates
  * ignore the arg (they render with empty `target`/`args`/`rest`);
  * builtins that opt in via {@link CommandHandler.inline} receive it
@@ -443,7 +443,7 @@ export function expandInlineCommands(
   user: SessionUser,
   roomId: string,
 ): string {
-  // Always strip pre-existing markers first — this is what guarantees
+  // Always strip pre-existing markers first, this is what guarantees
   // every marker the client sees came from this function on this call.
   const cleaned = stripVerificationMarkers(body);
   // Cheap escape hatch: bodies with no `!` at all skip the regex entirely.
@@ -454,7 +454,7 @@ export function expandInlineCommands(
       return seg.raw.replace(
         INLINE_TRIGGER_RE,
         (match: string, prefix: string, name: string, arg: string | undefined) => {
-          // Backslash escape — strip the `\`, keep the literal `!name[:arg]`.
+          // Backslash escape, strip the `\`, keep the literal `!name[:arg]`.
           if (prefix === "\\") return arg ? `!${name}:${arg}` : `!${name}`;
           const entry = registry.resolveInline(name);
           if (!entry) return match;
@@ -466,7 +466,7 @@ export function expandInlineCommands(
           // Both `entry.css` AND `entry.color` ride through the marker
           // (URI-encoded) so the renderer can apply the command's
           // sanitized style AND its admin-picked color to the spliced
-          // span — without color in the marker the inline form fell
+          // span, without color in the marker the inline form fell
           // through to whatever the surrounding chat line was painted
           // in, even when the standalone `/cmd` rendered in a distinct
           // theme color.

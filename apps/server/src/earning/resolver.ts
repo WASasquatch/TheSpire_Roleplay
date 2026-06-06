@@ -3,7 +3,7 @@
  *
  * The award engine calls `resolveRankForXp` after every XP credit to
  * decide whether the pool just crossed a tier boundary. Resolver
- * reads the live `rank_tiers` table on every call — admins can edit
+ * reads the live `rank_tiers` table on every call, admins can edit
  * thresholds, swap assets, or disable a rank from the panel and the
  * next earn respects the change without a deploy.
  *
@@ -11,7 +11,7 @@
  * `ranks.enabled = 0` is skipped by the resolver. A user climbing
  * past that rank's thresholds lands at the next *enabled* rank's
  * lowest qualifying tier. Existing rank-holders in a now-disabled
- * rank stay put — `maxRankKeyEverHeld` is only ever bumped UP, never
+ * rank stay put, `maxRankKeyEverHeld` is only ever bumped UP, never
  * recomputed from the live table.
  */
 
@@ -46,7 +46,7 @@ export interface RankCrossing {
  * Returns `{ rankKey: null, tier: null }` when no row qualifies (every
  * row has a threshold above the input XP, or the catalog is empty).
  *
- * One indexed query — cheap to call on every award. The compound
+ * One indexed query, cheap to call on every award. The compound
  * filter joins to `ranks` so disabled ranks fall out without a second
  * roundtrip.
  */
@@ -80,7 +80,7 @@ export async function resolveRankForXp(db: Db, xp: number): Promise<ResolvedRank
 /**
  * Given a user's prior peak (`maxRankKeyEverHeld` / `maxTierEverHeld`)
  * and a candidate new placement, return the merged peak. Never
- * decreases. The ordering is `(ranks.order asc, tier asc)` — a higher
+ * decreases. The ordering is `(ranks.order asc, tier asc)`, a higher
  * rank always trumps a lower one regardless of tier, and within the
  * same rank a higher tier trumps a lower tier.
  *
@@ -146,10 +146,10 @@ export function diffCrossing(
     newlyEligibleBorderKeys.push(after.rankKey);
   }
   // Cross-check against the merged peak so we never claim a "newly eligible"
-  // border that the peak already knows about (defensive — diff is the source
+  // border that the peak already knows about (defensive, diff is the source
   // of truth, peak just confirms).
   if (newPeak.maxRankKeyEverHeld === after.rankKey && (newPeak.maxTierEverHeld ?? 0) >= 4 && reachedCapstone && peakWasAlreadyCapstone) {
-    // Already eligible — drop from list if somehow added.
+    // Already eligible, drop from list if somehow added.
     newlyEligibleBorderKeys.length = 0;
   }
   return {
@@ -164,7 +164,7 @@ export function diffCrossing(
 /**
  * Bulk re-resolve every earning row (user + character scopes) against
  * the current rank_tiers table. Called from the admin Ranks tab after a
- * threshold edit — keeps denormalized `rankKey` / `tier` in sync with
+ * threshold edit, keeps denormalized `rankKey` / `tier` in sync with
  * the new placements without forcing every user to send a message
  * before their displayed rank updates.
  *
@@ -232,7 +232,7 @@ export async function listRanksOrdered(db: Db) {
  * `db.transaction((tx) => {...})` callback where the async query
  * builders don't apply.
  *
- * Same skip-disabled-ranks semantics as `resolveRankForXp` — a user
+ * Same skip-disabled-ranks semantics as `resolveRankForXp`, a user
  * climbing past a disabled rank's threshold lands in the next-higher
  * enabled rank's lowest tier.
  */
@@ -265,7 +265,7 @@ export function placeRankForXpSync(
 }
 
 /**
- * Sync version of `mergeMaxEverHeld` — same semantics, accepts the
+ * Sync version of `mergeMaxEverHeld`, same semantics, accepts the
  * pre-loaded ranks list for inside-transaction use.
  */
 export function mergeMaxEverHeldSync(
@@ -295,7 +295,7 @@ export function mergeMaxEverHeldSync(
  * caller can render gracefully (no sigil).
  *
  * `(scope, ownerId)` is the same shape used everywhere else in the
- * Earning engine — `user` scope keys on userId, `character` scope
+ * Earning engine, `user` scope keys on userId, `character` scope
  * keys on characterId.
  */
 export async function readPoolRank(

@@ -2,7 +2,7 @@
  * Client-side sanitizer + render-time CSS scoper for user-authored
  * HTML (profile bios, world pages, character journal, etc.). All of
  * these are also sanitized server-side via `sanitizeBio` in
- * apps/server — this pass is defense-in-depth, run before injecting
+ * apps/server, this pass is defense-in-depth, run before injecting
  * into the DOM via `dangerouslySetInnerHTML`.
  *
  * Two transforms happen here:
@@ -41,7 +41,7 @@ import { parseVideoEmbed } from "./markdown.js";
  * every user-bio `<style>` tag, so consumers that want to defensively
  * purge orphaned bio styles on unmount can query them by attribute
  * without reaching into `./cssScope.js`. Pair with the host modal's
- * cleanup effect — see {@link sweepOrphanedUserBioStyles}.
+ * cleanup effect, see {@link sweepOrphanedUserBioStyles}.
  */
 export { USER_HTML_STYLE_MARKER };
 
@@ -56,7 +56,7 @@ export { USER_HTML_STYLE_MARKER };
  * tree before the GC pass caught up. Calling this from the host
  * modal's effect cleanup guarantees nothing survives the close.
  *
- * Safe to call any time — operates only on tags carrying our marker,
+ * Safe to call any time, operates only on tags carrying our marker,
  * which {@link sanitizeUserHtml} stamps; server-rendered chrome
  * `<style>` tags (the inline JSON-LD nonce path, the 404 splash) do
  * NOT carry it and pass through untouched.
@@ -73,10 +73,10 @@ export function sweepOrphanedUserBioStyles(): void {
  * BEFORE DOMPurify runs, so the writer doesn't have to paste raw
  * iframe markup. URL is parsed via the same `parseVideoEmbed` chat /
  * markdown uses, so any YouTube URL shape (watch, short, shorts, embed)
- * is accepted; vimeo URLs are rejected — those would belong to a
+ * is accepted; vimeo URLs are rejected, those would belong to a
  * separate `<vimeo>` tag if we add one later.
  *
- * Inner text is the only thing read — attributes on the `<youtube>` tag
+ * Inner text is the only thing read, attributes on the `<youtube>` tag
  * are ignored. Invalid URLs (typos, non-YouTube hosts) drop the tag
  * entirely rather than render a broken embed.
  *
@@ -98,7 +98,7 @@ function transformYoutubeTags(html: string): string {
 /**
  * CSS class every user-HTML render site wraps its container in. The
  * client-side `<style>` scope pass prefixes every selector with this
- * (as a class selector — `.user-html-scope ${original}`) so user CSS
+ * (as a class selector, `.user-html-scope ${original}`) so user CSS
  * rules can only match descendants of the wrapper. Keep in sync with
  * the value passed to `scopeAndNonceStyleBlocks` in this file.
  */
@@ -109,7 +109,7 @@ export function sanitizeUserHtml(html: string): string {
     // `iframe` is in ADD_TAGS so the `<youtube>` → iframe transform
     // above survives. Arbitrary iframes are still gated by the strict
     // CSP `frame-src` allowlist (`youtube-nocookie.com`, `vimeo.com`,
-    // self) — a pasted `<iframe src="http://evil">` parses fine but
+    // self), a pasted `<iframe src="http://evil">` parses fine but
     // the browser refuses to load it, so the surface is the URL set
     // CSP already trusts.
     ADD_TAGS: ["style", "iframe"],
@@ -129,19 +129,19 @@ export function sanitizeUserHtml(html: string): string {
  * bios viewed in the OWNER's palette, story reader). Without this pass,
  * a writer who picked deep navy text against their light Parchment
  * editor reads fine on Parchment but disappears against a dark world's
- * navy bg — the original hex round-trips unchanged through the editor
+ * navy bg, the original hex round-trips unchanged through the editor
  * → DB → render pipeline.
  *
  * Two-pass scope:
- *   1. Inline `style="…"` attributes — the common case (rich-text
+ *   1. Inline `style="…"` attributes, the common case (rich-text
  *      pickers, copy-pasted spans). Walked via a small regex over
  *      `style` attributes that touches only `color:` / `background*:`
  *      declarations, leaves everything else (font-size, margin,
  *      transform, gradients) untouched.
- *   2. `<style>…</style>` block bodies — we already scope/nonce them in
+ *   2. `<style>…</style>` block bodies, we already scope/nonce them in
  *      sanitizeUserHtml. Same color-keyword regex runs against the CSS
  *      body. CSS variables (`var(--keep-text)`), `rgb(...)`, `hsl(...)`,
- *      and named colors are left alone — they either resolve through
+ *      and named colors are left alone, they either resolve through
  *      the scoped theme already or aren't safe to nudge without a full
  *      parser.
  *

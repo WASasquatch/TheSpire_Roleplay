@@ -1,7 +1,7 @@
 -- Switch name-style CSS to the classic background-clip-text pattern.
 --
 -- 0071 used `color: transparent` + `paint-order: stroke fill`. Combo
--- didn't composite correctly in every browser — `paint-order`
+-- didn't composite correctly in every browser, `paint-order`
 -- interaction with `background-clip: text` made the fill (gradient)
 -- get skipped, leaving the text rendering as a solid dark mass
 -- instead of as a gradient mask.

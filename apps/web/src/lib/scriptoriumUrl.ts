@@ -1,12 +1,12 @@
 /**
  * URL shape helpers for the public Scriptorium routes:
  *
- *   /scriptorium                      — public catalog
- *   /scriptorium/@<handle>/<slug>     — canonical per-story permalink
+ *   /scriptorium                     , public catalog
+ *   /scriptorium/@<handle>/<slug>    , canonical per-story permalink
  *
  * The server's splash-route registration (apps/server/src/index.ts)
  * serves the SPA shell on both paths so direct navigation and link
- * sharing both work — these helpers are what the SPA parses on first
+ * sharing both work, these helpers are what the SPA parses on first
  * paint and on `popstate` to decide which modal to mount.
  */
 
@@ -40,7 +40,7 @@ export function storyPermalink(handle: string, slug: string): string {
   return `/scriptorium/@${encodeURIComponent(handle)}/${encodeURIComponent(slug)}`;
 }
 
-/** Build the absolute URL — used by Copy Link / share UI. */
+/** Build the absolute URL, used by Copy Link / share UI. */
 export function storyShareUrl(handle: string, slug: string): string {
   const path = storyPermalink(handle, slug);
   if (typeof window === "undefined") return path;

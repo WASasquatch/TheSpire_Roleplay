@@ -6,7 +6,7 @@ import type { CommandContext as Ctx } from "../types.js";
 /**
  * Every room the toggling user currently has a live socket in.
  * Going incognito has to land a presence refresh on each of those
- * rooms simultaneously — broadcasting only on `ctx.roomId` (the room
+ * rooms simultaneously, broadcasting only on `ctx.roomId` (the room
  * where /incognito was typed) left every other room the user is
  * present in showing them as visible until the next /rooms poll
  * (20s). For a feature whose contract is "global invisible, no trace"
@@ -14,7 +14,7 @@ import type { CommandContext as Ctx } from "../types.js";
  * is way too much, so we walk the user's sockets up front and refresh
  * each room they're currently joined to.
  *
- * Returns the unique set of roomIds — sockets can repeat the same
+ * Returns the unique set of roomIds, sockets can repeat the same
  * room when the user has multiple tabs on it, so we dedupe before
  * iterating. Includes `ctx.roomId` even if no live socket is in it
  * (defensive: the command was issued from that room, so there must
@@ -36,14 +36,14 @@ import { recordAudit } from "../../audit.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 /**
- * /incognito (alias /ghost) — moderator observation tool.
+ * /incognito (alias /ghost), moderator observation tool.
  *
  * When a mod or admin enters incognito mode:
  *   - They disappear from every userlist they're in. The next
  *     presence broadcast filters them out (see broadcast.ts
  *     `INCOGNITO FILTER` block).
  *   - The current room sees a system "X has left the chat" line
- *     (or their custom exit message) — visually identical to the
+ *     (or their custom exit message), visually identical to the
  *     mod legitimately leaving the room, so other participants
  *     stop adjusting their behavior around staff presence.
  *   - Room transitions (joining / leaving rooms) STOP broadcasting
@@ -62,17 +62,17 @@ import type { CommandContext, CommandHandler } from "../types.js";
  * State persists on the user row (incognito_mode + incognito_alias
  * + custom messages) so a tab refresh / network blip doesn't pop
  * them back into visibility mid-investigation. Toggle is the only
- * way out — there's no automatic timeout.
+ * way out, there's no automatic timeout.
  *
  * Subcommand shape:
- *   /incognito                      — toggle on/off
- *   /incognito on                   — explicit on
- *   /incognito off                  — explicit off
- *   /incognito <alias>              — set alias + turn on (if off)
- *   /incognito alias <name>         — set alias only
- *   /incognito exit <message>       — set custom leave-message
- *   /incognito return <message>     — set custom join-message
- *   /incognito clear                — reset alias + custom messages
+ *   /incognito                     , toggle on/off
+ *   /incognito on                  , explicit on
+ *   /incognito off                 , explicit off
+ *   /incognito <alias>             , set alias + turn on (if off)
+ *   /incognito alias <name>        , set alias only
+ *   /incognito exit <message>      , set custom leave-message
+ *   /incognito return <message>    , set custom join-message
+ *   /incognito clear               , reset alias + custom messages
  *
  * Permission-gated. Users without `use_ghost_mode` get the same
  * "unknown command" surface as if the command didn't exist (the
@@ -111,8 +111,8 @@ async function patchUser(
   const fresh = (await ctx.db.select().from(users).where(eq(users.id, ctx.user.id)).limit(1))[0]!;
   // Keep the in-memory session user (and the per-socket cached
   // user, if present) in sync so downstream code paths in this
-  // dispatch tick — and on the NEXT dispatched event from the same
-  // socket — see the updated state without a round-trip through
+  // dispatch tick, and on the NEXT dispatched event from the same
+  // socket, see the updated state without a round-trip through
   // loadSessionUser.
   ctx.user.incognitoMode = fresh.incognitoMode;
   ctx.user.incognitoAlias = fresh.incognitoAlias;
@@ -129,7 +129,7 @@ async function patchUser(
   // tab's `me.incognitoMode` / `me.incognitoAlias` updates the
   // moment the toggle / alias change lands, not on the next
   // /auth/me poll. The handler on the client side updates the
-  // chat store directly — same posture as `me:character-update`.
+  // chat store directly, same posture as `me:character-update`.
   const allSockets = await ctx.io.fetchSockets();
   for (const s of allSockets) {
     if ((s.data as { userId?: string }).userId !== ctx.user.id) continue;
@@ -152,16 +152,16 @@ async function enterIncognito(ctx: CommandContext, opts: { aliasOverride?: strin
   const fresh = await patchUser(ctx, patch);
 
   // Broadcast the "X has left the chat" line BEFORE the presence
-  // broadcast hides the user — otherwise other clients couldn't
+  // broadcast hides the user, otherwise other clients couldn't
   // visually correlate the leave message with a specific row.
   // Use addSystemMessage (not addMessage with kind:"system") so the
   // persisted row's displayName is the literal "system" and the
   // client renders it as a bare system notice. addMessage would have
   // stamped the moderator's real displayName onto the row, which the
-  // client now surfaces as a `[Name]` prefix — leaking the mod's
+  // client now surfaces as a `[Name]` prefix, leaking the mod's
   // identity on the very line that's supposed to disguise it.
   const exitLine = fresh.incognitoExitMessage ?? defaultExitMessage(realDisplayName);
-  // Exit line goes ONLY to ctx.roomId — that's the room the mod was
+  // Exit line goes ONLY to ctx.roomId, that's the room the mod was
   // visible in when they typed the command, so other participants
   // see one coherent "X has left the chat." The OTHER rooms the
   // mod has tabs in get a silent presence refresh (no exit message)
@@ -183,7 +183,7 @@ async function enterIncognito(ctx: CommandContext, opts: { aliasOverride?: strin
     },
   });
 
-  // Quiet confirmation to the caller only — other clients see the
+  // Quiet confirmation to the caller only, other clients see the
   // exit message above, but the mod themself needs an explicit
   // ack so they know the toggle landed.
   ctx.socket.emit("error:notice", {
@@ -201,7 +201,7 @@ async function leaveIncognito(ctx: CommandContext): Promise<void> {
   const meRow = (await ctx.db.select().from(users).where(eq(users.id, ctx.user.id)).limit(1))[0]!;
   // Real display name = the user's master username, or the active
   // character's name if one is attached. We don't need the full
-  // resolver here — the system line just identifies who came back.
+  // resolver here, the system line just identifies who came back.
   const realDisplayName = ctx.user.activeCharacterId == null
     ? meRow.username
     : ctx.user.displayName;  // already character-resolved by the dispatcher
@@ -209,7 +209,7 @@ async function leaveIncognito(ctx: CommandContext): Promise<void> {
   const fresh = await patchUser(ctx, { incognitoMode: false });
 
   const returnLine = fresh.incognitoReturnMessage ?? defaultReturnMessage(realDisplayName);
-  // Same addSystemMessage rationale as enterIncognito — keep the
+  // Same addSystemMessage rationale as enterIncognito, keep the
   // persisted displayName as the bare "system" sentinel so the
   // client doesn't render this as `[Name] X has joined the chat.`.
   await addSystemMessage(ctx.io, ctx.db, ctx.roomId, returnLine);
@@ -385,7 +385,7 @@ export const incognitoCommand: CommandHandler = {
       return;
     }
 
-    // Bare positional alias — `/incognito God` → set alias to "God"
+    // Bare positional alias, `/incognito God` → set alias to "God"
     // AND enter incognito in one step. The args.join here gathers
     // multi-word aliases ("/incognito The Watcher").
     const alias = ctx.argsText.trim();
@@ -397,7 +397,7 @@ export const incognitoCommand: CommandHandler = {
       return;
     }
     if (meRow.incognitoMode) {
-      // Already on — just update alias.
+      // Already on, just update alias.
       await patchUser(ctx, { incognitoAlias: alias });
       ctx.socket.emit("error:notice", {
         code: "INCOGNITO_ALIAS_SET",

@@ -58,7 +58,7 @@ export function rng2(a: number, b: number): number {
 
 /**
  * Worn-edge noise for parchment / paper textures. Returns a value in
- * [0, 1] that falls off smoothly toward the corners — useful for damping
+ * [0, 1] that falls off smoothly toward the corners, useful for damping
  * the "noise mask" generators apply so corners look more weathered than
  * the center.
  */

@@ -1,5 +1,5 @@
 /**
- * Theme style system — public API.
+ * Theme style system, public API.
  *
  * `applyStyle(theme, styleKey)` is the entry point. The caller (typically
  * App.tsx) invokes it AFTER `applyTheme` has set the color custom
@@ -12,7 +12,7 @@
  * from the OrnamentSet); the consumer falls back to flat color.
  *
  * The result of each `(themeHash, styleKey)` pair is memoized for the
- * session — switching back to a previously-applied combination is
+ * session, switching back to a previously-applied combination is
  * instant (no canvas re-render).
  */
 
@@ -31,15 +31,15 @@ const ALL_ORNAMENT_KEYS: ReadonlyArray<OrnamentKey> = [
 ];
 
 /**
- * Registry of available styles. Four families — each a complete design
+ * Registry of available styles. Four families, each a complete design
  * language, not just a texture variant:
  *
- *   medieval — flat warm surfaces, soft inset shadows, parchment palette
+ *   medieval, flat warm surfaces, soft inset shadows, parchment palette
  *              defaults, drop shadows on bottom, serif headers.
- *   modern   — soft two-tone gradients, rounded corners, light shadows.
- *   scifi    — glass + multi-color radial bokeh, neon glow on focus,
+ *   modern  , soft two-tone gradients, rounded corners, light shadows.
+ *   scifi   , glass + multi-color radial bokeh, neon glow on focus,
  *              sharp corners, action-color edges.
- *   glass    — frosted translucent panels over the user's backdrop
+ *   glass   , frosted translucent panels over the user's backdrop
  *              image (or the Spire artwork as fallback). Soft inset
  *              frost bevel, outer ambient shadow, palette-tinted
  *              gradients. Pairs with the Glass Light / Glass Dark
@@ -71,7 +71,7 @@ export function listStyles(): Array<{ key: string; label: string }> {
  *
  * Cache key combines the 8 theme hex values + the style key. Both must
  * match for a cache hit, so re-applying after a single color change
- * regenerates (cheap — canvas drawing is microseconds on these small
+ * regenerates (cheap, canvas drawing is microseconds on these small
  * surfaces).
  */
 const cache = new Map<string, OrnamentSet>();

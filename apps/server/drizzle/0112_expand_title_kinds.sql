@@ -5,16 +5,16 @@
 -- that already added one of these by hand doesn't collide.
 --
 -- Token reminder (see migration 0111 + titles/service.ts):
---   {target}                  — other party's display name
---   {gender:Male|Female|Neutral}  — picks per subject's gender;
+--   {target}                 , other party's display name
+--   {gender:Male|Female|Neutral} , picks per subject's gender;
 --                                   "Neutral" handles nonbinary /
 --                                   other / undisclosed
 --
 -- Symmetric column meaning:
---   1 (true)  — both sides render with the same format string
+--   1 (true) , both sides render with the same format string
 --               (but {gender:} still picks per-viewer, so a
 --               symmetric kind can still ship gendered words)
---   0 (false) — A side (requester) and B side (recipient) render
+--   0 (false), A side (requester) and B side (recipient) render
 --               with DIFFERENT format strings. The asymmetric
 --               family roles (grandparent/grandchild,
 --               aunt-uncle/niece-nephew, master/apprentice, etc.)
@@ -76,7 +76,7 @@ VALUES
    '{gender:Twin Brother|Twin Sister|Twin} of {target}',
    0),
 
-  -- Fiancé / Fiancée. Exclusive=1 like marriage — engaged to one
+  -- Fiancé / Fiancée. Exclusive=1 like marriage, engaged to one
   -- party at a time. Symmetric, the gender token picks the right
   -- spelling per viewer.
   ('fiance', 'fiance', 'Fiancé(e)', 1,

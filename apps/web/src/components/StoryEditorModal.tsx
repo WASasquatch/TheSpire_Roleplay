@@ -35,7 +35,7 @@ interface Props {
   storyId: string | null;
   onClose: () => void;
   onDeleted?: () => void;
-  /** When provided, the header shows a "← Back" affordance — used when
+  /** When provided, the header shows a "← Back" affordance, used when
    *  the editor is stacked on top of the catalog so the user can
    *  return to browsing without collapsing the whole stack. */
   onBack?: () => void;
@@ -242,7 +242,7 @@ function NewStoryWizard({
         const j = (await r.json()) as { characters: { id: string; name: string }[] };
         if (!cancelled) setCharacters(j.characters ?? []);
       } catch {
-        // Non-critical — the selector falls back to master-only.
+        // Non-critical, the selector falls back to master-only.
       }
     })();
     return () => { cancelled = true; };
@@ -370,7 +370,7 @@ function NewStoryWizard({
 }
 
 /* =============================================================
- *  Overview tab — story meta editor
+ *  Overview tab, story meta editor
  * ============================================================= */
 
 function OverviewEditor({
@@ -461,16 +461,16 @@ function OverviewEditor({
         </Field>
       </div>
 
-      <Field label={`Summary (${summary.length}/280) — shown on catalog cards`}>
+      <Field label={`Summary (${summary.length}/280), shown on catalog cards`}>
         <textarea value={summary} onChange={(e) => setSummary(e.target.value)} maxLength={280} rows={2}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm" />
       </Field>
 
-      <Field label="Synopsis — shown on the story landing page">
+      <Field label="Synopsis, shown on the story landing page">
         <RichEditor
           value={synopsisHtml}
           onChange={setSynopsisHtml}
-          placeholder="A longer pitch — the hook that gets readers to start chapter 1."
+          placeholder="A longer pitch, the hook that gets readers to start chapter 1."
           minHeight="10rem"
         />
       </Field>
@@ -494,9 +494,9 @@ function OverviewEditor({
         <Field label="Visibility">
           <select value={visibility} onChange={(e) => setVisibility(e.target.value as StoryVisibility)}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
-            <option value="private">Private — only you</option>
-            <option value="unlisted">Unlisted — link only</option>
-            <option value="public">Public — listed</option>
+            <option value="private">Private, only you</option>
+            <option value="unlisted">Unlisted, link only</option>
+            <option value="public">Public, listed</option>
           </select>
         </Field>
         <Field label="Status">
@@ -507,7 +507,7 @@ function OverviewEditor({
         </Field>
       </div>
 
-      <Field label="Rating — sets who can read this story">
+      <Field label="Rating, sets who can read this story">
         <RatingPicker value={rating} onChange={setRating} name="story-rating" />
       </Field>
 
@@ -593,7 +593,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 /* =============================================================
- *  Chapters tab — list + editor pane
+ *  Chapters tab, list + editor pane
  * ============================================================= */
 
 function ChaptersTab({
@@ -691,7 +691,7 @@ function ChaptersTab({
         {err ? <p className="border-b border-keep-rule bg-keep-accent/10 px-2 py-1 text-[11px] text-keep-accent">{err}</p> : null}
         <div className="min-h-0 flex-1 overflow-y-auto p-1">
           {orderedIds.length === 0 ? (
-            <p className="p-3 text-xs italic text-keep-muted">No chapters yet — add one to start writing.</p>
+            <p className="p-3 text-xs italic text-keep-muted">No chapters yet, add one to start writing.</p>
           ) : (
             <ChapterList
               orderedIds={orderedIds}
@@ -824,13 +824,13 @@ function ChapterEditor({
    * Advisory chapter-edit lock. When a second collaborator opens the
    * chapter, the lock POST returns the holder's identity and the
    * banner gates the textarea into read-only. The user can "Force
-   * edit" anyway — saves still go through, the version table captures
+   * edit" anyway, saves still go through, the version table captures
    * the divergence. Heartbeat every STORY_CHAPTER_LOCK_HEARTBEAT_MS;
    * release on unmount.
    */
   const [lock, setLock] = useState<StoryChapterLockState | null>(null);
   const [forceEdit, setForceEdit] = useState(false);
-  /** The chapter `updatedAt` we last surfaced a divergence for — i.e.
+  /** The chapter `updatedAt` we last surfaced a divergence for, i.e.
    *  the value seen on the heartbeat that beat our loaded snapshot. */
   const [lastDivergedAt, setLastDivergedAt] = useState<number>(0);
   /** The user can dismiss the banner; we store the value they dismissed
@@ -838,7 +838,7 @@ function ChapterEditor({
   const [divergeDismissedFor, setDivergeDismissedFor] = useState<number>(0);
   /** updatedAt we last observed for this chapter row (initial load or
    *  after our own save). Heartbeat compares this against the lock
-   *  payload's `currentUpdatedAt` — a newer server value means someone
+   *  payload's `currentUpdatedAt`, a newer server value means someone
    *  else saved while we were editing. */
   const loadedUpdatedAtRef = useRef<number>(0);
 
@@ -894,12 +894,12 @@ function ChapterEditor({
         setLock(j);
         if (j.currentUpdatedAt > loadedUpdatedAtRef.current) setLastDivergedAt(j.currentUpdatedAt);
       } catch {
-        // Network blip — try again on the next tick.
+        // Network blip, try again on the next tick.
       }
     }
     void tick();
     const id = window.setInterval(tick, STORY_CHAPTER_LOCK_HEARTBEAT_MS);
-    // Backgrounded tabs throttle setInterval — refresh the moment the
+    // Backgrounded tabs throttle setInterval, refresh the moment the
     // user comes back so the lock doesn't lapse mid-session and the
     // banner can pick up someone else taking over while we were away.
     const onVis = () => { if (document.visibilityState === "visible") void tick(); };
@@ -976,7 +976,7 @@ function ChapterEditor({
       setCws(updated.contentWarnings);
       lastSavedBody.current = { body: updated.bodyHtml, notes: updated.authorNotesHtml, title: updated.title };
       setSavedAt(Date.now());
-      // The pill is a brief flash, not a permanent badge — the dirty
+      // The pill is a brief flash, not a permanent badge, the dirty
       // indicator below tells the user whether the buffer is actually
       // in sync. 4s is long enough to register, short enough to fade.
       window.setTimeout(() => {
@@ -1118,7 +1118,7 @@ function ChapterEditor({
       ) : previewing ? (
         <div className="flex-1 overflow-y-auto p-6">
           <article className="prose mx-auto max-w-prose text-keep-text"
-            dangerouslySetInnerHTML={{ __html: body || "<p><i>Empty chapter — nothing to preview.</i></p>" }} />
+            dangerouslySetInnerHTML={{ __html: body || "<p><i>Empty chapter, nothing to preview.</i></p>" }} />
           {notes ? (
             <div className="mx-auto mt-6 max-w-prose border-t border-keep-rule pt-3 text-sm text-keep-muted">
               <h4 className="mb-1 text-xs uppercase tracking-widest">Author's notes</h4>
@@ -1145,7 +1145,7 @@ function ChapterEditor({
                 value={notes}
                 onChange={setNotes}
                 readOnly={isReadOnly}
-                placeholder="Notes shown above or below the chapter — context, citations, dedications..."
+                placeholder="Notes shown above or below the chapter, context, citations, dedications..."
                 minHeight="6rem"
               />
             </div>
@@ -1248,7 +1248,7 @@ function VersionHistoryPane({
       <section className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center justify-between border-b border-keep-rule bg-keep-panel/30 px-3 py-1.5">
           <span className="text-xs text-keep-muted">
-            {active ? `Preview — v${active.version}` : "Pick a version on the left."}
+            {active ? `Preview, v${active.version}` : "Pick a version on the left."}
           </span>
           {active ? (
             <button type="button" onClick={() => onRestore(active)}

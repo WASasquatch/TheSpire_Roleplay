@@ -1,5 +1,5 @@
 /**
- * Earning dashboard modal — the user-facing surface for the
+ * Earning dashboard modal, the user-facing surface for the
  * XP / Currency / Ranks system.
  *
  * Phase 1 ships sections 1 (header), 2 (wallets), 3 (ledger), and 7
@@ -21,6 +21,7 @@ import {
   equipCosmetic,
   fetchEarningCatalog,
   fetchEarningLedger,
+  fetchGameRankings,
   fetchRankings,
   formatItemName,
   formatLedgerEntry,
@@ -59,6 +60,9 @@ import {
   type RankingChampion,
   type RankingPoolEntry,
   type RankTierRow,
+  type GameRankingsResponse,
+  type GameRankingRow,
+  type OverallRankingRow,
 } from "../lib/earning.js";
 import { BorderedAvatar } from "./BorderedAvatar.js";
 import { EmoticonSubmissionModal } from "./EmoticonSubmissionModal.js";
@@ -125,7 +129,7 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab }: Pro
     let cancelled = false;
     fetchFlashSale()
       .then((r) => { if (!cancelled) setFlashSale(r); })
-      .catch(() => { /* silent — sale info is decoration */ });
+      .catch(() => { /* silent, sale info is decoration */ });
     return () => { cancelled = true; };
   }, []);
 
@@ -139,7 +143,7 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab }: Pro
           <h2 className="shrink-0 font-action text-lg">Your Earning</h2>
           {/* Mobile: a single full-width dropdown for the active tab,
               with the X button flush to its right. The horizontal
-              tab strip was hard to scan at <lg widths — even the
+              tab strip was hard to scan at <lg widths, even the
               `overflow-x-auto` scroll didn't help when six labels
               crowded the same space the header title + close button
               wanted. */}
@@ -190,7 +194,7 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab }: Pro
             <p className="text-sm text-keep-muted">Loading your earning…</p>
           ) : null}
           {!snapshot && !loading && !error ? (
-            <p className="text-sm text-keep-muted">No earning record yet — earn XP from chat or forums to start.</p>
+            <p className="text-sm text-keep-muted">No earning record yet, earn XP from chat or forums to start.</p>
           ) : null}
 
           {snapshot && tab === "overview" ? <OverviewTab snapshot={snapshot} flashSale={flashSale} onNavigate={navigateTo} /> : null}
@@ -237,12 +241,12 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
  * row via its `data-shop-row="<key>"` attribute, scroll it into view,
  * and apply a brief CSS pulse so the user sees exactly which row they
  * came to buy. `scrollIntoView` walks up to the nearest scrollable
- * ancestor automatically — the modal body's `overflow-y-auto` div
+ * ancestor automatically, the modal body's `overflow-y-auto` div
  * is what ends up scrolling.
  *
  * The pulse class set is applied via direct DOM mutation rather than
  * a state-driven rerender, so it works regardless of how the tab
- * structures its rows. Cleaned up after 2.5s — enough for the user's
+ * structures its rows. Cleaned up after 2.5s, enough for the user's
  * eye to land on it without lingering after they start interacting.
  *
  * Retries on rAF for ~1.5s to handle tabs that fetch their catalog
@@ -286,7 +290,7 @@ function OverviewTab({ snapshot, flashSale, onNavigate }: {
   onNavigate: (tab: DashboardTab, focusKey?: string | null) => void;
 }) {
   const masterRank = lookupRankTier(snapshot, snapshot.master.rankKey, snapshot.master.tier);
-  // Viewer's actual avatar URL — feeds the Flash Sale border preview
+  // Viewer's actual avatar URL, feeds the Flash Sale border preview
   // so the showcase shows what the border will look like on the
   // user's own portrait instead of a stand-in initials chip (which
   // makes the ring blend into its own backdrop and reads as
@@ -294,7 +298,7 @@ function OverviewTab({ snapshot, flashSale, onNavigate }: {
   //
   // CRITICAL: the lookup MUST filter on (userId, characterId) tuple,
   // not just userId. The occupants cache holds one row per
-  // (userId, characterId) tuple — a master with three open tabs
+  // (userId, characterId) tuple, a master with three open tabs
   // voicing OOC, character A, and character B has THREE rows
   // matching `o.userId === me.id`. Iterating `Object.values(...)`
   // without the characterId filter returns the FIRST tuple that
@@ -302,7 +306,7 @@ function OverviewTab({ snapshot, flashSale, onNavigate }: {
   // deterministic. That manifested as: a user shopping on OOC
   // (Darkest Thoughts) with another tab parked as Sister_Rosalina
   // (character) seeing Sister_Rosalina's portrait painted onto the
-  // OOC dashboard's border previews — and the purchase actually
+  // OOC dashboard's border previews, and the purchase actually
   // charged from OOC, so the visual identity didn't match the wallet
   // the buy was hitting. Refreshing the tab cleared the cross-tab
   // state and the lookup landed on the right row. Now scoped to
@@ -330,7 +334,7 @@ function OverviewTab({ snapshot, flashSale, onNavigate }: {
     snapshot.ownedBorders.length === 0;
   return (
     <div className="space-y-4">
-      {/* Hero band — sigil renders LEFT at 11rem so the chevron art
+      {/* Hero band, sigil renders LEFT at 11rem so the chevron art
           reads as the primary visual element (the chevron points
           right, so left-aligning it with the identity text to its
           right reads as a single lockup pointing at the user's
@@ -384,7 +388,7 @@ function OverviewTab({ snapshot, flashSale, onNavigate }: {
  * Today's flash sale, surfaced on the Overview tab so it's the first
  * thing a user sees when they open Earning. Hides itself entirely
  * when nothing's on sale today (admin disabled every category, or
- * every enabled category had an empty catalog) — empty state would
+ * every enabled category had an empty catalog), empty state would
  * read as broken UI, not as "nothing today."
  *
  * The category strip uses the same shape the per-tab shop cards use
@@ -397,7 +401,7 @@ function OverviewTab({ snapshot, flashSale, onNavigate }: {
 function FlashSaleSection({ flashSale, previewName, previewAvatarUrl, onNavigate }: {
   flashSale: FlashSaleResponse | null;
   previewName: string;
-  /** Viewer's actual avatar URL — passed to the border-preview card
+  /** Viewer's actual avatar URL, passed to the border-preview card
    *  so the showcase paints the freeform frame around the user's real
    *  portrait, matching the Borders tab. Null falls back to the
    *  initials-chip path; the ring becomes hard to see without an
@@ -432,7 +436,7 @@ function FlashSaleSection({ flashSale, previewName, previewAvatarUrl, onNavigate
 
   return (
     <section className="relative overflow-hidden rounded-lg border-2 border-keep-action/60 bg-gradient-to-br from-keep-action/15 via-keep-bg/20 to-keep-bg/40 p-5 shadow-[0_0_28px_-6px_var(--keep-action,rgba(255,128,0,0.45))]">
-      {/* Radial glow accent — top-right corner — gives the hero a
+      {/* Radial glow accent, top-right corner, gives the hero a
           "deal of the day" warmth without the gradient swallowing
           the cards. Decorative, no pointer interaction. */}
       <div
@@ -441,7 +445,7 @@ function FlashSaleSection({ flashSale, previewName, previewAvatarUrl, onNavigate
       />
       <header className="relative mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          {/* Animated lightning bolt — replaces the static `⚡` emoji
+          {/* Animated lightning bolt, replaces the static `⚡` emoji
               with a strike-from-above loop (streak descends, bolt
               lands with a flash + ground impact, holds with an
               afterglow, resets). Scoped to its own 44px box via
@@ -494,7 +498,7 @@ function FlashSaleSection({ flashSale, previewName, previewAvatarUrl, onNavigate
 /**
  * Reusable "ON SALE -N%" badge. Used on shop catalog cards across
  * Name Styles / Cosmetics / Items so the user can see today's
- * discounted rows while browsing — not just on the Overview hero.
+ * discounted rows while browsing, not just on the Overview hero.
  * Returns null when no sale applies, so callers can render it
  * unconditionally without scaffolding `{discount ? ... : null}`.
  */
@@ -546,7 +550,7 @@ function PriceBlock({
  * Helper that combines a base price with the day's flash-sale snapshot.
  * Returns the effective unit price + the matching discount %, or null
  * when the row isn't on sale today. Pure compute against the cached
- * `flashSale` prop — never re-fetches, so it's cheap to call per row.
+ * `flashSale` prop, never re-fetches, so it's cheap to call per row.
  */
 function flashSalePriceFor(
   flashSale: FlashSaleResponse | null,
@@ -575,11 +579,11 @@ function FlashSaleCard({
    *  name-style preview so the user can see what it would look like
    *  on their own row. Falls back to "Username" if none is supplied. */
   previewName: string;
-  /** Viewer's actual avatar URL for the border preview — null falls
+  /** Viewer's actual avatar URL for the border preview, null falls
    *  back to the initials chip. Only consumed by the freeformBorder
    *  branch; other kinds ignore it. */
   previewAvatarUrl: string | null;
-  /** Card-level click handler — jumps to the matching shop tab. */
+  /** Card-level click handler, jumps to the matching shop tab. */
   onClick: () => void;
 }) {
   // Per-kind preview affordance:
@@ -648,7 +652,7 @@ function FlashSaleCard({
       title={`Open in the ${kindLabel} shop`}
       className="group relative flex flex-col overflow-hidden rounded-lg border border-keep-action/40 bg-gradient-to-b from-keep-bg/80 to-keep-bg/50 text-left transition-all hover:border-keep-action hover:shadow-[0_0_16px_-4px_rgba(255,128,0,0.45)] focus:outline-none focus-visible:ring-2 focus-visible:ring-keep-action"
     >
-      {/* Big diagonal discount tag — top-right corner. Bold, high-
+      {/* Big diagonal discount tag, top-right corner. Bold, high-
           contrast, slightly rotated so it reads as a sticker slapped
           onto the card. Z-index lifts it above the preview's drop
           shadow so it never gets visually buried. */}
@@ -658,7 +662,7 @@ function FlashSaleCard({
         </div>
       ) : null}
 
-      {/* Preview strip — fixed height per breakpoint so cards align
+      {/* Preview strip, fixed height per breakpoint so cards align
           and the showcase art has room to breathe. Mobile keeps it
           modest (128px) so the card stays roughly square; tablet+
           bumps to 160px and desktop to 192px so the actual icons
@@ -668,7 +672,7 @@ function FlashSaleCard({
         {preview}
       </div>
 
-      {/* Info block — kind tag, name, prices, savings line. */}
+      {/* Info block, kind tag, name, prices, savings line. */}
       <div className="flex flex-1 flex-col gap-1 border-t border-keep-action/20 bg-keep-banner/30 px-3 py-2.5">
         <div className="text-[10px] font-bold uppercase tracking-widest text-keep-action/80">
           {kindLabel}
@@ -695,7 +699,7 @@ function FlashSaleCard({
 function prettyDate(yyyyMmDd: string): string {
   // Render the ISO date in the viewer's locale without dragging in
   // a date library. "2026-05-27" → "May 27" on en-US, "27 May" on
-  // en-GB — locale-respectful without needing the year (it's today).
+  // en-GB, locale-respectful without needing the year (it's today).
   const [y, m, d] = yyyyMmDd.split("-").map((n) => Number.parseInt(n, 10));
   if (!y || !m || !d) return yyyyMmDd;
   const dt = new Date(Date.UTC(y, m - 1, d));
@@ -712,7 +716,7 @@ function prettyDate(yyyyMmDd: string): string {
  * naturally once any pool earns its first XP.
  *
  * Drops the user onto the "what does this even do" footing without
- * forcing them to leave the modal — the longer-form Earning guide
+ * forcing them to leave the modal, the longer-form Earning guide
  * lives in /help → Guides → Earning for anyone who wants more.
  */
 function ZeroStateCard() {
@@ -727,12 +731,12 @@ function ZeroStateCard() {
         grow side by side as you participate:
       </p>
       <ul className="mt-2 list-disc space-y-0.5 pl-5 text-[12px] text-keep-text">
-        <li><b>XP</b> grows your <b>rank</b> — the sigil shown next to your name in chat and the userlist.</li>
+        <li><b>XP</b> grows your <b>rank</b>, the sigil shown next to your name in chat and the userlist.</li>
         <li><b>Currency</b> goes into your wallet, ready to spend on name styles, avatar borders, and other cosmetics here in the dashboard.</li>
       </ul>
       <p className="mt-2 text-keep-text">You earn both at the same time from:</p>
       <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[12px] text-keep-text">
-        <li>Chat messages (long enough to be meaningful — a single "ok" doesn't count)</li>
+        <li>Chat messages (long enough to be meaningful, a single "ok" doesn't count)</li>
         <li>Forum topics and replies</li>
         <li>Being active in a room (we award a small amount every few minutes you're present)</li>
       </ul>
@@ -754,7 +758,7 @@ function SigilOrFallback({
   /**
    * `default` (h-12 w-12) is the legacy size used by the lower
    * cards. `hero` (h-44 ~= 11rem) is the dashboard's left-aligned
-   * rank lockup at the top of the modal — sized large enough that
+   * rank lockup at the top of the modal, sized large enough that
    * the chevron art reads clearly. Add new entries here rather than
    * inlining classNames at call sites so the dashboard's sigil
    * sizing stays in one place.
@@ -773,7 +777,7 @@ function SigilOrFallback({
         // onError fallback: a bad URL (admin uploaded then deleted the
         // file, asset rename in flight) shouldn't leave a broken image
         // icon. Swap to the text fallback by setting display: none and
-        // letting the sibling render — done inline via a CSS handle.
+        // letting the sibling render, done inline via a CSS handle.
         onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
       />
     );
@@ -832,28 +836,41 @@ function PoolCard({ pool, snapshot, label }: { pool: PoolView; snapshot: ReturnT
 }
 
 /* =========================================================
- *  Rankings tab — public leaderboards across the nine boards
+ *  Rankings tab, public leaderboards across the nine boards
  *
  *  Fetches /earning/rankings on mount, paints:
- *    1. A rotating "Spotlight" hero at the top — auto-cycles
+ *    1. A rotating "Spotlight" hero at the top, auto-cycles
  *       through each board's #1 entry every 5 seconds.
  *    2. A grid of board cards underneath, each showing the
  *       board's top N entries as RankingEntryCard rows.
  *
  *  Clicking any entry opens that user's profile via the chat
- *  store's `setOpenProfile` — same path the userlist click uses,
+ *  store's `setOpenProfile`, same path the userlist click uses,
  *  so the rankings act as a profile-discovery surface.
  * ========================================================= */
 
 function RankingsTab() {
   const [data, setData] = useState<RankingsResponse | null>(null);
+  const [gameData, setGameData] = useState<GameRankingsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetchRankings()
-      .then((r) => { if (!cancelled) setData(r); })
+    // Game rankings load alongside the main pool boards. A failure
+    // on the game-rankings fetch shouldn't block the main board
+    // render, so it's caught separately and rendered as a soft
+    // "no data" later. The pool-board fetch failing is still a
+    // hard error because the page is mostly empty without it.
+    Promise.all([
+      fetchRankings(),
+      fetchGameRankings().catch(() => null),
+    ])
+      .then(([r, g]) => {
+        if (cancelled) return;
+        setData(r);
+        setGameData(g);
+      })
       .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load rankings"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -869,12 +886,126 @@ function RankingsTab() {
           board.entries.length > 0 ? <RankingBoardCard key={board.key} board={board} /> : null,
         )}
       </div>
+      {gameData && (gameData.games.length > 0 || gameData.overall.length > 0) ? (
+        <GameRankingsSection data={gameData} />
+      ) : null}
     </div>
   );
 }
 
 /**
- * Spotlight hero — large card that rotates through each board's
+ * Per-social-game leaderboards. Rendered below the main earning
+ * boards in the Rankings tab. Shows one card per game kind plus an
+ * "overall" card aggregating wins across all games.
+ *
+ * The set of games comes from the API at read time, so a newly
+ * added social game appears here the moment its first winner is
+ * recorded; no UI registration step is needed.
+ */
+function GameRankingsSection({ data }: { data: GameRankingsResponse }) {
+  return (
+    <section className="space-y-3">
+      <header className="flex items-baseline justify-between">
+        <h3 className="font-action text-base">Social Game Rankings</h3>
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">
+          {data.games.length} {data.games.length === 1 ? "game" : "games"} tracked
+        </span>
+      </header>
+      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        {data.overall.length > 0 ? <OverallGameBoardCard rows={data.overall} /> : null}
+        {data.games.map((g) => (
+          <PerGameBoardCard key={g.gameKind} gameKind={g.gameKind} label={g.label} rows={g.leaderboard} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function OverallGameBoardCard({ rows }: { rows: OverallRankingRow[] }) {
+  return (
+    <section className="rounded border border-keep-action/40 bg-gradient-to-br from-keep-action/10 to-keep-bg/40 p-3">
+      <header className="mb-2 flex items-baseline justify-between">
+        <h4 className="font-action text-sm uppercase tracking-widest text-keep-action">All Games</h4>
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">total wins</span>
+      </header>
+      <ol className="space-y-1.5">
+        {rows.map((r, i) => (
+          <li key={`${r.ownerScope}::${r.ownerId}`}>
+            <GameRankingEntry rank={i + 1} displayName={r.displayName} scope={r.ownerScope} primary={r.totalWins} primaryLabel="wins" secondary={r.totalPoints > r.totalWins ? r.totalPoints : null} secondaryLabel="points" />
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function PerGameBoardCard({ gameKind, label, rows }: { gameKind: string; label: string; rows: GameRankingRow[] }) {
+  return (
+    <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
+      <header className="mb-2 flex items-baseline justify-between">
+        <h4 className="font-action text-sm uppercase tracking-widest text-keep-muted">{label}</h4>
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">{gameKind}</span>
+      </header>
+      <ol className="space-y-1.5">
+        {rows.map((r, i) => (
+          <li key={`${r.ownerScope}::${r.ownerId}`}>
+            <GameRankingEntry
+              rank={i + 1}
+              displayName={r.displayName}
+              scope={r.ownerScope}
+              primary={r.wins}
+              primaryLabel={r.wins === 1 ? "win" : "wins"}
+              secondary={r.points > r.wins ? r.points : null}
+              secondaryLabel="points"
+            />
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function GameRankingEntry({
+  rank,
+  displayName,
+  scope,
+  primary,
+  primaryLabel,
+  secondary,
+  secondaryLabel,
+}: {
+  rank: number;
+  displayName: string;
+  scope: "user" | "character";
+  primary: number;
+  primaryLabel: string;
+  secondary: number | null;
+  secondaryLabel: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1.5 hover:border-keep-action/40">
+      <div className={`w-6 shrink-0 text-center font-bold tabular-nums ${rank <= 3 ? "text-keep-action" : "text-keep-muted"}`}>
+        {rank}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="min-w-0 truncate text-sm font-semibold">{displayName}</div>
+        {scope === "character" ? (
+          <div className="text-[10px] uppercase tracking-wide text-keep-muted">character</div>
+        ) : null}
+      </div>
+      <div className="shrink-0 text-right">
+        <div className="text-sm font-semibold tabular-nums">{primary.toLocaleString()}</div>
+        <div className="text-[10px] uppercase tracking-widest text-keep-muted">{primaryLabel}</div>
+        {secondary !== null ? (
+          <div className="text-[10px] text-keep-muted">{secondary.toLocaleString()} {secondaryLabel}</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Spotlight hero, large card that rotates through each board's
  * champion every 5 seconds. Pauses on hover so a viewer who wants
  * to read the current entry's tagline isn't yanked away mid-read.
  *
@@ -921,7 +1052,7 @@ function RankingsSpotlight({ champions }: { champions: RankingChampion[] }) {
         {/* `key` tied to the champion pool id forces a full remount of
             the avatar on rotation. Without this, React reuses the
             BorderedAvatar instance and only swaps the template HTML
-            via dangerouslySetInnerHTML — the simultaneous inline
+            via dangerouslySetInnerHTML, the simultaneous inline
             `<style>` update + innerHTML swap can leave the .av spin
             and .pic counter-rotation momentarily desynced, which
             visually reads as the avatar IMG spinning until the
@@ -976,7 +1107,7 @@ function RankingBoardCard({ board }: { board: RankingBoard }) {
   );
 }
 
-/** Single ranking row — rank pill + avatar (with effects) + styled
+/** Single ranking row, rank pill + avatar (with effects) + styled
  *  name + metric value. The whole row is a profile-open click target. */
 function RankingEntryCard({ rank, entry, metric }: { rank: number; entry: RankingPoolEntry; metric: string }) {
   return (
@@ -1028,7 +1159,7 @@ function ProfileLinkAvatar({ entry, size }: { entry: RankingPoolEntry; size: "sm
       if (!r.ok) return;
       const j = await r.json();
       if (j && "kind" in j) setOpenProfile(j);
-    } catch { /* network blip — silent */ }
+    } catch { /* network blip, silent */ }
   }
   return (
     <BorderedAvatar
@@ -1065,7 +1196,7 @@ function StyledEntryName({ entry }: { entry: RankingPoolEntry }) {
 }
 
 /* =========================================================
- *  Section 3 — Activity ledger
+ *  Section 3, Activity ledger
  * ========================================================= */
 
 function LedgerTab({
@@ -1094,7 +1225,7 @@ function LedgerTab({
   // Live tick from the earning store. Bumps every time the socket
   // delivers an `earning:earned` event. The fetch effect below uses
   // it as a dep so the feed catches up to new ledger rows without a
-  // manual reload — previously the activity log silently froze at
+  // manual reload, previously the activity log silently froze at
   // whatever was there when the dashboard was first opened.
   const earnedTick = useEarning((s) => s.earnedTick);
 
@@ -1107,7 +1238,7 @@ function LedgerTab({
     let cancelled = false;
     setLoading(true);
     setErr(null);
-    // Only blank the visible list on a SCOPE change — a live-tick
+    // Only blank the visible list on a SCOPE change, a live-tick
     // refetch keeps the previous page mounted so the user doesn't
     // see a flash of empty between credits.
     if (cursor === null) {
@@ -1130,7 +1261,7 @@ function LedgerTab({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-    // `cursor` intentionally NOT a dep — loadMore drives pagination
+    // `cursor` intentionally NOT a dep, loadMore drives pagination
     // and would otherwise re-trigger this effect into an infinite
     // refetch loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1226,11 +1357,11 @@ function LedgerTab({
 }
 
 /* =========================================================
- *  Section 7 — Settings (privacy toggle)
+ *  Section 7, Settings (privacy toggle)
  * ========================================================= */
 
 function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {}; myId: string | null }) {
-  // Both privacy flags share one save handler — patchEarningSettings
+  // Both privacy flags share one save handler, patchEarningSettings
   // accepts either or both. We track them locally so the user can
   // toggle without each click round-tripping through the snapshot
   // refetch (which would briefly flicker the checkbox).
@@ -1266,7 +1397,7 @@ function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarnin
       <section>
         <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">Privacy</h3>
         <p className="mb-2 text-xs text-keep-muted">
-          Rank, tier, and sigil are always visible — rank is a public identity tag. XP and Currency
+          Rank, tier, and sigil are always visible, rank is a public identity tag. XP and Currency
           totals are hidden independently when their respective toggle is on.
         </p>
         <label className="mb-2 flex items-start gap-2">
@@ -1310,7 +1441,7 @@ function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarnin
       </section>
 
       {/* Display + per-metric privacy. Identical UI to the Profile
-          Editor's Privacy tab — the component is shared from
+          Editor's Privacy tab, the component is shared from
           [DisplayPrivacyRow.tsx](./DisplayPrivacyRow.tsx) so the two
           surfaces stay in 1:1 parity. The user asked for the toggles
           to live in BOTH the Earning Modal Settings AND Profile
@@ -1323,11 +1454,11 @@ function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarnin
         <section>
           <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">Slash commands</h3>
           <ul className="space-y-1 text-sm">
-            <li><code>/currency</code> — show your wallets</li>
-            <li><code>/currency [user]</code> — look up another user's Currency (honors their privacy)</li>
-            <li><code>/currency send [target] [amount]</code> — transfer Currency to a user or character</li>
-            <li><code>/exp</code> — show your XP, rank, and any borders you can buy</li>
-            <li><code>/exp [user]</code> — look up another user's rank</li>
+            <li><code>/currency</code>, show your wallets</li>
+            <li><code>/currency [user]</code>, look up another user's Currency (honors their privacy)</li>
+            <li><code>/currency send [target] [amount]</code>, transfer Currency to a user or character</li>
+            <li><code>/exp</code>, show your XP, rank, and any borders you can buy</li>
+            <li><code>/exp [user]</code>, look up another user's rank</li>
           </ul>
         </section>
       ) : null}
@@ -1343,21 +1474,21 @@ function StubTab({ title, phase }: { title: string; phase: string }) {
   return (
     <div className="rounded border border-keep-rule bg-keep-bg/40 p-4 text-sm text-keep-muted">
       <p className="font-semibold text-keep-text">{title}</p>
-      <p className="mt-1">Coming in {phase}. The data plumbing is already in place — only the buy / equip UI is pending.</p>
+      <p className="mt-1">Coming in {phase}. The data plumbing is already in place, only the buy / equip UI is pending.</p>
     </div>
   );
 }
 
 /* =========================================================
- *  Section 4 — Name Styles
+ *  Section 4, Name Styles
  *
  *  Three tabs by ownership state:
- *    Owned     — the user owns these. Equip / unequip + per-style
+ *    Owned    , the user owns these. Equip / unequip + per-style
  *                color picker. Live preview against the user's
  *                own display name.
- *    Available — enabled catalog styles the user doesn't own yet.
+ *    Available, enabled catalog styles the user doesn't own yet.
  *                Shows the buy button + cost.
- *    Locked    — placeholder for future "earn-only" gating. Empty
+ *    Locked   , placeholder for future "earn-only" gating. Empty
  *                in Phase 3 (every style is buyable).
  * ========================================================= */
 
@@ -1372,7 +1503,7 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
   // ACTIVE identity (master/OOC when no character is selected;
   // otherwise that character). Reading the active character id from
   // the chat store keeps the dashboard in lockstep with whatever
-  // identity the user is voicing — switching characters via /char
+  // identity the user is voicing, switching characters via /char
   // re-keys this tab to that character's owned/equipped state.
   const activeCharacterId = useChat((s) => s.activeCharacterId);
   const refresh = useEarning((s) => s.refresh);
@@ -1382,7 +1513,7 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
   const styles = snapshot.catalog.nameStyles;
   // Owned list for the CURRENT identity (master = `ownedStyles`,
   // character = `ownedStylesByCharacter[id]`). Each identity owns
-  // separately since migration 0086 — a master who bought Embers
+  // separately since migration 0086, a master who bought Embers
   // does NOT make their characters own it; characters have to buy
   // from their own pool.
   const ownedStylesForIdentity = useMemo(() => {
@@ -1439,7 +1570,7 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
   // Affordability gates against the pool the server will actually
   // debit on Buy: the active character's pool when voicing a
   // character, the master pool when on OOC. Previously this used
-  // `snapshot.master.currency` unconditionally — a user with 4000
+  // `snapshot.master.currency` unconditionally, a user with 4000
   // on master and 0 on the active character saw Buy enabled at 1000
   // Currency, clicked, and got "insufficient funds" from the server.
   const activeWallet = activeCharacterId
@@ -1489,7 +1620,7 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
     }
   }
 
-  // Preview name reflects the current identity — the active
+  // Preview name reflects the current identity, the active
   // character's display name when one is active, otherwise the
   // master username. The character display name comes from the
   // snapshot's `characters[]` pool view (ownerId === characterId
@@ -1632,7 +1763,7 @@ function OwnedStyleCard({
           preview's stacking context. Without it, when the user's
           equipped style was the SAME card being rendered (so this
           card carried `isActive`), any decoration that escaped the
-          preview — even subtly — landed over the Equip row and ate
+          preview, even subtly, landed over the Equip row and ate
           the click. Reports surfaced as "owned name style is
           invisible and can't be interacted with" specifically on the
           equipped style; the workaround was unequipping to "default
@@ -1660,7 +1791,7 @@ function OwnedStyleCard({
         </button>
       </div>
 
-      {/* Preview is read-only — `name-style-preview` is the hook the
+      {/* Preview is read-only, `name-style-preview` is the hook the
           stylesheet uses to (a) clip decoration overflow to the
           preview box, so a name-style with sprawling pseudo-elements
           (the "Fog" overlay was the reported case) can't drape over
@@ -1739,12 +1870,12 @@ function AvailableStyleCard({
         </button>
       </div>
       <div className="name-style-preview mt-3 rounded border border-keep-rule/60 bg-keep-bg/60 px-3 py-2 text-2xl font-bold">
-        {/* No config override — each style paints in its catalog
+        {/* No config override, each style paints in its catalog
             defaults (Embers → fire orange, Neon Sign → neon pink,
             Aurora → tropical, etc.). The Available preview used to
             hardcode an orange palette which made every style look
             like a fire variant regardless of its actual design.
-            `name-style-preview` is the same hook the Owned card uses —
+            `name-style-preview` is the same hook the Owned card uses,
             see comment there for the click-shielding rationale. */}
         <StyledName displayName={previewName} styleKey={style.key} config={null} />
       </div>
@@ -1764,16 +1895,16 @@ function normalizeHex(s: string): string {
 }
 
 /* =========================================================
- *  Section 5 — Rank Borders (Phase 4)
+ *  Section 5, Rank Borders (Phase 4)
  *
  *  Three buckets:
- *    Eligible to buy — Tier IV of this rank reached at some
+ *    Eligible to buy, Tier IV of this rank reached at some
  *                      point but the user hasn't purchased the
  *                      border yet.
- *    Owned          — borders the user already bought. Equip one
+ *    Owned         , borders the user already bought. Equip one
  *                      via /earning/me/settings { selectedBorderRankKey }
  *                      (handled by the existing patchEarningSettings).
- *    Locked         — borders the user isn't eligible for yet
+ *    Locked        , borders the user isn't eligible for yet
  *                      (haven't crossed Tier IV). Shown muted with
  *                      a "Reach <rank> IV" hint.
  *
@@ -1801,12 +1932,12 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
   // Pull the viewer's own avatar from the room-occupant cosmetics
   // cache (same source that drives the chat-line inline avatars).
   // Lets every preview show the user's actual portrait inside the
-  // frame — not an initials chip stand-in. Falls back to null when
+  // frame, not an initials chip stand-in. Falls back to null when
   // the user has no occupant row in any open room yet, in which
   // case the BorderedAvatar shows initials.
   //
   // Scoped to (me.id, activeCharacterId) so a sibling tab voicing a
-  // different identity can't poison this lookup — see the long-form
+  // different identity can't poison this lookup, see the long-form
   // comment on the dashboard hero's `viewerAvatarUrl` for the full
   // failure mode this guards against.
   const me = useChat((s) => s.me);
@@ -1841,7 +1972,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
     ? (activeCharacterView?.selectedBorderRankKey ?? null)
     : snapshot.master.selectedBorderRankKey;
 
-  // Free-form border parallel state — same per-identity partitioning
+  // Free-form border parallel state, same per-identity partitioning
   // rules. Ownership is independent of rank-tier ownership; the
   // equip slot is also independent (the BorderedAvatar resolver
   // checks the freeform slot first and falls back to the rank slot).
@@ -1871,7 +2002,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
       .sort((a, b) => a.rank!.order - b.rank!.order);
   }, [snapshot.catalog]);
 
-  // Eligibility against the CURRENT identity's peak rank/tier — a
+  // Eligibility against the CURRENT identity's peak rank/tier, a
   // character that hasn't peaked at Tier IV can't buy its own
   // border even when the master has. Mirrors the server-side check
   // in the border purchase handler.
@@ -1972,7 +2103,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
   }
 
   // Free-form catalog rows partitioned the same way: owned vs
-  // available. There's no "locked" bucket — free-form borders have
+  // available. There's no "locked" bucket, free-form borders have
   // no eligibility gate. Rarity-sorted within each bucket so the
   // user sees common/rare/etc. cluster predictably.
   const freeformCatalog = snapshot.catalog.freeformBorders;
@@ -2089,7 +2220,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
               borders live in a parallel catalog with their own
               ownership ledger and equip slot. The chip below the
               header shows whichever freeform border is currently
-              equipped — independent of the rank-tier equip state
+              equipped, independent of the rank-tier equip state
               displayed at the top of this tab. */}
           <div className="border-t border-keep-rule pt-4">
             <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
@@ -2170,7 +2301,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
   );
 }
 
-/** Pill color per rarity — open string in the catalog row, so
+/** Pill color per rarity, open string in the catalog row, so
  *  unknown values fall back to the common-tier palette. */
 function rarityPalette(rarity: string): { ring: string; text: string; label: string } {
   switch (rarity.toLowerCase()) {
@@ -2225,7 +2356,7 @@ function FreeformBorderCard({
     if (!configJson) return {} as Record<string, string>;
     return parseFreeformBorderConfig(configJson);
   }, [configJson]);
-  // Customizable slots — names AND default fallback colors extracted
+  // Customizable slots, names AND default fallback colors extracted
   // from the row's styleCss. Empty when the catalog row defines no
   // `--c-*` references; we hide the color picker entirely in that
   // case so cards without user-customizable slots don't display a
@@ -2239,13 +2370,13 @@ function FreeformBorderCard({
   const [draft, setDraft] = useState<Record<string, string>>(savedConfig);
   useEffect(() => { setDraft(savedConfig); }, [savedConfig]);
   // Live preview uses the draft (instant feedback on color picks)
-  // rather than the saved config — saved config only re-renders the
+  // rather than the saved config, saved config only re-renders the
   // border after the user clicks Save.
   const previewConfig = useMemo(() => {
     const merged: Record<string, string> = { ...draft };
     return Object.keys(merged).length > 0 ? merged : null;
   }, [draft]);
-  // Only the EQUIPPED card gets the color editor — owned-but-not-
+  // Only the EQUIPPED card gets the color editor, owned-but-not-
   // equipped cards would otherwise duplicate the same long picker
   // grid for every collected border, spamming the catalog. Equipping
   // a card flips it into the editor state; unequipping hides it again.
@@ -2320,7 +2451,7 @@ function FreeformBorderCard({
           </button>
         )}
       </div>
-      {/* Color picker — one `<input type="color">` per `--c-*` slot
+      {/* Color picker, one `<input type="color">` per `--c-*` slot
           discovered in the row's styleCss. Mirrors the name-style
           OwnedStyleCard pattern: stage in local draft, persist via
           Save button. Reset clears all customization back to the
@@ -2347,11 +2478,11 @@ function FreeformBorderCard({
               // Starting swatch precedence:
               //   1. User's current draft pick (if set).
               //   2. The catalog row's `var(--c-slot, <default>)`
-              //      fallback — the actual color the border renders
+              //      fallback, the actual color the border renders
               //      with when no override is saved.
               //   3. A neutral grey for slots whose fallback isn't a
               //      parseable color (named colors, hsl(), color-mix,
-              //      etc. — rare in our catalog).
+              //      etc., rare in our catalog).
               const cur = typeof draft[slot] === "string"
                 ? draft[slot]
                 : (defaultColor ?? "#808080");
@@ -2423,9 +2554,9 @@ function BorderCard({
   return (
     <div className={`flex items-center gap-3 rounded border p-3 ${state === "equipped" ? "border-keep-action bg-keep-action/5" : "border-keep-rule bg-keep-bg/40"}`}>
       {/* `xl` slot: 124px avatar centered inside a 186px frame
-          container — the avatar fills the frame's inner ring so the
+          container, the avatar fills the frame's inner ring so the
           preview shows the border on the user's actual portrait.
-          The frame is intentionally NOT muted on locked tiles —
+          The frame is intentionally NOT muted on locked tiles,
           earlier we wrapped the whole card in `opacity-60`, which
           washed out the gold/silver detailing of the frames the
           user is trying to evaluate. Only the text (rank name +
@@ -2480,7 +2611,7 @@ function BorderCard({
 }
 
 /* =========================================================
- *  Section 6 — Cosmetics (Phase 4)
+ *  Section 6, Cosmetics (Phase 4)
  *
  *  Currently a single row: `inline_avatar`. Buy + on/off toggle.
  *  Purchase is one-time; the toggle is free to flip after.
@@ -2529,7 +2660,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
   const lurkingMasterRow = catalog?.cosmetics.find((c) => c.key === "flair_lurking_master");
   const roomPresenceRow = catalog?.cosmetics.find((c) => c.key === "flair_room_presence");
   const sessionPresenceRow = catalog?.cosmetics.find((c) => c.key === "flair_session_presence");
-  // Migration 0192 flairs — same shape as the other catalog rows.
+  // Migration 0192 flairs, same shape as the other catalog rows.
   // Both surfaces are config-only (no inline preview / equip toggle
   // here), so the cards use the compact `ProfileFlairBuyCard`
   // shared at the bottom of this section. Editor lives in the
@@ -2548,10 +2679,10 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
   // The snapshot exposes the currently-enabled flag per identity; we
   // use it as a proxy for ownership because the purchase endpoint
   // auto-equips on first buy. If the user later disables, the proxy
-  // flips back to "Buy" — `doBuy` below catches the resulting
+  // flips back to "Buy", `doBuy` below catches the resulting
   // "already owned" response and auto-equips instead, so the UX
   // stays clean. Previously this combined master + every character's
-  // flag into a single "owns" — a master who bought it made every
+  // flag into a single "owns", a master who bought it made every
   // character show "Owned (off)" with an Equip toggle that failed
   // server-side because the character's own ledger had no purchase.
   const masterEnabled = snapshot.activeCosmetics.inlineAvatarEnabled;
@@ -2574,7 +2705,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
       await refresh();
     } catch (e) {
       // Server says this identity already bought it (they disabled
-      // it, then clicked Buy again). Skip the cost prompt — flip
+      // it, then clicked Buy again). Skip the cost prompt, flip
       // the equip on for them and re-sync. The server's equip
       // route enforces ownership, so a true never-purchased
       // identity still hits the proper rejection.
@@ -2597,7 +2728,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     setBusy(true);
     setErr(null);
     try {
-      // Scope to the current identity — same partition as the
+      // Scope to the current identity, same partition as the
       // name-style equip path. Server validates character ownership.
       await equipCosmetic("inline_avatar", next, activeCharacterId);
       await refresh();
@@ -2609,7 +2740,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
   }
 
   // Flash-sale price for the inline_avatar cosmetic if it's today's
-  // pick. Pure compute against the cached flashSale prop — server
+  // pick. Pure compute against the cached flashSale prop, server
   // applies the same discount on the actual purchase, so this is
   // faithful to what `doBuy()` will end up debiting.
   const inlineAvatarSale = inlineAvatarRow
@@ -2645,7 +2776,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     }
   }
 
-  // Typing-phrase Flair state for the current identity — same
+  // Typing-phrase Flair state for the current identity, same
   // shape as the banner state above.
   const typingPhraseOwned = activeCharacterId
     ? (perCharacterMap[activeCharacterId]?.typingPhraseOwned ?? false)
@@ -2712,7 +2843,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     }
   }
 
-  // Phase 7 (migration 0161) — room-presence Flair state for the
+  // Phase 7 (migration 0161), room-presence Flair state for the
   // current identity. Templates are per-identity; the broadcaster
   // reads the active character's row when voicing a character, the
   // master's row otherwise.
@@ -2744,7 +2875,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     }
   }
 
-  // Session-presence is master-only — no character partition. Read
+  // Session-presence is master-only, no character partition. Read
   // straight off the top-level snapshot fields.
   const sessionPresenceOwned = snapshot.activeCosmetics.sessionPresenceOwned ?? false;
   const sessionConnectTemplate = snapshot.activeCosmetics.sessionConnectTemplate ?? null;
@@ -2754,7 +2885,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     : null;
   async function doBuySessionPresence() {
     if (!sessionPresenceRow || !sessionPresenceSale) return;
-    // Always charges the master pool — session presence is account-
+    // Always charges the master pool, session presence is account-
     // level, not per-character. Pass `null` to scope to master.
     if (!window.confirm(`Buy "${sessionPresenceRow.name}" for ${sessionPresenceSale.effectivePrice} Currency from your master account's pool?`)) return;
     setBusy(true);
@@ -2769,7 +2900,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     }
   }
 
-  // Migration 0192 — profile flair purchase state. Ownership flows
+  // Migration 0192, profile flair purchase state. Ownership flows
   // through the snapshot (set on the matching identity row); the
   // actual editor + config lives in ProfileEditor → Flair tab,
   // so the card here is a single "Buy" CTA with a short
@@ -2823,7 +2954,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
       {err ? (
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-sm text-keep-accent">{err}</div>
       ) : null}
-      {/* Grid container — pre-arranges so adding a Flair row in admin
+      {/* Grid container, pre-arranges so adding a Flair row in admin
           auto-fills the next grid slot rather than requiring another
           layout pass. */}
       <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -2962,7 +3093,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
               secondDefault="{name} has disconnected."
               secondPlaceholder="{name} fades into the night."
               supportsRoomPlaceholder={false}
-              /* Session presence is master-only — pass null so the card
+              /* Session presence is master-only, pass null so the card
                  doesn't show a "this character" badge. */
               activeCharacterId={null}
               activeWallet={snapshot.master.currency}
@@ -3069,7 +3200,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
  * Minimal Flair card used by the two profile-customization flairs
  * (visitors counter + quote marquee) added in migration 0192.
  * Identical visual posture to the inline-avatar / banner cards but
- * no inline equip toggle or config form — the actual editor lives
+ * no inline equip toggle or config form, the actual editor lives
  * in ProfileEditor → Flair, so this card just owns the Buy CTA +
  * a one-line "configure it here" pointer for buyers.
  */
@@ -3157,7 +3288,7 @@ function ProfileFlairBuyCard({
  *     preview strip shows what the banner will look like on the
  *     profile modal. Empty input clears the slot on save.
  *
- * Per-identity scoping mirrors the rest of the Flair tab — the
+ * Per-identity scoping mirrors the rest of the Flair tab, the
  * active character's purchase is independent of master's, and a
  * user voicing a character writes to that character's slot.
  */
@@ -3240,7 +3371,7 @@ function ProfileBannerFlairCard({
 
       {owned ? (
         <>
-          {/* Inline editor kept compact — paired with a tiny thumbnail
+          {/* Inline editor kept compact, paired with a tiny thumbnail
               that just confirms a link resolves. The full-size preview
               lives in Profile » Appearance, where the field reads as a
               banner-shaped strip at the size visitors actually see.
@@ -3300,7 +3431,7 @@ function ProfileBannerFlairCard({
 }
 
 /** Hard cap mirrored from the server's TYPING_PHRASE_MAX. Keeping
- *  it as a literal here (not a fetched value) is fine — the server
+ *  it as a literal here (not a fetched value) is fine, the server
  *  re-clamps on save, this is purely for the live char-count hint
  *  and the textarea maxLength. */
 const TYPING_PHRASE_MAX_CLIENT = 60;
@@ -3312,7 +3443,7 @@ const TYPING_PHRASE_MAX_CLIENT = 60;
  *   - Owned → text input + Save/Clear with a live preview of how
  *     the indicator will read ("YourName <phrase>").
  *
- * Mirrors the banner card's per-identity scoping rules — the
+ * Mirrors the banner card's per-identity scoping rules, the
  * active character's phrase is independent of master's, and a user
  * voicing a character writes to that character's slot.
  */
@@ -3343,7 +3474,7 @@ function TypingPhraseFlairCard({
   const [saving, setSaving] = useState(false);
   useEffect(() => { setDraft(currentPhrase ?? ""); }, [currentPhrase]);
 
-  // Active identity's display name — drives the live preview so
+  // Active identity's display name, drives the live preview so
   // the user sees the same "Name <phrase>" shape peers will see.
   const meName = useChat((s) => {
     const me = s.me;
@@ -3423,7 +3554,7 @@ function TypingPhraseFlairCard({
               className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm text-keep-text"
             />
           </label>
-          {/* Live preview — same shape peers will see in the
+          {/* Live preview, same shape peers will see in the
               indicator strip when this identity is the sole typer.
               Falls back to the default suffix on empty drafts so
               the user can compare. */}
@@ -3468,7 +3599,7 @@ function TypingPhraseFlairCard({
 const PRESENCE_TEMPLATE_MAX_CLIENT = 100;
 
 /**
- * Generic two-template Flair card — drives both the Custom Room
+ * Generic two-template Flair card, drives both the Custom Room
  * Entrance and Custom Session Greeting cards. Mirrors the
  * TypingPhraseFlairCard shape (Buy → Set/Clear input → live preview)
  * but lays out TWO inputs side by side (or stacked on narrow widths)
@@ -3536,7 +3667,7 @@ function PresenceTemplatesFlairCard({
   useEffect(() => { setFirstDraft(firstTemplate ?? ""); }, [firstTemplate]);
   useEffect(() => { setSecondDraft(secondTemplate ?? ""); }, [secondTemplate]);
 
-  // Active identity's display name — feeds the preview so the user
+  // Active identity's display name, feeds the preview so the user
   // sees the same `{name}` substitution peers will see.
   const meName = useChat((s) => {
     const me = s.me;
@@ -3709,7 +3840,7 @@ function ReactionSheetFlairCard({
   onRefreshEarning: () => void;
 }) {
   // The modal pulls the active character from the chat store
-  // directly, so the card doesn't need to thread the id through —
+  // directly, so the card doesn't need to thread the id through,
   // matches how the picker and chat composer scope their identity.
   const [open, setOpen] = useState(false);
   return (
@@ -3749,21 +3880,21 @@ function ReactionSheetFlairCard({
 }
 
 /* =========================================================
- *  Items tab — Shop + Inventory for the active identity.
+ *  Items tab, Shop + Inventory for the active identity.
  *
  *  Identity is the currently-voiced one (OOC master when no
  *  character is active, otherwise the active character). Each
  *  identity has its own inventory and its own currency pool, so
  *  switching identity via /char swaps BOTH the inventory list AND
  *  the wallet shown above the buy button. Nothing is shared
- *  across identities — the only legal way to move items is via
+ *  across identities, the only legal way to move items is via
  *  the /give command (handled by the chat composer, not here).
  *
  *  Two sub-views:
- *    Inventory — items the active identity currently holds, with
+ *    Inventory, items the active identity currently holds, with
  *                quantity and the per-item available commands so
  *                the user knows which /give /throw /drop work.
- *    Shop      — every enabled+forSale+in-window catalog row,
+ *    Shop     , every enabled+forSale+in-window catalog row,
  *                with quantity stepper + Buy. Stack-cap respected
  *                client-side; server enforces too.
  * ========================================================= */
@@ -3775,7 +3906,7 @@ function ItemsTab({
   focusKey,
 }: {
   snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {};
-  /** Deep-link landing sub-tab — defaults to "inventory" when omitted.
+  /** Deep-link landing sub-tab, defaults to "inventory" when omitted.
    *  Plumbed in from the `/shop` / `/collection` / `/pets` builtin
    *  commands via EarningDashboard's prop. */
   initialSubTab?: "inventory" | "shop" | "collection" | "pets";
@@ -3792,7 +3923,7 @@ function ItemsTab({
   const [tab, setTab] = useState<"inventory" | "shop" | "collection" | "pets">(initialSubTab ?? (focusKey ? "shop" : "inventory"));
   // When arriving via Flash Sale, also reset the shop filters so the
   // target item isn't hidden by a leftover category chip or search
-  // term — the user came here to buy a specific row, surface it
+  // term, the user came here to buy a specific row, surface it
   // unconditionally.
   useEffect(() => {
     if (!focusKey) return;
@@ -3800,17 +3931,17 @@ function ItemsTab({
     setShopCategory("all");
     setShopQuery("");
   }, [focusKey]);
-  // Shop category chip — "all" shows everything, otherwise filter to
+  // Shop category chip, "all" shows everything, otherwise filter to
   // that bucket. Stored in component state so flipping chips doesn't
   // round-trip through the URL or persist between dashboard opens.
   const [shopCategory, setShopCategory] = useState<ItemCategory | "all">("all");
   // Free-text shop search. Matches name / namePlural / description /
   // aliases (aliases aren't on the public catalog row, so we fall
-  // back to name-only on the user side — see the filter below).
+  // back to name-only on the user side, see the filter below).
   const [shopQuery, setShopQuery] = useState("");
   // Inventory filter mirrors the shop's category + search pattern.
   // Independent state so flipping between tabs preserves each
-  // filter independently — a user filtering inventory to "pet" can
+  // filter independently, a user filtering inventory to "pet" can
   // pop over to shop without losing their inventory filter, and
   // vice versa.
   const [inventoryCategory, setInventoryCategory] = useState<ItemCategory | "all">("all");
@@ -3819,7 +3950,7 @@ function ItemsTab({
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
   // Resolve the active identity's display label + inventory + wallet.
-  // Identity-switching reshapes EVERY field on this view — currency
+  // Identity-switching reshapes EVERY field on this view, currency
   // pool drained on Buy, inventory rendered, wallet shown, and the
   // identity label in the header.
   const activeIdentity = useMemo(() => {
@@ -3870,7 +4001,7 @@ function ItemsTab({
     }
     return snapshot.collection ?? [];
   }, [activeCharacterId, snapshot.collection, snapshot.collectionByCharacter]);
-  // Pet Collection pins — sparse 0..4. Independent from the item
+  // Pet Collection pins, sparse 0..4. Independent from the item
   // collection; only items with `category='pet'` are pinnable here.
   const petCollection: CollectionEntry[] = useMemo(() => {
     if (activeCharacterId) {
@@ -3929,7 +4060,7 @@ function ItemsTab({
       </div>
 
       {/* Desktop (md+): button strip. Shop gets the action-color
-          treatment to read as a primary CTA — Inventory / Collection
+          treatment to read as a primary CTA, Inventory / Collection
           / Pets are about MANAGING what you own; Shop is about
           acquiring. Even when not active, Shop is visually distinct
           from the muted "manage" tabs so a user opening this view
@@ -3985,14 +4116,14 @@ function ItemsTab({
               {activeIdentity.label} doesn't hold any items yet. Switch to "Shop" to browse or wait for someone to /give you one.
             </p>
           ) : (() => {
-            // Inventory filter row — category select + free-text
+            // Inventory filter row, category select + free-text
             // search, mirroring the admin Items panel's lighter
             // single-row pattern (no chip strip). Inventories
             // typically run 5-30 items so we don't need the shop's
             // dense filter UI; one row is enough.
             //
             // Categories listed in the dropdown are only the ones
-            // present in THIS inventory — empty buckets are hidden
+            // present in THIS inventory, empty buckets are hidden
             // so the picker doesn't list categories the user has
             // nothing in.
             const presentCategories = new Set<ItemCategory>();
@@ -4058,7 +4189,7 @@ function ItemsTab({
                     {filtered.map((entry) => {
                       const row = catalogByKey.get(entry.itemKey);
                       if (!row) {
-                        // Catalog row vanished — shouldn't happen given
+                        // Catalog row vanished, shouldn't happen given
                         // the FK on identity_inventory, but render a
                         // defensive fallback rather than crashing the tab.
                         return (
@@ -4083,7 +4214,7 @@ function ItemsTab({
       {tab === "shop" ? (
         <div className="space-y-2">
           {/* Category filter. "All" first, then every category that
-              actually has at least one shop item — empty buckets get
+              actually has at least one shop item, empty buckets get
               hidden so the affordance doesn't carry dead options.
               Mobile collapses the chip strip to a single <select>
               dropdown; desktop renders the full chip row. */}
@@ -4135,7 +4266,7 @@ function ItemsTab({
             );
           })()}
           {/* Free-text search. Sits below the category row so the
-              two filters compose visually — pick a bucket, then
+              two filters compose visually, pick a bucket, then
               refine by name. Matches against name + plural +
               description (the public catalog doesn't expose aliases,
               so the admin's "knife" → dagger trick from the admin
@@ -4167,7 +4298,7 @@ function ItemsTab({
                 </p>
               );
             }
-            // Grid layout — better use of horizontal space than the
+            // Grid layout, better use of horizontal space than the
             // previous full-width stacked rows. 1 col mobile, 2 col
             // tablet, 3 col desktop. `auto-rows-fr` keeps the per-row
             // card heights aligned even when one card has a longer
@@ -4208,7 +4339,7 @@ function ItemsTab({
           copy={{
             header: (
               <>
-                Pin up to 10 items from <span className="font-semibold text-keep-text">{activeIdentity.label}</span>'s inventory to feature on their profile. Pets pin to the separate Pet Collection (5 slots) — switch to the Pets tab to manage those.
+                Pin up to 10 items from <span className="font-semibold text-keep-text">{activeIdentity.label}</span>'s inventory to feature on their profile. Pets pin to the separate Pet Collection (5 slots), switch to the Pets tab to manage those.
               </>
             ),
             emptyInventory: "No items in this identity's inventory to pin. Visit the Shop tab or wait for someone to /give you one.",
@@ -4246,7 +4377,7 @@ function ItemsTab({
 
       {!me ? null : (
         <p className="text-[10px] text-keep-muted">
-          Tip: items move between identities only via the <code>/give</code> command. <code>/throw</code> and <code>/drop</code> consume the item for flavor — nothing transfers.
+          Tip: items move between identities only via the <code>/give</code> command. <code>/throw</code> and <code>/drop</code> consume the item for flavor, nothing transfers.
         </p>
       )}
     </div>
@@ -4288,13 +4419,13 @@ function CollectionEditor({
   /** Save callback. Same wire shape (slots[] + characterId) for both
    *  collection kinds; differs only in which server endpoint is hit. */
   commitFn: (slots: { slot: number; itemKey: string | null }[], characterId: string | null) => Promise<void>;
-  /** Optional rename callback — when set, the editor surfaces the
+  /** Optional rename callback, when set, the editor surfaces the
    *  current nickname under each pinned slot's catalog name and adds
    *  an inline "Pet name" input in the slot's edit panel. Only the
    *  pet collection wires this; the item collection has no per-item
    *  nicknames so omits it. */
   renameFn?: (slot: number, nickname: string | null, characterId: string | null) => Promise<{ slot: number; nickname: string | null }>;
-  /** Per-kind UI copy — header sentence + empty-picker message.
+  /** Per-kind UI copy, header sentence + empty-picker message.
    *  `header` is a ReactNode so callers can interpolate the identity
    *  label inline; the other two are plain strings for the empty
    *  states. */
@@ -4310,7 +4441,7 @@ function CollectionEditor({
   const [saving, setSaving] = useState(false);
   // Picker filter state. Lives at the editor level (not the picker
   // panel) so flipping between slots preserves the admin's filter
-  // selection — they're typically pinning a series of related items
+  // selection, they're typically pinning a series of related items
   // and reapplying the same filter each time would be friction.
   const [pickerCategory, setPickerCategory] = useState<ItemCategory | "all">("all");
   const [pickerQuery, setPickerQuery] = useState("");
@@ -4360,7 +4491,7 @@ function CollectionEditor({
     const source = override === undefined ? renameDraft : (override ?? "");
     const trimmed = source.replace(/\s+/g, " ").trim();
     const next = trimmed.length > 0 ? trimmed : null;
-    // No-op when the draft matches the current value — skip the
+    // No-op when the draft matches the current value, skip the
     // round trip rather than churning the ledger.
     const current = slotNicknames.get(editingSlot) ?? null;
     if (next === current) return;
@@ -4375,7 +4506,7 @@ function CollectionEditor({
     }
   }
 
-  // Don't suggest the SAME item twice — the showcase reads as
+  // Don't suggest the SAME item twice, the showcase reads as
   // disorganized when slots 0/3/7 all show the same cookie tile.
   // Filter the picker against the slots that ALREADY pin this key
   // (except the slot being edited, where re-picking the current key
@@ -4387,7 +4518,7 @@ function CollectionEditor({
     return s;
   }, [collection, editingSlot]);
 
-  // Picker source — the active identity's inventory, filtered by the
+  // Picker source, the active identity's inventory, filtered by the
   // editor's kind predicate (items vs pets). Lazy-resolved so an
   // empty inventory short-circuits before we hit the catalog.
   const pickerCandidates = useMemo(() => {
@@ -4412,7 +4543,7 @@ function CollectionEditor({
     }
   }
 
-  // Grid column count — fits 5-wide for items (10 slots → 2 rows of 5)
+  // Grid column count, fits 5-wide for items (10 slots → 2 rows of 5)
   // and 5-wide for pets (5 slots → 1 row of 5).
   const gridCols = "grid-cols-5";
 
@@ -4435,7 +4566,7 @@ function CollectionEditor({
                     ? "border-keep-rule bg-keep-bg/40 hover:bg-keep-banner"
                     : "border-keep-rule/60 bg-keep-banner/20 hover:bg-keep-banner/40 text-keep-muted"
               }`}
-              title={pinned ? `${pinned.name} — click to change` : `Slot ${slot + 1} (empty)`}
+              title={pinned ? `${pinned.name}, click to change` : `Slot ${slot + 1} (empty)`}
             >
               {pinned ? (
                 <>
@@ -4513,7 +4644,7 @@ function CollectionEditor({
               </button>
             </div>
           </div>
-          {/* Rename row — only when a pet is pinned in this slot AND
+          {/* Rename row, only when a pet is pinned in this slot AND
               the parent provided a renameFn (pet collection only).
               Empty input clears the nickname; the server normalizes
               whitespace and treats empty as null. */}
@@ -4562,7 +4693,7 @@ function CollectionEditor({
             // candidate list. The kind filter (item vs pet) is
             // applied upstream in `pickerCandidates`; category and
             // search narrow within that pool. Only categories
-            // ACTUALLY present in the candidates are surfaced —
+            // ACTUALLY present in the candidates are surfaced,
             // for the pet collection that usually means just one
             // bucket, but the dropdown stays functional regardless.
             const presentCategories = new Set<ItemCategory>();
@@ -4581,7 +4712,7 @@ function CollectionEditor({
               <>
                 <div className="flex flex-wrap items-center gap-2">
                   {/* Only render the category select if there's more
-                      than one bucket to choose between — the pet
+                      than one bucket to choose between, the pet
                       collection picker degenerates to just "pet", so
                       a single-option dropdown would be dead UI. */}
                   {orderedPresent.length > 1 ? (
@@ -4648,7 +4779,7 @@ function CollectionEditor({
   );
 }
 
-/** One inventory row — icon, name × quantity, description, and a
+/** One inventory row, icon, name × quantity, description, and a
  *  hint listing which commands (give/throw/drop) the item supports.
  *  Disabled items render with a "no longer available" chip so the
  *  user knows why /buy is gone but they still hold the stack. */
@@ -4713,7 +4844,7 @@ function InventoryRow({ item, quantity }: { item: ItemCatalogRow; quantity: numb
   );
 }
 
-/** Shop card — vertical layout for grid display. Icon on top, name +
+/** Shop card, vertical layout for grid display. Icon on top, name +
  *  description in the middle, price + qty + Buy at the bottom.
  *
  *  Buy disables when the price exceeds the active identity's wallet
@@ -4722,7 +4853,7 @@ function InventoryRow({ item, quantity }: { item: ItemCatalogRow; quantity: numb
  *  why an item they can see isn't buyable yet. When the row is today's
  *  flash-sale pick, `<SalePip />` appears next to the name and the
  *  base price is struck through with the discounted price in accent.
- *  Server applies the same discount on the actual purchase — the UI
+ *  Server applies the same discount on the actual purchase, the UI
  *  display is faithful to what the user will be charged. */
 function ShopRow({
   item,
@@ -4742,11 +4873,12 @@ function ShopRow({
   const sale = flashSalePriceFor(flashSale, "item", item.key, item.price);
   const effectiveUnitPrice = sale.effectivePrice;
   const [qty, setQty] = useState(1);
-  const capRemaining = Math.max(0, item.stackLimit - owned);
-  // Buyable cap respects the DISCOUNTED price so a sale puts more
-  // units in reach of a thin wallet. Mirrors what the server actually
-  // debits — they pay `effectiveUnitPrice * qty`, not base.
-  const maxBuyable = Math.min(capRemaining, Math.floor(wallet / Math.max(1, effectiveUnitPrice)) || 0);
+  // No per-item stack cap on the buyable quantity, players
+  // accumulate without ceiling, by design. `maxBuyable` is now
+  // wallet-bound only. (The catalog row still carries a
+  // `stackLimit` value the admin tool exposes, but no runtime gate
+  // reads it on the shop / give / raffle paths.)
+  const maxBuyable = Math.floor(wallet / Math.max(1, effectiveUnitPrice)) || 0;
   const clampedQty = Math.min(Math.max(1, qty), Math.max(1, maxBuyable));
   const total = effectiveUnitPrice * clampedQty;
   const blockedReason = useMemo(() => {
@@ -4757,10 +4889,9 @@ function ShopRow({
       return `Sale opens ${new Date(item.saleStartsAt).toLocaleString()}.`;
     }
     if (item.saleEndsAt && now >= item.saleEndsAt) return "Sale ended.";
-    if (capRemaining === 0) return `Stack full (${item.stackLimit}).`;
     if (wallet < effectiveUnitPrice) return "Not enough Currency.";
     return null;
-  }, [item, capRemaining, wallet, effectiveUnitPrice]);
+  }, [item, wallet, effectiveUnitPrice]);
 
   return (
     <article className="flex flex-col gap-2 rounded border border-keep-rule bg-keep-bg/40 p-3">
@@ -4794,7 +4925,7 @@ function ShopRow({
           <PriceBlock basePrice={item.price} effectivePrice={effectiveUnitPrice} onSale={sale.discountPct != null} />
           {owned > 0 ? (
             <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-              you own {owned}/{item.stackLimit}
+              you own {owned.toLocaleString()}
             </span>
           ) : null}
         </div>

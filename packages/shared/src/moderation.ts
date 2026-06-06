@@ -29,6 +29,7 @@ export type AuditAction =
   | "custom_command_create"
   | "custom_command_update"
   | "custom_command_delete"
+  | "builtin_command_config_update"
   | "logo_upload"
   // Backup / restore (admin Backups tab)
   | "backup_create"
@@ -61,12 +62,12 @@ export type AuditAction =
   | "typing_phrase_clear"
   | "room_presence_clear"
   | "session_presence_clear"
-  // Permission-system moderation (Phase 1 — granular roles)
+  // Permission-system moderation (Phase 1, granular roles)
   | "role_permission_grant"     // a permission was granted to a role in the matrix
   | "role_permission_revoke"    // a permission was revoked from a role in the matrix
   | "user_permission_override_set"   // a per-user override was set (grant or revoke)
   | "user_permission_override_clear" // a per-user override was removed (falls back to role grant)
-  // Incognito ("ghost") mode toggles (Phase 11 — staff observation)
+  // Incognito ("ghost") mode toggles (Phase 11, staff observation)
   | "incognito_enter"
   | "incognito_exit"
   // Announcements (banner marquee + scheduled /announce cronjobs)
@@ -125,6 +126,7 @@ export const AUDIT_ACTION_GROUPS: Record<string, { label: string; actions: reado
       "custom_command_create",
       "custom_command_update",
       "custom_command_delete",
+      "builtin_command_config_update",
       "logo_upload",
     ],
   },

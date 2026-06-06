@@ -1,16 +1,16 @@
 /**
- * Phase 3 — user-facing reaction sheet submission modal.
+ * Phase 3, user-facing reaction sheet submission modal.
  *
  * Opens from the Flair tab's "Custom Reaction Sheet" card. Two
  * sections, top-down:
  *
- *   1. Submit a new sheet — slug + name + 16 cell labels + image
+ *   1. Submit a new sheet, slug + name + 16 cell labels + image
  *      upload (PNG/JPEG/WebP/GIF). Cost shown live; insufficient-
  *      funds disables the submit button.
- *   2. My uploads — history list with status per row. Rejected rows
+ *   2. My uploads, history list with status per row. Rejected rows
  *      surface the moderator's reason and confirm the refund.
  *
- * Per-identity scope follows the rest of the Flair tab — the
+ * Per-identity scope follows the rest of the Flair tab, the
  * active character pays from its own pool, master pays from its
  * own. Switching identities (via /char in chat, or the per-tab
  * character switcher) re-targets the form.
@@ -29,13 +29,13 @@ import {
 import { COMMUNITY_EMOTICON_USE_COST } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 
-/** 4×4 grid — same constant the server validates against. */
+/** 4×4 grid, same constant the server validates against. */
 const CELL_COUNT = 16;
 const SLUG_RX = /^[a-z0-9](?:[a-z0-9-]{0,40}[a-z0-9])?$/;
 
 /** Default labels mirroring the seeded basic / male / female sheets
  *  (see server `DEFAULT_EMOTICON_CELLS`). Most custom uploads follow
- *  the same reaction set + ordering — pre-filling spares the author
+ *  the same reaction set + ordering, pre-filling spares the author
  *  from retyping the common mood vocabulary. They can edit any cell
  *  or blank it out if their sheet diverges; trailing four are empty
  *  because the stock sheets only populate the first 12 cells. */
@@ -53,7 +53,7 @@ interface Props {
    *  Server re-validates on submit so a stale price here just shows
    *  a brief "insufficient funds" message; not a security issue. */
   costAtSubmission: number;
-  /** Active identity's wallet balance — used to gate the submit
+  /** Active identity's wallet balance, used to gate the submit
    *  button on the client. Server enforces the real check. */
   activeWallet: number;
   /** Caller refreshes their earning snapshot after a successful
@@ -105,14 +105,14 @@ export function EmoticonSubmissionModal({
     // reports them as `image/apng`. Accept both so animated PNG
     // uploads don't bounce off the type check on Safari.
     if (!/^image\/(png|apng|jpeg|webp|gif)$/.test(file.type)) {
-      setImagePreviewWarning("Unsupported image type — use PNG, APNG, JPEG, WebP, or GIF.");
+      setImagePreviewWarning("Unsupported image type, use PNG, APNG, JPEG, WebP, or GIF.");
       return;
     }
     // 6 MB soft cap on the client. The server's hard cap (8MB base64,
     // ~6MB actual bytes) will reject anything bigger anyway, but
     // surfacing it here saves the round-trip.
     if (file.size > 6 * 1024 * 1024) {
-      setImagePreviewWarning("File is larger than 6 MB — please compress or resize.");
+      setImagePreviewWarning("File is larger than 6 MB, please compress or resize.");
       return;
     }
     const reader = new FileReader();
@@ -124,7 +124,7 @@ export function EmoticonSubmissionModal({
     reader.readAsDataURL(file);
   }
 
-  // Form validation — rendered next to the submit button so the
+  // Form validation, rendered next to the submit button so the
   // user sees exactly what's missing.
   const slugValid = SLUG_RX.test(slug);
   const labeledCellCount = cells.filter((c) => c.trim().length > 0).length;
@@ -167,7 +167,7 @@ export function EmoticonSubmissionModal({
   }
 
   return (
-    // EarningDashboard renders at zIndex=50 — without a bump here the
+    // EarningDashboard renders at zIndex=50, without a bump here the
     // nested submission modal lands at the default zIndex=40 and gets
     // hidden behind the dashboard's `bg-black/40` backdrop, which is
     // what users saw as "a weird transparent dark overlay" when they
@@ -404,7 +404,7 @@ export function EmoticonSubmissionModal({
                     )}
                     <div className="min-w-0 flex-1">
                       <div className="font-semibold">
-                        {row.name} <span className="text-keep-muted">— {row.slug}</span>
+                        {row.name} <span className="text-keep-muted">· {row.slug}</span>
                       </div>
                       <div className="text-[10px] text-keep-muted">
                         {statusLabel(row)}
@@ -414,7 +414,7 @@ export function EmoticonSubmissionModal({
                           Reason: {row.rejectionReason}
                         </div>
                       ) : null}
-                      {/* Commerce toggle + usage tally — only meaningful
+                      {/* Commerce toggle + usage tally, only meaningful
                           on approved rows (the live picker is the only
                           place commerce_enabled is consulted). Pending
                           and rejected rows still carry the flag but
@@ -458,7 +458,7 @@ function ApprovedRowControls({
     if (saving || enabled === next) return;
     setSaving(true);
     setErr(null);
-    // Optimistic flip — the picker shows the new state immediately;
+    // Optimistic flip, the picker shows the new state immediately;
     // a failure rolls it back.
     setEnabled(next);
     try {
@@ -502,10 +502,10 @@ function statusLabel(row: MyEmoticonSubmission): string {
     case "pending":
       return "Awaiting moderator review";
     case "approved":
-      return "Approved — live in the picker";
+      return "Approved, live in the picker";
     case "rejected":
       return row.costPaid != null
-        ? `Rejected — ${row.costPaid} Currency refunded`
+        ? `Rejected, ${row.costPaid} Currency refunded`
         : "Rejected";
     default:
       return row.status;

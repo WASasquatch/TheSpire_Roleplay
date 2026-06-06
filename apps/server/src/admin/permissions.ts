@@ -1,5 +1,5 @@
 /**
- * Admin — Roles & Permissions matrix endpoints.
+ * Admin, Roles & Permissions matrix endpoints.
  *
  * Wired from inside `registerAdminRoutes` so the coarse `view_admin_*`
  * gate already covers these routes. Each handler then enforces the
@@ -29,11 +29,11 @@
  *                                            By-user sub-tab.
  *
  * Hardcoded refusals (NOT matrix-toggleable):
- *  - masteradmin role row — every key is implicit, no rows in the table.
+ *  - masteradmin role row, every key is implicit, no rows in the table.
  *    The PATCH endpoint refuses `role === "masteradmin"`.
- *  - self-edit — actor can't change their own user_id's overrides.
+ *  - self-edit, actor can't change their own user_id's overrides.
  *    Mirrors the `users.ts:/admin/users/:id` self-edit guard.
- *  - non-catalog keys — the body is validated against `PERMISSION_KEYS`
+ *  - non-catalog keys, the body is validated against `PERMISSION_KEYS`
  *    so an unknown string can't sneak into the table.
  */
 
@@ -56,7 +56,7 @@ import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import { recordAudit } from "../audit.js";
 import type { Db } from "../db/index.js";
 
-/** Roles the matrix can edit. Masteradmin is intentionally excluded —
+/** Roles the matrix can edit. Masteradmin is intentionally excluded,
  *  the tier has no grants table row and the bypass is hardcoded; a
  *  PATCH attempting to set its row is refused with a 400 so an admin
  *  who's confused about the contract gets a clear error rather than
@@ -76,7 +76,7 @@ const rolePatchBody = z.object({
 const userPatchBody = z.object({
   userId: z.string().min(1).max(80),
   permissionKey: z.string().min(1).max(80),
-  /** null clears the row — the user falls back to their role grant. */
+  /** null clears the row, the user falls back to their role grant. */
   granted: z.boolean().nullable(),
 }).strict();
 
@@ -185,7 +185,7 @@ export function registerAdminPermissionRoutes(
    *
    * Gated on `view_admin_permissions` (you can already see the matrix,
    * so you can see its diagnostics). No mutation, so no audit-log
-   * entry — pure read.
+   * entry, pure read.
    *
    * Returns the full `DiagnosticsResult` shape from the diagnostics
    * module so the client can render the per-group rollup and any
@@ -213,7 +213,7 @@ export function registerAdminPermissionRoutes(
 
   /* ---------- GET /admin/permissions/sensitive-grants ----------
    * Advisory catalog: lists who currently holds the privacy-sensitive
-   * and high-impact permission keys. NOT pass/fail — purely
+   * and high-impact permission keys. NOT pass/fail, purely
    * informational. The point is to give a masteradmin a "yep, that's
    * still who I want holding these" eyeball check, without the
    * diagnostics suite treating any of the holders as a failure (since
@@ -221,11 +221,11 @@ export function registerAdminPermissionRoutes(
    * not drift).
    *
    * Two categories:
-   *   - "privacy"     — keys that expose other users' private content
+   *   - "privacy"    , keys that expose other users' private content
    *                     (journals, deleted bodies, secure user
    *                     directory, scriptorium drafts). Mirrors the
    *                     `PRIVACY_SENSITIVE_KEYS` set from shared.
-   *   - "high-impact" — destructive / account-affecting actions
+   *   - "high-impact", destructive / account-affecting actions
    *                     (delete user, reset password, edit email,
    *                     disable/enable, manage backups, manage the
    *                     matrix itself, …).
@@ -235,13 +235,13 @@ export function registerAdminPermissionRoutes(
    *   - Roles currently holding it (from role_permission_grants).
    *   - Users with an explicit `granted=true` override on this key
    *     (with username + role for readable rendering). Revokes are
-   *     omitted — a revoke makes the holder set smaller, not bigger.
+   *     omitted, a revoke makes the holder set smaller, not bigger.
    */
   app.get("/admin/permissions/sensitive-grants", async (req, reply) => {
     if (!(await requireMatrixPermission(req, reply, "view_admin_permissions"))) return;
 
     // Curated list. Kept here (not in shared) because it's a UX choice
-    // for the admin panel, not a runtime invariant — adding a key
+    // for the admin panel, not a runtime invariant, adding a key
     // here only changes what shows in the advisory, never resolver
     // behavior.
     const privacyKeys: readonly PermissionKey[] = Array.from(PRIVACY_SENSITIVE_KEYS) as PermissionKey[];
@@ -437,7 +437,7 @@ export function registerAdminPermissionRoutes(
     }
 
     if (body.granted) {
-      // Idempotent insert — re-granting an already-granted row is a
+      // Idempotent insert, re-granting an already-granted row is a
       // no-op rather than a 409 so the UI doesn't have to handle a
       // double-click race against another admin's edit.
       await db
@@ -478,13 +478,13 @@ export function registerAdminPermissionRoutes(
       reply.code(400);
       return { error: "unknown permission key" };
     }
-    // Self-edit guard — mirrors `users.ts:/admin/users/:id`. Without
+    // Self-edit guard, mirrors `users.ts:/admin/users/:id`. Without
     // it, a masteradmin could grant themselves a privilege their role
     // doesn't have via the matrix, or (worse) revoke their own access
     // to `manage_permissions` and lock themselves out.
     if (body.userId === me.id) {
       reply.code(403);
-      return { error: "you cannot edit your own overrides — use a separate masteradmin account" };
+      return { error: "you cannot edit your own overrides, use a separate masteradmin account" };
     }
     const target = (await db
       .select({ id: users.id })
@@ -494,7 +494,7 @@ export function registerAdminPermissionRoutes(
     if (!target) { reply.code(404); return { error: "user not found" }; }
 
     if (body.granted === null) {
-      // Clear path — delete the override row; user falls back to their
+      // Clear path, delete the override row; user falls back to their
       // role grant. Idempotent.
       await db
         .delete(userPermissionOverrides)
@@ -512,7 +512,7 @@ export function registerAdminPermissionRoutes(
       return { ok: true, cleared: true };
     }
 
-    // Upsert path — explicit grant or revoke. The (user_id,
+    // Upsert path, explicit grant or revoke. The (user_id,
     // permission_key) PK + onConflict swap makes this a single
     // round-trip; we capture `setByUserId` + `setAt` for the audit
     // trail so a future "who gave Bob ban_user?" query has a row to
@@ -544,14 +544,14 @@ export function registerAdminPermissionRoutes(
    * Audit-feed slice scoped to permission events. Used by the matrix
    * UI's "Active overrides" + "Recent changes" panels. Re-uses the
    * shared audit log table so a permission grant shows up in both
-   * places — here for the matrix's context, and in /admin/audit for
+   * places, here for the matrix's context, and in /admin/audit for
    * the global review queue.
    */
   app.get<{
     Querystring: {
       limit?: string;
       /** Filter to entries whose metadata.permissionKey matches. Used by the
-       *  matrix's "show history for this key" affordance — e.g. answer
+       *  matrix's "show history for this key" affordance, e.g. answer
        *  "who granted kick_user to mod, when?" in one call. */
       permissionKey?: string;
       /** Filter to entries that touched a specific role. Matches in two
@@ -560,7 +560,7 @@ export function registerAdminPermissionRoutes(
        *  override changed (`user_permission_override_*` whose target's
        *  current role is X). Without the second branch, "show all
        *  changes affecting the admin role" would silently drop user-
-       *  override edits on admin-tier users — which is the more
+       *  override edits on admin-tier users, which is the more
        *  common moderation question. */
       role?: string;
       /** Filter to entries that touched a specific user. Joins on the

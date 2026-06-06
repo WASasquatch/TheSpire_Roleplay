@@ -2,7 +2,7 @@
 --   * Mood tags        (users.current_mood, messages.mood_snapshot)
 --   * /npc command     (rooms.npc_disabled, messages.npc_voiced_by)
 --   * Edit/delete grace (messages.edited_at, messages.deleted_at)
---   * /scene message kind: no DDL — `kind` is enforced in code, not at the
+--   * /scene message kind: no DDL, `kind` is enforced in code, not at the
 --     SQLite layer; the existing TEXT column accepts the new value.
 --   * Multi-portrait gallery (new character_portraits table).
 

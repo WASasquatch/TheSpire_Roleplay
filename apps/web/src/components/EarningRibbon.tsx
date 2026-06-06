@@ -3,11 +3,11 @@
  *
  * Per the project ethos memory: no video-game toasts, no popup
  * ceremonies. This component renders as a dismissible strip pinned
- * between the chat top-bar and the message list — visible until
+ * between the chat top-bar and the message list, visible until
  * acknowledged so a user who ranks up mid-scene doesn't lose the
  * notification on the next reload.
  *
- * Stacks multiple unacknowledged rank-ups (rare — most users get one
+ * Stacks multiple unacknowledged rank-ups (rare, most users get one
  * at a time). "Dismiss" acks one and the next slides into place;
  * "Open Earning" both opens the dashboard and clears the ribbon.
  */
@@ -90,7 +90,7 @@ export function EarningRibbon({ onOpenEarning }: Props) {
         type="button"
         onClick={() => {
           onOpenEarning();
-          // Don't auto-clear — the dashboard now lets the user see what
+          // Don't auto-clear, the dashboard now lets the user see what
           // was new. Caller (or the user) can dismiss explicitly.
         }}
         className="shrink-0 rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs uppercase tracking-widest text-keep-action hover:bg-keep-action/25"

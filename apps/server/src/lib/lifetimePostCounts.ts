@@ -5,7 +5,7 @@
  * messages, forum topics, forum replies) by `COUNT(*) FROM messages
  * WHERE …`. That number drifted DOWN every time a row was purged by
  * the retention sweep, soft-deleted by a mod, or cascade-removed with
- * a deleted room — which made the displayed activity an
+ * a deleted room, which made the displayed activity an
  * artificially-low "what's still here" number instead of a real
  * "lifetime" stat.
  *
@@ -17,7 +17,7 @@
  * time; subsequent deletes never decrement.
  *
  * Whispers, system, cmd, and announce kinds are deliberately
- * excluded — they never contributed to the original COUNT() either
+ * excluded, they never contributed to the original COUNT() either
  * (whispers are private; system/cmd/announce are server chrome, not
  * the user's voice).
  */
@@ -37,7 +37,7 @@ export type LifetimeCategory = "chat" | "topic" | "reply" | null;
  * Classify a freshly-accepted message insert into the lifetime
  * counter bucket it should bump. Returns null when the message
  * doesn't qualify for any counter (whispers, system noise, an
- * off-shape row in a wrongly-moded room, etc.) — the caller skips
+ * off-shape row in a wrongly-moded room, etc.), the caller skips
  * the write in that case.
  *
  * Logic mirrors `computeProfileMetrics` exactly so backfill and
@@ -68,7 +68,7 @@ export function classifyMessageForLifetime(input: {
  * authored under that character.
  *
  * Idempotency: the caller MUST invoke this exactly once per accepted
- * message insert. There's no per-(user, message) de-dup here — that
+ * message insert. There's no per-(user, message) de-dup here, that
  * would require an extra index lookup on the hot path, and the
  * insert callsites are countable on one hand.
  *

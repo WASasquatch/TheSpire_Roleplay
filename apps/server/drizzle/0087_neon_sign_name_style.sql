@@ -6,7 +6,7 @@
 -- drop-shadow (radiates past the layout box for the lit-tube look).
 --
 -- OFF state: face dims to a mid-gray (`--user-color-2`) with a thin
--- darker inner stroke (`--user-outline`) — the dead-tube look. No
+-- darker inner stroke (`--user-outline`), the dead-tube look. No
 -- outer halo.
 --
 -- The flicker is random-looking via irregular `step-end` keyframes:

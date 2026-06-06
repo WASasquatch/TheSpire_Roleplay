@@ -2,14 +2,14 @@
 -- "matched name-style + border" cosmetic pairings.
 --
 -- This pass:
---   1. Upgrades Sylvan (key: 'forest') to Sakura-grade — many falling
+--   1. Upgrades Sylvan (key: 'forest') to Sakura-grade, many falling
 --      leaves with size + drift variation, a forest-floor pile fade,
 --      gentle ring sway. Replaces the threadbare 3-leaf strip with
 --      the same particle-field structure sakura-v2 uses.
---   2. Adds 'ember-glow' — companion to the 'embers' name style.
+--   2. Adds 'ember-glow', companion to the 'embers' name style.
 --      Embers float UP from the bottom rim instead of down, fading
 --      toward the top. Pulsing inner ring of warm orange/red.
---   3. Adds 'hearth-flame' — companion to the 'hearth_fire' name
+--   3. Adds 'hearth-flame', companion to the 'hearth_fire' name
 --      style. Flickering flame tongues licking around the avatar
 --      rim plus a smouldering log glow at the bottom. Steady,
 --      cozy warmth rather than chaos.
@@ -91,7 +91,7 @@ WHERE `key` = 'forest' AND `is_builtin` = 1;
 --> statement-breakpoint
 
 -- =========================================================
--- EMBER GLOW — companion to 'embers' name style
+-- EMBER GLOW, companion to 'embers' name style
 -- =========================================================
 
 INSERT OR IGNORE INTO `freeform_borders`
@@ -149,7 +149,7 @@ VALUES
 --> statement-breakpoint
 
 -- =========================================================
--- HEARTH FLAME — companion to 'hearth_fire' name style
+-- HEARTH FLAME, companion to 'hearth_fire' name style
 -- =========================================================
 
 INSERT OR IGNORE INTO `freeform_borders`

@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema.js";
 
 // SQLITE_PATH is the canonical name. DATABASE_URL is kept as a fallback
-// so existing local .env files keep working — flyctl flags any var named
+// so existing local .env files keep working, flyctl flags any var named
 // `DATABASE_URL` as "potentially sensitive" because it usually carries
 // a Postgres-style connection string with credentials. Ours is just a
 // filesystem path on the mounted volume, so the rename clears the
@@ -31,13 +31,13 @@ export type Db = typeof db;
  * legitimately need full SQL flexibility:
  *
  *   - dynamic table/column SQL (PRAGMA table_info, dynamic INSERT
- *     into a name chosen at runtime — used by the backup importer
+ *     into a name chosen at runtime, used by the backup importer
  *     for cross-install upserts against arbitrary schemas);
  *   - `VACUUM INTO` for atomic full-DB snapshots;
  *   - one-off admin tooling that doesn't fit the drizzle query
  *     builder.
  *
- * Do NOT reach for this when a typed drizzle call would work —
+ * Do NOT reach for this when a typed drizzle call would work,
  * skipping the ORM forfeits the type safety the rest of the codebase
  * relies on.
  */

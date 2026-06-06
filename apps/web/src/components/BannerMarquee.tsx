@@ -9,7 +9,7 @@ import { handleUiRouteClickInHtml } from "../lib/uiRouteOpen.js";
 import { hydrateDynamicUiRouteChips } from "../lib/hydrateDynamicUiRouteChips.js";
 
 /**
- * Persistent close key — content-aware. The key is the marquee
+ * Persistent close key, content-aware. The key is the marquee
  * namespace joined with a signature of the CURRENT enabled banner
  * set (each entry's id + updatedAt). When an admin adds, edits, or
  * removes a banner, the signature changes → key changes → dismissed
@@ -18,7 +18,7 @@ import { hydrateDynamicUiRouteChips } from "../lib/hydrateDynamicUiRouteChips.js
  * own without forcing the viewer to manually clear site data.
  *
  * Mirrors the version-keyed close on the StaleVersionBanner
- * (`stale-version:0.20.4`) — the viewer's "I've seen this" is
+ * (`stale-version:0.20.4`), the viewer's "I've seen this" is
  * scoped to the artifact they dismissed, not the surface itself.
  *
  * The empty-set sentinel keeps the key stable while the initial
@@ -38,7 +38,7 @@ function buildDismissKey(banners: AnnouncementBanner[]): string {
  *  next-up banner without losing the room flow. */
 const ROTATION_MS = 8_000;
 /** Fade transition duration. Keep in sync with the inline transition
- *  style below — declared as a constant so tests / a future
+ *  style below, declared as a constant so tests / a future
  *  reduced-motion override can read it. */
 const FADE_MS = 300;
 
@@ -68,7 +68,7 @@ export function BannerMarquee() {
   const [fading, setFading] = useState(false);
   // Bumped when the viewer manually jumps to a specific banner (dot
   // click). The auto-rotation effect uses this in its deps so a
-  // manual jump restarts the ROTATION_MS timer — without it the
+  // manual jump restarts the ROTATION_MS timer, without it the
   // viewer could land on a chosen banner and have it advance ~1
   // second later because the existing interval fired mid-jump.
   const [rotationResetKey, setRotationResetKey] = useState(0);
@@ -79,7 +79,7 @@ export function BannerMarquee() {
   const theme = useActiveTheme();
 
   useEffect(() => {
-    // ALWAYS fetch — the dismiss-key signature depends on the
+    // ALWAYS fetch, the dismiss-key signature depends on the
     // current banner set, so we have to load the set BEFORE we can
     // ask "is this content-set dismissed?" An earlier draft
     // short-circuited here on `dismissed`, but with a content-aware
@@ -100,7 +100,7 @@ export function BannerMarquee() {
           // out-of-range index.
           setActiveIdx(0);
         }
-      } catch { /* network blip — keep last good catalog */ }
+      } catch { /* network blip, keep last good catalog */ }
     }
     void load();
     // Socket push from the admin's create/edit/delete so the marquee
@@ -113,7 +113,7 @@ export function BannerMarquee() {
     };
   }, [dismissed]);
 
-  // Auto-rotate. Only schedules when there are 2+ banners — a single
+  // Auto-rotate. Only schedules when there are 2+ banners, a single
   // banner stays put without a redundant fade. `rotationResetKey`
   // in the deps means a manual dot-jump tears down the interval
   // and starts a fresh ROTATION_MS window so the viewer gets the
@@ -141,7 +141,7 @@ export function BannerMarquee() {
 
   // Hydrate any dynamic chip (e.g. {scriptorium:latest:story}) AFTER
   // `dangerouslySetInnerHTML` has put the rendered HTML into the
-  // body div — the chip's static label is the skeleton, the
+  // body div, the chip's static label is the skeleton, the
   // hydration helper fetches + writes in the real title. Re-runs
   // when the rendered HTML changes (rotation tick, admin edit) so a
   // freshly-shown banner with a dynamic chip gets resolved too.
@@ -155,7 +155,7 @@ export function BannerMarquee() {
   if (dismissed) return null;
   if (banners.length === 0) return null;
 
-  // Same legibility computation as StaleVersionBanner — opaque
+  // Same legibility computation as StaleVersionBanner, opaque
   // panel bg, text nudged against it, action color for the close
   // button border. Without this the body washes out on glass /
   // dark themes whose default banner CSS is translucent.
@@ -180,13 +180,13 @@ export function BannerMarquee() {
       // their own width out of the centering math.
       className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-1.5 text-sm"
     >
-      {/* Left spacer — sized symmetrically to the right column via
+      {/* Left spacer, sized symmetrically to the right column via
           the 1fr-auto-1fr track shape so the auto (body) column lands
           dead center. */}
       <div aria-hidden />
       <div
         ref={bodyRef}
-        // The fade is purely CSS — opacity 1 → 0 → 1 around the
+        // The fade is purely CSS, opacity 1 → 0 → 1 around the
         // index swap. `transition` is inline so it stays tied to
         // FADE_MS without us needing a custom Tailwind config.
         // Inline `<p>` + zero-margin overrides keep multi-paragraph
@@ -200,7 +200,7 @@ export function BannerMarquee() {
         }}
         // The structural-tag overrides flatten paragraph/list spacing
         // so multi-paragraph bodies render on one line. We DELIBERATELY
-        // avoid `[&_*]:m-0` here — that wildcard previously stripped
+        // avoid `[&_*]:m-0` here, that wildcard previously stripped
         // the UI-route chip's own `mx-1.5` breathing-room margin and
         // left the chip pressed against the surrounding text. Listing
         // just the structural tags lets the chip's margin survive.
@@ -211,7 +211,7 @@ export function BannerMarquee() {
         // = 180`) leaves a small markdown-expansion tolerance past
         // that. The previous `max-w-3xl` ate ~40% of typical banner
         // text even when the author stayed well under the announced
-        // 4000-char cap — that's the inconsistency this bumps.
+        // 4000-char cap, that's the inconsistency this bumps.
         //
         // Truncate is `sm:`-prefixed so phones don't lose 90% of the
         // body to ellipsis; below the `sm` breakpoint (640px) the
@@ -228,12 +228,12 @@ export function BannerMarquee() {
         onClick={handleUiRouteClickInHtml}
         dangerouslySetInnerHTML={{ __html: renderedHtml }}
       />
-      {/* Right controls — dot row (when 2+ banners) + close button,
+      {/* Right controls, dot row (when 2+ banners) + close button,
           aligned to the right edge of the row via `justify-self-end`
           on the grid track. */}
       <div className="flex items-center justify-self-end gap-2">
         {banners.length > 1 ? (
-          // Dots hidden on mobile — h-2 w-2 is too small to tap
+          // Dots hidden on mobile, h-2 w-2 is too small to tap
           // reliably on touch, and the wrapped multi-line body
           // already gives mobile readers the whole banner without
           // needing to flip between rotations. Auto-rotation still
@@ -265,11 +265,20 @@ export function BannerMarquee() {
             ))}
           </div>
         ) : null}
+        {/* Dismiss ×, matches the world-banner + topic-banner close
+            chips in App.tsx (h-5 w-5 rounded box, action-tinted bg +
+            border, hover deepens both). The marquee X used to be a
+            plain `text-lg opacity-60` glyph, which read as a
+            different family of control than the other top-of-chat
+            banners stacked underneath it and visibly mismatched once
+            the world / topic banners painted side by side with the
+            marquee. The action color slot is theme-aware (CSS var)
+            so it still honors the chat's palette without needing
+            the marquee's earlier `legibleAgainstBg` math. */}
         <button
           type="button"
           onClick={() => dismiss(dismissKey)}
-          style={{ color: textHex }}
-          className="rounded px-1 text-lg leading-none opacity-60 hover:opacity-100"
+          className="flex h-5 w-5 items-center justify-center rounded border border-keep-action/40 bg-keep-action/20 text-[11px] leading-none text-keep-action hover:border-keep-action hover:bg-keep-action/40"
           aria-label="Dismiss site announcements"
           title="Dismiss this set. Re-shows when an admin adds or edits a banner."
         >

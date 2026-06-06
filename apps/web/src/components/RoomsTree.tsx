@@ -595,21 +595,36 @@ interface StaffChip {
  * the bg gets nudged toward legibility before the icon paints.
  */
 function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
-  // EVERY staff/role badge is suppressed on character rows, they go
-  // fully incognito so an admin/mod can RP without the public
-  // signaling "this character belongs to staff" or "this character's
-  // master owns this room." The OOC ↔ character partition is meant
-  // to be one-way: master surfaces own all role info, character
-  // surfaces own none.
+  // SITE-staff badges (masteradmin / admin / site-mod) are suppressed
+  // on character rows so an admin/mod can RP without the public
+  // signaling "this character belongs to staff." The OOC ↔ character
+  // partition is meant to be one-way for site staff: master surfaces
+  // own the role info, character surfaces own none.
   //
-  // This includes the per-room owner/mod badges. They're keyed on
-  // user_id (the master), not per-identity, so a masteradmin owning
-  // OOC Lobby would otherwise tag THEIR character row with a Room
-  // owner chip, exactly the giveaway we're trying to avoid. Anyone
-  // who wants to claim their staff or room-mod badge can voice the
-  // master to do so.
+  // Per-room ROLE badges (room owner / room mod) DO surface on
+  // character rows: room moderation is a publicly-attached role the
+  // room owner picked, occupants need to know who's running the
+  // room they're in regardless of which identity that person is
+  // voicing right now. Without this, a room owner who RPs as their
+  // character loses the crown the moment they slip in-character,
+  // and a re-promoted mod (the original "Florian still no crown
+  // after /promote" report) reads as a regular member to everyone
+  // else in the room.
   const isMasterRow = o.characterId === null;
-  if (!isMasterRow) return null;
+  if (!isMasterRow) {
+    if (o.role === "mod" || o.role === "owner") {
+      return {
+        label: o.role === "owner" ? "Room owner" : "Room moderator",
+        Icon: ModIcon,
+        color: legibleAgainstBg(theme.system, theme.bg),
+        title:
+          o.role === "owner"
+            ? "Room owner, moderation authority in this room."
+            : "Room moderator, moderation authority in this room.",
+      };
+    }
+    return null;
+  }
 
   if (o.accountRole === "masteradmin") {
     return {

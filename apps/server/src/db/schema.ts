@@ -459,6 +459,23 @@ export const rooms = sqliteTable(
     passwordHash: text("password_hash"),
     /** owner of user-created rooms; null for system rooms */
     ownerId: text("owner_id").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * The user who FIRST created this room. Never changes after
+     * creation (even when the room is archived + resurrected by a
+     * different caller, or ownership is transferred). Null for
+     * system rooms and for rows backfilled from before migration
+     * 0196 where the current ownerId had also been wiped.
+     */
+    originalOwnerUserId: text("original_owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * The user who held ownership immediately before the current
+     * `ownerId`. Updated each time `ownerId` changes (transfer,
+     * resurrection of an archived room by a different caller).
+     * When a fresh room is created this equals the creator;
+     * subsequent transfers shift it to the prior owner. Null when
+     * unknown (backfill couldn't determine).
+     */
+    lastOwnerUserId: text("last_owner_user_id").references(() => users.id, { onDelete: "set null" }),
     topic: text("topic"),
     /**
      * Long-form world/setting description shown to a user ONCE when they

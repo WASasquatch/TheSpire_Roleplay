@@ -2,21 +2,24 @@
  * Story Dice, the server picks four evocative prompt words; the
  * room writes IC snippets that weave all four in. Winner is decided
  * by the room itself: each `/storydice <text>` submission posts as
- * a normal chat line, the server seeds a 👍 reaction so the voting
- * chip is right there for tappers, and the room thumbs-ups whichever
- * submissions they liked best. At expiry the system counts thumbs-
- * up reactions per submission (subtracting the seed), crowns the
- * top-voted entrant(s), and mints the configured reward.
+ * a stylized chat line (bolded header + indented body) so the
+ * entry stands apart from normal chatter, the server seeds a 📖
+ * reaction so the voting chip is right there for tappers, and the
+ * room books-up whichever submissions they liked best. At expiry
+ * the system counts 📖 reactions per submission (subtracting the
+ * seed), crowns the top-voted entrant(s), and mints the
+ * configured reward.
  *
  * Lifecycle:
  *   - `/storydice` opens a round in the current room with four
  *     random prompt words drawn from the bank below.
  *   - During the window, anyone runs `/storydice <text>` to submit
- *     a post. The text is posted to chat as a regular `say` line
- *     attributed to the player; the system seeds a 👍 reaction on
- *     it. One submission per identity, resubmitting is rejected
- *     so a player can't dilute their own vote with multiple posts.
- *   - At expiry, the resolver reads the 👍 count for each
+ *     a post. The text is posted to chat as a stylized `say` line
+ *     attributed to the player (header + blockquoted body); the
+ *     system seeds a 📖 reaction on it. One submission per
+ *     identity, resubmitting is rejected so a player can't dilute
+ *     their own vote with multiple posts.
+ *   - At expiry, the resolver reads the 📖 count for each
  *     submission, subtracts 1 (the seed), and surfaces the result
  *     line listing each entrant and their vote total. The highest
  *     vote total (or tied set) wins; the reward mints to each
@@ -72,11 +75,14 @@ export const STORYDICE_DEFAULT_REWARD: BuiltinCommandReward = {
   itemCount: 0,
 };
 
-/** The 👍 codepoint we use for the seed AND the count-target.
+/** The 📖 codepoint we use for the seed AND the count-target.
  *  Other emoji from the room still appear on the submission chip
- *  but don't influence the winner determination. */
-export const STORYDICE_VOTE_EMOJI = "👍";
-const STORYDICE_VOTE_LABEL = "thumbs up";
+ *  but don't influence the winner determination. The open-book
+ *  glyph reads as "story / read / vote-for-this-tale" cleanly,
+ *  which fits Story Dice's framing better than the generic thumbs
+ *  up the system used at first launch. */
+export const STORYDICE_VOTE_EMOJI = "📖";
+const STORYDICE_VOTE_LABEL = "open book";
 
 /** Prompt word bank. Curated for breadth + evocativeness; mostly
  *  concrete nouns + a few abstract concepts so players have hooks
@@ -103,7 +109,7 @@ export interface StoryDiceSubmission {
   participant: ParticipantRef;
   /** Chat-message id the player's text was posted as. The resolver
    *  reads reaction counts off this row to determine the vote
-   *  tally; the seed 👍 was already attached at submission time. */
+   *  tally; the seed 📖 was already attached at submission time. */
   messageId: string;
   /** Verbatim text the player submitted. Stored for the result
    *  line so the resolver doesn't need to re-fetch the message row
@@ -153,7 +159,7 @@ export function newStoryDiceState(reward: BuiltinCommandReward): StoryDiceState 
  * Record a new submission. Returns false when the identity already
  * has an entry on this round, story dice is one-submission-per-
  * identity by design (a resubmit would dilute their own vote).
- * Caller has already posted the chat message + seeded the 👍
+ * Caller has already posted the chat message + seeded the 📖
  * reaction before calling.
  */
 export function recordStorySubmission(
@@ -168,18 +174,18 @@ export function recordStorySubmission(
 }
 
 /**
- * Attach the seed 👍 reaction to a freshly-posted submission. The
- * reactor is the singleton `system` user (the same row
- * `addSystemMessage` uses) so the chip renders as a generic 1-count
- * 👍 the room can tap to add their own vote. Returns true on
- * success; false (silently) on a missing system user row, which
+ * Attach the seed vote reaction (📖) to a freshly-posted
+ * submission. The reactor is the singleton `system` user (the same
+ * row `addSystemMessage` uses) so the chip renders as a generic
+ * 1-count 📖 the room can tap to add their own vote. Returns true
+ * on success; false (silently) on a missing system user row, which
  * means the round still runs but the chip won't be pre-seeded.
  *
  * Note on the inserted row's `displayName`: we use "system" so the
  * reactor-list tooltip ("Reactors: …") reads cleanly without
  * leaking real account names from server-authored votes.
  */
-export async function seedSubmissionThumbsUp(
+export async function seedSubmissionVote(
   db: Db,
   io: Io,
   roomId: string,
@@ -234,16 +240,16 @@ export async function seedSubmissionThumbsUp(
 }
 
 /**
- * Load the 👍 reaction count for a set of message ids in one query.
+ * Load the 📖 reaction count for a set of message ids in one query.
  * Returns a Map<messageId, count>. Counts include the system seed,
  * so the resolver subtracts 1 to get the "real" room votes.
  *
- * We constrain on `unicodeChar = "👍"` so other reactions the room
+ * We constrain on `unicodeChar = "📖"` so other reactions the room
  * added (a 🔥 for an exceptional submission, a 💀 for a meme-y one)
  * still render on the chip but don't count toward Story Dice
- * winner selection. The vote is specifically the thumbs up.
+ * winner selection. The vote is specifically the open-book glyph.
  */
-async function loadThumbsUpCounts(
+async function loadVoteCounts(
   db: Db,
   messageIds: string[],
 ): Promise<Map<string, number>> {
@@ -291,7 +297,7 @@ async function resolveStoryDice(session: GameSession, ctx: ResolveContext): Prom
 
   // Count the real (non-seed) votes per submission. The seed adds 1,
   // so we subtract, a submission nobody else voted on reads as 0.
-  const countByMessageId = await loadThumbsUpCounts(ctx.db, subs.map((s) => s.messageId));
+  const countByMessageId = await loadVoteCounts(ctx.db, subs.map((s) => s.messageId));
   interface TalliedSub {
     submission: StoryDiceSubmission;
     /** Total 👍 reactions on the chat message, including the seed. */

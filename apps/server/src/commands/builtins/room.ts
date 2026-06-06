@@ -84,11 +84,30 @@ async function resurrectArchivedRoom(
   roomId: string,
   overrides?: { type?: "public" | "private"; passwordHash?: string | null },
 ): Promise<void> {
+  // Snapshot the previous owner so we can park it on `lastOwnerUserId`.
+  // The room row is the canonical source; we don't trust the caller
+  // to know what the prior incarnation owned. `originalOwnerUserId`
+  // is deliberately NOT touched, even across resurrection it sticks
+  // with whoever first made the room.
+  const prior = (await ctx.db
+    .select({ ownerId: rooms.ownerId, originalOwnerUserId: rooms.originalOwnerUserId })
+    .from(rooms)
+    .where(eq(rooms.id, roomId))
+    .limit(1))[0];
   await ctx.db
     .update(rooms)
     .set({
       archivedAt: null,
       ownerId: ctx.user.id,
+      lastOwnerUserId: prior?.ownerId ?? ctx.user.id,
+      // Backfill safety: if the row predates migration 0196 and had
+      // no original captured (NULL), seize the moment to set one.
+      // Picking the prior owner here matches "this user owned it
+      // when the new caller resurrected it," which is the best info
+      // we have at this point.
+      ...(prior?.originalOwnerUserId == null
+        ? { originalOwnerUserId: prior?.ownerId ?? ctx.user.id }
+        : {}),
       ...(overrides?.type !== undefined ? { type: overrides.type } : {}),
       ...(overrides?.passwordHash !== undefined ? { passwordHash: overrides.passwordHash } : {}),
     })
@@ -132,6 +151,12 @@ async function joinOrCreatePublic(ctx: CommandContext, name: string) {
       name,
       type: "public",
       ownerId: ctx.user.id,
+      // Owner-history seeds: both equal the creator on a fresh room.
+      // `originalOwnerUserId` is locked in here and never updated
+      // again; `lastOwnerUserId` shifts to the prior owner on each
+      // subsequent transfer / resurrection (see resurrectArchivedRoom).
+      originalOwnerUserId: ctx.user.id,
+      lastOwnerUserId: ctx.user.id,
     });
     // Mirror /private: the creator is also a member with role=owner.
     // Otherwise /topic and other owner-gated commands won't recognize them
@@ -178,6 +203,10 @@ async function createPrivateRoom(ctx: CommandContext, name: string, password: st
     type: "private",
     passwordHash,
     ownerId: ctx.user.id,
+    // See joinOrCreatePublic comment, both seed to the creator on a
+    // fresh room; only `lastOwnerUserId` ever shifts on transfer.
+    originalOwnerUserId: ctx.user.id,
+    lastOwnerUserId: ctx.user.id,
   });
   await ctx.db.insert(roomMembers).values({
     roomId: id,

@@ -460,6 +460,27 @@ export async function registerAdminRoutes(
       .groupBy(roomMembers.roomId);
     const countByRoom = new Map(counts.map((r) => [r.roomId, r.n]));
 
+    // Hydrate display names for the three owner slots (current /
+    // original / last) so the admin UI doesn't have to repeat a
+    // batch user-lookup. One IN-query over every userId referenced
+    // by any of the three slots, then map back.
+    const ownerIds = new Set<string>();
+    for (const r of allRooms) {
+      if (r.ownerId) ownerIds.add(r.ownerId);
+      if (r.originalOwnerUserId) ownerIds.add(r.originalOwnerUserId);
+      if (r.lastOwnerUserId) ownerIds.add(r.lastOwnerUserId);
+    }
+    const ownerNameByUserId = new Map<string, string>();
+    if (ownerIds.size > 0) {
+      const userRows = await db
+        .select({ id: users.id, username: users.username })
+        .from(users)
+        .where(inArray(users.id, [...ownerIds]));
+      for (const u of userRows) ownerNameByUserId.set(u.id, u.username);
+    }
+    const usernameFor = (uid: string | null): string | null =>
+      uid ? (ownerNameByUserId.get(uid) ?? null) : null;
+
     return {
       rooms: allRooms.map((r) => ({
         id: r.id,
@@ -468,6 +489,17 @@ export async function registerAdminRoutes(
         topic: r.topic,
         description: r.description,
         ownerId: r.ownerId,
+        ownerUsername: usernameFor(r.ownerId),
+        // Owner-history surface (migration 0196). `originalOwnerUserId`
+        // is the very first creator and never moves; `lastOwnerUserId`
+        // is whoever held the room immediately before the current
+        // owner (or equal to the current owner when nothing has
+        // changed hands). Useful when investigating "who used to
+        // run this room before so-and-so took it over."
+        originalOwnerUserId: r.originalOwnerUserId,
+        originalOwnerUsername: usernameFor(r.originalOwnerUserId),
+        lastOwnerUserId: r.lastOwnerUserId,
+        lastOwnerUsername: usernameFor(r.lastOwnerUserId),
         isSystem: r.isSystem,
         isDefault: r.isDefault,
         replyMode: r.replyMode,
@@ -625,6 +657,12 @@ export async function registerAdminRoutes(
       // Owner is the creating admin. Cascade `set null` on user delete keeps
       // the room around even if the admin is later removed.
       ownerId: sessionUser.id,
+      // Owner-history seeds, the admin creating the room is both the
+      // original creator and the current last-known owner. Migration
+      // 0196 added these columns; see commands/builtins/room.ts for
+      // the user-facing /go / /private create paths that mirror this.
+      originalOwnerUserId: sessionUser.id,
+      lastOwnerUserId: sessionUser.id,
       isSystem: body.isSystem ?? true,
       isDefault: body.isDefault ?? false,
       replyMode: body.replyMode ?? "flat",

@@ -1457,6 +1457,7 @@ function TopicCard({
           src={topic.avatarUrl ?? null}
           name={topic.displayName}
           userId={topic.userId}
+          characterId={topic.characterId ?? null}
           size={48}
           onClick={(e) => {
             e.stopPropagation();
@@ -1616,6 +1617,7 @@ export function ForumAvatar({
   onClick,
   size = 32,
   userId,
+  characterId,
   borderRankKey,
 }: {
   src: string | null;
@@ -1630,13 +1632,28 @@ export function ForumAvatar({
    *  forum topic/reply call sites so the same border the user
    *  picked in the Earning dashboard frames their forum posts. */
   userId?: string | null;
+  /** Author's character id at message time (null = the post was OOC).
+   *  Paired with `userId` for occupant lookup so a master who has
+   *  since switched to a different character doesn't bleed their
+   *  CURRENT character's avatar / crop / border onto a past post
+   *  authored under a DIFFERENT character. Without this, the
+   *  userId-only `.find()` below returned whichever identity the
+   *  master happens to be voicing right now. */
+  characterId?: string | null;
   /** Direct border override, wins over `userId` lookup. */
   borderRankKey?: string | null;
 }) {
+  // Tuple-aware occupant matcher used by every cache lookup below.
+  // (userId, characterId) pins a specific identity, the same way
+  // `cosmeticsByIdentity` in the chat path does, so two characters
+  // from the same master never share a resolution.
+  function matchesIdentity(o: { userId: string; characterId: string | null }): boolean {
+    return o.userId === userId && (o.characterId ?? null) === (characterId ?? null);
+  }
   const occupantBorderRankKey = useChat((s) => {
     if (!userId) return null;
     for (const list of Object.values(s.occupants)) {
-      const row = list.find((o) => o.userId === userId);
+      const row = list.find(matchesIdentity);
       if (row) return row.selectedBorderRankKey;
     }
     return null;
@@ -1644,7 +1661,7 @@ export function ForumAvatar({
   const occupantFreeformBorderKey = useChat((s) => {
     if (!userId) return null;
     for (const list of Object.values(s.occupants)) {
-      const row = list.find((o) => o.userId === userId);
+      const row = list.find(matchesIdentity);
       if (row) return row.selectedFreeformBorderKey;
     }
     return null;
@@ -1652,19 +1669,20 @@ export function ForumAvatar({
   const occupantFreeformBorderConfig = useChat((s) => {
     if (!userId) return null;
     for (const list of Object.values(s.occupants)) {
-      const row = list.find((o) => o.userId === userId);
+      const row = list.find(matchesIdentity);
       if (row) return row.freeformBorderConfig;
     }
     return null;
   });
   // Live-first lookup. The author's currently-set avatar URL +
-  // crop come from the occupant cache when they're online in any
-  // room the viewer can see. The message snapshot is the
-  // fallback for authors who have since logged out.
+  // crop come from the occupant cache when they're online AS THIS
+  // EXACT IDENTITY (master AND characterId both match) in any room
+  // the viewer can see. The message snapshot is the fallback for
+  // authors who have since switched identities OR logged out.
   const occupantAvatarUrl = useChat((s) => {
     if (!userId) return null;
     for (const list of Object.values(s.occupants)) {
-      const row = list.find((o) => o.userId === userId);
+      const row = list.find(matchesIdentity);
       if (row?.avatarUrl) return row.avatarUrl;
     }
     return null;
@@ -1673,11 +1691,14 @@ export function ForumAvatar({
   // carries it. Paired with `occupantAvatarUrl` below so we never
   // frame a snapshot URL with a live crop (which produced the
   // "old avatar, new zoom" mismatch reported on forum posts after
-  // an author re-cropped their portrait).
+  // an author re-cropped their portrait). Pairing with the tuple
+  // matcher above ALSO closes the "switched character" leak that
+  // had a master's current-character crop framing every prior
+  // post from any of their OTHER identities.
   const occupantAvatarCrop = useChat((s) => {
     if (!userId) return null;
     for (const list of Object.values(s.occupants)) {
-      const row = list.find((o) => o.userId === userId);
+      const row = list.find(matchesIdentity);
       if (row) return row.avatarCrop;
     }
     return null;
@@ -1922,6 +1943,7 @@ export function ForumPostBody({
           src={msg.avatarUrl ?? null}
           name={msg.displayName}
           userId={msg.userId}
+          characterId={msg.characterId ?? null}
           onClick={(e) => {
             e.stopPropagation();
             onIconClick(msg.userId, msg.displayName, msg.characterId ?? null);

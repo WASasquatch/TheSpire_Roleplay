@@ -3551,6 +3551,18 @@ interface AdminRoom {
   topic: string | null;
   description: string | null;
   ownerId: string | null;
+  /** Resolved current-owner username for display (null when the
+   *  user row was deleted or never set). */
+  ownerUsername: string | null;
+  /** The user who FIRST created this room (migration 0196). Never
+   *  changes, even on resurrection of an archived room or transfer. */
+  originalOwnerUserId: string | null;
+  originalOwnerUsername: string | null;
+  /** The user who held ownership immediately before the current
+   *  `ownerId`. Updated on resurrection / transfer; equals the
+   *  current owner when nothing has changed hands. */
+  lastOwnerUserId: string | null;
+  lastOwnerUsername: string | null;
   isSystem: boolean;
   isDefault: boolean;
   replyMode: "flat" | "nested";
@@ -4150,6 +4162,7 @@ function RoomsTab() {
               <th className="px-2 py-1 text-left">Type</th>
               <th className="px-2 py-1">Members</th>
               <th className="px-2 py-1 text-left">Topic</th>
+              <th className="px-2 py-1 text-left">Owner</th>
               <th className="px-2 py-1">System</th>
               <th className="px-2 py-1">Default</th>
               <th className="px-2 py-1"></th>
@@ -4178,6 +4191,32 @@ function RoomsTab() {
                 </td>
                 <td className="px-2 py-1 text-center tabular-nums">{r.memberCount}</td>
                 <td className="px-2 py-1 truncate max-w-xs" title={r.topic ?? ""}>{r.topic ?? "-"}</td>
+                <td className="px-2 py-1 truncate max-w-xs">
+                  {/*
+                    Owner column packs the three slots (current /
+                    original / last) into one cell, current owner on
+                    the primary line, original + last on a small
+                    secondary line. System rooms have no owner.
+                  */}
+                  {r.ownerUsername || r.originalOwnerUsername ? (
+                    <div className="leading-tight">
+                      <div className="truncate" title={r.ownerUsername ?? "(unknown user)"}>
+                        {r.ownerUsername ?? <span className="italic text-keep-muted">unknown</span>}
+                      </div>
+                      <div className="truncate text-[10px] text-keep-muted">
+                        {r.originalOwnerUsername ? (
+                          <>orig: <span className="text-keep-text/80">{r.originalOwnerUsername}</span></>
+                        ) : null}
+                        {r.originalOwnerUsername && r.lastOwnerUsername && r.lastOwnerUserId !== r.originalOwnerUserId ? " · " : ""}
+                        {r.lastOwnerUsername && r.lastOwnerUserId !== r.originalOwnerUserId && r.lastOwnerUserId !== r.ownerId ? (
+                          <>prev: <span className="text-keep-text/80">{r.lastOwnerUsername}</span></>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-keep-muted">-</span>
+                  )}
+                </td>
                 <td className="px-2 py-1 text-center">{r.isSystem ? "✓" : ""}</td>
                 <td className="px-2 py-1 text-center" title={r.isDefault ? "Default landing room" : ""}>
                   {r.isDefault ? "★" : ""}

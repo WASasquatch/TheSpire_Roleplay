@@ -1547,7 +1547,7 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <Heading>Story Dice</Heading>
         <P>
           A 3-minute creative-writing prompt round. The server picks four random words; players
-          write short IC posts weaving all four in. The room votes the winner with 👍 reactions,
+          write short IC posts weaving all four in. The room votes the winner with 📖 reactions,
           there's no host pick.
         </P>
         <Bullets>
@@ -1556,9 +1556,10 @@ foot of the mountains. Speaks little. Watches everything.</p>
             line, things like <i>lantern, oath, rust, river</i>.
           </li>
           <li>
-            <K>/storydice {`<your post>`}</K> submits a paragraph. Your post goes into chat as a
-            regular line attributed to you, with a seeded 👍 reaction already on it so the voting
-            chip is right there for tappers.
+            <K>/storydice {`<your post>`}</K> submits a paragraph. Your post lands in chat as a
+            stylized entry (bolded "Storydice entry by …" header with your text indented under it)
+            so it doesn't blend into normal chatter, with a seeded 📖 reaction already on it so
+            the voting chip is right there for tappers.
           </li>
           <li>
             One submission per identity. Once you post you're committed, so put your best foot
@@ -1566,8 +1567,8 @@ foot of the mountains. Speaks little. Watches everything.</p>
           </li>
         </Bullets>
         <P>
-          <b>Voting:</b> tap the 👍 chip on any submission you like (or any combination of them
-          you want to support). At the end of the round, whichever submission has the most 👍
+          <b>Voting:</b> tap the 📖 chip on any submission you like (or any combination of them
+          you want to support). At the end of the round, whichever submission has the most 📖
           reactions wins, ties share the prize, and the result line lists every entry with its
           vote count. Submissions that didn't weave all four prompts in are marked but still
           eligible to win if the room loved them.

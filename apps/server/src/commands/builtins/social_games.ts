@@ -57,7 +57,7 @@ import {
   newStoryDiceState,
   readStoryDiceConfig,
   recordStorySubmission,
-  seedSubmissionThumbsUp,
+  seedSubmissionVote,
   type StoryDiceState,
 } from "../../games/storydice.js";
 import {
@@ -728,10 +728,10 @@ export const storyDiceCommand: CommandHandler = {
   aliases: ["story-dice"],
   usage: "/storydice | /storydice <your post>",
   description:
-    "Open or play a Story Dice round. With no args, opens a 3-minute round; the server picks four random prompt words. Any free-form text becomes your submission for the round, a short IC paragraph weaving all four prompts in. Your submission posts to chat as a normal line and the system seeds a 👍 reaction so the voting chip is right there. The room votes by adding their own 👍 reactions; whoever the room thumbs up the most wins. One submission per identity (no resubmits).",
+    "Open or play a Story Dice round. With no args, opens a 3-minute round; the server picks four random prompt words. Any free-form text becomes your submission for the round, a short IC paragraph weaving all four prompts in. Your submission posts to chat as a stylized entry (bolded header + indented body) so it stands apart from chatter, and the system seeds a 📖 reaction so the voting chip is right there. The room votes by adding their own 📖 reactions; whichever submission collects the most wins. One submission per identity (no resubmits).",
   subcommands: [
     { verb: "(no args)", usage: "/storydice", description: "Open a round. The four prompts are revealed in the start line." },
-    { verb: "<your post>", usage: "/storydice The lantern swung once over the bridge...", description: "Submit a Story Dice post. Posts as a regular chat line with a seeded 👍 reaction so the room can vote." },
+    { verb: "<your post>", usage: "/storydice The lantern swung once over the bridge...", description: "Submit a Story Dice post. Lands as a stylized chat entry with a seeded 📖 reaction so the room can vote." },
   ],
   async run(ctx) {
     if (ctx.user.incognitoMode) {
@@ -771,7 +771,7 @@ export const storyDiceCommand: CommandHandler = {
         ctx.io,
         ctx.db,
         ctx.roomId,
-        `📜 Story Dice from ${ctx.user.displayName}! Prompts: ${state.prompts.join(", ")}. Run /storydice <your post> in the next ${Math.round(windowMs / 1000)}s. Weave all four in, the room votes the winner with 👍 reactions.`,
+        `📜 Story Dice from ${ctx.user.displayName}! Prompts: ${state.prompts.join(", ")}. Run /storydice <your post> in the next ${Math.round(windowMs / 1000)}s. Weave all four in, the room votes the winner with 📖 reactions.`,
       );
       return;
     }
@@ -785,27 +785,34 @@ export const storyDiceCommand: CommandHandler = {
     if ((active.state as StoryDiceState).submissions.has(key)) {
       return notice(ctx, "STORYDICE_ONCE", "You already submitted this round. One submission per identity, the room is voting on your post now.");
     }
-    // Post the submission as a regular chat line attributed to the
-    // player. We use `addMessage` so the line goes through the same
-    // pipeline as a normal /say (avatar snapshot, inline-cmd
-    // expansion, push triggers, etc.), readers can't tell from the
-    // wire shape that it was a Story Dice submission, only from
-    // context (the round is live, prompts visible above).
-    const messageId = await addMessage(ctx, { kind: "say", body: argsText });
+    // Post the submission as a stylized chat line attributed to the
+    // player. We still use `addMessage` so the line flows through
+    // the same pipeline as a normal /say (avatar snapshot, inline-
+    // cmd expansion, push triggers, etc.), but the body itself
+    // wraps the player's text in a bolded "Storydice entry by …"
+    // header + a blockquoted body so the post reads as a stylized
+    // submission rather than blending into chatter. The blockquote
+    // covers multi-paragraph bodies by re-prefixing each newline.
+    const formattedBody = `📜 **Storydice entry by ${ctx.user.displayName}:**\n\n> ${argsText.replace(/\n/g, "\n> ")}`;
+    const messageId = await addMessage(ctx, { kind: "say", body: formattedBody });
     if (!messageId) {
       // addMessage already emitted the rejection notice (size cap,
       // UI-route token guard, etc.). Bail without recording state.
       return;
     }
-    // Seed the 👍 reaction on the freshly-posted message so the
+    // Seed the vote reaction on the freshly-posted message so the
     // voting chip renders immediately for everyone in the room.
     // Failure is silently tolerated, the round still runs, just
     // without the seed. (The resolver clamps `votes` at 0 so a
     // missing seed reads as "0 votes" rather than "-1".)
-    await seedSubmissionThumbsUp(ctx.db, ctx.io, ctx.roomId, messageId);
+    await seedSubmissionVote(ctx.db, ctx.io, ctx.roomId, messageId);
     recordStorySubmission(active, key, {
       participant: participantFor(ctx),
       messageId,
+      // Keep the raw text in state so the resolver's transcript
+      // line ("— Alice (3 votes): …") shows the entry as written,
+      // not the markdown-wrapped chat-body form. Only the chat
+      // line gets the stylized wrapper.
       text: argsText,
     });
   },
@@ -1016,7 +1023,7 @@ export const gamesCommand: CommandHandler = {
     lines.push("🎮 Social games:");
     lines.push("• /rps: Rock-paper-scissors. Open a quick round, throw rock, paper, or scissors.");
     lines.push("• /trivia <question> | <answer>: Ask a trivia question; the room races to /answer.");
-    lines.push("• /storydice: You get four prompt words. Write a short IC post weaving them in. The room votes the winner with 👍.");
+    lines.push("• /storydice: You get four prompt words. Write a short IC post weaving them in. The room votes the winner with 📖.");
     lines.push("• /scramble [rounds] [words...]: Letters from a word are shuffled; find as many words as you can. You can also supply your own words for each round.");
     lines.push("• /duel <opponent>: One-on-one duel. Pick a class and trade attacks, defends, parries, and rests until someone falls.");
     lines.push("• /raffle item <name> or /raffle currency <amount>: Put up a prize from your stuff. Others run /claim. One winner is drawn at random.");

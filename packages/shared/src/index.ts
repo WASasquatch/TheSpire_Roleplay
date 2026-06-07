@@ -16,6 +16,7 @@ export * from "./presenceTemplate.js";
 export * from "./profile.js";
 export * from "./room.js";
 export * from "./theater.js";
+export * from "./arcade.js";
 export * from "./message.js";
 export * from "./theme.js";
 export * from "./moderation.js";

@@ -207,7 +207,7 @@ export interface NameStyleCatalogRow {
  *  types; use `ITEM_CATEGORIES` for shop-tab iteration. */
 export type ItemCategory =
   | "food" | "drink" | "joke" | "tool" | "weapon" | "armor"
-  | "magic" | "treasure" | "building" | "gift" | "pet" | "misc";
+  | "magic" | "treasure" | "building" | "gift" | "toy" | "pet" | "misc";
 
 /** Stable ordering for shop category chips. `misc` is last as the
  *  fallback bucket; `pet` is intentionally LAST among the "real"
@@ -215,14 +215,14 @@ export type ItemCategory =
  *  before browsing common items. */
 export const ITEM_CATEGORIES: readonly ItemCategory[] = [
   "food", "drink", "joke", "tool", "weapon", "armor",
-  "magic", "treasure", "building", "gift", "pet", "misc",
+  "magic", "treasure", "building", "gift", "toy", "pet", "misc",
 ] as const;
 
 /** Human-readable label for each category, used for shop-tab text. */
 export const ITEM_CATEGORY_LABELS: Record<ItemCategory, string> = {
   food: "Food", drink: "Drinks", joke: "Joke", tool: "Tools",
   weapon: "Weapons", armor: "Armor", magic: "Magic", treasure: "Treasure",
-  building: "Buildings", gift: "Gifts", pet: "Pets", misc: "Misc",
+  building: "Buildings", gift: "Gifts", toy: "Toys", pet: "Pets", misc: "Misc",
 };
 
 /**
@@ -605,21 +605,41 @@ export async function fetchRankings(): Promise<RankingsResponse> {
   return jsonOrThrow<RankingsResponse>(await fetch("/earning/rankings", { credentials: "include" }));
 }
 
+/**
+ * The minimal cosmetic subset the row renderers (ProfileLinkAvatar +
+ * StyledEntryName) actually read. Both RankingPoolEntry and the
+ * social-game rows below satisfy it, so the same components paint both
+ * the pool boards and the game boards.
+ */
+export type RankingDisplayEntry = Pick<
+  RankingPoolEntry,
+  | "displayName"
+  | "avatarUrl"
+  | "borderRankKey"
+  | "freeformBorderKey"
+  | "freeformBorderConfigJson"
+  | "activeNameStyleKey"
+  | "nameStyleConfigJson"
+>;
+
 /* ---------- social-game rankings ---------- */
 
-export interface GameRankingRow {
+/** Cosmetic context shared by both game-row shapes - mirrors the server
+ *  (everything from a RankingPoolEntry except the per-board `value` and
+ *  the scope/ownerId re-exposed below as ownerScope/ownerId). */
+type GameRankingCosmetics = Omit<RankingPoolEntry, "value" | "scope" | "ownerId">;
+
+export interface GameRankingRow extends GameRankingCosmetics {
   ownerScope: "user" | "character";
   ownerId: string;
-  displayName: string;
   wins: number;
   points: number;
   lastWonAt: number;
 }
 
-export interface OverallRankingRow {
+export interface OverallRankingRow extends GameRankingCosmetics {
   ownerScope: "user" | "character";
   ownerId: string;
-  displayName: string;
   totalWins: number;
   totalPoints: number;
 }
@@ -635,6 +655,31 @@ export interface GameRankingsResponse {
 
 export async function fetchGameRankings(): Promise<GameRankingsResponse> {
   return jsonOrThrow<GameRankingsResponse>(await fetch("/earning/game-rankings", { credentials: "include" }));
+}
+
+/** Eidolon Tamer familiar leaderboards (level / age / streak / best-kept). */
+export interface FamiliarRankingRow extends GameRankingCosmetics {
+  ownerScope: "user" | "character";
+  ownerId: string;
+  familiarName: string;
+  kind: "species" | "pet";
+  speciesId: string | null;
+  dead: boolean;
+  level: number;
+  ageHours: number;
+  bestStreak: number;
+  health: number;
+  /** Metric value for the board this row was returned on. */
+  value: number;
+}
+export interface FamiliarRankingsResponse {
+  byLevel: FamiliarRankingRow[];
+  byAge: FamiliarRankingRow[];
+  byStreak: FamiliarRankingRow[];
+  byHealth: FamiliarRankingRow[];
+}
+export async function fetchFamiliarRankings(): Promise<FamiliarRankingsResponse> {
+  return jsonOrThrow<FamiliarRankingsResponse>(await fetch("/earning/familiar-rankings", { credentials: "include" }));
 }
 
 /* ---------- admin flash-sale + transfer ---------- */

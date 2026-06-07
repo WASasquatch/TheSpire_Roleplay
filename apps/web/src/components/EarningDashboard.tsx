@@ -22,6 +22,7 @@ import {
   fetchEarningCatalog,
   fetchEarningLedger,
   fetchGameRankings,
+  fetchFamiliarRankings,
   fetchRankings,
   formatItemName,
   formatLedgerEntry,
@@ -58,11 +59,15 @@ import {
   type RankingsResponse,
   type RankingBoard,
   type RankingChampion,
+  type RankingBoardKey,
   type RankingPoolEntry,
+  type RankingDisplayEntry,
   type RankTierRow,
   type GameRankingsResponse,
   type GameRankingRow,
   type OverallRankingRow,
+  type FamiliarRankingsResponse,
+  type FamiliarRankingRow,
 } from "../lib/earning.js";
 import { BorderedAvatar } from "./BorderedAvatar.js";
 import { EmoticonSubmissionModal } from "./EmoticonSubmissionModal.js";
@@ -87,9 +92,15 @@ interface Props {
    * `initialTab === "items"`; the prop threads through to ItemsTab.
    */
   initialItemSubTab?: ItemsSubTab;
+  /**
+   * Board to scroll to + flash within the Rankings tab. Set by the
+   * `{ranking:<board>}` UI-route chips; only meaningful when
+   * `initialTab === "rankings"`.
+   */
+  initialBoard?: RankingBoardKey;
 }
 
-export function EarningDashboard({ onClose, initialTab, initialItemSubTab }: Props) {
+export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initialBoard }: Props) {
   const snapshot = useEarning((s) => s.snapshot);
   const loading = useEarning((s) => s.loading);
   const error = useEarning((s) => s.error);
@@ -205,7 +216,7 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab }: Pro
             />
           ) : null}
           {snapshot && tab === "settings" ? <SettingsTab snapshot={snapshot} myId={me?.id ?? null} /> : null}
-          {tab === "rankings" ? <RankingsTab /> : null}
+          {tab === "rankings" ? <RankingsTab {...(initialBoard ? { initialBoard } : {})} /> : null}
           {snapshot && tab === "styles" ? <NameStylesTab snapshot={snapshot} flashSale={flashSale} focusKey={focusKey} /> : null}
           {snapshot && tab === "borders" ? <BordersTab snapshot={snapshot} flashSale={flashSale} focusKey={focusKey} /> : null}
           {snapshot && tab === "cosmetics" ? <CosmeticsTab snapshot={snapshot} flashSale={flashSale} focusKey={focusKey} /> : null}
@@ -849,11 +860,24 @@ function PoolCard({ pool, snapshot, label }: { pool: PoolView; snapshot: ReturnT
  *  so the rankings act as a profile-discovery surface.
  * ========================================================= */
 
-function RankingsTab() {
+function RankingsTab({ initialBoard }: { initialBoard?: RankingBoardKey }) {
   const [data, setData] = useState<RankingsResponse | null>(null);
   const [gameData, setGameData] = useState<GameRankingsResponse | null>(null);
+  const [familiarData, setFamiliarData] = useState<FamiliarRankingsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  // Deep-link: once the boards have rendered, scroll to + briefly flash
+  // the board a {ranking:<board>} chip targeted. Direct DOM (mirrors the
+  // help-guide jump) so it works inside the modal's own scroll pane.
+  useEffect(() => {
+    if (!initialBoard || !data) return;
+    const el = document.getElementById(`ranking-board-${initialBoard}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.classList.add("tk-ranking-flash");
+    const t = window.setTimeout(() => el.classList.remove("tk-ranking-flash"), 1600);
+    return () => window.clearTimeout(t);
+  }, [initialBoard, data]);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -865,11 +889,13 @@ function RankingsTab() {
     Promise.all([
       fetchRankings(),
       fetchGameRankings().catch(() => null),
+      fetchFamiliarRankings().catch(() => null),
     ])
-      .then(([r, g]) => {
+      .then(([r, g, f]) => {
         if (cancelled) return;
         setData(r);
         setGameData(g);
+        setFamiliarData(f);
       })
       .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load rankings"); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -889,6 +915,72 @@ function RankingsTab() {
       {gameData && (gameData.games.length > 0 || gameData.overall.length > 0) ? (
         <GameRankingsSection data={gameData} />
       ) : null}
+      {familiarData && (familiarData.byLevel.length > 0 || familiarData.byAge.length > 0 || familiarData.byStreak.length > 0 || familiarData.byHealth.length > 0) ? (
+        <FamiliarRankingsSection data={familiarData} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Eidolon Tamer leaderboards — four boards (level / eldest / longest streak /
+ * best-kept) that auto-populate from any hatched familiar. Living familiars
+ * rank above dormant ones (which carry a 💤 badge).
+ */
+function FamiliarRankingsSection({ data }: { data: FamiliarRankingsResponse }) {
+  const allBoards: Array<{ key: string; label: string; rows: FamiliarRankingRow[]; metric: (r: FamiliarRankingRow) => number; unit: string }> = [
+    { key: "level", label: "Highest Level", rows: data.byLevel, metric: (r: FamiliarRankingRow) => r.level, unit: "level" },
+    { key: "age", label: "Eldest", rows: data.byAge, metric: (r: FamiliarRankingRow) => Math.floor(r.ageHours / 24), unit: "days" },
+    { key: "streak", label: "Longest Streak", rows: data.byStreak, metric: (r: FamiliarRankingRow) => r.bestStreak, unit: "day streak" },
+    { key: "health", label: "Best-Kept", rows: data.byHealth, metric: (r: FamiliarRankingRow) => Math.round(r.health), unit: "health" },
+  ];
+  const boards = allBoards.filter((b) => b.rows.length > 0);
+  if (boards.length === 0) return null;
+  return (
+    <section className="space-y-3">
+      <header className="flex items-baseline justify-between">
+        <h3 className="font-action text-base">Familiar Rankings</h3>
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">Eidolon Tamer</span>
+      </header>
+      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        {boards.map((b) => (
+          <section key={b.key} className="rounded border border-keep-rule bg-keep-bg/40 p-3">
+            <header className="mb-2 flex items-baseline justify-between">
+              <h4 className="font-action text-sm uppercase tracking-widest text-keep-muted">{b.label}</h4>
+              <span className="text-[10px] uppercase tracking-widest text-keep-muted">{b.unit}</span>
+            </header>
+            <ol className="space-y-1.5">
+              {b.rows.map((r, i) => (
+                <li key={`${r.ownerScope}::${r.ownerId}`}>
+                  <FamiliarRankingEntry rank={i + 1} entry={r} primary={b.metric(r)} primaryLabel={b.unit} />
+                </li>
+              ))}
+            </ol>
+          </section>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FamiliarRankingEntry({ rank, entry, primary, primaryLabel }: { rank: number; entry: FamiliarRankingRow; primary: number; primaryLabel: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1.5 hover:border-keep-action/40">
+      <div className={`w-6 shrink-0 text-center font-bold tabular-nums ${rank <= 3 ? "text-keep-action" : "text-keep-muted"}`}>{rank}</div>
+      <ProfileLinkAvatar entry={entry} size="sm" />
+      <div className="min-w-0 flex-1">
+        <div className="min-w-0 overflow-clip whitespace-nowrap text-ellipsis text-sm font-semibold [overflow-clip-margin:1.75em]">
+          <StyledEntryName entry={entry} />
+        </div>
+        <div className="truncate text-[10px] uppercase tracking-wide text-keep-muted">
+          {entry.dead ? "💤 " : "🥚 "}{entry.familiarName}
+          {entry.kind === "pet" ? " · pet" : entry.speciesId ? ` · ${entry.speciesId}` : ""}
+        </div>
+      </div>
+      <div className="shrink-0 text-right">
+        <div className="text-sm font-semibold tabular-nums">{primary.toLocaleString()}</div>
+        <div className="text-[10px] uppercase tracking-widest text-keep-muted">{primaryLabel}</div>
+      </div>
     </div>
   );
 }
@@ -931,7 +1023,7 @@ function OverallGameBoardCard({ rows }: { rows: OverallRankingRow[] }) {
       <ol className="space-y-1.5">
         {rows.map((r, i) => (
           <li key={`${r.ownerScope}::${r.ownerId}`}>
-            <GameRankingEntry rank={i + 1} displayName={r.displayName} scope={r.ownerScope} primary={r.totalWins} primaryLabel="wins" secondary={r.totalPoints > r.totalWins ? r.totalPoints : null} secondaryLabel="points" />
+            <GameRankingEntry rank={i + 1} entry={r} primary={r.totalWins} primaryLabel="wins" secondary={r.totalPoints > r.totalWins ? r.totalPoints : null} secondaryLabel="points" />
           </li>
         ))}
       </ol>
@@ -951,8 +1043,7 @@ function PerGameBoardCard({ gameKind, label, rows }: { gameKind: string; label: 
           <li key={`${r.ownerScope}::${r.ownerId}`}>
             <GameRankingEntry
               rank={i + 1}
-              displayName={r.displayName}
-              scope={r.ownerScope}
+              entry={r}
               primary={r.wins}
               primaryLabel={r.wins === 1 ? "win" : "wins"}
               secondary={r.points > r.wins ? r.points : null}
@@ -967,16 +1058,17 @@ function PerGameBoardCard({ gameKind, label, rows }: { gameKind: string; label: 
 
 function GameRankingEntry({
   rank,
-  displayName,
-  scope,
+  entry,
   primary,
   primaryLabel,
   secondary,
   secondaryLabel,
 }: {
   rank: number;
-  displayName: string;
-  scope: "user" | "character";
+  /** A game-ranking row: the cosmetic display fields the avatar +
+   *  styled-name renderers read, plus the owner scope + optional rank
+   *  name for the subtitle. Mirrors RankingEntryCard's row look. */
+  entry: RankingDisplayEntry & { ownerScope: "user" | "character"; rankName: string | null };
   primary: number;
   primaryLabel: string;
   secondary: number | null;
@@ -987,10 +1079,17 @@ function GameRankingEntry({
       <div className={`w-6 shrink-0 text-center font-bold tabular-nums ${rank <= 3 ? "text-keep-action" : "text-keep-muted"}`}>
         {rank}
       </div>
+      <ProfileLinkAvatar entry={entry} size="sm" />
       <div className="min-w-0 flex-1">
-        <div className="min-w-0 truncate text-sm font-semibold">{displayName}</div>
-        {scope === "character" ? (
-          <div className="text-[10px] uppercase tracking-wide text-keep-muted">character</div>
+        <div className="min-w-0 overflow-clip whitespace-nowrap text-ellipsis text-sm font-semibold [overflow-clip-margin:1.75em]">
+          <StyledEntryName entry={entry} />
+        </div>
+        {entry.ownerScope === "character" || entry.rankName ? (
+          <div className="truncate text-[10px] uppercase tracking-wide text-keep-muted">
+            {entry.ownerScope === "character" ? <span>character</span> : null}
+            {entry.ownerScope === "character" && entry.rankName ? <span> · </span> : null}
+            {entry.rankName ?? null}
+          </div>
         ) : null}
       </div>
       <div className="shrink-0 text-right">
@@ -1091,7 +1190,7 @@ function RankingsSpotlight({ champions }: { champions: RankingChampion[] }) {
  *  the board + its metric; the body lists the entries top-down. */
 function RankingBoardCard({ board }: { board: RankingBoard }) {
   return (
-    <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
+    <section id={`ranking-board-${board.key}`} className="rounded border border-keep-rule bg-keep-bg/40 p-3 scroll-mt-2">
       <header className="mb-2 flex items-baseline justify-between">
         <h4 className="font-action text-sm uppercase tracking-widest text-keep-muted">{board.label}</h4>
         <span className="text-[10px] uppercase tracking-widest text-keep-muted">{board.metric}</span>
@@ -1145,7 +1244,7 @@ function RankingEntryCard({ rank, entry, metric }: { rank: number; entry: Rankin
 /** Avatar with cosmetic context (border + freeform config) that
  *  opens the entry's profile on click. Mirrors the userlist's
  *  click-to-profile affordance using the chat store's setOpenProfile. */
-function ProfileLinkAvatar({ entry, size }: { entry: RankingPoolEntry; size: "sm" | "xl" }) {
+function ProfileLinkAvatar({ entry, size }: { entry: RankingDisplayEntry; size: "sm" | "xl" }) {
   const setOpenProfile = useChat((s) => s.setOpenProfile);
   const freeformConfig = useMemo(() => {
     const json = entry.freeformBorderConfigJson;
@@ -1177,7 +1276,7 @@ function ProfileLinkAvatar({ entry, size }: { entry: RankingPoolEntry; size: "sm
 
 /** Render an entry's display name with their active name-style
  *  applied. Falls back to a plain span when no style is equipped. */
-function StyledEntryName({ entry }: { entry: RankingPoolEntry }) {
+function StyledEntryName({ entry }: { entry: RankingDisplayEntry }) {
   const config = useMemo<Record<string, unknown> | null>(() => {
     if (!entry.nameStyleConfigJson) return null;
     try { return JSON.parse(entry.nameStyleConfigJson) as Record<string, unknown>; }

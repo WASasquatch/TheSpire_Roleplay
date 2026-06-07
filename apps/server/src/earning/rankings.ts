@@ -579,8 +579,13 @@ async function filterByPublicOwner(db: Db, entries: RawEntry[]): Promise<RawEntr
 
 /** Display-info batch fetch. Resolves the (scope, ownerId) tuples
  *  the boards referenced into the full PoolEntry shape minus
- *  `value` (filled per-board). */
-async function fetchDisplayInfo(
+ *  `value` (filled per-board). Keyed `${scope}::${ownerId}`. Applies
+ *  the same privacy gate as the boards (disabled / non-public masters
+ *  and deleted characters are omitted), so callers should treat a
+ *  missing key as "drop this row." Exported so the social-game
+ *  rankings (earning/gameRankings.ts) reuse the exact same cosmetic
+ *  resolution + privacy posture instead of duplicating it. */
+export async function fetchDisplayInfo(
   db: Db,
   pools: ReadonlyArray<{ scope: RankingScope; ownerId: string }>,
 ): Promise<Map<string, Omit<RankingPoolEntry, "value">>> {

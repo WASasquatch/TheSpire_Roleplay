@@ -181,6 +181,7 @@ function checkSeedDoesNotLeakMasteradminKeys(seed: PermissionsCache): Diagnostic
 const GROUP_LABEL: Record<DiagnosticGroup, string> = {
   chat_moderation: "Chat moderation",
   room_admin: "Room administration",
+  arcade: "Spire Arcade",
   user_admin: "User administration",
   site_admin: "Site administration",
   content_admin: "Content moderation",

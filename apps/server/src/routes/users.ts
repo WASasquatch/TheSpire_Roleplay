@@ -37,6 +37,55 @@ export async function registerUsersRoutes(
   db: Db,
   io: Io,
 ): Promise<void> {
+  /**
+   * Member-spotlight resolver for the {users:latest|random} and
+   * {users:character:latest|random} UI-route chips. Returns ONE member
+   * to open: a `token` (username for masters, `@cid:<id>` for
+   * characters) the client feeds to `profile:fetch`, plus a
+   * `displayName` for the chip label.
+   *
+   * Discovery posture mirrors `lookupRandomProfile`: only public,
+   * non-NSFW, non-disabled identities (and never the system account) so
+   * a chip can't surface a hidden/disabled/NSFW member. `latest` =
+   * newest by createdAt; `random` = a uniform SQL pick (re-rolls each
+   * call, so the client must not cache it).
+   */
+  app.get<{ Querystring: { scope?: string; pick?: string } }>("/members/spotlight", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const scope = req.query.scope === "character" ? "character" : "user";
+    const pick = req.query.pick === "random" ? "random" : "latest";
+
+    if (scope === "user") {
+      const row = (await db
+        .select({ username: users.username })
+        .from(users)
+        .where(and(
+          isNull(users.disabledAt),
+          eq(users.isPublic, true),
+          eq(users.isNsfw, false),
+          sql`${users.username} != 'system'`,
+        ))
+        .orderBy(pick === "random" ? sql`RANDOM()` : desc(users.createdAt))
+        .limit(1))[0];
+      return { member: row ? { token: row.username, displayName: row.username } : null };
+    }
+
+    const row = (await db
+      .select({ id: characters.id, name: characters.name })
+      .from(characters)
+      .innerJoin(users, eq(users.id, characters.userId))
+      .where(and(
+        isNull(characters.deletedAt),
+        isNull(users.disabledAt),
+        eq(characters.isPublic, true),
+        eq(characters.isNsfw, false),
+      ))
+      .orderBy(pick === "random" ? sql`RANDOM()` : desc(characters.createdAt))
+      .limit(1))[0];
+    return { member: row ? { token: `@cid:${row.id}`, displayName: row.name } : null };
+  });
+
   app.get<{ Querystring: { q?: string; offset?: string; limit?: string; rank?: string; sort?: string } }>("/users", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }

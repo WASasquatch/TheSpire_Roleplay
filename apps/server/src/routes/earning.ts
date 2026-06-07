@@ -75,6 +75,7 @@ import {
 } from "../earning/flashSale.js";
 import { buildRankings } from "../earning/rankings.js";
 import { buildGameRankings } from "../earning/gameRankings.js";
+import { buildFamiliarRankings } from "../earning/familiarRankings.js";
 // creditPool is no longer called directly here, purchase endpoints
 // run their own sqlite transaction (see `runPurchaseTxn` below) for
 // atomicity. The award engine still imports it for the live earn
@@ -1030,6 +1031,10 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     return await buildGameRankings(db);
   });
 
+  app.get("/earning/familiar-rankings", async () => {
+    return await buildFamiliarRankings(db);
+  });
+
   /**
    * Cursor-based paginated ledger. Cursor is the createdAt epoch ms
    * of the last item in the previous page; we walk back from there.
@@ -1777,6 +1782,10 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     // and need no other server changes for these two SKUs.
     "flair_profile_visitors",
     "flair_profile_marquee",
+    // Spire Arcade — one-time unlock for the Eidolon Tamer game. Bare
+    // ledger unlock (no toggle slot); the arcade routes gate on the
+    // `purchase_flair_eidolon_tamer` ledger row.
+    "flair_eidolon_tamer",
   ]);
 
   app.post<{ Params: { key: string }; Body: unknown }>(

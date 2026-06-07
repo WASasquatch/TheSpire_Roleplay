@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import { CHARACTER_VIBE_AXES, isAdminRole, isDarkPalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
-import type { CharacterAttribute, CharacterPortrait, CharacterVibeAxisKey, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
+import type { CharacterAttribute, CharacterPortrait, CharacterVibeAxisKey, EidolonProfileSummary, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
 import { buildOrnamentStyle } from "../lib/ornaments/index.js";
 import { BorderedAvatar } from "./BorderedAvatar.js";
@@ -10,6 +10,7 @@ import { genderGlyph } from "../lib/gender.js";
 import type { Gender } from "../lib/gender.js";
 import { profileShareUrl } from "../lib/profiles.js";
 import { fetchPublicEarning, type PublicEarningResponse } from "../lib/earning.js";
+import { ArcadeError, fetchEidolonSummary, patFamiliar } from "../lib/arcade.js";
 import { ItemZoomView } from "./ItemZoomView.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { RankSigil } from "./RankSigil.js";
@@ -494,6 +495,32 @@ function ProfileBody({
       .catch(() => { /* unranked / not-found / network, hide the chip */ });
     return () => { cancelled = true; };
   }, [profile.profile.userId, characterIdForEarning]);
+  // The identity's Eidolon Tamer familiar, shown as a small profile card.
+  // Public-view (no stats/economy); null = no familiar (or hidden/error).
+  const [familiar, setFamiliar] = useState<EidolonProfileSummary | null>(null);
+  const [patState, setPatState] = useState<"idle" | "busy" | "done" | "cooldown">("idle");
+  useEffect(() => {
+    let cancelled = false;
+    const scope = characterIdForEarning ? "character" : "user";
+    const ownerId = characterIdForEarning ?? profile.profile.userId;
+    void fetchEidolonSummary(scope, ownerId).then((s) => { if (!cancelled) { setFamiliar(s); setPatState("idle"); } });
+    return () => { cancelled = true; };
+  }, [profile.profile.userId, characterIdForEarning]);
+  // Patting is a "someone else cares" gesture, so it's only offered on
+  // another player's profile (never your own identities).
+  const myId = useChat((s) => s.me?.id ?? null);
+  const canPatFamiliar = myId !== null && myId !== profile.profile.userId;
+  const doPat = async () => {
+    if (patState !== "idle") return;
+    setPatState("busy");
+    try {
+      const scope = characterIdForEarning ? "character" : "user";
+      await patFamiliar(scope, characterIdForEarning ?? profile.profile.userId);
+      setPatState("done");
+    } catch (e) {
+      setPatState(e instanceof ArcadeError && e.status === 429 ? "cooldown" : "idle");
+    }
+  };
   const freeformConfig = useMemo(() => {
     const json = earning?.freeformBorderConfigJson;
     if (!json) return null;
@@ -1060,6 +1087,44 @@ function ProfileBody({
                       </li>
                     ))}
                   </ul>
+                </Section>
+              ) : null}
+
+              {familiar ? (
+                <Section title="Familiar">
+                  <div className="flex items-center gap-3 rounded border border-keep-rule/60 bg-keep-panel/50 px-3 py-2">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-keep-rule/50 bg-keep-bg/60 text-2xl">
+                      {familiar.kind === "pet" && familiar.petIconUrl ? (
+                        <img src={familiar.petIconUrl} alt="" className="max-h-full max-w-full object-contain" />
+                      ) : (
+                        <span aria-hidden>{familiar.dead ? "💤" : "🥚"}</span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold">
+                        {familiar.variant ? <span className="text-keep-action" title="Prismatic">✦ </span> : null}
+                        {familiar.name}
+                        {familiar.streakCount > 0 && !familiar.dead ? (
+                          <span className="ml-1.5 text-xs text-keep-muted" title={`${familiar.streakCount}-day care streak`}>🔥{familiar.streakCount}</span>
+                        ) : null}
+                      </div>
+                      <div className="text-xs text-keep-muted">
+                        Lv {familiar.level} · {familiar.dead ? "dormant" : familiar.moodLabel}
+                        {familiar.kind === "species" && familiar.speciesId ? ` · ${familiar.speciesId}` : familiar.kind === "pet" ? " · pet" : ""}
+                      </div>
+                    </div>
+                    {canPatFamiliar && !familiar.dead ? (
+                      <button
+                        type="button"
+                        onClick={() => void doPat()}
+                        disabled={patState !== "idle"}
+                        className="ml-auto shrink-0 self-center rounded border border-keep-action/50 px-2.5 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
+                        title="Pat this familiar — a little joy, once a day"
+                      >
+                        {patState === "done" ? "Patted ♥" : patState === "cooldown" ? "Patted today" : patState === "busy" ? "…" : "Pat ♥"}
+                      </button>
+                    ) : null}
+                  </div>
                 </Section>
               ) : null}
 

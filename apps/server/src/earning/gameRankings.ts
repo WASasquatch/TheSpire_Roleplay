@@ -14,9 +14,9 @@
  * registration step is required when adding a new game.
  */
 
-import { desc, eq, inArray, sql } from "drizzle-orm";
-import { characters, gameStats, users } from "../db/schema.js";
+import { gameStats } from "../db/schema.js";
 import type { Db } from "../db/index.js";
+import { fetchDisplayInfo, type RankingPoolEntry, type RankingScope } from "./rankings.js";
 
 const PER_GAME_LIMIT = 10;
 const OVERALL_LIMIT = 20;
@@ -41,19 +41,26 @@ function labelFor(gameKind: string): string {
     .join(" ");
 }
 
-export interface GameRankingRow {
+/**
+ * Cosmetic display context shared by both row shapes, resolved via the
+ * earning rankings' `fetchDisplayInfo` so social-game boards render with
+ * the same avatar + border + name-style fidelity as the pool boards.
+ * (Everything from a RankingPoolEntry except the per-board `value` and
+ * the `scope`/`ownerId` we re-expose as `ownerScope`/`ownerId` below.)
+ */
+type GameRankingCosmetics = Omit<RankingPoolEntry, "value" | "scope" | "ownerId">;
+
+export interface GameRankingRow extends GameRankingCosmetics {
   ownerScope: "user" | "character";
   ownerId: string;
-  displayName: string;
   wins: number;
   points: number;
   lastWonAt: number;
 }
 
-export interface OverallRankingRow {
+export interface OverallRankingRow extends GameRankingCosmetics {
   ownerScope: "user" | "character";
   ownerId: string;
-  displayName: string;
   totalWins: number;
   totalPoints: number;
 }
@@ -89,50 +96,37 @@ export async function buildGameRankings(db: Db): Promise<GameRankingsResponse> {
     return { games: [], overall: [] };
   }
 
-  // Resolve display names. One pass over the result to collect the
-  // unique (scope, id) pairs we need, then two batched lookups.
-  const characterIds = new Set<string>();
-  const userIds = new Set<string>();
+  // Resolve the full cosmetic display context (avatar, border, name
+  // style, rank tier) for every identity on the boards, reusing the
+  // earning rankings' batched resolver so social-game rows render with
+  // identical fidelity. `fetchDisplayInfo` also applies the privacy
+  // gate (disabled / non-public masters + deleted characters are
+  // omitted from the map), so a missing key means "drop this row" -
+  // which both hides those identities AND replaces the old
+  // deleted-character-only skip.
+  const poolByKey = new Map<string, { scope: RankingScope; ownerId: string }>();
   for (const r of allRows) {
-    if (r.ownerScope === "character") characterIds.add(r.ownerId);
-    else userIds.add(r.ownerId);
+    poolByKey.set(`${r.ownerScope}::${r.ownerId}`, { scope: r.ownerScope, ownerId: r.ownerId });
   }
-  const nameByCharacter = new Map<string, string>();
-  const nameByUser = new Map<string, string>();
-  if (characterIds.size > 0) {
-    const rows = await db
-      .select({ id: characters.id, name: characters.name, deletedAt: characters.deletedAt })
-      .from(characters)
-      .where(inArray(characters.id, [...characterIds]));
-    for (const c of rows) {
-      // Skip deleted characters from the leaderboard, their wins
-      // still count toward the overall row (we have no other key),
-      // but the rendering side filters with `displayName === ""`.
-      if (c.deletedAt) continue;
-      nameByCharacter.set(c.id, c.name);
-    }
-  }
-  if (userIds.size > 0) {
-    const rows = await db
-      .select({ id: users.id, username: users.username })
-      .from(users)
-      .where(inArray(users.id, [...userIds]));
-    for (const u of rows) nameByUser.set(u.id, u.username);
-  }
-  function resolveName(scope: "user" | "character", ownerId: string): string {
-    if (scope === "character") return nameByCharacter.get(ownerId) ?? "";
-    return nameByUser.get(ownerId) ?? "";
+  const displayInfo = await fetchDisplayInfo(db, [...poolByKey.values()]);
+  /** Cosmetic fields for a (scope, ownerId), or null when the identity
+   *  is hidden (private/disabled/deleted) and the row should be dropped. */
+  function cosmeticsFor(scope: "user" | "character", ownerId: string): GameRankingCosmetics | null {
+    const info = displayInfo.get(`${scope}::${ownerId}`);
+    if (!info) return null;
+    const { scope: _s, ownerId: _o, ...cosmetics } = info;
+    return cosmetics;
   }
 
   // Group rows by game kind for per-game boards.
   const byKind = new Map<string, GameRankingRow[]>();
   for (const r of allRows) {
-    const displayName = resolveName(r.ownerScope, r.ownerId);
-    if (!displayName) continue; // deleted identity, skip surface
+    const cosmetics = cosmeticsFor(r.ownerScope, r.ownerId);
+    if (!cosmetics) continue; // hidden identity, skip surface
     const row: GameRankingRow = {
       ownerScope: r.ownerScope,
       ownerId: r.ownerId,
-      displayName,
+      ...cosmetics,
       wins: r.wins,
       points: r.points,
       lastWonAt: r.lastWonAt instanceof Date ? +r.lastWonAt : Number(r.lastWonAt),
@@ -174,18 +168,18 @@ export async function buildGameRankings(db: Db): Promise<GameRankingsResponse> {
   // include game kinds that didn't make their per-game top-N.
   const totalsByIdentity = new Map<string, OverallRankingRow>();
   for (const r of allRows) {
-    const displayName = resolveName(r.ownerScope, r.ownerId);
-    if (!displayName) continue;
-    const key = `${r.ownerScope}:${r.ownerId}`;
+    const key = `${r.ownerScope}::${r.ownerId}`;
     const existing = totalsByIdentity.get(key);
     if (existing) {
       existing.totalWins += r.wins;
       existing.totalPoints += r.points;
     } else {
+      const cosmetics = cosmeticsFor(r.ownerScope, r.ownerId);
+      if (!cosmetics) continue; // hidden identity, skip surface
       totalsByIdentity.set(key, {
         ownerScope: r.ownerScope,
         ownerId: r.ownerId,
-        displayName,
+        ...cosmetics,
         totalWins: r.wins,
         totalPoints: r.points,
       });

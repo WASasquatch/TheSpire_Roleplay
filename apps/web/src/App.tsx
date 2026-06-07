@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage, PermissionKey, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, WorldDetail } from "@thekeep/shared";
+import type { ChatMessage, PermissionKey, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, UiRouteRankingBoard, WorldDetail } from "@thekeep/shared";
 import { DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, legibleAgainstBg, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
@@ -24,11 +24,14 @@ import { RulesModal } from "./components/RulesModal.js";
 import { RulesPage } from "./components/RulesPage.js";
 import { isRulesUrl, navigateAwayFromRules } from "./lib/rulesUrl.js";
 import { EarningDashboard } from "./components/EarningDashboard.js";
+import { ArcadeLauncher } from "./components/arcade/ArcadeLauncher.js";
+import { EidolonWindow } from "./components/arcade/EidolonWindow.js";
 import { EarningRibbon } from "./components/EarningRibbon.js";
 import { BannerMarquee } from "./components/BannerMarquee.js";
 import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanners.js";
 import { onUiRouteOpen } from "./lib/uiRouteOpen.js";
 import { fetchLatestPublishedStory } from "./lib/latestStory.js";
+import { fetchSpotlightMember } from "./lib/uiRouteDynamicLabel.js";
 import { loadForumDraft, pruneStaleForumDrafts, saveForumDraft } from "./lib/forumDrafts.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
 import { ThreadModal } from "./components/ThreadModal.js";
@@ -999,10 +1002,18 @@ function Chat() {
    * the "Your Earning" tools-panel entry uses.
    */
   type EarningOpenSpec = {
-    tab?: "overview" | "ledger" | "styles" | "borders" | "cosmetics" | "items" | "settings";
+    tab?: "overview" | "ledger" | "styles" | "borders" | "cosmetics" | "items" | "rankings" | "settings";
     itemSubTab?: "inventory" | "shop" | "collection" | "pets";
+    /** When opening the Rankings tab, scroll to + flash this board. */
+    board?: UiRouteRankingBoard;
   };
   const [earningOpen, setEarningOpen] = useState<EarningOpenSpec | null>(null);
+  // Spire Arcade: the launcher (a modal) and the free-floating Eidolon
+  // Tamer window (non-modal, kept up while chatting). Both read the current
+  // activeCharacterId at render so the right identity's wallet/inventory is
+  // used. Permission gating is enforced at the dispatch + by the server.
+  const [arcadeOpen, setArcadeOpen] = useState(false);
+  const [eidolonOpen, setEidolonOpen] = useState(false);
   /**
    * Full-screen item-zoom view triggered by the `/item <name>` chat
    * command. Mounts the same overlay that powers tap-to-zoom on
@@ -1010,7 +1021,7 @@ function Chat() {
    * `ItemZoomEntry` (server-resolved catalog row) when open.
    */
   const [openItem, setOpenItem] = useState<ItemZoomEntry | null>(null);
-  const [helpOpen, setHelpOpen] = useState<{ filter?: string } | null>(null);
+  const [helpOpen, setHelpOpen] = useState<{ filter?: string; guide?: string } | null>(null);
   const [usersOpen, setUsersOpen] = useState<{ query?: string } | null>(null);
   // Server-emitted info modal, server commands like /list and /find
   // populate this with a title + multi-line body that the user can
@@ -1074,7 +1085,47 @@ function Chat() {
         const spec: EarningOpenSpec = {};
         if (t.tab) spec.tab = t.tab;
         if (t.itemSubTab) spec.itemSubTab = t.itemSubTab;
+        if (t.board) spec.board = t.board;
         setEarningOpen(spec);
+        return;
+      }
+      case "open-member": {
+        // Resolve a member (newest / random; the `random` fetch
+        // re-rolls each click) then open their profile via the same
+        // profile:fetch path @mentions use. `@cid:` tokens resolve a
+        // character; a bare username resolves the master account.
+        void fetchSpotlightMember(t.scope, t.pick).then((m) => {
+          if (!m) {
+            setNotice({ code: "NO_MEMBER", message: "No member to show right now." });
+            return;
+          }
+          socket.emit("profile:fetch", { username: m.token }, (res) => {
+            if (res.ok) setOpenProfile(res.profile);
+            else setNotice({ code: res.code, message: res.message });
+          });
+        });
+        return;
+      }
+      case "open-arcade": {
+        // Read `me` fresh from the store — this effect's deps are
+        // [openEditor], so a closure-captured `me` would be stale.
+        if (!useChat.getState().me?.permissions.includes("use_arcade")) {
+          setNotice({ code: "NO_PERMISSION", message: "The Spire Arcade isn't available to you." });
+          return;
+        }
+        setArcadeOpen(true);
+        return;
+      }
+      case "open-arcade-game": {
+        const perms = useChat.getState().me?.permissions ?? [];
+        if (!perms.includes("use_arcade") || !perms.includes("use_eidolon_tamer")) {
+          setNotice({ code: "NO_PERMISSION", message: "That game isn't available to you." });
+          return;
+        }
+        // Only one game today; the launcher handles unlock state, but the
+        // direct chip opens the window (the game itself shows a locked
+        // notice + the server enforces the purchase gate).
+        setEidolonOpen(true);
         return;
       }
       case "modal-rules":     setRulesOpen(true); return;
@@ -2032,6 +2083,12 @@ function Chat() {
         else updateForumTopic(msg);
       }
     });
+    // Bulk hard-delete (the `/trash` purge): drop the ids from the live
+    // buffer so they vanish for everyone without a tombstone or refetch.
+    socket.on("message:bulk-delete", ({ roomId, ids }) => {
+      useChat.getState().removeMessages(roomId, ids);
+      for (const id of ids) removeForumTopic(roomId, id);
+    });
     socket.on("watch:online", ({ username, displayName }) => {
       // Show ONLY the public-facing display name. When the watched
       // user is in-character, `displayName` is the character name,
@@ -2529,6 +2586,7 @@ function Chat() {
       socket.off("message:new");
       socket.off("message:bulk");
       socket.off("message:update");
+      socket.off("message:bulk-delete");
       socket.off("watch:online");
       socket.off("error:notice");
       socket.off("auth:expired");
@@ -3285,6 +3343,7 @@ function Chat() {
               roomId={currentRoomId}
               room={room}
               canControl={canControlTheater}
+              onShowStreamGuide={() => setHelpOpen({ guide: "theater-stream" })}
             />
           ) : null}
           {/* "Viewing older history" only applies to flat rooms, for
@@ -3491,6 +3550,7 @@ function Chat() {
           onJumpToMessage={jumpToMessage}
           onOpenMessages={() => { setMessagesOpen(true); setRailOpen(false); }}
           onOpenEarning={() => { setEarningOpen({}); setRailOpen(false); }}
+          onOpenArcade={() => { setArcadeOpen(true); setRailOpen(false); }}
           isOpen={railOpen}
           onClose={() => setRailOpen(false)}
           fontStep={fontStep}
@@ -3685,7 +3745,18 @@ function Chat() {
           onClose={() => setEarningOpen(null)}
           {...(earningOpen.tab ? { initialTab: earningOpen.tab } : {})}
           {...(earningOpen.itemSubTab ? { initialItemSubTab: earningOpen.itemSubTab } : {})}
+          {...(earningOpen.board ? { initialBoard: earningOpen.board } : {})}
         />
+      ) : null}
+      {arcadeOpen ? (
+        <ArcadeLauncher
+          characterId={activeCharacterId}
+          onLaunch={() => setEidolonOpen(true)}
+          onClose={() => setArcadeOpen(false)}
+        />
+      ) : null}
+      {eidolonOpen ? (
+        <EidolonWindow characterId={activeCharacterId} onClose={() => setEidolonOpen(false)} />
       ) : null}
       {openItem ? (
         <ItemZoomView entry={openItem} onClose={() => setOpenItem(null)} />
@@ -3727,6 +3798,7 @@ function Chat() {
         <HelpModal
           onClose={() => setHelpOpen(null)}
           {...(helpOpen.filter ? { initialFilter: helpOpen.filter } : {})}
+          {...(helpOpen.guide ? { initialGuide: helpOpen.guide } : {})}
         />
       ) : null}
       {usersOpen ? (

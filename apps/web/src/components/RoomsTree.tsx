@@ -72,6 +72,8 @@ interface Props {
   /** Open the Earning dashboard. Threaded straight through to ToolPanel
    *  so the rail's Tools drawer can surface a one-click entry. */
   onOpenEarning?: () => void;
+  /** Open the Spire Arcade launcher. Threaded through to ToolPanel too. */
+  onOpenArcade?: () => void;
   /**
    * Mobile drawer state. On md+ screens the rail is always visible regardless;
    * isOpen only controls the slide-in/out at sub-md widths.
@@ -116,6 +118,7 @@ export function RoomsTree({
   onJumpToMessage,
   onOpenMessages,
   onOpenEarning,
+  onOpenArcade,
   isOpen,
   onClose,
   fontStep = 1,
@@ -283,6 +286,7 @@ export function RoomsTree({
         onJumpToMessage={onJumpToMessage}
         onOpenMessages={onOpenMessages}
         {...(onOpenEarning ? { onOpenEarning } : {})}
+        {...(onOpenArcade ? { onOpenArcade } : {})}
       />
     </aside>
   );

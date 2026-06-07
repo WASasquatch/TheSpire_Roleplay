@@ -1,5 +1,6 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { roomMembers, rooms } from "../../db/schema.js";
+import { setRoomCleared } from "../../lib/roomClears.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -63,16 +64,22 @@ export const listCommand: CommandHandler = {
 };
 
 /**
- * /clear - wipe the local message buffer for the current room. Pure client
- * effect; no message history is touched server-side. Useful when a long
- * scrollback is making the page sluggish or the user wants a clean slate.
+ * /clear - hide your scrollback in the current room from this point on.
+ *
+ * Records a per-viewer `cleared_at = now` marker (room_clears) so the
+ * clear is DURABLE: every backlog source filters to messages newer than
+ * it for this user. Previously this only emitted the UI hint below, so
+ * the wipe was cosmetic - the next backlog resend (rejoin / resync /
+ * scroll-up) handed the full history straight back. No message rows are
+ * deleted and other users are unaffected; use /trash to actually delete.
  */
 export const clearCommand: CommandHandler = {
   name: "clear",
   aliases: ["cls"],
   usage: "/clear",
-  description: "Clear the local view of messages in the current room (your view only).",
-  run(ctx) {
+  description: "Hide earlier messages in the current room from your own view (durable; doesn't delete).",
+  async run(ctx) {
+    await setRoomCleared(ctx.db, ctx.user.id, ctx.roomId, new Date());
     ctx.socket.emit("ui:hint", { kind: "clear-room-messages" });
   },
 };

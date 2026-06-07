@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { hasPermission } from "../auth/permissions.js";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { getClearedAt } from "../lib/roomClears.js";
 import type { Server as IoServer } from "socket.io";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -385,6 +386,10 @@ export async function registerRoomsRoutes(
       ),
     );
 
+    // Per-viewer `/clear` marker: never page back past the point this
+    // user cleared the room. Keeps the scroll-up loader from resurrecting
+    // history a /clear was meant to hide.
+    const clearedAt = await getClearedAt(db, me.id, room.id);
     // Overfetch by one to detect hasMore without a separate count.
     const rows = await db
       .select()
@@ -392,6 +397,7 @@ export async function registerRoomsRoutes(
       .where(and(
         roomOrPartyWhisper,
         lt(messages.createdAt, new Date(before)),
+        clearedAt ? gt(messages.createdAt, clearedAt) : undefined,
       ))
       .orderBy(desc(messages.createdAt))
       .limit(limit + 1);

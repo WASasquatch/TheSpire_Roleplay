@@ -230,6 +230,13 @@ export interface ServerToClientEvents {
   "room:history_meta": (payload: { roomId: string; hasMore: boolean }) => void;
   /** A message was edited or soft-deleted (within its grace window). The client replaces the row with this updated version. */
   "message:update": (msg: ChatMessage) => void;
+  /**
+   * A batch of messages was hard-deleted from a room (the `/trash`
+   * moderation purge). The client drops these ids from its buffer so
+   * they vanish live for everyone, no per-message tombstone. `ids` are
+   * the exact rows removed; unknown ids are ignored.
+   */
+  "message:bulk-delete": (payload: { roomId: string; ids: string[] }) => void;
   "room:state": (payload: { room: RoomSummary; occupants: RoomOccupant[] }) => void;
   "presence:update": (payload: { roomId: string; occupants: RoomOccupant[] }) => void;
   /**

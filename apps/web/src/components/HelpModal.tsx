@@ -10,6 +10,8 @@ import { CloseButton } from "./CloseButton.js";
 interface Props {
   /** Initial filter - pre-fills the search box (e.g. /help char). */
   initialFilter?: string;
+  /** Open straight to the Guides tab and scroll to this guide id. */
+  initialGuide?: string;
   onClose: () => void;
 }
 
@@ -23,11 +25,11 @@ type HelpTab = "guides" | "commands" | "formatting";
  * an active filter is matched against name, aliases, descriptions, and
  * subcommand verbs/usage so users can find by example.
  */
-export function HelpModal({ initialFilter, onClose }: Props) {
+export function HelpModal({ initialFilter, initialGuide, onClose }: Props) {
   // /help <something> jumps straight to the Commands tab so the filter applies;
-  // bare /help opens on Guides since most newcomers want concept walkthroughs
-  // before they want to grep slash commands.
-  const [tab, setTab] = useState<HelpTab>(initialFilter ? "commands" : "guides");
+  // an explicit guide deep-link opens on Guides; bare /help opens on Guides
+  // since most newcomers want concept walkthroughs before slash commands.
+  const [tab, setTab] = useState<HelpTab>(initialGuide ? "guides" : initialFilter ? "commands" : "guides");
   const [commands, setCommands] = useState<CommandDoc[] | null>(null);
   const [filter, setFilter] = useState(initialFilter ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -159,7 +161,7 @@ export function HelpModal({ initialFilter, onClose }: Props) {
           ) : tab === "formatting" ? (
             <FormattingHelp />
           ) : (
-            <HelpGuides />
+            <HelpGuides {...(initialGuide ? { initialGuide } : {})} />
           )}
         </div>
 

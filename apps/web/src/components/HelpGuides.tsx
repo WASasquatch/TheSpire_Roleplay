@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import type { PermissionKey } from "@thekeep/shared";
+import { useChat } from "../state/store.js";
 
 /**
  * TOC click handler. The Help modal scrolls within its own
@@ -30,7 +32,25 @@ function jumpToGuide(id: string) {
  * is open; the rest are closed. Anchor ids on each guide match the TOC links
  * so clicking a TOC entry jumps and opens it.
  */
-export function HelpGuides() {
+export function HelpGuides({ initialGuide }: { initialGuide?: string }) {
+  // Some guides are feature-gated: e.g. the Theater guides only make
+  // sense (and only show) for users who can actually run a theater, so we
+  // hide them from everyone who lacks `use_theater_mode`. Viewer-facing
+  // guides have no `requiresPermission` and always show.
+  const permissions = useChat((s) => s.me?.permissions);
+  const guides = GUIDES.filter(
+    (g) => !g.requiresPermission || (permissions?.includes(g.requiresPermission) ?? false),
+  );
+
+  // Deep-link: when opened pointed at a specific guide (e.g. the theater
+  // panel's "How to stream" link), open + scroll to it once mounted.
+  // Deferred a tick so the <details> anchors exist before we scroll.
+  useEffect(() => {
+    if (!initialGuide) return;
+    const t = window.setTimeout(() => jumpToGuide(initialGuide), 50);
+    return () => window.clearTimeout(t);
+  }, [initialGuide]);
+
   return (
     <div className="space-y-3 text-xs">
       <p className="text-keep-muted">
@@ -41,7 +61,7 @@ export function HelpGuides() {
       <nav className="rounded border border-keep-rule/60 bg-keep-panel/30 p-2 text-[11px]">
         <div className="mb-1 uppercase tracking-widest text-keep-muted">Jump to</div>
         <ul className="grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2">
-          {GUIDES.map((g) => (
+          {guides.map((g) => (
             <li key={g.id}>
               <button
                 type="button"
@@ -55,7 +75,7 @@ export function HelpGuides() {
         </ul>
       </nav>
 
-      {GUIDES.map((g, i) => (
+      {guides.map((g, i) => (
         <details
           key={g.id}
           id={`guide-${g.id}`}
@@ -111,7 +131,7 @@ function Heading({ children }: { children: ReactNode }) {
  *  Guide content
  * ============================================================ */
 
-const GUIDES: Array<{ id: string; title: string; body: ReactNode }> = [
+const GUIDES: Array<{ id: string; title: string; body: ReactNode; requiresPermission?: PermissionKey }> = [
   {
     id: "welcome",
     title: "Welcome to The Spire",
@@ -987,6 +1007,129 @@ foot of the mountains. Speaks little. Watches everything.</p>
         <Tip>
           A scene banner is just dressing. It does not lock the room down or limit who can post;
           it sets the stage and everyone keeps writing as usual.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "theater",
+    title: "Theater rooms: watch videos together",
+    requiresPermission: "use_theater_mode",
+    body: (
+      <>
+        <P>
+          Theater turns a room into a shared watch party. A video panel sits above the chat and
+          everyone sees the same thing at the same time, while the conversation keeps going
+          underneath. Anyone in the room can watch and react; setting it up is for the host.
+        </P>
+        <Heading>Turn it on</Heading>
+        <P>
+          Run <K>/theater on</K> in the room. A video panel appears above the chat. Turn it back
+          off any time with <K>/theater off</K>.
+        </P>
+        <Heading>Queue up videos</Heading>
+        <Steps>
+          <li>
+            Add a video with <K>/theater add {`<link>`}</K>. YouTube, Vimeo, and direct video
+            links all work. Add as many as you like to build a playlist.
+          </li>
+          <li>
+            See what is queued with <K>/theater list</K>, remove one with{" "}
+            <K>/theater remove {`<number>`}</K>, or empty the whole list with <K>/theater clear</K>.
+          </li>
+          <li>
+            Adding and removing videos is quiet, only you see the confirmation, so queuing things
+            up does not spam the room.
+          </li>
+        </Steps>
+        <Heading>Play it for everyone</Heading>
+        <P>
+          The controls under the video, play, pause, skip, and the scrub bar, drive playback for
+          the whole room at once. Only the host sees the controls; everyone else just follows
+          along in sync, and people who arrive late jump straight to the current spot.
+        </P>
+        <Heading>Looping</Heading>
+        <Bullets>
+          <li><K>/theater loop all</K> plays through the playlist and starts over (the default).</li>
+          <li><K>/theater loop one</K> repeats the current video.</li>
+          <li><K>/theater loop off</K> stops at the end of the last video.</li>
+        </Bullets>
+        <Heading>Reactions and size</Heading>
+        <P>
+          Anyone can tap the emoji in the bar to float a reaction up over the video. Drag the
+          handle at the bottom of the panel to make the video taller or shorter and give the chat
+          more or less room.
+        </P>
+        <Tip>
+          Want to broadcast your own screen or a movie from your computer instead of a link? See
+          the "Theater: streaming your own video" guide.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "theater-stream",
+    title: "Theater: streaming your own video",
+    requiresPermission: "use_theater_mode",
+    body: (
+      <>
+        <P>
+          A Theater room shows a shared video player above the chat, so everyone watches together
+          in sync. Besides pasting a video link or a YouTube or Vimeo URL, you can broadcast your
+          own screen or a video file from your computer using a free player like VLC.
+        </P>
+        <Heading>Turn the room into a theater</Heading>
+        <P>
+          As the room owner or a mod, run <K>/theater on</K>. A video panel appears above the
+          chat. You can queue a normal video with <K>/theater add {`<link>`}</K>; the steps below
+          cover streaming your own desktop instead.
+        </P>
+        <Heading>Step 1: have VLC make a live link</Heading>
+        <Steps>
+          <li>Open VLC and choose <b>Media</b>, then <b>Stream</b>.</li>
+          <li>
+            Add the video file you want to play, or pick <b>Capture Device</b> and set the mode to{" "}
+            <b>Desktop</b> to share your screen. Then click <b>Stream</b>.
+          </li>
+          <li>
+            On the destinations step choose <b>HLS</b> and add it. Turn on transcoding and pick a
+            profile that uses <b>H.264 video and AAC audio</b>, which is what browsers can play.
+          </li>
+          <li>
+            Set the path so it ends in <K>.m3u8</K> (for example <K>/live/stream.m3u8</K>) and
+            start the stream. VLC is now serving your video on a port on your computer.
+          </li>
+        </Steps>
+        <Heading>Step 2: put the link online safely</Heading>
+        <P>
+          Your stream lives on your computer right now, and this site is secure, so a plain
+          computer link will not load here. Use a free tunnel app to turn it into a secure public
+          link:
+        </P>
+        <Bullets>
+          <li>
+            <b>Cloudflare Tunnel</b> or <b>ngrok</b> are the easiest. Point either one at the port
+            VLC is using.
+          </li>
+          <li>
+            It gives you a secure web address. Your stream link is that address with your{" "}
+            <K>.m3u8</K> path on the end, like{" "}
+            <K>https://something.trycloudflare.com/live/stream.m3u8</K>.
+          </li>
+        </Bullets>
+        <Heading>Step 3: add it to the room</Heading>
+        <P>
+          Run <K>/theater live {`<your https link>`}</K>. Everyone in the room sees your stream
+          right away, marked <b>Live</b>. Because it is live there is no rewind; people who arrive
+          late jump straight to what is happening now.
+        </P>
+        <Tip>
+          The link you add is shown to the room, so anyone can also open it in their own player.
+          If the video does not appear, check that the link starts with <b>https</b> and that both
+          your tunnel and VLC are still running. OBS works too if you prefer it; the idea is the
+          same, send out HLS and share the secure link.
         </Tip>
       </>
     ),

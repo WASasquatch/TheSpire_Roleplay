@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
-import { customCmdCssToStyle, resolveMessageColor, resolveUiRoute, splitOnCode, VMARK_SPAN_RE, type UiRoute } from "@thekeep/shared";
+import { customCmdCssToStyle, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, splitOnCode, VMARK_SPAN_RE, type UiRoute } from "@thekeep/shared";
 import { openUiRoute } from "./uiRouteOpen.js";
-import { fetchLatestPublishedStory } from "./latestStory.js";
+import { resolveDynamicChipLabel } from "./uiRouteDynamicLabel.js";
 import { splitMentions } from "./mentions.js";
 import { useActiveTheme } from "./theme.js";
 import { useEmoticons } from "../state/emoticons.js";
@@ -1425,16 +1425,17 @@ function UiRouteChip({ entry }: { entry: UiRoute }) {
   // on the same surface coalesce on one request.
   const [dynamicLabel, setDynamicLabel] = useState<string | null>(null);
   useEffect(() => {
-    if (entry.target.kind !== "nav-scriptorium-latest-story") return;
+    // Only chips the catalog marks dynamic resolve a live label; the
+    // rest (and `random` member picks) keep their static catalog label.
+    if (!dynamicMarkerFor(entry)) return;
     let cancelled = false;
-    void fetchLatestPublishedStory().then((r) => {
-      if (cancelled) return;
-      if (r?.title) setDynamicLabel(r.title);
+    void resolveDynamicChipLabel(entry).then((label) => {
+      if (!cancelled && label) setDynamicLabel(label);
     });
     return () => {
       cancelled = true;
     };
-  }, [entry.target.kind]);
+  }, [entry]);
 
   const renderedLabel = dynamicLabel ?? entry.label;
   return (

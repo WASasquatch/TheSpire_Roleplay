@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactPlayer from "react-player";
 import type { Socket } from "socket.io-client";
 import type { ClientToServerEvents, RoomSummary, ServerToClientEvents } from "@thekeep/shared";
@@ -26,6 +26,8 @@ interface Props {
   room: RoomSummary;
   /** True for room owner/mods (and the site-wide grant): drives playback. */
   canControl: boolean;
+  /** Opens the Help modal to the Theater streaming guide (owner/mod link). */
+  onShowStreamGuide?: () => void;
 }
 
 const HEIGHT_KEY = "tk:theaterHeight:v1";
@@ -35,6 +37,16 @@ const DEFAULT_HEIGHT = 340;
 // position. Small enough to feel synced, loose enough to ignore the
 // sub-second jitter of normal playback + network latency.
 const DRIFT_TOLERANCE_SEC = 1.5;
+// After issuing a seek, ignore drift for this long so the player (YouTube
+// especially) can finish buffering and report an accurate time before we
+// judge it again. Without this, a seek that's slow to land reads as fresh
+// drift on the next tick and we seek again, thrashing near the start.
+const SEEK_COOLDOWN_MS = 3000;
+// Live streams have no shared timeline; instead of converging on a
+// position anchor we keep each player near the broadcast's live edge.
+// Only re-seek to the edge when more than this far behind, so normal
+// HLS buffer jitter doesn't cause constant re-seeks.
+const LIVE_EDGE_TOLERANCE_SEC = 6;
 const QUICK_REACTIONS = ["❤️", "😂", "🔥", "👏", "😮", "👍", "😭", "🎉"];
 
 function loadHeight(): number {
@@ -67,11 +79,14 @@ function fmtTime(sec: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-export function TheaterPanel({ socket, roomId, room, canControl }: Props) {
+export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGuide }: Props) {
   const playlist = room.theaterPlaylist;
   const sync = useChat((s) => s.theaterSyncByRoom[roomId]);
   const reactions = useChat((s) => s.theaterReactions);
   const dropTheaterReaction = useChat((s) => s.dropTheaterReaction);
+  // The streaming guide is gated to theater hosts in the Help modal, so
+  // only surface the links to it for users who'd actually see the guide.
+  const canSeeStreamGuide = useChat((s) => s.me?.permissions.includes("use_theater_mode") ?? false);
 
   const playerRef = useRef<ReactPlayer | null>(null);
   const [ready, setReady] = useState(false);
@@ -90,14 +105,43 @@ export function TheaterPanel({ socket, roomId, room, canControl }: Props) {
   const current = playlist[safeIndex] ?? null;
   const isPlaying = sync?.isPlaying ?? false;
   const isEmbed = current?.kind === "embed";
+  // Live streams: no shared timeline (no seek bar, no drift-to-position,
+  // no auto-advance on a momentary drop); everyone tracks the live edge.
+  const isLive = current?.kind === "live";
 
   // Expected playback position right now: the anchored position plus the
   // elapsed wall-clock since the server captured it (while playing).
+  //
+  // The elapsed term is clamped to >= 0: a playing source can never be
+  // BEFORE the position the server anchored it at. A viewer whose local
+  // clock runs behind the server's would otherwise compute a negative
+  // elapsed (target below the anchor / near zero), and the drift loop
+  // would "correct" toward it by seeking back to the start over and over,
+  // which is the "stuck repeating the first few seconds" bug.
   const expectedPosition = useCallback((): number => {
     if (!sync) return 0;
-    if (!sync.isPlaying) return sync.positionSec;
-    return sync.positionSec + (Date.now() - sync.serverTimeMs) / 1000;
+    if (!sync.isPlaying) return Math.max(0, sync.positionSec);
+    return sync.positionSec + Math.max(0, (Date.now() - sync.serverTimeMs) / 1000);
   }, [sync]);
+
+  // All seeks route through here so we can stamp the time (for the
+  // post-seek cooldown) and never seek to a negative position.
+  const lastSeekAtRef = useRef(0);
+  const seekTo = useCallback((sec: number) => {
+    const p = playerRef.current;
+    if (!p) return;
+    p.seekTo(Math.max(0, sec), "seconds");
+    lastSeekAtRef.current = Date.now();
+  }, []);
+
+  // Stable config identity. A fresh object here on every render (and the
+  // panel re-renders ~once/sec from onProgress + reactions) made
+  // react-player re-init the YouTube iframe, which reloads the video to
+  // the start - one of the ways playback got stuck at the first seconds.
+  const playerConfig = useMemo(
+    () => ({ youtube: { playerVars: { controls: 0, disablekb: 1, modestbranding: 1, rel: 0 } } }),
+    [],
+  );
 
   // Persist the resize height (cheap; localStorage write per drag tick).
   useEffect(() => {
@@ -117,31 +161,63 @@ export function TheaterPanel({ socket, roomId, room, canControl }: Props) {
 
   // Reconcile to the authoritative position whenever a control lands
   // (each control bumps serverTimeMs) or the source just became ready.
+  // This fires on a real control (serverTimeMs bumps) or when a fresh
+  // source becomes ready, so a deliberate seek/select IS honored in both
+  // directions - this is the only place we ever seek backward.
   useEffect(() => {
-    if (!ready || isEmbed || !playerRef.current) return;
+    if (!ready || isEmbed || isLive || !playerRef.current) return;
     const target = expectedPosition();
     const cur = playerRef.current.getCurrentTime() ?? 0;
     if (Math.abs(cur - target) > DRIFT_TOLERANCE_SEC) {
-      playerRef.current.seekTo(target, "seconds");
+      seekTo(target);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sync?.serverTimeMs, safeIndex, ready, isEmbed]);
+  }, [sync?.serverTimeMs, safeIndex, ready, isEmbed, isLive]);
 
-  // While playing, poll for drift and snap back if we slip. Covers the
-  // slow accumulation a single seek can't (a viewer whose tab throttled
-  // in the background, a slow decoder).
+  // While playing, poll for drift and pull a LAGGING player forward
+  // (buffer/stall recovery). Two guards make this safe:
+  //   - forward only: we never seek backward here. A player slightly
+  //     ahead is harmless; yanking it back to an earlier point is what
+  //     produced the repeat-the-first-few-seconds loop. Genuine backward
+  //     seeks come from a controller via the reconcile effect above.
+  //   - cooldown: skip for a few seconds after any seek so a slow YouTube
+  //     seek can land before we re-measure (no thrash). This also lets a
+  //     stuck player auto-recover - it gets pulled forward to the right
+  //     spot without anyone clicking the playlist.
   useEffect(() => {
-    if (!isPlaying || !ready || isEmbed) return;
+    if (!isPlaying || !ready || isEmbed || isLive) return;
     const id = window.setInterval(() => {
-      if (!playerRef.current) return;
+      const p = playerRef.current;
+      if (!p) return;
+      if (Date.now() - lastSeekAtRef.current < SEEK_COOLDOWN_MS) return;
       const target = expectedPosition();
-      const cur = playerRef.current.getCurrentTime() ?? 0;
-      if (Math.abs(cur - target) > DRIFT_TOLERANCE_SEC) {
-        playerRef.current.seekTo(target, "seconds");
+      const cur = p.getCurrentTime() ?? 0;
+      if (cur < target - DRIFT_TOLERANCE_SEC) {
+        seekTo(target);
       }
     }, 1500);
     return () => window.clearInterval(id);
-  }, [isPlaying, ready, isEmbed, expectedPosition]);
+  }, [isPlaying, ready, isEmbed, isLive, expectedPosition, seekTo]);
+
+  // Live-edge tracking. A live source has no position anchor; instead we
+  // pin the player to the broadcast's live edge. hls.js reports the
+  // seekable end as getDuration(), so seeking there drops any buffered
+  // delay accumulated from a slow start, a pause/resume, or a stall.
+  // Runs on (re)play of a live source and nudges every few seconds.
+  useEffect(() => {
+    if (!isLive || !ready || !isPlaying) return;
+    const snapToLive = () => {
+      const p = playerRef.current;
+      if (!p) return;
+      const end = p.getDuration();
+      if (Number.isFinite(end) && end > 0 && end - (p.getCurrentTime() ?? 0) > LIVE_EDGE_TOLERANCE_SEC) {
+        seekTo(end);
+      }
+    };
+    snapToLive();
+    const id = window.setInterval(snapToLive, 5000);
+    return () => window.clearInterval(id);
+  }, [isLive, ready, isPlaying, sync?.serverTimeMs, seekTo]);
 
   const emitControl = useCallback(
     (action: ControlAction, extra?: { positionSec?: number; index?: number }) => {
@@ -230,19 +306,35 @@ export function TheaterPanel({ socket, roomId, room, canControl }: Props) {
                 onEnded={() => {
                   // Only controllers report end-of-source; the server
                   // debounces duplicate reports and owns the advance.
-                  if (canControl) emitControl("ended");
+                  // Live streams are exempt: a momentary drop/reconnect
+                  // shouldn't skip to the next playlist item.
+                  if (canControl && !isLive) emitControl("ended");
                 }}
-                config={{
-                  youtube: { playerVars: { controls: 0, disablekb: 1, modestbranding: 1, rel: 0 } },
-                }}
+                config={playerConfig}
               />
             </div>
           )
         ) : (
-          <div className="flex h-full items-center justify-center px-4 text-center text-sm text-white/60">
-            {canControl
-              ? "No video queued. Add one with /theater add <url>."
-              : "The host hasn't queued a video yet."}
+          <div className="flex h-full flex-col items-center justify-center gap-1.5 px-4 text-center text-sm text-white/60">
+            {canControl ? (
+              <>
+                <span>
+                  No video queued. Add one with <span className="font-mono">/theater add &lt;url&gt;</span>, or stream
+                  your own with <span className="font-mono">/theater live &lt;url&gt;</span>.
+                </span>
+                {onShowStreamGuide && canSeeStreamGuide ? (
+                  <button
+                    type="button"
+                    onClick={onShowStreamGuide}
+                    className="text-keep-action underline-offset-2 hover:underline"
+                  >
+                    How to stream your desktop →
+                  </button>
+                ) : null}
+              </>
+            ) : (
+              "The host hasn't queued a video yet."
+            )}
           </div>
         )}
 
@@ -291,6 +383,11 @@ export function TheaterPanel({ socket, roomId, room, canControl }: Props) {
             {safeIndex + 1} / {playlist.length}
           </span>
         ) : null}
+        {isLive ? (
+          <span className="shrink-0 rounded bg-red-600/90 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+            ● Live
+          </span>
+        ) : null}
         {current ? (
           <>
             <span className="min-w-0 flex-1 truncate" title={current.url}>
@@ -316,6 +413,16 @@ export function TheaterPanel({ socket, roomId, room, canControl }: Props) {
             title="Mute audio (local only)"
           >
             🔊
+          </button>
+        ) : null}
+        {canControl && canSeeStreamGuide && onShowStreamGuide ? (
+          <button
+            type="button"
+            onClick={onShowStreamGuide}
+            className="shrink-0 rounded border border-keep-border/60 px-2 py-0.5 text-keep-muted hover:bg-keep-action/10"
+            title="How to stream your own video (VLC / OBS + a tunnel)"
+          >
+            Stream help
           </button>
         ) : null}
 
@@ -365,32 +472,42 @@ export function TheaterPanel({ socket, roomId, room, canControl }: Props) {
           >
             ⏭
           </button>
-          <span className="shrink-0 font-mono text-[11px] text-keep-muted">
-            {fmtTime(sliderValue)} / {fmtTime(duration)}
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={sliderMax}
-            step="any"
-            value={sliderValue}
-            disabled={isEmbed || sliderMax === 0}
-            onChange={(e) => setScrub(Number(e.target.value))}
-            onPointerUp={() => {
-              if (scrub != null) {
-                emitControl("seek", { positionSec: scrub });
-                setScrub(null);
-              }
-            }}
-            onMouseUp={() => {
-              if (scrub != null) {
-                emitControl("seek", { positionSec: scrub });
-                setScrub(null);
-              }
-            }}
-            className="min-w-0 flex-1 accent-keep-action disabled:opacity-40"
-            aria-label="Seek"
-          />
+          {isLive ? (
+            // Live has no timeline: no seek bar, just a live-edge indicator.
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-red-400">
+              <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" />
+              Live - everyone watching the live edge
+            </span>
+          ) : (
+            <>
+              <span className="shrink-0 font-mono text-[11px] text-keep-muted">
+                {fmtTime(sliderValue)} / {fmtTime(duration)}
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={sliderMax}
+                step="any"
+                value={sliderValue}
+                disabled={isEmbed || sliderMax === 0}
+                onChange={(e) => setScrub(Number(e.target.value))}
+                onPointerUp={() => {
+                  if (scrub != null) {
+                    emitControl("seek", { positionSec: scrub });
+                    setScrub(null);
+                  }
+                }}
+                onMouseUp={() => {
+                  if (scrub != null) {
+                    emitControl("seek", { positionSec: scrub });
+                    setScrub(null);
+                  }
+                }}
+                className="min-w-0 flex-1 accent-keep-action disabled:opacity-40"
+                aria-label="Seek"
+              />
+            </>
+          )}
           <span className="shrink-0 text-[11px] uppercase tracking-wide text-keep-muted" title="Loop mode (set with /theater loop)">
             loop: {room.theaterLoop}
           </span>

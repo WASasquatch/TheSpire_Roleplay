@@ -32,6 +32,7 @@ import { worldCommand, worldsCommand } from "./world.js";
 import { scriptoriumCommand, storyCommand, writeCommand } from "./scriptorium.js";
 import { expiryCommand, replyModeCommand } from "./room_modes.js";
 import { theaterCommand } from "./theater.js";
+import { trashCommand } from "./trash.js";
 import { ignoreCommand, unignoreCommand } from "./ignore.js";
 import { usersCommand } from "./users.js";
 import { bookmarksCommand } from "./bookmarks.js";
@@ -69,6 +70,7 @@ import {
   triviaCommand,
 } from "./social_games.js";
 import { duelCommand } from "./duel.js";
+import { eidolonCommand } from "./eidolon.js";
 import { registerRps } from "../../games/rps.js";
 import { registerRaffle } from "../../games/raffle.js";
 import { registerTrivia } from "../../games/trivia.js";
@@ -79,6 +81,7 @@ import { registerDuel } from "../../games/duel.js";
 /** Registers all built-in commands. Must run before custom commands are loaded. */
 export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(meCommand);
+  reg.registerBuiltin(eidolonCommand);
   reg.registerBuiltin(charCommand);
   reg.registerBuiltin(goCommand);
   reg.registerBuiltin(privateRoomCommand);
@@ -116,6 +119,7 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(expiryCommand);
   reg.registerBuiltin(replyModeCommand);
   reg.registerBuiltin(theaterCommand);
+  reg.registerBuiltin(trashCommand);
   reg.registerBuiltin(ignoreCommand);
   reg.registerBuiltin(unignoreCommand);
   reg.registerBuiltin(usersCommand);

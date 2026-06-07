@@ -5050,3 +5050,15 @@ aside.margin-note {
 .theater-resize-handle:active .theater-resize-grip {
   background-color: rgb(var(--keep-action) / 0.9);
 }
+
+/* Brief highlight when a {ranking:<board>} chip deep-links to a board.
+ * The Rankings tab scrolls the board into view and adds this class for
+ * ~1.6s so the eye lands on the right card. */
+@keyframes tkRankingFlash {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--keep-action) / 0); }
+  20%, 60% { box-shadow: 0 0 0 2px rgb(var(--keep-action) / 0.8); }
+}
+.tk-ranking-flash {
+  animation: tkRankingFlash 1.6s ease-in-out;
+  border-color: rgb(var(--keep-action) / 0.7);
+}

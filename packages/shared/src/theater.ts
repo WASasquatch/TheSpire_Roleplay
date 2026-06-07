@@ -21,10 +21,17 @@
  *   "video"   - direct file (mp4/webm) or HLS (.m3u8); precise seek sync.
  *   "youtube" - YouTube watch/share/embed URL; synced via the iframe API.
  *   "vimeo"   - Vimeo URL; synced via the Vimeo player.
+ *   "live"    - a live stream (HLS .m3u8 or a never-ending progressive
+ *               feed), e.g. a VLC/OBS desktop broadcast exposed over
+ *               HTTPS. No shared timeline: everyone watches the live
+ *               edge, there is no seek/position sync, and a momentary
+ *               drop does not auto-advance the playlist. Set explicitly
+ *               via `/theater live` (NOT inferred from the URL, since an
+ *               .m3u8 can also be a seekable VOD).
  *   "embed"   - anything else; rendered display-only (no fine sync /
  *               auto-advance) as a best-effort fallback.
  */
-export type TheaterSourceKind = "video" | "youtube" | "vimeo" | "embed";
+export type TheaterSourceKind = "video" | "youtube" | "vimeo" | "live" | "embed";
 
 export interface TheaterSource {
   /** Stable id so the client can key list rows across reorders. */

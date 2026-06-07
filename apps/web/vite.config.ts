@@ -32,6 +32,12 @@ export default defineConfig({
       "/api": "http://localhost:3001",
       "/thesaurus": "http://localhost:3001",
       "/earning": "http://localhost:3001",
+      // Spire Arcade game endpoints (Eidolon Tamer: GET state, hatch,
+      // action, feed, remedy, release). Without this the GET falls through
+      // to the SPA index.html (parses as 200 with no `eidolon` field, so the
+      // egg-select screen shows by accident) and the POSTs 404 → the client
+      // surfaces a generic "the ritual faltered".
+      "/arcade": "http://localhost:3001",
       "/mentions": "http://localhost:3001",
       // Emoticon catalog + reaction toggle endpoints. /emoticons is
       // GET only (anyone reads); /reactions/toggle is POST. Without

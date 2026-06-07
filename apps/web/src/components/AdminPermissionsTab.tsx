@@ -54,6 +54,7 @@ const ROLE_LABEL: Record<Role, string> = {
 const GROUP_LABEL: Record<PermissionGroup, string> = {
   chat_moderation: "Chat moderation",
   room_admin: "Room admin",
+  arcade: "Spire Arcade",
   user_admin: "User admin",
   site_admin: "Site admin",
   content_admin: "Content admin",

@@ -45,9 +45,27 @@ export type UiRouteEarningTab =
   | "borders"
   | "cosmetics"
   | "items"
+  | "rankings"
   | "settings";
 /** Items sub-tabs, mirrors `EarningOpenSpec.itemSubTab`. */
 export type UiRouteItemSubTab = "inventory" | "shop" | "collection" | "pets";
+/**
+ * Earning ranking leaderboards a `{ranking:<board>}` chip can deep-link
+ * to. Mirrors the server's `RankingBoardKey` (apps/server earning/
+ * rankings.ts); kept as its own type here because shared can't import
+ * from the server. When the chip opens, the Rankings tab scrolls to +
+ * highlights this board's section.
+ */
+export type UiRouteRankingBoard =
+  | "currency"
+  | "xp"
+  | "rank"
+  | "items"
+  | "messages"
+  | "borders"
+  | "styles"
+  | "topics"
+  | "reactions";
 
 /**
  * Discriminated target the runtime handler dispatches on. New action
@@ -55,7 +73,7 @@ export type UiRouteItemSubTab = "inventory" | "shop" | "collection" | "pets";
  * listener narrows on `kind` and calls the appropriate setter.
  */
 export type UiRouteTarget =
-  | { kind: "modal-earning"; tab?: UiRouteEarningTab; itemSubTab?: UiRouteItemSubTab }
+  | { kind: "modal-earning"; tab?: UiRouteEarningTab; itemSubTab?: UiRouteItemSubTab; board?: UiRouteRankingBoard }
   | { kind: "modal-rules" }
   | { kind: "modal-messages" }
   | { kind: "modal-worlds" }
@@ -74,7 +92,24 @@ export type UiRouteTarget =
    * HTML surfaces (banner marquee + scheduled-announce bodies) that
    * a hydration helper post-processes into the resolved title.
    */
-  | { kind: "nav-scriptorium-latest-story" };
+  | { kind: "nav-scriptorium-latest-story" }
+  /**
+   * DYNAMIC member-spotlight chip. Resolves a member at render/click
+   * time from `GET /members/spotlight?scope&pick` (public, non-NSFW
+   * pool only), then opens that profile. `pick:'latest'` chips show the
+   * resolved member's name as the label (newest registered); `random`
+   * chips keep a static label and re-roll on every click. `scope:'user'`
+   * resolves the master account; `'character'` a character.
+   */
+  | { kind: "open-member"; pick: "latest" | "random"; scope: "user" | "character" }
+  /** Open the Spire Arcade launcher (a list of games). The dispatcher
+   *  checks the `use_arcade` permission at click time and shows a
+   *  notice if the viewer lacks it. */
+  | { kind: "open-arcade" }
+  /** Open a specific arcade game directly (e.g. the Eidolon Tamer
+   *  window). Dispatcher checks the game's permission + that the player
+   *  has purchased the unlock. */
+  | { kind: "open-arcade-game"; game: "eidolon" };
 
 export interface UiRoute {
   /** Canonical token (lowercase, colon-delimited). Matches what the
@@ -169,6 +204,33 @@ export const UI_ROUTES: ReadonlyArray<UiRoute> = [
   // skeleton shown while the fetch is in flight (and the fallback
   // when nothing is published yet).
   { token: "scriptorium:latest:story", label: "Latest story", icon: "📖", description: "Open the most recently published story in the Scriptorium.", target: { kind: "nav-scriptorium-latest-story" } },
+
+  // ----- Earning rankings (Rankings tab + per-board deep links) -----
+  // The bare {rankings} opens the tab; each {ranking:<board>} is a
+  // DYNAMIC chip whose label surfaces that board's current #1 (resolved
+  // at render time) and which scrolls the Rankings tab to that board.
+  { token: "rankings", label: "Rankings", icon: "🏆", description: "Open Earning → Rankings.", target: { kind: "modal-earning", tab: "rankings" } },
+  { token: "earning:rankings", label: "Rankings", icon: "🏆", description: "Open Earning → Rankings.", target: { kind: "modal-earning", tab: "rankings" } },
+  { token: "earnings:rankings", label: "Rankings", icon: "🏆", description: "Open Earning → Rankings.", target: { kind: "modal-earning", tab: "rankings" } },
+  { token: "ranking:currency", label: "Wealthiest", icon: "💰", description: "Top of the Wealthiest (Currency) leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "currency" } },
+  { token: "ranking:xp", label: "Most XP", icon: "✨", description: "Top of the Most XP leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "xp" } },
+  { token: "ranking:rank", label: "Highest Rank", icon: "🎖", description: "Top of the Highest Rank leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "rank" } },
+  { token: "ranking:items", label: "Most Items", icon: "🧰", description: "Top of the Most Items leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "items" } },
+  { token: "ranking:messages", label: "Most Talkative", icon: "💬", description: "Top of the Most Talkative (Messages) leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "messages" } },
+  { token: "ranking:borders", label: "Most Borders", icon: "🖼", description: "Top of the Most Borders leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "borders" } },
+  { token: "ranking:styles", label: "Most Styles", icon: "🅰️", description: "Top of the Most Styles leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "styles" } },
+  { token: "ranking:topics", label: "Forum Founders", icon: "📌", description: "Top of the Forum Founders (Topics) leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "topics" } },
+  { token: "ranking:reactions", label: "Reactor", icon: "❤️", description: "Top of the Reactor (Reactions) leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "reactions" } },
+
+  // ----- Member spotlight (dynamic; opens a profile) -----
+  { token: "users:latest", label: "Newest member", icon: "🧑", description: "Open the most recently joined member's profile.", target: { kind: "open-member", pick: "latest", scope: "user" } },
+  { token: "users:random", label: "Random member", icon: "🎲", description: "Open a random member's profile.", target: { kind: "open-member", pick: "random", scope: "user" } },
+  { token: "users:character:latest", label: "Newest character", icon: "🧑", description: "Open the most recently created character's profile.", target: { kind: "open-member", pick: "latest", scope: "character" } },
+  { token: "users:character:random", label: "Random character", icon: "🎲", description: "Open a random character's profile.", target: { kind: "open-member", pick: "random", scope: "character" } },
+
+  // ----- Spire Arcade -----
+  { token: "arcade", label: "Spire Arcade", icon: "🕹", description: "Open the Spire Arcade.", target: { kind: "open-arcade" } },
+  { token: "arcade:eidolon", label: "Eidolon Tamer", icon: "🥚", description: "Open the Eidolon Tamer.", target: { kind: "open-arcade-game", game: "eidolon" } },
 
   // ----- Admin / staff (author-gated; viewer-gated mirrors the admin-panel posture) -----
   { token: "admin", label: "Admin panel", icon: "🛡", description: "Open the admin panel.", authorRole: "admin", viewerRole: "mod", target: { kind: "modal-admin" } },
@@ -342,9 +404,19 @@ function escapeHtml(s: string): string {
  * null → no marker, no hydration, the static label stays as-is.
  */
 export function dynamicMarkerFor(entry: UiRoute): string | null {
-  switch (entry.target.kind) {
+  const t = entry.target;
+  switch (t.kind) {
     case "nav-scriptorium-latest-story":
       return "latest-story";
+    // Member-spotlight: only the `latest` picks resolve to a stable
+    // name worth showing as the label. `random` re-rolls each click, so
+    // it keeps its static "Random member" label (no marker, no hydrate).
+    case "open-member":
+      return t.pick === "latest" ? "member" : null;
+    // Ranking deep-links surface the board's current #1 as the label.
+    // The bare {rankings} (no board) is static.
+    case "modal-earning":
+      return t.board ? "ranking" : null;
     default:
       return null;
   }

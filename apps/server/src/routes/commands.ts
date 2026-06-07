@@ -14,14 +14,21 @@ import { hasPermission } from "../auth/permissions.js";
  * every enabled custom command. Custom commands are flagged with
  * `isCustom: true` so the UI can group/badge them.
  *
- * Permission-gated commands (those that declare a `permission` field
- * on the handler, currently /promoteadmin, /demoteadmin, /incognito)
+ * Commands that declare a top-level `permission` field on the handler
+ * (e.g. /incognito, /trash, /promoteadmin, /demoteadmin, /announceraffle
+ * - the filter is generic, so this list is illustrative, not exhaustive)
  * are dropped from the response for callers who don't hold that
  * permission. The dispatcher gates execution independently, but
  * filtering here keeps non-permitted users from seeing the command
  * exists in /help, useful for the incognito case specifically, since
  * the whole point is mods/admins observing without their tools being
  * visible to regular users.
+ *
+ * NOTE: this only filters on the top-level `permission` field. Commands
+ * gated INSIDE run() (room owner/mod checks: /kick, /topic, /theater,
+ * etc.) intentionally stay visible to everyone, since room role is
+ * contextual - a regular user may be an owner/mod in some room. Their
+ * execution is still enforced server-side in run().
  */
 export async function registerCommandsRoutes(
   app: FastifyInstance,

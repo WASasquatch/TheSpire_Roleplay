@@ -25,6 +25,9 @@ const SIZE_PX: Record<NonNullable<Props["size"]>, number> = {
 
 export function CoinAmount({ amount, className, title, size = "sm" }: Props) {
   const px = SIZE_PX[size];
+  // Guard against a non-finite amount (e.g. undefined from a partial payload),
+  // which would otherwise throw on .toLocaleString() and crash the tree.
+  const safe = Number.isFinite(amount) ? amount : 0;
   return (
     <span
       className={`inline-flex items-center gap-1 tabular-nums ${className ?? ""}`}
@@ -40,7 +43,7 @@ export function CoinAmount({ amount, className, title, size = "sm" }: Props) {
         draggable={false}
         onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
       />
-      <span>{amount.toLocaleString()}</span>
+      <span>{safe.toLocaleString()}</span>
     </span>
   );
 }

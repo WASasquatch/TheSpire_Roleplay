@@ -21,30 +21,35 @@
  * write into a detached DOM node.
  */
 
-import { fetchLatestPublishedStory } from "./latestStory.js";
+import { resolveUiRoute } from "@thekeep/shared";
+import { resolveDynamicChipLabel } from "./uiRouteDynamicLabel.js";
 
 /**
  * Hydrate every dynamic UI-route chip inside `container`. Returns a
  * cleanup function that cancels any in-flight fetches.
+ *
+ * Generic over every dynamic chip kind: any chip stamped with
+ * `data-tk-ui-route-dynamic` (by `renderUiRouteChipsInHtml` +
+ * `dynamicMarkerFor`) gets its label resolved via the shared
+ * `resolveDynamicChipLabel` and its `.tk-ui-route-chip-label` span
+ * rewritten in place. Adding a new dynamic chip needs no change here.
  */
 export function hydrateDynamicUiRouteChips(container: HTMLElement): () => void {
   let cancelled = false;
   // querySelectorAll returns a snapshot, safe to iterate without
   // worrying about mid-iteration DOM mutations from the hydrator's
   // own writes.
-  const latestStoryChips = container.querySelectorAll<HTMLElement>(
-    '[data-tk-ui-route-dynamic="latest-story"]',
-  );
-  if (latestStoryChips.length > 0) {
-    void fetchLatestPublishedStory().then((r) => {
-      if (cancelled || !r?.title) return;
-      for (const chip of Array.from(latestStoryChips)) {
-        // Rewrite the dedicated label span only, leaves the leading
-        // icon span (📖) intact. Falling back to the chip's plain
-        // textContent setter would erase the icon glyph.
-        const labelSpan = chip.querySelector<HTMLElement>(".tk-ui-route-chip-label");
-        if (labelSpan) labelSpan.textContent = r.title;
-      }
+  const chips = container.querySelectorAll<HTMLElement>("[data-tk-ui-route-dynamic]");
+  for (const chip of Array.from(chips)) {
+    const token = chip.getAttribute("data-tk-ui-route");
+    const entry = token ? resolveUiRoute(token) : null;
+    if (!entry) continue;
+    void resolveDynamicChipLabel(entry).then((label) => {
+      if (cancelled || !label) return;
+      // Rewrite the dedicated label span only, leaving the leading icon
+      // span intact. The plain textContent setter would erase the glyph.
+      const labelSpan = chip.querySelector<HTMLElement>(".tk-ui-route-chip-label");
+      if (labelSpan) labelSpan.textContent = label;
     });
   }
   return () => {

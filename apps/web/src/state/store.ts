@@ -429,6 +429,9 @@ interface ChatState {
   /** Replace an existing message in-place (used for edit/delete grace updates). */
   updateMessage: (msg: ChatMessage) => void;
   setMessages: (roomId: string, msgs: ChatMessage[]) => void;
+  /** Drop a batch of messages by id from a room's buffer (the `/trash`
+   *  bulk-delete purge). No-op when none of the ids are present. */
+  removeMessages: (roomId: string, ids: string[]) => void;
   /**
    * Prepend an older window of messages onto the front of a room's
    * buffer. Used by the scroll-to-top infinite history loader; the
@@ -924,6 +927,16 @@ export const useChat = create<ChatState>((set) => ({
 
   setMessages: (roomId, msgs) =>
     set((s) => ({ messagesByRoom: { ...s.messagesByRoom, [roomId]: msgs } })),
+
+  removeMessages: (roomId, ids) =>
+    set((s) => {
+      const list = s.messagesByRoom[roomId];
+      if (!list || ids.length === 0) return {};
+      const drop = new Set(ids);
+      const next = list.filter((m) => !drop.has(m.id));
+      if (next.length === list.length) return {};
+      return { messagesByRoom: { ...s.messagesByRoom, [roomId]: next } };
+    }),
 
   prependMessages: (roomId, older) =>
     set((s) => {

@@ -559,6 +559,33 @@ export const rooms = sqliteTable(
   }),
 );
 
+/* ---------- room_clears ---------- */
+/**
+ * Per-user, per-room "cleared my scrollback at" marker. Set by `/clear`
+ * (which is a PER-VIEWER action, not a delete). Every backlog source
+ * (sendRoomBacklogTo + the scroll-up /rooms/:id/messages page) filters to
+ * `messages.created_at > cleared_at` for the viewer, so a clear is
+ * DURABLE across reconnects / resyncs / new messages instead of snapping
+ * back the moment the socket re-sends history. Monotonic: each /clear
+ * bumps the timestamp forward; a row's absence means "never cleared."
+ */
+export const roomClears = sqliteTable(
+  "room_clears",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    roomId: text("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    clearedAt: integer("cleared_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.roomId] }),
+    roomIdx: index("room_clears_room_idx").on(t.roomId),
+  }),
+);
+
 /* ---------- room_members ---------- */
 export const roomMembers = sqliteTable(
   "room_members",
@@ -3104,8 +3131,9 @@ export const items = sqliteTable(
      * (5 slots), every other category routes to identity_collection
      * (10 slots). The category set is intentionally small (food,
      * drink, joke, tool, weapon, armor, magic, treasure, building,
-     * gift, pet, misc); `misc` is the safety default for any row
-     * that didn't get categorized.
+     * gift, toy, pet, misc); `misc` is the safety default for any row
+     * that didn't get categorized. (`toy` = Eidolon Tamer play-things,
+     * migration 0207.)
      */
     category: text("category").notNull().default("misc"),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
@@ -3670,3 +3698,124 @@ export const gameStats = sqliteTable("game_stats", {
   pk: primaryKey({ columns: [t.ownerScope, t.ownerId, t.gameKind] }),
 }));
 export type DbGameStats = typeof gameStats.$inferSelect;
+
+/* ---------- eidolon_state ----------
+ * Per-identity Spire Arcade "Eidolon Tamer" save. Same (ownerScope,
+ * ownerId) partition as identity_inventory / game_stats so a master
+ * account and each character raise independent familiars and feed from
+ * their own currency + inventory. Server-authoritative: decay is a pure
+ * function of (now - lastSeenMs), recomputed on every read, so no
+ * per-tick writes. Absence of a row = "never hatched" (client shows the
+ * egg-select). `kind='pet'` familiars render the owned pet item's
+ * iconUrl; `kind='species'` uses one of the four drawn starter species.
+ */
+export const eidolonState = sqliteTable(
+  "eidolon_state",
+  {
+    ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
+    ownerId: text("owner_id").notNull(),
+    // "dormant" = the chosen death model: health-0 freezes the familiar (no
+    // decay, no XP) until a Potion-revive. "dead" is the legacy permanent state,
+    // treated identically (frozen + revivable). No CHECK constraint, so adding
+    // "dormant" is a type-only widening — no migration needed.
+    stage: text("stage", { enum: ["egg", "alive", "dead", "dormant"] }).notNull().default("alive"),
+    kind: text("kind", { enum: ["species", "pet"] }).notNull().default("species"),
+    speciesId: text("species_id"),
+    petItemKey: text("pet_item_key").references(() => items.key, { onDelete: "set null" }),
+    name: text("name").notNull().default(""),
+    satiety: real("satiety").notNull().default(80),
+    joy: real("joy").notNull().default(75),
+    vigor: real("vigor").notNull().default(85),
+    hygiene: real("hygiene").notNull().default(80),
+    health: real("health").notNull().default(100),
+    sick: integer("sick", { mode: "boolean" }).notNull().default(false),
+    asleep: integer("asleep", { mode: "boolean" }).notNull().default(false),
+    ageHours: real("age_hours").notNull().default(0),
+    simHour: real("sim_hour").notNull().default(8),
+    messCount: integer("mess_count").notNull().default(0),
+    /** Lifetime XP earned passively for being kept well + happy (drives level + sale value). */
+    xp: real("xp").notNull().default(0),
+    /** Personality trait id (composed onto species decay traits); null = legacy/none. */
+    trait: text("trait"),
+    /** Rare variant (e.g. "prismatic") rolled at hatch; null = ordinary. Visual
+     *  prestige + a sale-value bump; doesn't change decay. Migration 0208. */
+    variant: text("variant"),
+    /** Non-sellable XP head-start INHERITED from a predecessor (lineage). Counts
+     *  toward level/visual but is subtracted before sale value, so a hatch->sell
+     *  loop can't farm the bonus. Migration 0208. */
+    bonusXp: real("bonus_xp").notNull().default(0),
+    /** Daily care-streak: consecutive days tended (one-day grace before reset). */
+    streakCount: integer("streak_count").notNull().default(0),
+    /** UTC day-key (YYYY-MM-DD) of the last tend; null until first check-in. */
+    lastCheckInDayKey: text("last_checkin_day_key"),
+    /** Best streak this familiar has ever reached. */
+    bestStreak: integer("best_streak").notNull().default(0),
+    /** Opt-in "your familiar needs you" push nudges (ON by default once hatched). */
+    nudgeOptin: integer("nudge_optin", { mode: "boolean" }).notNull().default(true),
+    /** UTC day-key of the last nudge sent; bounds nudges to once per day. */
+    lastNudgeDayKey: text("last_nudge_day_key"),
+    /** Wall-clock (ms) of the last persisted snapshot; drives offline decay catch-up. */
+    lastSeenMs: integer("last_seen_ms").notNull().default(0),
+    hatchedAt: ts("hatched_at"),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.ownerScope, t.ownerId] }),
+  }),
+);
+export type DbEidolonState = typeof eidolonState.$inferSelect;
+
+/**
+ * Eidolon Tamer "visits": one row per (visitor user, target familiar identity),
+ * holding the last pat time. Drives the 24h pat cooldown (a social +joy gesture
+ * on another player's familiar). Keyed by the visitor's USER id (so a user's
+ * many identities can't each pat the same target) — see the /arcade/eidolon/visit
+ * route, which also blocks patting any familiar you own.
+ */
+export const eidolonVisits = sqliteTable(
+  "eidolon_visits",
+  {
+    visitorUserId: text("visitor_user_id").notNull(),
+    targetOwnerScope: text("target_owner_scope", { enum: ["user", "character"] }).notNull(),
+    targetOwnerId: text("target_owner_id").notNull(),
+    /** Wall-clock (ms) of the last pat; drives the cooldown. */
+    visitedAt: integer("visited_at").notNull().default(0),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.visitorUserId, t.targetOwnerScope, t.targetOwnerId] }),
+  }),
+);
+export type DbEidolonVisit = typeof eidolonVisits.$inferSelect;
+
+/**
+ * The Hall — a memorial record per departed familiar (sold or released), so a
+ * keeper can look back on everyone they've raised AND the next hatch can
+ * inherit from the most recent one (lineage). Append-only history; one row per
+ * departure (a keeper can have many). `peak_level` is the level at departure,
+ * which equals the lifetime peak since XP only ever accrues. Migration 0208.
+ */
+export const eidolonHall = sqliteTable(
+  "eidolon_hall",
+  {
+    id: text("id").primaryKey(),
+    ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
+    ownerId: text("owner_id").notNull(),
+    name: text("name").notNull().default(""),
+    kind: text("kind", { enum: ["species", "pet"] }).notNull().default("species"),
+    speciesId: text("species_id"),
+    trait: text("trait"),
+    variant: text("variant"),
+    /** Level at departure (= lifetime peak; XP is monotonic). */
+    peakLevel: integer("peak_level").notNull().default(1),
+    ageHours: real("age_hours").notNull().default(0),
+    /** "sold" | "released". */
+    departReason: text("depart_reason").notNull().default("released"),
+    /** Wall-clock (ms) of departure. */
+    departedAt: integer("departed_at").notNull().default(0),
+  },
+  (t) => ({
+    ownerIdx: index("eidolon_hall_owner_idx").on(t.ownerScope, t.ownerId, t.departedAt),
+  }),
+);
+export type DbEidolonHall = typeof eidolonHall.$inferSelect;

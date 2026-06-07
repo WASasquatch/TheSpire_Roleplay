@@ -1013,7 +1013,7 @@ export function registerAdminEarningRoutes(
    *  category drift stays bounded. */
   const itemCategory = z.enum([
     "food", "drink", "joke", "tool", "weapon", "armor",
-    "magic", "treasure", "building", "gift", "pet", "misc",
+    "magic", "treasure", "building", "gift", "toy", "pet", "misc",
   ]);
 
   const itemPatchBody = z.object({

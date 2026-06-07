@@ -24,6 +24,7 @@ const KIND_LABEL: Record<TheaterSourceKind, string> = {
   video: "video file",
   youtube: "YouTube",
   vimeo: "Vimeo",
+  live: "live stream",
   embed: "embed (display-only)",
 };
 
@@ -32,6 +33,7 @@ const KIND_LABEL: Record<TheaterSourceKind, string> = {
  *
  *   /theater on | off              toggle the video panel above chat
  *   /theater add <url> [title]     append a source to the playlist
+ *   /theater live <url> [title]    append a LIVE stream (no rewind; live edge)
  *   /theater remove <n>            drop playlist item #n (1-based)
  *   /theater clear                 empty the playlist
  *   /theater loop off | one | all  end-of-source behavior (all = default)
@@ -45,13 +47,14 @@ export const theaterCommand: CommandHandler = {
   name: "theater",
   // NB: "watch" is taken by the friends follow command; avoid it.
   aliases: ["cinema", "theatre", "movie"],
-  usage: "/theater on|off | add <url> [title] | remove <n> | clear | loop off|one|all | list",
+  usage: "/theater on|off | add <url> [title] | live <url> [title] | remove <n> | clear | loop off|one|all | list",
   description: "Set up a synchronized video watch-party panel for this room (owner/mod only to change).",
   subcommands: [
     { verb: "(no args)", usage: "/theater", description: "Show the current playlist and theater settings." },
-    { verb: "on", usage: "/theater on", description: "Turn theater mode on - shows the video panel above chat." },
+    { verb: "on", usage: "/theater on", description: "Turn theater mode on - shows the video panel above chat. Requires theater access (an admin grants it)." },
     { verb: "off", usage: "/theater off", description: "Turn theater mode off and reset playback." },
     { verb: "add", usage: "/theater add <url> [title]", description: "Append a video to the playlist (direct file/HLS, YouTube, or Vimeo)." },
+    { verb: "live", usage: "/theater live <https-stream-url>", description: "Append a live stream (e.g. your VLC/OBS broadcast over https). No rewind; everyone watches the live edge. See the Theater streaming guide in Help.", aliases: ["stream"] },
     { verb: "remove", usage: "/theater remove 2", description: "Remove playlist item #2 (1-based).", aliases: ["rm", "del"] },
     { verb: "clear", usage: "/theater clear", description: "Empty the playlist." },
     { verb: "loop", usage: "/theater loop all", description: "End-of-source behavior: off (stop) | one (repeat) | all (advance + loop, default).", aliases: ["repeat"] },
@@ -86,6 +89,33 @@ export const theaterCommand: CommandHandler = {
     const { addMessage, broadcastRoomState, broadcastTheaterSync, persistTheaterCheckpoint } = await import(
       "../../realtime/broadcast.js"
     );
+
+    // Shared append used by both `add` (kind sniffed from the URL) and
+    // `live` (kind forced to "live"). Parses `<url> [title]` from `rest`,
+    // validates, appends, and confirms PRIVATELY to the operator (queuing
+    // shouldn't spam the room); the playlist itself still syncs to
+    // everyone via broadcastRoomState.
+    const appendSource = async (kindOverride?: TheaterSourceKind) => {
+      const m = rest.match(/^(\S+)\s*(.*)$/);
+      const url = m?.[1] ?? "";
+      const title = (m?.[2] ?? "").trim();
+      if (!/^https?:\/\//i.test(url)) {
+        return notice(ctx, "BAD_URL", "Give a full http(s) media URL, e.g. /theater add https://example.com/clip.mp4");
+      }
+      if (kindOverride === "live" && !/^https:\/\//i.test(url)) {
+        return notice(ctx, "BAD_URL", "Live streams must be an https link (a plain http link won't load on this site). See the Theater streaming guide in Help.");
+      }
+      if (playlist.length >= 50) {
+        return notice(ctx, "PLAYLIST_FULL", "Playlist is full (50 sources). Remove some with /theater remove <n>.");
+      }
+      const source: TheaterSource = { id: nanoid(), url, kind: kindOverride ?? sniffKind(url), ...(title ? { title } : {}) };
+      const next = [...playlist, source];
+      await ctx.db.update(rooms).set({ theaterPlaylist: serializePlaylist(next) }).where(eq(rooms.id, ctx.roomId));
+      notice(ctx, "THEATER", `Added to the theater playlist (#${next.length}, ${KIND_LABEL[source.kind]}): ${title || url}`);
+      await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
+      // If this is the first source, snap viewers onto it.
+      if (playlist.length === 0) await broadcastTheaterSync(ctx.io, ctx.roomId);
+    };
 
     if (verb === "on") {
       // Enabling theater is gated behind a granular permission ON TOP of
@@ -138,26 +168,12 @@ export const theaterCommand: CommandHandler = {
     }
 
     if (verb === "add") {
-      // First token of `rest` is the URL; anything after is an optional title.
-      const m = rest.match(/^(\S+)\s*(.*)$/);
-      const url = m?.[1] ?? "";
-      const title = (m?.[2] ?? "").trim();
-      if (!/^https?:\/\//i.test(url)) {
-        return notice(ctx, "BAD_URL", "Give a full http(s) media URL, e.g. /theater add https://example.com/clip.mp4");
-      }
-      if (playlist.length >= 50) {
-        return notice(ctx, "PLAYLIST_FULL", "Playlist is full (50 sources). Remove some with /theater remove <n>.");
-      }
-      const source: TheaterSource = { id: nanoid(), url, kind: sniffKind(url), ...(title ? { title } : {}) };
-      const next = [...playlist, source];
-      await ctx.db.update(rooms).set({ theaterPlaylist: serializePlaylist(next) }).where(eq(rooms.id, ctx.roomId));
-      await addMessage(ctx, {
-        kind: "system",
-        body: `Added to the theater playlist (#${next.length}, ${KIND_LABEL[source.kind]}): ${title || url}`,
-      });
-      await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
-      // If this is the first source, snap viewers onto it.
-      if (playlist.length === 0) await broadcastTheaterSync(ctx.io, ctx.roomId);
+      await appendSource();
+      return;
+    }
+
+    if (verb === "live" || verb === "stream") {
+      await appendSource("live");
       return;
     }
 
@@ -194,7 +210,7 @@ export const theaterCommand: CommandHandler = {
         // doesn't restore a stale index pointing past the edited playlist.
         await persistTheaterCheckpoint(ctx.db, ctx.roomId);
       }
-      await addMessage(ctx, { kind: "system", body: `Removed from the theater playlist: ${removed?.title || removed?.url}` });
+      notice(ctx, "THEATER", `Removed from the theater playlist: ${removed?.title || removed?.url}`);
       await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
       return;
     }
@@ -204,7 +220,7 @@ export const theaterCommand: CommandHandler = {
       await ctx.db.update(rooms).set({ theaterPlaylist: "[]" }).where(eq(rooms.id, ctx.roomId));
       clearTheater(ctx.roomId);
       await persistTheaterCheckpoint(ctx.db, ctx.roomId); // clears the persisted checkpoint
-      await addMessage(ctx, { kind: "system", body: "Theater playlist cleared." });
+      notice(ctx, "THEATER", "Theater playlist cleared.");
       await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
       return;
     }

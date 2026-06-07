@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer, Socket } from "socket.io";
 import type {
@@ -45,6 +45,7 @@ import { expandInlineCommands } from "../commands/registry.js";
 import { getSettings } from "../settings.js";
 import { awardForForum, awardForMessage } from "../earning/award.js";
 import { bumpLifetimeForMessage, classifyMessageForLifetime } from "../lib/lifetimePostCounts.js";
+import { getClearedAt } from "../lib/roomClears.js";
 import { getAway } from "./awayState.js";
 import { getMood } from "./moodState.js";
 import {
@@ -1145,15 +1146,21 @@ export async function sendRoomBacklogTo(
   // this room" with "whisper rows the viewer is a party to from
   // anywhere." The wire roomId is rewritten below so the client buckets
   // them under the room being loaded.
+  // Per-viewer `/clear` marker: hide everything at or before the time
+  // this user last cleared the room. Null when they never cleared.
+  const clearedAt = await getClearedAt(db, viewerUserId, roomId);
   const recentPlusOne = await db
     .select()
     .from(messages)
-    .where(or(
-      and(sql`${messages.kind} != 'whisper'`, eq(messages.roomId, roomId)),
-      and(
-        sql`${messages.kind} = 'whisper'`,
-        or(eq(messages.userId, viewerUserId), eq(messages.toUserId, viewerUserId)),
+    .where(and(
+      or(
+        and(sql`${messages.kind} != 'whisper'`, eq(messages.roomId, roomId)),
+        and(
+          sql`${messages.kind} = 'whisper'`,
+          or(eq(messages.userId, viewerUserId), eq(messages.toUserId, viewerUserId)),
+        ),
       ),
+      clearedAt ? gt(messages.createdAt, clearedAt) : undefined,
     ))
     .orderBy(desc(messages.createdAt))
     .limit(BACKLOG_LIMIT + 1);

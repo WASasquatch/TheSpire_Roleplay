@@ -27,6 +27,7 @@ interface Props {
    *  Optional so a future caller that doesn't surface earning can drop
    *  the menu entry; the Account section just hides the row when omitted. */
   onOpenEarning?: () => void;
+  onOpenArcade?: () => void;
 }
 
 /**
@@ -41,7 +42,7 @@ interface Props {
  * is a fixed-position slide-out), so the drawer here just expands upward
  * within that container - works the same as desktop.
  */
-export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, currentRoomId, onJumpToMessage, onOpenMessages, onOpenEarning }: Props) {
+export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, currentRoomId, onJumpToMessage, onOpenMessages, onOpenEarning, onOpenArcade }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
   const [refreshOpen, setRefreshOpen] = useState(false);
@@ -358,6 +359,13 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
                 label="Your Earning"
                 hint="Wallet, ranks, shop, items, collection, pets"
                 onClick={() => { onOpenEarning(); setDrawerOpen(false); }}
+              />
+            ) : null}
+            {onOpenArcade && me?.permissions.includes("use_arcade") ? (
+              <MenuItem
+                label="Spire Arcade"
+                hint="Play the arcade's games, like the Eidolon Tamer"
+                onClick={() => { onOpenArcade(); setDrawerOpen(false); }}
               />
             ) : null}
             <MenuItem label="Bookmarks" hint="Your saved chat messages" onClick={() => fire("/bookmarks")} />

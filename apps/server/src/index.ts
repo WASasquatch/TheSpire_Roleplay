@@ -101,6 +101,7 @@ import { startAnnouncementScheduler } from "./admin/announcements.js";
 import { registerNavLinkRoutes } from "./routes/nav-links.js";
 import { registerRoomsRoutes } from "./routes/rooms.js";
 import { registerEarningRoutes } from "./routes/earning.js";
+import { registerArcadeRoutes } from "./routes/arcade.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { registerThesaurusRoutes } from "./routes/thesaurus.js";
 import { registerUsersRoutes } from "./routes/users.js";
@@ -555,6 +556,7 @@ async function main() {
   await initPush(db);
   await registerStatsRoutes(baseApp, db, io);
   await registerEarningRoutes(baseApp, db, io);
+  await registerArcadeRoutes(baseApp, db, io);
   await registerThesaurusRoutes(baseApp, db);
   await registerUsersRoutes(baseApp, db, io);
   await registerRoomsRoutes(baseApp, db, io);

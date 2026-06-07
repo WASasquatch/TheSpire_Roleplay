@@ -11,6 +11,7 @@ import { DEFAULT_WORLDS, WORLDS_SEED_VERSION } from "./seed_worlds.js";
 import type { Db } from "./db/index.js";
 import { runBackfillIfNeeded } from "./earning/backfill.js";
 import { schedulePresenceSweep } from "./earning/sweeps.js";
+import { scheduleEidolonNudgeSweep } from "./earning/eidolonNudge.js";
 import { pruneSnapshots } from "./backup/snapshots.js";
 
 /**
@@ -586,10 +587,14 @@ export function startJanitor(
   // skips the schedule.
   void runBackfillIfNeeded(db, log).catch((err) => log.error({ err }, "[earning] backfill failed"));
   let cancelPresence: (() => void) | null = null;
+  let cancelEidolonNudge: (() => void) | null = null;
   if (io) {
     void schedulePresenceSweep(db, io, log).then((cancel) => {
       cancelPresence = cancel;
     }).catch((err) => log.error({ err }, "[earning] presence sweep scheduling failed"));
+    void scheduleEidolonNudgeSweep(db, io, log).then((cancel) => {
+      cancelEidolonNudge = cancel;
+    }).catch((err) => log.error({ err }, "[eidolon] nudge sweep scheduling failed"));
   }
 
   return () => {
@@ -598,5 +603,6 @@ export function startJanitor(
     clearInterval(trustId);
     clearInterval(snapshotId);
     if (cancelPresence) cancelPresence();
+    if (cancelEidolonNudge) cancelEidolonNudge();
   };
 }

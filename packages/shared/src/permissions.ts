@@ -50,6 +50,10 @@ export const PERMISSION_KEYS = [
   "delete_room",
   "use_theater_mode",
 
+  // ---- arcade ----
+  "use_arcade",
+  "use_eidolon_tamer",
+
   // ---- user_admin ----
   "grant_admin_role",
   "revoke_admin_role",
@@ -175,6 +179,10 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   delete_room: "Delete a non-system room via the admin tab.",
   use_theater_mode: "Turn on theater (watch-party) mode for a room you own or moderate.",
 
+  // arcade
+  use_arcade: "Open the Spire Arcade and its games. (Each game may also require its own unlock to be purchased.)",
+  use_eidolon_tamer: "Play the Eidolon Tamer arcade game (after unlocking it in the shop).",
+
   // user_admin
   grant_admin_role: "Promote another account to the admin tier. Same as /promoteadmin.",
   revoke_admin_role: "Demote an admin account back to user. Same as /demoteadmin.",
@@ -289,6 +297,10 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   delete_room: "room_admin",
   use_theater_mode: "room_admin",
 
+  // arcade
+  use_arcade: "arcade",
+  use_eidolon_tamer: "arcade",
+
   // user_admin
   grant_admin_role: "user_admin",
   revoke_admin_role: "user_admin",
@@ -375,6 +387,7 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
 export type PermissionGroup =
   | "chat_moderation"
   | "room_admin"
+  | "arcade"
   | "user_admin"
   | "site_admin"
   | "content_admin"

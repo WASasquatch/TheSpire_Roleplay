@@ -5,20 +5,17 @@
  * focus trap — so the player can keep their familiar up while chatting.
  * Draggable by its titlebar (pointer events, clamped to the viewport), position
  * persisted to localStorage, with an X to close. Sits above chat but below true
- * modals.
+ * modals. (This desktop path is the original, unchanged.)
  *
  * On mobile (< lg) a tiny draggable window is unusable, so the same content
- * fills the screen as a fullscreen modal instead.
- *
- * Either way the window is PORTALED to <body>. It's `position: fixed`, and the
- * chat shell sits inside themed frames that use `backdrop-filter` / `transform`
- * (glass + medieval/modern/scifi themes), which make an ancestor the containing
- * block for fixed descendants. Rendered inline, the window was clipped to that
- * blurred frame instead of the viewport — the "blank page" when Play was tapped.
- * Portaling lifts it out of that trap, the same fix the shared Modal documents.
+ * fills the screen as a fullscreen modal instead. The mobile path reuses the
+ * shared Modal (variant="mobile-fullscreen"), which portals to <body> and so
+ * escapes the chat shell's `backdrop-filter`/`transform` frames — those make an
+ * ancestor the containing block for `position: fixed`, which is what clipped the
+ * inline window to a blurred frame and produced the "blank page" on phones.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { Modal } from "../Modal";
 import { EidolonTamer } from "./EidolonTamer";
 
 const POS_KEY = "tk:eidolonWindow:v1";
@@ -75,7 +72,7 @@ export function EidolonWindow({ characterId, onClose }: { characterId: string | 
   }, []);
 
   // Re-clamp on mount + whenever the viewport changes. Desktop only — the
-  // mobile layout is fullscreen and CSS-driven, so there's nothing to clamp.
+  // mobile layout is the fullscreen Modal, so there's nothing to clamp.
   useEffect(() => {
     if (mobile) return;
     const reclamp = () => setPos((p) => clampPos(p.x, p.y));
@@ -99,33 +96,37 @@ export function EidolonWindow({ characterId, onClose }: { characterId: string | 
     try { localStorage.setItem(POS_KEY, JSON.stringify(posRef.current)); } catch { /* ignore */ }
   };
 
-  const body = (
-    <div className="ei-window-body">
-      <EidolonTamer characterId={characterId} />
-    </div>
-  );
+  // Mobile: fullscreen modal. Modal owns the body portal + backdrop + Escape.
+  if (mobile) {
+    return (
+      <Modal onClose={onClose} variant="mobile-fullscreen" zIndex={50}>
+        <div className="ei-window-m" onClick={(e) => e.stopPropagation()}>
+          <style>{WINDOW_CSS}</style>
+          <div className="ei-window-bar ei-window-bar--static">
+            <span className="ei-window-title">🥚 Eidolon Tamer</span>
+            <button className="ei-window-x" onClick={onClose} aria-label="Close">✕</button>
+          </div>
+          <div className="ei-window-body">
+            <EidolonTamer characterId={characterId} />
+          </div>
+        </div>
+      </Modal>
+    );
+  }
 
-  const win = mobile ? (
-    <div className="ei-window ei-window--mobile" role="dialog" aria-modal="true">
-      <style>{WINDOW_CSS}</style>
-      <div className="ei-window-bar ei-window-bar--static">
-        <span className="ei-window-title">🥚 Eidolon Tamer</span>
-        <button className="ei-window-x" onClick={onClose} aria-label="Close">✕</button>
-      </div>
-      {body}
-    </div>
-  ) : (
+  // Desktop: original free-floating, draggable window (unchanged).
+  return (
     <div ref={winRef} className="ei-window" style={{ left: pos.x, top: pos.y }}>
       <style>{WINDOW_CSS}</style>
       <div className="ei-window-bar" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <span className="ei-window-title">🥚 Eidolon Tamer</span>
         <button className="ei-window-x" onClick={onClose} aria-label="Close" onPointerDown={(e) => e.stopPropagation()}>✕</button>
       </div>
-      {body}
+      <div className="ei-window-body">
+        <EidolonTamer characterId={characterId} />
+      </div>
     </div>
   );
-
-  return createPortal(win, document.body);
 }
 
 const WINDOW_CSS = `
@@ -141,10 +142,11 @@ const WINDOW_CSS = `
 .ei-window-x:hover{color:rgb(var(--keep-text) / 1); border-color:rgb(var(--keep-action) / 1);}
 .ei-window-body{padding:12px;}
 
-/* Fullscreen modal on mobile: fill the viewport (inset:0 overrides the
-   desktop width), pin the titlebar, and let only the body scroll so a tall
-   familiar device is fully reachable. */
-.ei-window--mobile{inset:0; width:auto; max-width:none; border-radius:0; z-index:50; display:flex; flex-direction:column;}
-.ei-window--mobile .ei-window-bar--static{cursor:default; touch-action:auto;}
-.ei-window--mobile .ei-window-body{flex:1 1 auto; overflow-y:auto; -webkit-overflow-scrolling:touch;}
+/* Mobile fullscreen panel — laid out by the Modal's flex backdrop (not fixed),
+   so it just fills the cell. Titlebar pinned; only the body scrolls so a tall
+   familiar device stays fully reachable. */
+.ei-window-m{display:flex; flex-direction:column; width:100%; height:100%; overflow:hidden;
+  background:rgb(var(--keep-panel) / 1);}
+.ei-window-m .ei-window-bar--static{cursor:default; touch-action:auto;}
+.ei-window-m .ei-window-body{flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch;}
 `;

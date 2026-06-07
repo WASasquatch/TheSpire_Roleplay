@@ -405,13 +405,13 @@ foot of the mountains. Speaks little. Watches everything.</p>
           up, including chat lines, member lists, and the world member gallery.
         </P>
 
-        <Heading>Vibe sliders, attributes, and section visibility (characters)</Heading>
+        <Heading>Disposition sliders, attributes, and section visibility (characters)</Heading>
         <P>
           Characters get a few extra panels in the editor:
         </P>
         <Bullets>
           <li>
-            <b>Vibe sliders</b> are eight personality dials, things like Pacifist to Combat or
+            <b>Disposition sliders</b> are eight personality dials, things like Pacifist to Combat or
             Cold to Warm. Set them to give visitors a quick read on who your character is. Leave
             them at the middle and the panel hides on the profile.
           </li>
@@ -421,7 +421,7 @@ foot of the mountains. Speaks little. Watches everything.</p>
           </li>
           <li>
             <b>Section visibility</b> lets you hide individual fields (age, race, height, and so
-            on) or whole sections (Vibe, Attributes, Gallery) from public view while keeping them
+            on) or whole sections (Disposition, Attributes, Gallery) from public view while keeping them
             saved in your editor.
           </li>
         </Bullets>

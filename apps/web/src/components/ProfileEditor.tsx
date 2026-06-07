@@ -3118,11 +3118,11 @@ function VibeAxesEditor({
   return (
     <fieldset className="rounded border border-keep-rule p-3">
       <legend className="flex items-center gap-2 px-1 text-xs uppercase tracking-widest text-keep-muted">
-        Vibe
+        Disposition
         <VisibilityToggle
           hidden={sectionHidden}
           onToggle={() => onChange((s) => toggleVisibility(s, "vibe"))}
-          label="Vibe"
+          label="Disposition"
         />
       </legend>
       <p className="mb-3 text-[10px] text-keep-muted">

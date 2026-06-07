@@ -2090,16 +2090,27 @@ function VibeSection({
                 25% / 75% leave ~15px of solid color on each side
                 of the dot with a ~15px fade-out beyond. Painted
                 before the dot in source order so the dot sits on
-                top. */}
-            <span
-              aria-hidden
-              className="pointer-events-none absolute top-1/2 h-1.5 w-[60px] -translate-x-1/2 -translate-y-1/2 rounded-full"
-              style={{
-                left: `${axis.value}%`,
-                background:
-                  "linear-gradient(90deg, rgb(var(--keep-action) / 0) 0%, rgb(var(--keep-action) / 0.85) 25%, rgb(var(--keep-action) / 0.85) 75%, rgb(var(--keep-action) / 0) 100%)",
-              }}
-            />
+                top.
+
+                The glow lives inside its own `overflow-hidden`
+                clip layer (matching the track's rounded bounds) so
+                that near the extremes (value → 0 / 100) the 60px
+                gradient is trimmed at the bar edge instead of
+                bleeding past "Minimum"/"Maximum". The dot is a
+                SIBLING of this clip layer, not a child, so it keeps
+                its intended centered overhang at the ends (it's
+                taller than the track and would otherwise be clipped). */}
+            <span className="pointer-events-none absolute inset-0 overflow-hidden rounded-full">
+              <span
+                aria-hidden
+                className="absolute top-1/2 h-1.5 w-[60px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+                style={{
+                  left: `${axis.value}%`,
+                  background:
+                    "linear-gradient(90deg, rgb(var(--keep-action) / 0) 0%, rgb(var(--keep-action) / 0.85) 25%, rgb(var(--keep-action) / 0.85) 75%, rgb(var(--keep-action) / 0) 100%)",
+                }}
+              />
+            </span>
             <span
               className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-keep-action/60 bg-keep-action shadow"
               style={{ left: `${axis.value}%` }}
@@ -2110,7 +2121,7 @@ function VibeSection({
       ))}
     </ul>
   );
-  return variant === "compact" ? list : <Section title="Vibe">{list}</Section>;
+  return variant === "compact" ? list : <Section title="Disposition">{list}</Section>;
 }
 
 /**

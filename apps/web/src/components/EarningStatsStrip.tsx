@@ -32,7 +32,13 @@ import { useEarning, lookupRankTier, progressToNextTier } from "../state/earning
 import { useChat } from "../state/store.js";
 
 interface Props {
-  onOpenEarning: () => void;
+  /**
+   * Click handler that opens the Earning dashboard. When OMITTED the strip
+   * renders as a plain, non-interactive read-out (a `<div>`, no hover, no
+   * tap target). The mobile placement omits it on purpose so the full-width
+   * read-out isn't one giant accidental-tap button.
+   */
+  onOpenEarning?: () => void;
   /** Optional className for the wrapper, used to control md+/mobile visibility. */
   className?: string;
 }
@@ -141,24 +147,16 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
       ? "Loading your Earning…"
       : "Open your Earning, XP, Currency, ranks, cosmetics";
 
-  return (
-    <button
-      type="button"
-      onClick={onOpenEarning}
-      title={title}
-      className={
-        // `relative` is the positioning context for the floating burst
-        // chips so they anchor to the strip, not the page.
-        //
-        // `bg-black/10` + the wider `px-[15px]` give the strip a
-        // visible dark partition so the rank / coin / XP triad reads
-        // as its own grouped panel against the formatting-toolbar row,
-        // rather than three free-floating chips. Hover still flips to
-        // `keep-banner/40` so the affordance stays, the dark base
-        // just makes the resting state legible without it.
-        `relative flex items-center gap-2 rounded bg-black/10 px-[15px] py-0.5 text-[11px] leading-tight text-keep-muted hover:bg-keep-banner/40 hover:text-keep-text ${className ?? ""}`
-      }
-    >
+  // Interactive only when a handler is supplied (desktop). Mobile renders a
+  // plain read-out so the bar isn't a giant link.
+  const interactive = typeof onOpenEarning === "function";
+  // `relative` anchors the floating burst chips to the strip. `bg-black/10` +
+  // `px-[15px]` give the rank / coin / XP triad a grouped dark panel. The
+  // hover affordance only applies when the strip is actually clickable.
+  const wrapperClassName =
+    `relative flex items-center gap-2 rounded bg-black/10 px-[15px] py-0.5 text-[11px] leading-tight text-keep-muted ${interactive ? "hover:bg-keep-banner/40 hover:text-keep-text" : ""} ${className ?? ""}`;
+  const content = (
+    <>
       {/* Rank text, uppercase tracked, matches other meta chips. */}
       <span className="hidden font-action uppercase tracking-widest text-keep-text sm:inline">
         {rankLabel}
@@ -239,6 +237,15 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
           className="ml-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-keep-accent"
         />
       ) : null}
+    </>
+  );
+  return interactive ? (
+    <button type="button" onClick={onOpenEarning} title={title} className={wrapperClassName}>
+      {content}
     </button>
+  ) : (
+    <div title={title} className={wrapperClassName}>
+      {content}
+    </div>
   );
 }

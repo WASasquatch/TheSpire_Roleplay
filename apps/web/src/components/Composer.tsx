@@ -1550,8 +1550,14 @@ export function Composer({
           snapshot hasn't loaded. The desktop placement lives inside
           the toolbar below (pushed right via ml-auto). */}
       {!inputDisabled && onOpenEarning ? (
-        <div className="mb-1 lg:hidden">
-          <EarningStatsStrip onOpenEarning={onOpenEarning} className="w-full justify-between" />
+        // Mobile read-out: compact + right-aligned. NOT `w-full
+        // justify-between`, which spread the rank / coin / XP triad into huge
+        // gaps at tablet widths (the XP bar is capped, so justify-between had
+        // slack to throw around). And rendered WITHOUT `onOpenEarning` so the
+        // full-width bar isn't one giant accidental-tap link to the dashboard;
+        // the desktop strip in the toolbar below stays clickable.
+        <div className="mb-1 flex justify-end lg:hidden">
+          <EarningStatsStrip />
         </div>
       ) : null}
       {!inputDisabled ? (

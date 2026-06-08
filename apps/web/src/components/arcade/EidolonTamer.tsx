@@ -29,6 +29,7 @@ import {
 } from "./eidolonEngine";
 import { ItemDrawer } from "./ItemDrawer";
 import { CoinAmount } from "../CoinAmount";
+import { ensureInjectedStyle } from "../../lib/injectStyle";
 
 interface Live {
   stats: EidolonStats;
@@ -51,12 +52,11 @@ const liveFromSnap = (s: EidolonSnapshot): Live => ({
 });
 
 function Shell({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return (
-    <div className="eidolon-root">
-      <style>{EIDOLON_CSS}</style>
-      {children}
-    </div>
-  );
+  // Inject the device stylesheet with the CSP nonce stamped. A plain
+  // <style>{EIDOLON_CSS}</style> is blocked by the strict prod CSP, which left
+  // the whole minigame unstyled in prod (worked in dev where there's no CSP).
+  useEffect(() => { ensureInjectedStyle("eidolon-css", EIDOLON_CSS); }, []);
+  return <div className="eidolon-root">{children}</div>;
 }
 const noticeStyle: React.CSSProperties = { padding: "48px 24px", textAlign: "center", fontStyle: "italic", lineHeight: 1.5 };
 

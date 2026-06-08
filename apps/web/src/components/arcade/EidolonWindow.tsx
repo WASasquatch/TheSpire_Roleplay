@@ -17,6 +17,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Modal } from "../Modal";
 import { EidolonTamer } from "./EidolonTamer";
+import { ensureInjectedStyle } from "../../lib/injectStyle";
 
 const POS_KEY = "tk:eidolonWindow:v1";
 const WIDTH = 452;
@@ -58,6 +59,12 @@ function loadPos(): Pos {
 }
 
 export function EidolonWindow({ characterId, onClose }: { characterId: string | null; onClose: () => void }): React.JSX.Element {
+  // Inject the window chrome stylesheet with the CSP nonce stamped. A plain
+  // <style>{WINDOW_CSS}</style> is blocked by the strict prod CSP, so the
+  // window lost its `position:fixed`/sizing/background in prod and rendered as
+  // an unstyled in-flow blob (the "blank page / no window" report); dev has no
+  // CSP so it looked fine.
+  useEffect(() => { ensureInjectedStyle("eidolon-window-css", WINDOW_CSS); }, []);
   const mobile = useIsMobile();
   const [pos, setPos] = useState<Pos>(loadPos);
   const posRef = useRef(pos); posRef.current = pos;
@@ -101,7 +108,6 @@ export function EidolonWindow({ characterId, onClose }: { characterId: string | 
     return (
       <Modal onClose={onClose} variant="mobile-fullscreen" zIndex={50}>
         <div className="ei-window-m" onClick={(e) => e.stopPropagation()}>
-          <style>{WINDOW_CSS}</style>
           <div className="ei-window-bar ei-window-bar--static">
             <span className="ei-window-title">🥚 Eidolon Tamer</span>
             <button className="ei-window-x" onClick={onClose} aria-label="Close">✕</button>
@@ -117,7 +123,6 @@ export function EidolonWindow({ characterId, onClose }: { characterId: string | 
   // Desktop: original free-floating, draggable window (unchanged).
   return (
     <div ref={winRef} className="ei-window" style={{ left: pos.x, top: pos.y }}>
-      <style>{WINDOW_CSS}</style>
       <div className="ei-window-bar" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <span className="ei-window-title">🥚 Eidolon Tamer</span>
         <button className="ei-window-x" onClick={onClose} aria-label="Close" onPointerDown={(e) => e.stopPropagation()}>✕</button>

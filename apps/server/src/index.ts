@@ -1551,9 +1551,18 @@ async function main() {
           "img-src 'self' data: https:",
           // Google Fonts woff2 files live on fonts.gstatic.com.
           "font-src 'self' data: https://fonts.gstatic.com",
-          "connect-src 'self'",
-          "media-src 'self'",
-          "worker-src 'self'",
+          // Theater live streams. hls.js fetches the .m3u8 + .ts segments
+          // (connect-src) and plays them through an MSE `blob:` source
+          // (media-src + worker-src blob:). We allow the ngrok tunnel
+          // families a host streams from (free + paid + custom-domain +
+          // legacy), so a host's `/theater live https://<sub>.ngrok-*/…m3u8`
+          // can load. The host's tunnel must also send `Access-Control-
+          // Allow-Origin` (CORS) for the cross-origin reads to succeed.
+          // `media-src` lists both `blob:` (hls.js MSE) and the origins
+          // (Safari native HLS uses a direct <video src=…m3u8>).
+          "connect-src 'self' https://*.ngrok-free.app https://*.ngrok-free.dev https://*.ngrok.app https://*.ngrok.io",
+          "media-src 'self' blob: https://*.ngrok-free.app https://*.ngrok-free.dev https://*.ngrok.app https://*.ngrok.io",
+          "worker-src 'self' blob:",
           "manifest-src 'self'",
           "object-src 'none'",
           "base-uri 'self'",

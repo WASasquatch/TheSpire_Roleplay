@@ -1118,6 +1118,12 @@ foot of the mountains. Speaks little. Watches everything.</p>
             <K>.m3u8</K> path on the end, like{" "}
             <K>https://something.trycloudflare.com/live/stream.m3u8</K>.
           </li>
+          <li>
+            One required setting: the stream has to let this site read it. For ngrok, start it with{" "}
+            <K>ngrok http 8090 --response-header-add "Access-Control-Allow-Origin: *"</K>; for other
+            tools, set the response header <K>Access-Control-Allow-Origin: *</K>. Without it the
+            player stays blank.
+          </li>
         </Bullets>
         <Heading>Step 3: add it to the room</Heading>
         <P>

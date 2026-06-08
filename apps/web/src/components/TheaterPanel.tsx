@@ -185,6 +185,28 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
     [],
   );
 
+  // Use our BUNDLED hls.js for live/HLS sources instead of letting
+  // react-player fetch it from a CDN at runtime. Setting `window.Hls` makes
+  // react-player's SDK loader find it and skip the network load entirely, no
+  // CDN dependency, no script-src ambiguity. Loaded lazily (only when a live
+  // or .m3u8 source is actually shown) so non-theater users don't pay the
+  // ~400KB. Live HLS still needs the CSP connect-src/media-src allowance for
+  // the stream's origin AND CORS headers from that origin to actually play.
+  const needsHls = !isEmbed && (isLive || /\.m3u8(?:[?#]|$)/i.test(current?.url ?? ""));
+  useEffect(() => {
+    if (!needsHls || typeof window === "undefined") return;
+    if ((window as { Hls?: unknown }).Hls) return;
+    let cancelled = false;
+    void import("hls.js")
+      .then((m) => {
+        if (cancelled) return;
+        const w = window as { Hls?: unknown };
+        if (!w.Hls) w.Hls = m.default;
+      })
+      .catch(() => { /* react-player falls back to its own CDN load */ });
+    return () => { cancelled = true; };
+  }, [needsHls]);
+
   // Persist the resize height (cheap; localStorage write per drag tick).
   useEffect(() => {
     try {

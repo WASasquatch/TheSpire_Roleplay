@@ -19,11 +19,13 @@
  *     The winner mints the admin-configured reward (XP / Currency /
  *     optional shop item).
  *
- * Classes (hardcoded baseline; no admin-tunable layer yet):
- *   - knight     sword   highest HP, balanced damage
- *   - archer     bow     medium HP, +to-hit
- *   - mage       magic   lowest HP, biggest damage dice
- *   - gunslinger pistol  low-medium HP, crits on 19-20
+ * Classes (hardcoded baseline; no admin-tunable layer yet). Every class
+ * starts at the same 20 HP; they differ by to-hit, crit range, and damage
+ * dice rather than by health pool:
+ *   - knight     sword   balanced damage
+ *   - archer     bow     +to-hit
+ *   - mage       magic   biggest damage dice
+ *   - gunslinger pistol  crits on 19-20
  *
  * Dice math (transparent in the result lines):
  *   - To-hit: 1d20 + classHitMod vs target's defense (12 base, +5
@@ -71,21 +73,27 @@ export const DUEL_CHALLENGE_MS = 60_000;
 
 /**
  * Out-of-the-box reward for duels when the admin hasn't tuned the
- * Built-In Commands panel. The combat is long enough and the
- * damage-scaling multiplier sharp enough that a flat 15 XP / 5
- * Currency base feels meaningful in either direction: a clean win
- * lands closer to 75 XP / 25 Currency at the 5x cap, a loser at
- * 0.25x earns ~4 XP for their effort. An admin who wants more
- * generous payouts (or wants to add a shop item as the prize) sets
- * those values in the admin panel; an admin who wants no rewards
- * sets them to zero there.
+ * Built-In Commands panel. A win pays the base scaled by the damage
+ * multiplier (roughly 1x-2x at the 20-HP scale, see duelMultiplier);
+ * the loser earns a reduced consolation of XP AND Currency
+ * (DUEL_LOSER_REWARD_FACTOR). An admin who wants different payouts (or a
+ * shop item as the prize) sets those in the admin panel; setting them to
+ * zero disables rewards.
  */
 export const DUEL_DEFAULT_REWARD: BuiltinCommandReward = {
-  xp: 15,
-  currency: 5,
+  xp: 40,
+  currency: 15,
   itemKey: null,
   itemCount: 0,
 };
+
+/**
+ * Fraction of the (already damage-scaled) reward the LOSER receives as a
+ * consolation. Applied on top of their own duelMultiplier so a loser who
+ * fought hard still earns more than one who barely landed a hit. Covers
+ * both XP and Currency; the loser never gets the shop item (winner's prize).
+ */
+const DUEL_LOSER_REWARD_FACTOR = 0.5;
 
 export type DuelClassKey = "knight" | "archer" | "mage" | "gunslinger";
 
@@ -103,13 +111,18 @@ export interface DuelClass {
   damage: { count: number; faces: number; bonus: number };
 }
 
+// Shared starting health for every class. Duels are short, punchy d20
+// skirmishes: ~20 HP against the per-class damage dice resolves a fight in a
+// handful of turns rather than the long grind the old 80-120 pools produced.
+const DUEL_START_HP = 20;
+
 export const DUEL_CLASSES: Record<DuelClassKey, DuelClass> = {
   knight: {
     key: "knight",
     label: "Knight",
     weapon: "sword",
     weaponEmoji: "⚔️",
-    maxHp: 120,
+    maxHp: DUEL_START_HP,
     hitMod: 2,
     critOn: 20,
     damage: { count: 1, faces: 10, bonus: 5 },
@@ -119,7 +132,7 @@ export const DUEL_CLASSES: Record<DuelClassKey, DuelClass> = {
     label: "Archer",
     weapon: "bow",
     weaponEmoji: "🏹",
-    maxHp: 100,
+    maxHp: DUEL_START_HP,
     hitMod: 3,
     critOn: 20,
     damage: { count: 1, faces: 8, bonus: 3 },
@@ -129,7 +142,7 @@ export const DUEL_CLASSES: Record<DuelClassKey, DuelClass> = {
     label: "Mage",
     weapon: "magic",
     weaponEmoji: "✨",
-    maxHp: 80,
+    maxHp: DUEL_START_HP,
     hitMod: 1,
     critOn: 20,
     damage: { count: 1, faces: 12, bonus: 2 },
@@ -139,7 +152,7 @@ export const DUEL_CLASSES: Record<DuelClassKey, DuelClass> = {
     label: "Gunslinger",
     weapon: "pistol",
     weaponEmoji: "🔫",
-    maxHp: 90,
+    maxHp: DUEL_START_HP,
     hitMod: 1,
     critOn: 19,
     damage: { count: 1, faces: 8, bonus: 4 },
@@ -583,19 +596,18 @@ async function resolveDuel(session: GameSession, ctx: ResolveContext): Promise<v
     const winnerIdx: 0 | 1 = winnerIsChallenger ? 0 : 1;
     const loserIdx: 0 | 1 = winnerIsChallenger ? 1 : 0;
     const winnerMult = duelMultiplier(state.totalDamageDealt[winnerIdx], state.totalDamageDealt[loserIdx]);
-    const loserMult = duelMultiplier(state.totalDamageDealt[loserIdx], state.totalDamageDealt[winnerIdx]) * 0.25;
+    const loserMult = duelMultiplier(state.totalDamageDealt[loserIdx], state.totalDamageDealt[winnerIdx]) * DUEL_LOSER_REWARD_FACTOR;
+    // Loser consolation: the same XP + Currency base as the win but at the
+    // reduced loser multiplier; never the shop item (that's the winner's prize).
+    const loserReward: BuiltinCommandReward = {
+      xp: state.reward.xp,
+      currency: state.reward.currency,
+      itemKey: null,
+      itemCount: 0,
+    };
     if (rewardIsNonZero(state.reward)) {
       await mintRewardForWinner(ctx.db, ctx.io, winner, state.reward, "duel_win", { multiplier: winnerMult });
-      if (state.reward.xp > 0) {
-        // Loser's XP-only consolation reward. Strip currency + item
-        // so the loser doesn't walk away with the shop prize they
-        // didn't win; the XP rewards the time spent in the fight.
-        const loserReward: BuiltinCommandReward = {
-          xp: state.reward.xp,
-          currency: 0,
-          itemKey: null,
-          itemCount: 0,
-        };
+      if (loserReward.xp > 0 || loserReward.currency > 0) {
         await mintRewardForWinner(ctx.db, ctx.io, loser, loserReward, "duel_loss", { multiplier: loserMult });
       }
     }
@@ -607,11 +619,14 @@ async function resolveDuel(session: GameSession, ctx: ResolveContext): Promise<v
       { multiplier: winnerMult },
     );
     if (winningsLine) lines.push(winningsLine);
-    if (state.reward.xp > 0) {
-      const loserXp = Math.round(state.reward.xp * loserMult);
-      if (loserXp > 0) {
-        lines.push(`📚 ${loser.displayName} earns ${loserXp} XP for the effort.`);
-      }
+    // Loser consolation line, mirrors the winnings line for XP + Currency.
+    const loserXp = Math.round(loserReward.xp * loserMult);
+    const loserCur = Math.round(loserReward.currency * loserMult);
+    const loserParts: string[] = [];
+    if (loserXp > 0) loserParts.push(`${loserXp} XP`);
+    if (loserCur > 0) loserParts.push(`${loserCur} Currency`);
+    if (loserParts.length > 0) {
+      lines.push(`📚 ${loser.displayName} earns ${loserParts.join(" + ")} for the effort.`);
     }
   } else {
     lines.push("Duel ended with no clear winner.");
@@ -631,17 +646,18 @@ async function resolveDuel(session: GameSession, ctx: ResolveContext): Promise<v
  * this same calculation, see resolveDuel).
  *
  * Formula:
- *   raw = damageDealt / max(damageReceived, 25)
+ *   raw = damageDealt / max(damageReceived, 10)
  *   clamped to [0.5, 5]
  *
- * The denominator floor of 25 keeps a flawless sweep (took zero) from
- * blowing the multiplier to infinity. The [0.5, 5] clamp keeps any
- * single duel's payout within a 10× window end-to-end, so the admin
- * can tune base rewards without worrying about a single lucky fight
- * draining the configured pool.
+ * The denominator floor keeps a flawless sweep (took zero) from blowing the
+ * multiplier to infinity. It is set to 10 to match the 20-HP scale, at the
+ * old floor of 25 a 20-HP fight always took less than the floor, pinning
+ * every result to a flat ~0.8x and erasing the skill differentiation. The
+ * [0.5, 5] clamp keeps any single duel's payout within a 10x window so the
+ * admin can tune base rewards without a single lucky fight draining the pool.
  */
 export function duelMultiplier(damageDealt: number, damageReceived: number): number {
-  const raw = damageDealt / Math.max(damageReceived, 25);
+  const raw = damageDealt / Math.max(damageReceived, 10);
   return Math.max(0.5, Math.min(5, raw));
 }
 

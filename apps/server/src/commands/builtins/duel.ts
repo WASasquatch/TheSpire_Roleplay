@@ -181,7 +181,7 @@ export const duelCommand: CommandHandler = {
   name: "duel",
   usage: "/duel <opponent> [as <your class>] [vs <suggested opponent class>] | /duel accept [class] | /duel attack|defend|parry|rest | /duel status | /duel forfeit",
   description:
-    "Turn-based 1v1 combat. Challenge someone with /duel <name>; the opponent accepts with /duel accept and picks their own class. As the challenger, set your own class right in the start line: /duel Casey as mage. Classes (knight/archer/mage/gunslinger) have different weapons, HP, and crit ranges. Winner mints the configured XP / Currency / item reward.",
+    "Turn-based 1v1 combat. Challenge someone with /duel <name>; the opponent accepts with /duel accept and picks their own class. As the challenger, set your own class right in the start line: /duel Casey as mage. Everyone starts at 20 HP; classes (knight/archer/mage/gunslinger) differ by weapon, damage dice, and crit range. Winner mints the configured XP / Currency / item reward; the loser earns a reduced consolation.",
   subcommands: [
     { verb: "<opponent>", usage: "/duel Casey", description: "Challenge someone with the default class (knight). Use a name, or paste an identity token to disambiguate when multiple identities share the name." },
     { verb: "<opponent> as <class>", usage: "/duel Casey as mage", description: "Challenge someone and set YOUR class for the fight. Classes: knight, archer, mage, gunslinger." },

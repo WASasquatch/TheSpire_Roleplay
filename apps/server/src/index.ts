@@ -1127,8 +1127,10 @@ async function main() {
       await broadcastTheaterSync(io, roomId);
       // Checkpoint the new playback state so a restart resumes from this
       // control (a fresh seek/pause survives even a crash 1s later, ahead
-      // of the next 30s sweep).
-      await persistTheaterCheckpoint(db, roomId);
+      // of the next 30s sweep). The `progress` heartbeat fires every ~10s,
+      // though; let the periodic sweep persist those rather than writing the
+      // row on every beat.
+      if (action !== "progress") await persistTheaterCheckpoint(db, roomId);
       ack?.({ ok: true });
     });
 

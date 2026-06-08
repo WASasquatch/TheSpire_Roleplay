@@ -40,7 +40,7 @@ export interface TheaterState {
   errorSkips: number;
 }
 
-export type TheaterAction = "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended" | "error";
+export type TheaterAction = "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended" | "error" | "progress";
 
 const ENDED_DEBOUNCE_MS = 2000;
 
@@ -238,6 +238,17 @@ export function applyControl(
       next.updatedAtMs = now;
       resetErrorChain();
       break;
+    case "progress": {
+      // Re-anchor to the controller's REAL position so wall-clock
+      // extrapolation can't drift ahead of the actual frame over a long
+      // video. No index / play-state change. Ignore a stale report for a
+      // source that's already been advanced past.
+      if (opts.index !== undefined && opts.index !== prev.index) break;
+      if (opts.positionSec === undefined) break;
+      next.positionSec = Math.max(0, opts.positionSec);
+      next.updatedAtMs = now;
+      break;
+    }
     case "select": {
       next.index = clampIndex(opts.index ?? 0, len);
       next.positionSec = 0;

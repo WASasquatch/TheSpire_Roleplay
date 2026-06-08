@@ -18,6 +18,29 @@ import { StyledName } from "./StyledName.js";
 import { useChat } from "../state/store.js";
 import { ProfileMarquee, ProfileVisitorsChip, useTrackProfileView } from "./ProfileFlairSurfaces.js";
 
+/**
+ * Unified profile action-button styling. Every button shares ONE shape; only
+ * the color slot changes, and it encodes intent so the row reads at a glance:
+ *   - action  : communicate (Message / Whisper / Switch identity)
+ *   - accent  : caution, reversible        (Ignore)
+ *   - system  : strongest, account-level   (Block)
+ * `ACT_PILL_*` are the desktop pills; `ACT_SEG_*` are the mobile full-width
+ * segmented bar. Keep these as the single source so the buttons can't drift
+ * back into the four-different-designs state they were in.
+ */
+const ACT_PILL = "rounded border bg-keep-bg px-2 py-1 transition-colors";
+const ACT_PILL_ACTION = `${ACT_PILL} border-keep-action/50 text-keep-action hover:bg-keep-action/10`;
+const ACT_PILL_NEUTRAL = `${ACT_PILL} border-keep-rule text-keep-text hover:bg-keep-panel`;
+const ACT_PILL_ACCENT = `${ACT_PILL} border-keep-accent/60 text-keep-accent hover:bg-keep-accent/10`;
+const ACT_PILL_SYSTEM = `${ACT_PILL} border-keep-system/60 text-keep-system hover:bg-keep-system/10`;
+
+const ACT_SEG = "flex-1 px-2 py-2.5 transition-colors";
+const ACT_SEG_ACTION = `${ACT_SEG} text-keep-action hover:bg-keep-action/10`;
+const ACT_SEG_NEUTRAL = `${ACT_SEG} text-keep-text hover:bg-keep-panel`;
+const ACT_SEG_ACCENT = `${ACT_SEG} text-keep-accent hover:bg-keep-accent/10`;
+const ACT_SEG_SYSTEM = `${ACT_SEG} text-keep-system hover:bg-keep-system/10`;
+const ACT_SEG_DIVIDER = "border-r border-keep-rule";
+
 interface Props {
   profile: ProfileView;
   onClose: () => void;
@@ -947,7 +970,7 @@ function ProfileBody({
                     type="button"
                     onClick={() => onMessage(profile.profile.userId, name, avatar)}
                     title="Open a direct message thread with this user."
-                    className="rounded border border-keep-action/40 bg-keep-bg px-2 py-1 text-keep-action hover:bg-keep-action/10"
+                    className={ACT_PILL_ACTION}
                   >
                     💬 Message
                   </button>
@@ -956,7 +979,8 @@ function ProfileBody({
                   <button
                     type="button"
                     onClick={() => onWhisper(name)}
-                    className="rounded border border-keep-border bg-keep-bg px-2 py-1 hover:bg-keep-panel"
+                    title="Send a one-off private message in chat."
+                    className={ACT_PILL_NEUTRAL}
                   >
                     Whisper
                   </button>
@@ -969,7 +993,8 @@ function ProfileBody({
                         onIgnore(name);
                       }
                     }}
-                    className="rounded border border-keep-accent/60 bg-keep-bg px-2 py-1 text-keep-accent hover:bg-keep-accent/10"
+                    title="Hide this user's messages from you (one-way, reversible)."
+                    className={ACT_PILL_ACCENT}
                   >
                     Ignore
                   </button>
@@ -982,7 +1007,8 @@ function ProfileBody({
                         onBlock(name);
                       }
                     }}
-                    className="rounded border border-keep-accent bg-keep-accent/10 px-2 py-1 font-semibold text-keep-accent hover:bg-keep-accent/20"
+                    title="Block: you and this user become invisible to each other everywhere."
+                    className={ACT_PILL_SYSTEM}
                   >
                     Block
                   </button>
@@ -1030,7 +1056,7 @@ function ProfileBody({
                 type="button"
                 onClick={() => onMessage(profile.profile.userId, name, avatar)}
                 title="Open a direct message thread with this user."
-                className="flex-1 border-r border-keep-rule px-2 py-2.5 text-keep-action hover:bg-keep-action/10"
+                className={`${ACT_SEG_ACTION} ${ACT_SEG_DIVIDER}`}
               >
                 💬 Message
               </button>
@@ -1039,7 +1065,7 @@ function ProfileBody({
               <button
                 type="button"
                 onClick={() => onWhisper(name)}
-                className="flex-1 border-r border-keep-rule px-2 py-2.5 text-keep-text hover:bg-keep-panel"
+                className={`${ACT_SEG_NEUTRAL} ${ACT_SEG_DIVIDER}`}
               >
                 Whisper
               </button>
@@ -1052,7 +1078,7 @@ function ProfileBody({
                     onIgnore(name);
                   }
                 }}
-                className="flex-1 border-r border-keep-rule px-2 py-2.5 text-keep-accent hover:bg-keep-accent/10"
+                className={`${ACT_SEG_ACCENT} ${ACT_SEG_DIVIDER}`}
               >
                 Ignore
               </button>
@@ -1065,7 +1091,7 @@ function ProfileBody({
                     onBlock(name);
                   }
                 }}
-                className="flex-1 px-2 py-2.5 font-semibold text-keep-accent hover:bg-keep-accent/10"
+                className={ACT_SEG_SYSTEM}
               >
                 Block
               </button>

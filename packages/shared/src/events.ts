@@ -178,11 +178,16 @@ export interface ClientToServerEvents {
    *                       unembeddable); skip past it to the next source
    *                       regardless of loop mode. `index` identifies which
    *                       source ended/errored.
+   *   progress          , the CONTROLLER's actual playback position
+   *                       (`positionSec`, for `index`). Owner/mod-gated. Re-
+   *                       anchors the server's position to reality so wall-
+   *                       clock extrapolation can't drift ahead over a long
+   *                       video; does not change index / play state.
    */
   "theater:control": (
     payload: {
       roomId: string;
-      action: "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended" | "error";
+      action: "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended" | "error" | "progress";
       positionSec?: number;
       index?: number;
     },

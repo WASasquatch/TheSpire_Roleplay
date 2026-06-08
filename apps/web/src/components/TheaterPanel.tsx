@@ -18,7 +18,7 @@ import { useChat } from "../state/store.js";
  * the height persists per-device and the chat below takes the rest.
  */
 
-type ControlAction = "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended" | "error";
+type ControlAction = "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended" | "error" | "progress";
 
 interface Props {
   socket: Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -42,6 +42,14 @@ const DRIFT_TOLERANCE_SEC = 1.5;
 // judge it again. Without this, a seek that's slow to land reads as fresh
 // drift on the next tick and we seek again, thrashing near the start.
 const SEEK_COOLDOWN_MS = 3000;
+// Automatic drift-correction never seeks into the final N seconds of a source.
+// Seeking to the very end trips the player's `ended` and skips the video; only
+// natural playback reaching the end should advance the playlist.
+const DRIFT_END_MARGIN_SEC = 10;
+// How often the controlling client reports its REAL playback position so the
+// server re-anchors instead of extrapolating from wall-clock alone (which
+// drifts ahead over a long video as buffering accumulates).
+const POSITION_HEARTBEAT_MS = 10_000;
 // Live streams have no shared timeline; instead of converging on a
 // position anchor we keep each player near the broadcast's live edge.
 // Only re-seek to the edge when more than this far behind, so normal
@@ -129,9 +137,16 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
   // which is the "stuck repeating the first few seconds" bug.
   const expectedPosition = useCallback((): number => {
     if (!sync) return 0;
-    if (!sync.isPlaying) return Math.max(0, sync.positionSec);
-    return sync.positionSec + Math.max(0, (Date.now() - sync.serverTimeMs) / 1000);
-  }, [sync]);
+    const base = !sync.isPlaying
+      ? Math.max(0, sync.positionSec)
+      : sync.positionSec + Math.max(0, (Date.now() - sync.serverTimeMs) / 1000);
+    // Never extrapolate past the video's length. Over a long video, buffering
+    // stalls make the wall-clock term outrun the real frame; without this cap
+    // the drift logic would seek toward a position beyond the end (mis-drawing
+    // the bar and tripping a premature auto-advance). The controller heartbeat
+    // below keeps `positionSec` itself honest; this is the belt-and-suspenders.
+    return duration > 0 ? Math.min(base, duration) : base;
+  }, [sync, duration]);
 
   // Whether the current source has produced real playback (a progress tick
   // past 0). Distinguishes a DEAD source (errors before ever playing → we
@@ -219,7 +234,13 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
       const p = playerRef.current;
       if (!p) return;
       if (Date.now() - lastSeekAtRef.current < SEEK_COOLDOWN_MS) return;
-      const target = expectedPosition();
+      // Cap automatic drift-correction short of the very end. Seeking into the
+      // final stretch would trip the player's `ended` and skip the video, the
+      // "advanced ~10 min early" bug. Genuine advancement comes from natural
+      // playback reaching the end (onEnded), never from drift.
+      const dur = p.getDuration() ?? duration;
+      const cap = dur > 0 ? dur - DRIFT_END_MARGIN_SEC : Infinity;
+      const target = Math.min(expectedPosition(), cap);
       const cur = p.getCurrentTime() ?? 0;
       if (cur < target - DRIFT_TOLERANCE_SEC) {
         seekTo(target);
@@ -227,6 +248,33 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
     }, 1500);
     return () => window.clearInterval(id);
   }, [isPlaying, ready, isEmbed, isLive, expectedPosition, seekTo]);
+
+  // Drive the seek bar from a local poll of the player's ACTUAL position
+  // instead of relying solely on react-player's onProgress. onProgress can go
+  // quiet on some players/states (notably YouTube right after a join-seek, or
+  // while buffering) even as playback advances, which leaves the bar frozen
+  // ("playing but the timer isn't counting up"). Polling getCurrentTime every
+  // 500ms keeps the bar tracking reality. Skipped for live (no shared
+  // timeline / seek bar) and embeds (no player handle).
+  useEffect(() => {
+    if (!isPlaying || !ready || isEmbed || isLive) return;
+    const id = window.setInterval(() => {
+      const p = playerRef.current;
+      if (!p) return;
+      const cur = p.getCurrentTime();
+      if (typeof cur === "number" && Number.isFinite(cur) && cur >= 0) {
+        setPlayed(cur);
+        if (cur > 0.1) startedRef.current = true;
+      }
+      // Backstop for a missed onDuration so the bar's track + readout aren't
+      // stuck at 0:00 if the duration callback never fired.
+      const dur = p.getDuration();
+      if (typeof dur === "number" && Number.isFinite(dur) && dur > 0) {
+        setDuration((d) => (d !== dur ? dur : d));
+      }
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [isPlaying, ready, isEmbed, isLive]);
 
   // Live-edge tracking. A live source has no position anchor; instead we
   // pin the player to the broadcast's live edge. hls.js reports the
@@ -254,6 +302,29 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
     },
     [socket, roomId],
   );
+
+  // Position heartbeat. The controlling client reports its ACTUAL playback
+  // position so the server re-anchors to reality rather than extrapolating
+  // from a fixed start-of-video timestamp. Without this, accumulated buffering
+  // over a long movie makes the server's position run minutes ahead of the
+  // real frame, which mis-draws everyone's seek bar and prematurely "ends"
+  // the video. Gated on tab visibility so a backgrounded host (whose player
+  // the browser paused) doesn't pin the room to a frozen position; on return
+  // its own drift logic catches it up to the live edge before it reports.
+  useEffect(() => {
+    if (!canControl || !isPlaying || !ready || isEmbed || isLive) return;
+    const report = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      const p = playerRef.current;
+      if (!p) return;
+      const cur = p.getCurrentTime();
+      if (typeof cur === "number" && Number.isFinite(cur) && cur >= 0) {
+        emitControl("progress", { positionSec: cur, index: safeIndex });
+      }
+    };
+    const id = window.setInterval(report, POSITION_HEARTBEAT_MS);
+    return () => window.clearInterval(id);
+  }, [canControl, isPlaying, ready, isEmbed, isLive, emitControl, safeIndex]);
 
   const togglePlay = () => {
     const positionSec = playerRef.current?.getCurrentTime() ?? expectedPosition();
@@ -298,7 +369,10 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
 
   const roomReactions = reactions.filter((r) => r.roomId === roomId);
   const sliderMax = duration > 0 ? duration : 0;
-  const sliderValue = scrub ?? played;
+  // Clamp to the track so a transient over-extrapolated `played` can't push
+  // the thumb past the end / mislabel the time readout.
+  const rawSliderValue = scrub ?? played;
+  const sliderValue = duration > 0 ? Math.min(Math.max(0, rawSliderValue), duration) : Math.max(0, rawSliderValue);
 
   return (
     <div className="flex flex-col border-b border-keep-border/60" style={{ height }}>

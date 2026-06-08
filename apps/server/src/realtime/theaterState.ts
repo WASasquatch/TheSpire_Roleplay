@@ -30,16 +30,24 @@ export interface TheaterState {
    * index change is ignored so the playlist advances exactly once.
    */
   lastIndexChangeAt: number;
+  /**
+   * Consecutive sources skipped via `error` (dead / unembeddable) without a
+   * successful play in between. Reset to 0 whenever a source plays to its end
+   * (`ended`) or a human issues any control. If it reaches the playlist length
+   * the whole list is effectively dead, so we STOP rather than hot-loop
+   * skipping forever.
+   */
+  errorSkips: number;
 }
 
-export type TheaterAction = "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended";
+export type TheaterAction = "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended" | "error";
 
 const ENDED_DEBOUNCE_MS = 2000;
 
 const byRoom = new Map<string, TheaterState>();
 
 function defaultState(now: number): TheaterState {
-  return { index: 0, isPlaying: false, positionSec: 0, updatedAtMs: now, lastIndexChangeAt: now };
+  return { index: 0, isPlaying: false, positionSec: 0, updatedAtMs: now, lastIndexChangeAt: now, errorSkips: 0 };
 }
 
 export function getTheater(roomId: string): TheaterState | null {
@@ -138,6 +146,7 @@ export function hydrate(roomId: string, cp: TheaterCheckpoint, now: number): voi
     isPlaying: cp.isPlaying,
     updatedAtMs: now,
     lastIndexChangeAt: now,
+    errorSkips: 0,
   });
 }
 
@@ -206,20 +215,28 @@ export function applyControl(
     next.lastIndexChangeAt = now;
   };
 
+  // A human control or a clean end-of-source means playback is healthy again,
+  // so the dead-source skip chain resets. (The `error` branch is the only one
+  // that grows it.)
+  const resetErrorChain = () => { next.errorSkips = 0; };
+
   switch (action) {
     case "play":
       next.isPlaying = true;
       next.positionSec = opts.positionSec ?? prev.positionSec;
       next.updatedAtMs = now;
+      resetErrorChain();
       break;
     case "pause":
       next.isPlaying = false;
       next.positionSec = opts.positionSec ?? prev.positionSec;
       next.updatedAtMs = now;
+      resetErrorChain();
       break;
     case "seek":
       next.positionSec = Math.max(0, opts.positionSec ?? 0);
       next.updatedAtMs = now;
+      resetErrorChain();
       break;
     case "select": {
       next.index = clampIndex(opts.index ?? 0, len);
@@ -227,17 +244,26 @@ export function applyControl(
       next.isPlaying = true;
       next.updatedAtMs = now;
       next.lastIndexChangeAt = now;
+      resetErrorChain();
       break;
     }
     case "next":
       advance(1);
+      resetErrorChain();
       break;
     case "prev":
       advance(-1);
+      resetErrorChain();
       break;
     case "ended": {
-      // Debounce duplicate / stale end-of-source reports.
+      // Ignore a report about a source that is no longer the live one
+      // (stale / duplicate from another viewer after we already advanced).
+      if (opts.index !== undefined && opts.index !== prev.index) break;
+      // Debounce duplicate / stale end-of-source reports (also covers the
+      // loop-"one" repeat case, where the index never changes to self-dedup).
       if (now - prev.lastIndexChangeAt < ENDED_DEBOUNCE_MS) break;
+      // A source played through cleanly → the dead-skip chain is broken.
+      resetErrorChain();
       if (loop === "one") {
         next.positionSec = 0;
         next.isPlaying = true;
@@ -254,6 +280,42 @@ export function applyControl(
           next.updatedAtMs = now;
         }
       }
+      break;
+    }
+    case "error": {
+      if (len <= 0) break;
+      // Only the live source's failure matters; a stale report for an
+      // already-skipped index is ignored (this also dedups multiple viewers
+      // reporting the same dead source, the first advances the index).
+      if (opts.index !== undefined && opts.index !== prev.index) break;
+      const skips = prev.errorSkips + 1;
+      if (skips >= len) {
+        // Every source failed in a row → the whole playlist is dead. Stop
+        // instead of hot-looping through dead sources forever; a human can
+        // re-queue / hit play to retry (which resets the chain).
+        next.isPlaying = false;
+        next.updatedAtMs = now;
+        next.errorSkips = 0;
+        break;
+      }
+      // Skip the dead source. Always step FORWARD regardless of loop mode,
+      // repeating a dead source under loop "one" would wedge playback.
+      if (loop === "all") {
+        next.index = ((prev.index + 1) % len + len) % len;
+      } else if (prev.index + 1 < len) {
+        next.index = prev.index + 1;
+      } else {
+        // loop "off"/"one" on the last source with nothing after it → stop.
+        next.isPlaying = false;
+        next.updatedAtMs = now;
+        next.errorSkips = 0;
+        break;
+      }
+      next.positionSec = 0;
+      next.isPlaying = true;
+      next.updatedAtMs = now;
+      next.lastIndexChangeAt = now;
+      next.errorSkips = skips;
       break;
     }
   }

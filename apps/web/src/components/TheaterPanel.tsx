@@ -18,7 +18,7 @@ import { useChat } from "../state/store.js";
  * the height persists per-device and the chat below takes the rest.
  */
 
-type ControlAction = "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended";
+type ControlAction = "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended" | "error";
 
 interface Props {
   socket: Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -47,6 +47,15 @@ const SEEK_COOLDOWN_MS = 3000;
 // Only re-seek to the edge when more than this far behind, so normal
 // HLS buffer jitter doesn't cause constant re-seeks.
 const LIVE_EDGE_TOLERANCE_SEC = 6;
+// A genuine end-of-source means the player is actually NEAR the end. react-
+// player (YouTube especially) fires `onEnded` spuriously near the START on a
+// buffering hiccup, an embed/playback error, or right after a programmatic
+// seek. Acting on those makes the server advance/repeat the playlist every
+// couple seconds, which is exactly the "stuck looping the first few seconds,
+// never actually playing through" bug. We only forward `ended` when the
+// reported position is within this of the duration; genuine ends (and very
+// short clips, where duration <= this) still pass, the false alarms don't.
+const END_REACHED_GRACE_SEC = 2.5;
 const QUICK_REACTIONS = ["❤️", "😂", "🔥", "👏", "😮", "👍", "😭", "🎉"];
 
 function loadHeight(): number {
@@ -124,6 +133,12 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
     return sync.positionSec + Math.max(0, (Date.now() - sync.serverTimeMs) / 1000);
   }, [sync]);
 
+  // Whether the current source has produced real playback (a progress tick
+  // past 0). Distinguishes a DEAD source (errors before ever playing → we
+  // skip it) from a transient mid-playback error (don't skip for everyone
+  // over one viewer's network hiccup). Reset on every source change.
+  const startedRef = useRef(false);
+
   // All seeks route through here so we can stamp the time (for the
   // post-seek cooldown) and never seek to a negative position.
   const lastSeekAtRef = useRef(0);
@@ -138,8 +153,20 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
   // panel re-renders ~once/sec from onProgress + reactions) made
   // react-player re-init the YouTube iframe, which reloads the video to
   // the start - one of the ways playback got stuck at the first seconds.
+  //
+  // `playsinline` / `playsInline` are load-bearing on iOS (iPad/iPhone
+  // Safari): WITHOUT them iOS hijacks the video into its native fullscreen
+  // player, where our shared-position seeks don't reach the element, so each
+  // iPad plays its own timeline and drifts out of sync. Android Chrome plays
+  // inline by default, which is why it already syncs. We set both the YouTube
+  // playerVar (`playsinline: 1`) and the underlying <video> attribute used by
+  // the file/HLS player (`playsInline: true`) so direct files + live HLS get
+  // it too.
   const playerConfig = useMemo(
-    () => ({ youtube: { playerVars: { controls: 0, disablekb: 1, modestbranding: 1, rel: 0 } } }),
+    () => ({
+      youtube: { playerVars: { controls: 0, disablekb: 1, modestbranding: 1, rel: 0, playsinline: 1 } },
+      file: { attributes: { playsInline: true } },
+    }),
     [],
   );
 
@@ -152,11 +179,13 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
     }
   }, [height]);
 
-  // New source loading → wait for the fresh onReady before seeking.
+  // New source loading → wait for the fresh onReady before seeking, and reset
+  // the "has it played?" flag so a dead new source can be detected.
   useEffect(() => {
     setReady(false);
     setDuration(0);
     setPlayed(0);
+    startedRef.current = false;
   }, [current?.url]);
 
   // Reconcile to the authoritative position whenever a control lands
@@ -302,13 +331,44 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
                 height="100%"
                 onReady={() => setReady(true)}
                 onDuration={(d) => setDuration(d)}
-                onProgress={(st) => setPlayed(st.playedSeconds)}
+                onProgress={(st) => {
+                  setPlayed(st.playedSeconds);
+                  // Real playback happened → this source isn't dead.
+                  if (st.playedSeconds > 0.1) startedRef.current = true;
+                }}
                 onEnded={() => {
-                  // Only controllers report end-of-source; the server
-                  // debounces duplicate reports and owns the advance.
-                  // Live streams are exempt: a momentary drop/reconnect
-                  // shouldn't skip to the next playlist item.
-                  if (canControl && !isLive) emitControl("ended");
+                  // End-of-source is a PASSIVE signal ANY viewer reports, so
+                  // the playlist advances even with no mod present. The server
+                  // validates against the live index + debounces, so duplicate
+                  // reports from many viewers advance only once. Live streams
+                  // are exempt: a momentary drop/reconnect shouldn't skip on.
+                  if (isLive) return;
+                  // Guard against react-player firing `onEnded` spuriously
+                  // near the start (buffering / error / post-seek). Acting on
+                  // those resets playback every couple seconds, the stuck-at-
+                  // the-start loop. Take whichever position estimate is
+                  // furthest along: getCurrentTime() can snap to 0 the moment
+                  // 'ended' fires on some players, while `played` (last
+                  // onProgress) still holds the near-end value; a lagging
+                  // `played` is covered by the live getCurrentTime(). Only a
+                  // position genuinely near the end advances the playlist.
+                  const p = playerRef.current;
+                  const dur = p?.getDuration() ?? duration;
+                  const pos = Math.max(p?.getCurrentTime() ?? 0, played);
+                  if (dur > 0 && pos < dur - END_REACHED_GRACE_SEC) return;
+                  emitControl("ended", { index: safeIndex });
+                }}
+                onError={() => {
+                  // A source that FAILS is auto-skipped so the playlist keeps
+                  // going with no mod intervention. Restrict the auto-skip to
+                  // sources that never actually played (dead / removed /
+                  // unembeddable): a mid-playback error after real progress is
+                  // likely a transient or viewer-local hiccup and shouldn't
+                  // skip the source for everyone. Passive signal, so any
+                  // viewer may report it; the server validates the index +
+                  // caps consecutive skips so an all-dead list can't hot-loop.
+                  if (isLive || startedRef.current) return;
+                  emitControl("error", { index: safeIndex });
                 }}
                 config={playerConfig}
               />
@@ -368,7 +428,21 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
         {current && !isEmbed && muted ? (
           <button
             type="button"
-            onClick={() => setMuted(false)}
+            onClick={() => {
+              setMuted(false);
+              // iOS Safari gates programmatic seeks behind a user gesture, so
+              // a muted-autoplay iPad can be stuck on its own timeline. This
+              // tap IS a gesture, use it to snap to the shared position (live
+              // edge for streams) so the viewer joins in sync. Harmless on
+              // other platforms (it just re-aligns to where it already is).
+              if (isLive) {
+                const p = playerRef.current;
+                const end = p?.getDuration() ?? 0;
+                if (Number.isFinite(end) && end > 0) seekTo(end);
+              } else {
+                seekTo(expectedPosition());
+              }
+            }}
             className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-4 py-1.5 text-sm font-medium text-white shadow-lg ring-1 ring-white/20 hover:bg-black/85"
           >
             🔇 Tap to unmute

@@ -5,6 +5,7 @@ import { matchThemePreset, resolveScriptoriumAuthorTier, roleRank } from "@theke
 import { getSettings, parseUserThemeJson } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
+import { isBlockedBetween } from "../../auth/blocks.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -613,6 +614,28 @@ async function buildCharacterProfileView(
 }
 
 /**
+ * lookupProfile + global-block gate. A blocked user's profile is invisible
+ * (mutual), so any viewer who is blocked with the resolved profile's owner
+ * gets `null` (not found), exactly as if the name didn't resolve. Centralizing
+ * the gate here covers every caller, the HTTP /profiles/:name route, the
+ * userlist click-to-view handler, and the /whois command, so none can leak a
+ * blocked identity. Anonymous viewers (no `viewerId`) can't have blocks, so
+ * they skip the check.
+ */
+export async function lookupProfile(
+  db: import("../../db/index.js").Db,
+  name: string,
+  viewerId?: string,
+): Promise<ProfileView | null> {
+  const view = await resolveProfileView(db, name, viewerId);
+  if (view && viewerId && view.profile.userId !== viewerId
+      && await isBlockedBetween(db, viewerId, view.profile.userId)) {
+    return null;
+  }
+  return view;
+}
+
+/**
  * Resolve a name (master username OR character name) or an identity
  * token (`@id:<userId>` / `@cid:<characterId>`) to a ProfileView.
  * Used by /whois, the HTTP profile endpoint, and the click-to-view
@@ -623,7 +646,7 @@ async function buildCharacterProfileView(
  * some other identity that happens to share its display name. Bare
  * names take the legacy NBSP-variant flow.
  */
-async function lookupProfile(
+async function resolveProfileView(
   db: import("../../db/index.js").Db,
   name: string,
   /** Authenticated viewer id, when available. Threaded through to
@@ -1108,5 +1131,3 @@ export const whoisCommand: CommandHandler = {
     ctx.socket.emit("ui:hint", { kind: "open-profile", profile: view });
   },
 };
-
-export { lookupProfile };

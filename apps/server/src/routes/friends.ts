@@ -8,6 +8,7 @@ import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { characterIdFromQuery, eqIdentity, ownsCharacter, type Identity } from "../auth/identity.js";
 import { eqNameInsensitive } from "../lib/nameLookup.js";
+import { blockedUserIdsFor, isBlockedBetween } from "../auth/blocks.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -212,7 +213,12 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
       });
     }
 
-    return { matches };
+    // Blocked accounts are invisible: drop any match for a user we're blocked
+    // with (either direction) so they can't be found or friend-requested.
+    const blocked = await blockedUserIdsFor(db, me.id);
+    const visible = blocked.size ? matches.filter((m) => !blocked.has(m.userId)) : matches;
+
+    return { matches: visible };
   });
 
   app.get<{ Querystring: { characterId?: string } }>("/me/friends", async (req, reply) => {
@@ -253,13 +259,20 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     // We need both the user row (for username + master avatar) and
     // optionally the specific character row (for character name +
     // avatar when the friendship was tagged to a character).
-    const otherIdentities = rows.map((r) => {
+    const otherIdentitiesAll = rows.map((r) => {
       const iAmFriender = r.frienderUserId === me.id
         && (r.frienderCharacterId ?? null) === charId;
       return iAmFriender
         ? { userId: r.friendedUserId, characterId: r.friendedCharacterId ?? null }
         : { userId: r.frienderUserId, characterId: r.frienderCharacterId ?? null };
     });
+    // Hide friends we're blocked with (either direction). Keep-but-hide: the
+    // friendship row stays, it just doesn't surface while the block stands,
+    // and reappears once unblocked.
+    const blockedSet = await blockedUserIdsFor(db, me.id);
+    const otherIdentities = blockedSet.size
+      ? otherIdentitiesAll.filter((o) => !blockedSet.has(o.userId))
+      : otherIdentitiesAll;
 
     const otherUserIds = [...new Set(otherIdentities.map((o) => o.userId))];
     const userRows = otherUserIds.length
@@ -273,29 +286,40 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
       : [];
     const charById = new Map(charRows.map((c) => [c.id, c]));
 
-    // Incognito moderators are subtracted from the online set so the
-    // friends list doesn't light up a dot next to them. Same global-
-    // invisibility contract the userlist + /users endpoint honor.
+    // Per-identity presence. Friendships are pinned to a specific identity
+    // (a character, or master/OOC), so the online dot must reflect THAT
+    // identity's presence, not merely whether the account is connected as
+    // some other character, which would light up @Aphelios's row when the
+    // owner is actually online voicing a different, un-friended character
+    // (the same per-identity leak the watcher ping guards against). A socket
+    // voicing character C marks (userId, C) present; an OOC socket marks
+    // (userId, null). Key shape: `${userId}:${characterId ?? ""}`.
+    //
+    // Incognito moderators are globally invisible, so all of their
+    // identities are stripped, same contract the userlist + /users honor.
     const allSockets = await io.fetchSockets();
-    const rawOnline = new Set<string>();
+    const onlineIdentities = new Set<string>();
+    const onlineUserIds = new Set<string>();
     for (const s of allSockets) {
       const uid = (s.data as { userId?: string }).userId;
-      if (uid) rawOnline.add(uid);
+      if (!uid) continue;
+      onlineUserIds.add(uid);
+      const tabChar = (s.data as { tabCharId?: string | null }).tabCharId ?? null;
+      onlineIdentities.add(`${uid}:${tabChar ?? ""}`);
     }
-    let online = rawOnline;
-    if (rawOnline.size > 0) {
+    const hiddenUserIds = new Set<string>();
+    if (onlineUserIds.size > 0) {
       const incognitoRows = await db
         .select({ id: users.id })
         .from(users)
         .where(and(
           eq(users.incognitoMode, true),
-          sql`${users.id} IN (${sql.join([...rawOnline].map((u) => sql`${u}`), sql`, `)})`,
+          sql`${users.id} IN (${sql.join([...onlineUserIds].map((u) => sql`${u}`), sql`, `)})`,
         ));
-      if (incognitoRows.length > 0) {
-        const hide = new Set(incognitoRows.map((r) => r.id));
-        online = new Set([...rawOnline].filter((id) => !hide.has(id)));
-      }
+      for (const r of incognitoRows) hiddenUserIds.add(r.id);
     }
+    const isIdentityOnline = (userId: string, characterId: string | null) =>
+      !hiddenUserIds.has(userId) && onlineIdentities.has(`${userId}:${characterId ?? ""}`);
 
     const entries: FriendListEntry[] = otherIdentities.map((o) => {
       const u = userById.get(o.userId);
@@ -334,7 +358,9 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
         handle: usingChar ? c!.name : (u?.username ?? "(unknown)"),
         avatarUrl,
         avatarCrop,
-        online: online.has(o.userId),
+        // Presence of the EXACT friended identity (pinned character, or
+        // master/OOC when characterId is null), not the account at large.
+        online: isIdentityOnline(o.userId, o.characterId),
         recipientDmEnabled,
       };
     });
@@ -442,6 +468,11 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     if (targetIdentity.userId === me.id && targetIdentity.characterId === myCharId) {
       reply.code(400); return { error: "self" };
     }
+    // A block hides the target entirely, so a friend request behaves as if
+    // they don't exist (same 404 as an unknown user, never reveal the block).
+    if (await isBlockedBetween(db, me.id, targetIdentity.userId)) {
+      reply.code(404); return { error: "no_user" };
+    }
 
     // Idempotency over the identity pair, in either direction.
     const existing = (await db
@@ -528,7 +559,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     // Pending rows where I (this identity) am the friended side.
     // Surface the FRIENDER's identity, the user only ever sees the
     // character that sent the request, not the master handle behind it.
-    const rows = await db
+    const rowsAll = await db
       .select({
         frienderUserId: friends.frienderUserId,
         frienderCharacterId: friends.frienderCharacterId,
@@ -539,6 +570,10 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
         eqIdentity(friends.friendedUserId, friends.friendedCharacterId, meIdentity),
         eq(friends.status, "pending"),
       ));
+
+    // Hide pending requests from anyone we're blocked with (either direction).
+    const blockedSenders = await blockedUserIdsFor(db, me.id);
+    const rows = blockedSenders.size ? rowsAll.filter((r) => !blockedSenders.has(r.frienderUserId)) : rowsAll;
 
     const otherUserIds = [...new Set(rows.map((r) => r.frienderUserId))];
     const userRows = otherUserIds.length

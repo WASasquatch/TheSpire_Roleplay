@@ -4988,10 +4988,12 @@ interface AdminUserRow {
   lastLoginAt: number | null;
   disabled: boolean;
   characters: Array<{ id: string; name: string; deleted: boolean }>;
-  /** Last ~5 distinct IPs this user has logged in from, newest-first.
-   *  `altCount` is the number of OTHER accounts that have logged in
-   *  from the same IP, non-zero values flag ban-evasion or
-   *  shared-device patterns for moderation review. */
+  /** Last ~5 distinct IPs this user has been seen on, newest-first.
+   *  Captured on activity (login, connect, room switch, chat, posts), not
+   *  just at login, so `lastSeenAt` is a true last-activity time and the
+   *  list reflects where the user actually is now. `altCount` is the number
+   *  of OTHER accounts seen on the same IP, non-zero values flag ban-evasion
+   *  or shared-device patterns for moderation review. */
   recentIps: Array<{ ip: string; lastSeenAt: number; altCount: number }>;
 }
 
@@ -5285,7 +5287,7 @@ function UsersTab() {
               <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("chars")}>Chars{sortIndicator("chars")}</th>
               <th
                 className="px-2 py-1 text-left"
-                title="Up to 5 most-recent distinct IPs the user has logged in from. Click an IP to pivot the list to every account that shares it. Numeric badge = count of OTHER accounts that have used the same IP, flag for ban evasion or shared-device review."
+                title="Up to 5 most-recent distinct IPs the user has been seen on. Captured on activity (login, connect, room switch, chat, posts), so this stays current as a user roams networks instead of showing only their original login IP. Click an IP to pivot the list to every account that shares it. Numeric badge = count of OTHER accounts seen on the same IP, flag for ban evasion or shared-device review."
               >IPs &amp; alts</th>
               <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("registered")}>Registered{sortIndicator("registered")}</th>
               <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("lastSeen")}>Last seen{sortIndicator("lastSeen")}</th>
@@ -5436,7 +5438,7 @@ function UserIpChips({
               <span>{entry.ip}</span>
               <span
                 className={`rounded-full px-1 text-[9px] uppercase tracking-widest ${altClass}`}
-                title={`${entry.altCount} other account${entry.altCount === 1 ? "" : "s"} have logged in from this IP`}
+                title={`${entry.altCount} other account${entry.altCount === 1 ? "" : "s"} seen on this IP`}
               >
                 {entry.altCount} alt{entry.altCount === 1 ? "" : "s"}
               </span>

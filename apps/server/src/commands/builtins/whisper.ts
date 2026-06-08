@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import type { ChatMessage } from "@thekeep/shared";
 import { characters, ignores, messages, users } from "../../db/schema.js";
 import { pushTriggers } from "../../realtime/broadcast.js";
+import { isBlockedBetween } from "../../auth/blocks.js";
 import { stripFirstToken } from "../parser.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
 import type { CommandContext, CommandHandler } from "../types.js";
@@ -67,6 +68,12 @@ export const whisperCommand: CommandHandler = {
     const targetUserId = resolution.target.userId;
     if (targetUserId === ctx.user.id) {
       notice(ctx, "WHISPER_SELF", "Whispering yourself isn't useful.");
+      return;
+    }
+    // A block hides the target entirely (mutual): behave as if no such user
+    // exists, never reveal the block to either side.
+    if (await isBlockedBetween(ctx.db, ctx.user.id, targetUserId)) {
+      notice(ctx, "WHISPER_NO_USER", `No user named "${targetName}".`);
       return;
     }
     // Fetch the full target row for downstream needs (activeCharacterId

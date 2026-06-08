@@ -34,6 +34,10 @@ interface Props {
   onMessage?: (userId: string, displayName: string, avatarUrl: string | null) => void;
   /** Issue `/ignore <name>`. */
   onIgnore?: (name: string) => void;
+  /** Block this user globally + mutually (POST /me/blocks). Block-only:
+   *  after blocking, the profile is no longer reachable, so undo lives in
+   *  Profile -> Privacy, not here. */
+  onBlock?: (name: string) => void;
   /** Open another profile by name (used to follow a mutual-title link). */
   onOpenProfile?: (name: string) => void;
   /** Open a world viewer by slug. Used by the Worlds section chips. */
@@ -83,7 +87,7 @@ interface Props {
  * Every section degrades gracefully: characters with nothing filled out
  * still get a clean modal that says "X hasn't filled out their profile yet."
  */
-export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore, onOpenProfile, onOpenWorld, activeCharacterAction, bypassNsfwGate, zIndex }: Props) {
+export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore, onBlock, onOpenProfile, onOpenWorld, activeCharacterAction, bypassNsfwGate, zIndex }: Props) {
   const isChar = profile.kind === "character";
   const name = isChar ? profile.profile.name : profile.profile.username;
   const bio = profile.profile.bioHtml.trim();
@@ -339,6 +343,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
             onWhisper={onWhisper}
             onMessage={onMessage}
             onIgnore={onIgnore}
+            onBlock={onBlock}
             onOpenProfile={onOpenProfile}
             onOpenWorld={onOpenWorld}
             activeCharacterAction={activeCharacterAction}
@@ -423,6 +428,7 @@ function ProfileBody({
   onWhisper,
   onMessage,
   onIgnore,
+  onBlock,
   onOpenProfile,
   onOpenWorld,
   activeCharacterAction,
@@ -465,6 +471,7 @@ function ProfileBody({
   onWhisper: ((name: string) => void) | undefined;
   onMessage: ((userId: string, displayName: string, avatarUrl: string | null) => void) | undefined;
   onIgnore: ((name: string) => void) | undefined;
+  onBlock: ((name: string) => void) | undefined;
   onOpenProfile: ((name: string) => void) | undefined;
   onOpenWorld: ((slug: string) => void) | undefined;
   activeCharacterAction: { label: string; onClick: () => void } | undefined;
@@ -553,7 +560,7 @@ function ProfileBody({
   //   - desktop (≥640px): original layout preserved, XL avatar,
   //     XP/Currency as the prominent chip pair, action buttons inline
   //     beneath the meta.
-  const hasActions = !!(onWhisper || onMessage || onIgnore || activeCharacterAction);
+  const hasActions = !!(onWhisper || onMessage || onIgnore || onBlock || activeCharacterAction);
   // Profile banner, the URL slot the owner equipped via the Flair
   // tab. Renders as a 3:1 hero strip ABOVE the existing avatar/name
   // hero band. Falls through to nothing when the URL is null (slot
@@ -967,6 +974,19 @@ function ProfileBody({
                     Ignore
                   </button>
                 ) : null}
+                {onBlock ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`Block ${name}? You won't see each other anywhere - chat, userlist, whispers, DMs, friends, or search. Undo later in Profile -> Privacy.`)) {
+                        onBlock(name);
+                      }
+                    }}
+                    className="rounded border border-keep-accent bg-keep-accent/10 px-2 py-1 font-semibold text-keep-accent hover:bg-keep-accent/20"
+                  >
+                    Block
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1032,9 +1052,22 @@ function ProfileBody({
                     onIgnore(name);
                   }
                 }}
-                className="flex-1 px-2 py-2.5 text-keep-accent hover:bg-keep-accent/10"
+                className="flex-1 border-r border-keep-rule px-2 py-2.5 text-keep-accent hover:bg-keep-accent/10"
               >
                 Ignore
+              </button>
+            ) : null}
+            {onBlock ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`Block ${name}? You won't see each other anywhere - chat, userlist, whispers, DMs, friends, or search. Undo later in Profile -> Privacy.`)) {
+                    onBlock(name);
+                  }
+                }}
+                className="flex-1 px-2 py-2.5 font-semibold text-keep-accent hover:bg-keep-accent/10"
+              >
+                Block
               </button>
             ) : null}
           </div>

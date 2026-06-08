@@ -3,8 +3,9 @@ import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import { roleRank, type ClientToServerEvents, type ServerToClientEvents } from "@thekeep/shared";
 import { hasPermission } from "../auth/permissions.js";
-import { characters, messages, sessions, userEarning, users } from "../db/schema.js";
+import { characters, messages, sessions, userEarning, userIpLog, users } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
+import { blockedUserIdsFor } from "../auth/blocks.js";
 import { recordAudit } from "../audit.js";
 import { canonicalizeNameForLookup, loweredSpaceCanonical, substringNameInsensitive } from "../lib/nameLookup.js";
 import type { Db } from "../db/index.js";
@@ -388,7 +389,13 @@ export async function registerUsersRoutes(
           }
         });
 
-    const pageRows = sqlPaginated ? sorted : sorted.slice(offset, offset + limit);
+    // Drop anyone the viewer is blocked with (either direction) from the
+    // directory + add-friend autocomplete. Blocks are rare, so post-filtering
+    // the page (rather than threading NOT IN through both pagination regimes)
+    // is acceptable; at worst a page returns slightly fewer than `limit`.
+    const blockedSet = await blockedUserIdsFor(db, me.id);
+    const pageRowsRaw = sqlPaginated ? sorted : sorted.slice(offset, offset + limit);
+    const pageRows = blockedSet.size ? pageRowsRaw.filter((u) => !blockedSet.has(u.id)) : pageRowsRaw;
     const page = pageRows.map((u) => {
       const rank = rankByUser.get(u.id) ?? null;
       return {
@@ -439,20 +446,25 @@ export async function registerUsersRoutes(
     const q = (req.query.q ?? "").trim().toLowerCase();
     const offset = Math.max(0, parseInt(req.query.offset ?? "0", 10) || 0);
     const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit ?? "100", 10) || 100));
-    // Optional IP filter, when set, scopes the result to every user
-    // who has at least one session row from this IP. Used by the
-    // UsersTab's "alts on this IP" click affordance so an admin can
-    // pivot from one user's IP chip to every other account that
-    // shares it. Empty string = no filter.
+    // Optional IP filter, when set, scopes the result to every user who has
+    // touched this IP - either a login (sessions) or later event-time activity
+    // (user_ip_log). Used by the UsersTab's "alts on this IP" click affordance
+    // so an admin can pivot from one user's IP chip to every other account
+    // that shares it. Unioning both tables means a roaming long-lived session
+    // (whose login IP differs from its current one) still surfaces here.
+    // Empty string = no filter.
     const ipFilter = (req.query.ip ?? "").trim();
     const ipScopedUserIds = ipFilter
-      ? new Set(
-          (await db
+      ? new Set([
+          ...(await db
             .select({ userId: sessions.userId })
             .from(sessions)
-            .where(eq(sessions.ip, ipFilter)))
-            .map((r) => r.userId),
-        )
+            .where(eq(sessions.ip, ipFilter))).map((r) => r.userId),
+          ...(await db
+            .select({ userId: userIpLog.userId })
+            .from(userIpLog)
+            .where(eq(userIpLog.ip, ipFilter))).map((r) => r.userId),
+        ])
       : null;
 
     // Admin search includes email + disabled accounts (for moderation review).
@@ -523,73 +535,81 @@ export async function registerUsersRoutes(
       charsByUser.set(c.userId, list);
     }
 
-    // Per-user IP aggregation. Pulls every session row (with non-null
-    // IP) for users in the current page, sorted newest-first; we then
-    // dedupe by IP and keep the top 5 per user. SQLite doesn't have a
-    // clean per-group LIMIT so the dedup happens in app code, at
-    // page sizes of ≤100 users with bounded session counts, the
-    // result-set is tiny and the in-memory reduce is cheap.
-    //
-    // The same query also seeds the IP→user-set lookup we use for
-    // alt-count: every distinct (ip, userId) pair the admin's page
-    // touches. For alt-count we also pull session rows OUTSIDE the
-    // page so an IP shared with a user not in the current view still
-    // surfaces (otherwise an admin viewing a single user would always
-    // see alts=0 for that user's IPs, which would be misleading).
+    // Per-user IP aggregation, unioning two sources:
+    //   * sessions   - the address each session LOGGED IN from (createdAt as
+    //                  the timestamp). Frozen at login.
+    //   * user_ip_log - addresses captured on later activity (socket connect,
+    //                  room switch, chat send, authenticated posts) with a
+    //                  true `last_seen_at`.
+    // Merging both means a long-lived session that has since roamed networks
+    // surfaces every address it has used - freshest first - instead of only
+    // the one it first logged in from. We dedupe by IP keeping the newest
+    // timestamp and keep the top 5 per user. At page sizes of ≤100 users with
+    // bounded per-user rows the result-set is tiny and the in-memory reduce is
+    // cheap. SQLite has no clean per-group LIMIT, so the dedup is app-side.
     const RECENT_IPS_PER_USER = 5;
     interface RecentIp { ip: string; lastSeenAt: number; altCount: number }
     const recentIpsByUser = new Map<string, RecentIp[]>();
     if (ids.length > 0) {
-      // Step 1: pull recent (ip, last-seen) pairs for the page's users.
-      const pageSessionRows = await db
-        .select({
-          userId: sessions.userId,
-          ip: sessions.ip,
-          createdAt: sessions.createdAt,
-        })
-        .from(sessions)
-        .where(and(
-          inArray(sessions.userId, ids),
-          sql`${sessions.ip} IS NOT NULL`,
-        ))
-        .orderBy(desc(sessions.createdAt));
-
-      // Dedup per user keeping the most recent timestamp per IP.
+      // Step 1: collect (user, ip, ts) signals from both tables, keeping the
+      // newest timestamp per (user, ip).
       const perUser = new Map<string, Map<string, number>>();
-      for (const r of pageSessionRows) {
-        const ip = r.ip!;
-        const ts = +r.createdAt;
-        const m = perUser.get(r.userId) ?? new Map<string, number>();
-        if (!m.has(ip)) m.set(ip, ts); // first write wins (already newest-first ordered)
-        perUser.set(r.userId, m);
-      }
+      const bump = (userId: string, ip: string, ts: number) => {
+        const m = perUser.get(userId) ?? new Map<string, number>();
+        const prev = m.get(ip);
+        if (prev === undefined || ts > prev) m.set(ip, ts);
+        perUser.set(userId, m);
+      };
 
-      // Step 2: gather every distinct IP across the page so we can
-      // resolve alt-count for each in a single grouped query.
+      const pageSessionRows = await db
+        .select({ userId: sessions.userId, ip: sessions.ip, createdAt: sessions.createdAt })
+        .from(sessions)
+        .where(and(inArray(sessions.userId, ids), sql`${sessions.ip} IS NOT NULL`));
+      for (const r of pageSessionRows) if (r.ip) bump(r.userId, r.ip, +r.createdAt);
+
+      const pageLogRows = await db
+        .select({ userId: userIpLog.userId, ip: userIpLog.ip, lastSeenAt: userIpLog.lastSeenAt })
+        .from(userIpLog)
+        .where(inArray(userIpLog.userId, ids));
+      for (const r of pageLogRows) bump(r.userId, r.ip, +r.lastSeenAt);
+
+      // Step 2: gather every distinct IP across the page so alt-count resolves
+      // in one grouped query per table.
       const distinctIps = new Set<string>();
       for (const m of perUser.values()) for (const ip of m.keys()) distinctIps.add(ip);
 
-      const altCountByIp = new Map<string, number>();
+      // Step 3: alt-count = distinct accounts seen on each IP across BOTH
+      // tables, minus the user themselves. We pull distinct (ip, userId) pairs
+      // (GROUP BY both columns) and union them into a per-IP user set, so an
+      // account present in both tables on one IP isn't counted twice. This
+      // also spans users OUTSIDE the current page, so an IP shared with a user
+      // not in view still reports a non-zero alt count.
+      const usersByIp = new Map<string, Set<string>>();
       if (distinctIps.size > 0) {
-        const ipRows = await db
-          .select({
-            ip: sessions.ip,
-            userCount: sql<number>`count(distinct ${sessions.userId})`,
-          })
+        const ipsArr = [...distinctIps];
+        const sessPairs = await db
+          .select({ ip: sessions.ip, userId: sessions.userId })
           .from(sessions)
-          .where(inArray(sessions.ip, [...distinctIps]))
-          .groupBy(sessions.ip);
-        for (const r of ipRows) {
-          if (r.ip) altCountByIp.set(r.ip, r.userCount);
+          .where(inArray(sessions.ip, ipsArr))
+          .groupBy(sessions.ip, sessions.userId);
+        const logPairs = await db
+          .select({ ip: userIpLog.ip, userId: userIpLog.userId })
+          .from(userIpLog)
+          .where(inArray(userIpLog.ip, ipsArr))
+          .groupBy(userIpLog.ip, userIpLog.userId);
+        for (const r of [...sessPairs, ...logPairs]) {
+          if (!r.ip) continue;
+          const s = usersByIp.get(r.ip) ?? new Set<string>();
+          s.add(r.userId);
+          usersByIp.set(r.ip, s);
         }
       }
 
-      // Step 3: stitch the per-user IP lists with alt-count + truncation.
+      // Step 4: stitch the per-user IP lists with alt-count + truncation.
       for (const [userId, m] of perUser.entries()) {
         const arr: RecentIp[] = [];
         for (const [ip, ts] of m.entries()) {
-          // alt count = total accounts on this IP minus the user themselves.
-          const total = altCountByIp.get(ip) ?? 1;
+          const total = usersByIp.get(ip)?.size ?? 1;
           arr.push({ ip, lastSeenAt: ts, altCount: Math.max(0, total - 1) });
         }
         arr.sort((a, b) => b.lastSeenAt - a.lastSeenAt);
@@ -906,11 +926,15 @@ export async function registerUsersRoutes(
     )).slice(0, 64);
     if (canonicals.length === 0) return { valid: [] };
 
+    // Blocked accounts (either direction) are invisible: their mention must
+    // not light up as a clickable chip for the viewer.
+    const blocked = await blockedUserIdsFor(db, me.id);
+
     // Master usernames first, globally unique, fast hit. NB: only
     // non-disabled accounts (the system sentinel + any deactivated
     // accounts shouldn't surface as clickable mentions).
     const userMatches = await db
-      .select({ username: users.username })
+      .select({ id: users.id, username: users.username })
       .from(users)
       .where(
         and(
@@ -919,7 +943,9 @@ export async function registerUsersRoutes(
           sql`${loweredSpaceCanonical(users.username)} IN (${sql.join(canonicals.map((n) => sql`${n}`), sql`, `)})`,
         ),
       );
-    const valid = new Set(userMatches.map((u) => canonicalizeNameForLookup(u.username)));
+    const valid = new Set(
+      userMatches.filter((u) => !blocked.has(u.id)).map((u) => canonicalizeNameForLookup(u.username)),
+    );
 
     // Character names, match against any non-deleted character of
     // a non-disabled owner. The active-character constraint that the
@@ -931,7 +957,7 @@ export async function registerUsersRoutes(
     const remaining = canonicals.filter((n) => !valid.has(n));
     if (remaining.length > 0) {
       const charMatches = await db
-        .select({ name: characters.name })
+        .select({ ownerId: users.id, name: characters.name })
         .from(characters)
         .innerJoin(users, eq(users.id, characters.userId))
         .where(
@@ -941,7 +967,7 @@ export async function registerUsersRoutes(
             sql`${loweredSpaceCanonical(characters.name)} IN (${sql.join(remaining.map((n) => sql`${n}`), sql`, `)})`,
           ),
         );
-      for (const c of charMatches) valid.add(canonicalizeNameForLookup(c.name));
+      for (const c of charMatches) if (!blocked.has(c.ownerId)) valid.add(canonicalizeNameForLookup(c.name));
     }
 
     return { valid: Array.from(valid) };
@@ -1039,10 +1065,15 @@ export async function registerUsersRoutes(
       online: boolean;
     }
 
+    // Blocked accounts (either direction) are invisible to the viewer, so
+    // they can't surface as DM / add-friend suggestions.
+    const blocked = await blockedUserIdsFor(db, me.id);
+
     const identities: IdentityRow[] = [];
 
     for (const u of masterRows) {
       if (u.userId === me.id) continue;
+      if (blocked.has(u.userId)) continue;
       identities.push({
         kind: "user",
         userId: u.userId,
@@ -1058,6 +1089,7 @@ export async function registerUsersRoutes(
     for (const c of charRows) {
       if (c.ownerDisabledAt) continue;
       if (c.userId === me.id) continue;
+      if (blocked.has(c.userId)) continue;
       identities.push({
         kind: "character",
         userId: c.userId,

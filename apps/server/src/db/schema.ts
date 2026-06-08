@@ -949,6 +949,41 @@ export const ignores = sqliteTable(
   }),
 );
 
+/* ---------- blocks (global, MUTUAL invisibility) ----------
+ * Stronger than `ignores`. `/ignore` is one-way and message-only: the
+ * ignorer stops seeing the ignored user's chat lines, but the ignored user
+ * still sees them everywhere. A block is MUTUAL and GLOBAL: once a row exists
+ * between two accounts (in either direction), the two users and ALL their
+ * characters become invisible to each other across the whole app, chat,
+ * userlist, whispers, DMs, friends, profiles, search/@mentions.
+ *
+ * One directed row is written per initiation (`blocker_user_id` blocked
+ * `blocked_user_id`); the effect is symmetric because every read consults
+ * BOTH directions (see auth/blocks.ts). Only the blocker can lift their own
+ * row (Profile → Privacy); the blocked user has no signal and can't undo it.
+ * Keyed on the master userId like `ignores`, so it spans every character on
+ * both sides. Blocking performs NO destructive changes, friendships / DM
+ * threads are merely filtered out while blocked and reappear on unblock.
+ */
+export const blocks = sqliteTable(
+  "blocks",
+  {
+    blockerUserId: text("blocker_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    blockedUserId: text("blocked_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.blockerUserId, t.blockedUserId] }),
+    // Reverse-direction lookups ("who has blocked me / am I blocked by")
+    // hit blocked_user_id, which the PK's leading column can't serve.
+    blockedIdx: index("blocks_blocked_idx").on(t.blockedUserId),
+  }),
+);
+
 /* ---------- custom_commands ----------
  * Admin-authored commands beyond the built-in registry.
  * Two flavors:
@@ -1036,6 +1071,47 @@ export const sessions = sqliteTable(
   },
   (t) => ({
     userIdx: index("sessions_user_idx").on(t.userId),
+  }),
+);
+
+/* ---------- user_ip_log ----------
+ * Event-time IP capture. `sessions.ip` is frozen at login, so a long-lived
+ * session (TTL defaults to 30 days) keeps reporting the address the user
+ * first logged in from even as they roam networks (mobile handoff, VPN
+ * toggle, moving between locations). This table is upserted on real activity
+ * - socket connect, room switch, chat send, authenticated HTTP posts - keyed
+ * (user_id, ip) so each distinct address a user touches gets exactly one row
+ * whose `last_seen_at` tracks their most recent activity from it. It feeds
+ * the admin /admin/users IP / alt-detection alongside `sessions`, so the
+ * "recent IPs" chips reflect where a user actually is now, not just where
+ * they first logged in.
+ *
+ * Writes are throttled in-process (see auth/ipLog.ts) to at most one per
+ * (user, ip) per minute, so chat spam can't pin SQLite. A brand-new IP for a
+ * user is a different key, so it's always captured immediately.
+ */
+export const userIpLog = sqliteTable(
+  "user_ip_log",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    ip: text("ip").notNull(),
+    firstSeenAt: ts("first_seen_at"),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    /** Approximate activity volume from this IP; bumped on each (throttled) write. */
+    hitCount: integer("hit_count").notNull().default(1),
+    lastUserAgent: text("last_user_agent"),
+    /** What surfaced this write: "connect" | "chat" | "room" | "http". */
+    lastEvent: text("last_event"),
+  },
+  (t) => ({
+    userIpUnique: uniqueIndex("user_ip_log_user_ip_idx").on(t.userId, t.ip),
+    ipIdx: index("user_ip_log_ip_idx").on(t.ip),
+    userSeenIdx: index("user_ip_log_user_seen_idx").on(t.userId, t.lastSeenAt),
   }),
 );
 

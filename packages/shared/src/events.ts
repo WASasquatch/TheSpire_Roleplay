@@ -158,24 +158,31 @@ export interface ClientToServerEvents {
     asCharacterId?: string | null;
   }) => void;
   /**
-   * Theater (watch-party) playback control. Owner/mod-only; the server
-   * re-checks the room-edit gate and silently ignores unauthorized
-   * senders. Mutates the in-memory live playback state and rebroadcasts
-   * `theater:sync` to the room.
+   * Theater (watch-party) playback control.
+   *
+   * ACTIVE controls (play / pause / seek / next / prev / select) are
+   * owner/mod-only; the server re-checks the room-edit gate and silently
+   * ignores unauthorized senders.
+   *
+   * PASSIVE signals (ended / error) may be sent by ANY occupant so playback
+   * keeps advancing autonomously when no mod is present. The server validates
+   * them against the live `index` (so a stale report can't skip) and acts at
+   * most once per source.
    *
    *   play / pause      , toggle playback at `positionSec`.
    *   seek              , jump to `positionSec`.
    *   next / prev       , step the playlist (honors loop on wrap).
    *   select            , jump to playlist `index`.
-   *   ended             , the controller's source finished; advance per
-   *                       loop mode. Server debounces by current index so
-   *                       duplicate reports from multiple owners advance
-   *                       only once.
+   *   ended             , a viewer's source finished; advance per loop mode.
+   *   error             , a viewer's source failed to play (dead / removed /
+   *                       unembeddable); skip past it to the next source
+   *                       regardless of loop mode. `index` identifies which
+   *                       source ended/errored.
    */
   "theater:control": (
     payload: {
       roomId: string;
-      action: "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended";
+      action: "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended" | "error";
       positionSec?: number;
       index?: number;
     },
@@ -380,6 +387,17 @@ export interface ServerToClientEvents {
     frienderUsername: string;
     frienderDisplayName: string;
   }) => void;
+  /**
+   * A block relationship with the receiving user changed (they blocked, were
+   * blocked by, or unblocked the other party). Emitted to BOTH affected
+   * users' sockets. `withUserId` is the OTHER account; `blocked` is the new
+   * state (true = now blocked, false = unblocked). The client uses it to
+   * make the change feel live without a reload: drop that user's messages
+   * from the buffer, close an open profile / DM with them, and bump the
+   * friends refresh key. Presence repaints on its own, the server re-runs
+   * broadcastPresence for the affected rooms alongside this event.
+   */
+  "relationships:changed": (payload: { withUserId: string; blocked: boolean }) => void;
   /**
    * Broadcast to every connected socket when an admin creates / edits
    * / deletes / toggles a custom command. Carries no payload, the

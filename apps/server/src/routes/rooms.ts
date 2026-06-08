@@ -19,6 +19,7 @@ import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { getSettings } from "../settings.js";
 import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
+import { blockedUserIdsFor } from "../auth/blocks.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -366,14 +367,16 @@ export async function registerRoomsRoutes(
     }
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit ?? "50", 10) || 50));
 
-    // Apply the same ignore filter the live backlog uses so a user
-    // they've muted doesn't re-appear when they scroll older.
+    // Apply the same hide filter the live backlog uses so a user they've
+    // muted (one-way /ignore) or are blocked with (mutual) doesn't re-appear
+    // when they scroll older.
     const ignoredIds = new Set(
       (await db
         .select({ ignoredUserId: ignores.ignoredUserId })
         .from(ignores)
         .where(eq(ignores.userId, me.id))).map((r) => r.ignoredUserId),
     );
+    for (const blockedId of await blockedUserIdsFor(db, me.id)) ignoredIds.add(blockedId);
     // Whispers overlay across rooms, see the matching union in
     // sendRoomBacklogTo. Non-whisper rows are scoped to THIS room;
     // whisper rows the caller is a party to are pulled regardless of

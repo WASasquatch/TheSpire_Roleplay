@@ -36,6 +36,7 @@ import { type Role } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import { characterEarning, ignores, userActiveCosmetics, userEarning } from "../db/schema.js";
 import { hasPermission } from "../auth/permissions.js";
+import { blocksAmong } from "../auth/blocks.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -295,6 +296,20 @@ async function broadcastTyperSet(io: Io, db: Db, roomId: string): Promise<void> 
     }
   }
 
+  // Mutual-block filtering: a receiver must not see a typer they're blocked
+  // with (and vice versa, handled symmetrically since each receiver filters
+  // their own view). Batched over the typers + receivers; empty when no pair
+  // is blocked, the common case.
+  let blockGraph = new Map<string, Set<string>>();
+  if (allTypers.length > 0) {
+    const ids = new Set<string>(allTypers.map((t) => t.userId));
+    for (const s of sockets) {
+      const uid = (s.data as { userId?: string }).userId;
+      if (uid) ids.add(uid);
+    }
+    blockGraph = await blocksAmong(db, [...ids]);
+  }
+
   for (const s of sockets) {
     const receiverId = (s.data as { userId?: string }).userId;
     if (!receiverId) continue;
@@ -311,10 +326,13 @@ async function broadcastTyperSet(io: Io, db: Db, roomId: string): Promise<void> 
       "view_deleted_message_body",
       db,
     ));
+    const blockedWithReceiver = blockGraph.get(receiverId);
     const visible = allTypers.filter((t) => {
       // The composer hides its own indicator client-side, but keep
       // the wire clean by suppressing on the server too.
       if (t.userId === receiverId) return false;
+      // Mutual block: hide the typer from this receiver entirely.
+      if (blockedWithReceiver && blockedWithReceiver.has(t.userId)) return false;
       const ignorers = ignorersByTyper.get(t.userId);
       if (ignorers && ignorers.has(receiverId)) return false;
       // Lurking typer + non-admin receiver = skip. Admins fall

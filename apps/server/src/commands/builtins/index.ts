@@ -34,6 +34,7 @@ import { expiryCommand, replyModeCommand } from "./room_modes.js";
 import { theaterCommand } from "./theater.js";
 import { trashCommand } from "./trash.js";
 import { ignoreCommand, unignoreCommand } from "./ignore.js";
+import { blockCommand, unblockCommand } from "./block.js";
 import { usersCommand } from "./users.js";
 import { bookmarksCommand } from "./bookmarks.js";
 import { clearCommand, findCommand, listCommand } from "./rooms_list.js";
@@ -122,6 +123,8 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(trashCommand);
   reg.registerBuiltin(ignoreCommand);
   reg.registerBuiltin(unignoreCommand);
+  reg.registerBuiltin(blockCommand);
+  reg.registerBuiltin(unblockCommand);
   reg.registerBuiltin(usersCommand);
   reg.registerBuiltin(bookmarksCommand);
   reg.registerBuiltin(listCommand);

@@ -40,6 +40,7 @@ import { inArray } from "drizzle-orm";
 import type { LinkedWorldRef } from "@thekeep/shared";
 import { pushToUser } from "../push.js";
 import type { Db } from "../db/index.js";
+import { blockedUserIdsFor, blocksAmong } from "../auth/blocks.js";
 import type { CommandContext, SessionUser } from "../commands/types.js";
 import { expandInlineCommands } from "../commands/registry.js";
 import { getSettings } from "../settings.js";
@@ -643,10 +644,12 @@ export async function pushTriggers(
 
 /**
  * Emit a `message:new` to every socket in the room EXCEPT those whose user
- * has `ignores` row pointing at the sender. Looking up ignorers on each
- * send is fine at our scale - `ignores` is keyed by (userId, ignoredUserId)
- * and the typical block list is small. If this ever becomes hot, cache by
- * senderId with a short TTL.
+ * shouldn't see the sender, two reasons:
+ *   - they have an `ignores` row pointing at the sender (one-way mute), or
+ *   - they're in a `blocks` relationship with the sender (mutual, either
+ *     direction) , the sender can't see them and they can't see the sender.
+ * Looking these up on each send is fine at our scale; both lists are tiny.
+ * If this ever becomes hot, cache by senderId with a short TTL.
  *
  * NOTE: System messages still go through `addSystemMessage` which uses a
  * direct `io.to(...).emit` - those should never be filterable by /ignore.
@@ -662,15 +665,16 @@ async function emitFiltered(
     .select({ userId: ignores.userId })
     .from(ignores)
     .where(eq(ignores.ignoredUserId, senderUserId));
-  if (ignorerRows.length === 0) {
+  const blockedWithSender = await blockedUserIdsFor(db, senderUserId);
+  if (ignorerRows.length === 0 && blockedWithSender.size === 0) {
     io.to(`room:${roomId}`).emit("message:new", msg);
     return;
   }
-  const ignorerSet = new Set(ignorerRows.map((r) => r.userId));
+  const hide = new Set<string>([...ignorerRows.map((r) => r.userId), ...blockedWithSender]);
   const sockets = await io.in(`room:${roomId}`).fetchSockets();
   for (const s of sockets) {
     const uid = (s.data as { userId?: string }).userId;
-    if (uid && ignorerSet.has(uid)) continue;
+    if (uid && hide.has(uid)) continue;
     s.emit("message:new", msg);
   }
 }
@@ -1108,12 +1112,15 @@ export async function sendRoomBacklogTo(
   roomId: string,
   viewerUserId: string,
 ): Promise<void> {
+  // Authors the viewer must not see in scrollback: their one-way /ignore list
+  // PLUS everyone they're mutually blocked with (either direction).
   const ignoredIds = new Set(
     (await db
       .select({ ignoredUserId: ignores.ignoredUserId })
       .from(ignores)
       .where(eq(ignores.userId, viewerUserId))).map((r) => r.ignoredUserId),
   );
+  for (const blockedId of await blockedUserIdsFor(db, viewerUserId)) ignoredIds.add(blockedId);
   // Look the viewer's role up once so the originalBody carve-out below
   // is consistent with the per-socket gating used by the live
   // delete-broadcast path. Single row lookup; cheap relative to the
@@ -1607,7 +1614,12 @@ async function joinRoomBody(
     // into the watcher's CURRENT room as `☆ Wallace is online.`)
     // immediately AFTER the user's "has left the room." broadcast.
     // The room-switch path is not an online transition.
-    await pingWatchers(io, db, user);
+    //
+    // Pass the identity this socket is voicing so watchers are only pinged
+    // for the exact handle they friended, not every character on the
+    // account. `socketCharacterId` was resolved above the same way the
+    // userlist render path does (per-tab /char wins, else master default).
+    await pingWatchers(io, db, user, socketCharacterId);
   }
 }
 
@@ -1790,6 +1802,41 @@ export async function hydrateTheaterFromDb(db: Db): Promise<number> {
   return restored;
 }
 
+/**
+ * Build the mutual-block graph for everyone relevant to a room's userlist:
+ * the occupants plus the sockets parked in the room (viewers). Returns the
+ * room sockets (reused by the caller to emit) and the graph. An empty graph
+ * (`.size === 0`) means no two of them are blocked, so the caller can take the
+ * single room-wide emit fast path instead of fanning out per-socket.
+ */
+async function roomBlockGraph(
+  io: Io,
+  db: Db,
+  roomId: string,
+  occupants: RoomOccupant[],
+): Promise<{ sockets: Awaited<ReturnType<Io["fetchSockets"]>>; blockGraph: Map<string, Set<string>> }> {
+  const sockets = await io.in(`room:${roomId}`).fetchSockets();
+  const ids = new Set<string>(occupants.map((o) => o.userId));
+  for (const s of sockets) {
+    const uid = (s.data as { userId?: string }).userId;
+    if (uid) ids.add(uid);
+  }
+  const blockGraph = await blocksAmong(db, [...ids]);
+  return { sockets, blockGraph };
+}
+
+/** The occupant list a given viewer should see: occupants they're blocked
+ *  with removed. Blocks are symmetric, so this also keeps each blocked pair
+ *  out of the OTHER's list when applied per-viewer. */
+function occupantsForViewer(
+  occupants: RoomOccupant[],
+  blockGraph: Map<string, Set<string>>,
+  viewerUserId: string | undefined,
+): RoomOccupant[] {
+  const hide = viewerUserId ? blockGraph.get(viewerUserId) : undefined;
+  return hide ? occupants.filter((o) => !hide.has(o.userId)) : occupants;
+}
+
 export async function broadcastRoomState(
   io: Io,
   db: Db,
@@ -1799,7 +1846,17 @@ export async function broadcastRoomState(
   if (!room) return;
   const summary = await buildRoomSummary(db, room);
   const occupants = await currentOccupants(io, db, roomId);
-  io.to(`room:${roomId}`).emit("room:state", { room: summary, occupants });
+  // Per-viewer block filtering (see roomBlockGraph). Fast path: no blocks
+  // among the room → one room-wide emit. Otherwise fan out filtered lists.
+  const { sockets, blockGraph } = await roomBlockGraph(io, db, roomId, occupants);
+  if (blockGraph.size === 0) {
+    io.to(`room:${roomId}`).emit("room:state", { room: summary, occupants });
+  } else {
+    for (const s of sockets) {
+      const uid = (s.data as { userId?: string }).userId;
+      s.emit("room:state", { room: summary, occupants: occupantsForViewer(occupants, blockGraph, uid) });
+    }
+  }
   // Tree-wide invalidate. Room metadata changed (topic, replyMode,
   // owner, archive flip, etc.), anyone with a rooms rail open
   // needs to know. Sockets in other rooms wouldn't see the room-
@@ -1811,7 +1868,18 @@ export async function broadcastRoomState(
 
 export async function broadcastPresence(io: Io, db: Db, roomId: string): Promise<void> {
   const occupants = await currentOccupants(io, db, roomId);
-  io.to(`room:${roomId}`).emit("presence:update", { roomId, occupants });
+  // Per-viewer block filtering: blocked accounts must not see each other in
+  // the userlist. Fast path (no blocks among the room) keeps the single
+  // room-wide emit; otherwise fan out filtered lists per socket.
+  const { sockets, blockGraph } = await roomBlockGraph(io, db, roomId, occupants);
+  if (blockGraph.size === 0) {
+    io.to(`room:${roomId}`).emit("presence:update", { roomId, occupants });
+  } else {
+    for (const s of sockets) {
+      const uid = (s.data as { userId?: string }).userId;
+      s.emit("presence:update", { roomId, occupants: occupantsForViewer(occupants, blockGraph, uid) });
+    }
+  }
   // Same tree-invalidate as broadcastRoomState. Presence changes the
   // occupant count next to each room in the rail, and the only way
   // a viewer in room A finds out about a join/leave in room B is to
@@ -1840,15 +1908,31 @@ async function loadLinkedWorld(db: Db, roomId: string): Promise<LinkedWorldRef |
 }
 
 /**
- * Fan out a `watch:online` push to every live socket of every user who
- * has the just-connected user as an accepted mutual friend. The event
- * name on the wire is still `watch:online` (changing it would break
- * older cached client bundles); the underlying table moved from
- * `watches` to `friends`, and as of migration 0051 friendship is
- * symmetric, so we pull the OTHER side of every accepted edge that
- * touches `user`, in either direction.
+ * Fan out a `watch:online` push to every live socket of every user who is
+ * friends with the EXACT identity the user just came online as.
+ *
+ * Friendships are per-identity: you can friend someone's master/OOC handle
+ * OR a specific character, and the row pins that side's character id (null
+ * for master). `onlineAsCharacterId` is the identity this user is connecting
+ * as. We only ping watchers whose friendship is pinned to that same identity,
+ * so a player who friended @Aphelios does NOT get an "online" ping when the
+ * owner logs in voicing a different character (or OOC). Matching the owner's
+ * other characters would leak identities the watcher never friended.
+ *
+ * `displayName` in the payload is the connecting identity's public name, so a
+ * character-pinned ping reads "☆ Aphelios is online." with no OOC crossover.
+ *
+ * The event name on the wire is still `watch:online` (changing it would break
+ * older cached client bundles); the underlying table moved from `watches` to
+ * `friends`, and as of migration 0051 friendship is symmetric, so we look at
+ * both sides of every accepted edge that touches `user`.
  */
-async function pingWatchers(io: Io, db: Db, user: SessionUser): Promise<void> {
+async function pingWatchers(
+  io: Io,
+  db: Db,
+  user: SessionUser,
+  onlineAsCharacterId: string | null,
+): Promise<void> {
   // Incognito gate. An incognito moderator coming online (login, reconnect,
   // /char-switch, etc.) is supposed to leave no trace, friends receiving
   // a "☆ X is online" system line in their current room would directly
@@ -1857,7 +1941,10 @@ async function pingWatchers(io: Io, db: Db, user: SessionUser): Promise<void> {
   if (user.incognitoMode) return;
   const rows = await db
     .select({
-      otherUserId: sql<string>`CASE WHEN ${friends.frienderUserId} = ${user.id} THEN ${friends.friendedUserId} ELSE ${friends.frienderUserId} END`,
+      frienderUserId: friends.frienderUserId,
+      frienderCharacterId: friends.frienderCharacterId,
+      friendedUserId: friends.friendedUserId,
+      friendedCharacterId: friends.friendedCharacterId,
     })
     .from(friends)
     .where(and(
@@ -1865,7 +1952,24 @@ async function pingWatchers(io: Io, db: Db, user: SessionUser): Promise<void> {
       eq(friends.status, "accepted"),
     ));
   if (rows.length === 0) return;
-  const friendSet = new Set(rows.map((r) => r.otherUserId));
+  // Keep only edges whose USER side is pinned to the identity they're online
+  // as, then collect the OTHER side's user to notify. Each side is checked
+  // independently so a (rare) self-friendship across two of the user's own
+  // characters resolves correctly; self-pings are dropped.
+  const friendSet = new Set<string>();
+  for (const r of rows) {
+    if (r.frienderUserId === user.id && (r.frienderCharacterId ?? null) === onlineAsCharacterId) {
+      if (r.friendedUserId !== user.id) friendSet.add(r.friendedUserId);
+    }
+    if (r.friendedUserId === user.id && (r.friendedCharacterId ?? null) === onlineAsCharacterId) {
+      if (r.frienderUserId !== user.id) friendSet.add(r.frienderUserId);
+    }
+  }
+  if (friendSet.size === 0) return;
+  // Drop any friend who is now blocked with this user (either direction): a
+  // block must suppress the "online" ping the same way it hides chat/presence.
+  for (const blockedId of await blockedUserIdsFor(db, user.id)) friendSet.delete(blockedId);
+  if (friendSet.size === 0) return;
   const sockets = await io.fetchSockets();
   const payload = {
     userId: user.id,
@@ -1878,6 +1982,40 @@ async function pingWatchers(io: Io, db: Db, user: SessionUser): Promise<void> {
       s.emit("watch:online", payload);
     }
   }
+}
+
+/**
+ * Make a freshly-created or -removed block take effect live for both parties,
+ * without either having to reload. Two halves:
+ *
+ *   1. Re-run `broadcastPresence` for every room that holds a socket of
+ *      either user, so the per-viewer presence filter (see currentOccupants /
+ *      broadcastPresence) repaints, the blocked pair vanish from each other's
+ *      userlists (on block) or reappear (on unblock).
+ *   2. Emit `relationships:changed` to both users' sockets so the client can
+ *      drop the other's messages from its buffer, close an open profile / DM,
+ *      and refresh its friends list.
+ *
+ * `blocked` is the NEW state (true = just blocked, false = just unblocked).
+ */
+export async function notifyBlockChange(
+  io: Io,
+  db: Db,
+  userA: string,
+  userB: string,
+  blocked: boolean,
+): Promise<void> {
+  const sockets = await io.fetchSockets();
+  const roomIds = new Set<string>();
+  for (const s of sockets) {
+    const uid = (s.data as { userId?: string }).userId;
+    if (uid !== userA && uid !== userB) continue;
+    for (const r of s.rooms) if (r.startsWith("room:")) roomIds.add(r.slice(5));
+    // Tell this socket which relationship flipped. A socket belonging to A
+    // hears about B and vice versa.
+    s.emit("relationships:changed", { withUserId: uid === userA ? userB : userA, blocked });
+  }
+  for (const roomId of roomIds) await broadcastPresence(io, db, roomId);
 }
 
 /**
@@ -1939,8 +2077,13 @@ export async function sendRoomStateTo(
   if (!room) return;
   const summary = await buildRoomSummary(db, room);
   const occupants = await currentOccupants(io, db, roomId);
-  socket.emit("room:state", { room: summary, occupants });
-  socket.emit("presence:update", { roomId, occupants });
+  // Hide occupants this single viewer is blocked with (mutual). One viewer
+  // here, so a direct block-set lookup is cheaper than the room graph.
+  const viewerUserId = (socket.data as { userId?: string }).userId;
+  const blocked = viewerUserId ? await blockedUserIdsFor(db, viewerUserId) : new Set<string>();
+  const view = blocked.size ? occupants.filter((o) => !blocked.has(o.userId)) : occupants;
+  socket.emit("room:state", { room: summary, occupants: view });
+  socket.emit("presence:update", { roomId, occupants: view });
   // Re-snap to live theater playback on resync (reconnect, tab wake).
   const tp = theaterSyncPayload(roomId);
   if (tp) socket.emit("theater:sync", tp);

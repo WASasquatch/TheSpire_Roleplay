@@ -2128,6 +2128,20 @@ function Chat() {
         catch { /* ignore */ }
       }
     });
+    // A block involving me changed. Make it feel live without a reload:
+    // when newly blocked, purge that user's buffered messages (presence
+    // repaints itself, the server re-broadcasts it) and close an open
+    // profile with them; either way refresh friends/DM lists. On unblock
+    // their content flows again naturally on the next room load / fetch.
+    socket.on("relationships:changed", ({ withUserId, blocked }) => {
+      const st = useChat.getState();
+      if (blocked) {
+        st.purgeUserMessages(withUserId);
+        const cur = st.openProfile;
+        if (cur && cur.profile.userId === withUserId) st.setOpenProfile(null);
+      }
+      st.bumpFriendsVersion();
+    });
     socket.on("error:notice", (n) => setNotice(n));
     socket.on("auth:expired", () => {
       // Server invalidated the session (idle window elapsed, admin disabled
@@ -3640,6 +3654,22 @@ function Chat() {
                     displayName: name,
                   });
                   send(`/ignore ${targetArg}`);
+                },
+                onBlock: (name: string) => {
+                  setOpenProfile(null);
+                  // Mirrors onIgnore: route through the /block command (same
+                  // socket pipeline + identity-token resolution) rather than
+                  // a one-off fetch. The command fans out the live refresh,
+                  // so the blocked user vanishes from chat/userlist at once.
+                  // Undo lives in Profile -> Privacy (the HTTP /me/blocks API).
+                  const targetArg = identityArgFor({
+                    userId: openProfile.profile.userId,
+                    characterId: openProfile.kind === "character"
+                      ? (openProfile.profile.id ?? null)
+                      : null,
+                    displayName: name,
+                  });
+                  send(`/block ${targetArg}`);
                 },
               }
             : {})}

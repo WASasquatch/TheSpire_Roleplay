@@ -20,6 +20,7 @@ import {
 } from "../lib/push.js";
 import { readError } from "../lib/http.js";
 import { fetchEarningMe, patchEarningSettings, patchProfileBannerUrl } from "../lib/earning.js";
+import { fetchBlocks, removeBlock, type BlockedUser } from "../lib/blocks.js";
 import { useChat } from "../state/store.js";
 import { useEarning, lookupRankTier } from "../state/earning.js";
 import { StylePicker } from "./AdminPanel.js";
@@ -1826,6 +1827,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     their own catalog filters (the master account is
                     the reader identity, not the per-character mask). */}
                 {!isCharacter ? <ScriptoriumPrivacyRow /> : null}
+                {/* Blocked-users management. Master-only (blocks are global
+                    + account-level). The only place to UNDO a block, since
+                    a blocked user's profile is no longer reachable. */}
+                {!isCharacter ? <BlockedUsersRow /> : null}
               </div>
             ) : null}
 
@@ -3763,6 +3768,77 @@ function InputBehaviorRow({
  * sign-in); falls back to a direct /earning/me fetch when the
  * store hasn't loaded yet.
  */
+/**
+ * Manage the account's block list. Blocks are global + mutual, so this is a
+ * master-only row. The Block ACTION lives on user profiles (the "Block"
+ * button); this is the only place to UNDO one, since a blocked user's profile
+ * is no longer reachable once blocked.
+ */
+function BlockedUsersRow() {
+  const [list, setList] = useState<BlockedUser[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchBlocks()
+      .then((b) => { if (!cancelled) setList(b); })
+      .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load"); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function remove(userId: string) {
+    setBusyId(userId);
+    setErr(null);
+    try {
+      await removeBlock(userId);
+      setList((cur) => (cur ?? []).filter((b) => b.userId !== userId));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to remove");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Blocked users</legend>
+      <p className="mb-2 text-[10px] text-keep-muted">
+        Blocking is mutual and global: you and a blocked user (and all of both your characters) can't
+        see each other anywhere - chat, the userlist, whispers, DMs, friends, or search. Remove a
+        block here to restore visibility.
+      </p>
+      {err ? <div className="mb-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-keep-accent">{err}</div> : null}
+      {list === null ? (
+        <p className="italic text-keep-muted">Loading…</p>
+      ) : list.length === 0 ? (
+        <p className="italic text-keep-muted">You haven't blocked anyone.</p>
+      ) : (
+        <ul className="space-y-1">
+          {list.map((b) => (
+            <li key={b.userId} className="flex items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/40 px-2 py-1.5">
+              {b.avatarUrl ? (
+                <img src={b.avatarUrl} alt="" referrerPolicy="no-referrer" className="h-6 w-6 shrink-0 rounded-full object-cover" />
+              ) : (
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-keep-rule/40 text-[10px] uppercase text-keep-muted">{b.username.slice(0, 1)}</span>
+              )}
+              <span className="min-w-0 flex-1 truncate text-keep-text">{b.username}</span>
+              <button
+                type="button"
+                disabled={busyId === b.userId}
+                onClick={() => void remove(b.userId)}
+                className="shrink-0 rounded border border-keep-rule px-2 py-0.5 hover:bg-keep-banner disabled:opacity-50"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </fieldset>
+  );
+}
+
 function CurrencyPrivacyRow() {
   const snapshot = useEarning((s) => s.snapshot);
   const refresh = useEarning((s) => s.refresh);

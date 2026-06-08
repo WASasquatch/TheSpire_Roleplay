@@ -489,6 +489,13 @@ export function isMasterAdminRole(role: Role): boolean {
   return role === "masteradmin";
 }
 
+/** True for moderators and both admin tiers, the "is this account staff?"
+ *  check. Used e.g. to make staff un-blockable (you can't hide a moderator
+ *  from yourself, and staff can't block each other). `trusted` is NOT staff. */
+export function isModeratorRole(role: Role): boolean {
+  return role === "mod" || role === "admin" || role === "masteradmin";
+}
+
 /**
  * Numeric rank so the moderation code can ask "does this caller
  * outrank this target?" without enumerating every tier. Higher number

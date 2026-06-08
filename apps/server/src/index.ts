@@ -79,13 +79,15 @@ import {
 } from "./seo.js";
 import { readFile } from "node:fs/promises";
 import { extendSession, loadSessionUser, resolveDisplayName } from "./auth/session.js";
-import { registerAuthRoutes, getSessionUser, userIdFromSessionId, slugToUsername } from "./routes/auth.js";
+import { recordHttpIp, recordSocketIp, extractSocketIp } from "./auth/ipLog.js";
+import { registerAuthRoutes, getSessionUser, userIdFromSessionId, slugToUsername, readBearerToken } from "./routes/auth.js";
 import { registerCharacterRoutes } from "./routes/characters.js";
 import { registerAffiliateRoutes } from "./routes/affiliates.js";
 import { registerBookmarkRoutes } from "./routes/bookmarks.js";
 import { registerDirectMessageRoutes } from "./routes/directMessages.js";
 import { registerEmoticonRoutes } from "./routes/emoticons.js";
 import { registerFriendsRoutes } from "./routes/friends.js";
+import { registerBlockRoutes } from "./routes/blocks.js";
 import { registerJournalRoutes } from "./routes/journal.js";
 import { registerLinkRoutes } from "./routes/links.js";
 import { registerWorldRoutes } from "./routes/worlds.js";
@@ -286,6 +288,19 @@ async function main() {
     return payload;
   });
 
+  // Event-time IP capture for authenticated HTTP requests (forum posts,
+  // scriptorium edits, world saves, etc.). `sessions.ip` is frozen at login,
+  // so this keeps the admin alt-detection current as users roam networks.
+  // Anonymous requests (static assets, the SPA shell, public polls) carry no
+  // bearer token and short-circuit instantly; authenticated requests are
+  // throttled to one effective write per (token, ip) per minute inside
+  // recordHttpIp, so a busy tab never turns this into a write storm.
+  // `trustProxy` (set above) makes `req.ip` the real client address behind
+  // Fly's edge. Fire-and-forget: never blocks or fails the request.
+  app.addHook("onRequest", async (req) => {
+    recordHttpIp(db, readBearerToken(req), req.ip, req.headers["user-agent"] ?? null);
+  });
+
   // ZodError → 400 with a readable list of issues. Without this, our routes'
   // `schema.parse(req.body)` calls bubble up as 500s.
   app.setErrorHandler((err, _req, reply) => {
@@ -342,6 +357,8 @@ async function main() {
     // when they're viewing their own profile (the flags are meant to
     // hide counts from OTHER users, not from the owner themselves).
     const me = await getSessionUser(req, db);
+    // lookupProfile applies the mutual-block gate internally (a blocked
+    // user's profile resolves to null, i.e. 404), so no extra check here.
     const profile = await lookupProfile(db, slugToUsername(name), me?.id);
     if (!profile) {
       reply.code(404);
@@ -546,6 +563,7 @@ async function main() {
   await registerWorldRoutes(baseApp, db, io);
   await registerStoryRoutes(baseApp, db, io);
   await registerFriendsRoutes(baseApp, db, io);
+  await registerBlockRoutes(baseApp, db, io);
   await registerDirectMessageRoutes(baseApp, db, io);
   await registerEmoticonRoutes(baseApp, db, io, uploadsRoot);
   await registerMessageRoutes(baseApp, db, io);
@@ -703,6 +721,19 @@ async function main() {
   io.on("connection", async (socket) => {
     const user = (socket.data as { user: import("./commands/types.js").SessionUser }).user;
 
+    // Event-time IP capture. A socket's IP is fixed for the life of its TCP
+    // connection, so recording it here covers every chat send / room switch on
+    // this connection; a network change forces a reconnect, which re-captures
+    // the new address. Cached on socket.data so per-event hooks below can keep
+    // `last_seen_at` fresh without re-parsing the handshake. socket.io bypasses
+    // Fastify's trustProxy, so extractSocketIp reproduces it from the headers.
+    const clientIp = extractSocketIp(socket.handshake);
+    (socket.data as { clientIp?: string | null }).clientIp = clientIp;
+    {
+      const ua = socket.handshake.headers["user-agent"];
+      recordSocketIp(db, user.id, clientIp, Array.isArray(ua) ? ua[0] : ua, "connect");
+    }
+
     // Auto-join the canonical landing room on connect for instant chat.
     // Prefers "The_Spire" by name (the seeded default); falls back to any
     // system room so installs with custom landings or pre-migration MainHall
@@ -810,6 +841,13 @@ async function main() {
       // the latest sessionTtlMs from settings each call so admin changes
       // take effect on the next interaction without restart.
       await extendSession(db, sid);
+      // Refresh the event-time IP log on real activity (chat send, room
+      // switch, etc. all funnel through here). The connection's IP is fixed,
+      // so this just bumps `last_seen_at`; the throttle inside recordSocketIp
+      // keeps it to one write/min so a chat spammer can't hammer SQLite.
+      const ip = (socket.data as { clientIp?: string | null }).clientIp;
+      const uid = (socket.data as { userId?: string }).userId;
+      recordSocketIp(db, uid, ip, null, "active");
       return true;
     }
 
@@ -1069,7 +1107,12 @@ async function main() {
         ack?.({ ok: false, code: "NO_THEATER", message: "Theater mode is not on in this room." });
         return;
       }
-      if (!(await callerCanEditRoom(db, user, roomId))) {
+      // `ended` / `error` are PASSIVE end-of-source signals any viewer's
+      // player emits; allowing them from non-controllers is what keeps the
+      // playlist advancing (and skipping dead sources) when no mod is around.
+      // ACTIVE controls still require the room-edit gate.
+      const isPassive = action === "ended" || action === "error";
+      if (!isPassive && !(await callerCanEditRoom(db, user, roomId))) {
         ack?.({ ok: false, code: "PERM", message: "Only the room owner or a mod can control playback." });
         return;
       }

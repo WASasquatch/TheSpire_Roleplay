@@ -232,7 +232,13 @@ function OverviewPanel({
   return (
     <div className="space-y-6 p-4">
       {w.coverImageUrl ? (
-        <img src={w.coverImageUrl} alt="" referrerPolicy="no-referrer" className="h-40 w-full rounded-lg border border-keep-rule/60 object-cover" />
+        // 16:9 container with object-contain so the whole cover shows
+        // (uncropped), letterboxed on the panel bg. Centered + width-capped so
+        // the ratio holds without the banner growing absurdly tall on wide
+        // viewports.
+        <div className="mx-auto aspect-video w-full max-w-4xl overflow-hidden rounded-lg border border-keep-rule/60 bg-keep-bg/60">
+          <img src={w.coverImageUrl} alt="" referrerPolicy="no-referrer" className="h-full w-full object-contain" />
+        </div>
       ) : null}
 
       {/* About — contained, larger copy. Full-width so a short description

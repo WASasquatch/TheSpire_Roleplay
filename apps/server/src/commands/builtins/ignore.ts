@@ -59,9 +59,12 @@ async function resolveIgnoreTarget(
  */
 export const ignoreCommand: CommandHandler = {
   name: "ignore",
-  aliases: ["block", "mute-user"],
+  // NOTE: "block"/"unblock" are NO LONGER ignore aliases. /block is now a
+  // separate, MUTUAL, global invisibility feature (see builtins/block.ts);
+  // /ignore stays the one-way, message-only mute it always was.
+  aliases: ["mute-user"],
   usage: "/ignore [name|clear]",
-  description: "Toggle ignoring a user, runs again to undo. Persists on your account across all characters.",
+  description: "Toggle ignoring a user (one-way: silences their messages for you). Runs again to undo. Persists on your account across all characters. For a stronger, mutual block use /block.",
   subcommands: [
     { verb: "<name>", usage: "/ignore <name>", description: "Ignore (or, if already ignored, unignore) this user." },
     { verb: "clear", usage: "/ignore clear", description: "Clear your entire ignore list." },
@@ -131,7 +134,6 @@ export const ignoreCommand: CommandHandler = {
  */
 export const unignoreCommand: CommandHandler = {
   name: "unignore",
-  aliases: ["unblock"],
   usage: "/unignore <name>",
   description: "Stop ignoring a user; their messages will reach you again.",
   async run(ctx) {

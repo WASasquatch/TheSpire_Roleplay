@@ -432,6 +432,10 @@ interface ChatState {
   /** Drop a batch of messages by id from a room's buffer (the `/trash`
    *  bulk-delete purge). No-op when none of the ids are present. */
   removeMessages: (roomId: string, ids: string[]) => void;
+  /** Drop EVERY buffered message authored by a user across all rooms. Used
+   *  when a block lands live so the blocked user's lines vanish immediately
+   *  instead of lingering until the next room load. */
+  purgeUserMessages: (userId: string) => void;
   /**
    * Prepend an older window of messages onto the front of a room's
    * buffer. Used by the scroll-to-top infinite history loader; the
@@ -942,6 +946,22 @@ export const useChat = create<ChatState>((set) => ({
       const next = list.filter((m) => !drop.has(m.id));
       if (next.length === list.length) return {};
       return { messagesByRoom: { ...s.messagesByRoom, [roomId]: next } };
+    }),
+
+  purgeUserMessages: (userId) =>
+    set((s) => {
+      let touched = false;
+      const nextByRoom: Record<string, ChatMessage[]> = {};
+      for (const rid of Object.keys(s.messagesByRoom)) {
+        const buf = s.messagesByRoom[rid];
+        if (!buf) continue;
+        // Drop lines the blocked user authored AND whispers addressed to
+        // them (so a whisper the viewer sent to a now-blocked user clears too).
+        const next = buf.filter((m) => m.userId !== userId && m.toUserId !== userId);
+        if (next.length !== buf.length) touched = true;
+        nextByRoom[rid] = next;
+      }
+      return touched ? { messagesByRoom: nextByRoom } : {};
     }),
 
   prependMessages: (roomId, older) =>

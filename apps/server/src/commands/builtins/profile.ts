@@ -1,6 +1,6 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { characterEarning, characterJournalEntries, characterOwnedNameStyles, characterPortraits, characters, identityCollection, identityPetCollection, items, profileLinks, stories, userActiveCosmetics, userOwnedNameStyles, userPortraits, users } from "../../db/schema.js";
-import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLink, ProfileMetrics, ProfileView, Theme } from "@thekeep/shared";
+import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { characterEarning, characterJournalEntries, characterOwnedNameStyles, characterPortraits, characters, identityCollection, identityPetCollection, items, profileLinks, stories, storyCopies, userActiveCosmetics, userOwnedNameStyles, userPortraits, users } from "../../db/schema.js";
+import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLibraryEntry, ProfileLink, ProfileMetrics, ProfileView, StoryRating, Theme } from "@thekeep/shared";
 import { matchThemePreset, resolveScriptoriumAuthorTier, roleRank } from "@thekeep/shared";
 import { getSettings, parseUserThemeJson } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
@@ -191,6 +191,53 @@ async function listProfilePetCollection(
     ))
     .orderBy(asc(identityPetCollection.slot));
   return rows.map((r) => ({ ...r, nickname: r.nickname ?? null }));
+}
+
+/**
+ * Read the identity's showcased Library — Scriptorium copies the owner bought
+ * and pinned (showcase_slot non-null), joined to the live story + author
+ * byline. Ordered by slot. Empty when nothing is pinned (the section hides).
+ */
+async function listProfileLibrary(
+  db: import("../../db/index.js").Db,
+  ownerScope: "user" | "character",
+  ownerId: string,
+): Promise<ProfileLibraryEntry[]> {
+  const rows = await db
+    .select({
+      slot: storyCopies.showcaseSlot,
+      storyId: stories.id,
+      slug: stories.slug,
+      title: stories.title,
+      coverImageUrl: stories.coverImageUrl,
+      rating: stories.rating,
+      authorCharacterId: stories.authorCharacterId,
+      authorMasterUsername: users.username,
+      authorCharacterName: characters.name,
+    })
+    .from(storyCopies)
+    .innerJoin(stories, eq(stories.id, storyCopies.storyId))
+    .innerJoin(users, eq(users.id, stories.authorUserId))
+    .leftJoin(characters, eq(characters.id, stories.authorCharacterId))
+    .where(and(
+      eq(storyCopies.ownerScope, ownerScope),
+      eq(storyCopies.ownerId, ownerId),
+      isNotNull(storyCopies.showcaseSlot),
+    ))
+    .orderBy(asc(storyCopies.showcaseSlot));
+  return rows.map((r) => {
+    const masterName = r.authorMasterUsername ?? "(deleted user)";
+    return {
+      slot: r.slot ?? 0,
+      storyId: r.storyId,
+      slug: r.slug,
+      title: r.title,
+      coverImageUrl: r.coverImageUrl ?? null,
+      rating: (r.rating ?? "PG") as StoryRating,
+      authorMasterUsername: masterName,
+      authorName: r.authorCharacterId ? (r.authorCharacterName ?? masterName) : masterName,
+    };
+  });
 }
 
 /**
@@ -495,6 +542,7 @@ async function buildMasterProfileView(
       scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, u.id),
       collection: await listProfileCollection(db, "user", u.id),
       petCollection: await listProfilePetCollection(db, "user", u.id),
+      library: await listProfileLibrary(db, "user", u.id),
       nameStyleKey: ns.key,
       nameStyleConfig: ns.config,
       profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id),
@@ -553,6 +601,7 @@ async function buildCharacterProfileView(
       scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, c.userId),
       collection: await listProfileCollection(db, "character", c.id),
       petCollection: await listProfilePetCollection(db, "character", c.id),
+      library: await listProfileLibrary(db, "character", c.id),
       nameStyleKey: ns.key,
       nameStyleConfig: ns.config,
       profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id),
@@ -694,6 +743,7 @@ async function lookupProfile(
         scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, u.id),
         collection: await listProfileCollection(db, "user", u.id),
         petCollection: await listProfilePetCollection(db, "user", u.id),
+        library: await listProfileLibrary(db, "user", u.id),
         nameStyleKey: ns.key,
         nameStyleConfig: ns.config,
         profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id),
@@ -762,6 +812,7 @@ async function lookupProfile(
       scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, c.userId),
       collection: await listProfileCollection(db, "character", c.id),
       petCollection: await listProfilePetCollection(db, "character", c.id),
+      library: await listProfileLibrary(db, "character", c.id),
       nameStyleKey: ns.key,
       nameStyleConfig: ns.config,
       profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id),
@@ -853,6 +904,7 @@ async function lookupRandomProfile(
         scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, u.id),
         collection: await listProfileCollection(db, "user", u.id),
         petCollection: await listProfilePetCollection(db, "user", u.id),
+        library: await listProfileLibrary(db, "user", u.id),
         nameStyleKey: ns.key,
         nameStyleConfig: ns.config,
         profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id),
@@ -915,6 +967,7 @@ async function lookupRandomProfile(
       scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, c.userId),
       collection: await listProfileCollection(db, "character", c.id),
       petCollection: await listProfilePetCollection(db, "character", c.id),
+      library: await listProfileLibrary(db, "character", c.id),
       nameStyleKey: ns.key,
       nameStyleConfig: ns.config,
       profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id),

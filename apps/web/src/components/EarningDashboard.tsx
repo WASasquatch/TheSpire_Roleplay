@@ -23,6 +23,7 @@ import {
   fetchEarningLedger,
   fetchGameRankings,
   fetchFamiliarRankings,
+  fetchScriptoriumRankings,
   fetchRankings,
   formatItemName,
   formatLedgerEntry,
@@ -68,6 +69,8 @@ import {
   type OverallRankingRow,
   type FamiliarRankingsResponse,
   type FamiliarRankingRow,
+  type ScriptoriumRankingsResponse,
+  type ScriptoriumBookRow,
 } from "../lib/earning.js";
 import { BorderedAvatar } from "./BorderedAvatar.js";
 import { EmoticonSubmissionModal } from "./EmoticonSubmissionModal.js";
@@ -864,6 +867,7 @@ function RankingsTab({ initialBoard }: { initialBoard?: RankingBoardKey }) {
   const [data, setData] = useState<RankingsResponse | null>(null);
   const [gameData, setGameData] = useState<GameRankingsResponse | null>(null);
   const [familiarData, setFamiliarData] = useState<FamiliarRankingsResponse | null>(null);
+  const [scriptoriumData, setScriptoriumData] = useState<ScriptoriumRankingsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   // Deep-link: once the boards have rendered, scroll to + briefly flash
@@ -890,12 +894,14 @@ function RankingsTab({ initialBoard }: { initialBoard?: RankingBoardKey }) {
       fetchRankings(),
       fetchGameRankings().catch(() => null),
       fetchFamiliarRankings().catch(() => null),
+      fetchScriptoriumRankings().catch(() => null),
     ])
-      .then(([r, g, f]) => {
+      .then(([r, g, f, s]) => {
         if (cancelled) return;
         setData(r);
         setGameData(g);
         setFamiliarData(f);
+        setScriptoriumData(s);
       })
       .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load rankings"); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -918,7 +924,100 @@ function RankingsTab({ initialBoard }: { initialBoard?: RankingBoardKey }) {
       {familiarData && (familiarData.byLevel.length > 0 || familiarData.byAge.length > 0 || familiarData.byStreak.length > 0 || familiarData.byHealth.length > 0) ? (
         <FamiliarRankingsSection data={familiarData} />
       ) : null}
+      {scriptoriumData && (
+        scriptoriumData.authorBoards.some((b) => b.entries.length > 0) ||
+        scriptoriumData.bookBoards.some((b) => b.entries.length > 0)
+      ) ? (
+        <ScriptoriumRankingsSection data={scriptoriumData} />
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Scriptorium leaderboards — AUTHOR boards (Top Publishers / Most Words) rank
+ * writing identities and reuse the shared entry renderer; BOOK boards (Top
+ * Books / Highest Rated) rank the books themselves with a cover tile that opens
+ * the reader. Auto-populates from published stories; no registration step.
+ */
+function ScriptoriumRankingsSection({ data }: { data: ScriptoriumRankingsResponse }) {
+  const authorBoards = data.authorBoards.filter((b) => b.entries.length > 0);
+  const bookBoards = data.bookBoards.filter((b) => b.entries.length > 0);
+  return (
+    <section className="space-y-3">
+      <header className="flex items-baseline justify-between">
+        <h3 className="font-action text-base">Scriptorium Rankings</h3>
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">Books & Authors</span>
+      </header>
+      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        {authorBoards.map((b) => (
+          <section key={b.key} className="rounded border border-keep-rule bg-keep-bg/40 p-3">
+            <header className="mb-2 flex items-baseline justify-between">
+              <h4 className="font-action text-sm uppercase tracking-widest text-keep-muted">{b.label}</h4>
+              <span className="text-[10px] uppercase tracking-widest text-keep-muted">{b.metric}</span>
+            </header>
+            <ol className="space-y-1.5">
+              {b.entries.map((e, i) => (
+                <li key={`${e.scope}::${e.ownerId}`}>
+                  <RankingEntryCard rank={i + 1} entry={e} metric={b.metric} />
+                </li>
+              ))}
+            </ol>
+          </section>
+        ))}
+        {bookBoards.map((b) => (
+          <section key={b.key} className="rounded border border-keep-rule bg-keep-bg/40 p-3">
+            <header className="mb-2 flex items-baseline justify-between">
+              <h4 className="font-action text-sm uppercase tracking-widest text-keep-muted">{b.label}</h4>
+              <span className="text-[10px] uppercase tracking-widest text-keep-muted">{b.metric}</span>
+            </header>
+            <ol className="space-y-1.5">
+              {b.entries.map((r, i) => (
+                <li key={r.storyId}>
+                  <BookRankingEntry rank={i + 1} book={r} boardKey={b.key} />
+                </li>
+              ))}
+            </ol>
+          </section>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** A book-board row: rank pill + cover thumbnail + title/author + metric. The
+ *  whole row opens the story in the reader (via the store bridge). */
+function BookRankingEntry({ rank, book, boardKey }: { rank: number; book: ScriptoriumBookRow; boardKey: "applause" | "rated" }) {
+  const setOpenStoryReader = useChat((s) => s.setOpenStoryReader);
+  const byline = book.author.characterName ?? book.author.masterUsername;
+  const primary = boardKey === "rated"
+    ? (book.avgRating != null ? `${book.avgRating.toFixed(1)}★` : "—")
+    : book.applauseCount.toLocaleString();
+  const primaryLabel = boardKey === "rated" ? `${book.reviewCount} reviews` : "applause";
+  return (
+    <button
+      type="button"
+      onClick={() => setOpenStoryReader(book.storyId)}
+      title={`Read "${book.title}"`}
+      className="flex w-full items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1.5 text-left hover:border-keep-action/40"
+    >
+      <div className={`w-6 shrink-0 text-center font-bold tabular-nums ${rank <= 3 ? "text-keep-action" : "text-keep-muted"}`}>{rank}</div>
+      <div className="h-10 w-7 shrink-0 overflow-hidden rounded-sm border border-keep-rule/60 bg-keep-panel/60">
+        {book.coverImageUrl ? (
+          <img src={book.coverImageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-[12px] text-keep-muted">📖</div>
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-semibold">{book.title}</div>
+        <div className="truncate text-[10px] uppercase tracking-wide text-keep-muted">by {byline}</div>
+      </div>
+      <div className="shrink-0 text-right">
+        <div className="text-sm font-semibold tabular-nums">{primary}</div>
+        <div className="text-[10px] uppercase tracking-widest text-keep-muted">{primaryLabel}</div>
+      </div>
+    </button>
   );
 }
 

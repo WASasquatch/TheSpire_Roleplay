@@ -117,6 +117,7 @@ export const CHARACTER_ATTRIBUTE_VALUE_MIN = -9999;
 export const CHARACTER_ATTRIBUTE_VALUE_MAX = 9999;
 
 import type { Theme } from "./theme.js";
+import type { StoryRating } from "./story.js";
 
 /**
  * A reference to a "title-bound identity" - either a master account
@@ -235,6 +236,23 @@ export interface ProfileCollectionEntry {
    * the pre-nickname behavior.
    */
   nickname?: string | null;
+}
+
+/**
+ * A showcased book in an identity's Library — a copy the owner bought from the
+ * Scriptorium and chose to display, pinned in `slot` order, beside their item
+ * Collection and Pets. Click-through opens the story reader at its permalink.
+ */
+export interface ProfileLibraryEntry {
+  slot: number;
+  storyId: string;
+  slug: string;
+  title: string;
+  coverImageUrl: string | null;
+  rating: StoryRating;
+  /** Author byline for the cover tile. */
+  authorMasterUsername: string;
+  authorName: string;
 }
 
 /**
@@ -370,6 +388,13 @@ export interface CharacterProfile {
    * "Pets" section on the profile, below the item collection.
    */
   petCollection: ProfileCollectionEntry[];
+  /**
+   * Showcased books from this identity's Library — copies bought from the
+   * Scriptorium that the owner pinned to display, beside Collection and Pets.
+   * Empty when nothing is pinned (the section then hides). Same per-identity
+   * isolation as `collection`.
+   */
+  library: ProfileLibraryEntry[];
   /**
    * Equipped name-style key for THIS identity. Drives the rendered
    * username in the profile hero so a name style isn't just a chat
@@ -591,6 +616,12 @@ export interface MasterProfile {
    * to 5). Same isolation rules as `collection`.
    */
   petCollection: ProfileCollectionEntry[];
+  /**
+   * Showcased books from this master account's Library — Scriptorium copies
+   * the owner pinned to display. Empty when nothing is pinned. Same isolation
+   * as `collection`.
+   */
+  library: ProfileLibraryEntry[];
   /**
    * Master/OOC equipped name-style key + config. Painted on the
    * profile hero so the user's OOC cosmetic shows up beyond chat.

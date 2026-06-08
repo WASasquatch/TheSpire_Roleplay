@@ -1067,6 +1067,16 @@ function Chat() {
   // Story reader state. Object → open; null → closed. `chapterIndex`
   // optional so `/story <slug> chapter <N>` can land on a specific page.
   const [storyReader, setStoryReader] = useState<{ storyId: string; chapterIndex?: number } | null>(null);
+  // Bridge: any surface (e.g. the Scriptorium rankings in the Earning
+  // dashboard) can request the reader via the store; App owns the actual
+  // reader state, so it watches the request, opens the reader, and clears it.
+  const openStoryReaderId = useChat((s) => s.openStoryReaderId);
+  const setOpenStoryReader = useChat((s) => s.setOpenStoryReader);
+  useEffect(() => {
+    if (!openStoryReaderId) return;
+    setStoryReader({ storyId: openStoryReaderId });
+    setOpenStoryReader(null);
+  }, [openStoryReaderId, setOpenStoryReader]);
   const [navLinksVersion, setNavLinksVersion] = useState(0);
 
   /**

@@ -89,6 +89,7 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
   const sellTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevStreakRef = useRef<number | null>(null);
   const prevLevelRef = useRef<number | null>(null);
+  const xpRef = useRef(0); // last anchored XP, so a tend can float the delta it earned
   const interactingRef = useRef(false); // true while a tool is armed or an action is in flight
   const screenRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ kind: "play" | "wipe" } | null>(null);
@@ -140,11 +141,13 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
         pushFloat(`✦ Level ${s.level} ✦`, "good", 50);
       }
       prevLevelRef.current = s.level;
+      xpRef.current = s.xp;
       setLive(liveFromSnap(s));
       lastTick.current = Date.now();
     } else {
       prevStreakRef.current = null;
       prevLevelRef.current = null;
+      xpRef.current = 0;
       setLive(null);
     }
   }, [pushFloat, flash]);
@@ -217,8 +220,13 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
     inFlight.current = true;
     setBusy(true);
     try {
+      const beforeXp = xpRef.current;
       const next = await fn();
       anchor(next);
+      // Surface the XP this tend earned (server-authoritative) so the Lv/XP bar
+      // visibly pays off. floor-diff so sub-1 passive drift doesn't show a "+0".
+      const gainedXp = Math.floor(next.xp) - Math.floor(beforeXp);
+      if (gainedXp >= 1) pushFloat(`+${gainedXp} XP`, "good", 50);
       if (opts?.anim) flash(opts.anim);
       if (opts?.float) pushFloat(opts.float[0], opts.float[1]);
       void refreshEarning();

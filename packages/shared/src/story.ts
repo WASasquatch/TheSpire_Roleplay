@@ -232,6 +232,86 @@ export function countWords(html: string): number {
   return text.split(" ").length;
 }
 
+/* ----- Scriptorium writing-reward math (shared so the editor can preview, and
+ *       the server stays authoritative with the exact same numbers) ----- */
+
+/**
+ * Monday (UTC) that starts the week containing `date`, as YYYY-MM-DD. This is
+ * the Scriptorium weekly-streak key — the writing analog of the eidolon daily
+ * day-key. Readable, and gives exact week-gap math via `weekNumFromKey`.
+ */
+export function isoWeekKey(date: Date = new Date()): string {
+  const dayNum = Math.floor(date.getTime() / 86_400_000); // days since epoch (UTC)
+  // 1970-01-01 (dayNum 0) was a Thursday; offset to the most recent Monday.
+  const offsetToMonday = (((dayNum + 3) % 7) + 7) % 7;
+  const monday = new Date((dayNum - offsetToMonday) * 86_400_000);
+  return monday.toISOString().slice(0, 10);
+}
+
+/** Integer week index for a key from `isoWeekKey` (consecutive weeks differ by
+ *  exactly 1), used for gap math. */
+export function weekNumFromKey(key: string): number {
+  const [y, m, d] = key.split("-").map(Number);
+  const dayNum = Math.floor(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1) / 86_400_000);
+  return Math.floor((dayNum + 3) / 7);
+}
+
+export interface WeeklyStreakState {
+  streakCount: number;
+  lastPublishWeekKey: string | null;
+  bestStreak: number;
+}
+export interface WeeklyStreakRoll {
+  streakCount: number;
+  bestStreak: number;
+  lastPublishWeekKey: string;
+  /** True when this publish was the first of a new week (the streak moved). */
+  advanced: boolean;
+}
+
+/**
+ * Advance the weekly publishing streak. Publishing again the same week is a
+ * no-op; a consecutive week (gap of exactly 1) increments; a gap of two or
+ * more weeks resets to 1 (no grace — stricter than the eidolon daily loop).
+ */
+export function rollWeeklyStreak(prev: WeeklyStreakState, thisWeekKey: string): WeeklyStreakRoll {
+  if (prev.lastPublishWeekKey === thisWeekKey) {
+    return { streakCount: prev.streakCount, bestStreak: prev.bestStreak, lastPublishWeekKey: thisWeekKey, advanced: false };
+  }
+  let streak: number;
+  if (!prev.lastPublishWeekKey) {
+    streak = 1;
+  } else {
+    const gap = weekNumFromKey(thisWeekKey) - weekNumFromKey(prev.lastPublishWeekKey);
+    streak = gap === 1 ? prev.streakCount + 1 : 1;
+  }
+  const bestStreak = Math.max(prev.bestStreak, streak);
+  return { streakCount: streak, bestStreak, lastPublishWeekKey: thisWeekKey, advanced: true };
+}
+
+/** Payout multiplier from the current weekly streak: 1 + perWeekBonus·(weeks-1),
+ *  clamped to [1, maxMultiplier]. */
+export function scriptoriumStreakMultiplier(
+  streakCount: number,
+  cfg: { perWeekBonus: number; maxMultiplier: number },
+): number {
+  const mult = 1 + cfg.perWeekBonus * Math.max(0, streakCount - 1);
+  return Math.min(cfg.maxMultiplier, Math.max(1, mult));
+}
+
+/** Base (pre-streak) reward for a chapter of `wordCount` words: a continuous
+ *  per-word payout that scales with length, or zero below the word floor. */
+export function scriptoriumChapterBaseReward(
+  wordCount: number,
+  cfg: { xpPerWord: number; currencyPerWord: number; wordFloor: number },
+): { xp: number; currency: number } {
+  if (wordCount < cfg.wordFloor) return { xp: 0, currency: 0 };
+  return {
+    xp: Math.round(wordCount * cfg.xpPerWord),
+    currency: Math.round(wordCount * cfg.currencyPerWord),
+  };
+}
+
 /**
  * Compact author identity. Mirrors the "identity = master OR character"
  * model used by messages, profiles, and reviews elsewhere.

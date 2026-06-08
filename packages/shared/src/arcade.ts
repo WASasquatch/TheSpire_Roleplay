@@ -356,6 +356,25 @@ export const streakXpMultiplier = (streakCount: number): number =>
 export const EIDOLON_STREAK_REWARDS: Record<number, number> = { 3: 25, 7: 75, 14: 150, 30: 400 };
 export const streakRewardFor = (streakCount: number): number => EIDOLON_STREAK_REWARDS[streakCount] ?? 0;
 
+/* ---- active-care XP (the bar moves when you actually tend) ---- */
+/** XP per point of wellbeing a care action actually restores. Passive XP
+ *  (eidolonXpGain) rewards keeping a familiar thriving over time; this rewards
+ *  the hands-on tend that brings a decayed one back up, so the Lv/XP bar visibly
+ *  jumps when you feed/play/clean a needy familiar. */
+export const EIDOLON_CARE_XP_FACTOR = 0.4;
+/**
+ * XP earned for an action that raised the gauge total by `gaugeGain` (sum of
+ * Satiety+Spirit+Vigor+Hygiene+Health deltas, post-clamp). Returns 0 for a
+ * no-op / net-negative action (e.g. playing with an already-joyful familiar),
+ * so it can't be farmed by spamming a maxed gauge — XP only flows for care
+ * that actually helped. Scaled by the same care-streak multiplier as passive
+ * XP for consistency.
+ */
+export function eidolonCareXp(gaugeGain: number, streakCount = 0): number {
+  if (!Number.isFinite(gaugeGain) || gaugeGain <= 0) return 0;
+  return Math.round(gaugeGain * EIDOLON_CARE_XP_FACTOR * streakXpMultiplier(streakCount));
+}
+
 /* ---- visiting (patting another player's familiar) ---- */
 /** Cooldown between pats of the same familiar by the same visitor (24h). */
 export const EIDOLON_PAT_COOLDOWN_MS = 24 * 60 * 60 * 1000;

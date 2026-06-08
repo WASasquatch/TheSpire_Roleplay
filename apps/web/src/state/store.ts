@@ -564,6 +564,12 @@ interface ChatState {
   openProfile: ProfileView | null;
   setOpenProfile: (p: ProfileView | null) => void;
 
+  /** Request to open the Story reader for a story id, from anywhere (e.g. the
+   *  Scriptorium rankings). App owns the actual reader state; it watches this,
+   *  opens the reader, and clears it back to null. */
+  openStoryReaderId: string | null;
+  setOpenStoryReader: (storyId: string | null) => void;
+
   /**
    * Editor target - null means closed.
    * mode "master" → edits the master account (no characterId).
@@ -1228,6 +1234,8 @@ export const useChat = create<ChatState>((set) => ({
 
   openProfile: null,
   setOpenProfile: (p) => set({ openProfile: p }),
+  openStoryReaderId: null,
+  setOpenStoryReader: (storyId) => set({ openStoryReaderId: storyId }),
 
   editor: null,
   openEditor: (target) => set({ editor: target }),

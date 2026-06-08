@@ -41,6 +41,47 @@ export interface LengthBonusSpec {
   maxMultiplier: number;
 }
 
+/** Scriptorium (book-writing) earning + buy-a-copy economy. All amounts are
+ *  admin-tunable so the writing economy can be balanced without a deploy. */
+export interface ScriptoriumConfig {
+  /** When false, publishing chapters and buying copies award/cost nothing. */
+  enabled: boolean;
+  /** Reward scales CONTINUOUSLY with the chapter's published word count — a
+   *  longer chapter always earns proportionally more, no plateau. Paid once,
+   *  at first publish. */
+  xpPerWord: number;
+  currencyPerWord: number;
+  /** Chapters below this word count pay nothing (but still latch as paid, so
+   *  padding one up later doesn't re-trigger a reward). */
+  wordFloor: number;
+  /** Per-authoring-pool, per-UTC-day ceilings on total writing income. */
+  dailyXpCap: number;
+  dailyCurrencyCap: number;
+  /** Weekly publishing streak → payout multiplier. mult = min(maxMultiplier,
+   *  1 + perWeekBonus*(weeks-1)). */
+  streak: { perWeekBonus: number; maxMultiplier: number };
+  /** Spam gate (the chat-style block, tuned for long-form prose). A chapter
+   *  whose body trips these earns NOTHING (still latches). The per-character
+   *  unique-ratio used for short chat is omitted — it's meaningless on long
+   *  text — in favor of dominant-token + lexical-diversity checks. */
+  spam: {
+    enabled: boolean;
+    /** Skip the check below this many words (a short chapter can't pad-spam). */
+    minWords: number;
+    /** Flag when a single word exceeds this share of all words. */
+    dominantTokenRatioCap: number;
+    /** Flag when distinct-words / total-words falls below this (a sentence or
+     *  paragraph pasted over and over to inflate the count). */
+    uniqueWordRatioFloor: number;
+  };
+  /** "Buy a Copy" price in currency. */
+  copyPrice: number;
+  /** Fraction (0..1) of the copy price paid to the author as royalty. */
+  royaltyRate: number;
+  /** Per-author, per-UTC-day ceiling on royalty income (buyers still pay full). */
+  dailyRoyaltyCap: number;
+}
+
 export interface EarningConfig {
   /** Master kill-switch. When false, no source awards anything. */
   enabled: boolean;
@@ -144,6 +185,8 @@ export interface EarningConfig {
     /** Epoch ms when backfill last ran; non-null = skip on next boot. */
     completedAt: number | null;
   };
+  /** Scriptorium writing rewards + buy-a-copy economy. */
+  scriptorium: ScriptoriumConfig;
 }
 
 export const DEFAULT_EARNING_CONFIG: EarningConfig = {
@@ -218,6 +261,27 @@ export const DEFAULT_EARNING_CONFIG: EarningConfig = {
     // seeded default for fresh installs.
     xpPerHistoricalMessage: 5.0,
     completedAt: null,
+  },
+  scriptorium: {
+    enabled: true,
+    // Continuous per-word reward — a longer chapter ALWAYS earns proportionally
+    // more, no plateau. ~0.04 XP/word puts an 11k-word chapter near 450 XP and
+    // a 2.5k one near 100, with everything in between scaling smoothly.
+    xpPerWord: 0.04,
+    currencyPerWord: 0.025,
+    wordFloor: 300,
+    // Anti-grind ceiling: pays one or two big chapters in full per day, then
+    // clips — not a tax on a single legitimate long chapter.
+    dailyXpCap: 1200,
+    dailyCurrencyCap: 800,
+    streak: { perWeekBonus: 0.1, maxMultiplier: 2.0 },
+    // Tuned for prose: real writing has high lexical diversity and no single
+    // dominant word, so these only trip on padded / pasted-repeat garbage.
+    spam: { enabled: true, minWords: 50, dominantTokenRatioCap: 0.30, uniqueWordRatioFloor: 0.06 },
+    // Buy-a-Copy economy, scaled up to match the richer writing rewards.
+    copyPrice: 120,
+    royaltyRate: 0.5,
+    dailyRoyaltyCap: 800,
   },
 };
 
@@ -328,6 +392,33 @@ export function normalizeEarningConfig(input: unknown): EarningConfig {
           ? null
           : num(backfill.completedAt, 0) || null,
     },
+    scriptorium: (() => {
+      const sc = obj(src.scriptorium);
+      const st = obj(sc.streak);
+      const sp = obj(sc.spam);
+      const d = def.scriptorium;
+      return {
+        enabled: bool(sc.enabled, d.enabled),
+        xpPerWord: Math.max(0, num(sc.xpPerWord, d.xpPerWord)),
+        currencyPerWord: Math.max(0, num(sc.currencyPerWord, d.currencyPerWord)),
+        wordFloor: Math.max(0, num(sc.wordFloor, d.wordFloor)),
+        dailyXpCap: Math.max(0, num(sc.dailyXpCap, d.dailyXpCap)),
+        dailyCurrencyCap: Math.max(0, num(sc.dailyCurrencyCap, d.dailyCurrencyCap)),
+        streak: {
+          perWeekBonus: Math.max(0, num(st.perWeekBonus, d.streak.perWeekBonus)),
+          maxMultiplier: Math.max(1.0, Math.min(5.0, num(st.maxMultiplier, d.streak.maxMultiplier))),
+        },
+        spam: {
+          enabled: bool(sp.enabled, d.spam.enabled),
+          minWords: Math.max(0, num(sp.minWords, d.spam.minWords)),
+          dominantTokenRatioCap: Math.max(0, Math.min(1, num(sp.dominantTokenRatioCap, d.spam.dominantTokenRatioCap))),
+          uniqueWordRatioFloor: Math.max(0, Math.min(1, num(sp.uniqueWordRatioFloor, d.spam.uniqueWordRatioFloor))),
+        },
+        copyPrice: Math.max(0, Math.round(num(sc.copyPrice, d.copyPrice))),
+        royaltyRate: Math.max(0, Math.min(1, num(sc.royaltyRate, d.royaltyRate))),
+        dailyRoyaltyCap: Math.max(0, num(sc.dailyRoyaltyCap, d.dailyRoyaltyCap)),
+      };
+    })(),
   };
 }
 

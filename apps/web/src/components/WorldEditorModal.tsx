@@ -35,6 +35,9 @@ import { ActiveThemeContext, themeStyle, useActiveTheme } from "../lib/theme.js"
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { CloseButton } from "./CloseButton.js";
+import { WorldEntitiesTab } from "./WorldEntitiesTab.js";
+import { WorldArcsTab } from "./WorldArcsTab.js";
+import { WorldSessionsTab } from "./WorldSessionsTab.js";
 import { useChat } from "../state/store.js";
 
 interface Props {
@@ -54,6 +57,9 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [creatingUnderParent, setCreatingUnderParent] = useState<string | "root" | null>(null);
+  // Which knowledge-base surface (if any) the right pane is showing instead of
+  // the page / world-settings editors.
+  const [kbView, setKbView] = useState<null | "entries" | "arcs" | "sessions">(null);
 
   async function load() {
     setError(null);
@@ -145,9 +151,9 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
                 <span className="uppercase tracking-widest text-keep-muted">Pages</span>
                 <button
                   type="button"
-                  onClick={() => { setCreatingUnderParent("root"); setSelectedPageId(null); }}
+                  onClick={() => { setCreatingUnderParent("root"); setSelectedPageId(null); setKbView(null); }}
                   className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-[11px] hover:bg-keep-banner"
-                  title="Add a top-level page"
+                  title="Add a top-level Lore page"
                 >
                   + Page
                 </button>
@@ -155,23 +161,41 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
               <div className="min-h-0 flex-1 overflow-y-auto p-1 text-sm">
                 <button
                   type="button"
-                  onClick={() => { setSelectedPageId(null); setCreatingUnderParent(null); }}
+                  onClick={() => { setSelectedPageId(null); setCreatingUnderParent(null); setKbView(null); }}
                   className={`block w-full rounded px-2 py-1 text-left text-xs uppercase tracking-widest ${
-                    selectedPageId === null && creatingUnderParent === null
+                    selectedPageId === null && creatingUnderParent === null && kbView === null
                       ? "bg-keep-action/15 text-keep-action"
                       : "text-keep-muted hover:bg-keep-muted/25"
                   }`}
                 >
                   World settings
                 </button>
+                {([
+                  ["entries", "Knowledge base", "Locations, NPCs, Items, Factions, custom kinds"],
+                  ["arcs", "Arcs", "Storyline groupings"],
+                  ["sessions", "Sessions", "Chronological session logs"],
+                ] as const).map(([key, label, title]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => { setKbView(key); setSelectedPageId(null); setCreatingUnderParent(null); }}
+                    className={`block w-full rounded px-2 py-1 text-left text-xs uppercase tracking-widest ${
+                      kbView === key ? "bg-keep-action/15 text-keep-action" : "text-keep-muted hover:bg-keep-muted/25"
+                    }`}
+                    title={title}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <div className="mt-1 border-t border-keep-rule/40 pt-1 text-[10px] uppercase tracking-widest text-keep-muted">Lore pages</div>
                 {tree.length === 0 ? (
                   <p className="p-2 italic text-keep-muted">No pages yet.</p>
                 ) : (
                   <PageTree
                     nodes={tree}
                     selectedId={selectedPageId}
-                    onSelect={(id) => { setSelectedPageId(id); setCreatingUnderParent(null); }}
-                    onAddChild={(id) => { setCreatingUnderParent(id); setSelectedPageId(null); }}
+                    onSelect={(id) => { setSelectedPageId(id); setCreatingUnderParent(null); setKbView(null); }}
+                    onAddChild={(id) => { setCreatingUnderParent(id); setSelectedPageId(null); setKbView(null); }}
                   />
                 )}
               </div>
@@ -179,7 +203,13 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
 
             {/* Right: editor pane */}
             <section className="min-h-0 flex-1 overflow-y-auto p-4">
-              {creatingUnderParent !== null ? (
+              {kbView === "entries" ? (
+                <WorldEntitiesTab worldId={worldId} detail={detail} onChanged={load} />
+              ) : kbView === "arcs" ? (
+                <WorldArcsTab worldId={worldId} detail={detail} onChanged={load} />
+              ) : kbView === "sessions" ? (
+                <WorldSessionsTab worldId={worldId} detail={detail} onChanged={load} />
+              ) : creatingUnderParent !== null ? (
                 <NewPageForm
                   worldId={worldId}
                   parentId={creatingUnderParent === "root" ? null : creatingUnderParent}

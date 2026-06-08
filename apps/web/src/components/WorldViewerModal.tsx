@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import { legibleHtmlColors, sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
-import type { WorldDetail, WorldMemberRef, WorldPage } from "@thekeep/shared";
-import { cropStyleFor } from "../lib/avatarCrop.js";
-import { buildWorldTree, parseWorldFromUrl, syncWorldUrl, worldShareUrl, type WorldTreeNode } from "../lib/worlds.js";
+import { useEffect, useState } from "react";
+import { sweepOrphanedUserBioStyles } from "../lib/userHtml.js";
+import type { WorldDetail } from "@thekeep/shared";
+import { parseWorldFromUrl, syncWorldUrl, worldShareUrl } from "../lib/worlds.js";
 import { readError } from "../lib/http.js";
 import { ActiveThemeContext, themeStyle, useActiveTheme } from "../lib/theme.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { CloseButton } from "./CloseButton.js";
 import { ApplicationFormModal } from "./ApplicationFormModal.js";
+import { WorldKnowledgeBase } from "./WorldKnowledgeBase.js";
 
 interface Props {
   worldId: string;
@@ -47,15 +47,6 @@ interface Props {
 export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAuthenticated = true, openApplicationOnMount = false }: Props) {
   const [detail, setDetail] = useState<WorldDetail | null>(initialDetail ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [selectedPageId, setSelectedPageId] = useState<string | null>(() => {
-    // Seed the selected page from initialDetail so the standalone view doesn't
-    // flash the "pick a page" placeholder before useEffect runs.
-    if (!initialDetail) return null;
-    const firstTop = initialDetail.pages
-      .filter((p) => p.parentPageId === null)
-      .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt)[0];
-    return firstTop?.id ?? null;
-  });
   const [busy, setBusy] = useState(false);
   // Application form overlay. The catalog opens this same component
   // via its own `applyingTo` state; here we drive it from either the
@@ -70,12 +61,6 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
       if (!r.ok) throw new Error(await readError(r));
       const j = (await r.json()) as WorldDetail;
       setDetail(j);
-      if (selectedPageId === null) {
-        const firstTop = j.pages
-          .filter((p) => p.parentPageId === null)
-          .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt)[0];
-        if (firstTop) setSelectedPageId(firstTop.id);
-      }
       // Normalize the URL: callers may have opened the viewer with the
       // world's id (chat banner, primary-world chip) but the canonical
       // shareable form is /w/<slug>. Replace - not push - so back button
@@ -137,9 +122,6 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
   // migration 0187, per-identity memberships made a cross-identity
   // primary signal meaningless. Memberships still exist, just without
   // the "this one is your headline affiliation" flag.
-
-  const tree = useMemo(() => (detail ? buildWorldTree(detail.pages) : []), [detail]);
-  const selectedPage = detail?.pages.find((p) => p.id === selectedPageId) ?? null;
 
   // "Copy link" feedback: brief flash so the user knows the click did
   // something, since clipboard APIs are silent by default.
@@ -241,38 +223,11 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
         {detail === null && error === null ? (
           <p className="p-4 italic text-keep-muted">Loading...</p>
         ) : detail !== null ? (
-          <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-            <aside className="flex shrink-0 flex-col border-keep-rule md:w-72 md:border-r">
-              <div className="shrink-0 border-b border-keep-rule bg-keep-banner/40 px-3 py-1.5 text-xs uppercase tracking-widest text-keep-muted">
-                Pages
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto p-1 text-sm">
-                {tree.length === 0 ? (
-                  <p className="p-2 italic text-keep-muted">This world has no pages yet.</p>
-                ) : (
-                  <ViewerTree
-                    nodes={tree}
-                    selectedId={selectedPageId}
-                    onSelect={(id) => setSelectedPageId(id)}
-                  />
-                )}
-              </div>
-            </aside>
-
-            <section className="min-h-0 flex-1 overflow-y-auto">
-              <MemberGallery members={detail.members} />
-              <div className="p-5">
-                {selectedPage ? (
-                  <PageView page={selectedPage} description={null} />
-                ) : (
-                  <PageView
-                    page={null}
-                    description={detail.world.description}
-                  />
-                )}
-              </div>
-            </section>
-          </div>
+          <WorldKnowledgeBase
+            worldId={worldId}
+            detail={detail}
+            membership={{ isAuthenticated, busy, onJoin: join, onLeave: leave, onApply: () => setShowApplicationForm(true) }}
+          />
         ) : null}
       </div>
       </ActiveThemeContext.Provider>
@@ -296,159 +251,6 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
   );
 }
 
-function ViewerTree({
-  nodes,
-  selectedId,
-  onSelect,
-}: {
-  nodes: WorldTreeNode[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <ul className="space-y-0.5">
-      {nodes.map((n) => (
-        <li key={n.page.id}>
-          <button
-            type="button"
-            onClick={() => onSelect(n.page.id)}
-            className={`block w-full truncate rounded px-2 py-1 text-left text-xs ${
-              selectedId === n.page.id
-                ? "bg-keep-action/15 text-keep-action"
-                : "hover:bg-keep-muted/25"
-            }`}
-            style={{ paddingLeft: `${n.depth * 12 + 8}px` }}
-            title={n.page.title}
-          >
-            {n.page.title}
-          </button>
-          {n.children.length > 0 ? (
-            <ViewerTree nodes={n.children} selectedId={selectedId} onSelect={onSelect} />
-          ) : null}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function PageView({ page, description }: { page: WorldPage | null; description: string | null }) {
-  // The viewer context here is already the world's scoped theme (the
-  // modal wraps PageView in <ActiveThemeContext.Provider>), so `bg`
-  // is the actual background user-styled text is painted against,
-  // which is what legibleHtmlColors needs to compute its nudges.
-  const themeBg = useActiveTheme().bg;
-  const safeHtml = useMemo(() => {
-    if (!page || !page.bodyHtml.trim()) return "";
-    return legibleHtmlColors(sanitizeUserHtml(page.bodyHtml), themeBg);
-  }, [page?.bodyHtml, themeBg]);
-  if (!page) {
-    return (
-      <div className="prose prose-sm max-w-none text-sm">
-        {description ? (
-          <p className="italic text-keep-muted">{description}</p>
-        ) : (
-          <p className="italic text-keep-muted">Pick a page from the sidebar.</p>
-        )}
-      </div>
-    );
-  }
-  return (
-    <article>
-      <h3 className="mb-2 font-action text-xl">{page.title}</h3>
-      {page.bodyHtml.trim() ? (
-        <div
-          className={`prose prose-sm max-w-none text-sm leading-relaxed [&_a]:text-keep-action [&_blockquote]:border-l-2 [&_blockquote]:border-keep-rule [&_blockquote]:pl-3 [&_h3]:font-action [&_h4]:font-action [&_h5]:font-action [&_h6]:font-action [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 ${USER_HTML_SCOPE_CLASS}`}
-          dangerouslySetInnerHTML={{ __html: safeHtml }}
-        />
-      ) : (
-        <p className="italic text-keep-muted">This page is empty.</p>
-      )}
-    </article>
-  );
-}
-
-/**
- * Member avatars rendered above the world body as a flex gallery
- * spanning the section width. Capped at three rows tall (~144px) via
- * a hard max-height + overflow-hidden so a popular world with many
- * members doesn't push the page content below the fold. Members are
- * ordered with primary affiliations first (server sort), then by
- * join date.
- *
- * Privacy: the server-side filter in `memberListFor` already drops
- * users whose master profile is private or NSFW, they explicitly
- * opted out of public affiliation, so they never appear here. The
- * client takes the wire list at face value.
- *
- * No-op render when the list is empty so a young world doesn't carry
- * a hollow "Members" strip.
- */
-function MemberGallery({ members }: { members: WorldMemberRef[] }) {
-  if (members.length === 0) return null;
-  return (
-    <section
-      aria-label="World members"
-      className="border-b border-keep-rule bg-keep-banner/30 px-4 pb-2 pt-3"
-    >
-      <header className="mb-1.5 flex items-baseline justify-between">
-        <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-          Members
-        </span>
-        <span className="text-[10px] text-keep-muted">
-          {members.length} {members.length === 1 ? "member" : "members"}
-        </span>
-      </header>
-      {/* Cap at 3 rows: 40px avatar + 8px gap = 48px per row, three rows
-          = 144px tall. Overflow clips additional members; the count in
-          the header still surfaces the true total. */}
-      <div
-        className="flex flex-wrap gap-2 overflow-hidden"
-        style={{ maxHeight: 144 }}
-      >
-        {members.map((m) => (
-          <MemberAvatar key={m.userId} member={m} />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function MemberAvatar({ member }: { member: WorldMemberRef }) {
-  const [errored, setErrored] = useState(false);
-  // Display the identity that joined: character name when present
-  // (with master in parens for accountability), master username for
-  // OOC memberships.
-  const title = member.characterId !== null
-    ? `${member.displayName} (${member.username})`
-    : member.displayName;
-  // Shared crop resolver, see `lib/avatarCrop`. Default crop maps to
-  // `undefined` so the legacy centered-cover render is byte-identical.
-  const cropStyle = cropStyleFor(member.avatarCrop);
-  return (
-    <span
-      title={title}
-      className="relative inline-block h-10 w-10 shrink-0 rounded-full"
-    >
-      <span className="absolute inset-0 overflow-hidden rounded-full border border-keep-rule bg-keep-bg">
-        {member.avatarUrl && !errored ? (
-          <img
-            src={member.avatarUrl}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => setErrored(true)}
-            className="absolute inset-0 h-full w-full object-cover"
-            style={cropStyle}
-          />
-        ) : (
-          <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-keep-muted">
-            {member.displayName.slice(0, 2).toUpperCase()}
-          </span>
-        )}
-      </span>
-    </span>
-  );
-}
 
 /**
  * Membership action chips for the viewer header. Per migration 0187

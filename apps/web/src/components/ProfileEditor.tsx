@@ -980,6 +980,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           // the preview at least surfaces what's currently pinned.
           collection: previewCollections.items,
           petCollection: previewCollections.pets,
+          library: [],
           nameStyleKey: previewNameStyle.key,
           nameStyleConfig: previewNameStyle.config,
           // Banner URL isn't editable from ProfileEditor, it lives on
@@ -1040,6 +1041,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         // a character picks up that character's pin sets.
         collection: previewCollections.items,
         petCollection: previewCollections.pets,
+        library: [],
         nameStyleKey: previewNameStyle.key,
         nameStyleConfig: previewNameStyle.config,
         // Per-character banner URL, looked up by character id; falls

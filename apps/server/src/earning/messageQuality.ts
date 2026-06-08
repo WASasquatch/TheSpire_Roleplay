@@ -167,6 +167,47 @@ function hasDominantToken(body: string, cap: number): boolean {
 }
 
 /* ============================================================
+ *  Long-form (Scriptorium) spam detection.
+ * ============================================================
+ *
+ * The chat spam path leans on a per-CHARACTER unique-ratio that's only
+ * meaningful for short bodies — a long chapter always has a tiny
+ * distinct-char/total ratio (the alphabet is finite), so that check would
+ * flag every real chapter. For prose we instead look at WORD-level signals
+ * that stay clean on genuine writing but spike on padding:
+ *   - dominant token: one word is an outsized share of the text
+ *     ("reward reward reward …").
+ *   - low lexical diversity: distinct-words / total-words is tiny, which is
+ *     what a sentence/paragraph pasted over and over to inflate the count
+ *     looks like.
+ * Returns the reason, or null when the prose looks legitimate. */
+export function detectProseSpam(
+  text: string,
+  cfg: { minWords: number; dominantTokenRatioCap: number; uniqueWordRatioFloor: number },
+): "dominant_token" | "low_lexical_diversity" | null {
+  const tokens = text
+    .toLowerCase()
+    .split(/\s+/)
+    .map((t) => t.replace(/[^\p{L}\p{N}]+/gu, ""))
+    .filter((t) => t.length > 0);
+  if (tokens.length < Math.max(3, cfg.minWords)) return null;
+  const counts = new Map<string, number>();
+  let max = 0;
+  for (const t of tokens) {
+    const next = (counts.get(t) ?? 0) + 1;
+    counts.set(t, next);
+    if (next > max) max = next;
+  }
+  if (cfg.dominantTokenRatioCap > 0 && max / tokens.length > cfg.dominantTokenRatioCap) {
+    return "dominant_token";
+  }
+  if (cfg.uniqueWordRatioFloor > 0 && counts.size / tokens.length < cfg.uniqueWordRatioFloor) {
+    return "low_lexical_diversity";
+  }
+  return null;
+}
+
+/* ============================================================
  *  Test helper, exposed for unit tests / admin debug only.
  * ============================================================ */
 

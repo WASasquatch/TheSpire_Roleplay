@@ -258,6 +258,8 @@ export interface WorldPage {
   title: string;
   bodyHtml: string;
   sortOrder: number;
+  /** Optional arc this Lore page belongs to. */
+  arcId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -289,6 +291,21 @@ export interface WorldDetail {
    *  the wiki shows the list to everyone for transparency, but the
    *  add/remove controls are gated on `viewerIsOwner`. */
   collaborators: WorldCollaborator[];
+  /**
+   * Lightweight typed entries (Locations/NPCs/Items/Factions/custom — no
+   * bodies) for the dashboard, By-Type/By-Tag lists, and search. Non-editors
+   * receive only public entries (server-filtered). Bodies are fetched lazily
+   * per entry via GET /worlds/:id/entities/:eid.
+   */
+  entities: WorldEntityLight[];
+  /** Owner-defined custom entry kinds (the per-world registry). Built-in kinds
+   *  are constants in shared and are NOT included here. */
+  entityKinds: WorldEntityKind[];
+  /** Storyline arcs (full rows; small). */
+  arcs: WorldArc[];
+  /** Session logs (light rows, no bodies; chronological). Bodies fetched lazily
+   *  via GET /worlds/:id/sessions/:sid. */
+  sessions: WorldSessionLight[];
   /**
    * The viewer's most recent application against this world, if any.
    * Drives the "Apply" / "Pending" / "Rejected, Re-apply" button
@@ -534,3 +551,123 @@ export function deriveSlug(input: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
 }
+
+/* =========================================================
+ *  World knowledge base — typed entries, kinds, arcs, sessions
+ * ========================================================= */
+
+/** Display metadata for an entry "type" card on the world dashboard. Shared by
+ *  built-in kinds (constants below) and custom kinds (the per-world registry). */
+export interface WorldEntityKindDef {
+  key: string;
+  label: string;
+  description: string;
+  /** Emoji/glyph rendered on the type card. */
+  icon: string;
+  /** CSS color (hex) for the card accent. */
+  color: string;
+  sortOrder: number;
+  /** True for "lore", which is backed by the worldPages tree, not world_entities. */
+  synthetic?: boolean;
+  /** True for built-in kinds (vs owner-defined custom kinds). */
+  builtIn: boolean;
+}
+
+/** The synthetic "Lore" kind = the existing worldPages tree. */
+export const LORE_KIND_KEY = "lore";
+
+/** Built-in entry kinds. "lore" is synthetic (pages); the rest are
+ *  world_entities rows. Custom kinds come from the per-world registry. */
+export const BUILTIN_WORLD_ENTITY_KINDS: readonly WorldEntityKindDef[] = [
+  { key: "lore", label: "Lore", description: "Cosmology & history", icon: "📖", color: "#5b8def", sortOrder: 0, synthetic: true, builtIn: true },
+  { key: "npc", label: "NPCs", description: "People in the world", icon: "👥", color: "#3fb27f", sortOrder: 1, builtIn: true },
+  { key: "location", label: "Locations", description: "Places & sites", icon: "📍", color: "#e0894a", sortOrder: 2, builtIn: true },
+  { key: "faction", label: "Factions", description: "Powers & alliances", icon: "⚑", color: "#9b6cff", sortOrder: 3, builtIn: true },
+  { key: "item", label: "Items", description: "Relics & artifacts", icon: "⚔", color: "#d4a44c", sortOrder: 4, builtIn: true },
+] as const;
+
+/** Real entity kinds (world_entities rows) — excludes synthetic "lore". */
+export const BUILTIN_ENTITY_KIND_KEYS = ["npc", "location", "faction", "item"] as const;
+export type BuiltinWorldEntityKindKey = (typeof BUILTIN_ENTITY_KIND_KEYS)[number];
+
+/** A full typed entry (with body). */
+export interface WorldEntity {
+  id: string;
+  worldId: string;
+  kind: string;
+  slug: string;
+  name: string;
+  summary: string;
+  bodyHtml: string;
+  /** Free-form key/value stats (e.g. NPC age/role). */
+  stats: Record<string, string>;
+  tags: string[];
+  imageUrl: string | null;
+  isPublic: boolean;
+  sortOrder: number;
+  /** Arc this entry belongs to, or null. */
+  arcId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Lightweight entry row for dashboard lists/search (no body). */
+export type WorldEntityLight = Omit<WorldEntity, "bodyHtml">;
+
+/** A custom (owner-defined) entry kind registered on a world. */
+export interface WorldEntityKind {
+  key: string;
+  label: string;
+  description: string;
+  icon: string | null;
+  color: string | null;
+  sortOrder: number;
+}
+
+export const WORLD_ENTITY_BODY_MAX = 20_000;
+export const WORLD_ENTITY_PER_KIND_CAP = 500;
+export const WORLD_ENTITY_KINDS_CAP = 50;
+export const WORLD_ENTITY_SUMMARY_MAX = 500;
+export const WORLD_ENTITY_NAME_MAX = 120;
+
+/* ----- Arcs (storyline groupings) ----- */
+
+export const WORLD_ARC_STATUSES = ["planned", "active", "concluded", "archived"] as const;
+export type WorldArcStatus = (typeof WORLD_ARC_STATUSES)[number];
+
+export interface WorldArc {
+  id: string;
+  worldId: string;
+  slug: string;
+  title: string;
+  summary: string;
+  status: WorldArcStatus;
+  color: string | null;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export const WORLD_ARCS_CAP = 100;
+
+/* ----- Sessions (chronological logs) ----- */
+
+export interface WorldSession {
+  id: string;
+  worldId: string;
+  arcId: string | null;
+  slug: string;
+  title: string;
+  summary: string;
+  bodyHtml: string;
+  /** Epoch ms; null = undated. Drives chronological ordering. */
+  sessionDate: number | null;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Lightweight session row for dashboard lists/search (no body). */
+export type WorldSessionLight = Omit<WorldSession, "bodyHtml">;
+
+export const WORLD_SESSIONS_CAP = 2000;

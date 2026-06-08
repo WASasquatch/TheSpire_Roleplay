@@ -1708,12 +1708,15 @@ export const worldPages = sqliteTable(
     title: text("title").notNull(),
     bodyHtml: text("body_html").notNull().default(""),
     sortOrder: integer("sort_order").notNull().default(0),
+    /** Optional arc grouping (soft ref, route-validated). Migration 0213. */
+    arcId: text("arc_id"),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
   },
   (t) => ({
     treeIdx: index("world_pages_tree_idx").on(t.worldId, t.parentPageId, t.sortOrder),
     slugIdx: index("world_pages_slug_idx").on(t.worldId, sql`lower(${t.slug})`),
+    arcIdx: index("world_pages_arc_idx").on(t.worldId, t.arcId),
   }),
 );
 
@@ -1820,6 +1823,135 @@ export const worldCollaborators = sqliteTable(
   }),
 );
 
+/**
+ * Typed knowledge-base entries inside a world (Locations, NPCs, Items/Codex,
+ * Factions, and owner-defined custom kinds). Mirrors `storyEntities` (the
+ * Scriptorium codex). The "Lore" type is NOT a row here — it stays the
+ * `worldPages` tree. `arcId` is a soft reference (no DB FK; the arcs table
+ * lands in a later migration and route handlers validate same-world). Migration
+ * 0211.
+ */
+export const worldEntities = sqliteTable(
+  "world_entities",
+  {
+    id: id(),
+    worldId: text("world_id")
+      .notNull()
+      .references(() => worlds.id, { onDelete: "cascade" }),
+    /** Built-in key (location|npc|item|faction) or a custom registry key. */
+    kind: text("kind").notNull(),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    summary: text("summary").notNull().default(""),
+    bodyHtml: text("body_html").notNull().default(""),
+    /** Free-form kv map (e.g. NPC stats). */
+    statsJson: text("stats_json").notNull().default("{}"),
+    /** Comma-separated tag list (parseTagList). Powers the By-Tag dashboard. */
+    tags: text("tags").notNull().default(""),
+    imageUrl: text("image_url"),
+    isPublic: integer("is_public").notNull().default(0),
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** Optional arc grouping (soft ref, route-validated). Added in 0211 so the
+     *  arcs migration doesn't need to ALTER this table. */
+    arcId: text("arc_id"),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    worldKindSlugUq: uniqueIndex("world_entities_world_kind_slug_uq").on(
+      t.worldId,
+      t.kind,
+      sql`lower(${t.slug})`,
+    ),
+    orderIdx: index("world_entities_order_idx").on(t.worldId, t.kind, t.sortOrder),
+    arcIdx: index("world_entities_arc_idx").on(t.worldId, t.arcId),
+  }),
+);
+export type DbWorldEntity = typeof worldEntities.$inferSelect;
+
+/**
+ * Per-world registry of OWNER-DEFINED custom entry kinds. Built-in kinds
+ * (location/npc/item/faction + synthetic lore) are constants in shared and are
+ * NOT stored here. `worldEntities.kind` holds the key for both. Migration 0211.
+ */
+export const worldEntityKinds = sqliteTable(
+  "world_entity_kinds",
+  {
+    worldId: text("world_id")
+      .notNull()
+      .references(() => worlds.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    label: text("label").notNull(),
+    description: text("description").notNull().default(""),
+    icon: text("icon"),
+    color: text("color"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    worldKeyUq: uniqueIndex("world_entity_kinds_world_key_uq").on(t.worldId, sql`lower(${t.key})`),
+  }),
+);
+export type DbWorldEntityKind = typeof worldEntityKinds.$inferSelect;
+
+/**
+ * Arcs: storyline groupings that pages / entities / sessions can belong to,
+ * with a status. Migration 0212.
+ */
+export const worldArcs = sqliteTable(
+  "world_arcs",
+  {
+    id: id(),
+    worldId: text("world_id")
+      .notNull()
+      .references(() => worlds.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    /** planned | active | concluded | archived (Zod-enforced). */
+    status: text("status").notNull().default("active"),
+    color: text("color"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    worldSlugUq: uniqueIndex("world_arcs_world_slug_uq").on(t.worldId, sql`lower(${t.slug})`),
+    orderIdx: index("world_arcs_order_idx").on(t.worldId, t.sortOrder),
+  }),
+);
+export type DbWorldArc = typeof worldArcs.$inferSelect;
+
+/**
+ * Sessions: chronological session-log entries. `arcId` is a soft reference
+ * (no DB FK; routes validate same-world). Migration 0212.
+ */
+export const worldSessions = sqliteTable(
+  "world_sessions",
+  {
+    id: id(),
+    worldId: text("world_id")
+      .notNull()
+      .references(() => worlds.id, { onDelete: "cascade" }),
+    arcId: text("arc_id"),
+    slug: text("slug").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    bodyHtml: text("body_html").notNull().default(""),
+    /** Epoch ms of the in-fiction/real session date; drives chronological sort. */
+    sessionDate: integer("session_date", { mode: "timestamp_ms" }),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    worldSlugUq: uniqueIndex("world_sessions_world_slug_uq").on(t.worldId, sql`lower(${t.slug})`),
+    chronoIdx: index("world_sessions_chrono_idx").on(t.worldId, t.sessionDate, t.sortOrder),
+    arcIdx: index("world_sessions_arc_idx").on(t.worldId, t.arcId),
+  }),
+);
+export type DbWorldSession = typeof worldSessions.$inferSelect;
+
 /* =========================================================
  *  Scriptorium, long-form fiction (migration 0139)
  *
@@ -1896,6 +2028,10 @@ export const storyChapters = sqliteTable(
     wordCount: integer("word_count").notNull().default(0),
     status: text("status").notNull().default("draft"),
     publishedAt: integer("published_at", { mode: "timestamp_ms" }),
+    /** When the one-time writing reward was paid for this chapter (stamped on
+     *  first publish). Non-null = already rewarded; edits/re-publish never
+     *  re-pay. Migration 0209. */
+    rewardPaidAt: integer("reward_paid_at", { mode: "timestamp_ms" }),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
   },
@@ -1904,6 +2040,59 @@ export const storyChapters = sqliteTable(
     publishedIdx: index("story_chapters_published_idx").on(t.storyId, t.status, t.publishedAt),
   }),
 );
+
+/**
+ * Per-authoring-identity weekly publishing streak for Scriptorium writing
+ * rewards. Mirrors the eidolon care-streak shape but keyed on ISO week
+ * (YYYY-Www) instead of UTC day: publishing a chapter in consecutive weeks
+ * raises `streak_count`, which multiplies the chapter payout; a gap of two or
+ * more weeks resets it. Migration 0209.
+ */
+export const scriptoriumWriteStreaks = sqliteTable(
+  "scriptorium_write_streaks",
+  {
+    ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
+    ownerId: text("owner_id").notNull(),
+    streakCount: integer("streak_count").notNull().default(0),
+    /** ISO week-key (YYYY-Www) of the last rewarded publish; null until first. */
+    lastPublishWeekKey: text("last_publish_week_key"),
+    bestStreak: integer("best_streak").notNull().default(0),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.ownerScope, t.ownerId] }),
+  }),
+);
+export type DbScriptoriumWriteStreak = typeof scriptoriumWriteStreaks.$inferSelect;
+
+/**
+ * A purchased copy of a published story. "Buy a Copy" costs the buyer currency
+ * (a royalty cut goes to the author); an owned copy can optionally be showcased
+ * on the buyer's profile in a Library column. One copy per identity per story.
+ * Migration 0210.
+ */
+export const storyCopies = sqliteTable(
+  "story_copies",
+  {
+    id: id(),
+    storyId: text("story_id").notNull().references(() => stories.id, { onDelete: "cascade" }),
+    /** Buyer identity: "user" (master/OOC) or "character". */
+    ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
+    ownerId: text("owner_id").notNull(),
+    /** Buyer's master account, for cascade cleanup + the self-buy guard. */
+    ownerUserId: text("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    pricePaid: integer("price_paid").notNull().default(0),
+    /** Profile showcase slot; null = owned but not shown, non-null = pinned. */
+    showcaseSlot: integer("showcase_slot"),
+    purchasedAt: ts("purchased_at"),
+  },
+  (t) => ({
+    ownerStoryUq: uniqueIndex("story_copies_owner_story_uq").on(t.ownerScope, t.ownerId, t.storyId),
+    showcaseIdx: index("story_copies_showcase_idx").on(t.ownerScope, t.ownerId, t.showcaseSlot),
+    storyIdx: index("story_copies_story_idx").on(t.storyId),
+  }),
+);
+export type DbStoryCopy = typeof storyCopies.$inferSelect;
 
 /**
  * Immutable per-chapter version snapshots. Autosave frames are pruned

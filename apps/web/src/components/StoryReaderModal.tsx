@@ -11,6 +11,8 @@ import type {
 } from "@thekeep/shared";
 import { readError } from "../lib/http.js";
 import { themeStyle } from "../lib/theme.js";
+import { useChat } from "../state/store.js";
+import { fetchStoryCopyState, buyStoryCopy, setStoryShowcase, type StoryCopyState } from "../lib/storyCopies.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { CloseButton } from "./CloseButton.js";
 import { StoryReviewsPanel } from "./StoryReviewsPanel.js";
@@ -46,6 +48,37 @@ const FONT_FAMILIES: Record<FontFamily, string> = {
 const FONT_SIZE_STEPS = [14, 16, 17, 18, 20, 22];
 const LINE_HEIGHT_STEPS = [1.45, 1.55, 1.7, 1.85, 2];
 const MAX_WIDTH_STEPS = [560, 640, 720, 820, 960];
+
+/** First ancestor (inclusive) whose computed background-color is actually
+ *  opaque enough to be what the eye sees behind `start`. Returns its [r,g,b],
+ *  or null if none is found. Used by the reader's auto scheme to tone its text
+ *  against the SURFACE the prose sits on (a `.keep-panel`), not the theme's
+ *  `--keep-bg` variable — those can differ (light bg + dark panel), which would
+ *  otherwise force same-on-same, unreadable text. */
+function effectiveBgRgb(start: Element | null): [number, number, number] | null {
+  let el: Element | null = start;
+  while (el) {
+    const m = getComputedStyle(el).backgroundColor.match(/rgba?\(([^)]+)\)/i);
+    if (m) {
+      const p = m[1]!.split(",").map((s) => Number.parseFloat(s.trim()));
+      const a = p.length >= 4 ? p[3]! : 1;
+      if (a > 0.5 && p.length >= 3 && p.slice(0, 3).every((n) => Number.isFinite(n))) {
+        return [p[0]!, p[1]!, p[2]!];
+      }
+    }
+    el = el.parentElement;
+  }
+  return null;
+}
+
+/** Fallback: the theme's `--keep-bg` triple ("R G B") read off an element. */
+function keepBgVarRgb(el: Element): [number, number, number] | null {
+  const raw = getComputedStyle(el).getPropertyValue("--keep-bg").trim();
+  if (!raw) return null;
+  const p = raw.split(/\s+/).map((s) => Number.parseFloat(s));
+  if (p.length < 3 || p.some((n) => !Number.isFinite(n))) return null;
+  return [p[0]!, p[1]!, p[2]!];
+}
 
 /**
  * Reader modal with two display modes, `book` (paginated, one chapter
@@ -233,24 +266,22 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
     if (scheme !== "auto") return;
     const el = readerShellRef.current;
     if (!el) return;
-    // `--keep-bg` is set as an "R G B" triple by applyTheme. Read it
-    // from computed style and walk to relative luminance via the
-    // standard sRGB weights. Bail to the default tone if anything
-    // looks off (no var, partial parse), a wrong tone is worse than
-    // the existing rendering.
-    const cs = getComputedStyle(el);
-    const raw = cs.getPropertyValue("--keep-bg").trim();
-    if (!raw) return;
-    const parts = raw.split(/\s+/).map((s) => Number.parseFloat(s));
-    if (parts.length < 3 || parts.some((n) => !Number.isFinite(n))) return;
-    const [r, g, b] = parts as [number, number, number];
+    // Sample the ACTUAL painted background behind the prose — the reading
+    // column sits on a `.keep-panel`, whose tone can differ from the theme's
+    // `--keep-bg` (e.g. a light bg + dark panel, or a dim author theme). Tone
+    // the text against what's really there; fall back to the `--keep-bg`
+    // variable, then bail (a wrong tone is worse than the default).
+    const surface = el.querySelector(".reader-main .keep-panel") ?? el;
+    const rgb = effectiveBgRgb(surface) ?? keepBgVarRgb(el);
+    if (!rgb) return;
+    const [r, g, b] = rgb;
     const toLin = (v: number) => {
       const s = v / 255;
       return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
     };
     const luminance = 0.2126 * toLin(r) + 0.7152 * toLin(g) + 0.0722 * toLin(b);
     setReaderBgTone(luminance < 0.45 ? "dark" : "light");
-  }, [scheme, readerTheme, themeOverride]);
+  }, [scheme, readerTheme, themeOverride, detail]);
 
   return (
     <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
@@ -945,9 +976,85 @@ function ActionBar({
       <ActionSegment left={allowApplause} right={false}>
         <FollowSegment storyId={storyId} />
       </ActionSegment>
+      {/* Buy-a-Copy renders its own segment (with divider) only when it
+          applies — author / unpublished / not-logged-in collapse to nothing,
+          so it never leaves a blank column. */}
+      <BuyCopySegment storyId={storyId} />
       <ActionSegment left right>
         <ReportSegment storyId={storyId} />
       </ActionSegment>
+    </div>
+  );
+}
+
+/* ---------- Buy-a-Copy segment ---------- */
+function BuyCopySegment({ storyId }: { storyId: string }) {
+  const activeCharacterId = useChat((s) => s.activeCharacterId);
+  const setNotice = useChat((s) => s.setNotice);
+  const [state, setState] = useState<StoryCopyState | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchStoryCopyState(storyId, activeCharacterId)
+      .then((s) => { if (!cancelled) setState(s); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [storyId, activeCharacterId]);
+
+  async function buy() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await buyStoryCopy(storyId, activeCharacterId);
+      setState(await fetchStoryCopyState(storyId, activeCharacterId));
+      setNotice({ code: "scriptorium_copy", message: `Copy added to your Library (−${res.price}).` });
+    } catch (e) {
+      setNotice({ code: "scriptorium_copy_err", message: e instanceof Error ? e.message : "Purchase failed." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleShowcase() {
+    if (busy || !state) return;
+    setBusy(true);
+    try {
+      const r = await setStoryShowcase(storyId, activeCharacterId, !state.showcased);
+      setState({ ...state, showcased: r.shown });
+    } catch (e) {
+      setNotice({ code: "scriptorium_showcase_err", message: e instanceof Error ? e.message : "Couldn't update your Library." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Collapse to nothing when buying doesn't apply (author, not published, not
+  // logged in) and the viewer doesn't already own it.
+  if (!state || state.isAuthor || (!state.canBuy && !state.owned)) return null;
+
+  const owned = state.owned;
+  return (
+    <div className="flex min-w-0 flex-1 items-stretch border-l border-keep-action/30">
+      <button
+        type="button"
+        onClick={owned ? toggleShowcase : buy}
+        disabled={busy}
+        title={owned
+          ? (state.showcased ? "Remove from your profile Library" : "Show on your profile Library")
+          : `Buy a copy for ${state.price}`}
+        className={`flex w-full flex-col items-center justify-center gap-0.5 px-2 py-2 text-center transition hover:bg-keep-action/10 ${
+          owned && state.showcased ? "text-keep-action" : "text-keep-text"
+        } disabled:opacity-50`}
+      >
+        <span className="text-base leading-none" aria-hidden>{owned ? "📚" : "📖"}</span>
+        <span className="text-[10px] font-semibold uppercase tracking-widest">
+          {owned ? (state.showcased ? "In Library" : "Owned") : "Buy a Copy"}
+        </span>
+        <span className="text-xs tabular-nums opacity-70">
+          {owned ? (state.showcased ? "shown" : "show") : `· ${state.price}`}
+        </span>
+      </button>
     </div>
   );
 }

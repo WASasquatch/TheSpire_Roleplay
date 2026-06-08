@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, isNotNull, ne, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { hasPermission } from "../auth/permissions.js";
@@ -59,10 +59,18 @@ import {
   normalizeTheme,
   parseTagList,
   serializeTagList,
+  isoWeekKey,
+  rollWeeklyStreak,
+  scriptoriumChapterBaseReward,
+  scriptoriumStreakMultiplier,
 } from "@thekeep/shared";
 import {
+  characterEarning,
   characters,
   earningLedger,
+  scriptoriumWriteStreaks,
+  storyCopies,
+  userEarning,
   stories,
   storyApplause,
   storyChapterLocks,
@@ -82,6 +90,8 @@ import { sanitizeBio, stripMarginNotes } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
 import { pushToUser } from "../push.js";
 import { creditPool } from "../earning/award.js";
+import { detectProseSpam } from "../earning/messageQuality.js";
+import { getSettings } from "../settings.js";
 import { recordAudit } from "../audit.js";
 import type { Db } from "../db/index.js";
 import type { Server as IoServer } from "socket.io";
@@ -1422,19 +1432,18 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
         return { error: result.error };
       }
 
-      // Publish event: fan out follower notifications + the author's
-      // daily earning trickle. Both are fire-and-forget so a
-      // notification / earning hiccup never blocks the publish itself.
-      // Runs AFTER the transaction commits so a notify failure can't
-      // roll back the actual publish (which is already durable).
+      // Publish event: fan out follower notifications + the author's writing
+      // reward. Both are fire-and-forget so a notification / earning hiccup
+      // never blocks the publish itself. Runs AFTER the transaction commits so
+      // a failure can't roll back the actual publish (which is already durable).
       if (result.publishedNow) {
         void notifyPublish(db, io, s, result.updated, me.id).catch((err) => {
           // eslint-disable-next-line no-console
           console.error("[scriptorium] notifyPublish failed", err);
         });
-        void awardDailyPublishTrickle(db, io, me.id).catch((err) => {
+        void awardChapterPublishReward(db, io, s, result.updated).catch((err) => {
           // eslint-disable-next-line no-console
-          console.error("[scriptorium] awardDailyPublishTrickle failed", err);
+          console.error("[scriptorium] awardChapterPublishReward failed", err);
         });
       }
 
@@ -1783,6 +1792,164 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       return payload;
     },
   );
+
+  /* ===================================================== *
+   *  Buy a Copy — paid copies + profile Library showcase
+   * ===================================================== */
+
+  /** Resolve the caller's buying identity. A passed characterId must be the
+   *  caller's own (and not deleted); otherwise the buy is the master pool. */
+  async function resolveBuyerIdentity(
+    me: { id: string },
+    characterId: string | null | undefined,
+  ): Promise<{ scope: "user" | "character"; ownerId: string } | null> {
+    if (!characterId) return { scope: "user", ownerId: me.id };
+    const ch = (await db
+      .select({ id: characters.id })
+      .from(characters)
+      .where(and(eq(characters.id, characterId), eq(characters.userId, me.id), isNull(characters.deletedAt)))
+      .limit(1))[0];
+    if (!ch) return null;
+    return { scope: "character", ownerId: characterId };
+  }
+
+  /** Current liquid currency for a pool (creditPool floors debits at 0, so a
+   *  buy must pre-check funds here rather than rely on going negative). */
+  async function poolCurrency(scope: "user" | "character", ownerId: string): Promise<number> {
+    if (scope === "user") {
+      const r = (await db.select({ c: userEarning.currency }).from(userEarning).where(eq(userEarning.userId, ownerId)).limit(1))[0];
+      return r?.c ?? 0;
+    }
+    const r = (await db.select({ c: characterEarning.currency }).from(characterEarning).where(eq(characterEarning.characterId, ownerId)).limit(1))[0];
+    return r?.c ?? 0;
+  }
+
+  const copyIdentityBody = z.object({ characterId: z.string().nullable().optional() }).strict();
+  const copyShowcaseBody = z.object({ characterId: z.string().nullable().optional(), shown: z.boolean() }).strict();
+
+  /** Copy state for the reader's CTA. */
+  app.get<{ Params: { id: string }; Querystring: { characterId?: string } }>(
+    "/stories/:id/copy",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      const s = (await db.select().from(stories).where(eq(stories.id, req.params.id)).limit(1))[0];
+      if (!s) { reply.code(404); return { error: "not found" }; }
+      const access = await viewerMayRead(s, me?.id ?? null, me?.role ?? null, db);
+      if (!access.ok) { reply.code(403); return { error: "forbidden" }; }
+      const cfg = (await getSettings(db)).earningConfig.scriptorium;
+      const price = cfg.copyPrice;
+      const isAuthor = !!me && me.id === s.authorUserId;
+      const published = s.visibility === "public" && s.status !== "draft";
+      let owned = false;
+      let showcased = false;
+      if (me) {
+        const buyer = await resolveBuyerIdentity(me, req.query.characterId ?? null);
+        if (buyer) {
+          const copy = (await db.select({ slot: storyCopies.showcaseSlot }).from(storyCopies)
+            .where(and(eq(storyCopies.ownerScope, buyer.scope), eq(storyCopies.ownerId, buyer.ownerId), eq(storyCopies.storyId, s.id))).limit(1))[0];
+          owned = !!copy;
+          showcased = !!copy && copy.slot != null;
+        }
+      }
+      return { owned, showcased, isAuthor, price, canBuy: !!me && cfg.enabled && published && !isAuthor && !owned };
+    },
+  );
+
+  /** Buy a copy: pre-check funds, insert the copy (one per identity), debit the
+   *  buyer, then pay the author a per-day-capped royalty. */
+  app.post<{ Params: { id: string }; Body: unknown }>("/stories/:id/copy", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let body;
+    try { body = copyIdentityBody.parse(req.body ?? {}); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const s = (await db.select().from(stories).where(eq(stories.id, req.params.id)).limit(1))[0];
+    if (!s) { reply.code(404); return { error: "not found" }; }
+    const access = await viewerMayRead(s, me.id, me.role, db);
+    if (!access.ok) { reply.code(403); return { error: "forbidden" }; }
+    if (s.visibility !== "public" || s.status === "draft") { reply.code(409); return { error: "this story isn't published yet" }; }
+    if (s.authorUserId === me.id) { reply.code(400); return { error: "you can't buy a copy of your own book" }; }
+    const cfg = (await getSettings(db)).earningConfig.scriptorium;
+    if (!cfg.enabled) { reply.code(409); return { error: "the Scriptorium shop is closed" }; }
+    const price = cfg.copyPrice;
+
+    const buyer = await resolveBuyerIdentity(me, body.characterId ?? null);
+    if (!buyer) { reply.code(403); return { error: "not your character" }; }
+
+    const already = (await db.select({ id: storyCopies.id }).from(storyCopies)
+      .where(and(eq(storyCopies.ownerScope, buyer.scope), eq(storyCopies.ownerId, buyer.ownerId), eq(storyCopies.storyId, s.id))).limit(1))[0];
+    if (already) { reply.code(409); return { error: "you already own a copy of this book" }; }
+
+    const balance = await poolCurrency(buyer.scope, buyer.ownerId);
+    if (balance < price) { reply.code(402); return { error: "not enough currency", required: price, balance }; }
+
+    const now = new Date();
+    try {
+      await db.insert(storyCopies).values({
+        id: nanoid(), storyId: s.id, ownerScope: buyer.scope, ownerId: buyer.ownerId,
+        ownerUserId: me.id, pricePaid: price, showcaseSlot: null, purchasedAt: now,
+      });
+    } catch { reply.code(409); return { error: "you already own a copy of this book" }; }
+
+    if (price > 0) {
+      await creditPool(db, io, {
+        scope: buyer.scope, ownerId: buyer.ownerId, xpDelta: 0, currencyDelta: -price,
+        reason: "scriptorium_copy_purchase", metadata: { storyId: s.id, authorUserId: s.authorUserId }, notifyUserId: me.id,
+      });
+    }
+
+    // Author royalty to the authoring identity, clamped by the per-day cap so a
+    // buyer ring can't farm an author past the ceiling (buyers still pay full).
+    const authorScope: "user" | "character" = s.authorCharacterId ? "character" : "user";
+    const authorOwnerId = s.authorCharacterId ?? s.authorUserId;
+    let royalty = Math.round(price * cfg.royaltyRate);
+    if (royalty > 0 && cfg.dailyRoyaltyCap > 0) {
+      const utcMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+      const paid = (await db.select({ c: sql<number>`COALESCE(SUM(${earningLedger.currencyDelta}), 0)` })
+        .from(earningLedger).where(and(
+          eq(earningLedger.scope, authorScope), eq(earningLedger.ownerId, authorOwnerId),
+          eq(earningLedger.reason, "scriptorium_royalty"), sql`${earningLedger.createdAt} >= ${utcMidnight}`,
+        )))[0]?.c ?? 0;
+      royalty = Math.max(0, Math.min(royalty, cfg.dailyRoyaltyCap - Number(paid)));
+    }
+    if (royalty > 0) {
+      await creditPool(db, io, {
+        scope: authorScope, ownerId: authorOwnerId, xpDelta: 0, currencyDelta: royalty,
+        reason: "scriptorium_royalty", metadata: { storyId: s.id, buyerScope: buyer.scope }, notifyUserId: s.authorUserId,
+      });
+    }
+
+    return { owned: true, price, royaltyPaid: royalty };
+  });
+
+  /** Pin / unpin an owned copy to the buyer's profile Library (opt-in display).
+   *  `shown:true` appends to the next slot; `shown:false` clears it. */
+  app.post<{ Params: { id: string }; Body: unknown }>("/stories/:id/copy/showcase", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let body;
+    try { body = copyShowcaseBody.parse(req.body ?? {}); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const buyer = await resolveBuyerIdentity(me, body.characterId ?? null);
+    if (!buyer) { reply.code(403); return { error: "not your character" }; }
+    const copy = (await db.select().from(storyCopies)
+      .where(and(eq(storyCopies.ownerScope, buyer.scope), eq(storyCopies.ownerId, buyer.ownerId), eq(storyCopies.storyId, req.params.id))).limit(1))[0];
+    if (!copy) { reply.code(404); return { error: "you don't own a copy of this book" }; }
+    let slot: number | null;
+    if (!body.shown) {
+      slot = null;
+    } else if (copy.showcaseSlot != null) {
+      slot = copy.showcaseSlot; // already shown
+    } else {
+      const maxRow = (await db.select({ m: sql<number>`COALESCE(MAX(${storyCopies.showcaseSlot}), -1)` })
+        .from(storyCopies).where(and(
+          eq(storyCopies.ownerScope, buyer.scope), eq(storyCopies.ownerId, buyer.ownerId), isNotNull(storyCopies.showcaseSlot),
+        )))[0];
+      slot = Number(maxRow?.m ?? -1) + 1;
+    }
+    await db.update(storyCopies).set({ showcaseSlot: slot }).where(eq(storyCopies.id, copy.id));
+    return { shown: slot != null, slot };
+  });
 
   /* ===================================================== *
    *  Reviews (Phase 6)
@@ -3204,7 +3371,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
    * Admin: hide a story (set visibility to private). The author still
    * sees it in their My Stories tab; the rest of the world doesn't.
    */
-  app.post<{ Params: { id: string }; Body: { note?: string } }>(
+  app.post<{ Params: { id: string }; Body: { note?: string; revokeEarnings?: boolean } }>(
     "/admin/scriptorium/stories/:id/hide",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
@@ -3214,6 +3381,9 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       }
       const s = (await db.select().from(stories).where(eq(stories.id, req.params.id)).limit(1))[0];
       if (!s) { reply.code(404); return { error: "not found" }; }
+      // Optional earnings claw-back for blatant rule-breaking (BEFORE the hide,
+      // though the ledger isn't FK'd to the story so order is cosmetic).
+      const revoked = req.body?.revokeEarnings ? await revokeBookEarnings(db, io, s) : { xp: 0, currency: 0 };
       await db
         .update(stories)
         .set({ visibility: "private", updatedAt: new Date() })
@@ -3222,9 +3392,9 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
         actorUserId: me.id,
         action: "story_admin_hide",
         reason: req.body?.note ?? null,
-        metadata: { storyId: s.id, oldVisibility: s.visibility },
+        metadata: { storyId: s.id, oldVisibility: s.visibility, revokedXp: revoked.xp, revokedCurrency: revoked.currency },
       });
-      return { ok: true };
+      return { ok: true, revoked };
     },
   );
 
@@ -3232,7 +3402,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
    * Admin: delete a story. Cascades to chapters / reviews / applause /
    * subscriptions / reports per the FK constraints. Hard delete.
    */
-  app.delete<{ Params: { id: string }; Body: { note?: string } }>(
+  app.delete<{ Params: { id: string }; Body: { note?: string; revokeEarnings?: boolean } }>(
     "/admin/scriptorium/stories/:id",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
@@ -3242,14 +3412,17 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       }
       const s = (await db.select().from(stories).where(eq(stories.id, req.params.id)).limit(1))[0];
       if (!s) { reply.code(404); return { error: "not found" }; }
+      // Optional earnings claw-back: must run BEFORE the delete cascades, while
+      // the author identity is still resolvable from the story row.
+      const revoked = req.body?.revokeEarnings ? await revokeBookEarnings(db, io, s) : { xp: 0, currency: 0 };
       await db.delete(stories).where(eq(stories.id, s.id));
       await recordAudit(db, {
         actorUserId: me.id,
         action: "story_admin_delete",
         reason: req.body?.note ?? null,
-        metadata: { storyId: s.id, storyTitle: s.title, authorUserId: s.authorUserId },
+        metadata: { storyId: s.id, storyTitle: s.title, authorUserId: s.authorUserId, revokedXp: revoked.xp, revokedCurrency: revoked.currency },
       });
-      return { ok: true };
+      return { ok: true, revoked };
     },
   );
 }
@@ -3439,39 +3612,188 @@ async function notifyPublish(
   }
 }
 
-/**
- * Daily-publish XP trickle. Per the project ethos memory: NO daily
- * streaks, NO grinding. This grants a small one-shot XP per UTC day
- * regardless of how many chapters the author publishes, once per day,
- * no chaining. The cap is enforced by looking back at the earning
- * ledger for any prior `scriptorium_daily_publish` row in the current
- * UTC day; if one exists, the call no-ops.
- */
-const SCRIPTORIUM_DAILY_PUBLISH_XP = 25;
-const SCRIPTORIUM_DAILY_PUBLISH_REASON = "scriptorium_daily_publish";
+const SCRIPTORIUM_CHAPTER_REWARD_REASON = "scriptorium_chapter_reward";
 
-async function awardDailyPublishTrickle(db: Db, io: Io, userId: string): Promise<void> {
-  // UTC midnight today, in ms.
+/**
+ * One-time writing reward for publishing a chapter. Writing is a large,
+ * deliberate effort, so this pays meaningfully — but only for real output.
+ *
+ * Credits the AUTHORING identity (the story's character pool if it was authored
+ * IC, else the author's master/OOC pool), scaled by word-count brackets and a
+ * weekly publishing-streak multiplier, and bounded by a per-pool per-UTC-day
+ * cap. All amounts come from the admin-tunable `scriptorium` EarningConfig.
+ *
+ * Anti-abuse:
+ *  - Pays at most ONCE per chapter, ever — the `reward_paid_at` latch is set via
+ *    a conditional UPDATE that only one caller can win, so re-publishes and
+ *    concurrent publishes never double-pay.
+ *  - Chapters under the word floor latch as "paid" but earn nothing, so padding
+ *    a stub up to length later can't retrigger a reward.
+ *  - The daily cap is enforced by summing today's reward rows for the pool and
+ *    clamping the new credit so the running total stays under the ceiling.
+ */
+async function awardChapterPublishReward(
+  db: Db,
+  io: Io,
+  story: typeof stories.$inferSelect,
+  chapter: typeof storyChapters.$inferSelect,
+): Promise<void> {
+  const cfg = (await getSettings(db)).earningConfig.scriptorium;
+  if (!cfg.enabled) return;
+
+  // Pay-once latch: flip reward_paid_at from NULL → now. Only one publish wins;
+  // everything past first publish (edits, unpublish→republish) no-ops here.
   const now = new Date();
+  const latched = await db
+    .update(storyChapters)
+    .set({ rewardPaidAt: now })
+    .where(and(eq(storyChapters.id, chapter.id), isNull(storyChapters.rewardPaidAt)))
+    .run();
+  if (latched.changes === 0) return;
+
+  // Authoring identity → which earning pool gets paid.
+  const scope: "user" | "character" = story.authorCharacterId ? "character" : "user";
+  const ownerId = story.authorCharacterId ?? story.authorUserId;
+  const notifyUserId = story.authorUserId;
+
+  // Per-word base payout; zero below the word floor (we still latched above, so
+  // a later edit past the floor can't re-trigger).
+  const base = scriptoriumChapterBaseReward(chapter.wordCount, cfg);
+  if (base.xp <= 0 && base.currency <= 0) return;
+
+  // Spam gate (the chat-style block, tuned for prose): a padded / pasted-repeat
+  // chapter earns nothing. It's latched, so it won't get another shot; we still
+  // log a zero-value flagged ledger row so admins can audit + tune the knobs.
+  if (cfg.spam.enabled) {
+    const text = chapter.bodyHtml
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const spamReason = detectProseSpam(text, cfg.spam);
+    if (spamReason) {
+      await db.insert(earningLedger).values({
+        id: nanoid(),
+        scope,
+        ownerId,
+        xpDelta: 0,
+        currencyDelta: 0,
+        reason: SCRIPTORIUM_CHAPTER_REWARD_REASON,
+        metadataJson: JSON.stringify({ storyId: story.id, chapterId: chapter.id, wordCount: chapter.wordCount, flaggedSpam: true, spamReason }),
+      }).run();
+      return;
+    }
+  }
+
+  // Advance the weekly publishing streak (once per ISO week per pool) and scale.
+  const weekKey = isoWeekKey(now);
+  const prev = (await db
+    .select()
+    .from(scriptoriumWriteStreaks)
+    .where(and(eq(scriptoriumWriteStreaks.ownerScope, scope), eq(scriptoriumWriteStreaks.ownerId, ownerId)))
+    .limit(1))[0];
+  const roll = rollWeeklyStreak(
+    { streakCount: prev?.streakCount ?? 0, lastPublishWeekKey: prev?.lastPublishWeekKey ?? null, bestStreak: prev?.bestStreak ?? 0 },
+    weekKey,
+  );
+  await db
+    .insert(scriptoriumWriteStreaks)
+    .values({ ownerScope: scope, ownerId, streakCount: roll.streakCount, lastPublishWeekKey: roll.lastPublishWeekKey, bestStreak: roll.bestStreak, updatedAt: now })
+    .onConflictDoUpdate({
+      target: [scriptoriumWriteStreaks.ownerScope, scriptoriumWriteStreaks.ownerId],
+      set: { streakCount: roll.streakCount, lastPublishWeekKey: roll.lastPublishWeekKey, bestStreak: roll.bestStreak, updatedAt: now },
+    })
+    .run();
+  const mult = scriptoriumStreakMultiplier(roll.streakCount, cfg.streak);
+
+  let xp = Math.round(base.xp * mult);
+  let currency = Math.round(base.currency * mult);
+
+  // Per-pool, per-UTC-day cap: sum today's reward rows and clamp so the running
+  // total never exceeds the ceiling.
   const utcMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  const prior = (await db
-    .select({ id: earningLedger.id })
+  const spent = (await db
+    .select({
+      xp: sql<number>`COALESCE(SUM(${earningLedger.xpDelta}), 0)`,
+      currency: sql<number>`COALESCE(SUM(${earningLedger.currencyDelta}), 0)`,
+    })
     .from(earningLedger)
     .where(and(
-      eq(earningLedger.scope, "user"),
-      eq(earningLedger.ownerId, userId),
-      eq(earningLedger.reason, SCRIPTORIUM_DAILY_PUBLISH_REASON),
+      eq(earningLedger.scope, scope),
+      eq(earningLedger.ownerId, ownerId),
+      eq(earningLedger.reason, SCRIPTORIUM_CHAPTER_REWARD_REASON),
       sql`${earningLedger.createdAt} >= ${utcMidnight}`,
-    ))
-    .limit(1))[0];
-  if (prior) return; // already credited today; no chaining
+    )))[0] ?? { xp: 0, currency: 0 };
+  xp = Math.max(0, Math.min(xp, cfg.dailyXpCap - Number(spent.xp)));
+  currency = Math.max(0, Math.min(currency, cfg.dailyCurrencyCap - Number(spent.currency)));
+  if (xp <= 0 && currency <= 0) return; // daily cap exhausted
+
   await creditPool(db, io, {
-    scope: "user",
-    ownerId: userId,
-    xpDelta: SCRIPTORIUM_DAILY_PUBLISH_XP,
-    currencyDelta: 0,
-    reason: SCRIPTORIUM_DAILY_PUBLISH_REASON,
-    metadata: null,
-    notifyUserId: userId,
+    scope,
+    ownerId,
+    xpDelta: xp,
+    currencyDelta: currency,
+    reason: SCRIPTORIUM_CHAPTER_REWARD_REASON,
+    metadata: {
+      storyId: story.id,
+      chapterId: chapter.id,
+      wordCount: chapter.wordCount,
+      baseXp: base.xp,
+      baseCurrency: base.currency,
+      streak: roll.streakCount,
+      mult,
+    },
+    notifyUserId,
   });
+}
+
+/**
+ * Claw back the XP + currency a book earned its author — chapter-publish
+ * rewards and copy-sale royalties (matched by `metadata.storyId`). Used by
+ * admin removal when a book was blatantly farming the writing economy. Clamped
+ * to the pool's current balance so the author can't be driven negative; writes
+ * one negative ledger row (reason `scriptorium_admin_revoke`). Buyers of copies
+ * are NOT refunded — that's a separate concern. Returns what was pulled.
+ */
+async function revokeBookEarnings(
+  db: Db,
+  io: Io,
+  story: typeof stories.$inferSelect,
+): Promise<{ xp: number; currency: number }> {
+  const scope: "user" | "character" = story.authorCharacterId ? "character" : "user";
+  const ownerId = story.authorCharacterId ?? story.authorUserId;
+  const agg = (await db
+    .select({
+      xp: sql<number>`COALESCE(SUM(${earningLedger.xpDelta}), 0)`,
+      currency: sql<number>`COALESCE(SUM(${earningLedger.currencyDelta}), 0)`,
+    })
+    .from(earningLedger)
+    .where(and(
+      eq(earningLedger.scope, scope),
+      eq(earningLedger.ownerId, ownerId),
+      inArray(earningLedger.reason, ["scriptorium_chapter_reward", "scriptorium_royalty"]),
+      sql`json_extract(${earningLedger.metadataJson}, '$.storyId') = ${story.id}`,
+    )))[0] ?? { xp: 0, currency: 0 };
+  const earnedXp = Math.max(0, Number(agg.xp));
+  const earnedCurrency = Math.max(0, Number(agg.currency));
+  if (earnedXp <= 0 && earnedCurrency <= 0) return { xp: 0, currency: 0 };
+  // Clamp to the current balance so the claw-back can't push the pool negative
+  // (creditPool floors currency at 0 but NOT xp, and a negative xp would break
+  // rank placement).
+  const bal = scope === "user"
+    ? (await db.select({ xp: userEarning.xp, currency: userEarning.currency }).from(userEarning).where(eq(userEarning.userId, ownerId)).limit(1))[0]
+    : (await db.select({ xp: characterEarning.xp, currency: characterEarning.currency }).from(characterEarning).where(eq(characterEarning.characterId, ownerId)).limit(1))[0];
+  const revokeXp = Math.min(earnedXp, bal?.xp ?? 0);
+  const revokeCurrency = Math.min(earnedCurrency, bal?.currency ?? 0);
+  if (revokeXp <= 0 && revokeCurrency <= 0) return { xp: 0, currency: 0 };
+  await creditPool(db, io, {
+    scope,
+    ownerId,
+    xpDelta: -revokeXp,
+    currencyDelta: -revokeCurrency,
+    reason: "scriptorium_admin_revoke",
+    metadata: { storyId: story.id, storyTitle: story.title, earnedXp, earnedCurrency },
+    notifyUserId: story.authorUserId,
+  });
+  return { xp: revokeXp, currency: revokeCurrency };
 }

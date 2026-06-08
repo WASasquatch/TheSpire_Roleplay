@@ -171,6 +171,7 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
 
   async function hide() {
     if (!window.confirm(`Hide "${report.storyTitle}"? (sets visibility = private)`)) return;
+    const revokeEarnings = window.confirm("Also revoke the author's XP/currency earned from this book? (use for blatant rule-breaking / economy farming)");
     const note = window.prompt("Optional note for the audit log");
     if (note === null) return;
     setBusy(true);
@@ -180,7 +181,7 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify(note.trim() ? { note: note.trim() } : {}),
+        body: JSON.stringify({ ...(note.trim() ? { note: note.trim() } : {}), ...(revokeEarnings ? { revokeEarnings: true } : {}) }),
       });
       if (!r.ok) throw new Error(await readError(r));
       await onChanged();
@@ -193,6 +194,7 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
 
   async function deleteStory() {
     if (!window.confirm(`HARD DELETE "${report.storyTitle}"? This cascades to chapters, reviews, and reports. Cannot be undone.`)) return;
+    const revokeEarnings = window.confirm("Also revoke the author's XP/currency earned from this book? (use for blatant rule-breaking / economy farming)");
     const note = window.prompt("Audit log note (required for delete)");
     if (note === null) return;
     setBusy(true);
@@ -202,7 +204,7 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ note: note.trim() }),
+        body: JSON.stringify({ note: note.trim(), ...(revokeEarnings ? { revokeEarnings: true } : {}) }),
       });
       if (!r.ok) throw new Error(await readError(r));
       await onChanged();

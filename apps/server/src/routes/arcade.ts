@@ -14,7 +14,7 @@ import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
 import { nanoid } from "nanoid";
 import type { ClientToServerEvents, EidolonHallEntry, EidolonProfileSummary, EidolonSnapshot, ServerToClientEvents } from "@thekeep/shared";
-import { EIDOLON_SPECIES_IDS, EIDOLON_MOOD_LABEL, EIDOLON_PAT_COOLDOWN_MS, EIDOLON_PAT_JOY_GAIN, FLAIR_EIDOLON_TAMER, effectiveTraits, eidolonLevelFromXp, eidolonLineageBonusXp, eidolonPrimaryMood, eidolonSaleValueOf, reviveStats, rollTraitId, rollVariant, streakXpMultiplier } from "@thekeep/shared";
+import { EIDOLON_SPECIES_IDS, EIDOLON_MOOD_LABEL, EIDOLON_PAT_COOLDOWN_MS, EIDOLON_PAT_JOY_GAIN, FLAIR_EIDOLON_TAMER, effectiveTraits, eidolonCareXp, eidolonLevelFromXp, eidolonLineageBonusXp, eidolonPrimaryMood, eidolonSaleValueOf, reviveStats, rollTraitId, rollVariant, streakXpMultiplier } from "@thekeep/shared";
 import { characterEarning, characters, earningLedger, eidolonHall, eidolonState, eidolonVisits, identityInventory, items, userEarning } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
@@ -30,6 +30,10 @@ type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Scope = "user" | "character";
 type Row = typeof eidolonState.$inferSelect;
 const clamp = (n: number, lo = 0, hi = 100): number => Math.max(lo, Math.min(hi, n));
+/** Total of the five wellbeing gauges — the "before vs after" measure that
+ *  decides how much active-care XP a tend earns (see eidolonCareXp). */
+const gaugeSum = (s: { satiety: number; joy: number; vigor: number; hygiene: number; health: number }): number =>
+  s.satiety + s.joy + s.vigor + s.hygiene + s.health;
 
 export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
   /* ---- identity + gate ---- */
@@ -421,9 +425,13 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     const prog = catchUp(row, nowMs);
     if (prog.dead) { reply.code(409); return { error: "your familiar lies dormant — revive it with a magical item" }; }
     const jg = effectiveTraits(row.kind, row.speciesId, row.trait).joyGain;
+    const before = gaugeSum(prog.stats);
     if (body.kind === "play") { prog.stats.joy = clamp(prog.stats.joy + 14 * jg); prog.stats.vigor = clamp(prog.stats.vigor - 2); }
     else if (body.kind === "clean") { prog.stats.hygiene = 100; prog.stats.joy = clamp(prog.stats.joy + 5 * jg); prog.messCount = 0; }
     else if (body.kind === "rest") { prog.asleep = !prog.asleep; }
+    // Active-care XP: reward the net wellbeing this tend restored (0 if it was
+    // already maxed, so no spam-farming). Mirrors feed/toy/remedy below.
+    prog.xp += eidolonCareXp(gaugeSum(prog.stats) - before, row.streakCount);
     await recordCheckIn(g.scope, g.ownerId, g.userId, row, nowMs);
     await persist(g.scope, g.ownerId, row, prog, nowMs);
     return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey), nowMs) };
@@ -451,11 +459,13 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       const jg = effectiveTraits(row.kind, row.speciesId, row.trait).joyGain;
       // Multi-stat food: Satiety + the food's bonus (Spirit/Vigor/Hygiene), with
       // joy scaled by the joyGain trait, minus a tiny mess from eating.
+      const before = gaugeSum(prog.stats);
       const eff = foodEffect(item);
       prog.stats.satiety = clamp(prog.stats.satiety + eff.satiety);
       prog.stats.joy = clamp(prog.stats.joy + eff.joy * jg);
       prog.stats.vigor = clamp(prog.stats.vigor + eff.vigor);
       prog.stats.hygiene = clamp(prog.stats.hygiene + eff.hygiene - 1);
+      prog.xp += eidolonCareXp(gaugeSum(prog.stats) - before, row.streakCount);
       await recordCheckIn(g.scope, g.ownerId, g.userId, row, nowMs);
       await persist(g.scope, g.ownerId, row, prog, nowMs);
       return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey), nowMs) };
@@ -488,10 +498,12 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     const prog = catchUp(row, nowMs);
     if (prog.dead) { reply.code(409); return { error: "your familiar lies dormant — revive it with a magical item" }; }
     const jg = effectiveTraits(row.kind, row.speciesId, row.trait).joyGain;
+    const before = gaugeSum(prog.stats);
     const eff = toyEffect(body.itemKey);
     prog.stats.joy = clamp(prog.stats.joy + eff.joy * jg);
     prog.stats.vigor = clamp(prog.stats.vigor + eff.vigor);
     prog.stats.hygiene = clamp(prog.stats.hygiene + eff.hygiene);
+    prog.xp += eidolonCareXp(gaugeSum(prog.stats) - before, row.streakCount);
     await recordCheckIn(g.scope, g.ownerId, g.userId, row, nowMs);
     await persist(g.scope, g.ownerId, row, prog, nowMs);
     return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey), nowMs) };
@@ -514,6 +526,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       const nowMs = Date.now();
       const prog = catchUp(row, nowMs);
       if (prog.dead) { reply.code(409); return { error: "your familiar lies dormant — revive it with a magical item" }; }
+      const before = gaugeSum(prog.stats);
 
       if (body.itemKey) {
         // Potion path: must be a magic-category consumable they hold.
@@ -534,6 +547,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
         });
         prog.stats.health = clamp(prog.stats.health + BASIC_HEAL_AMOUNT);
       }
+      prog.xp += eidolonCareXp(gaugeSum(prog.stats) - before, row.streakCount);
       await recordCheckIn(g.scope, g.ownerId, g.userId, row, nowMs);
       await persist(g.scope, g.ownerId, row, prog, nowMs);
       return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey), nowMs) };

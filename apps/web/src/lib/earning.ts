@@ -449,6 +449,25 @@ export interface EarningConfig {
     xpPerHistoricalMessage: number;
     completedAt: number | null;
   };
+  /** Scriptorium writing rewards + buy-a-copy economy. */
+  scriptorium: {
+    enabled: boolean;
+    xpPerWord: number;
+    currencyPerWord: number;
+    wordFloor: number;
+    dailyXpCap: number;
+    dailyCurrencyCap: number;
+    streak: { perWeekBonus: number; maxMultiplier: number };
+    spam: {
+      enabled: boolean;
+      minWords: number;
+      dominantTokenRatioCap: number;
+      uniqueWordRatioFloor: number;
+    };
+    copyPrice: number;
+    royaltyRate: number;
+    dailyRoyaltyCap: number;
+  };
 }
 
 export interface AdminAwardsResponse {
@@ -680,6 +699,56 @@ export interface FamiliarRankingsResponse {
 }
 export async function fetchFamiliarRankings(): Promise<FamiliarRankingsResponse> {
   return jsonOrThrow<FamiliarRankingsResponse>(await fetch("/earning/familiar-rankings", { credentials: "include" }));
+}
+
+/* ---------- Scriptorium rankings ---------- */
+
+/** Author byline for a book-board row (mirrors shared StoryAuthor). */
+export interface ScriptoriumAuthor {
+  userId: string;
+  masterUsername: string;
+  characterId: string | null;
+  characterName: string | null;
+  characterAvatarUrl: string | null;
+  masterAvatarUrl: string | null;
+}
+
+/** A book-board row (the book itself, not an identity). */
+export interface ScriptoriumBookRow {
+  storyId: string;
+  slug: string;
+  title: string;
+  coverImageUrl: string | null;
+  rating: string;
+  author: ScriptoriumAuthor;
+  applauseCount: number;
+  avgRating: number | null;
+  reviewCount: number;
+  totalWords: number;
+}
+
+/** Author boards rank identities (reuse RankingPoolEntry); book boards rank
+ *  books (ScriptoriumBookRow). */
+export interface ScriptoriumAuthorBoard {
+  key: "publishers" | "words";
+  label: string;
+  metric: string;
+  entries: RankingPoolEntry[];
+}
+export interface ScriptoriumBookBoard {
+  key: "applause" | "rated";
+  label: string;
+  metric: string;
+  entries: ScriptoriumBookRow[];
+}
+export interface ScriptoriumRankingsResponse {
+  authorBoards: ScriptoriumAuthorBoard[];
+  bookBoards: ScriptoriumBookBoard[];
+  generatedAt: number;
+}
+
+export async function fetchScriptoriumRankings(): Promise<ScriptoriumRankingsResponse> {
+  return jsonOrThrow<ScriptoriumRankingsResponse>(await fetch("/earning/scriptorium-rankings", { credentials: "include" }));
 }
 
 /* ---------- admin flash-sale + transfer ---------- */

@@ -76,6 +76,7 @@ import {
 import { buildRankings } from "../earning/rankings.js";
 import { buildGameRankings } from "../earning/gameRankings.js";
 import { buildFamiliarRankings } from "../earning/familiarRankings.js";
+import { buildScriptoriumRankings } from "../earning/scriptoriumRankings.js";
 // creditPool is no longer called directly here, purchase endpoints
 // run their own sqlite transaction (see `runPurchaseTxn` below) for
 // atomicity. The award engine still imports it for the live earn
@@ -1033,6 +1034,16 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
 
   app.get("/earning/familiar-rankings", async () => {
     return await buildFamiliarRankings(db);
+  });
+
+  /**
+   * Public Scriptorium leaderboards. AUTHOR boards (Top Publishers, Most Words)
+   * rank authoring identities; BOOK boards (Top Books by applause, Highest
+   * Rated by reviews) rank the books themselves. Computed live from the story
+   * rollups — no registration, surfaces the moment data exists.
+   */
+  app.get("/earning/scriptorium-rankings", async () => {
+    return await buildScriptoriumRankings(db);
   });
 
   /**

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import { CHARACTER_VIBE_AXES, isAdminRole, isDarkPalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
-import type { CharacterAttribute, CharacterPortrait, CharacterVibeAxisKey, EidolonProfileSummary, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
+import type { CharacterAttribute, CharacterPortrait, CharacterVibeAxisKey, EidolonProfileSummary, ProfileLibraryEntry, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
 import { buildOrnamentStyle } from "../lib/ornaments/index.js";
 import { BorderedAvatar } from "./BorderedAvatar.js";
@@ -1267,46 +1267,67 @@ function ProfileBody({
                   rest empty; we collapse empty slots so the renderer
                   shows only filled tiles. Section hidden entirely
                   when nothing is pinned. */}
-              {profile.profile.collection.length > 0 ? (
-                <Section title="Collection">
-                  {/* Grid (not flex-wrap) so the 10 pinned tiles distribute
-                      across the row width instead of clumping at the left.
-                      Column counts ramp by viewport: 3-up on phones, 5-up
-                      on small/medium, 10-up on lg+ so the full collection
-                      becomes a single tidy row on desktop. */}
-                  <ul className="grid grid-cols-3 gap-3 sm:grid-cols-5 lg:grid-cols-10">
-                    {profile.profile.collection.map((c) => (
-                      <li key={c.slot} className="flex justify-center">
-                        <CollectionPin entry={c} variant="item" onClick={() => setZoomedPin(c)} />
-                      </li>
-                    ))}
-                  </ul>
-                </Section>
-              ) : null}
+              {/* Collection + Pets (wide left column) with Library as a narrow
+                  right column — mirrors the Stats / Disposition split above so
+                  the showcase reads side-by-side on desktop instead of stacking
+                  and pushing the bio further down. On mobile the grid collapses
+                  to one column and they stack naturally. The whole block hides
+                  when nothing is pinned anywhere. */}
+              {(profile.profile.collection.length > 0
+                || profile.profile.petCollection.length > 0
+                || profile.profile.library.length > 0) ? (
+                <div className="mb-5 grid grid-cols-1 gap-x-5 lg:grid-cols-4">
+                  <div className="lg:col-span-3">
+                    {profile.profile.collection.length > 0 ? (
+                      <Section title="Collection">
+                        {/* Grid (not flex-wrap) so the pinned tiles distribute
+                            across the row. 3-up on phones, 5-up on small/medium,
+                            8-up on lg+ (the column is 3/4 width here, so 8 keeps
+                            the tiles from getting cramped). */}
+                        <ul className="grid grid-cols-3 gap-3 sm:grid-cols-5 lg:grid-cols-8">
+                          {profile.profile.collection.map((c) => (
+                            <li key={c.slot} className="flex justify-center">
+                              <CollectionPin entry={c} variant="item" onClick={() => setZoomedPin(c)} />
+                            </li>
+                          ))}
+                        </ul>
+                      </Section>
+                    ) : null}
 
-              {/* Pet Collection, separate 5-slot showcase scoped to
-                  items with category='pet'. Same identity partitioning
-                  as the item collection above; rendered directly
-                  under it so visitors see the pin sets together. The
-                  section header reads "Pets" rather than "Pet
-                  Collection", the modal already has "Collection"
-                  for items, so the simpler noun keeps the two
-                  sections visually distinct without verbose repetition. */}
-              {profile.profile.petCollection.length > 0 ? (
-                <Section title="Pets">
-                  {/* Grid so the up-to-5 pet tiles distribute across the
-                      row instead of clumping at the left. 2 cols on the
-                      tightest phones (taller tiles wrap to two rows), 3
-                      on small phones, then 5-up on md+ so the full
-                      showcase reads as one row on tablet/desktop. */}
-                  <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
-                    {profile.profile.petCollection.map((c) => (
-                      <li key={c.slot} className="flex justify-center">
-                        <CollectionPin entry={c} variant="pet" onClick={() => setZoomedPin(c)} />
-                      </li>
-                    ))}
-                  </ul>
-                </Section>
+                    {/* Pet Collection, separate 5-slot showcase scoped to
+                        items with category='pet'. Same identity partitioning
+                        as the item collection above. */}
+                    {profile.profile.petCollection.length > 0 ? (
+                      <Section title="Pets">
+                        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+                          {profile.profile.petCollection.map((c) => (
+                            <li key={c.slot} className="flex justify-center">
+                              <CollectionPin entry={c} variant="pet" onClick={() => setZoomedPin(c)} />
+                            </li>
+                          ))}
+                        </ul>
+                      </Section>
+                    ) : null}
+                  </div>
+
+                  {/* Library (right column), the owner's showcased Scriptorium
+                      copies. 2-up in the narrow desktop column (covers are tall
+                      2:3), more columns when stacked full-width on mobile. Each
+                      cover opens the story in the reader. */}
+                  {profile.profile.library.length > 0 ? (
+                    <div className="lg:col-span-1">
+                      <Section title="Library">
+                        <ul className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-2">
+                          {profile.profile.library.map((b) => (
+                            <li key={b.slot} className="flex justify-center">
+                              <LibraryPin entry={b} />
+                            </li>
+                          ))}
+                        </ul>
+                      </Section>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
 
               <Section title="Bio">
@@ -1640,6 +1661,36 @@ function CollectionPin({
       ) : (
         <span className="line-clamp-1 break-all font-semibold text-keep-text">{entry.name}</span>
       )}
+    </button>
+  );
+}
+
+/** A showcased book in the profile Library. A cover tile (or a glyph
+ *  fallback) that opens the story in the reader via the store bridge. */
+function LibraryPin({ entry }: { entry: ProfileLibraryEntry }) {
+  const setOpenStoryReader = useChat((s) => s.setOpenStoryReader);
+  return (
+    <button
+      type="button"
+      onClick={() => setOpenStoryReader(entry.storyId)}
+      title={`${entry.title} — by ${entry.authorName}`}
+      className="flex w-full flex-col items-center gap-1 rounded border border-keep-rule/60 bg-keep-bg/40 p-2 text-center text-[11px] transition hover:border-keep-action hover:bg-keep-banner"
+    >
+      {entry.coverImageUrl ? (
+        <img
+          src={entry.coverImageUrl}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          className="aspect-[2/3] w-full rounded border border-keep-rule/40 bg-keep-bg object-cover"
+        />
+      ) : (
+        <div className="grid aspect-[2/3] w-full place-items-center rounded border border-keep-rule/40 bg-keep-banner/40 text-keep-muted" aria-hidden="true">
+          <span className="text-3xl">📖</span>
+        </div>
+      )}
+      <span className="line-clamp-1 break-all font-semibold text-keep-text">{entry.title}</span>
+      <span className="line-clamp-1 break-all text-[10px] italic text-keep-muted">by {entry.authorName}</span>
     </button>
   );
 }

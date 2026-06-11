@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type {
   PrivateStoryStub,
   StoryApplauseState,
@@ -103,8 +103,14 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
   const [scheme, setScheme] = useReaderPref<ReaderScheme>("scriptorium.scheme", "auto");
 
   const [typoOpen, setTypoOpen] = useState(false);
+  // Mobile-only "Contents" drawer. The whole sidebar (info, Buy a Copy,
+  // chapters, codex) is `hidden md:flex` on desktop, so on phones it has
+  // no home; this slides the same panel in full-screen over the reader.
+  const [navOpen, setNavOpen] = useState(false);
   const [chapterIdx, setChapterIdx] = useState<number>(initialChapterIndex ?? 0);
   const [chapterBodies, setChapterBodies] = useState<Record<string, StoryChapter>>({});
+  // Bumped after a Buy-to-Read purchase to re-fetch the (now unlocked) detail.
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,15 +136,30 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
       })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "load failed"); });
     return () => { cancelled = true; };
-  }, [storyId, initialChapterIndex]);
+  }, [storyId, initialChapterIndex, refreshKey]);
 
   const chapters = detail?.chapters ?? [];
   const currentChapter = chapters[chapterIdx] ?? null;
+  // Buy-to-Read: this viewer must purchase to read past the first-chapter
+  // sample. The server enforces it (the body endpoint only ships a sample);
+  // here it swaps the reading pane for the locked view.
+  const locked = !!detail?.locked;
 
-  // Fetch chapter bodies, current only in book mode, all in pageless.
+  // Unlock after a purchase: drop the cached sample so chapter 1 re-fetches
+  // in full, then re-pull the detail (now `locked: false`).
+  const handleUnlocked = useCallback(() => {
+    setChapterBodies({});
+    setChapterIdx(0);
+    setRefreshKey((k) => k + 1);
+  }, []);
+
+  // Fetch chapter bodies: when locked, only the first chapter (its sample);
+  // otherwise current chapter in book mode, all chapters in pageless.
   useEffect(() => {
     if (!detail) return;
-    const targets = mode === "book" && currentChapter ? [currentChapter] : detail.chapters;
+    const targets = locked
+      ? (chapters[0] ? [chapters[0]] : [])
+      : mode === "book" && currentChapter ? [currentChapter] : detail.chapters;
     targets.forEach((c) => {
       if (chapterBodies[c.id]) return;
       void fetch(`/stories/${detail.story.id}/chapters/${c.id}`)
@@ -150,7 +171,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
         .catch(() => { /* swallow */ });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, currentChapter?.id, detail?.story.id]);
+  }, [mode, currentChapter?.id, detail?.story.id, locked]);
 
   // Reading-position sync. Scroll handler is on the article (the actual
   // scroll container), scroll events don't bubble, so a parent listener
@@ -283,14 +304,57 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
     setReaderBgTone(luminance < 0.45 ? "dark" : "light");
   }, [scheme, readerTheme, themeOverride, detail]);
 
+  // Shared chapter jump, used by both the desktop sidebar and the mobile
+  // drawer. In pageless mode we also scroll the article to the chapter
+  // anchor. `closeNav` lets the mobile drawer dismiss itself after a tap
+  // so the reader lands on the chosen chapter (desktop passes false).
+  const jumpToChapter = useCallback((id: string, closeNav: boolean) => {
+    const i = chapters.findIndex((c) => c.id === id);
+    if (i < 0) return;
+    setChapterIdx(i);
+    if (closeNav) setNavOpen(false);
+    if (mode === "pageless") {
+      window.setTimeout(() => {
+        articleRef.current
+          ?.querySelector<HTMLElement>(`[data-chapter-id="${id}"]`)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+    }
+  }, [chapters, mode]);
+
+  // Esc closes the drawer first (before the modal's own Esc-to-close).
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); setNavOpen(false); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [navOpen]);
+
   return (
     <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
         style={themeOverride}
-        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg text-keep-text`}
+        className={`${MODAL_CARD_CONTENT} keep-frame relative rounded bg-keep-bg text-keep-text`}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center gap-2 border-b border-keep-rule bg-keep-banner px-3 py-2">
+          {/* Mobile-only "Contents" trigger. Opens the drawer that holds
+              the sidebar (info, Buy a Copy, chapters, codex) — all of
+              which are desktop-only otherwise. Hidden once the drawer is
+              open (the drawer has its own close control). */}
+          {detail ? (
+            <button
+              type="button"
+              onClick={() => setNavOpen(true)}
+              className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-base leading-none text-keep-muted hover:text-keep-text md:hidden"
+              title="Contents: chapters, codex, buy a copy"
+              aria-label="Open contents menu"
+            >
+              ☰
+            </button>
+          ) : null}
           {onBack ? (
             <button
               type="button"
@@ -298,7 +362,8 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
               title="Back to Scriptorium"
             >
-              ← Back
+              <span className="md:hidden" aria-hidden>←</span>
+              <span className="hidden md:inline">← Back</span>
             </button>
           ) : null}
           <h2 className="min-w-0 flex-1 truncate font-action text-lg">
@@ -348,14 +413,23 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
         ) : !detail ? (
           <p className="p-6 italic text-keep-muted">Loading...</p>
         ) : (
-          <div
-            ref={readerShellRef}
-            data-reader-scheme={scheme === "auto" ? undefined : scheme}
-            // Sampled bg luminance, only meaningful under the auto
-            // scheme; the manual schemes pin their own contrast.
-            data-reader-bg-tone={scheme === "auto" ? readerBgTone : undefined}
-            className={`reader-shell flex min-h-0 flex-1 gap-3 p-3 ${schemeBgClass}`}
-          >
+          <div className="flex min-h-0 flex-1 flex-col">
+            {/* Moderator paywall-bypass warning. Shown only when full access
+                comes solely from the bypass permission (not owning/authoring),
+                so a mod knows the book is normally purchase-to-read. */}
+            {detail.paywallBypassed ? (
+              <div className="shrink-0 border-b border-amber-400/40 bg-amber-400/10 px-4 py-2 text-center text-xs text-amber-200">
+                ⚠️ This book is marked <b>Buy to Read</b>. You're viewing it in full via moderator access — readers must buy a copy to read past a sample.
+              </div>
+            ) : null}
+            <div
+              ref={readerShellRef}
+              data-reader-scheme={scheme === "auto" ? undefined : scheme}
+              // Sampled bg luminance, only meaningful under the auto
+              // scheme; the manual schemes pin their own contrast.
+              data-reader-bg-tone={scheme === "auto" ? readerBgTone : undefined}
+              className={`reader-shell flex min-h-0 flex-1 gap-3 p-3 ${schemeBgClass}`}
+            >
             {/* Sidebar (left). `keep-panel` picks up the theme
                 design's chrome (medieval filigree, modern soft
                 gradient + shadow, scifi cyber border + corner
@@ -371,16 +445,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
                 chapters={chapters}
                 currentChapterId={currentChapter?.id ?? null}
                 mode={mode}
-                onJumpChapter={(id) => {
-                  const i = chapters.findIndex((c) => c.id === id);
-                  if (i < 0) return;
-                  setChapterIdx(i);
-                  if (mode === "pageless") {
-                    window.setTimeout(() => {
-                      articleRef.current?.querySelector<HTMLElement>(`[data-chapter-id="${id}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    }, 0);
-                  }
-                }}
+                onJumpChapter={(id) => jumpToChapter(id, false)}
               />
             </aside>
 
@@ -392,7 +457,16 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
                 parchment, modern gradient, scifi neon edge, glass
                 frost) carries through to both panels. */}
             <div className="reader-main flex min-w-0 flex-1 flex-col">
-              {mode === "pageless" ? (
+              {locked ? (
+                <LockedReadingPane
+                  story={detail.story}
+                  firstChapter={chapters[0] ?? null}
+                  sampleBody={chapters[0] ? (chapterBodies[chapters[0].id] ?? null) : null}
+                  chapterCount={chapters.length}
+                  typographyStyle={typographyStyle}
+                  onUnlocked={handleUnlocked}
+                />
+              ) : mode === "pageless" ? (
                 <article
                   ref={(el) => { articleRef.current = el; }}
                   onScroll={scheduleSend}
@@ -436,8 +510,38 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
                 </BookPagedView>
               )}
             </div>
+            </div>
           </div>
         )}
+
+        {/* Mobile contents drawer. Full-screen panel (md:hidden) layered
+            over the whole reader card so phone readers can reach book
+            info, Buy a Copy, chapters, and the codex — all of which live
+            in the desktop-only sidebar otherwise. Tapping a chapter jumps
+            + closes; the codex expands inline so it stays readable here. */}
+        {navOpen && detail ? (
+          <div className="absolute inset-0 z-30 flex flex-col bg-keep-bg md:hidden">
+            <header className="flex shrink-0 items-center gap-2 border-b border-keep-rule bg-keep-banner px-3 py-2">
+              <h3 className="min-w-0 flex-1 truncate font-action text-base">Contents</h3>
+              <button
+                type="button"
+                onClick={() => setNavOpen(false)}
+                className="rounded border border-keep-rule bg-keep-bg px-3 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
+              >
+                Done
+              </button>
+            </header>
+            <div className="keep-panel min-h-0 flex-1 overflow-y-auto">
+              <ReaderSidebar
+                detail={detail}
+                chapters={chapters}
+                currentChapterId={currentChapter?.id ?? null}
+                mode={mode}
+                onJumpChapter={(id) => jumpToChapter(id, true)}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
     </Modal>
   );
@@ -794,6 +898,14 @@ function ReaderSidebar({
             </span>
           </p>
         ) : null}
+        {s.buyToRead ? (
+          <p className="mt-2">
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/60 bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-amber-300" title="Readers buy a copy to read past a sample">
+              <span aria-hidden="true">🔒</span>
+              Buy to read
+            </span>
+          </p>
+        ) : null}
         {s.summary ? (
           <p className="mt-3 text-sm leading-snug text-keep-text/90">{s.summary}</p>
         ) : null}
@@ -964,31 +1076,35 @@ function ActionBar({
   applauseCount: number;
 }) {
   return (
-    <div className="mt-2 flex w-full overflow-hidden rounded-md border border-keep-action/40 bg-keep-action/10 shadow-inner">
-      {allowApplause ? (
-        <ActionSegment
-          left
-          right={false}
-        >
-          <ApplauseSegment storyId={storyId} initialCount={applauseCount} />
+    <>
+      <div className="mt-2 flex w-full overflow-hidden rounded-md border border-keep-action/40 bg-keep-action/10 shadow-inner">
+        {allowApplause ? (
+          <ActionSegment
+            left
+            right={false}
+          >
+            <ApplauseSegment storyId={storyId} initialCount={applauseCount} />
+          </ActionSegment>
+        ) : null}
+        <ActionSegment left={allowApplause} right={false}>
+          <FollowSegment storyId={storyId} />
         </ActionSegment>
-      ) : null}
-      <ActionSegment left={allowApplause} right={false}>
-        <FollowSegment storyId={storyId} />
-      </ActionSegment>
-      {/* Buy-a-Copy renders its own segment (with divider) only when it
-          applies — author / unpublished / not-logged-in collapse to nothing,
-          so it never leaves a blank column. */}
-      <BuyCopySegment storyId={storyId} />
-      <ActionSegment left right>
-        <ReportSegment storyId={storyId} />
-      </ActionSegment>
-    </div>
+        <ActionSegment left right>
+          <ReportSegment storyId={storyId} />
+        </ActionSegment>
+      </div>
+      {/* Buy-a-Copy / showcase is pulled OUT of the segmented row into its
+          own full-width button: three lines of label crammed into a ~1/4
+          column read as scrunched, and a full-width CTA also makes the
+          purchase path more discoverable. Collapses to nothing when buying
+          doesn't apply (author / unpublished / signed out & not owned). */}
+      <BuyCopyBar storyId={storyId} />
+    </>
   );
 }
 
-/* ---------- Buy-a-Copy segment ---------- */
-function BuyCopySegment({ storyId }: { storyId: string }) {
+/* ---------- Buy-a-Copy bar (full width, below the action row) ---------- */
+function BuyCopyBar({ storyId }: { storyId: string }) {
   const activeCharacterId = useChat((s) => s.activeCharacterId);
   const setNotice = useChat((s) => s.setNotice);
   const [state, setState] = useState<StoryCopyState | null>(null);
@@ -1034,28 +1150,31 @@ function BuyCopySegment({ storyId }: { storyId: string }) {
   if (!state || state.isAuthor || (!state.canBuy && !state.owned)) return null;
 
   const owned = state.owned;
+  const active = owned && state.showcased;
   return (
-    <div className="flex min-w-0 flex-1 items-stretch border-l border-keep-action/30">
-      <button
-        type="button"
-        onClick={owned ? toggleShowcase : buy}
-        disabled={busy}
-        title={owned
-          ? (state.showcased ? "Remove from your profile Library" : "Show on your profile Library")
-          : `Buy a copy for ${state.price}`}
-        className={`flex w-full flex-col items-center justify-center gap-0.5 px-2 py-2 text-center transition hover:bg-keep-action/10 ${
-          owned && state.showcased ? "text-keep-action" : "text-keep-text"
-        } disabled:opacity-50`}
-      >
-        <span className="text-base leading-none" aria-hidden>{owned ? "📚" : "📖"}</span>
-        <span className="text-[10px] font-semibold uppercase tracking-widest">
-          {owned ? (state.showcased ? "In Library" : "Owned") : "Buy a Copy"}
-        </span>
-        <span className="text-xs tabular-nums opacity-70">
-          {owned ? (state.showcased ? "shown" : "show") : `· ${state.price}`}
-        </span>
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={owned ? toggleShowcase : buy}
+      disabled={busy}
+      title={owned
+        ? (state.showcased
+            ? "Showing on your profile — tap to hide"
+            : "You own this — tap to show it on your profile")
+        : `Buy a copy for ${state.price} (adds it to your profile Library)`}
+      className={`mt-2 flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold uppercase tracking-widest shadow-inner transition disabled:opacity-50 ${
+        active
+          ? "border-keep-action bg-keep-action/20 text-keep-action hover:bg-keep-action/30"
+          : "border-keep-action/40 bg-keep-action/10 text-keep-text hover:bg-keep-action/20"
+      }`}
+    >
+      <span className="text-base leading-none" aria-hidden>{owned ? "📚" : "📖"}</span>
+      <span>{owned ? (state.showcased ? "Showing on Profile" : "Show on Profile") : "Buy a Copy"}</span>
+      {!owned ? (
+        <span className="text-xs tabular-nums opacity-70 normal-case">· {state.price}</span>
+      ) : state.showcased ? (
+        <span className="text-xs opacity-80" aria-hidden>✓</span>
+      ) : null}
+    </button>
   );
 }
 
@@ -1213,6 +1332,100 @@ function ReportSegment({ storyId }: { storyId: string }) {
       <span className="text-base leading-none" aria-hidden>🚩</span>
       <span className="text-[10px] font-semibold uppercase tracking-widest">Report</span>
     </button>
+  );
+}
+
+/* =============================================================
+ *  LockedReadingPane, the "Buy to Read" paywall view
+ * =============================================================
+ *
+ *  Shown in place of the reading panes when `detail.locked` is true.
+ *  Renders the server-sampled first chapter (already truncated server-
+ *  side — we never receive the full text), masks its tail to a fade,
+ *  and presents the Buy CTA. A successful purchase calls `onUnlocked`,
+ *  which clears the cached sample and re-fetches the now-unlocked detail.
+ */
+function LockedReadingPane({
+  story,
+  firstChapter,
+  sampleBody,
+  chapterCount,
+  typographyStyle,
+  onUnlocked,
+}: {
+  story: StoryDetail["story"];
+  firstChapter: StoryChapterRef | null;
+  sampleBody: StoryChapter | null;
+  chapterCount: number;
+  typographyStyle: CSSProperties;
+  onUnlocked: () => void;
+}) {
+  const activeCharacterId = useChat((s) => s.activeCharacterId);
+  const setNotice = useChat((s) => s.setNotice);
+  const me = useChat((s) => s.me);
+  const [busy, setBusy] = useState(false);
+
+  async function buy() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await buyStoryCopy(story.id, activeCharacterId);
+      setNotice({ code: "scriptorium_copy", message: `Unlocked! Copy added to your Library (−${res.price}).` });
+      onUnlocked();
+    } catch (e) {
+      setNotice({ code: "scriptorium_copy_err", message: e instanceof Error ? e.message : "Purchase failed." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="keep-panel min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto w-full px-6 py-6" style={typographyStyle}>
+        {/* Sampled first chapter. The mask fades the tail to transparent —
+            scheme-agnostic (no bg-color match needed) and a true "fade out"
+            of the text itself. */}
+        <div
+          style={{
+            WebkitMaskImage: "linear-gradient(to bottom, #000 58%, transparent)",
+            maskImage: "linear-gradient(to bottom, #000 58%, transparent)",
+          }}
+        >
+          {firstChapter ? (
+            <ChapterBlock chapterRef={firstChapter} full={sampleBody} />
+          ) : (
+            <p className="italic opacity-60">No preview available yet.</p>
+          )}
+        </div>
+
+        {/* Paywall CTA */}
+        <div className="mx-auto -mt-6 max-w-prose rounded-lg border border-keep-action/40 bg-keep-action/10 p-5 text-center shadow-inner">
+          <div className="text-2xl" aria-hidden>🔒</div>
+          <h3 className="mt-1 font-action text-lg text-keep-text">Buy to keep reading</h3>
+          <p className="mt-1 text-sm text-keep-muted">
+            This is a preview. Buy a copy to read all {chapterCount} {chapterCount === 1 ? "chapter" : "chapters"}
+            {" "}— it's added to your Library and you can show it on your profile.
+          </p>
+          {me ? (
+            <button
+              type="button"
+              onClick={buy}
+              disabled={busy}
+              className="mt-3 inline-flex items-center justify-center gap-2 rounded-md border border-keep-action bg-keep-action px-5 py-2 text-sm font-semibold uppercase tracking-widest text-keep-bg transition hover:brightness-110 disabled:opacity-50"
+            >
+              <span aria-hidden>📖</span> {busy ? "Unlocking…" : `Buy to read · ${story.copyPrice}`}
+            </button>
+          ) : (
+            <a
+              href="/login"
+              className="mt-3 inline-block rounded-md border border-keep-action bg-keep-action px-5 py-2 text-sm font-semibold uppercase tracking-widest text-keep-bg hover:brightness-110"
+            >
+              Sign in to buy
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

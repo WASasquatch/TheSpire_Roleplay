@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { ChatMessage, PermissionKey, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, UiRouteRankingBoard, WorldDetail } from "@thekeep/shared";
 import { DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, legibleAgainstBg, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
@@ -31,6 +32,7 @@ import { BannerMarquee } from "./components/BannerMarquee.js";
 import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanners.js";
 import { onUiRouteOpen } from "./lib/uiRouteOpen.js";
 import { fetchLatestPublishedStory } from "./lib/latestStory.js";
+import { playRoomTransition } from "./lib/transitions/orchestrator.js";
 import { fetchSpotlightMember } from "./lib/uiRouteDynamicLabel.js";
 import { loadForumDraft, pruneStaleForumDrafts, saveForumDraft } from "./lib/forumDrafts.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
@@ -979,6 +981,12 @@ function Chat() {
   const removeForumTopic = useChat((s) => s.removeForumTopic);
 
   const currentRoomId = useChat((s) => s.currentRoomId);
+  const myActiveTransitionKey = useChat((s) => s.myActiveTransitionKey);
+  const setMyActiveTransitionKey = useChat((s) => s.setMyActiveTransitionKey);
+  // Stable wrapper around the chat content; the room-transition orchestrator
+  // overlays + clones it during a room switch. (The fetch of the equipped
+  // transition lives after `activeCharacterId` is declared, below.)
+  const chatWrapperRef = useRef<HTMLDivElement | null>(null);
   const rooms = useChat((s) => s.rooms);
   const messagesByRoom = useChat((s) => s.messagesByRoom);
   const forumTopicsByRoom = useChat((s) => s.forumTopicsByRoom);
@@ -1282,6 +1290,18 @@ function Chat() {
   const [characterTheme, setCharacterTheme] = useState<Theme | null>(null);
   const [activeCharacterId, setActiveCharacterIdLocal] = useState<string | null>(null);
   const [activeCharacterName, setActiveCharacterName] = useState<string | null>(null);
+  // Load THIS identity's equipped room transition so the room-switch hook can
+  // play it. Refetched on identity change; the shop updates the store directly.
+  useEffect(() => {
+    if (!me) { setMyActiveTransitionKey(null); return; }
+    let cancelled = false;
+    const qs = activeCharacterId ? `?characterId=${encodeURIComponent(activeCharacterId)}` : "";
+    fetch(`/earning/me/active-room-transition${qs}`, { credentials: "include" })
+      .then((r) => (r.ok ? (r.json() as Promise<{ key: string | null }>) : null))
+      .then((j) => { if (!cancelled && j) setMyActiveTransitionKey(j.key); })
+      .catch(() => { /* non-fatal; the switch just stays instant */ });
+    return () => { cancelled = true; };
+  }, [me?.id, activeCharacterId, setMyActiveTransitionKey]);
   // Wrapper that mirrors local state into the Zustand store so any
   // component / fetch can read the active identity via useChat. The
   // friend + DM endpoints scope responses by this id (server filters
@@ -2232,6 +2252,39 @@ function Chat() {
           // full catalog row inline so no follow-up fetch is needed.
           setOpenItem(h.item);
           break;
+        case "download-export": {
+          // /export — fetch the server-built HTML log and save it. We append
+          // the viewer's timezone offset (minutes EAST of UTC) so the log's
+          // timestamps read in their local time, matching the chat. The
+          // transfer is a plain credentialed fetch → Blob → temporary
+          // <a download>, so nothing streams over the socket and the cookie
+          // session authorizes the request. Errors surface as a toast.
+          const tzMin = -new Date().getTimezoneOffset();
+          const sep = h.url.includes("?") ? "&" : "?";
+          const fullUrl = `${h.url}${sep}tz=${tzMin}`;
+          const filename = h.filename;
+          void (async () => {
+            try {
+              const r = await fetch(fullUrl, { credentials: "include" });
+              if (!r.ok) {
+                setNotice({ code: "EXPORT_FAILED", message: "Couldn't generate the chat export. Try a shorter range." });
+                return;
+              }
+              const blob = await r.blob();
+              const objectUrl = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = objectUrl;
+              a.download = filename;
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+            } catch {
+              setNotice({ code: "EXPORT_FAILED", message: "Couldn't generate the chat export. Try a shorter range." });
+            }
+          })();
+          break;
+        }
       }
     });
 
@@ -3010,8 +3063,31 @@ function Chat() {
 
   function onRoomClick(roomId: string) {
     if (roomId === currentRoomId) return;
-    socket.emit("room:join", { roomId }, (res) => {
-      if (!res.ok) setNotice({ code: res.code, message: res.message });
+    // Mobile: close the rooms/userlist drawer BEFORE the transition snapshots
+    // the chat. The drawer is a fixed child of the wrapper we clone, so if it's
+    // still open at snapshot time the clone freezes the open drawer over the
+    // whole animation (it only "closed" once the overlay was torn down). A
+    // plain setRailOpen(false) re-renders too late — the synchronous
+    // playRoomTransition clone runs first. flushSync forces the drawer out of
+    // the DOM now so the snapshot is clean. No-op on desktop (rail isn't a
+    // drawer there) and when already closed; closing a fixed overlay doesn't
+    // reflow the row, so the captured rect is unchanged.
+    if (railOpen) flushSync(() => setRailOpen(false));
+    const doJoin = () => {
+      socket.emit("room:join", { roomId }, (res) => {
+        if (!res.ok) setNotice({ code: res.code, message: res.message });
+      });
+    };
+    // Play the equipped room transition (self-only). Gated by the
+    // `use_room_transitions` permission; null key / unequipped / reduced-motion
+    // all fall through to an instant switch inside playRoomTransition.
+    const permitted = !!me?.permissions?.includes("use_room_transitions");
+    const key = permitted ? myActiveTransitionKey : null;
+    void playRoomTransition(key, {
+      wrapperEl: chatWrapperRef.current,
+      swap: doJoin,
+      // The new room has rendered once the store's currentRoomId catches up.
+      isReady: () => useChat.getState().currentRoomId === roomId,
     });
   }
 
@@ -3272,6 +3348,21 @@ function Chat() {
           user has unacknowledged rank-ups. Tucked under the version
           banner so deploy nags still take precedence. */}
       <EarningRibbon onOpenEarning={() => setEarningOpen({})} />
+      {/* Per-room view wrapper. Bundles the room's own banners (world /
+          topic / expiry), the header accent rail, and the chat+rooms row
+          into ONE stable flex-col. The room-transition orchestrator snapshots
+          and overlays THIS element, so the overlay must span the same box
+          regardless of which per-room banners are present. Before this
+          wrapper existed the transition targeted only the chat+rooms row, so
+          switching to a room WITHOUT a topic dropped the topic banner above
+          the row, reflowed the row upward, and left an uncovered strip at the
+          top of the animation (the overlay was still pinned to the old, lower
+          rect). Keeping the per-room banners inside the wrapper means that
+          reflow happens within the covered area — and the banners animate
+          along with the room instead of popping outside the effect. The
+          account-level banners (rank-up ribbon, version, marquee) stay OUTSIDE
+          so they don't get swept into a room switch. */}
+      <div ref={chatWrapperRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       {room?.linkedWorld && !worldBannerDismissed ? (
         <div className="keep-notice keep-notice-accent relative flex w-full items-center justify-center pr-10">
           <button
@@ -3580,6 +3671,7 @@ function Chat() {
           fontStep={fontStep}
         />
       </div>
+      </div>{/* /per-room view wrapper (transition target) */}
       {notice ? <Toast notice={notice} onDismiss={() => setNotice(null)} /> : null}
       {openProfile ? (
         <ProfileModal

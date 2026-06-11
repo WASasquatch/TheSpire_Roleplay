@@ -887,6 +887,12 @@ function ProfileBody({
               ) : null}
               <span aria-hidden>·</span>
               <CopyProfileLink name={name} />
+              <span aria-hidden>·</span>
+              {/* Paste-ready identity token. `@cid:<id>` for a character,
+                  `@id:<userId>` for a master/OOC account — drop it straight
+                  into /whisper, /currency send, /friend, /title, etc. (names
+                  with spaces can't be typed as command args). */}
+              <CopyIdentityToken token={isChar ? `@cid:${profile.profile.id}` : `@id:${profile.profile.userId}`} />
               {/* Visitor counter, renders only when the owner owns
                   `flair_profile_visitors` AND has flipped visibility
                   on. Returns null otherwise, so the meta line is
@@ -1538,6 +1544,35 @@ function scriptoriumTierClass(tier: "author" | "storyteller" | "loremaster"): st
  * the URL when navigator.clipboard isn't available (Safari pre-13.1, some
  * sandboxed iframes).
  */
+/**
+ * Click-to-copy identity token (`@id:<userId>` / `@cid:<characterId>`). Public
+ * (unlike the mod-only raw CopyId): every user can grab it to target this
+ * identity in slash-commands without retyping a name (which breaks on spaces).
+ */
+function CopyIdentityToken({ token }: { token: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(token);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      window.prompt("Copy this token:", token);
+    }
+  }
+  const preview = token.length > 14 ? `${token.slice(0, 12)}…` : token;
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title={`Copy ${token} — paste into /whisper, /currency send, /friend, /title, etc.`}
+      className="rounded border border-keep-rule/60 px-1 font-mono text-[10px] hover:border-keep-action hover:text-keep-action"
+    >
+      {copied ? "copied!" : preview}
+    </button>
+  );
+}
+
 function CopyProfileLink({ name }: { name: string }) {
   const [copied, setCopied] = useState(false);
   async function copy() {

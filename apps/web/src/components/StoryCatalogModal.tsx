@@ -17,6 +17,7 @@ import {
 } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { readError } from "../lib/http.js";
+import { buyStoryCopy } from "../lib/storyCopies.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { CloseButton } from "./CloseButton.js";
 
@@ -138,6 +139,10 @@ function FindStoriesTab({ onOpenStory, authed }: { onOpenStory: (id: string, car
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Buy-a-Copy state for the card tiles. Price is per-card (each card's
+  // resolved `copyPrice`); the shop on/off flag + owned set are page-level.
+  const [copyEnabled, setCopyEnabled] = useState(false);
+  const [ownedIds, setOwnedIds] = useState<Set<string>>(() => new Set());
 
   const qRef = useRef(filters.q);
   qRef.current = filters.q;
@@ -171,6 +176,8 @@ function FindStoriesTab({ onOpenStory, authed }: { onOpenStory: (id: string, car
       setEntries(j.entries);
       setTotal(j.total);
       setHasMore(j.hasMore);
+      setCopyEnabled(j.copyEnabled);
+      setOwnedIds(new Set(j.ownedStoryIds));
     } catch (e) {
       setError(e instanceof Error ? e.message : "load failed");
     } finally {
@@ -207,7 +214,12 @@ function FindStoriesTab({ onOpenStory, authed }: { onOpenStory: (id: string, car
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {entries.map((s) => (
-              <StoryCardTile key={s.id} card={s} onOpen={() => onOpenStory(s.id, s)} />
+              <StoryCardTile
+                key={s.id}
+                card={s}
+                onOpen={() => onOpenStory(s.id, s)}
+                buy={{ price: s.copyPrice, enabled: copyEnabled, owned: ownedIds.has(s.id) }}
+              />
             ))}
           </div>
         )}
@@ -661,10 +673,14 @@ function StoryCardTile({
   card,
   onOpen,
   edit,
+  buy,
 }: {
   card: StoryCard;
   onOpen: () => void;
   edit?: { onClick: () => void };
+  /** Buy-a-Copy CTA shown on browsable catalog cards. Omitted on the
+   *  "My Stories" tab (you can't buy your own book). */
+  buy?: { price: number; enabled: boolean; owned: boolean };
 }) {
   const authorName = card.author.characterName ?? card.author.masterUsername;
   // OOC ↔ character partition: a story attributed to a character
@@ -769,6 +785,11 @@ function StoryCardTile({
               {card.visibility}
             </span>
           ) : null}
+          {card.buyToRead ? (
+            <span className="rounded border border-amber-500/50 bg-amber-500/10 px-1.5 py-0.5 text-amber-300" title="Buy a copy to read past a sample">
+              🔒 Buy to read
+            </span>
+          ) : null}
         </div>
 
         {card.summary ? (
@@ -792,8 +813,80 @@ function StoryCardTile({
             Edit
           </button>
         ) : null}
+
+        {/* Buy-a-Copy, only on browsable cards (not your own books) when
+            signed in. Buying adds the book to your profile Library; the
+            "show on profile" toggle then lives in the reader. */}
+        {buy && me && card.author.userId !== me.id && card.status !== "draft" ? (
+          <CatalogBuyButton
+            storyId={card.id}
+            price={buy.price}
+            enabled={buy.enabled}
+            initialOwned={buy.owned}
+          />
+        ) : null}
       </div>
     </article>
+  );
+}
+
+/** Buy / Owned control on a catalog card. Self-contained: tracks its own
+ *  owned state so it flips to "In your Library" right after a purchase
+ *  without a catalog reload. Buys under the active identity (character or
+ *  master), mirroring the reader's Buy a Copy. */
+function CatalogBuyButton({
+  storyId,
+  price,
+  enabled,
+  initialOwned,
+}: {
+  storyId: string;
+  price: number;
+  enabled: boolean;
+  initialOwned: boolean;
+}) {
+  const activeCharacterId = useChat((s) => s.activeCharacterId);
+  const setNotice = useChat((s) => s.setNotice);
+  const [owned, setOwned] = useState(initialOwned);
+  const [busy, setBusy] = useState(false);
+
+  if (owned) {
+    return (
+      <span className="mt-1 inline-flex items-center justify-center gap-1 self-start rounded border border-keep-action/40 bg-keep-action/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-keep-action">
+        <span aria-hidden>📚</span> In your Library
+      </span>
+    );
+  }
+  if (!enabled) return null;
+
+  async function buy(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await buyStoryCopy(storyId, activeCharacterId);
+      setOwned(true);
+      setNotice({
+        code: "scriptorium_copy",
+        message: `Copy added to your Library (−${res.price}). Open it to show it on your profile.`,
+      });
+    } catch (err) {
+      setNotice({ code: "scriptorium_copy_err", message: err instanceof Error ? err.message : "Purchase failed." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={buy}
+      disabled={busy}
+      title={`Buy a copy for ${price} — adds it to your profile Library`}
+      className="mt-1 inline-flex items-center justify-center gap-1 self-start rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-keep-action transition hover:bg-keep-action/25 disabled:opacity-50"
+    >
+      <span aria-hidden>📖</span> Buy · {price}
+    </button>
   );
 }
 

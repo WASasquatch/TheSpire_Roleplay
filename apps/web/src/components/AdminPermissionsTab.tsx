@@ -55,6 +55,7 @@ const GROUP_LABEL: Record<PermissionGroup, string> = {
   chat_moderation: "Chat moderation",
   room_admin: "Room admin",
   arcade: "Spire Arcade",
+  cosmetics: "Cosmetics",
   user_admin: "User admin",
   site_admin: "Site admin",
   content_admin: "Content admin",

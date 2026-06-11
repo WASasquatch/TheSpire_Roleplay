@@ -166,6 +166,12 @@ export interface IdentityCosmetics {
    *  they can be edited frequently and we don't want the snapshot
    *  payload to bloat with rotating-quote content. */
   profileMarqueeOwned?: boolean;
+  /** Migration 0219, equipped room-transition key for this identity. Null =
+   *  instant switch (no animation). Plays only on the user's own client. */
+  activeRoomTransitionKey?: string | null;
+  /** Migration 0219, room-transition keys this identity owns. Always includes
+   *  the free `slide`. The CosmeticsTab shop reads this for Buy/Equip CTAs. */
+  ownedTransitionKeys?: string[];
 }
 
 export interface ActiveCosmetics extends IdentityCosmetics {
@@ -1177,6 +1183,37 @@ export async function purchaseNameStyle(
     headers: { "content-type": "application/json" },
     credentials: "include",
     body: JSON.stringify({ characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/** Buy a room-transition cosmetic for an identity (master/OOC = null, else a
+ *  character id). Per-identity, like name styles. Gated server-side by the
+ *  `use_room_transitions` permission + per-transition currency cost. */
+export async function purchaseTransition(
+  key: string,
+  characterId: string | null = null,
+): Promise<void> {
+  const r = await fetch(`/earning/me/transitions/${encodeURIComponent(key)}/purchase`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ characterId }),
+  });
+  if (!r.ok) throw new Error(await readError(r));
+}
+
+/** Equip (or clear, via null = instant) the active room transition for an
+ *  identity. Must be owned by that identity (the free `slide` always is). */
+export async function setActiveRoomTransition(
+  key: string | null,
+  characterId: string | null = null,
+): Promise<void> {
+  const r = await fetch("/earning/me/active-room-transition", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ key, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }

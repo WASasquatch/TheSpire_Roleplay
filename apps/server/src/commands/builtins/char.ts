@@ -36,6 +36,20 @@ function notice(ctx: CommandContext, code: string, message: string) {
 }
 
 async function findCharacter(ctx: CommandContext, name: string) {
+  // `@cid:<id>` selects one of YOUR characters by id — paste-friendly from a
+  // profile, and unambiguous when a name has spaces or collides. Still scoped
+  // to the caller's own characters (you can only switch/edit/delete your own).
+  const trimmed = name.trim();
+  if (trimmed.startsWith("@cid:")) {
+    const charId = trimmed.slice(5).trim();
+    if (!charId || /\s/.test(charId)) return undefined;
+    const byId = await ctx.db
+      .select()
+      .from(characters)
+      .where(and(eq(characters.id, charId), eq(characters.userId, ctx.user.id), isNull(characters.deletedAt)))
+      .limit(1);
+    return byId[0];
+  }
   // Space-/case-insensitive lookup, same helper the friend / DM /
   // whisper paths use. Tolerates NBSP-vs-ASCII-space mismatches between
   // the typed query and whatever's stored, regardless of which form the

@@ -82,6 +82,26 @@ export async function resolveTransferTarget(
 ): Promise<{ ok: true; target: TransferTarget } | { ok: false; error: TransferError } | null> {
   const trimmed = name.trim();
   if (!trimmed) return null;
+
+  // Explicit identity tokens win, paste-friendly from a profile: `@cid:<id>`
+  // targets a character, `@id:<id>` a master/OOC account. These bypass the
+  // name lookup entirely, so a character whose name has spaces (or collides
+  // with another name) can still be targeted unambiguously.
+  if (trimmed.startsWith("@cid:")) {
+    const charId = trimmed.slice(5).trim();
+    if (!charId || /\s/.test(charId)) return null;
+    const c = (await db.select().from(characters).where(eq(characters.id, charId)).limit(1))[0];
+    if (!c || c.deletedAt) return null;
+    return { ok: true, target: { kind: "character", ownerId: c.id, userId: c.userId, displayName: c.name } };
+  }
+  if (trimmed.startsWith("@id:")) {
+    const userId = trimmed.slice(4).trim();
+    if (!userId || /\s/.test(userId)) return null;
+    const u = (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0];
+    if (!u || u.disabledAt) return null;
+    return { ok: true, target: { kind: "user", ownerId: u.id, userId: u.id, displayName: u.username } };
+  }
+
   const lower = trimmed.toLowerCase();
 
   const charRows = await db

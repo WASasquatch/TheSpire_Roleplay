@@ -54,6 +54,9 @@ export const PERMISSION_KEYS = [
   "use_arcade",
   "use_eidolon_tamer",
 
+  // ---- cosmetics ----
+  "use_room_transitions",
+
   // ---- user_admin ----
   "grant_admin_role",
   "revoke_admin_role",
@@ -88,6 +91,7 @@ export const PERMISSION_KEYS = [
   "admin_force_story_rating",
   "edit_others_scriptorium_content",
   "view_others_scriptorium_drafts",
+  "bypass_scriptorium_paywall",
 
   // ---- audit_view (non-tab read permissions) ----
   "view_room_messages_as_admin",
@@ -183,6 +187,9 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   use_arcade: "Open the Spire Arcade and its games. (Each game may also require its own unlock to be purchased.)",
   use_eidolon_tamer: "Play the Eidolon Tamer arcade game (after unlocking it in the shop).",
 
+  // cosmetics
+  use_room_transitions: "Buy and equip room-transition cosmetics (each transition is also purchased with currency).",
+
   // user_admin
   grant_admin_role: "Promote another account to the admin tier. Same as /promoteadmin.",
   revoke_admin_role: "Demote an admin account back to user. Same as /demoteadmin.",
@@ -217,6 +224,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   admin_force_story_rating: "Override an author's content-rating choice on a story.",
   edit_others_scriptorium_content: "Admin override on others' stories, chapters, reviews, and replies.",
   view_others_scriptorium_drafts: "Read other authors' unpublished drafts in the admin queue.",
+  bypass_scriptorium_paywall: "Read books marked 'Buy to Read' without buying a copy (shows a moderator warning).",
 
   // audit_view
   view_room_messages_as_admin: "Open the admin message scroll-through for a public room.",
@@ -301,6 +309,9 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   use_arcade: "arcade",
   use_eidolon_tamer: "arcade",
 
+  // cosmetics
+  use_room_transitions: "cosmetics",
+
   // user_admin
   grant_admin_role: "user_admin",
   revoke_admin_role: "user_admin",
@@ -335,6 +346,7 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   admin_force_story_rating: "content_admin",
   edit_others_scriptorium_content: "content_admin",
   view_others_scriptorium_drafts: "content_admin",
+  bypass_scriptorium_paywall: "content_admin",
 
   // audit_view
   view_room_messages_as_admin: "audit_view",
@@ -388,6 +400,7 @@ export type PermissionGroup =
   | "chat_moderation"
   | "room_admin"
   | "arcade"
+  | "cosmetics"
   | "user_admin"
   | "site_admin"
   | "content_admin"

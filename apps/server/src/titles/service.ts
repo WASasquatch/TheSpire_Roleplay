@@ -60,6 +60,26 @@ export async function resolveIdentityByName(db: Db, name: string): Promise<Ident
   const trimmed = name.trim();
   if (!trimmed) return null;
 
+  // Identity tokens win, paste-friendly from a profile: @cid:<id> targets a
+  // character, @id:<id> a master/OOC account. Bypass the name lookup so a name
+  // with spaces (or a collision) can still be addressed unambiguously.
+  if (trimmed.startsWith("@cid:")) {
+    const charId = trimmed.slice(5).trim();
+    if (!charId || /\s/.test(charId)) return null;
+    const c = (await db.select().from(characters).where(eq(characters.id, charId)).limit(1))[0];
+    if (!c || c.deletedAt) return null;
+    const owner = (await db.select().from(users).where(eq(users.id, c.userId)).limit(1))[0];
+    if (!owner || owner.disabledAt) return null;
+    return { userId: c.userId, characterId: c.id, displayName: c.name };
+  }
+  if (trimmed.startsWith("@id:")) {
+    const userId = trimmed.slice(4).trim();
+    if (!userId || /\s/.test(userId)) return null;
+    const u2 = (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0];
+    if (!u2 || u2.disabledAt) return null;
+    return { userId: u2.id, characterId: null, displayName: u2.username };
+  }
+
   // Space-insensitive match, NBSP and ASCII space are equivalent on
   // lookup so a /title or /whois argument typed with a regular space
   // resolves a master stored with NBSP (the master-username canonical

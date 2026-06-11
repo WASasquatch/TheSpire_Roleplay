@@ -44,6 +44,9 @@ import {
   STORY_CHAPTER_CAP,
   STORY_CHAPTER_LOCK_LEASE_MS,
   STORY_CONTENT_WARNINGS,
+  STORY_COPY_PRICE_MIN,
+  STORY_COPY_PRICE_MAX,
+  STORY_SAMPLE_MAX_WORDS,
   STORY_ENTITY_BODY_MAX,
   STORY_ENTITY_KINDS,
   STORY_ENTITY_PER_KIND_CAP,
@@ -146,6 +149,8 @@ const createStoryBody = z.object({
   coverImageUrl: httpUrl.nullable().optional(),
   allowReviews: z.boolean().optional(),
   allowApplause: z.boolean().optional(),
+  copyPrice: z.number().int().min(STORY_COPY_PRICE_MIN).max(STORY_COPY_PRICE_MAX).nullable().optional(),
+  buyToRead: z.boolean().optional(),
 }).strict();
 
 const updateStoryBody = z.object({
@@ -165,6 +170,8 @@ const updateStoryBody = z.object({
   coverImageUrl: httpUrl.nullable().optional(),
   allowReviews: z.boolean().optional(),
   allowApplause: z.boolean().optional(),
+  copyPrice: z.number().int().min(STORY_COPY_PRICE_MIN).max(STORY_COPY_PRICE_MAX).nullable().optional(),
+  buyToRead: z.boolean().optional(),
 }).strict();
 
 const catalogQuery = z.object({
@@ -323,6 +330,9 @@ async function loadLinkedWorldRef(
 async function toCard(db: Db, row: typeof stories.$inferSelect): Promise<StoryCard> {
   const author = await loadAuthor(db, row.authorUserId, row.authorCharacterId ?? null);
   const linkedWorld = await loadLinkedWorldRef(db, row.linkedWorldId ?? null);
+  // getSettings is an in-memory cached singleton, so resolving the default
+  // per card is free. Author-set price wins; null inherits the site default.
+  const defaultCopyPrice = (await getSettings(db)).earningConfig.scriptorium.copyPrice;
   return {
     id: row.id,
     slug: row.slug,
@@ -343,6 +353,8 @@ async function toCard(db: Db, row: typeof stories.$inferSelect): Promise<StoryCa
     applauseCount: row.applauseCount ?? 0,
     reviewCount: row.reviewCount ?? 0,
     avgRating: row.avgRatingX100 == null ? null : Math.round(row.avgRatingX100) / 100,
+    copyPrice: row.copyPrice ?? defaultCopyPrice,
+    buyToRead: !!row.buyToRead,
     publishedAt: row.publishedAt ? +row.publishedAt : null,
     updatedAt: +row.updatedAt,
   };
@@ -482,6 +494,65 @@ async function viewerMayRead(
   }
 
   return { ok: true };
+}
+
+/**
+ * "Buy to Read" sample: the first chapter's leading paragraphs, capped near
+ * STORY_SAMPLE_MAX_WORDS. Cut on whole `<p>` blocks so tags never break;
+ * falls back to plain-text truncation when the body has no paragraph markup.
+ */
+function buildChapterSample(html: string): string {
+  const paras = html.match(/<p\b[^>]*>[\s\S]*?<\/p>/gi) ?? [];
+  const out: string[] = [];
+  let words = 0;
+  for (const p of paras) {
+    // Don't add a paragraph that would push well past the cap once we already
+    // have something — keeps the sample close to the target length.
+    if (out.length > 0 && words + countWords(p) > STORY_SAMPLE_MAX_WORDS) break;
+    out.push(p);
+    words += countWords(p);
+    if (words >= STORY_SAMPLE_MAX_WORDS) break;
+  }
+  // Use the whole-paragraph sample only when it's within a sane bound. If the
+  // body has no <p> structure, or a single giant first paragraph blew past the
+  // cap (would leak most of the chapter), fall back to plain-text truncation.
+  if (out.length > 0 && words <= STORY_SAMPLE_MAX_WORDS * 1.6) return out.join("");
+  const text = html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+  const w = text.split(" ").filter(Boolean).slice(0, STORY_SAMPLE_MAX_WORDS);
+  return w.length ? `<p>${w.join(" ")}…</p>` : "";
+}
+
+/**
+ * Resolve whether a viewer may read a (possibly paywalled) story in full.
+ * For a non-`buyToRead` story everyone who passed `viewerMayRead` reads full.
+ * For a `buyToRead` story, full access requires: author, an active collaborator
+ * (book team), owning a copy under ANY of the viewer's identities (reading is
+ * account-level), the `bypass_scriptorium_paywall` permission, or masteradmin.
+ * The draft-admin permission alone does NOT bypass the paywall — it's a
+ * separate, explicitly-warned grant.
+ */
+async function resolveReadAccess(
+  db: Db,
+  story: typeof stories.$inferSelect,
+  me: { id: string; role: Role } | null,
+): Promise<{ canReadFull: boolean; hasBypass: boolean; hasPurchased: boolean; isAuthor: boolean; isTeam: boolean }> {
+  const isAuthor = !!me && me.id === story.authorUserId;
+  if (!story.buyToRead || isAuthor) {
+    return { canReadFull: true, hasBypass: false, hasPurchased: false, isAuthor, isTeam: isAuthor };
+  }
+  if (!me) {
+    return { canReadFull: false, hasBypass: false, hasPurchased: false, isAuthor: false, isTeam: false };
+  }
+  const hasBypass = await hasPermission(me, "bypass_scriptorium_paywall", db);
+  const hasPurchased = !!(await db
+    .select({ id: storyCopies.id })
+    .from(storyCopies)
+    .where(and(eq(storyCopies.ownerUserId, me.id), eq(storyCopies.storyId, story.id)))
+    .limit(1))[0];
+  const perm = await effectiveStoryPermissions(db, story, me.id, me.role);
+  const isTeam = perm.role === "owner" || perm.role === "reader" || perm.role === "editor" || perm.role === "co_author";
+  const canReadFull = isTeam || hasPurchased || hasBypass;
+  return { canReadFull, hasBypass, hasPurchased, isAuthor, isTeam };
 }
 
 async function resolveStory(
@@ -841,6 +912,15 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
         : and(eq(storyChapters.storyId, s.id), eq(storyChapters.status, "published")))
       .orderBy(asc(storyChapters.sortOrder));
 
+    // Buy-to-Read gate state for THIS viewer. `locked` drives the reader's
+    // sample-only view; `paywallBypassed` is true only when full access comes
+    // SOLELY from the moderator permission (not owning/authoring/collab), so
+    // the reader shows a warning banner.
+    const access = await resolveReadAccess(db, s, me);
+    const locked = !!s.buyToRead && !access.canReadFull;
+    const paywallBypassed = !!s.buyToRead && access.canReadFull && access.hasBypass
+      && !access.hasPurchased && !access.isTeam;
+
     let readingPosition: StoryReadingPosition | null = null;
     if (me) {
       const rp = (await db
@@ -872,6 +952,11 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       viewerCanEdit: isAuthor || isAdmin || (perm?.editChapters ?? false),
       viewerIsAuthor: isAuthor,
       readingPosition,
+      copyPriceCustom: s.copyPrice ?? null,
+      copyPriceDefault: (await getSettings(db)).earningConfig.scriptorium.copyPrice,
+      locked,
+      paywallBypassed,
+      viewerHasPurchased: access.hasPurchased,
     };
   }
 
@@ -1022,12 +1107,33 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       .limit(pageSize)
       .offset(page * pageSize);
     const entries = await Promise.all(rows.map((r) => toCard(db, r)));
+
+    // Buy-a-Copy state for the card tiles. Price + open/closed come from
+    // config; ownership is a single batched lookup over THIS page's ids,
+    // keyed on the buyer's master account (owner_user_id) so a copy bought
+    // under any of the viewer's identities counts as owned. Anonymous
+    // viewers get an empty set (no Buy button).
+    const cfg = (await getSettings(db)).earningConfig.scriptorium;
+    let ownedStoryIds: string[] = [];
+    if (me && rows.length > 0) {
+      const ownedRows = await db
+        .select({ storyId: storyCopies.storyId })
+        .from(storyCopies)
+        .where(and(
+          eq(storyCopies.ownerUserId, me.id),
+          inArray(storyCopies.storyId, rows.map((r) => r.id)),
+        ));
+      ownedStoryIds = ownedRows.map((o) => o.storyId);
+    }
+
     const payload: StoryCatalogPage = {
       entries,
       page,
       pageSize,
       total,
       hasMore: (page + 1) * pageSize < total,
+      copyEnabled: cfg.enabled,
+      ownedStoryIds,
     };
     return payload;
   });
@@ -1086,6 +1192,8 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
         linkedWorldId: body.linkedWorldId ?? null,
         allowReviews: body.allowReviews ? 1 : 0,
         allowApplause: body.allowApplause === false ? 0 : 1,
+        copyPrice: body.copyPrice ?? null,
+        buyToRead: body.buyToRead ? 1 : 0,
       });
     } catch (e) {
       // The pre-check above can race with a concurrent create. The unique
@@ -1179,6 +1287,9 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     if (body.coverImageUrl !== undefined) update.coverImageUrl = body.coverImageUrl ?? null;
     if (body.allowReviews !== undefined) update.allowReviews = body.allowReviews ? 1 : 0;
     if (body.allowApplause !== undefined) update.allowApplause = body.allowApplause ? 1 : 0;
+    // null clears the custom price (revert to the site default); a number sets it.
+    if (body.copyPrice !== undefined) update.copyPrice = body.copyPrice;
+    if (body.buyToRead !== undefined) update.buyToRead = body.buyToRead ? 1 : 0;
     if (body.slug !== undefined) {
       const slug = body.slug.toLowerCase();
       if (!SLUG_RX.test(slug)) {
@@ -1294,6 +1405,30 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     }
     const full = chapterRowToFull(c);
     if (canSeeDrafts) return full;
+
+    // Buy-to-Read paywall — the SERVER-SIDE enforcement point. A locked viewer
+    // (book is buyToRead and they don't own it / aren't team / lack the bypass
+    // permission) gets a short sample of the FIRST published chapter and
+    // nothing for the rest. We never ship the full body to be hidden by CSS.
+    const readAccess = await resolveReadAccess(db, s, me ? { id: me.id, role: me.role } : null);
+    if (s.buyToRead && !readAccess.canReadFull) {
+      const firstPub = (await db
+        .select({ id: storyChapters.id })
+        .from(storyChapters)
+        .where(and(eq(storyChapters.storyId, s.id), eq(storyChapters.status, "published")))
+        .orderBy(asc(storyChapters.sortOrder))
+        .limit(1))[0];
+      if (firstPub?.id === c.id) {
+        return {
+          ...full,
+          bodyHtml: buildChapterSample(stripMarginNotes(full.bodyHtml)),
+          authorNotesHtml: "",
+          sample: true,
+        };
+      }
+      return { ...full, bodyHtml: "", authorNotesHtml: "", sample: true, locked: true };
+    }
+
     // Belt-and-braces: chapters published before stripMarginNotes was
     // enforced at publish may still hold collaborator-side annotations.
     // Strip on read for any non-collaborator viewer, covering both the
@@ -1837,7 +1972,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
       const access = await viewerMayRead(s, me?.id ?? null, me?.role ?? null, db);
       if (!access.ok) { reply.code(403); return { error: "forbidden" }; }
       const cfg = (await getSettings(db)).earningConfig.scriptorium;
-      const price = cfg.copyPrice;
+      const price = s.copyPrice ?? cfg.copyPrice;
       const isAuthor = !!me && me.id === s.authorUserId;
       const published = s.visibility === "public" && s.status !== "draft";
       let owned = false;
@@ -1871,7 +2006,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     if (s.authorUserId === me.id) { reply.code(400); return { error: "you can't buy a copy of your own book" }; }
     const cfg = (await getSettings(db)).earningConfig.scriptorium;
     if (!cfg.enabled) { reply.code(409); return { error: "the Scriptorium shop is closed" }; }
-    const price = cfg.copyPrice;
+    const price = s.copyPrice ?? cfg.copyPrice;
 
     const buyer = await resolveBuyerIdentity(me, body.characterId ?? null);
     if (!buyer) { reply.code(403); return { error: "not your character" }; }

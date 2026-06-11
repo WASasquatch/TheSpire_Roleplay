@@ -18,6 +18,8 @@ import {
   STORY_CHAPTER_CAP,
   STORY_CHAPTER_LOCK_HEARTBEAT_MS,
   STORY_CONTENT_WARNINGS,
+  STORY_COPY_PRICE_MIN,
+  STORY_COPY_PRICE_MAX,
   STORY_GENRES,
   STORY_RATINGS,
   STORY_STATUSES,
@@ -397,6 +399,11 @@ function OverviewEditor({
   const [cws, setCws] = useState<string[]>(s.contentWarnings);
   const [allowReviews, setAllowReviews] = useState(s.allowReviews);
   const [allowApplause, setAllowApplause] = useState(s.allowApplause);
+  const [buyToRead, setBuyToRead] = useState(s.buyToRead);
+  // Raw text so the field can be blank (= inherit the site default price).
+  const [copyPrice, setCopyPrice] = useState<string>(
+    detail.copyPriceCustom != null ? String(detail.copyPriceCustom) : "",
+  );
   const [busy, setBusy] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -428,6 +435,21 @@ function OverviewEditor({
       if (cws.join(",") !== s.contentWarnings.join(",")) body.contentWarnings = cws;
       if (allowReviews !== s.allowReviews) body.allowReviews = allowReviews;
       if (allowApplause !== s.allowApplause) body.allowApplause = allowApplause;
+      if (buyToRead !== s.buyToRead) body.buyToRead = buyToRead;
+      // Price: blank → null (inherit site default); else a whole number in
+      // the allowed bracket. Only send it when it actually changed.
+      const priceTrimmed = copyPrice.trim();
+      let copyPriceNext: number | null = null;
+      if (priceTrimmed !== "") {
+        const n = Math.round(Number(priceTrimmed));
+        if (!Number.isFinite(n) || n < STORY_COPY_PRICE_MIN || n > STORY_COPY_PRICE_MAX) {
+          setErr(`Price must be a whole number between ${STORY_COPY_PRICE_MIN} and ${STORY_COPY_PRICE_MAX}.`);
+          setBusy(false);
+          return;
+        }
+        copyPriceNext = n;
+      }
+      if (copyPriceNext !== (detail.copyPriceCustom ?? null)) body.copyPrice = copyPriceNext;
       if (Object.keys(body).length === 0) { setBusy(false); return; }
       const r = await fetch(`/stories/${s.id}`, {
         method: "PATCH",
@@ -565,6 +587,38 @@ function OverviewEditor({
           Allow applause (👏)
         </label>
       </div>
+
+      <Field label="Price to buy a copy">
+        <input
+          type="number"
+          inputMode="numeric"
+          min={STORY_COPY_PRICE_MIN}
+          max={STORY_COPY_PRICE_MAX}
+          value={copyPrice}
+          onChange={(e) => setCopyPrice(e.target.value)}
+          placeholder={`Default (${detail.copyPriceDefault}g)`}
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5"
+        />
+        <p className="mt-1 text-[11px] text-keep-muted">
+          What readers pay to buy a copy and showcase your book on their profile (you earn a royalty on each sale).
+          Leave blank to use the site default ({detail.copyPriceDefault}g). A custom price must be {STORY_COPY_PRICE_MIN}–{STORY_COPY_PRICE_MAX}g.
+        </p>
+      </Field>
+
+      <Field label="Buy to read">
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={buyToRead}
+            onChange={(e) => setBuyToRead(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            Readers see a short sample of the first chapter, then must buy a copy (at the price above)
+            to read the rest. Moderators can read it in full with a warning.
+          </span>
+        </label>
+      </Field>
 
       <div className="flex items-center justify-between border-t border-keep-rule pt-3">
         <button type="button" onClick={onDelete}

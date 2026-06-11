@@ -2067,6 +2067,20 @@ export const stories = sqliteTable(
     linkedWorldId: text("linked_world_id").references(() => worlds.id, { onDelete: "set null" }),
     allowReviews: integer("allow_reviews").notNull().default(0),
     allowApplause: integer("allow_applause").notNull().default(1),
+    /**
+     * Author-set "Buy a Copy" price (migration 0216). NULL = inherit the
+     * site default (`earningConfig.scriptorium.copyPrice`). When set, it's
+     * bounded to STORY_COPY_PRICE_MIN..MAX (packages/shared) at the route
+     * layer. Resolved everywhere as `copyPrice ?? configDefault`.
+     */
+    copyPrice: integer("copy_price"),
+    /**
+     * "Buy to Read" paywall (migration 0217). When 1, non-purchasers see only
+     * a short faded sample of the first chapter and must buy a copy to read
+     * on. Enforced server-side in the chapter-body route; bypassable with the
+     * `bypass_scriptorium_paywall` permission.
+     */
+    buyToRead: integer("buy_to_read").notNull().default(0),
     totalWords: integer("total_words").notNull().default(0),
     totalChapters: integer("total_chapters").notNull().default(0),
     readerCount: integer("reader_count").notNull().default(0),
@@ -3034,6 +3048,11 @@ export const characterEarning = sqliteTable("character_earning", {
    */
   activeNameStyleKey: text("active_name_style_key"),
   /**
+   * Per-character equipped room-transition key (migration 0219). The catalog
+   * lives in shared code (ROOM_TRANSITIONS), so no FK. Null = instant switch.
+   */
+  activeRoomTransitionKey: text("active_room_transition_key"),
+  /**
    * Per-character inline-avatar toggle. Same partition as
    * activeNameStyleKey, character-active shows this character's
    * inline avatar choice, OOC shows the master's. Default false so
@@ -3539,6 +3558,11 @@ export const userActiveCosmetics = sqliteTable("user_active_cosmetics", {
   /** Currently-active name style (FK; set null on style delete). */
   activeNameStyleKey: text("active_name_style_key")
     .references(() => nameStyles.key, { onDelete: "set null" }),
+  /**
+   * Master/OOC equipped room-transition key (migration 0219). Catalog is in
+   * shared code (ROOM_TRANSITIONS) so no FK. Null = instant switch.
+   */
+  activeRoomTransitionKey: text("active_room_transition_key"),
   /**
    * Banner image URL pasted by the user on ProfileModal. Renders as a
    * 3:1 hero strip on their profile. Writable only when this user

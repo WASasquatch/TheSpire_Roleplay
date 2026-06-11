@@ -682,7 +682,16 @@ export type UiHint =
         description: string;
         iconUrl: string | null;
       };
-    };
+    }
+  /**
+   * Download a chat-log export. Emitted by the `/export` command after it has
+   * parsed + clamped the requested window. `url` is the relative
+   * `GET /rooms/:id/export?ms=…` endpoint (the client appends its timezone
+   * offset before fetching with credentials); `filename` is the suggested
+   * save name. The client fetches the file as a blob and triggers a download
+   * so generation never blocks the socket and the cookie session is sent.
+   */
+  | { kind: "download-export"; url: string; filename: string };
 
 /** Wire shape served by GET /commands. The help modal renders this. */
 export interface CommandDoc {

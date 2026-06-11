@@ -421,6 +421,13 @@ interface ChatState {
   currentRoomId: string | null;
   setCurrentRoom: (id: string | null) => void;
 
+  /** Equipped room-transition key for the CURRENT identity (active character
+   *  or OOC). Null = instant switch. Loaded by App on identity change and
+   *  updated when the user equips one in the shop; read by the room-switch
+   *  hook to play the effect. */
+  myActiveTransitionKey: string | null;
+  setMyActiveTransitionKey: (key: string | null) => void;
+
   rooms: Record<string, RoomSummary>;
   occupants: Record<string, RoomOccupant[]>;
   messagesByRoom: Record<string, ChatMessage[]>;
@@ -876,6 +883,9 @@ export const useChat = create<ChatState>((set) => ({
 
   currentRoomId: null,
   setCurrentRoom: (id) => set({ currentRoomId: id }),
+
+  myActiveTransitionKey: null,
+  setMyActiveTransitionKey: (key) => set({ myActiveTransitionKey: key }),
 
   rooms: {},
   occupants: {},

@@ -28,6 +28,7 @@ import {
 } from "../../db/schema.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 import { transferCurrency } from "../../earning/transfer.js";
+import { resolveIdentityArg, emitAmbiguousIdentityModal } from "../identityArg.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
   ctx.socket.emit("error:notice", { code, message });
@@ -292,31 +293,45 @@ export const currencyCommand: CommandHandler = {
       return;
     }
 
-    // /currency <name>, view someone else's master balance
+    // /currency <target>, view a balance. Accepts @id:/@cid: tokens and bare
+    // names; a character target shows THAT character's pool.
     const target = args;
-    const u = (await ctx.db
-      .select()
-      .from(users)
-      .where(sql`lower(${users.username}) = ${target.toLowerCase()}`)
-      .limit(1))[0];
-    if (!u) {
-      notice(ctx, "NO_USER", `No user named "${target}".`);
+    const resolution = await resolveIdentityArg(ctx.db, target);
+    if (resolution.kind === "none") {
+      notice(ctx, "NO_USER", `No user or character named "${target}".`);
       return;
     }
-    const earning = (await ctx.db
-      .select()
+    if (resolution.kind === "ambiguous") {
+      emitAmbiguousIdentityModal(ctx, target, resolution.matches);
+      return;
+    }
+    const t = resolution.target;
+    // Privacy gate is the owner's master setting (covers their character pools).
+    const ownerEarning = (await ctx.db
+      .select({ currency: userEarning.currency, hideCurrencyCount: userEarning.hideCurrencyCount })
       .from(userEarning)
-      .where(eq(userEarning.userId, u.id))
+      .where(eq(userEarning.userId, t.userId))
       .limit(1))[0];
-    if (!earning) {
-      notice(ctx, "CURRENCY_VIEW", `${u.username} has no Earning record yet.`);
+    if (ownerEarning?.hideCurrencyCount && t.userId !== ctx.user.id) {
+      notice(ctx, "CURRENCY_PRIVATE", `${t.displayName} keeps their Currency private.`);
       return;
     }
-    if (earning.hideCurrencyCount && u.id !== ctx.user.id) {
-      notice(ctx, "CURRENCY_PRIVATE", `${u.username} keeps their Currency private.`);
+    let currency: number | undefined;
+    if (t.characterId) {
+      const ce = (await ctx.db
+        .select({ currency: characterEarning.currency })
+        .from(characterEarning)
+        .where(eq(characterEarning.characterId, t.characterId))
+        .limit(1))[0];
+      currency = ce?.currency;
+    } else {
+      currency = ownerEarning?.currency;
+    }
+    if (currency === undefined) {
+      notice(ctx, "CURRENCY_VIEW", `${t.displayName} has no Earning record yet.`);
       return;
     }
-    notice(ctx, "CURRENCY_VIEW", `${u.username}: ${earning.currency} Currency.`);
+    notice(ctx, "CURRENCY_VIEW", `${t.displayName}: ${currency} Currency.`);
   },
 };
 
@@ -364,27 +379,23 @@ export const expCommand: CommandHandler = {
       notice(ctx, "EXP", lines.join("  |  "));
       return;
     }
+    // /exp <target>, view a Rank/XP. Accepts @id:/@cid: tokens and bare names;
+    // a character target shows THAT character's pool.
     const target = args;
-    const u = (await ctx.db
-      .select()
-      .from(users)
-      .where(sql`lower(${users.username}) = ${target.toLowerCase()}`)
-      .limit(1))[0];
-    if (!u) {
-      notice(ctx, "NO_USER", `No user named "${target}".`);
+    const resolution = await resolveIdentityArg(ctx.db, target);
+    if (resolution.kind === "none") {
+      notice(ctx, "NO_USER", `No user or character named "${target}".`);
       return;
     }
-    const earning = (await ctx.db
-      .select()
-      .from(userEarning)
-      .where(eq(userEarning.userId, u.id))
-      .limit(1))[0];
-    if (!earning) {
-      notice(ctx, "EXP_VIEW", `${u.username} has no Earning record yet.`);
+    if (resolution.kind === "ambiguous") {
+      emitAmbiguousIdentityModal(ctx, target, resolution.matches);
       return;
     }
-    const labels = await resolveRankLabels(ctx.db, earning.rankKey, earning.tier);
-    const rankBit = labels.rankName ? ` · ${labels.rankName} ${labels.tierLabel ?? ""}`.trimEnd() : "";
-    notice(ctx, "EXP_VIEW", `${u.username}: ${earning.xp} XP${rankBit}.`);
+    const t = resolution.target;
+    const pool = t.characterId
+      ? await readCharacterPool(ctx.db, t.characterId, t.displayName)
+      : await readUserPool(ctx.db, t.userId);
+    const rankBit = pool.rankName ? ` · ${pool.rankName} ${pool.tierLabel ?? ""}`.trimEnd() : "";
+    notice(ctx, "EXP_VIEW", `${t.displayName}: ${pool.xp} XP${rankBit}.`);
   },
 };

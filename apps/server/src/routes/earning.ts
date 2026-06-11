@@ -21,7 +21,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, like, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
@@ -36,6 +36,7 @@ import {
   FREEFORM_CONFIG_MAX_ENTRIES,
   PET_NICKNAME_MAX_LENGTH,
 } from "@thekeep/shared";
+import { getRoomTransition } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -64,6 +65,7 @@ import {
   users,
 } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
+import { hasPermission } from "../auth/permissions.js";
 import {
   ack as ackNotification,
   ackAllForUser,
@@ -364,10 +366,41 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             lurkingMasterEnabled: characterEarning.lurkingMasterEnabled,
             roomJoinTemplate: characterEarning.roomJoinTemplate,
             roomLeaveTemplate: characterEarning.roomLeaveTemplate,
+            activeRoomTransitionKey: characterEarning.activeRoomTransitionKey,
           })
           .from(characterEarning)
           .where(inArray(characterEarning.characterId, charIds))
       : [];
+    // Owned room-transition keys per identity, from the earning ledger
+    // (reason `purchase_transition_<key>`). Free `slide` is implicitly owned
+    // by every identity. One query covers master + all characters.
+    const transitionOwnerRows = await db
+      .select({ scope: earningLedger.scope, ownerId: earningLedger.ownerId, reason: earningLedger.reason })
+      .from(earningLedger)
+      .where(and(
+        like(earningLedger.reason, "purchase_transition_%"),
+        or(
+          and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
+          ...(charIds.length > 0
+            ? [and(eq(earningLedger.scope, "character"), inArray(earningLedger.ownerId, charIds))]
+            : []),
+        ),
+      ));
+    const TRANSITION_REASON_PREFIX = "purchase_transition_";
+    // No free default: nothing is owned until purchased (the default is an
+    // instant switch — equip nothing). Ownership comes solely from the ledger.
+    const masterOwnedTransitions = new Set<string>();
+    const characterOwnedTransitions = new Map<string, Set<string>>();
+    for (const r of transitionOwnerRows) {
+      const key = r.reason.slice(TRANSITION_REASON_PREFIX.length);
+      if (r.scope === "user") {
+        masterOwnedTransitions.add(key);
+      } else {
+        const set = characterOwnedTransitions.get(r.ownerId) ?? new Set<string>();
+        set.add(key);
+        characterOwnedTransitions.set(r.ownerId, set);
+      }
+    }
     // Master's typing phrase + presence templates live on user_earning
     // (NOT user_active_cosmetics). The pool view query a few lines up
     // already touches user_earning, but it doesn't pull these columns,
@@ -781,6 +814,12 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         // snapshot only carries the ownership flag for the catalog).
         profileVisitorsOwned: masterOwnsProfileVisitors,
         profileMarqueeOwned: masterOwnsProfileMarquee,
+        // Room-transition cosmetic (migration 0219). `activeRoomTransitionKey`
+        // null = instant switch (the default). `ownedTransitionKeys` lists only
+        // purchased transitions — none are free. The shop reads both for the
+        // Buy/Equip CTAs.
+        activeRoomTransitionKey: activeCosmeticsRow?.activeRoomTransitionKey ?? null,
+        ownedTransitionKeys: Array.from(masterOwnedTransitions),
         // Per-character slots, keyed by character id. Each entry
         // mirrors the master shape. Characters without an earning
         // row get null/false defaults so the client can read them
@@ -804,6 +843,11 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               // Migration 0192, per-character profile flair ownership.
               profileVisitorsOwned: characterProfileVisitorsOwnership.has(r.characterId),
               profileMarqueeOwned: characterProfileMarqueeOwnership.has(r.characterId),
+              // Room transition (migration 0219), per character.
+              activeRoomTransitionKey: r.activeRoomTransitionKey ?? null,
+              ownedTransitionKeys: Array.from(
+                characterOwnedTransitions.get(r.characterId) ?? new Set<string>(),
+              ),
             },
           ]),
         ),
@@ -2009,6 +2053,163 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       return { ok: true };
     },
   );
+
+  /* =========================================================
+   *  Room transitions (migration 0219)
+   *
+   *  Per-identity purchasable + equippable, exactly like name styles
+   *  (buy individual keys, equip ONE). The catalog (cost/rarity) lives
+   *  in shared `ROOM_TRANSITIONS`; ownership is the earning ledger
+   *  (`purchase_transition_<key>`). The effect is self-only (other
+   *  users never see it), so equipping does NOT rebroadcast presence.
+   * ========================================================= */
+  app.post<{ Params: { key: string }; Body: unknown }>(
+    "/earning/me/transitions/:key/purchase",
+    async (req, reply) => {
+      const me = await getSessionUser(req, db);
+      if (!me) { reply.code(401); return { error: "auth" }; }
+      if (!(await hasPermission(me, "use_room_transitions", db))) {
+        reply.code(403); return { error: "Room transitions aren't available to you." };
+      }
+      const transition = getRoomTransition(req.params.key);
+      if (!transition) { reply.code(404); return { error: "unknown transition" }; }
+      if (transition.cost <= 0) { reply.code(409); return { error: "this transition is free" }; }
+      let body: z.infer<typeof purchaseCosmeticBody> | undefined;
+      try { body = purchaseCosmeticBody.parse(req.body ?? {}); }
+      catch { reply.code(400); return { error: "invalid body" }; }
+      const characterId = body?.characterId ?? null;
+      if (characterId) {
+        const c = (await db
+          .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+          .from(characters).where(eq(characters.id, characterId)).limit(1))[0];
+        if (!c || c.userId !== me.id || c.deletedAt) { reply.code(403); return { error: "not your character" }; }
+      }
+      const reason = `purchase_transition_${transition.key}`;
+      const outcome = runPurchaseTxn(db, me.id, {
+        characterId,
+        validate: (tx) => {
+          const existing = characterId
+            ? tx.select({ id: earningLedger.id }).from(earningLedger).where(and(
+                eq(earningLedger.scope, "character"),
+                eq(earningLedger.ownerId, characterId),
+                eq(earningLedger.reason, reason),
+              )).limit(1).all()[0]
+            : tx.select({ id: earningLedger.id }).from(earningLedger).where(and(
+                eq(earningLedger.scope, "user"),
+                eq(earningLedger.ownerId, me.id),
+                eq(earningLedger.reason, reason),
+              )).limit(1).all()[0];
+          if (existing) return { ok: false, status: 409, error: "already owned" };
+          return { ok: true, cost: transition.cost };
+        },
+        grant: (tx) => {
+          // Ensure a character_earning row exists so the purchase surfaces in
+          // /earning/me's byCharacter map (and a later equip can land). The
+          // ledger row that runPurchaseTxn writes IS the ownership record.
+          if (characterId) {
+            tx.insert(characterEarning).values({ characterId }).onConflictDoNothing().run();
+          }
+        },
+        reason,
+        metadata: { kind: "room_transition", transitionKey: transition.key },
+      });
+      if (!outcome.ok) {
+        reply.code(outcome.status);
+        return outcome.required !== undefined
+          ? { error: outcome.error, required: outcome.required, balance: outcome.balance }
+          : { error: outcome.error };
+      }
+      await emitWalletUpdate(
+        io,
+        me.id,
+        outcome.final,
+        -outcome.cost,
+        reason,
+        characterId ? { scope: "character", ownerId: characterId } : { scope: "user" },
+      );
+      return { ok: true };
+    },
+  );
+
+  const equipTransitionBody = z.object({
+    key: z.string().nullable().optional(),
+    characterId: z.string().nullable().optional(),
+  }).strict();
+
+  app.post<{ Body: unknown }>("/earning/me/active-room-transition", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    if (!(await hasPermission(me, "use_room_transitions", db))) {
+      reply.code(403); return { error: "Room transitions aren't available to you." };
+    }
+    let body: z.infer<typeof equipTransitionBody>;
+    try { body = equipTransitionBody.parse(req.body); }
+    catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
+    const key = body.key ?? null;
+    const characterId = body.characterId ?? null;
+    // null clears (→ instant). A non-null key must be in the catalog AND owned
+    // by THIS identity. Nothing is free anymore, so every key requires a
+    // purchase row for the equipping identity.
+    if (key !== null) {
+      if (!getRoomTransition(key)) { reply.code(404); return { error: "unknown transition" }; }
+      const scope: "user" | "character" = characterId ? "character" : "user";
+      const ownerId = characterId ?? me.id;
+      if (!(await hasPurchased(scope, ownerId, `transition_${key}`))) {
+        reply.code(403); return { error: "you don't own that transition" };
+      }
+    }
+    if (characterId) {
+      const c = (await db
+        .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+        .from(characters).where(eq(characters.id, characterId)).limit(1))[0];
+      if (!c || c.userId !== me.id || c.deletedAt) { reply.code(403); return { error: "not your character" }; }
+      await db
+        .insert(characterEarning)
+        .values({ characterId: c.id, activeRoomTransitionKey: key })
+        .onConflictDoUpdate({
+          target: characterEarning.characterId,
+          set: { activeRoomTransitionKey: key, updatedAt: new Date() },
+        });
+    } else {
+      const existing = (await db
+        .select().from(userActiveCosmetics).where(eq(userActiveCosmetics.userId, me.id)).limit(1))[0];
+      if (existing) {
+        await db.update(userActiveCosmetics)
+          .set({ activeRoomTransitionKey: key, updatedAt: new Date() })
+          .where(eq(userActiveCosmetics.userId, me.id));
+      } else {
+        await db.insert(userActiveCosmetics).values({ userId: me.id, activeRoomTransitionKey: key });
+      }
+    }
+    return { ok: true };
+  });
+
+  /** Lightweight read of the equipped room transition for the current
+   *  identity, so the chat client can play it on room switch without
+   *  pulling the whole /earning/me snapshot. */
+  app.get<{ Querystring: { characterId?: string } }>("/earning/me/active-room-transition", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const characterId = req.query.characterId ?? null;
+    let key: string | null = null;
+    if (characterId) {
+      // Only read the caller's own character (consistent with purchase/equip).
+      const c = (await db
+        .select({ userId: characters.userId, deletedAt: characters.deletedAt })
+        .from(characters).where(eq(characters.id, characterId)).limit(1))[0];
+      if (!c || c.userId !== me.id || c.deletedAt) return { key: null };
+      const row = (await db
+        .select({ key: characterEarning.activeRoomTransitionKey })
+        .from(characterEarning).where(eq(characterEarning.characterId, characterId)).limit(1))[0];
+      key = row?.key ?? null;
+    } else {
+      const row = (await db
+        .select({ key: userActiveCosmetics.activeRoomTransitionKey })
+        .from(userActiveCosmetics).where(eq(userActiveCosmetics.userId, me.id)).limit(1))[0];
+      key = row?.key ?? null;
+    }
+    return { key };
+  });
 
   /* =========================================================
    *  Profile Banner, set / clear the URL slot

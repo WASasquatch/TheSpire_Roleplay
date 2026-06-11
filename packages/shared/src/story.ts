@@ -208,6 +208,17 @@ export const STORY_TAG_CAP = 20;
 /** Hard cap on per-story autosave snapshots kept in history. Publish frames are kept indefinitely. */
 export const STORY_AUTOSAVE_HISTORY_CAP = 20;
 
+/** Bracket an author may set their own "Buy a Copy" price within. A book with
+ *  no custom price inherits the site default (earningConfig.scriptorium.copyPrice).
+ *  Enforced server-side on create/update and used to bound the editor input. */
+export const STORY_COPY_PRICE_MIN = 1;
+export const STORY_COPY_PRICE_MAX = 5000;
+
+/** "Buy to Read" sample: how many words of the first chapter a non-purchaser
+ *  sees before the fade-out + Buy CTA. Cut on whole-paragraph boundaries so
+ *  formatting never breaks. Server-enforced in the chapter-body route. */
+export const STORY_SAMPLE_MAX_WORDS = 150;
+
 /** Slug derivation for stories, same rules as worlds. */
 export function deriveStorySlug(input: string): string {
   return input
@@ -350,6 +361,11 @@ export interface StoryCard {
   applauseCount: number;
   reviewCount: number;
   avgRating: number | null;
+  /** Resolved "Buy a Copy" price (author's custom price, else the site
+   *  default). Always a concrete number for the catalog/reader CTA. */
+  copyPrice: number;
+  /** When true, readers must buy a copy to read past a short sample. */
+  buyToRead: boolean;
   publishedAt: number | null;
   updatedAt: number;
 }
@@ -372,6 +388,12 @@ export interface StoryChapter extends StoryChapterRef {
   bodyHtml: string;
   authorNotesHtml: string;
   createdAt: number;
+  /** "Buy to Read" gate: true when `bodyHtml` is a truncated sample (first
+   *  chapter) rather than the full text. Absent/false on normal reads. */
+  sample?: boolean;
+  /** True when this is a withheld non-first chapter of a locked book (no body
+   *  shipped). The reader shows a lock placeholder. */
+  locked?: boolean;
 }
 
 /** Story landing-page payload. */
@@ -387,6 +409,18 @@ export interface StoryDetail {
   viewerCanEdit: boolean;
   viewerIsAuthor: boolean;
   readingPosition: StoryReadingPosition | null;
+  /** Author's RAW custom copy price (null = inheriting the default). Lets the
+   *  editor distinguish "no custom price set" from an explicit value. */
+  copyPriceCustom: number | null;
+  /** The current site-default copy price, for the editor's placeholder/help. */
+  copyPriceDefault: number;
+  /** "Buy to Read" gate state for THIS viewer (book is `story.buyToRead`):
+   *  locked = must buy to read past the sample; paywallBypassed = reading in
+   *  full via the moderator permission (show a warning); viewerHasPurchased =
+   *  owns a copy under any of their identities. */
+  locked: boolean;
+  paywallBypassed: boolean;
+  viewerHasPurchased: boolean;
 }
 
 /** Paged catalog response. */
@@ -396,6 +430,13 @@ export interface StoryCatalogPage {
   pageSize: number;
   total: number;
   hasMore: boolean;
+  /** Whether the copy shop is open; gates the card-tile Buy button. Price is
+   *  per-card now (`StoryCard.copyPrice`), since authors set it per book. */
+  copyEnabled: boolean;
+  /** Story ids on this page the viewer already owns a copy of (under ANY
+   *  of their identities — keyed on the buyer's master account). Empty for
+   *  anonymous viewers. Lets the card show "Owned" instead of "Buy". */
+  ownedStoryIds: string[];
 }
 
 /** Per-version snapshot returned by the version history pane. */

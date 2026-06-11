@@ -20,6 +20,8 @@ import { getSessionUser } from "./auth.js";
 import { getSettings } from "../settings.js";
 import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
+import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MAX_MESSAGES } from "@thekeep/shared";
+import { buildChatLogHtml, type ExportMessageRow } from "../export/chatLog.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -447,6 +449,127 @@ export async function registerRoomsRoutes(
       ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
     }));
     return { messages: wire, hasMore };
+  });
+
+  /**
+   * GET /rooms/:id/export?ms=<window-ms>&tz=<minutes-east-of-utc>
+   *
+   * Download the room's recent messages as a self-contained HTML chat log
+   * (timestamps + snapshotted author names + author colours). Emitted by the
+   * `/export` command, which parses the user's duration and clamps it; we
+   * re-clamp here defensively so a hand-crafted `ms` can't exceed retention or
+   * the hard cap. Kept off the socket so generation never blocks live chat,
+   * and bounded (one indexed range query + capped row count) so it can't slow
+   * the server for other users.
+   *
+   * `tz` (minutes east of UTC, the caller's offset) renders wall-clock
+   * timestamps that match what the user saw in chat; defaults to UTC.
+   *
+   * Auth: logged in + (for private rooms) a member — same posture as
+   * GET /rooms/:id/messages. Visibility mirrors the live backlog: this room's
+   * non-whisper lines + whispers the caller is a party to, minus ignored /
+   * blocked authors, never past the caller's own /clear, deleted excluded.
+   */
+  app.get<{
+    Params: { id: string };
+    Querystring: { ms?: string; tz?: string; theme?: string };
+  }>("/rooms/:id/export", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
+    if (!room) { reply.code(404); return { error: "no room" }; }
+    if (room.type === "private") {
+      const member = (await db
+        .select()
+        .from(roomMembers)
+        .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, me.id)))
+        .limit(1))[0];
+      if (!member) { reply.code(403); return { error: "not a member" }; }
+    }
+
+    // Re-derive the window from the same rules the command used; never trust
+    // the client `ms` beyond what's actually exportable.
+    const settings = await getSettings(db);
+    const reqMs = req.query.ms ? parseInt(req.query.ms, 10) : DEFAULT_EXPORT_MS;
+    const windowMs = clampExportMs(
+      Number.isFinite(reqMs) && reqMs > 0 ? reqMs : DEFAULT_EXPORT_MS,
+      settings.messageRetentionMs,
+      room.messageExpiryMinutes,
+    );
+    const tzRaw = req.query.tz ? parseInt(req.query.tz, 10) : 0;
+    const tzMinutes = Number.isFinite(tzRaw) ? Math.max(-14 * 60, Math.min(14 * 60, tzRaw)) : 0;
+    const theme = req.query.theme === "light" ? "light" : "dark";
+
+    const now = Date.now();
+    const cutoff = new Date(now - windowMs);
+
+    const ignoredIds = new Set(
+      (await db
+        .select({ ignoredUserId: ignores.ignoredUserId })
+        .from(ignores)
+        .where(eq(ignores.userId, me.id))).map((r) => r.ignoredUserId),
+    );
+    for (const blockedId of await blockedUserIdsFor(db, me.id)) ignoredIds.add(blockedId);
+    const roomOrPartyWhisper = or(
+      and(sql`${messages.kind} != 'whisper'`, eq(messages.roomId, room.id)),
+      and(
+        sql`${messages.kind} = 'whisper'`,
+        or(eq(messages.userId, me.id), eq(messages.toUserId, me.id)),
+      ),
+    );
+    const clearedAt = await getClearedAt(db, me.id, room.id);
+
+    // Most recent (window ∩ cap) rows DESC; overfetch one to detect that the
+    // cap dropped older lines, then flip to chronological for the document.
+    const rows = await db
+      .select()
+      .from(messages)
+      .where(and(
+        roomOrPartyWhisper,
+        gt(messages.createdAt, cutoff),
+        clearedAt ? gt(messages.createdAt, clearedAt) : undefined,
+        isNull(messages.deletedAt),
+      ))
+      .orderBy(desc(messages.createdAt))
+      .limit(EXPORT_MAX_MESSAGES + 1);
+    const truncated = rows.length > EXPORT_MAX_MESSAGES;
+    const capped = (truncated ? rows.slice(0, EXPORT_MAX_MESSAGES) : rows)
+      .filter((m) => !ignoredIds.has(m.userId));
+    capped.reverse();
+
+    const exportRows: ExportMessageRow[] = capped.map((m) => ({
+      kind: m.kind,
+      displayName: m.displayName,
+      body: m.body,
+      color: m.color,
+      createdAt: +m.createdAt,
+      toDisplayName: m.toDisplayName,
+      moodSnapshot: m.moodSnapshot,
+      npcVoicedBy: m.npcVoicedBy,
+    }));
+
+    const html = buildChatLogHtml({
+      roomName: room.name,
+      exportedBy: me.username,
+      generatedAtMs: now,
+      windowMs,
+      rangeStartMs: exportRows.length ? exportRows[0]!.createdAt : now - windowMs,
+      rangeEndMs: exportRows.length ? exportRows[exportRows.length - 1]!.createdAt : now,
+      tzMinutes,
+      messages: exportRows,
+      truncated,
+      theme,
+    });
+
+    const safeName = (room.name || "chat")
+      .replace(/[^a-z0-9._-]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "chat";
+    reply
+      .header("content-type", "text/html; charset=utf-8")
+      .header("content-disposition", `attachment; filename="${safeName}-log.html"`)
+      .header("cache-control", "no-store");
+    return html;
   });
 
   /**

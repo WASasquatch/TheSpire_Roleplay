@@ -11,7 +11,7 @@
  * other modal uses.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { DisplayPrivacyRow } from "./DisplayPrivacyRow.js";
 import { useEarning, lookupRankTier, progressToNextTier } from "../state/earning.js";
@@ -37,6 +37,8 @@ import {
   patchSessionPresenceTemplates,
   patchTypingPhrase,
   purchaseCosmetic,
+  purchaseTransition,
+  setActiveRoomTransition,
   purchaseNameStyle,
   setActiveNameStyle,
   setCollectionSlots,
@@ -78,8 +80,10 @@ import { CoinAmount } from "./CoinAmount.js";
 import { StyledName } from "./StyledName.js";
 import { CloseButton } from "./CloseButton.js";
 import { extractFreeformBorderVarsWithDefaults, parseFreeformBorderConfig } from "@thekeep/shared";
+import { ROOM_TRANSITIONS, type RoomTransition } from "@thekeep/shared";
+import { previewRoomTransition } from "../lib/transitions/orchestrator.js";
 
-type DashboardTab = "overview" | "ledger" | "settings" | "styles" | "borders" | "cosmetics" | "items" | "rankings";
+type DashboardTab = "overview" | "ledger" | "settings" | "styles" | "borders" | "transitions" | "cosmetics" | "items" | "rankings";
 type ItemsSubTab = "inventory" | "shop" | "collection" | "pets";
 
 interface Props {
@@ -172,6 +176,7 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
             <option value="rankings">Rankings</option>
             <option value="styles">Name Styles</option>
             <option value="borders">Borders</option>
+            <option value="transitions">Room Transitions</option>
             <option value="cosmetics">Flair</option>
             <option value="items">Items</option>
             <option value="settings">Settings</option>
@@ -185,6 +190,7 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
             <TabBtn active={tab === "rankings"} onClick={() => setTab("rankings")}>Rankings</TabBtn>
             <TabBtn active={tab === "styles"} onClick={() => setTab("styles")}>Name Styles</TabBtn>
             <TabBtn active={tab === "borders"} onClick={() => setTab("borders")}>Borders</TabBtn>
+            <TabBtn active={tab === "transitions"} onClick={() => setTab("transitions")}>Room Transitions</TabBtn>
             <TabBtn active={tab === "cosmetics"} onClick={() => setTab("cosmetics")}>Flair</TabBtn>
             <TabBtn active={tab === "items"} onClick={() => setTab("items")}>Items</TabBtn>
             <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>Settings</TabBtn>
@@ -222,6 +228,7 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
           {tab === "rankings" ? <RankingsTab {...(initialBoard ? { initialBoard } : {})} /> : null}
           {snapshot && tab === "styles" ? <NameStylesTab snapshot={snapshot} flashSale={flashSale} focusKey={focusKey} /> : null}
           {snapshot && tab === "borders" ? <BordersTab snapshot={snapshot} flashSale={flashSale} focusKey={focusKey} /> : null}
+          {snapshot && tab === "transitions" ? <RoomTransitionsTab snapshot={snapshot} /> : null}
           {snapshot && tab === "cosmetics" ? <CosmeticsTab snapshot={snapshot} flashSale={flashSale} focusKey={focusKey} /> : null}
           {snapshot && tab === "items" ? (
             <ItemsTab
@@ -3391,6 +3398,131 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * Room Transitions tab (migration 0219). Top-level shop tab, parallel to Name
+ * Styles + Borders. Self-only effects that play when YOU change rooms, bought
+ * + equipped per identity. The buy/equip is gated server-side by the
+ * `use_room_transitions` permission.
+ */
+function RoomTransitionsTab({ snapshot }: {
+  snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {};
+}) {
+  const me = useChat((s) => s.me);
+  const activeCharacterId = useChat((s) => s.activeCharacterId);
+  const setMyActiveTransitionKey = useChat((s) => s.setMyActiveTransitionKey);
+  const refresh = useEarning((s) => s.refresh);
+  const previewRef = useRef<HTMLDivElement | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  if (!me?.permissions?.includes("use_room_transitions")) {
+    return <p className="text-sm text-keep-muted">Room transitions have been disabled for your role by an admin.</p>;
+  }
+
+  const identity = activeCharacterId
+    ? snapshot.activeCosmetics.byCharacter?.[activeCharacterId]
+    : snapshot.activeCosmetics;
+  const owned = new Set<string>(identity?.ownedTransitionKeys ?? []);
+  const equippedKey = identity?.activeRoomTransitionKey ?? null;
+  const wallet = activeCharacterId
+    ? (snapshot.characters.find((c) => c.ownerId === activeCharacterId)?.currency ?? 0)
+    : snapshot.master.currency;
+  const who = activeCharacterId ? "this character" : "your master account";
+
+  async function buy(t: RoomTransition) {
+    if (!window.confirm(`Buy "${t.label}" for ${t.cost.toLocaleString()} Currency from ${who}'s pool?`)) return;
+    setBusyKey(t.key); setErr(null);
+    try { await purchaseTransition(t.key, activeCharacterId); await refresh(); }
+    catch (e) { setErr(e instanceof Error ? e.message : "Purchase failed"); }
+    finally { setBusyKey(null); }
+  }
+  async function equip(key: string | null) {
+    setBusyKey(key ?? "__off"); setErr(null);
+    try {
+      await setActiveRoomTransition(key, activeCharacterId);
+      setMyActiveTransitionKey(key);
+      await refresh();
+    } catch (e) { setErr(e instanceof Error ? e.message : "Equip failed"); }
+    finally { setBusyKey(null); }
+  }
+
+  return (
+    <section>
+      <h3 className="font-action text-lg text-keep-text">Room Transitions</h3>
+      <p className="mt-1 text-xs text-keep-muted">
+        A flourish that plays for YOU when you switch rooms — only you see it. Equipped per identity
+        ({activeCharacterId ? "this character" : "your OOC / master account"}). Off = instant.
+      </p>
+      <div
+        ref={previewRef}
+        className="relative mt-3 h-40 overflow-hidden rounded-lg border border-keep-rule bg-keep-bg/60"
+      >
+        <div className="flex h-full flex-col gap-2 p-3 text-xs text-keep-muted">
+          <div className="font-action text-sm text-keep-text">The Obsidian Hall</div>
+          <div>Castellan Vaire: The gates stand open.</div>
+          <div>mira_of_ash: atmospheric, as ever.</div>
+          <div className="mt-auto italic opacity-70">Hit Preview on a rite to see it here.</div>
+        </div>
+      </div>
+      {err ? <p className="mt-2 text-xs text-keep-accent">{err}</p> : null}
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={() => void equip(null)}
+          disabled={busyKey !== null}
+          className={`rounded border px-3 py-1 text-xs ${equippedKey === null ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"} disabled:opacity-50`}
+        >
+          {equippedKey === null ? "Off · instant ✓" : "Turn off (instant)"}
+        </button>
+      </div>
+      <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {ROOM_TRANSITIONS.map((t) => {
+          const isOwned = owned.has(t.key);
+          const isEquipped = equippedKey === t.key;
+          const rowBusy = busyKey === t.key;
+          return (
+            <li key={t.key} className="flex flex-col gap-1.5 rounded-lg border border-keep-rule bg-keep-panel/30 p-3">
+              <div className="font-semibold text-keep-text">{t.label}</div>
+              <p className="line-clamp-3 text-[11px] leading-snug text-keep-muted">{t.description}</p>
+              <div className="mt-auto flex items-center gap-1.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => void previewRoomTransition(t.key, previewRef.current)}
+                  className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-[11px] text-keep-muted hover:text-keep-text"
+                >
+                  Preview
+                </button>
+                {isEquipped ? (
+                  <span className="ml-auto text-[11px] font-semibold uppercase tracking-widest text-keep-action">Equipped ✓</span>
+                ) : isOwned ? (
+                  <button
+                    type="button"
+                    onClick={() => void equip(t.key)}
+                    disabled={busyKey !== null}
+                    className="ml-auto rounded border border-keep-action bg-keep-action/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50"
+                  >
+                    {rowBusy ? "…" : "Equip"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void buy(t)}
+                    disabled={busyKey !== null || wallet < t.cost}
+                    title={wallet < t.cost ? "Not enough currency" : undefined}
+                    className="ml-auto rounded border border-keep-action bg-keep-action px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
+                  >
+                    {rowBusy ? "…" : `Buy · ${t.cost.toLocaleString()}`}
+                  </button>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

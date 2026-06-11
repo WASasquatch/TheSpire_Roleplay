@@ -1374,9 +1374,13 @@ async function joinRoomBody(
   const userWasOnlineBefore = await userIsOnline(io, user.id, socket.id);
 
   // Resolve the per-identity room-presence templates ONCE per join.
-  // Character-active rooms read the character's own templates; OOC
-  // rooms read the master's. Null on either column = use the default
-  // phrasing. The session-presence templates are master-only.
+  // Character-active rooms read the character's OWN templates only;
+  // OOC (no active character) reads the master's. We deliberately do
+  // NOT fall back character -> master: the custom entrance/exit flair
+  // is bought per identity, so an OOC-purchased template must never
+  // leak onto a character that never bought (or enabled) one. Null on
+  // the chosen source = use the default phrasing. The session-presence
+  // templates are master-only.
   // Reads are bounded, one row from each table the user touches.
   const presenceMaster = (await db
     .select({
@@ -1397,8 +1401,16 @@ async function joinRoomBody(
         .where(eq(characterEarning.characterId, user.activeCharacterId))
         .limit(1))[0] ?? null
     : null;
-  const roomJoinTemplate = presenceCharacter?.roomJoinTemplate ?? presenceMaster?.roomJoinTemplate ?? null;
-  const roomLeaveTemplate = presenceCharacter?.roomLeaveTemplate ?? presenceMaster?.roomLeaveTemplate ?? null;
+  // `presenceCharacter` is non-null only when a character is active, so
+  // its presence is the in-character signal. When OOC it's null and we
+  // fall through to the master row; when in-character we use ONLY the
+  // character's columns (null -> default), never the master's.
+  const roomJoinTemplate = user.activeCharacterId
+    ? (presenceCharacter?.roomJoinTemplate ?? null)
+    : (presenceMaster?.roomJoinTemplate ?? null);
+  const roomLeaveTemplate = user.activeCharacterId
+    ? (presenceCharacter?.roomLeaveTemplate ?? null)
+    : (presenceMaster?.roomLeaveTemplate ?? null);
   const sessionConnectTemplate = presenceMaster?.sessionConnectTemplate ?? null;
   // Reconnect detection: if a "has disconnected" was scheduled for this user
   // and hasn't fired yet, this connect is a reconnect inside the grace window.

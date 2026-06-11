@@ -37,6 +37,7 @@ import { ignoreCommand, unignoreCommand } from "./ignore.js";
 import { blockCommand, unblockCommand } from "./block.js";
 import { usersCommand } from "./users.js";
 import { bookmarksCommand } from "./bookmarks.js";
+import { exportCommand } from "./export.js";
 import { clearCommand, findCommand, listCommand } from "./rooms_list.js";
 import {
   announceCommand,
@@ -127,6 +128,7 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(unblockCommand);
   reg.registerBuiltin(usersCommand);
   reg.registerBuiltin(bookmarksCommand);
+  reg.registerBuiltin(exportCommand);
   reg.registerBuiltin(listCommand);
   reg.registerBuiltin(clearCommand);
   reg.registerBuiltin(findCommand);

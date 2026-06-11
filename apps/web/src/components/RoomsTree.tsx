@@ -643,13 +643,13 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
   if (!isMasterRow) {
     if (o.role === "mod" || o.role === "owner") {
       return {
-        label: o.role === "owner" ? "Room owner" : "Room moderator",
+        label: o.role === "owner" ? "Room owner" : "Room Mod",
         Icon: ModIcon,
         color: legibleAgainstBg(theme.system, theme.bg),
         title:
           o.role === "owner"
             ? "Room owner, moderation authority in this room."
-            : "Room moderator, moderation authority in this room.",
+            : "Room Mod, moderation authority in this room.",
       };
     }
     return null;
@@ -673,25 +673,25 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
     };
   }
   // Site-mod beats per-room badges in label / tooltip if both apply
-  // (a site-mod who also owns the room reads as "Site moderator"
+  // (a site-mod who also owns the room reads as "Global Moderator"
   // since that's the broader authority).
   const isSiteMod = o.accountRole === "mod";
   if (isSiteMod || o.role === "mod" || o.role === "owner") {
     return {
       label:
         isSiteMod
-          ? "Site moderator"
+          ? "Global Moderator"
           : o.role === "owner"
           ? "Room owner"
-          : "Room moderator",
+          : "Room Mod",
       Icon: ModIcon,
       color: legibleAgainstBg(theme.system, theme.bg),
       title:
         isSiteMod
-          ? "Site moderator, moderation across every room."
+          ? "Global Moderator, moderation across every room."
           : o.role === "owner"
           ? "Room owner, moderation authority in this room."
-          : "Room moderator, moderation authority in this room.",
+          : "Room Mod, moderation authority in this room.",
     };
   }
   return null;

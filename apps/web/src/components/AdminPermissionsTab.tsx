@@ -46,7 +46,10 @@ const ALL_ROLES: readonly Role[] = ["user", "trusted", "mod", "admin", "masterad
 const ROLE_LABEL: Record<Role, string> = {
   user: "User",
   trusted: "Trusted",
-  mod: "Mod",
+  // Global (site-wide) moderator. Named in full to disambiguate from a
+  // per-room "Room Mod" (room_members.role = "mod"), which is a separate,
+  // local role and never appears in this account-role matrix.
+  mod: "Global Moderator",
   admin: "Admin",
   masteradmin: "Masteradmin",
 };

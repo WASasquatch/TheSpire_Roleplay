@@ -1,4 +1,15 @@
 import type { RefObject } from "react";
+import {
+  Bold,
+  Code,
+  Eye,
+  Image as ImageIcon,
+  Italic,
+  Link as LinkIcon,
+  Quote,
+  Strikethrough,
+  Underline,
+} from "lucide-react";
 import { EmoticonPickerButton } from "./EmoticonPickerButton.js";
 
 /**
@@ -159,37 +170,40 @@ export function FormattingToolbar({
 
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-0.5 text-keep-muted">
+      {/* Lucide icons (uniform stroke set) replaced the old letter + emoji
+          mix; FmtBtn supplies the title/aria-label so the icons stay
+          self-describing on hover and to screen readers. */}
       <FmtBtn label="Bold (**text**)" onClick={() => wrap("**", "**", "bold")} disabled={disabled}>
-        <b>B</b>
+        <Bold className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       <FmtBtn label="Italic (*text*)" onClick={() => wrap("*", "*", "italic")} disabled={disabled}>
-        <i>I</i>
+        <Italic className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       {/* Underline has no CommonMark equivalent (markdown reserves `__`
           for bold-alternate) so we wrap with literal <u>…</u>; the
           inline parser recognises the tag as an alias. Stored body
           keeps the tag, same as the room-chat composer. */}
       <FmtBtn label="Underline" onClick={() => wrap("<u>", "</u>", "underline")} disabled={disabled}>
-        <u>U</u>
+        <Underline className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       <FmtBtn label="Strikethrough (~~text~~)" onClick={() => wrap("~~", "~~", "strike")} disabled={disabled}>
-        <s>S</s>
+        <Strikethrough className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       <FmtBtn label="Inline code (`text`)" onClick={() => wrap("`", "`", "code")} disabled={disabled}>
-        <span className="font-mono">{`<>`}</span>
+        <Code className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       <FmtBtn label="Spoiler (||text||, click to reveal)" onClick={() => wrap("||", "||", "spoiler")} disabled={disabled}>
-        <span aria-hidden>👁</span>
+        <Eye className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       <FmtBtn label="Blockquote, prefixes selected lines with '> '" onClick={() => prefixLines("> ")} disabled={disabled}>
-        <span aria-hidden>❝</span>
+        <Quote className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       <span aria-hidden className="mx-1 h-3 w-px bg-keep-rule/60" />
       <FmtBtn label="Link, [text](url)" onClick={insertLink} disabled={disabled}>
-        🔗
+        <LinkIcon className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       <FmtBtn label="Image, ![alt](url)" onClick={insertImage} disabled={disabled}>
-        🖼
+        <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       <span aria-hidden className="mx-1 h-3 w-px bg-keep-rule/60" />
       {/* Inline emoticon: opens the picker anchored to the button;

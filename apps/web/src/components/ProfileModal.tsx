@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Ban, EyeOff, MessageSquare, Send } from "lucide-react";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import { CHARACTER_VIBE_AXES, isAdminRole, isDarkPalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
 import type { CharacterAttribute, CharacterPortrait, CharacterVibeAxisKey, EidolonProfileSummary, ProfileLibraryEntry, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
@@ -27,14 +28,18 @@ import { ProfileMarquee, ProfileVisitorsChip, useTrackProfileView } from "./Prof
  * `ACT_PILL_*` are the desktop pills; `ACT_SEG_*` are the mobile full-width
  * segmented bar. Keep these as the single source so the buttons can't drift
  * back into the four-different-designs state they were in.
+ *
+ * The buttons render Lucide icons only (compact), so each carries an
+ * `aria-label` + `title` to supply the name/tooltip the visible text used to
+ * give. The bases center their icon.
  */
-const ACT_PILL = "rounded border bg-keep-bg px-2 py-1 transition-colors";
+const ACT_PILL = "inline-flex items-center justify-center rounded border bg-keep-bg px-2 py-1 transition-colors";
 const ACT_PILL_ACTION = `${ACT_PILL} border-keep-action/50 text-keep-action hover:bg-keep-action/10`;
 const ACT_PILL_NEUTRAL = `${ACT_PILL} border-keep-rule text-keep-text hover:bg-keep-panel`;
 const ACT_PILL_ACCENT = `${ACT_PILL} border-keep-accent/60 text-keep-accent hover:bg-keep-accent/10`;
 const ACT_PILL_SYSTEM = `${ACT_PILL} border-keep-system/60 text-keep-system hover:bg-keep-system/10`;
 
-const ACT_SEG = "flex-1 px-2 py-2.5 transition-colors";
+const ACT_SEG = "flex flex-1 items-center justify-center px-2 py-2.5 transition-colors";
 const ACT_SEG_ACTION = `${ACT_SEG} text-keep-action hover:bg-keep-action/10`;
 const ACT_SEG_NEUTRAL = `${ACT_SEG} text-keep-text hover:bg-keep-panel`;
 const ACT_SEG_ACCENT = `${ACT_SEG} text-keep-accent hover:bg-keep-accent/10`;
@@ -861,7 +866,7 @@ function ProfileBody({
                   {isAdminRole(profile.profile.role) ? (
                     <span className="ml-1 italic text-keep-action">· Admin</span>
                   ) : profile.profile.role === "mod" ? (
-                    <span className="ml-1 italic text-keep-action">· Moderator</span>
+                    <span className="ml-1 italic text-keep-action">· Global Moderator</span>
                   ) : profile.profile.role === "trusted" ? (
                     <span className="ml-1 italic text-keep-system" title="Trusted account - elevated rate limits earned through participation.">· Trusted</span>
                   ) : null}
@@ -976,9 +981,10 @@ function ProfileBody({
                     type="button"
                     onClick={() => onMessage(profile.profile.userId, name, avatar)}
                     title="Open a direct message thread with this user."
+                    aria-label="Message"
                     className={ACT_PILL_ACTION}
                   >
-                    💬 Message
+                    <MessageSquare className="h-4 w-4" aria-hidden="true" />
                   </button>
                 ) : null}
                 {onWhisper ? (
@@ -986,9 +992,10 @@ function ProfileBody({
                     type="button"
                     onClick={() => onWhisper(name)}
                     title="Send a one-off private message in chat."
+                    aria-label="Whisper"
                     className={ACT_PILL_NEUTRAL}
                   >
-                    Whisper
+                    <Send className="h-4 w-4" aria-hidden="true" />
                   </button>
                 ) : null}
                 {onIgnore ? (
@@ -1000,9 +1007,10 @@ function ProfileBody({
                       }
                     }}
                     title="Hide this user's messages from you (one-way, reversible)."
+                    aria-label="Ignore"
                     className={ACT_PILL_ACCENT}
                   >
-                    Ignore
+                    <EyeOff className="h-4 w-4" aria-hidden="true" />
                   </button>
                 ) : null}
                 {onBlock ? (
@@ -1014,9 +1022,10 @@ function ProfileBody({
                       }
                     }}
                     title="Block: you and this user become invisible to each other everywhere."
+                    aria-label="Block"
                     className={ACT_PILL_SYSTEM}
                   >
-                    Block
+                    <Ban className="h-4 w-4" aria-hidden="true" />
                   </button>
                 ) : null}
               </div>
@@ -1062,18 +1071,21 @@ function ProfileBody({
                 type="button"
                 onClick={() => onMessage(profile.profile.userId, name, avatar)}
                 title="Open a direct message thread with this user."
+                aria-label="Message"
                 className={`${ACT_SEG_ACTION} ${ACT_SEG_DIVIDER}`}
               >
-                💬 Message
+                <MessageSquare className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : null}
             {onWhisper ? (
               <button
                 type="button"
                 onClick={() => onWhisper(name)}
+                title="Send a one-off private message in chat."
+                aria-label="Whisper"
                 className={`${ACT_SEG_NEUTRAL} ${ACT_SEG_DIVIDER}`}
               >
-                Whisper
+                <Send className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : null}
             {onIgnore ? (
@@ -1084,9 +1096,11 @@ function ProfileBody({
                     onIgnore(name);
                   }
                 }}
+                title="Hide this user's messages from you (one-way, reversible)."
+                aria-label="Ignore"
                 className={`${ACT_SEG_ACCENT} ${ACT_SEG_DIVIDER}`}
               >
-                Ignore
+                <EyeOff className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : null}
             {onBlock ? (
@@ -1097,9 +1111,11 @@ function ProfileBody({
                     onBlock(name);
                   }
                 }}
+                title="Block: you and this user become invisible to each other everywhere."
+                aria-label="Block"
                 className={ACT_SEG_SYSTEM}
               >
-                Block
+                <Ban className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : null}
           </div>

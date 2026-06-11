@@ -118,8 +118,16 @@ function escapeHtml(s: string): string {
  */
 function renderBody(raw: string): string {
   let s = escapeHtml(raw);
+  // Split `***` delimiter run, BEFORE the generic bold pass (which would
+  // otherwise swallow the third `*` into the bold's content):
+  // `***Title** rest…*` → em(strong(Title) rest…). Tolerates the habitual
+  // stray space before a line-end closer, mirroring the live chat parser.
+  s = s.replace(/\*\*\*([^*\n]+?)\*\*([^*\n]*?)[ \t]?\*(?=\n|$)/g, "<em><strong>$1</strong>$2</em>");
   s = s.replace(/\*\*([^*\n]+?)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/\*([^*\s][^*\n]*?[^*\s]|[^*\s])\*/g, "<em>$1</em>");
+  // Loose line-end italic closer: `*…all doubt. *` (space before the final
+  // asterisk). Only at line/text end, where there's no `2 * 3` ambiguity.
+  s = s.replace(/\*([^*\s][^*\n]*?)[ \t]\*(?=\n|$)/g, "<em>$1 </em>");
   s = s.replace(/_([^_\s][^_\n]*?[^_\s]|[^_\s])_/g, "<em>$1</em>");
   return s;
 }

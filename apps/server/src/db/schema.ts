@@ -13,6 +13,19 @@ const id = () => text("id").primaryKey();
 const ts = (name: string) =>
   integer(name, { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch() * 1000)`);
 
+/**
+ * Presence snapshot (migration 0221). A single row (id = "current") holding the
+ * in-memory away / mood / idle-ghost state as JSON, written on graceful
+ * shutdown and restored on the next boot so a deploy doesn't reset everyone's
+ * idle/away status. One-shot: deleted on restore. `savedAt` (ms) gates a stale
+ * restore so a real outage isn't replayed. See realtime/presenceSnapshot.ts.
+ */
+export const presenceSnapshots = sqliteTable("presence_snapshots", {
+  id: text("id").primaryKey(),
+  payload: text("payload").notNull(),
+  savedAt: integer("saved_at").notNull(),
+});
+
 /* ---------- users ---------- */
 export const users = sqliteTable(
   "users",

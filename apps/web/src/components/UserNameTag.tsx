@@ -204,7 +204,7 @@ export function UserNameTag({
           rank. `display: contents` makes this wrapper a layout no-op
           everywhere else (chat lines), preserving the prior inline flow. */}
       <span
-        className={railAlign ? "inline-flex shrink-0 items-center" : "contents"}
+        className={railAlign ? "inline-flex shrink-0 items-center justify-center" : "contents"}
         style={railAlign ? { width: RAIL_AVATAR_W } : undefined}
       >
       {(() => {
@@ -222,8 +222,14 @@ export function UserNameTag({
         //      clutter (the legacy behavior). Falls back to gender
         //      automatically for unranked accounts, so flipping nothing
         //      on a fresh account doesn't leave the row icon-less.
+        //      EXCEPTION: railAlign (the userlist's column layout) skips
+        //      this branch — there the rank ALWAYS renders in its own
+        //      reserved column (the standalone slot below), because a
+        //      gem floating in the avatar column for no-avatar users
+        //      sat visibly out of line with every other row's gem.
         //   3. Gender glyph, the original Unicode badge. Renders only
-        //      when there's no avatar AND no resolved rank.
+        //      when there's no avatar AND no resolved rank (and always
+        //      as the no-avatar fallback in railAlign, see above).
         if (hideIcon) return null;
         if (inlineAvatar && avatarUrl) {
           return (
@@ -250,7 +256,7 @@ export function UserNameTag({
         const hasResolvedRank =
           rankKey != null &&
           (rankIconVariant === "gem" || tier != null);
-        if (hasResolvedRank) {
+        if (hasResolvedRank && !railAlign) {
           return (
             <button
               type="button"
@@ -306,7 +312,9 @@ export function UserNameTag({
           rankKey != null &&
           (rankIconVariant === "gem" || tier != null);
         if (!hasResolvedRank) return null;
-        const rankWasInIconSlot = !hideIcon && !(inlineAvatar && avatarUrl);
+        // railAlign: the icon slot never shows the rank (see the priority
+        // comment above), so this column is the gem's ONLY home there.
+        const rankWasInIconSlot = !railAlign && !hideIcon && !(inlineAvatar && avatarUrl);
         if (rankWasInIconSlot) return null;
         return (
           <RankSigil rankKey={rankKey ?? null} tier={tier ?? null} size={rankSigilSize ?? "sm"} variant={rankIconVariant} />

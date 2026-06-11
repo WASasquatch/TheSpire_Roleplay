@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Check, X } from "lucide-react";
 import type {
   AvatarCrop,
   DirectConversationSummary,
@@ -977,17 +978,19 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                           type="button"
                           onClick={() => acceptRequest(r)}
                           title="Accept friend request"
-                          className="rounded border border-keep-action bg-keep-action/10 px-1.5 py-0.5 text-[10px] text-keep-action hover:bg-keep-action/20"
+                          aria-label="Accept friend request"
+                          className="rounded border border-keep-action bg-keep-action/10 px-1.5 py-0.5 text-keep-action hover:bg-keep-action/20"
                         >
-                          ✓
+                          <Check className="h-3 w-3" aria-hidden="true" />
                         </button>
                         <button
                           type="button"
                           onClick={() => declineRequest(r)}
                           title="Decline friend request"
-                          className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-[10px] text-keep-muted hover:border-keep-accent hover:text-keep-accent"
+                          aria-label="Decline friend request"
+                          className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-keep-muted hover:border-keep-accent hover:text-keep-accent"
                         >
-                          ×
+                          <X className="h-3 w-3" aria-hidden="true" />
                         </button>
                       </li>
                     ))}

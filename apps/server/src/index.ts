@@ -57,6 +57,7 @@ import {
   userIsOnline,
 } from "./realtime/broadcast.js";
 import { clearAllAwayForUser } from "./realtime/awayState.js";
+import { restorePresenceSnapshot, writePresenceSnapshot } from "./realtime/presenceSnapshot.js";
 import { applyControl, parsePlaylist } from "./realtime/theaterState.js";
 import { callerCanEditRoom } from "./auth/roomPermissions.js";
 import { clearAllMoodForUser } from "./realtime/moodState.js";
@@ -502,6 +503,38 @@ async function main() {
   // idle ghost finally times out. We don't pass io through `registerIdleGhost`
   // every call because the timer outlives the call that scheduled it.
   setGhostSweepIo(io);
+
+  // ── Presence persistence across restarts ──────────────────────────────
+  // Away / mood / idle state is in-memory, so a plain restart (and notably a
+  // remote-deploy.sh Fly deploy) would reset everyone to "present" and drop
+  // the "(idle)" rows. Restore the snapshot the LAST graceful shutdown wrote
+  // BEFORE we start accepting reconnects, so a returning user reclaims their
+  // away mark + clears their idle ghost silently. Best-effort + stale-guarded
+  // inside, and wrapped so a bad snapshot can never block boot.
+  try {
+    await restorePresenceSnapshot(db);
+  } catch (err) {
+    log.error({ err }, "presence restore failed; booting with empty presence");
+  }
+  // Persist that same state on the way down. Fly's default stop signal is
+  // SIGINT (then SIGTERM); we handle both. The write is synchronous and
+  // best-effort so it can never hang the shutdown, and we then exit because
+  // registering a handler overrides Node's default terminate-on-signal.
+  let shuttingDown = false;
+  const onShutdownSignal = (signal: NodeJS.Signals): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    try {
+      writePresenceSnapshot(db);
+      log.info({ signal }, "presence snapshot saved on shutdown");
+    } catch (err) {
+      log.error({ err, signal }, "presence snapshot failed on shutdown");
+    }
+    process.exit(0);
+  };
+  process.on("SIGTERM", () => onShutdownSignal("SIGTERM"));
+  process.on("SIGINT", () => onShutdownSignal("SIGINT"));
+
   // Phase 4 typing indicator, kicks off the periodic sweep that
   // expires stale typer entries and re-broadcasts shrunken sets.
   // Idempotent if called more than once.

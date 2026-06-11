@@ -742,7 +742,7 @@ function colorForKind(kind: MessageKind, color: string | null): string | null {
  * Memory is bounded by the number of identities currently in their idle
  * window. Entries self-clear via the timer or via the consume path.
  */
-type IdleGhost = {
+export type IdleGhost = {
   userId: string;
   characterId: string | null;
   roomId: string;
@@ -794,6 +794,22 @@ export function getIdleGhostsForRoom(roomId: string): Array<{ userId: string; ch
     }
   }
   return out;
+}
+
+/** Dump every idle ghost for the presence snapshot (graceful-shutdown
+ *  persistence) so the next boot can re-show the same "(idle)" rows. */
+export function exportIdleGhosts(): IdleGhost[] {
+  return Array.from(idleGhostsByKey.values());
+}
+
+/** Re-register idle ghosts restored from a presence snapshot on boot. Reuses
+ *  `registerIdleGhost`, so each re-tracked ghost (re)arms the per-user sweep
+ *  timer at `idleGraceMs` from now — a returning user clears it silently via
+ *  `consumePendingDisconnect`, a no-show is swept normally. */
+export async function importIdleGhosts(db: Db, ghosts: IdleGhost[]): Promise<void> {
+  for (const g of ghosts) {
+    await registerIdleGhost(db, g);
+  }
 }
 
 /**

@@ -45,3 +45,27 @@ export function clearAllMoodForUser(userId: string): void {
     if (k.startsWith(prefix)) byIdentity.delete(k);
   }
 }
+
+export interface MoodSnapshotEntry {
+  userId: string;
+  characterId: string | null;
+  mood: string;
+}
+
+/** Dump every mood entry for the presence snapshot (graceful-shutdown
+ *  persistence). Key shape mirrors awayState: `${userId}::${characterId ?? ""}`. */
+export function exportMoodEntries(): MoodSnapshotEntry[] {
+  const out: MoodSnapshotEntry[] = [];
+  for (const [k, v] of byIdentity) {
+    const sep = k.indexOf("::");
+    out.push({ userId: k.slice(0, sep), characterId: k.slice(sep + 2) || null, mood: v });
+  }
+  return out;
+}
+
+/** Reload mood entries on boot. */
+export function importMoodEntries(entries: MoodSnapshotEntry[]): void {
+  for (const e of entries) {
+    byIdentity.set(key(e.userId, e.characterId), e.mood);
+  }
+}

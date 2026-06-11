@@ -70,3 +70,35 @@ export function clearAllAwayForUser(userId: string): void {
     if (k.startsWith(prefix)) byIdentity.delete(k);
   }
 }
+
+export interface AwaySnapshotEntry {
+  userId: string;
+  characterId: string | null;
+  message: string;
+  since: number;
+}
+
+/** Dump every away entry for the presence snapshot (graceful-shutdown
+ *  persistence). The map key is `${userId}::${characterId ?? ""}`; we split on
+ *  the FIRST "::" so the (colon-free nanoid) ids round-trip exactly. */
+export function exportAwayEntries(): AwaySnapshotEntry[] {
+  const out: AwaySnapshotEntry[] = [];
+  for (const [k, v] of byIdentity) {
+    const sep = k.indexOf("::");
+    out.push({
+      userId: k.slice(0, sep),
+      characterId: k.slice(sep + 2) || null,
+      message: v.message,
+      since: v.since,
+    });
+  }
+  return out;
+}
+
+/** Reload away entries on boot, preserving the original `since` so "away for
+ *  X" stays accurate across the restart. */
+export function importAwayEntries(entries: AwaySnapshotEntry[]): void {
+  for (const e of entries) {
+    byIdentity.set(key(e.userId, e.characterId), { message: e.message, since: e.since });
+  }
+}

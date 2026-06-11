@@ -124,7 +124,16 @@ function findAsteriskClose(text: string, start: number, delim: "*" | "**" | "***
     const idx = text.indexOf(delim, i);
     if (idx < 0) return -1;
     const charBefore = text[idx - 1];
-    if (charBefore && /\S/.test(charBefore)) {
+    // A closer normally needs non-whitespace right before it (rules out
+    // `2 * 3 * 4` becoming italic). One deliberate exception: a closer at
+    // END of line/text may follow a space — writers habitually type
+    // `*…all doubt. *`, and at line end there's no multiplication
+    // ambiguity to protect, so dropping the whole line's emphasis over
+    // the stray space is worse than accepting it.
+    const looseLineEnd =
+      !!charBefore && /[ \t]/.test(charBefore) &&
+      (idx + len >= text.length || text[idx + len] === "\n");
+    if ((charBefore && /\S/.test(charBefore)) || looseLineEnd) {
       // Reject if this is part of a longer run than we want - e.g. don't
       // close `*foo*` on the first asterisk of `**bar**`.
       if (delim === "*" && text[idx + 1] === "*") {
@@ -624,6 +633,44 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
           </strong>
         ),
       };
+    }
+    // No literal *** closer. CommonMark treats `***` as a SPLITTABLE
+    // delimiter run, so the two mixed-closer shapes must still parse:
+    //   ***bold** then rest*  → <em><strong>bold</strong> then rest</em>
+    //   ***both* then rest**  → <strong><em>both</em> then rest</strong>
+    // Without this, the `**` branch below swallows the third `*` into the
+    // bold's content (`<strong>*bold</strong>`) and the line-spanning
+    // emphasis is silently lost — the exact "title bolds but the rest of
+    // the line won't italicize" report.
+    const boldClose = findAsteriskClose(text, i + 3, "**");
+    if (boldClose > i + 3) {
+      const italicClose = findAsteriskClose(text, boldClose + 2, "*");
+      if (italicClose > 0) {
+        return {
+          end: italicClose + 1,
+          node: (
+            <em>
+              <strong>{parseInline(text.slice(i + 3, boldClose), depth + 1)}</strong>
+              {parseInline(text.slice(boldClose + 2, italicClose), depth + 1)}
+            </em>
+          ),
+        };
+      }
+    }
+    const italicClose = findAsteriskClose(text, i + 3, "*");
+    if (italicClose > i + 3) {
+      const boldClose2 = findAsteriskClose(text, italicClose + 1, "**");
+      if (boldClose2 > 0) {
+        return {
+          end: boldClose2 + 2,
+          node: (
+            <strong>
+              <em>{parseInline(text.slice(i + 3, italicClose), depth + 1)}</em>
+              {parseInline(text.slice(italicClose + 1, boldClose2), depth + 1)}
+            </strong>
+          ),
+        };
+      }
     }
   }
 

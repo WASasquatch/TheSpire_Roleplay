@@ -105,6 +105,39 @@ export function AdminIcon({
 }
 
 /**
+ * Venetian / masquerade mask, "this person is voicing a CHARACTER right
+ * now" (vs their OOC master account, which shows no mask). Stroke-only
+ * outline in `currentColor`, so the userlist paints it muted. Path lifted
+ * from Lucide's `venetian-mask` icon (ISC-licensed); rendered inline
+ * rather than via `lucide-react` (not a dependency) to match the other
+ * StaffIcons and keep the bundle asset-free.
+ */
+export function CharacterMaskIcon({
+  title = "In character",
+  ...rest
+}: IconProps): JSX.Element {
+  return (
+    <svg
+      role="img"
+      aria-label={title}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      xmlns="http://www.w3.org/2000/svg"
+      {...rest}
+    >
+      <title>{title}</title>
+      <path d="M18 11c-1.5 0-2.5.5-3 2" />
+      <path d="M2 12a5 5 0 0 0 5 5 8 8 0 0 1 5 2 8 8 0 0 1 5-2 5 5 0 0 0 5-5V7h-5a8 8 0 0 0-5 2 8 8 0 0 0-5-2H2Z" />
+      <path d="M9 11c-1.5 0-2.5.5-3 2" />
+    </svg>
+  );
+}
+
+/**
  * Trophy outline only, mod tier. Original `mod.svg`: same cup
  * shape as the admin trophy but without the base bar, signaling
  * the lower authority level.

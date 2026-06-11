@@ -10,7 +10,7 @@ import {
 } from "react";
 import { legibleAgainstBg, type RoomOccupant, type RoomSummary, type Theme } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
-import { AdminIcon, MasterAdminIcon, ModIcon } from "./StaffIcons.js";
+import { AdminIcon, CharacterMaskIcon, MasterAdminIcon, ModIcon } from "./StaffIcons.js";
 import { ToolPanel } from "./ToolPanel.js";
 import { UserNameTag } from "./UserNameTag.js";
 
@@ -513,39 +513,64 @@ function RoomGroup({
                           // default (truncate=false) so italic + name-
                           // style decorations there render fully.
                           truncate
+                          // Rail alignment: pin the avatar slot + reserve the
+                          // rank slot so names line up regardless of border /
+                          // avatar / rank, and suppress the inline (ooc)/[away]
+                          // text (shown as the mask + sphere cluster below).
+                          railAlign
                         />
-                        {o.idle ? (
-                          // Adjacent suffix instead of folding "(idle)"
-                          // into the displayName prop, that would pick
-                          // up the user's chat-color and name-style
-                          // decoration, which we don't want on a system
-                          // marker. Classes match the `(ooc)` suffix
-                          // inside UserNameTag (10px, shrink-0, muted)
-                          // so the two read as a matched pair when
-                          // they're both present on a row.
+                      </div>
+                      {/* Right-edge identity/status cluster, inline + right-
+                          aligned: [character mask?] [status sphere] [staff
+                          crown?]. Replaces the old (ooc)/(idle)/[away] text
+                          suffixes:
+                            - mask present  → voicing a CHARACTER; absent → OOC
+                            - sphere colour → green online / grey idle / yellow away
+                          The sphere always renders, so the row always has a
+                          right anchor for `justify-between`. */}
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {o.characterId !== null ? (
+                          <CharacterMaskIcon
+                            className="h-4 w-4 text-keep-muted"
+                            title="In character"
+                          />
+                        ) : null}
+                        <span
+                          className="h-2.5 w-2.5 rounded-full"
+                          // Concrete status colours (not theme slots) so
+                          // green/grey/yellow read as the universal
+                          // online/idle/away convention on every palette. A
+                          // faint dark ring separates a bright sphere from a
+                          // bright row background.
+                          style={{
+                            backgroundColor: o.away ? "#facc15" : o.idle ? "#9ca3af" : "#22c55e",
+                            boxShadow: "0 0 0 1.5px rgba(0,0,0,.3)",
+                          }}
+                          title={
+                            o.away
+                              ? `Away${o.awayMessage ? `: ${o.awayMessage}` : ""}`
+                              : o.idle
+                              ? "Idle, tab closed or refreshed, may return"
+                              : "Online"
+                          }
+                          aria-label={o.away ? "Away" : o.idle ? "Idle" : "Online"}
+                        />
+                        {chip ? (
                           <span
-                            className="ml-1 shrink-0 text-[10px] text-keep-muted"
-                            title="Idle, tab closed or refreshed, may return"
+                            className="shrink-0"
+                            // Inline `color` is what the `currentColor`
+                            // fills/strokes inside the SVG pick up. The
+                            // value has already been nudged for legibility
+                            // against the rail bg, so the icon reads
+                            // cleanly across every theme.
+                            style={{ color: chip.color }}
+                            title={chip.title}
+                            aria-label={chip.label}
                           >
-                            (idle)
+                            <chip.Icon className="h-4 w-4" />
                           </span>
                         ) : null}
                       </div>
-                      {chip ? (
-                        <span
-                          className="shrink-0"
-                          // Inline `color` is what the `currentColor`
-                          // fills/strokes inside the SVG pick up. The
-                          // value has already been nudged for legibility
-                          // against the rail bg, so the icon reads
-                          // cleanly across every theme.
-                          style={{ color: chip.color }}
-                          title={chip.title}
-                          aria-label={chip.label}
-                        >
-                          <chip.Icon className="h-4 w-4" />
-                        </span>
-                      ) : null}
                     </li>
             );
           })}

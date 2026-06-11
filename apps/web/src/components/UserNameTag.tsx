@@ -6,6 +6,18 @@ import { BorderedAvatar } from "./BorderedAvatar.js";
 import { RankSigil } from "./RankSigil.js";
 import { StyledName } from "./StyledName.js";
 
+/**
+ * Userlist (`railAlign`) leading-column widths. Pinning the avatar slot and
+ * always reserving the rank slot makes every name start at the same x, so a
+ * user with no border frame, a template border (which renders a touch
+ * narrower), no avatar at all, or a hidden rank still lines up with everyone
+ * else instead of sitting tacky-left. AVATAR_W matches BorderedAvatar's `sm`
+ * container (`clamp(32px,2.2rem,40px) * 1.5`); RANK_W matches the `md` gem
+ * (`1.6em`). Outside the rail these are unused (`display: contents` wrapper).
+ */
+const RAIL_AVATAR_W = "calc(clamp(32px, 2.2rem, 40px) * 1.5)";
+const RAIL_RANK_W = "1.6em";
+
 interface Props {
   displayName: string;
   gender: Gender;
@@ -100,6 +112,16 @@ interface Props {
    * names.
    */
   truncate?: boolean;
+  /**
+   * Userlist alignment mode. When set, the leading avatar slot is pinned to a
+   * fixed width and the rank slot is always reserved (even when the rank is
+   * hidden), so every name in the rail starts at the same x regardless of
+   * border frame / avatar / rank presence. Also suppresses the inline `(ooc)`
+   * and `[away]` text suffixes, the userlist renders those as the
+   * mask + status-sphere cluster on the row's right edge instead. Off (the
+   * default) everywhere else, chat lines flow their icons inline as before.
+   */
+  railAlign?: boolean;
 }
 
 /**
@@ -132,6 +154,7 @@ export function UserNameTag({
   avatarCrop,
   inlineAvatar,
   truncate = false,
+  railAlign = false,
 }: Props) {
   const g = genderGlyph(gender);
   // Resolve theme-slot tokens (e.g. `theme:system`) to a CSS color
@@ -176,6 +199,14 @@ export function UserNameTag({
       className="inline-flex min-w-0 max-w-full items-center gap-1 align-middle"
       data-display-name={displayName}
     >
+      {/* Userlist (railAlign) pins the icon to a fixed-width slot so every
+          name starts at the same x regardless of border frame / avatar /
+          rank. `display: contents` makes this wrapper a layout no-op
+          everywhere else (chat lines), preserving the prior inline flow. */}
+      <span
+        className={railAlign ? "inline-flex shrink-0 items-center" : "contents"}
+        style={railAlign ? { width: RAIL_AVATAR_W } : undefined}
+      >
       {(() => {
         // Icon slot priority (only when an icon slot is shown at all,
         // chat lines pass `hideIcon` so this branch doesn't render
@@ -251,6 +282,7 @@ export function UserNameTag({
           </button>
         );
       })()}
+      </span>
       {/* Standalone inline rank sigil. Renders in two cases:
           1. Chat lines (`hideIcon`), no icon slot, so the rank sits
              here right before the name.
@@ -261,6 +293,14 @@ export function UserNameTag({
           slot rendered the rank because the user is ranked + has no
           avatar cosmetic), to keep the rail from showing two of the
           same image side by side. */}
+      {/* In the rail the rank column is ALWAYS reserved (fixed width) so a
+          user who hides their rank doesn't pull their name left out of
+          alignment. Elsewhere `display: contents` keeps the prior behavior:
+          render the sigil inline, or nothing. */}
+      <span
+        className={railAlign ? "inline-flex shrink-0 items-center justify-center" : "contents"}
+        style={railAlign ? { width: RAIL_RANK_W } : undefined}
+      >
       {(() => {
         const hasResolvedRank =
           rankKey != null &&
@@ -272,6 +312,7 @@ export function UserNameTag({
           <RankSigil rankKey={rankKey ?? null} tier={tier ?? null} size={rankSigilSize ?? "sm"} variant={rankIconVariant} />
         );
       })()}
+      </span>
       <button
         type="button"
         onClick={onNameClick}
@@ -340,7 +381,11 @@ export function UserNameTag({
           {mood}
         </span>
       ) : null}
-      {ooc ? (
+      {/* The rail conveys OOC-vs-character and away/idle/online via the
+          mask + status-sphere cluster on the row's right edge (see
+          RoomsTree), so these inline text suffixes are suppressed there.
+          Chat lines (no railAlign) still show them. */}
+      {ooc && !railAlign ? (
         <span
           className="ml-1 shrink-0 text-[10px] text-keep-muted"
           title="Speaking from their master / OOC account, not as a character"
@@ -348,9 +393,9 @@ export function UserNameTag({
           (ooc)
         </span>
       ) : null}
-      {/* Matches the `(ooc)` / `(idle)` suffix sizing (10px, shrink-0, muted)
-          so the three read as a matched set when several land on one row. */}
-      {away ? <span className="ml-1 shrink-0 text-[10px] text-keep-muted">[away]</span> : null}
+      {away && !railAlign ? (
+        <span className="ml-1 shrink-0 text-[10px] text-keep-muted">[away]</span>
+      ) : null}
     </span>
   );
 }

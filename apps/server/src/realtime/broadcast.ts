@@ -47,8 +47,8 @@ import { getSettings } from "../settings.js";
 import { awardForForum, awardForMessage } from "../earning/award.js";
 import { bumpLifetimeForMessage, classifyMessageForLifetime } from "../lib/lifetimePostCounts.js";
 import { getClearedAt } from "../lib/roomClears.js";
-import { getAway } from "./awayState.js";
-import { getMood } from "./moodState.js";
+import { getAway, clearAllAwayForUser } from "./awayState.js";
+import { getMood, clearAllMoodForUser } from "./moodState.js";
 import {
   checkpointFor,
   getTheater,
@@ -956,6 +956,18 @@ export async function registerIdleGhost(
           if (!expired) await broadcastPresence(io, db, roomId);
         } catch { /* swallow, sweep must not crash */ }
       }
+      // The user idled out without returning within the grace window, so the
+      // transient session signals (away + mood) that the disconnect handler
+      // deliberately LEFT in place — so a quick reconnect could keep your
+      // /away mark — are finally safe to drop for a clean next-login slate.
+      // Guard on still-offline: a sibling tab on another identity may have
+      // reconnected while this ghost sat out its window in a different room.
+      try {
+        if (!(await userIsOnline(io, userId))) {
+          clearAllAwayForUser(userId);
+          clearAllMoodForUser(userId);
+        }
+      } catch { /* swallow, sweep must not crash */ }
     })().catch(() => {});
   }, idleGraceMs);
   ghostTimerByUser.set(userId, timer);

@@ -1381,13 +1381,21 @@ async function main() {
             if (lastRoomId) {
               await db.update(users).set({ lastRoomId }).where(eq(users.id, userId));
             }
-            // Drop every per-identity away + mood mark for this
-            // user. Both are session signals, when the user has
-            // truly closed every tab and gone, the next login should
-            // land them present with a clean mood slate, not carrying
-            // a stale "brb" / "tired" from yesterday.
-            clearAllAwayForUser(userId);
-            clearAllMoodForUser(userId);
+            // Drop every per-identity away + mood mark for this user — but
+            // ONLY on a deliberate Exit. Both are session signals; a
+            // deliberate leave should land the next login present with a
+            // clean slate. On a NON-exit drop (refresh, network blip, mobile
+            // backgrounding, laptop sleep — common precisely BECAUSE away
+            // users are AFK and not keeping the socket warm) the identity is
+            // ghosted instead, and the ghost SWEEP clears away+mood only if
+            // they don't return within the grace window. Clearing here
+            // unconditionally wiped /away on every transient reconnect, so a
+            // user who set themselves away got "spontaneously marked
+            // un-away" the moment their idle socket blipped and reconnected.
+            if (exitIntent) {
+              clearAllAwayForUser(userId);
+              clearAllMoodForUser(userId);
+            }
           }
 
           // Per-room decision. For each room the socket was in:

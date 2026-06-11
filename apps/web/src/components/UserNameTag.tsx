@@ -348,7 +348,9 @@ export function UserNameTag({
           (ooc)
         </span>
       ) : null}
-      {away ? <span className="ml-1 shrink-0 text-keep-muted">[away]</span> : null}
+      {/* Matches the `(ooc)` / `(idle)` suffix sizing (10px, shrink-0, muted)
+          so the three read as a matched set when several land on one row. */}
+      {away ? <span className="ml-1 shrink-0 text-[10px] text-keep-muted">[away]</span> : null}
     </span>
   );
 }

@@ -137,17 +137,17 @@ export const kickCommand: CommandHandler = {
   name: "kick",
   aliases: ["boot"],
   usage: "/kick <username> [reason]",
-  description: "Boot a user from the current room (back to the landing room). Mod/owner/admin only.",
+  description: "Room owner/mod: boot a user from the current room (back to the landing room). Site admin: log the user out of the Spire entirely.",
   subcommands: [
     {
       verb: "<username>",
       usage: "/kick Bob",
-      description: "Kick with no reason. The kicked user can rejoin immediately - use /ban to keep them out.",
+      description: "Kick with no reason. Owners/mods boot from the room (they can rejoin - use /ban to keep them out); admins log them out of the site.",
     },
     {
       verb: "[reason]",
       usage: "/kick Bob being rude",
-      description: "Optional reason shown to the kicked user and posted as a system notice.",
+      description: "Optional reason shown to the kicked user (on the login screen for admin kicks) and posted as a system notice.",
     },
   ],
   async run(ctx) {
@@ -166,6 +166,34 @@ export const kickCommand: CommandHandler = {
     }
     if (await isKeymaster(ctx, target.id)) {
       return notice(ctx, "PERM", "The keymaster can't be kicked.");
+    }
+
+    // SITE kick (admin tier): /kick from an admin logs the target out of
+    // the Spire entirely — sessions revoked, sockets dropped, the reason
+    // shown on the login splash. Room owners and mods (site mods
+    // included) keep the room-level boot below.
+    if (isAdminRole(ctx.user.role)) {
+      const { forceLogoutUser } = await import("../../auth/session.js");
+      await forceLogoutUser(ctx.io, ctx.db, target.id, reason
+        ? `You were logged out by ${ctx.user.displayName}: ${reason}`
+        : `You were logged out by ${ctx.user.displayName}.`);
+      await addMessage(ctx, {
+        kind: "system",
+        body: reason
+          ? `${ctx.user.displayName} logged ${target.username} out: ${reason}`
+          : `${ctx.user.displayName} logged ${target.username} out.`,
+      });
+      await recordAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: "kick",
+        targetUserId: target.id,
+        targetRoomId: ctx.roomId,
+        reason: reason || null,
+        metadata: { site: true },
+      });
+      // No manual presence work: each socket's disconnect handler runs
+      // the full per-room cleanup (ghosting, presence, room expiry).
+      return;
     }
 
     // Boot every socket of the target out of this room and into the

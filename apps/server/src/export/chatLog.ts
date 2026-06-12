@@ -118,6 +118,10 @@ function escapeHtml(s: string): string {
  */
 function renderBody(raw: string): string {
   let s = escapeHtml(raw);
+  // Quote-reference links (`[wrote:](msg:<id>)`, from the forum Quote
+  // button) have no meaning in a static export - keep the label, drop
+  // the reference.
+  s = s.replace(/\[([^\]\n]+)\]\(msg:[A-Za-z0-9_-]{4,64}\)/g, "$1");
   // Split `***` delimiter run, BEFORE the generic bold pass (which would
   // otherwise swallow the third `*` into the bold's content):
   // `***Title** rest…*` → em(strong(Title) rest…). Tolerates the habitual

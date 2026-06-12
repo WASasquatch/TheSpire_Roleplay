@@ -10,6 +10,8 @@ import {
 } from "react";
 import { legibleAgainstBg, type RoomOccupant, type RoomSummary, type Theme } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
+import { useChat } from "../state/store.js";
+import { Landmark } from "lucide-react";
 import { AdminIcon, CharacterMaskIcon, MasterAdminIcon, ModIcon } from "./StaffIcons.js";
 import { ToolPanel } from "./ToolPanel.js";
 import { UserNameTag } from "./UserNameTag.js";
@@ -74,6 +76,10 @@ interface Props {
   onOpenEarning?: () => void;
   /** Open the Spire Arcade launcher. Threaded through to ToolPanel too. */
   onOpenArcade?: () => void;
+  /** Open the Forums Catalog modal (the pinned header row below the
+   *  Rooms title). Boards — rooms with a forumId — are filtered out of
+   *  the room list and live in the catalog instead. */
+  onOpenForums?: () => void;
   /**
    * Mobile drawer state. On md+ screens the rail is always visible regardless;
    * isOpen only controls the slide-in/out at sub-md widths.
@@ -98,6 +104,22 @@ interface Props {
  */
 const RAIL_FONT_EM = ["1.15em", "1.3em", "1.5em", "1.75em"] as const;
 
+/** Unread forum-notification pill on the Forums Catalog button. Reads
+ *  the store directly so the rail updates on every socket pulse without
+ *  threading a prop through App. */
+function ForumNotifBadge() {
+  const unread = useChat((s) => s.forumNotifUnread);
+  if (unread <= 0) return null;
+  return (
+    <span
+      title={`${unread} unread forum notification${unread === 1 ? "" : "s"}`}
+      className="rounded-full bg-keep-accent px-1.5 py-0.5 text-[10px] font-bold leading-none text-keep-bg"
+    >
+      {unread > 99 ? "99+" : unread}
+    </span>
+  );
+}
+
 /**
  * Right-rail navigation: each room (public always, plus the private room the
  * caller is currently in) is rendered as a header followed by its occupants
@@ -119,6 +141,7 @@ export function RoomsTree({
   onOpenMessages,
   onOpenEarning,
   onOpenArcade,
+  onOpenForums,
   isOpen,
   onClose,
   fontStep = 1,
@@ -128,17 +151,27 @@ export function RoomsTree({
   // mobile component by toggling via Tailwind's responsive variants.
   const drawerOpen = isOpen ?? false;
 
+  // Boards (rooms inside a forum, forumId set) live in the Forums Catalog,
+  // not the room list. Filtering keys on forumId — NOT replyMode — so a
+  // standalone nested room someone made via /replymode stays listed. The
+  // caller's CURRENT room is always kept even when it's a board, so being
+  // inside one never strands you with no rail entry for where you are.
+  const visibleRooms = useMemo(
+    () => rooms.filter((r) => !r.forumId || r.id === currentRoomId),
+    [rooms, currentRoomId],
+  );
+
   // Pin the caller's current room to the top of the rail so it stays
   // visible on installs with many rooms. The server returns rooms in
   // alphabetical order; we partition just enough to lift the active
   // room out and leave the rest in their original order. No-op when
   // the user isn't in any room or the room isn't in this list.
   const orderedRooms = useMemo(() => {
-    if (!currentRoomId) return rooms;
-    const idx = rooms.findIndex((r) => r.id === currentRoomId);
-    if (idx <= 0) return rooms;
-    return [rooms[idx]!, ...rooms.slice(0, idx), ...rooms.slice(idx + 1)];
-  }, [rooms, currentRoomId]);
+    if (!currentRoomId) return visibleRooms;
+    const idx = visibleRooms.findIndex((r) => r.id === currentRoomId);
+    if (idx <= 0) return visibleRooms;
+    return [visibleRooms[idx]!, ...visibleRooms.slice(0, idx), ...visibleRooms.slice(idx + 1)];
+  }, [visibleRooms, currentRoomId]);
 
   // Desktop-only horizontal resize for the rail. The user drags the
   // left edge, pulling LEFT widens the rail (eats into the chat
@@ -244,7 +277,7 @@ export function RoomsTree({
           gets real layout space and never covers the room list. */}
       <div className="flex items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-2 lg:bg-transparent lg:py-1.5">
         <span className="text-xs uppercase tracking-widest text-keep-muted">
-          Rooms <span className="text-keep-rule">({rooms.length})</span>
+          Rooms <span className="text-keep-rule">({visibleRooms.length})</span>
         </span>
         {onClose ? (
           <button
@@ -258,8 +291,33 @@ export function RoomsTree({
           </button>
         ) : null}
       </div>
+      {/* Forums Catalog entry — pinned above the room list. Forum boards
+          don't live in this rail (see visibleRooms); this is their front
+          door, so it's styled as a BUTTON (inset, action-bordered, with
+          an explicit "Open" chip) — the earlier full-bleed banner row
+          read as a section header, not something clickable. */}
+      {onOpenForums ? (
+        <div className="border-b border-keep-rule px-2 py-1.5">
+          <button
+            type="button"
+            onClick={onOpenForums}
+            title="Open the Forums Catalog - long-form boards owned by the community"
+            className="keep-button flex w-full items-center gap-2 rounded border border-keep-action/60 bg-keep-action/10 px-2.5 py-2 text-left transition-colors hover:border-keep-action hover:bg-keep-action/20 lg:py-1.5"
+          >
+            <Landmark className="h-4 w-4 shrink-0 text-keep-action" aria-hidden="true" />
+            <span className="font-action text-sm text-keep-text">Forums Catalog</span>
+            <ForumNotifBadge />
+            <span
+              aria-hidden
+              className="ml-auto rounded-full border border-keep-action/50 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-keep-action"
+            >
+              Open
+            </span>
+          </button>
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {rooms.length === 0 ? (
+        {visibleRooms.length === 0 ? (
           <div className="px-3 py-2 text-xs text-keep-muted">(no rooms)</div>
         ) : (
           <ul>

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import DOMPurify from "dompurify";
 import { VERSION } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
+import { readReturnForum } from "./ForumPublicLanding.js";
 import { setSessionToken } from "../lib/http.js";
 import { markLoginIntent } from "../lib/socket.js";
 import { resolveSplashTheme, splashBgUrl, themeStyle } from "../lib/theme.js";
@@ -566,6 +567,10 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
   const branding = useChat((s) => s.branding);
   const kickReason = useChat((s) => s.kickReason);
   const setKickReason = useChat((s) => s.setKickReason);
+  // Forum-bound visitor (came from a /f/<slug> landing's Log in /
+  // Register buttons). Read once on mount; the key itself stays in
+  // storage — the authed boot consumes it to reopen the forum.
+  const [returnForum] = useState(() => readReturnForum());
   // When the admin closes registration, snap any stale "register" mode back
   // to "login" so the form can't show fields that the server will reject.
   if (!branding.registrationOpen && mode === "register") setMode("login");
@@ -797,6 +802,25 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             >
               ✕
             </button>
+          </div>
+        ) : null}
+
+        {/* Forum-bound visitor: say plainly what this account is for and
+            that they'll land back on the forum afterward. */}
+        {returnForum ? (
+          <div className="rounded border border-keep-accent/40 bg-keep-accent/10 px-3 py-2 text-xs text-keep-text/90">
+            {mode === "register" ? (
+              <>
+                You're creating an account on <b>{branding.siteName || "The Spire"}</b> to access
+                the forum <b>{returnForum.name ?? `/f/${returnForum.slug}`}</b>. Once you've
+                registered, we'll take you straight back to it.
+              </>
+            ) : (
+              <>
+                After you sign in, we'll return you to the forum{" "}
+                <b>{returnForum.name ?? `/f/${returnForum.slug}`}</b>.
+              </>
+            )}
           </div>
         ) : null}
 

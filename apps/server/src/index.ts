@@ -34,7 +34,8 @@ import {
 } from "@thekeep/shared";
 
 import { db } from "./db/index.js";
-import { bans, characters, roomMembers, roomThreadCategories, rooms, sessions, userEarning, users } from "./db/schema.js";
+import { bans, characters, messages, roomMembers, roomThreadCategories, rooms, sessions, userEarning, users } from "./db/schema.js";
+import { hasPermission } from "./auth/permissions.js";
 import { CommandRegistry } from "./commands/registry.js";
 import { registerBuiltins } from "./commands/builtins/index.js";
 import { dispatchChatInput } from "./realtime/dispatch.js";
@@ -93,6 +94,7 @@ import { registerJournalRoutes } from "./routes/journal.js";
 import { registerLinkRoutes } from "./routes/links.js";
 import { registerWorldRoutes } from "./routes/worlds.js";
 import { registerStoryRoutes } from "./routes/stories.js";
+import { registerForumRoutes } from "./routes/forums.js";
 import { registerMessageRoutes } from "./routes/messages.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerPushRoutes } from "./routes/push.js";
@@ -595,6 +597,7 @@ async function main() {
   await registerBookmarkRoutes(baseApp, db);
   await registerWorldRoutes(baseApp, db, io);
   await registerStoryRoutes(baseApp, db, io);
+  await registerForumRoutes(baseApp, db, io, uploadsRoot);
   await registerFriendsRoutes(baseApp, db, io);
   await registerBlockRoutes(baseApp, db, io);
   await registerDirectMessageRoutes(baseApp, db, io);
@@ -787,6 +790,13 @@ async function main() {
       if (!candidateId) return null;
       const room = (await db.select().from(rooms).where(eq(rooms.id, candidateId)).limit(1))[0];
       if (!room || room.archivedAt) return null;
+      // Forum boards aren't chat rooms (they live in the Forums Catalog).
+      // A remembered board id — a tab cache or lastRoomId from before the
+      // forums moved out of chat, or a tab that was watching a board —
+      // silently degrades to the next placement tier here. Without this,
+      // the boot join hit joinRoom's FORUM_BOARD refusal and greeted the
+      // user with an error notice right after login/registration.
+      if (room.forumId) return null;
       const ban = (await db
         .select()
         .from(bans)
@@ -993,6 +1003,182 @@ async function main() {
         ack?.({ ok: true });
       } catch (err) {
         log.error({ err }, "chat:input error");
+        ack?.({ ok: false, code: "ERR", message: err instanceof Error ? err.message : "error" });
+      }
+    });
+
+    /**
+     * Forum posting (Forums revamp, Phase 1C). Boards live ENTIRELY in
+     * the Forums Catalog — they aren't joinable chat rooms — so posting
+     * can't ride chat:input (dispatch rejects sends to rooms the socket
+     * isn't in, and temporarily joining would flash the poster into the
+     * board's presence). This handler validates the forum gates itself,
+     * mirrors dispatch's topic/reply rules EXACTLY, and persists through
+     * the same addMessage pipeline, so identity snapshots, colors,
+     * earning awards, mentions/push, and the mute check all behave
+     * identically to a chat send. Slash commands are rejected: forums
+     * take prose, commands belong to chat.
+     */
+    socket.on("forum:post", async (payload, ack) => {
+      try {
+        if (!(await checkAndExtendSession())) {
+          ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
+          return;
+        }
+        const fresh = await loadSessionUser(db, user.id);
+        if (!fresh) {
+          socket.emit("auth:expired");
+          ack?.({ ok: false, code: "AUTH", message: "Session expired." });
+          socket.disconnect(true);
+          return;
+        }
+        Object.assign(user, fresh);
+        // Per-send identity claim, same resolution order as chat:input
+        // (claim → tabCharId → DB default) so the post is voiced by the
+        // identity the catalog UI shows.
+        let resolvedCharId: string | null = user.activeCharacterId;
+        const claim = payload.asCharacterId;
+        if (typeof claim === "string") {
+          const c = (await db
+            .select({ id: characters.id, userId: characters.userId, deletedAt: characters.deletedAt })
+            .from(characters)
+            .where(eq(characters.id, claim))
+            .limit(1))[0];
+          if (c && c.userId === user.id && !c.deletedAt) {
+            resolvedCharId = c.id;
+          } else {
+            const tabCharId = (socket.data as { tabCharId?: string | null }).tabCharId;
+            if (tabCharId !== undefined) resolvedCharId = tabCharId;
+          }
+        } else if (claim === null) {
+          resolvedCharId = null;
+        } else {
+          const tabCharId = (socket.data as { tabCharId?: string | null }).tabCharId;
+          if (tabCharId !== undefined) resolvedCharId = tabCharId;
+        }
+        if (resolvedCharId !== user.activeCharacterId) {
+          user.activeCharacterId = resolvedCharId;
+          user.displayName = await resolveDisplayName(db, user.id, resolvedCharId);
+        }
+
+        // The target must be a live forum BOARD; the forum's own gates
+        // (ban, members-only posting) decide access.
+        const board = (await db.select().from(rooms).where(eq(rooms.id, payload.roomId)).limit(1))[0];
+        if (!board || !board.forumId || board.archivedAt || board.replyMode !== "nested") {
+          ack?.({ ok: false, code: "NO_BOARD", message: "That board doesn't exist." });
+          return;
+        }
+        const { forumGateForBoard } = await import("./forums/authority.js");
+        const gate = await forumGateForBoard(db, user, board.forumId);
+        if (!gate.ok) {
+          ack?.({ ok: false, code: gate.code, message: gate.message });
+          return;
+        }
+
+        const text = payload.text.trim();
+        if (!text) { ack?.({ ok: false, code: "EMPTY", message: "Write something first." }); return; }
+        if (text.startsWith("/")) {
+          ack?.({
+            ok: false,
+            code: "NO_COMMANDS",
+            message: "Chat commands like /me don't work on the forums. Just write your post as plain text.",
+          });
+          return;
+        }
+        const { maxForumPostLength, maxForumTopicTitleLength } = await getSettings(db);
+        if (text.length > maxForumPostLength) {
+          ack?.({ ok: false, code: "TOO_LONG", message: `Forum posts are capped at ${maxForumPostLength} chars.` });
+          return;
+        }
+
+        // Category: validated to belong to the board; a racing delete
+        // degrades to Uncategorized rather than rejecting (chat parity).
+        let threadCategoryId: string | null = null;
+        if (payload.threadCategoryId) {
+          const cat = (await db.select().from(roomThreadCategories)
+            .where(and(
+              eq(roomThreadCategories.id, payload.threadCategoryId),
+              eq(roomThreadCategories.roomId, board.id),
+            )).limit(1))[0];
+          if (cat) threadCategoryId = cat.id;
+        }
+
+        const { addMessage } = await import("./realtime/broadcast.js");
+        // Synthetic CommandContext: addMessage reads db/io/socket/user/
+        // roomId (+ registry for inline-command expansion). The roomId is
+        // the BOARD, regardless of which chat room this socket sits in.
+        const ctx = {
+          db, io, socket, user,
+          roomId: board.id,
+          argsText: "", args: [], invokedAs: "",
+          registry,
+        } as Parameters<typeof addMessage>[0];
+
+        const threadTitle = payload.threadTitle?.trim();
+        const replyToId = payload.replyToId || undefined;
+
+        // New topic (title XOR reply — dispatch parity).
+        if (threadTitle && !replyToId) {
+          const cappedTitle = threadTitle.slice(0, maxForumTopicTitleLength);
+          const messageId = await addMessage(ctx, {
+            kind: "say",
+            body: text,
+            title: cappedTitle,
+            ...(threadCategoryId ? { threadCategoryId } : {}),
+          });
+          if (messageId) {
+            // Authors watch their own topics (reply notifications).
+            const { ensureTopicWatch } = await import("./forums/notifications.js");
+            void ensureTopicWatch(db, user.id, messageId).catch(() => {});
+          }
+          ack?.({ ok: true, messageId });
+          return;
+        }
+        // Reply under an existing topic.
+        if (replyToId && !threadTitle) {
+          const parent = (await db.select().from(messages).where(eq(messages.id, replyToId)).limit(1))[0];
+          if (!parent || parent.roomId !== board.id || parent.deletedAt) {
+            ack?.({ ok: false, code: "BAD_TOPIC", message: "That topic isn't on this board (or has been removed)." });
+            return;
+          }
+          if (parent.replyToId) {
+            ack?.({ ok: false, code: "NOT_A_TOPIC", message: "Replies attach to topics, not to other replies." });
+            return;
+          }
+          if (parent.lockedAt && !(await hasPermission(user, "bypass_topic_lock", db))) {
+            ack?.({ ok: false, code: "TOPIC_LOCKED", message: "This topic is locked and isn't accepting new replies." });
+            return;
+          }
+          const snippet = parent.body.length > 120 ? `${parent.body.slice(0, 120)}…` : parent.body;
+          const messageId = await addMessage(ctx, {
+            kind: "say",
+            body: text,
+            replyToId: parent.id,
+            replyToDisplayName: parent.displayName,
+            replyToBodySnippet: snippet,
+          });
+          if (messageId) {
+            // Repliers auto-watch the topic; then fan out the inbox rows
+            // (quote > reply-to-your-topic > watch) and badge pulses.
+            // Fire-and-forget: notification failures never fail the post.
+            const { ensureTopicWatch, notifyForumReply } = await import("./forums/notifications.js");
+            void ensureTopicWatch(db, user.id, parent.id)
+              .then(() => notifyForumReply(db, io, {
+                forumId: board.forumId!,
+                boardRoomId: board.id,
+                topic: { id: parent.id, userId: parent.userId, title: parent.title },
+                messageId,
+                body: text,
+                actor: { id: user.id, displayName: user.displayName },
+              }))
+              .catch((err) => log.warn({ err }, "forum notify failed"));
+          }
+          ack?.({ ok: true, messageId });
+          return;
+        }
+        ack?.({ ok: false, code: "FORUM_NEEDS_TOPIC", message: "Start a new topic with a title, or reply to an existing one." });
+      } catch (err) {
+        log.error({ err }, "forum:post error");
         ack?.({ ok: false, code: "ERR", message: err instanceof Error ? err.message : "error" });
       }
     });
@@ -1662,6 +1848,15 @@ async function main() {
       app.get("/p/:name", publicLimit, serveSplash);
       app.get("/u/:name", publicLimit, serveSplash);
       app.get("/w/:slug", publicLimit, serveSplash);
+      // Forums (community message boards): the shareable per-forum page.
+      // Anonymous visitors get the branded landing (header + boards teaser
+      // + login/register block); signed-in visitors land in the Forums
+      // Catalog opened at that forum. Parsed client-side on first paint.
+      // The /t/<topicId> form is a TOPIC permalink (optionally with a
+      // #p-<postId> hash for a specific reply) — same shell, the client
+      // resolves it via /forums/topics/:id/locate.
+      app.get("/f/:slug", publicLimit, serveSplash);
+      app.get("/f/:slug/t/:topicId", publicLimit, serveSplash);
       app.get("/login", publicLimit, serveSplash);
       app.get("/register", publicLimit, serveSplash);
       // Scriptorium, public catalog of SFW stories + canonical story

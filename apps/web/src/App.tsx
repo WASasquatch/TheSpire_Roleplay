@@ -43,6 +43,9 @@ import { WorldEditorModal } from "./components/WorldEditorModal.js";
 import { WorldViewerModal } from "./components/WorldViewerModal.js";
 import { WorldsListModal } from "./components/WorldsListModal.js";
 import { StoryCatalogModal } from "./components/StoryCatalogModal.js";
+import { ForumsCatalogModal } from "./components/ForumsCatalogModal.js";
+import { ForumPublicLanding, readReturnForum, RETURN_FORUM_STORAGE_KEY } from "./components/ForumPublicLanding.js";
+import { fetchForumNotifications, locateForumTopic } from "./lib/forums.js";
 import { StoryEditorModal } from "./components/StoryEditorModal.js";
 import { StoryReaderModal } from "./components/StoryReaderModal.js";
 import { WelcomeModal } from "./components/WelcomeModal.js";
@@ -764,6 +767,27 @@ function UnauthRouter(props: {
     }
   }
 
+  // Forum landing (/f/<slug>): the shareable public face of a community
+  // forum. Renders inside the standalone shell so anonymous visitors get
+  // the branded page with its login/register entrance; the chosen forum
+  // is remembered and reopened after the auth round-trip.
+  if (!hasDeepLinkHint) {
+    const fm = /^\/f\/([a-z0-9_]{3,40})(?:\/t\/([A-Za-z0-9_-]{4,64}))?\/?$/.exec(path);
+    if (fm?.[1]) {
+      const anonPost = /^#p-([A-Za-z0-9_-]{4,64})$/.exec(window.location.hash)?.[1];
+      return (
+        <PublicViewerShell isAuthenticated={false}>
+          <ForumPublicLanding
+            slug={fm[1]}
+            initialTopicId={fm[2] ?? null}
+            initialPostId={anonPost ?? null}
+            onNavigate={navigate}
+          />
+        </PublicViewerShell>
+      );
+    }
+  }
+
   if (!hasDeepLinkHint && path === "/") {
     return <SplashLanding onNavigate={navigate} />;
   }
@@ -1068,6 +1092,64 @@ function Chat() {
   // Scriptorium catalog state. Object → open; null → closed. The
   // optional `tab` lets `/scriptorium my` etc. land on a specific tab.
   const [scriptoriumOpen, setScriptoriumOpen] = useState<{ tab?: "find" | "my" | "reading" | "following" } | null>(null);
+  // Forums Catalog state (Forums revamp). Object → open; optional `key`
+  // (slug or id from `/forums <slug>`) lands on a specific forum, and
+  // optional `topic` (bookmark / search jumps into board posts) opens
+  // straight onto that topic's thread inside the catalog.
+  const [forumsOpen, setForumsOpen] = useState<{
+    key?: string;
+    topic?: { boardId: string; topicId: string; postId?: string };
+  } | null>(null);
+  // /f/<slug> deep-link for SIGNED-IN visitors (anonymous ones get the
+  // public landing in UnauthRouter): open the catalog on that forum and
+  // normalize the URL. Also consumes the return key the public landing
+  // stored before its login/register round-trip, so the visitor lands on
+  // the forum the share link promised.
+  useEffect(() => {
+    const m = /^\/f\/([a-z0-9_]{3,40})(?:\/t\/([A-Za-z0-9_-]{4,64}))?\/?$/.exec(window.location.pathname);
+    const fromPath = m?.[1] ?? null;
+    const topicFromPath = m?.[2] ?? null;
+    const postFromHash = /^#p-([A-Za-z0-9_-]{4,64})$/.exec(window.location.hash)?.[1];
+    let fromStorage: string | null = null;
+    try {
+      const pending = readReturnForum();
+      if (pending) {
+        fromStorage = pending.slug;
+        window.localStorage.removeItem(RETURN_FORUM_STORAGE_KEY);
+      }
+    } catch { /* private mode */ }
+    const slug = fromPath ?? fromStorage;
+    if (!slug) return;
+    if (topicFromPath) {
+      // Topic permalink: resolve the board (and root topic for reply
+      // links) server-side, then open the catalog on it. Falls back to
+      // the forum's front page if the post is gone.
+      void locateForumTopic(topicFromPath)
+        .then((loc) => setForumsOpen({
+          key: loc.forumId,
+          topic: {
+            boardId: loc.boardRoomId,
+            topicId: loc.topicId,
+            ...(postFromHash ? { postId: postFromHash } : {}),
+          },
+        }))
+        .catch(() => setForumsOpen({ key: slug }));
+    } else {
+      setForumsOpen({ key: slug });
+    }
+    if (fromPath) window.history.replaceState(null, "", "/");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Seed the forum-notification badge once per boot; the socket's
+  // forum:notifications pulse keeps it live from then on.
+  useEffect(() => {
+    let alive = true;
+    fetchForumNotifications(1)
+      .then((r) => { if (alive) useChat.getState().setForumNotifUnread(r.unread); })
+      .catch(() => { /* badge stays 0 until the first pulse */ });
+    return () => { alive = false; };
+  }, []);
   // Story editor state. Discriminated by presence: null → closed;
   // { storyId: null } → New Story wizard; { storyId: "xyz" } → edit
   // existing story. Avoids the empty-string sentinel pattern.
@@ -2163,11 +2245,29 @@ function Chat() {
       st.bumpFriendsVersion();
     });
     socket.on("error:notice", (n) => setNotice(n));
+    // Forum inbox pulse: keeps the rail + bell badges live without
+    // refetching (replies to your topics, quotes, watched topics).
+    socket.on("forum:notifications", ({ unread }) => {
+      useChat.getState().setForumNotifUnread(unread);
+    });
+    // Reasoned forced logout (account disabled, admin site-kick).
+    // Registered BEFORE auth:expired's generic handler matters: the
+    // server sends BOTH (this one for the reason, auth:expired for
+    // legacy clients), and whichever sets kickReason last wins - so the
+    // generic handler below must not clobber a specific reason.
+    socket.on("session:kicked", ({ message }) => {
+      setKickReason(message);
+      disconnectSocket();
+      setMe(null);
+    });
     socket.on("auth:expired", () => {
       // Server invalidated the session (idle window elapsed, admin disabled
       // the account, or the janitor sweep deleted the row). Hand the client
       // back to the splash with an explanation banner - the cookie is
-      // already worthless, so /auth/me would 401 anyway.
+      // already worthless, so /auth/me would 401 anyway. Skip when a
+      // specific reason already landed via session:kicked (the server
+      // sends both; the specific one must win the splash banner).
+      if (useChat.getState().kickReason) return;
       setKickReason("Your session expired due to inactivity. Please log in again.");
       disconnectSocket();
       setMe(null);
@@ -2210,6 +2310,9 @@ function Chat() {
           break;
         case "open-scriptorium":
           setScriptoriumOpen(h.tab ? { tab: h.tab } : {});
+          break;
+        case "open-forums":
+          setForumsOpen(h.slug ? { key: h.slug } : {});
           break;
         case "open-story-editor":
           setStoryEditor({ storyId: h.storyId });
@@ -3111,6 +3214,28 @@ function Chat() {
   const [viewingHistory, setViewingHistory] = useState<boolean>(false);
   async function jumpToMessage(roomId: string, messageId: string) {
     setRailOpen(false);
+    // Forum boards live ENTIRELY in the Forums Catalog (Phase 1C): a
+    // bookmark or search hit pointing into one opens the catalog at that
+    // topic instead of attempting a room jump (which boards now refuse).
+    // The thread route resolves the owning TOPIC from any message id, so
+    // bookmarked replies land on their thread too.
+    const boardForumId = useChat.getState().rooms[roomId]?.forumId;
+    if (boardForumId) {
+      try {
+        const r = await fetch(
+          `/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/thread`,
+          { credentials: "include" },
+        );
+        if (!r.ok) throw new Error("gone");
+        const j = (await r.json()) as { topic: ChatMessage };
+        setBookmarksOpen(false);
+        // postId flashes the exact bookmarked/search-hit post.
+        setForumsOpen({ key: boardForumId, topic: { boardId: roomId, topicId: j.topic.id, postId: messageId } });
+      } catch {
+        setNotice({ code: "JUMP_FAILED", message: "Couldn't open that topic, it may have been removed." });
+      }
+      return;
+    }
     // Different room: switch first via the same socket path /go uses, so
     // joinRoom handles bans, password, etc.
     if (roomId !== currentRoomId) {
@@ -3666,6 +3791,7 @@ function Chat() {
           onOpenMessages={() => { setMessagesOpen(true); setRailOpen(false); }}
           onOpenEarning={() => { setEarningOpen({}); setRailOpen(false); }}
           onOpenArcade={() => { setArcadeOpen(true); setRailOpen(false); }}
+          onOpenForums={() => { setForumsOpen({}); setRailOpen(false); }}
           isOpen={railOpen}
           onClose={() => setRailOpen(false)}
           fontStep={fontStep}
@@ -4038,6 +4164,20 @@ function Chat() {
             setWorldCatalogOpen(false);
             setWorldViewerId(worldId);
           }}
+        />
+      ) : null}
+      {forumsOpen ? (
+        <ForumsCatalogModal
+          {...(forumsOpen.key ? { initialKey: forumsOpen.key } : {})}
+          {...(forumsOpen.topic ? { initialTopic: forumsOpen.topic } : {})}
+          onOpenWorld={(worldId) => setWorldViewerId(worldId)}
+          onClose={() => setForumsOpen(null)}
+          onIconClick={onIconClick}
+          onNameClick={onNameClick}
+          onMentionClick={onMentionClick}
+          onWorldMentionClick={(slug) => setWorldViewerId(slug)}
+          selfNames={selfNames}
+          fontStep={fontStep}
         />
       ) : null}
       {scriptoriumOpen ? (

@@ -20,6 +20,7 @@ import { AdminEarningTab } from "./AdminEarningTab.js";
 import { AdminBackupsTab } from "./AdminBackupsTab.js";
 import { AdminScriptoriumTab } from "./AdminScriptoriumTab.js";
 import { AdminEmoticonsTab } from "./AdminEmoticonsTab.js";
+import { AdminForumsTab } from "./AdminForumsTab.js";
 import { AdminPermissionsTab } from "./AdminPermissionsTab.js";
 import { AdminAnnouncementsTab } from "./AdminAnnouncementsTab.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
@@ -35,7 +36,7 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "scriptorium" | "emoticons" | "audit" | "backups" | "permissions" | "announcements";
+type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "scriptorium" | "forums" | "emoticons" | "audit" | "backups" | "permissions" | "announcements";
 
 /** Tab grouping for the strip's section dividers. Each tab carries
  *  the id of the group it belongs to; the render walks the list
@@ -90,6 +91,7 @@ const TAB_ITEMS: ReadonlyArray<{
   { id: "earning", label: "Earning", group: "content" },
   { id: "emoticons", label: "Emoticons", group: "content" },
   { id: "scriptorium", label: "Scriptorium", group: "content" },
+  { id: "forums", label: "Forums", group: "content", permission: "view_admin_forums" },
   { id: "commands", label: "Commands", group: "content" },
   { id: "titles", label: "Titles", group: "content" },
   // Two distinct manage keys feed this tab, banner curation vs.
@@ -427,6 +429,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             {tab === "reports" ? <ReportsTab /> : null}
             {tab === "scriptorium" ? <AdminScriptoriumTab /> : null}
             {tab === "emoticons" ? <AdminEmoticonsTab /> : null}
+            {tab === "forums" && canSeeTab("view_admin_forums") ? <AdminForumsTab /> : null}
             {tab === "audit" ? <AuditTab /> : null}
             {tab === "backups" && canSeeTab("view_admin_backups") ? <AdminBackupsTab /> : null}
             {tab === "permissions" && canSeeTab("view_admin_permissions") ? <AdminPermissionsTab /> : null}

@@ -14,7 +14,8 @@ import type {
   ServerToClientEvents,
   ThreadCategory,
 } from "@thekeep/shared";
-import { ignores, messages, roomMembers, roomThreadCategories, rooms } from "../db/schema.js";
+import { forums, ignores, messages, roomMembers, roomThreadCategories, rooms } from "../db/schema.js";
+import { linkPreviewFromRow } from "../unfurl.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { getSettings } from "../settings.js";
@@ -315,6 +316,7 @@ export async function registerRoomsRoutes(
       ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
       ...(m.isSticky ? { isSticky: true } : {}),
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+      ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
       ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
       ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
       ...(m.rankKey ? { rankKey: m.rankKey } : {}),
@@ -442,6 +444,7 @@ export async function registerRoomsRoutes(
       ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
       ...(m.isSticky ? { isSticky: true } : {}),
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+      ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
       ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
       ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
       ...(m.rankKey ? { rankKey: m.rankKey } : {}),
@@ -573,6 +576,28 @@ export async function registerRoomsRoutes(
   });
 
   /**
+   * Anonymous READ gate for forum-board content: true when the room is a
+   * board whose forum has PUBLIC BROWSING enabled (owner toggle,
+   * migration 0237). Lets the /f/<slug> landing serve topics, threads,
+   * and categories to logged-out visitors; everything else keeps the
+   * 401. Posting paths never consult this — they all require a session.
+   */
+  async function boardAllowsAnonymousRead(roomId: string): Promise<boolean> {
+    const room = (await db
+      .select({ forumId: rooms.forumId })
+      .from(rooms)
+      .where(eq(rooms.id, roomId))
+      .limit(1))[0];
+    if (!room?.forumId) return false;
+    const f = (await db
+      .select({ publicBrowsing: forums.publicBrowsing })
+      .from(forums)
+      .where(eq(forums.id, room.forumId))
+      .limit(1))[0];
+    return !!f?.publicBrowsing;
+  }
+
+  /**
    * GET /rooms/:id/messages/:messageId/thread
    *
    * Resolve any message id (topic OR reply) to the topic it belongs to,
@@ -603,7 +628,9 @@ export async function registerRoomsRoutes(
     "/rooms/:id/messages/:messageId/thread",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
-      if (!me) { reply.code(401); return { error: "auth" }; }
+      if (!me && !(await boardAllowsAnonymousRead(req.params.id))) {
+        reply.code(401); return { error: "auth" };
+      }
 
       const roomId = req.params.id;
       const hit = (await db.select().from(messages).where(eq(messages.id, req.params.messageId)).limit(1))[0];
@@ -645,9 +672,9 @@ export async function registerRoomsRoutes(
 
       // Capture the permission resolution into a local before defining
       // the inner mapper so the async permission lookup runs once
-      // outside the synchronous map. TypeScript's null-narrowing (the
-      // `if (!me)` guard above) flows through to the closure too.
-      const viewerIsAdmin = await hasPermission(me, "view_deleted_message_body", db);
+      // outside the synchronous map. Anonymous viewers (public-browsing
+      // boards) never see deleted bodies.
+      const viewerIsAdmin = me ? await hasPermission(me, "view_deleted_message_body", db) : false;
       function rowToWire(m: typeof messages.$inferSelect): ChatMessage {
         return {
           id: m.id,
@@ -675,6 +702,7 @@ export async function registerRoomsRoutes(
           ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
           ...(m.isSticky ? { isSticky: true } : {}),
           ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+        ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
           ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
           ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
           ...(m.rankKey ? { rankKey: m.rankKey } : {}),
@@ -754,7 +782,9 @@ export async function registerRoomsRoutes(
     "/rooms/:id/topics",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
-      if (!me) { reply.code(401); return { error: "auth" }; }
+      if (!me && !(await boardAllowsAnonymousRead(req.params.id))) {
+        reply.code(401); return { error: "auth" };
+      }
 
       let q;
       try { q = topicsQuery.parse(req.query); }
@@ -870,7 +900,7 @@ export async function registerRoomsRoutes(
 
       const pageRows = [...stickies, ...nonStickyPage];
 
-      const canSeeOriginalBody = await hasPermission(me, "view_deleted_message_body", db);
+      const canSeeOriginalBody = me ? await hasPermission(me, "view_deleted_message_body", db) : false;
       const topics: ChatMessage[] = pageRows.map((m) => ({
         id: m.id,
         roomId: m.roomId,
@@ -897,6 +927,7 @@ export async function registerRoomsRoutes(
         ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
         ...(m.isSticky ? { isSticky: true } : {}),
         ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+        ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
         ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
         ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
         ...(m.rankKey ? { rankKey: m.rankKey } : {}),
@@ -911,6 +942,36 @@ export async function registerRoomsRoutes(
       //     totalPages/totalCount are 0 since we don't compute them
       //     (would be an extra COUNT for a path nobody should be
       //     hitting going forward).
+      // Per-viewer forum signals for THIS page's topics: unread (topic
+      // activity newer than the viewer's read marker, or never opened)
+      // and watched (subscription bell state). Two indexed IN lookups,
+      // bounded by perPage. Only meaningful for forum boards, but
+      // harmless (empty) for standalone nested rooms.
+      let unreadTopicIds: string[] = [];
+      let watchedTopicIds: string[] = [];
+      const pageIds = topics.map((t) => t.id);
+      if (me && pageIds.length > 0) {
+        const { forumTopicReads, forumTopicWatches } = await import("../db/schema.js");
+        const reads = await db
+          .select({ topicId: forumTopicReads.topicId, lastReadAt: forumTopicReads.lastReadAt })
+          .from(forumTopicReads)
+          .where(and(eq(forumTopicReads.userId, me.id), inArray(forumTopicReads.topicId, pageIds)));
+        const readAtBy = new Map(reads.map((r) => [r.topicId, +r.lastReadAt]));
+        unreadTopicIds = topics
+          .filter((t) => {
+            if (t.userId === me.id && !readAtBy.has(t.id)) return false; // your own fresh topic isn't "unread"
+            const seen = readAtBy.get(t.id);
+            const last = +(t.lastActivityAt ?? t.createdAt);
+            return seen === undefined || last > seen;
+          })
+          .map((t) => t.id);
+        const watches = await db
+          .select({ topicId: forumTopicWatches.topicId })
+          .from(forumTopicWatches)
+          .where(and(eq(forumTopicWatches.userId, me.id), inArray(forumTopicWatches.topicId, pageIds)));
+        watchedTopicIds = watches.map((w) => w.topicId);
+      }
+
       return {
         topics,
         hasMore,
@@ -918,6 +979,8 @@ export async function registerRoomsRoutes(
         perPage,
         totalPages: useCursor ? 0 : totalPages,
         totalCount: useCursor ? 0 : totalCount,
+        unreadTopicIds,
+        watchedTopicIds,
       };
     },
   );
@@ -933,7 +996,9 @@ export async function registerRoomsRoutes(
    */
   app.get<{ Params: { id: string } }>("/rooms/:id/thread-categories", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me) { reply.code(401); return { error: "auth" }; }
+    if (!me && !(await boardAllowsAnonymousRead(req.params.id))) {
+      reply.code(401); return { error: "auth" };
+    }
     const cats = await db
       .select()
       .from(roomThreadCategories)
@@ -945,6 +1010,9 @@ export async function registerRoomsRoutes(
       name: c.name,
       sortOrder: c.sortOrder,
       createdAt: +c.createdAt,
+      iconUrl: c.iconUrl ?? null,
+      subtitle: c.subtitle ?? null,
+      parentId: c.parentId ?? null,
     }));
     return { categories: out };
   });
@@ -957,7 +1025,25 @@ export async function registerRoomsRoutes(
   const createCategoryBody = z.object({
     name: z.string().min(1).max(40),
     sortOrder: z.number().int().min(0).max(10_000).optional(),
+    subtitle: z.string().trim().max(140).nullable().optional(),
+    /** Parent category (same room, itself top-level) ⇒ create a SUBcategory. */
+    parentId: z.string().nullable().optional(),
   }).strict();
+
+  /** Validate a requested parent for one-level nesting: must exist in
+   *  this room, must be top-level itself, and (for moves) must not be
+   *  the category or one of its children. Returns an error string. */
+  async function validateCategoryParent(roomId: string, parentId: string, selfId?: string): Promise<string | null> {
+    if (selfId && parentId === selfId) return "a category can't be its own parent";
+    const parent = (await db
+      .select()
+      .from(roomThreadCategories)
+      .where(and(eq(roomThreadCategories.id, parentId), eq(roomThreadCategories.roomId, roomId)))
+      .limit(1))[0];
+    if (!parent) return "parent category not found in this board";
+    if (parent.parentId) return "subcategories can't have their own subcategories";
+    return null;
+  }
 
   app.post<{ Params: { id: string }; Body: unknown }>(
     "/admin/rooms/:id/thread-categories",
@@ -975,6 +1061,10 @@ export async function registerRoomsRoutes(
       try { body = createCategoryBody.parse(req.body); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
 
+      if (body.parentId) {
+        const parentErr = await validateCategoryParent(room.id, body.parentId);
+        if (parentErr) { reply.code(400); return { error: parentErr }; }
+      }
       const id = nanoid();
       try {
         await db.insert(roomThreadCategories).values({
@@ -982,6 +1072,8 @@ export async function registerRoomsRoutes(
           roomId: room.id,
           name: body.name.trim(),
           sortOrder: body.sortOrder ?? 0,
+          subtitle: body.subtitle?.trim() ? body.subtitle.trim() : null,
+          parentId: body.parentId ?? null,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
@@ -998,6 +1090,9 @@ export async function registerRoomsRoutes(
   const patchCategoryBody = z.object({
     name: z.string().min(1).max(40).optional(),
     sortOrder: z.number().int().min(0).max(10_000).optional(),
+    subtitle: z.string().trim().max(140).nullable().optional(),
+    /** Move under a top-level parent (one level), or null → top level. */
+    parentId: z.string().nullable().optional(),
   }).strict();
 
   app.patch<{ Params: { id: string; catId: string }; Body: unknown }>(
@@ -1029,6 +1124,24 @@ export async function registerRoomsRoutes(
       const update: Partial<typeof roomThreadCategories.$inferInsert> = {};
       if (body.name !== undefined) update.name = body.name.trim();
       if (body.sortOrder !== undefined) update.sortOrder = body.sortOrder;
+      if (body.subtitle !== undefined) {
+        update.subtitle = body.subtitle?.trim() ? body.subtitle.trim() : null;
+      }
+      if (body.parentId !== undefined) {
+        if (body.parentId !== null) {
+          const parentErr = await validateCategoryParent(room.id, body.parentId, row.id);
+          if (parentErr) { reply.code(400); return { error: parentErr }; }
+          // A category that has children of its own can't become a child
+          // (that would create a second nesting level under the hood).
+          const child = (await db
+            .select({ id: roomThreadCategories.id })
+            .from(roomThreadCategories)
+            .where(eq(roomThreadCategories.parentId, row.id))
+            .limit(1))[0];
+          if (child) { reply.code(400); return { error: "move or delete its subcategories first" }; }
+        }
+        update.parentId = body.parentId;
+      }
       if (Object.keys(update).length === 0) return { ok: true };
       try {
         await db.update(roomThreadCategories).set(update).where(eq(roomThreadCategories.id, row.id));

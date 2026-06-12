@@ -104,6 +104,13 @@ export const replyModeCommand: CommandHandler = {
     if (arg !== "flat" && arg !== "nested") {
       return notice(ctx, "BAD_REPLYMODE", "Reply mode must be 'flat' or 'nested'.");
     }
+    // Boards (rooms inside a forum) are nested BY DEFINITION — the Forums
+    // Catalog renders their topics, and flipping one to flat would orphan
+    // every topic from that UI. Board structure is managed from the forum
+    // owner's settings, not this command.
+    if (room.forumId) {
+      return notice(ctx, "FORUM_BOARD", "This room is a forum board - boards always use nested replies.");
+    }
     if (!(await callerCanEditRoom(ctx.db, ctx.user, ctx.roomId))) {
       return notice(ctx, "PERM", "Only the room owner / mod / admin can change the reply mode.");
     }

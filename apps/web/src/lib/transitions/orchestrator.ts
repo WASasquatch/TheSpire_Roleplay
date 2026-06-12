@@ -111,7 +111,14 @@ export async function playRoomTransition(key: string | null | undefined, opts: P
   const content = document.createElement("div");
   Object.assign(content.style, { position: "absolute", inset: "0", backfaceVisibility: "hidden" } as Partial<CSSStyleDeclaration>);
   const fx = document.createElement("div");
-  Object.assign(fx.style, { position: "absolute", inset: "0", pointerEvents: "none", overflow: "hidden", zIndex: "2" } as Partial<CSSStyleDeclaration>);
+  // fx must beat ANY z-index inside the cloned content. The clone keeps
+  // the app's stacking values — notably the forum category headers'
+  // sticky z-30 — and when a rite doesn't transform `content` (the
+  // overlay-cover rites: fog, embers, eclipse, …), `content` stays
+  // z-auto so those children get promoted into the STAGE's stacking
+  // context. At the old zIndex 2 the fog painted UNDER the cloned
+  // category bars. 100 clears every in-app value the clone can carry.
+  Object.assign(fx.style, { position: "absolute", inset: "0", pointerEvents: "none", overflow: "hidden", zIndex: "100" } as Partial<CSSStyleDeclaration>);
   stage.appendChild(backdrop);   // behind content + fx (DOM order = paint order)
   stage.appendChild(content);
   stage.appendChild(fx);

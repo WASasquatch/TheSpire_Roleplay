@@ -545,6 +545,33 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
             ),
           };
         }
+        // Quoted-post reference: [wrote:](msg:<messageId>), emitted by the
+        // forum Quote button. Renders as a jump chip that dispatches a DOM
+        // event; the Forums Catalog listens and scrolls/flashes the quoted
+        // post. parseInline stays pure — no callback props — and the id
+        // charset is locked down, so no URL ever reaches an href.
+        const msgRef = /^msg:([A-Za-z0-9_-]{4,64})$/.exec(url);
+        if (msgRef) {
+          const messageId = msgRef[1]!;
+          const label = text.slice(i + 1, closeB);
+          return {
+            end: closeP + 1,
+            node: (
+              <button
+                type="button"
+                data-quote-ref={messageId}
+                title="Jump to the quoted post"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.dispatchEvent(new CustomEvent("spire:quote-ref", { detail: { messageId } }));
+                }}
+                className="rounded text-keep-action underline decoration-dotted underline-offset-2 hover:text-keep-action/80"
+              >
+                {parseInline(label, depth + 1)}
+              </button>
+            ),
+          };
+        }
       }
     }
   }

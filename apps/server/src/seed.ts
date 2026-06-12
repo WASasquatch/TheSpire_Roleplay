@@ -2,7 +2,7 @@ import { and, eq, lt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import { emoticonSheets, messages, rooms, sessions, users, worldPages, worlds } from "./db/schema.js";
+import { emoticonSheets, forums, messages, rooms, sessions, users, worldPages, worlds } from "./db/schema.js";
 import { hashPassword } from "./auth/passwords.js";
 import { ensureSiteSettings, getSettings, setWorldsSeedVersion } from "./settings.js";
 import { recordAudit } from "./audit.js";
@@ -165,11 +165,56 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
   // afterwards; the seeder doesn't try to "fix" their edits.
   await ensureDefaultEmoticonSheets(db);
 
+  // The Spire Forums (system forum container, plan.md Forums Phase 0).
+  // Always-on + idempotent (keys on a fixed id, can never duplicate).
+  // Migration 0229 already created it on installs that had an admin at
+  // migration time; this covers fresh installs where migrations ran
+  // before any user existed.
+  await ensureSystemForum(db);
+
   // Force-reseed the `{icon}` placeholder on item-message templates
   // when the deploy script (remote-deploy.sh) staged the flag. Always
   // ungated by SKIP_DEFAULT_SEED, that flag governs the room-rename
   // edge case; item-template policy is a separate concern.
   await maybeReseedItemTemplates(db);
+}
+
+/**
+ * Ensure "The Spire Forums" — the site-owned system forum that anchors the
+ * Forums Catalog — exists. Mirrors migration 0229 exactly (same fixed id,
+ * slug, copy) so whichever of the two runs first wins and the other no-ops.
+ *
+ * Owner = the oldest masteradmin (falling back to the oldest admin). When
+ * neither exists yet (fresh install before first registration), we skip and
+ * retry on the next boot — the catalog requires the forum but nothing
+ * crashes without it, and installs promote a masteradmin almost
+ * immediately. NOT keyed on SKIP_DEFAULT_SEED: that flag exists for the
+ * renamed-default-rooms case; a fixed-id insert can never duplicate.
+ *
+ * Deliberately does NOT adopt nested rooms (0229 does that once for
+ * existing installs): re-adopting on every boot would yank a standalone
+ * nested room a user created via /replymode into the public forum.
+ */
+async function ensureSystemForum(db: Db): Promise<void> {
+  const existing = (await db.select({ id: forums.id }).from(forums)
+    .where(eq(forums.id, "forum_spire_system")).limit(1))[0];
+  if (existing) return;
+  const owner = (await db.select({ id: users.id }).from(users)
+    .where(sql`${users.role} IN ('masteradmin', 'admin')`)
+    .orderBy(sql`CASE ${users.role} WHEN 'masteradmin' THEN 0 ELSE 1 END`, users.createdAt)
+    .limit(1))[0];
+  if (!owner) return; // retried next boot once an admin exists
+  await db.insert(forums).values({
+    id: "forum_spire_system",
+    slug: "spire",
+    name: "The Spire Forums",
+    tagline: "The Spire's town square — announcements, roleplay boards, and community talk.",
+    ownerUserId: owner.id,
+    isSystem: true,
+    status: "active",
+    visibility: "public",
+    postingMode: "open",
+  });
 }
 
 /**

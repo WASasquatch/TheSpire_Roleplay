@@ -54,6 +54,29 @@ export interface ClientToServerEvents {
     },
     ack?: AckFn<{ ok: true } | AckError>,
   ) => void;
+  /**
+   * Post into a FORUM BOARD from the Forums Catalog (Forums revamp,
+   * Phase 1C). Boards are not chat rooms anymore — the socket needn't
+   * (and can't) be joined to the board's room; the server validates the
+   * forum gates (ban / membership / mute / topic lock) and persists via
+   * the same pipeline as chat sends, so snapshots, awards, and pushes
+   * all behave identically. Exactly one of `threadTitle` (new topic) or
+   * `replyToId` (reply under a topic) must be set. Slash commands are
+   * rejected — forums take prose. `asCharacterId` mirrors chat:input's
+   * per-send identity claim. Ack carries the new message id so the
+   * catalog can refetch precisely.
+   */
+  "forum:post": (
+    payload: {
+      roomId: string;
+      text: string;
+      threadCategoryId?: string | null;
+      threadTitle?: string;
+      replyToId?: string;
+      asCharacterId?: string | null;
+    },
+    ack?: AckFn<{ ok: true; messageId: string | null } | AckError>,
+  ) => void;
   "room:join": (payload: { roomId: string; password?: string }, ack?: AckFn<{ ok: true } | AckError>) => void;
   "room:leave": (payload: { roomId: string }) => void;
   /**
@@ -314,6 +337,21 @@ export interface ServerToClientEvents {
    * socket is force-disconnected by the server.
    */
   "auth:expired": () => void;
+  /**
+   * Forced logout WITH a human-readable reason: the account was disabled,
+   * or a site admin /kick'd the user out of the site. The client shows
+   * `message` on the login splash (the kick-reason banner), drops its
+   * session state, and disconnects. Sessions are already revoked
+   * server-side when this fires, so reconnecting won't resurrect the tab.
+   */
+  "session:kicked": (payload: { message: string }) => void;
+  /**
+   * Forum inbox pulse: pushed to a user's sockets when a forum
+   * notification lands for them (reply to their topic, quote, watched
+   * topic activity). Carries the fresh unread total so badges update
+   * without a refetch.
+   */
+  "forum:notifications": (payload: { unread: number }) => void;
   /**
    * Pushed to a watcher's sockets when one of their watched accounts comes
    * online (transitions from no-sockets to first-socket). Carries no
@@ -691,7 +729,12 @@ export type UiHint =
    * save name. The client fetches the file as a blob and triggers a download
    * so generation never blocks the socket and the cookie session is sent.
    */
-  | { kind: "download-export"; url: string; filename: string };
+  | { kind: "download-export"; url: string; filename: string }
+  /**
+   * Open the Forums Catalog modal (Forums revamp). Optional `slug` lands on
+   * a specific forum instead of the system default. Emitted by `/forums`.
+   */
+  | { kind: "open-forums"; slug?: string };
 
 /** Wire shape served by GET /commands. The help modal renders this. */
 export interface CommandDoc {

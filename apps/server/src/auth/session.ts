@@ -1,8 +1,41 @@
 import { eq } from "drizzle-orm";
+import type { Server as IoServer } from "socket.io";
+import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { characters, sessions, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import type { SessionUser } from "../commands/types.js";
 import { getSettings } from "../settings.js";
+
+/**
+ * Force a user out of the site, authoritatively:
+ *
+ *   1. DELETE every session row they hold — the keystone. Without this,
+ *      the client's socket auto-reconnects with its still-valid token and
+ *      lands straight back in chat (the original "disabled users aren't
+ *      logged out" bug).
+ *   2. Emit `session:kicked` with the human-readable reason (shown on the
+ *      login splash) plus the legacy `auth:expired` for older clients.
+ *   3. Disconnect each socket AFTER a short flush delay — a synchronous
+ *      `disconnect(true)` right after `emit` races the transport and the
+ *      reason packet can be dropped before it's sent.
+ *
+ * Used by account disable and by the admin-tier /kick (site kick).
+ */
+export async function forceLogoutUser(
+  io: IoServer<ClientToServerEvents, ServerToClientEvents>,
+  db: Db,
+  userId: string,
+  message: string,
+): Promise<void> {
+  await db.delete(sessions).where(eq(sessions.userId, userId));
+  const socks = await io.fetchSockets();
+  for (const s of socks) {
+    if ((s.data as { userId?: string }).userId !== userId) continue;
+    s.emit("session:kicked", { message });
+    s.emit("auth:expired");
+    setTimeout(() => { try { s.disconnect(true); } catch { /* already gone */ } }, 250);
+  }
+}
 
 /**
  * Resolve the current display name for a user. By default reads

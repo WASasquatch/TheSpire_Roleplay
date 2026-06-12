@@ -526,6 +526,18 @@ export const rooms = sqliteTable(
       .notNull()
       .default("flat"),
     /**
+     * Forum container (migration 0223). Non-null ⇒ this room is a BOARD
+     * inside that forum: it leaves the chat room list (the client filters
+     * on forumId, NOT replyMode, so standalone nested rooms stay listed),
+     * renders inside the Forums Catalog, and its access consults
+     * `forumAuthority` (forum bans / membership) BEFORE the room-level
+     * checks. Boards are always replyMode "nested"; /replymode is blocked
+     * on them. ON DELETE SET NULL: forum deletion archives its boards
+     * first, so a row that loses its forum is already archived and never
+     * resurfaces in the chat list.
+     */
+    forumId: text("forum_id").references(() => forums.id, { onDelete: "set null" }),
+    /**
      * Theater (synchronized watch-party) CONFIG. Orthogonal to `type`
      * (a theater can be a public OR private room) - mirrors replyMode as
      * a presentation mode rather than an access mode.
@@ -569,6 +581,7 @@ export const rooms = sqliteTable(
   },
   (t) => ({
     nameUq: uniqueIndex("rooms_name_uq").on(sql`lower(${t.name})`),
+    forumIdx: index("rooms_forum_idx").on(t.forumId),
   }),
 );
 
@@ -787,6 +800,14 @@ export const messages = sqliteTable(
      * for `display_name`, `color`, etc. Null on every other kind.
      */
     cmdCss: text("cmd_css"),
+    /**
+     * OpenGraph unfurl for the body's first http(s) link (migration
+     * 0238): JSON {url,title,description,imageUrl,siteName}, or
+     * {"hidden":true} after the author removes the card. Filled
+     * fire-and-forget after the post lands; null = no link / nothing
+     * unfurlable / not processed.
+     */
+    linkPreviewJson: text("link_preview_json"),
     /**
      * Earning rank snapshot at send time, drives the chat-line sigil.
      * Same snapshot posture as displayName / color: a later rank-up or
@@ -2786,10 +2807,320 @@ export const roomThreadCategories = sqliteTable(
     name: text("name").notNull(),
     /** Admin-set ordering within a room; ties broken by createdAt for stability. */
     sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * Optional custom category icon (migration 0227). Uploaded by the
+     * FORUM owner (content-hashed, small square, same pipeline as
+     * emoticons) for boards inside a forum; null = the default glyph.
+     * Standalone nested rooms keep null (no upload surface for them).
+     */
+    iconUrl: text("icon_url"),
+    /** Optional one-line subtitle under the category name in the board's
+     *  section header — "what belongs in here" (migration 0233). */
+    subtitle: text("subtitle"),
+    /** ONE level of nesting (migration 0235): set ⇒ this category renders
+     *  as a sub-section under its top-level parent. Parents can't
+     *  themselves be children (enforced at the route layer). Deleting a
+     *  parent promotes children to top level (SET NULL). */
+    parentId: text("parent_id"),
     createdAt: ts("created_at"),
   },
   (t) => ({
     roomIdx: index("room_thread_categories_room_idx").on(t.roomId),
+  }),
+);
+
+/* ============================================================
+ * Forums — user-owned message boards (plan.md "Forums Revamp").
+ *
+ * A forum is a CONTAINER above rooms: `rooms.forumId` set ⇒ that room
+ * is a "board" inside the forum (always replyMode "nested"). Topics,
+ * replies, stickies, locks, reports, and earning awards all keep
+ * living on the rooms/messages tables — these tables only add the
+ * container, its roles, its bans, and the two application workflows
+ * (forum creation, reviewed by site staff; forum membership, reviewed
+ * by the forum owner/mods when postingMode = "application").
+ * ============================================================ */
+
+export const forums = sqliteTable(
+  "forums",
+  {
+    id: id(),
+    /** Share-URL slug (`/f/<slug>`), canonical lowercase [a-z0-9_]{3,40},
+     *  globally unique, immutable in v1 so share links never rot.
+     *  Reserved names are rejected at the route layer (shared
+     *  RESERVED_FORUM_SLUGS). */
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    /** Short purpose line, seeded from the creation application. */
+    tagline: text("tagline"),
+    /** Owner-editable long description (sanitized like profile bios). */
+    descriptionHtml: text("description_html"),
+    ownerUserId: text("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The Spire Forums = true: site-owned, undeletable, catalog-pinned. */
+    isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
+    /** `featured` is admin-curated (pins to catalog top); owners flip
+     *  between active and archived. */
+    status: text("status", { enum: ["active", "featured", "archived"] })
+      .notNull()
+      .default("active"),
+    /** Reserved for a future "hidden" tier — v1 is public-only, the
+     *  column exists so that becomes a flip, not a migration. */
+    visibility: text("visibility", { enum: ["public"] }).notNull().default("public"),
+    /** open = any signed-in non-banned user may post; application =
+     *  membership application reviewed by owner/mods. */
+    postingMode: text("posting_mode", { enum: ["open", "application"] })
+      .notNull()
+      .default("open"),
+    /** Owner toggle (migration 0237): anonymous visitors on /f/<slug>
+     *  may READ boards/topics/replies without an account. Posting and
+     *  joining always require login. Off by default. */
+    publicBrowsing: integer("public_browsing", { mode: "boolean" }).notNull().default(false),
+    /** Owner-set prompt above the membership application's answer field
+     *  (migration 0230). Null = a generic "tell the keeper why" prompt. */
+    applicationPrompt: text("application_prompt"),
+    /** Per-forum theme JSON (normalizeTheme on read). Scoped to the forum
+     *  modal + /f/ page only — never bleeds into chat (worlds pattern). */
+    themeJson: text("theme_json"),
+    /** Per-forum DESIGN style (ornaments/chrome: medieval, glass, …) —
+     *  orthogonal to the palette, mirrors users.style_key. Null = the
+     *  viewer's own design. Scoped to the forum's card (migration 0232). */
+    themeStyleKey: text("theme_style_key"),
+    logoUrl: text("logo_url"),
+    bannerImageUrl: text("banner_image_url"),
+    /** Vertical banner focus: 0 = show the image's top band, 100 = the
+     *  bottom, 50 = center (migration 0234). Cover-cropping picks the
+     *  band; the keeper picks which one. */
+    bannerFocusY: integer("banner_focus_y").notNull().default(50),
+    /** Optional world attachment: the forum header shows the world's
+     *  banner strip with view/join/apply actions. */
+    linkedWorldId: text("linked_world_id").references(() => worlds.id, { onDelete: "set null" }),
+    /** JSON array of roomIds giving the owner's explicit board ordering;
+     *  boards missing from the list sort by createdAt after it. */
+    boardOrderJson: text("board_order_json").notNull().default("[]"),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    slugUq: uniqueIndex("forums_slug_uq").on(sql`lower(${t.slug})`),
+    ownerIdx: index("forums_owner_idx").on(t.ownerUserId),
+    statusIdx: index("forums_status_idx").on(t.status),
+  }),
+);
+
+/**
+ * Forum-creation applications — the "Create your Forum" workflow.
+ * Reviewed by site staff (`review_forum_applications`), NOT forum
+ * owners. Same lifecycle + audit posture as world_applications:
+ * terminal rows stay; a partial unique index (migration 0224) enforces
+ * at most one PENDING application per applicant.
+ */
+export const forumCreationApplications = sqliteTable(
+  "forum_creation_applications",
+  {
+    id: id(),
+    applicantUserId: text("applicant_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    requestedName: text("requested_name").notNull(),
+    requestedSlug: text("requested_slug").notNull(),
+    /** The application's "what is your forum for" prose (30..500 chars). */
+    purpose: text("purpose").notNull(),
+    status: text("status", { enum: ["pending", "approved", "rejected", "withdrawn"] })
+      .notNull()
+      .default("pending"),
+    submittedAt: ts("submitted_at"),
+    reviewedAt: integer("reviewed_at", { mode: "timestamp_ms" }),
+    reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    reviewNote: text("review_note"),
+  },
+  (t) => ({
+    statusIdx: index("forum_creation_apps_status_idx").on(t.status, t.submittedAt),
+    applicantIdx: index("forum_creation_apps_applicant_idx").on(t.applicantUserId, t.status),
+    // "One pending per applicant" partial unique index lives in the
+    // migration (drizzle's builder doesn't model partial indexes); the
+    // route layer also pre-checks and maps races to 409.
+  }),
+);
+
+/**
+ * Forum membership + roles. Only meaningful rows:
+ *   - owner: exactly one per forum (the approved applicant; transferable
+ *     by site staff later).
+ *   - mod:   owner-assigned helpers (topic-level powers only).
+ *   - member: approved applicants when postingMode = "application".
+ * Open-posting forums don't require membership rows to post.
+ */
+export const forumMembers = sqliteTable(
+  "forum_members",
+  {
+    forumId: text("forum_id")
+      .notNull()
+      .references(() => forums.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["owner", "mod", "member"] })
+      .notNull()
+      .default("member"),
+    joinedAt: ts("joined_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.forumId, t.userId] }),
+    userIdx: index("forum_members_user_idx").on(t.userId),
+  }),
+);
+
+/**
+ * Forum membership applications (postingMode = "application" forums).
+ * Reviewed by the forum owner + forum mods in the forum settings page.
+ * Lifecycle mirrors world_applications; partial unique index (0225)
+ * enforces one PENDING per (forum, applicant).
+ */
+export const forumMembershipApplications = sqliteTable(
+  "forum_membership_applications",
+  {
+    id: id(),
+    forumId: text("forum_id")
+      .notNull()
+      .references(() => forums.id, { onDelete: "cascade" }),
+    applicantUserId: text("applicant_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Free-text answer to the owner's prompt; null = no prompt set. */
+    answer: text("answer"),
+    status: text("status", { enum: ["pending", "approved", "rejected", "withdrawn"] })
+      .notNull()
+      .default("pending"),
+    submittedAt: ts("submitted_at"),
+    reviewedAt: integer("reviewed_at", { mode: "timestamp_ms" }),
+    reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    reviewNote: text("review_note"),
+  },
+  (t) => ({
+    forumStatusIdx: index("forum_membership_apps_forum_idx").on(t.forumId, t.status),
+    applicantIdx: index("forum_membership_apps_applicant_idx").on(t.applicantUserId, t.status),
+  }),
+);
+
+/**
+ * Per-user last-visit marker (migration 0231), one row per (user, forum).
+ * Drives the catalog's "new since you last looked" dot: unseen when the
+ * forum's lastActivityAt outruns this timestamp (or no row exists).
+ * Upserted when a signed-in user selects the forum in the catalog.
+ */
+export const forumVisits = sqliteTable(
+  "forum_visits",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    forumId: text("forum_id")
+      .notNull()
+      .references(() => forums.id, { onDelete: "cascade" }),
+    lastVisitAt: ts("last_visit_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.forumId] }),
+  }),
+);
+
+/**
+ * OpenGraph unfurl cache (migration 0238): one row per fetched URL so a
+ * popular link is fetched once per TTL, not once per message. `json` is
+ * the LinkPreview payload, or '{}' for negative results (nothing
+ * previewable / unsafe target) so failures are cached too.
+ */
+export const ogUnfurlCache = sqliteTable("og_unfurl_cache", {
+  url: text("url").primaryKey(),
+  json: text("json").notNull().default("{}"),
+  fetchedAt: ts("fetched_at"),
+});
+
+/**
+ * Per-topic read markers (migration 0236): a topic shows unread while
+ * its lastActivityAt outruns lastReadAt (or no row). Upserted when the
+ * user opens the topic in the Forums Catalog.
+ */
+export const forumTopicReads = sqliteTable(
+  "forum_topic_reads",
+  {
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    topicId: text("topic_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+    lastReadAt: ts("last_read_at"),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.topicId] }) }),
+);
+
+/**
+ * Topic watches (migration 0236): explicit subscriptions. Authors
+ * auto-watch their topics; repliers auto-watch what they reply to.
+ * Watchers get a notification for every new reply.
+ */
+export const forumTopicWatches = sqliteTable(
+  "forum_topic_watches",
+  {
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    topicId: text("topic_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.topicId] }) }),
+);
+
+/**
+ * Forum notification inbox (migration 0236). Display fields are
+ * SNAPSHOTS (actor name, topic title, snippet) so the inbox survives
+ * renames; FKs cascade so deleted posts/topics/forums take their
+ * notifications with them. kind: reply (your topic) | quote (you were
+ * quoted) | watch (watched topic got a reply).
+ */
+export const forumNotifications = sqliteTable(
+  "forum_notifications",
+  {
+    id: id(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["reply", "quote", "watch"] }).notNull(),
+    forumId: text("forum_id").notNull().references(() => forums.id, { onDelete: "cascade" }),
+    boardRoomId: text("board_room_id").notNull().references(() => rooms.id, { onDelete: "cascade" }),
+    topicId: text("topic_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+    messageId: text("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+    actorUserId: text("actor_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    actorName: text("actor_name").notNull(),
+    topicTitle: text("topic_title").notNull(),
+    snippet: text("snippet").notNull().default(""),
+    createdAt: ts("created_at"),
+    readAt: integer("read_at", { mode: "timestamp_ms" }),
+  },
+  (t) => ({
+    userIdx: index("forum_notifications_user_idx").on(t.userId, t.createdAt),
+    unreadIdx: index("forum_notifications_unread_idx").on(t.userId, t.readAt),
+  }),
+);
+
+/**
+ * Per-forum bans, owner-issued (site staff with manage_any_forum can
+ * lift). Scoped STRICTLY to the forum's boards — a forum ban must never
+ * affect the rest of the site. `until` null = permanent. Enforced at:
+ * board join, topic post/reply, membership-application submit.
+ */
+export const forumBans = sqliteTable(
+  "forum_bans",
+  {
+    forumId: text("forum_id")
+      .notNull()
+      .references(() => forums.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    until: integer("until", { mode: "timestamp_ms" }),
+    reason: text("reason"),
+    issuedById: text("issued_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.forumId, t.userId] }),
+    userIdx: index("forum_bans_user_idx").on(t.userId),
   }),
 );
 

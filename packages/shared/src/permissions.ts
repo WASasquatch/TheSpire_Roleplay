@@ -92,6 +92,9 @@ export const PERMISSION_KEYS = [
   "edit_others_scriptorium_content",
   "view_others_scriptorium_drafts",
   "bypass_scriptorium_paywall",
+  "apply_create_forum",
+  "review_forum_applications",
+  "manage_any_forum",
 
   // ---- audit_view (non-tab read permissions) ----
   "view_room_messages_as_admin",
@@ -111,6 +114,7 @@ export const PERMISSION_KEYS = [
   "view_admin_rules",
   "view_admin_affiliates",
   "view_admin_scriptorium",
+  "view_admin_forums",
   "view_admin_backups",
   "view_admin_custom_commands",
   "view_admin_title_kinds",
@@ -225,6 +229,9 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   edit_others_scriptorium_content: "Admin override on others' stories, chapters, reviews, and replies.",
   view_others_scriptorium_drafts: "Read other authors' unpublished drafts in the admin queue.",
   bypass_scriptorium_paywall: "Read books marked 'Buy to Read' without buying a copy (shows a moderator warning).",
+  apply_create_forum: "Submit an application to create a community forum (one pending application at a time).",
+  review_forum_applications: "Approve or reject forum-creation applications in the admin Forums tab.",
+  manage_any_forum: "Admin override on any community forum: edit, archive, transfer, delete, and lift forum bans.",
 
   // audit_view
   view_room_messages_as_admin: "Open the admin message scroll-through for a public room.",
@@ -244,6 +251,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   view_admin_rules: "See the admin Rules tab.",
   view_admin_affiliates: "See the admin Affiliates tab.",
   view_admin_scriptorium: "See the admin Scriptorium tab.",
+  view_admin_forums: "See the admin Forums tab (forum-creation queue + forum oversight).",
   view_admin_backups: "See the admin Backups tab.",
   view_admin_custom_commands: "See the admin Custom Commands tab.",
   view_admin_title_kinds: "See the admin Title Kinds tab.",
@@ -347,6 +355,9 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   edit_others_scriptorium_content: "content_admin",
   view_others_scriptorium_drafts: "content_admin",
   bypass_scriptorium_paywall: "content_admin",
+  apply_create_forum: "content_admin",
+  review_forum_applications: "content_admin",
+  manage_any_forum: "content_admin",
 
   // audit_view
   view_room_messages_as_admin: "audit_view",
@@ -366,6 +377,7 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   view_admin_rules: "admin_panel_tabs",
   view_admin_affiliates: "admin_panel_tabs",
   view_admin_scriptorium: "admin_panel_tabs",
+  view_admin_forums: "admin_panel_tabs",
   view_admin_backups: "admin_panel_tabs",
   view_admin_custom_commands: "admin_panel_tabs",
   view_admin_title_kinds: "admin_panel_tabs",

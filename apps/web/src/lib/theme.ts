@@ -1,6 +1,7 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect, useRef } from "react";
 import type { CSSProperties } from "react";
 import { DEFAULT_THEME, isDarkPalette, legibleThemePalette, THEME_PRESETS, type Theme } from "@thekeep/shared";
+import { applyStyle } from "./ornaments/index.js";
 import { loadCachedActiveTheme, type SiteBranding } from "../state/store.js";
 
 /**
@@ -18,6 +19,76 @@ export const ActiveThemeContext = createContext<Theme>(DEFAULT_THEME);
 
 export function useActiveTheme(): Theme {
   return useContext(ActiveThemeContext);
+}
+
+/**
+ * GLOBAL ink-vs-surface mechanic: decide whether a surface reads as
+ * dark, so callers can flip text light/dark instead of trusting theme
+ * classes that assume a particular background.
+ *
+ *   - `imageOverlay: true` → the surface is one of our image banners,
+ *     which always paint a dark gradient scrim over the art — the
+ *     surface is dark BY CONSTRUCTION, whatever the image or theme.
+ *   - otherwise → sample the palette (WCAG relative luminance via
+ *     isDarkPalette) of whatever theme paints that surface.
+ *
+ * Pair with {@link inkClass} for the standard class strings.
+ */
+export function isDarkSurface(theme: Theme, opts?: { imageOverlay?: boolean }): boolean {
+  if (opts?.imageOverlay) return true;
+  return isDarkPalette(theme);
+}
+
+/** Standard legible-ink classes for a sampled surface. */
+export const inkClass = {
+  /** Headline ink. */
+  title: (dark: boolean) => (dark ? "text-white drop-shadow-[0_1px_3px_rgba(0,0,0,.9)]" : "text-keep-text"),
+  /** Secondary line ink. */
+  sub: (dark: boolean) => (dark ? "text-white/80 drop-shadow" : "text-keep-muted"),
+  /** Meta/caption ink. */
+  meta: (dark: boolean) => (dark ? "text-white/70" : "text-keep-muted"),
+  /** Emphasized inline ink inside meta. */
+  strong: (dark: boolean) => (dark ? "text-white" : "text-keep-text"),
+} as const;
+
+/**
+ * ROOT-level design override for forum surfaces (the Forums Catalog
+ * modal and the public /f/ landing — both cover the viewport).
+ *
+ * A DESIGN cannot be subtree-scoped the way a palette can: design CSS
+ * keys off `html[data-theme-style=…]`, and an ancestor design (e.g. the
+ * viewer's glass) keeps matching INSIDE any card that declares its own
+ * attribute — glass translucency bleeding through a medieval forum was
+ * exactly that. So while a forum that has CHOSEN a design style is on
+ * screen, we swap the root design to it (ornaments regenerated from the
+ * forum's palette) and restore the viewer's design on the way out.
+ *
+ * Forums with NO chosen style leave the viewer's design untouched —
+ * the user's own preferences fill the gaps, never override a choice.
+ */
+export function useScopedRootDesign(
+  /** Palette the ornaments should be generated from (forum theme,
+   *  falling back to the viewer's active palette). */
+  theme: Theme,
+  /** The forum's chosen design key; null/undefined = no override. */
+  styleKey: string | null | undefined,
+  /** Gate: only swap once the forum detail has actually loaded. */
+  enabled: boolean,
+  /** Viewer's root palette, used to regenerate THEIR ornaments on restore. */
+  restoreTheme: Theme,
+): void {
+  // Latest restore palette without retriggering the swap effect.
+  const restoreRef = useRef(restoreTheme);
+  restoreRef.current = restoreTheme;
+  useEffect(() => {
+    if (!enabled || !styleKey) return;
+    const root = document.documentElement;
+    const prevKey = root.getAttribute("data-theme-style");
+    applyStyle(theme, styleKey);
+    return () => {
+      applyStyle(restoreRef.current, prevKey);
+    };
+  }, [theme, styleKey, enabled]);
 }
 
 /**

@@ -757,21 +757,29 @@ export async function registerUsersRoutes(
     if (body.disabled !== undefined) update.disabledAt = body.disabled ? new Date() : null;
     await db.update(users).set(update).where(eq(users.id, id));
 
-    // If we just disabled the account or downgraded their role, force-kick
-    // any live sockets they have so they drop back to the splash instead
-    // of lingering in chat with stale permissions until they happen to
-    // interact (which would trigger auth:expired anyway, but only if they
-    // type/click). DELETE already does this - PATCH should mirror it.
     const justDisabled = body.disabled === true && target.disabledAt == null;
     const justEnabled = body.disabled === false && target.disabledAt != null;
     const roleChanged = body.role !== undefined && body.role !== target.role;
-    if (justDisabled || roleChanged) {
+    if (justDisabled) {
+      // Authoritative logout: revoke every session row AND drop live
+      // sockets with the reason shown on the splash. The old emit-then-
+      // immediate-disconnect here raced the transport (the event often
+      // never arrived) and left the session rows valid, so the client
+      // quietly auto-reconnected and stayed in chat — the "disabled
+      // users aren't logged out" bug.
+      const { forceLogoutUser } = await import("../auth/session.js");
+      await forceLogoutUser(io, db, id, "Your account has been disabled by an administrator.");
+    } else if (roleChanged) {
+      // Role changes keep their sessions (they should log straight back
+      // in with refreshed permissions); just bounce the sockets. The
+      // flush delay lets auth:expired actually reach the client before
+      // the transport closes.
       const sockets = await io.fetchSockets();
       for (const s of sockets) {
         const uid = (s.data as { userId?: string }).userId;
         if (uid !== id) continue;
         s.emit("auth:expired");
-        s.disconnect(true);
+        setTimeout(() => { try { s.disconnect(true); } catch { /* gone */ } }, 250);
       }
     }
 

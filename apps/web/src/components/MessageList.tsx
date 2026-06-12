@@ -18,6 +18,7 @@ import { splitMentions } from "../lib/mentions.js";
 import { extractMentions } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { ReactionAddButton, ReactionBar } from "./ReactionBar.js";
+import { LinkPreviewCard } from "./LinkPreviewCard.js";
 import { MessageVisibilityGate } from "./MessageVisibilityGate.js";
 import { useMentionsCache, requestMentionResolve } from "../state/mentions.js";
 import { readError } from "../lib/http.js";
@@ -173,10 +174,68 @@ interface Props {
    * cancels any active reply state in the parent. `null` = Uncategorized.
    */
   onStartTopicInCategory?: (categoryId: string | null) => void;
+  /**
+   * Forums Catalog: render the reply composer INSIDE the active topic
+   * card, after its reply chain — a "ghost post" that becomes the real
+   * post on submit. Called only for the ACTIVE topic. Chat passes
+   * nothing (its composer is the chat composer below the feed).
+   */
+  renderTopicComposer?: (topic: ChatMessage) => React.ReactNode;
+  /**
+   * Forums Catalog: render the new-topic form inline at the top of a
+   * category section (`"_uncat"` = the Uncategorized bucket). Return
+   * null for sections that aren't composing. Chat passes nothing.
+   */
+  renderNewTopicForm?: (categoryKey: string) => React.ReactNode;
+  /** Forums Catalog: topics with activity the viewer hasn't read —
+   *  renders the unread dot on their cards. Chat passes nothing. */
+  unreadTopicIds?: ReadonlySet<string>;
+  /** Forums Catalog: topics the viewer watches (bell state). */
+  watchedTopicIds?: ReadonlySet<string>;
+  /** Forums Catalog: toggle a topic subscription from the card's bell. */
+  onToggleTopicWatch?: (topicId: string, watch: boolean) => void;
+  /** Anonymous forum reader (/f/ landing): hide every action toolbar —
+   *  read-only browsing, copy-link only. */
+  readOnly?: boolean;
+  /** Permalink builders (forum surfaces). When present, topic cards and
+   *  post toolbars grow a copy-link button. */
+  postPermalink?: (messageId: string) => string;
 }
 
-/** Replies past this count get hidden behind a "View More" expander in nested mode. */
-const NESTED_VISIBLE_REPLIES = 5;
+/** Replies per page inside an expanded topic. Chains at or under this
+ *  render whole; longer chains get the classic forum pager (First /
+ *  Prev / Page x of y / Next / Last), defaulting to the newest page. */
+const REPLIES_PER_PAGE = 20;
+
+/** Tiny copy-permalink button (topic cards + post toolbars). Flashes a
+ *  check for a beat after copying. */
+function CopyLinkButton({ url, compact = false }: { url: string; compact?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        void navigator.clipboard?.writeText(url)
+          .then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1200);
+          })
+          .catch(() => { /* clipboard unavailable; nothing to show */ });
+      }}
+      title={copied ? "Link copied" : "Copy link to this"}
+      aria-label="Copy link"
+      className={compact
+        ? "shrink-0 rounded border border-keep-rule/60 bg-keep-bg/60 px-1.5 py-0.5 text-xs text-keep-muted hover:border-keep-action hover:text-keep-action"
+        : "keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 text-keep-muted hover:bg-keep-banner hover:text-keep-text"}
+    >
+      <span aria-hidden>{copied ? "✓" : "🔗"}</span>
+      {compact ? null : (
+        <span className="ml-1 text-[10px] uppercase tracking-widest">{copied ? "Copied" : "Link"}</span>
+      )}
+    </button>
+  );
+}
 
 /** Kinds eligible for /reports - mirrors the server's privacy gate. */
 const REPORTABLE_KINDS = new Set(["say", "me", "ooc", "announce", "npc"]);
@@ -276,7 +335,7 @@ function fmtFullTimestamp(ms: number): string {
   return new Date(ms).toLocaleString();
 }
 
-export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canAdminEdit = false, onQuotePost, forumBuckets, onGoToForumPage, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory }: Props) {
+export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canAdminEdit = false, onQuotePost, forumBuckets, onGoToForumPage, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory, renderTopicComposer, renderNewTopicForm, unreadTopicIds, watchedTopicIds, onToggleTopicWatch, readOnly = false, postPermalink }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   /**
    * Scroll-bookkeeping for flat-mode auto-scroll-vs-preserve. We
@@ -352,6 +411,12 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // Forums read TOP-DOWN: never end-pin or auto-scroll the nested
+    // view. The chat heuristics below (end-pin on append/replace) were
+    // yanking the forum list downward whenever the buffer changed —
+    // e.g. the Forums Catalog hydrating a topic's replies — sliding the
+    // expanded card's header under the sticky category bar.
+    if (replyMode === "nested") return;
     if (highlightMessageId) return; // jump-to-message owns scroll
     const prev = scrollState.current;
     const newFirstId = messages[0]?.id ?? null;
@@ -382,7 +447,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     }
     // first AND last unchanged → no buffer changes that affect layout
     // (an in-place message edit, for example). Leave scroll alone.
-  }, [messages, highlightMessageId]);
+  }, [messages, highlightMessageId, replyMode]);
 
   // Jump-to-message flash. When `highlightMessageId` flips to a value
   // present in the current buffer, find the row's DOM node, scroll it to
@@ -397,11 +462,25 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       `[data-message-id="${CSS.escape(highlightMessageId)}"]`,
     );
     if (!node) {
-      // Target not in the loaded buffer, caller is responsible for
-      // swapping the buffer first; we just clear the flag and let them
-      // retry on the next render.
-      onHighlightDone?.();
-      return;
+      // Target not rendered YET. The forum view may be expanding a
+      // capped reply window for this exact highlight (TopicCard's
+      // auto-expand keys on highlightMessageId in the same commit), so
+      // give the DOM one frame before giving up — without the retry,
+      // quote-reference jumps into "view earlier replies" territory
+      // cleared the flag before the row existed.
+      const raf = requestAnimationFrame(() => {
+        const late = container.querySelector<HTMLElement>(
+          `[data-message-id="${CSS.escape(highlightMessageId)}"]`,
+        );
+        if (!late) { onHighlightDone?.(); return; }
+        late.scrollIntoView({ behavior: "smooth", block: "center" });
+        late.classList.add("bg-keep-action/30");
+        window.setTimeout(() => {
+          late.classList.remove("bg-keep-action/30");
+          onHighlightDone?.();
+        }, 1800);
+      });
+      return () => cancelAnimationFrame(raf);
     }
     node.scrollIntoView({ behavior: "smooth", block: "center" });
     node.classList.add("bg-keep-action/30");
@@ -637,6 +716,14 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         canAdminEdit={canAdminEdit}
         {...(onQuotePost ? { onQuotePost } : {})}
         {...(onJumpToReply ? { onJumpToReply } : {})}
+        {...(renderTopicComposer ? { renderTopicComposer } : {})}
+        {...(renderNewTopicForm ? { renderNewTopicForm } : {})}
+        {...(unreadTopicIds ? { unreadTopicIds } : {})}
+        {...(watchedTopicIds ? { watchedTopicIds } : {})}
+        {...(onToggleTopicWatch ? { onToggleTopicWatch } : {})}
+        readOnly={readOnly}
+        {...(postPermalink ? { postPermalink } : {})}
+        highlightMessageId={highlightMessageId ?? null}
         genderByUser={genderByUser}
         adminUserIds={adminUserIds}
         selfUserId={selfUserId}
@@ -1008,6 +1095,14 @@ function ForumView({
   onMentionClick,
   onWorldClick,
   onTimeClick,
+  renderTopicComposer,
+  renderNewTopicForm,
+  unreadTopicIds,
+  watchedTopicIds,
+  onToggleTopicWatch,
+  readOnly = false,
+  postPermalink,
+  highlightMessageId,
 }: {
   scrollRef: React.MutableRefObject<HTMLDivElement | null>;
   /** Reply messages from the chat backlog. Topics come from `buckets`, not from this list. */
@@ -1053,6 +1148,19 @@ function ForumView({
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
+  /** See MessageList Props — inline composers for the Forums Catalog. */
+  renderTopicComposer?: (topic: ChatMessage) => React.ReactNode;
+  renderNewTopicForm?: (categoryKey: string) => React.ReactNode;
+  /** See MessageList Props — unread dots + watch bells (catalog only). */
+  unreadTopicIds?: ReadonlySet<string>;
+  watchedTopicIds?: ReadonlySet<string>;
+  onToggleTopicWatch?: (topicId: string, watch: boolean) => void;
+  /** See MessageList Props — anonymous read-only mode + permalinks. */
+  readOnly?: boolean;
+  postPermalink?: (messageId: string) => string;
+  /** Jump-highlight target (quote references); TopicCards expand their
+   *  reply cap when it's one of their hidden replies. */
+  highlightMessageId?: string | null;
 }) {
   // Index replies by parent topic id. Replies that don't match any
   // currently-loaded topic just don't render (they'll appear when the
@@ -1075,15 +1183,37 @@ function ForumView({
   // always render Uncategorized last when it has content, OR when
   // the room has no categories defined (so the room still has a
   // visible topic list).
+  // Category tree (one level): top-level categories render as sections;
+  // their children render as SUB-sections inside. A subcategory whose
+  // parent is missing or is itself a child (shouldn't happen — the
+  // server enforces one level) promotes to top level instead of
+  // disappearing.
+  type SubSection = { key: string; label: string; subtitle: string | null; iconUrl: string | null };
   const sections = useMemo(() => {
-    const out: Array<{ key: string; label: string | null }> = [];
+    const validParentIds = new Set(categories.filter((c) => !c.parentId).map((c) => c.id));
+    const isSub = (c: ThreadCategory) => !!c.parentId && validParentIds.has(c.parentId);
+    const subsByParent = new Map<string, SubSection[]>();
     for (const c of categories) {
-      out.push({ key: c.id, label: c.name });
+      if (!isSub(c)) continue;
+      const list = subsByParent.get(c.parentId!) ?? [];
+      list.push({ key: c.id, label: c.name, subtitle: c.subtitle ?? null, iconUrl: c.iconUrl ?? null });
+      subsByParent.set(c.parentId!, list);
+    }
+    const out: Array<{ key: string; label: string | null; subtitle: string | null; iconUrl: string | null; children: SubSection[] }> = [];
+    for (const c of categories) {
+      if (isSub(c)) continue;
+      out.push({
+        key: c.id,
+        label: c.name,
+        subtitle: c.subtitle ?? null,
+        iconUrl: c.iconUrl ?? null,
+        children: subsByParent.get(c.id) ?? [],
+      });
     }
     const uncatBucket = buckets["_uncat"];
     const uncatVisible = uncatBucket && (uncatBucket.topics.length > 0 || uncatBucket.pending.length > 0 || uncatBucket.hasMore);
     if (uncatVisible || categories.length === 0) {
-      out.push({ key: "_uncat", label: categories.length > 0 ? "Uncategorized" : null });
+      out.push({ key: "_uncat", label: categories.length > 0 ? "Uncategorized" : null, subtitle: null, iconUrl: null, children: [] });
     }
     return out;
   }, [categories, buckets]);
@@ -1116,6 +1246,104 @@ function ForumView({
     });
   }
 
+  /** One bucket's body: pending pill, inline new-topic slot, topic
+   *  cards, pagination. Shared by top-level sections and their
+   *  subcategory sub-sections (each category id has its own bucket). */
+  function renderBucket(key: string) {
+    const bucket = buckets[key];
+    const items = bucket?.topics ?? [];
+    const pendingCount = bucket?.pending.length ?? 0;
+    const isLoading = bucket?.loading ?? false;
+    const currentPage = bucket?.currentPage ?? 1;
+    const totalPages = bucket?.totalPages ?? 1;
+    const totalCount = bucket?.totalCount ?? items.length;
+    return (
+      <div className="flex flex-col gap-1.5">
+        {/* "X new topics" pill, visible only when at least one topic
+            from another user arrived since the last flush. */}
+        {pendingCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => onFlushPendingTopics(key)}
+            className="self-start rounded-full border border-keep-action/60 bg-keep-action/10 px-3 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
+            title="Show the topics that arrived while you were reading"
+          >
+            ↓ {pendingCount} new {pendingCount === 1 ? "topic" : "topics"}
+          </button>
+        ) : null}
+
+        {/* Inline new-topic form (Forums Catalog). Renders as a ghost
+            topic card in the category the user clicked "+ New Topic"
+            in; null everywhere else. */}
+        {renderNewTopicForm?.(key) ?? null}
+
+        {/* The actual list. While the bucket is still loading its first
+            page, show a skeleton hint instead of "No topics yet". */}
+        {items.length === 0 ? (
+          isLoading ? (
+            <div className="px-1 py-2 text-xs italic text-keep-muted">Loading topics…</div>
+          ) : (
+            <div className="px-1 py-2 text-xs italic text-keep-muted">No topics yet.</div>
+          )
+        ) : (
+          items.map((topic) => (
+            <TopicCard
+              key={topic.id}
+              topic={topic}
+              replies={repliesByParent.get(topic.id) ?? []}
+              isActive={topic.id === activeTopicId}
+              onToggle={() => onSetActiveTopic(topic.id === activeTopicId ? null : topic.id)}
+              onPopout={() => onPopoutTopic(topic.id)}
+              canModerate={canModerate}
+              canPin={canPin}
+              canAdminEdit={canAdminEdit}
+              {...(onQuotePost ? { onQuotePost } : {})}
+              {...(onJumpToReply ? { onJumpToReply } : {})}
+              // Reply pill activates the topic unconditionally (the
+              // toggle semantic would deactivate when already active,
+              // wrong for "I'm about to reply to this").
+              onActivateForReply={(id) => onSetActiveTopic(id)}
+              {...(renderTopicComposer ? { renderTopicComposer } : {})}
+              isUnread={unreadTopicIds?.has(topic.id) ?? false}
+              {...(onToggleTopicWatch
+                ? {
+                    isWatched: watchedTopicIds?.has(topic.id) ?? false,
+                    onToggleWatch: () => onToggleTopicWatch(topic.id, !(watchedTopicIds?.has(topic.id) ?? false)),
+                  }
+                : {})}
+              highlightMessageId={highlightMessageId ?? null}
+              readOnly={readOnly}
+              {...(postPermalink ? { postPermalink } : {})}
+              genderByUser={genderByUser}
+              adminUserIds={adminUserIds}
+              selfUserId={selfUserId}
+              selfNames={selfNames}
+              roomType={roomType}
+              onIconClick={onIconClick}
+              onNameClick={onNameClick}
+              onMentionClick={onMentionClick}
+              onWorldClick={onWorldClick}
+              onTimeClick={onTimeClick}
+            />
+          ))
+        )}
+
+        {/* Per-category pagination strip. Stickies stay on page 1 and
+            don't count against pagination (server behavior). */}
+        {totalPages > 1 ? (
+          <ForumPaginationStrip
+            sectionKey={key}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalCount={totalCount}
+            isLoading={isLoading}
+            onGoToPage={(p) => onGoToForumPage(key, p)}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div
       ref={scrollRef as React.RefObject<HTMLDivElement>}
@@ -1127,7 +1355,10 @@ function ForumView({
       // breakpoint is `lg` to match the rest of the chat shell, the
       // rail stays in drawer mode until `lg` so the chat needs the
       // full viewport gutter-free at every `< lg` width.
-      className="keep-chat-feed min-h-0 flex-1 overflow-y-auto py-2 leading-relaxed lg:px-4"
+      // pb only: top padding made the FIRST category header float below
+      // an awkward empty strip (the header's own border-y + the section
+      // chrome already separate it from whatever sits above).
+      className="keep-chat-feed min-h-0 flex-1 overflow-y-auto pb-2 leading-relaxed lg:px-4"
       style={{ fontSize: FONT_EM[fontStep] }}
       // Flatten any selection copied out of the chat feed to plain
       // text, no avatar markup, no name-style CSS, no bold /
@@ -1137,17 +1368,9 @@ function ForumView({
       onCopy={handlePlainTextCopy}
     >
       {sections.map((s) => {
-        const bucket = buckets[s.key];
-        const items = bucket?.topics ?? [];
-        const pendingCount = bucket?.pending.length ?? 0;
+        const ownBucket = buckets[s.key];
+        const headerCount = ownBucket?.totalCount ?? ownBucket?.topics.length ?? 0;
         const isCollapsed = s.label !== null && collapsed.has(s.key);
-        const isLoading = bucket?.loading ?? false;
-        // Pagination metadata. Falls back to a single-page assumption
-        // when the bucket hasn't loaded yet so the strip stays hidden
-        // until the first fetch returns real totals.
-        const currentPage = bucket?.currentPage ?? 1;
-        const totalPages = bucket?.totalPages ?? 1;
-        const totalCount = bucket?.totalCount ?? items.length;
         return (
           <section key={s.key} className="mb-3">
             {s.label !== null ? (
@@ -1216,14 +1439,29 @@ function ForumView({
                     button on the right off the edge. */}
                 <span className="flex min-w-0 items-baseline">
                   <span aria-hidden className="mr-2 inline-block w-3 shrink-0 text-keep-muted">{isCollapsed ? "▶" : "▼"}</span>
+                  {/* Owner-uploaded category icon (borderless, contain —
+                      alpha icons render as themselves). */}
+                  {s.iconUrl ? (
+                    <img src={s.iconUrl} alt="" className="mr-2 h-5 w-5 shrink-0 self-center object-contain" />
+                  ) : null}
                   {/* `min-w-0` on the truncate target itself, without
                       it, Tailwind's `.truncate` (which sets overflow:
                       hidden) can't shrink below the text's intrinsic
                       width because the default flex min-width is auto. */}
-                  <span className="min-w-0 truncate">{s.label}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate">{s.label}</span>
+                    {/* Owner-set "what belongs in here" line. Overrides
+                        the header's uppercase/tracking so it reads as
+                        prose, not as a second shouting label. */}
+                    {s.subtitle ? (
+                      <span className="block truncate text-[11px] font-normal normal-case tracking-normal text-keep-muted">
+                        {s.subtitle}
+                      </span>
+                    ) : null}
+                  </span>
                 </span>
                 <span className="flex shrink-0 items-baseline gap-3">
-                  <span className="text-xs tabular-nums text-keep-muted">{totalCount}</span>
+                  <span className="text-xs tabular-nums text-keep-muted">{headerCount}</span>
                   <button
                     type="button"
                     onClick={(e) => {
@@ -1242,81 +1480,69 @@ function ForumView({
               </div>
             ) : null}
             {isCollapsed ? null : (
-              <div className="flex flex-col gap-1.5">
-                {/* "X new topics" pill, visible only when at least one
-                    topic from another user arrived since the last
-                    flush. Click prepends them into `items`. */}
-                {pendingCount > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => onFlushPendingTopics(s.key)}
-                    className="self-start rounded-full border border-keep-action/60 bg-keep-action/10 px-3 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
-                    title="Show the topics that arrived while you were reading"
-                  >
-                    ↓ {pendingCount} new {pendingCount === 1 ? "topic" : "topics"}
-                  </button>
-                ) : null}
-
-                {/* The actual list. While the bucket is still loading
-                    its first page and hasn't returned anything yet,
-                    show a skeleton hint instead of "No topics yet" so
-                    the user doesn't briefly see "empty" on join. */}
-                {items.length === 0 ? (
-                  isLoading ? (
-                    <div className="px-1 py-2 text-xs italic text-keep-muted">Loading topics…</div>
-                  ) : (
-                    <div className="px-1 py-2 text-xs italic text-keep-muted">No topics yet.</div>
-                  )
-                ) : (
-                  items.map((topic) => (
-                    <TopicCard
-                      key={topic.id}
-                      topic={topic}
-                      replies={repliesByParent.get(topic.id) ?? []}
-                      isActive={topic.id === activeTopicId}
-                      onToggle={() => onSetActiveTopic(topic.id === activeTopicId ? null : topic.id)}
-                      onPopout={() => onPopoutTopic(topic.id)}
-                      canModerate={canModerate}
-                      canPin={canPin}
-                      canAdminEdit={canAdminEdit}
-                      {...(onQuotePost ? { onQuotePost } : {})}
-                      {...(onJumpToReply ? { onJumpToReply } : {})}
-                      // Reply pill activates the topic unconditionally (the
-                      // toggle semantic would deactivate when already active,
-                      // wrong for "I'm about to reply to this").
-                      onActivateForReply={(id) => onSetActiveTopic(id)}
-                      genderByUser={genderByUser}
-                      adminUserIds={adminUserIds}
-                      selfUserId={selfUserId}
-                      selfNames={selfNames}
-                      roomType={roomType}
-                      onIconClick={onIconClick}
-                      onNameClick={onNameClick}
-                      onMentionClick={onMentionClick}
-                      onWorldClick={onWorldClick}
-                      onTimeClick={onTimeClick}
-                    />
-                  ))
-                )}
-
-                {/* Per-category pagination strip, Prev / page numbers /
-                    Next. Only renders when there's more than one page
-                    of non-stickies. Stickies don't count against the
-                    pagination (the server keeps them on page 1 only
-                    and excludes them from the count), so a category
-                    with 3 stickies and 5 regular topics on a 20-per-
-                    page setting still shows as one page total. */}
-                {totalPages > 1 ? (
-                  <ForumPaginationStrip
-                    sectionKey={s.key}
-                    currentPage={currentPage}
-                    totalPages={totalPages}
-                    totalCount={totalCount}
-                    isLoading={isLoading}
-                    onGoToPage={(p) => onGoToForumPage(s.key, p)}
-                  />
-                ) : null}
-              </div>
+              <>
+                {renderBucket(s.key)}
+                {/* Subcategories: smaller indented header bars, each with
+                    its own collapse, "+ New Topic", and bucket. */}
+                {s.children.map((sub) => {
+                  const subCollapsed = collapsed.has(sub.key);
+                  const subBucket = buckets[sub.key];
+                  const subCount = subBucket?.totalCount ?? subBucket?.topics.length ?? 0;
+                  return (
+                    <div key={sub.key} className="mt-2 pl-2 lg:pl-5">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          if ((e.target as HTMLElement).closest("button") !== null) return;
+                          toggleSection(sub.key);
+                          onActivateCategory(sub.key);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggleSection(sub.key);
+                            onActivateCategory(sub.key);
+                          }
+                        }}
+                        className="mb-1.5 flex w-full cursor-pointer items-baseline justify-between gap-3 rounded border border-keep-rule bg-keep-panel/70 px-3 py-1.5 text-left text-[0.92rem] font-semibold uppercase tracking-widest text-keep-text hover:brightness-95"
+                        title={subCollapsed ? "Expand subcategory" : "Collapse subcategory"}
+                      >
+                        <span className="flex min-w-0 items-baseline">
+                          <span aria-hidden className="mr-2 inline-block w-3 shrink-0 text-keep-muted">{subCollapsed ? "▶" : "▼"}</span>
+                          {sub.iconUrl ? (
+                            <img src={sub.iconUrl} alt="" className="mr-2 h-4 w-4 shrink-0 self-center object-contain" />
+                          ) : null}
+                          <span className="min-w-0">
+                            <span className="block truncate">{sub.label}</span>
+                            {sub.subtitle ? (
+                              <span className="block truncate text-[11px] font-normal normal-case tracking-normal text-keep-muted">
+                                {sub.subtitle}
+                              </span>
+                            ) : null}
+                          </span>
+                        </span>
+                        <span className="flex shrink-0 items-baseline gap-3">
+                          <span className="text-xs tabular-nums text-keep-muted">{subCount}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onStartTopicInCategory(sub.key);
+                            }}
+                            className="keep-button rounded border border-keep-action/50 bg-keep-action/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
+                            title={`Start a new topic in ${sub.label}`}
+                          >
+                            + New Topic
+                          </button>
+                        </span>
+                      </div>
+                      {subCollapsed ? null : renderBucket(sub.key)}
+                    </div>
+                  );
+                })}
+              </>
             )}
           </section>
         );
@@ -1332,9 +1558,10 @@ function ForumView({
  * border, and the composer up top switches to "reply to this topic"
  * mode. Replies render as compact forum-post cards.
  *
- * NESTED_VISIBLE_REPLIES caps very long chains at the most-recent N
- * with a "View earlier replies" toggle, same as before, for short
- * threads (the overwhelming common case) the toggle never renders.
+ * Chains longer than REPLIES_PER_PAGE paginate with the classic forum
+ * strip (First / Prev / Page x of y / Next / Last), opening on the
+ * newest page; short threads (the overwhelming common case) render
+ * whole with no pager.
  */
 function TopicCard({
   topic,
@@ -1347,6 +1574,13 @@ function TopicCard({
   onQuotePost,
   onJumpToReply,
   onActivateForReply,
+  renderTopicComposer,
+  isUnread = false,
+  isWatched = false,
+  onToggleWatch,
+  highlightMessageId = null,
+  readOnly = false,
+  postPermalink,
   genderByUser,
   adminUserIds,
   selfUserId,
@@ -1383,6 +1617,20 @@ function TopicCard({
    * from `onToggle`, which toggles the topic open/closed.
    */
   onActivateForReply: (topicId: string) => void;
+  /** Forums Catalog: inline reply composer rendered after the reply
+   *  chain while this topic is active (see MessageList Props). */
+  renderTopicComposer?: (topic: ChatMessage) => React.ReactNode;
+  /** Forums Catalog: unread-activity dot on the card header. */
+  isUnread?: boolean;
+  /** Forums Catalog: watch-bell state + toggle (absent in chat). */
+  isWatched?: boolean;
+  onToggleWatch?: () => void;
+  /** Active jump-highlight target; expands the reply cap when it's one
+   *  of this topic's hidden replies. */
+  highlightMessageId?: string | null;
+  /** Anonymous read-only browsing + permalink builders (see MessageList). */
+  readOnly?: boolean;
+  postPermalink?: (messageId: string) => string;
   genderByUser: Map<string, Gender>;
   adminUserIds: Set<string>;
   selfUserId: string | null;
@@ -1395,14 +1643,74 @@ function TopicCard({
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
 }) {
-  const [expandAll, setExpandAll] = useState(false);
+  // Reply pagination (classic forum navigation): short chains render
+  // whole; past REPLIES_PER_PAGE the chain pages, defaulting to the LAST
+  // page (the live end of the conversation, matching the old tail-cap
+  // behavior). `replyPage` is null until the user (or a jump) picks one.
+  const [replyPage, setReplyPage] = useState<number | null>(null);
+  const totalReplyPages = Math.max(1, Math.ceil(replies.length / REPLIES_PER_PAGE));
+  const paged = replies.length > REPLIES_PER_PAGE;
+  const currentReplyPage = Math.min(replyPage ?? totalReplyPages, totalReplyPages);
+  // Quote-reference jump landing on a reply outside the visible page:
+  // navigate to its page so the highlight effect can find the row (it
+  // retries one frame later).
+  useEffect(() => {
+    if (!highlightMessageId) return;
+    const idx = replies.findIndex((r) => r.id === highlightMessageId);
+    if (idx >= 0) setReplyPage(Math.floor(idx / REPLIES_PER_PAGE) + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightMessageId]);
   const headingText = topicHeading(topic);
-  const visibleReplies = expandAll
-    ? replies
-    : replies.slice(-NESTED_VISIBLE_REPLIES);
-  const hidden = Math.max(0, replies.length - visibleReplies.length);
+  const visibleReplies = paged
+    ? replies.slice((currentReplyPage - 1) * REPLIES_PER_PAGE, currentReplyPage * REPLIES_PER_PAGE)
+    : replies;
   const themeBg = useActiveTheme().bg;
   const topicAuthorColor = resolveMessageColor(topic.color, themeBg);
+
+  /** Compact pager strip for the reply chain (top + bottom when paged). */
+  const replyPager = paged ? (
+    <div className="flex flex-wrap items-center justify-center gap-1.5 py-1 text-[11px] text-keep-muted">
+      <button
+        type="button"
+        disabled={currentReplyPage <= 1}
+        onClick={() => setReplyPage(1)}
+        className="rounded border border-keep-rule px-1.5 py-0.5 hover:text-keep-text disabled:opacity-30"
+        title="First page of replies"
+      >
+        « First
+      </button>
+      <button
+        type="button"
+        disabled={currentReplyPage <= 1}
+        onClick={() => setReplyPage(currentReplyPage - 1)}
+        className="rounded border border-keep-rule px-1.5 py-0.5 hover:text-keep-text disabled:opacity-30"
+        title="Previous page of replies"
+      >
+        ‹ Prev
+      </button>
+      <span className="px-1 tabular-nums">
+        Page {currentReplyPage} of {totalReplyPages} · {replies.length} replies
+      </span>
+      <button
+        type="button"
+        disabled={currentReplyPage >= totalReplyPages}
+        onClick={() => setReplyPage(currentReplyPage + 1)}
+        className="rounded border border-keep-rule px-1.5 py-0.5 hover:text-keep-text disabled:opacity-30"
+        title="Next page of replies"
+      >
+        Next ›
+      </button>
+      <button
+        type="button"
+        disabled={currentReplyPage >= totalReplyPages}
+        onClick={() => setReplyPage(totalReplyPages)}
+        className="rounded border border-keep-rule px-1.5 py-0.5 hover:text-keep-text disabled:opacity-30"
+        title="Newest page of replies"
+      >
+        Last »
+      </button>
+    </div>
+  ) : null;
 
   return (
     <article
@@ -1469,6 +1777,15 @@ function TopicCard({
               on the title span doesn't actually shrink, because
               min-width:auto on flex children defeats overflow:hidden. */}
           <div className="flex min-w-0 items-baseline gap-2">
+            {/* Unread marker (Forums Catalog): activity since the viewer
+                last opened this topic. Cleared when the topic opens. */}
+            {isUnread ? (
+              <span
+                aria-label="New activity"
+                title="New activity since you last read this topic"
+                className="h-2 w-2 shrink-0 self-center rounded-full bg-keep-action"
+              />
+            ) : null}
             {topic.isSticky ? (
               <span
                 aria-label="Pinned"
@@ -1525,18 +1842,41 @@ function TopicCard({
             </span>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onPopout();
-          }}
-          aria-label="Open in focused view"
-          title="Open in focused view"
-          className="shrink-0 rounded border border-keep-rule/60 bg-keep-bg/60 px-1.5 py-0.5 text-xs text-keep-muted hover:border-keep-action hover:bg-keep-action/10 hover:text-keep-action"
-        >
-          ⤢
-        </button>
+        {/* Watch bell (Forums Catalog): subscribe to reply notifications
+            for this topic. Authors and repliers are auto-subscribed. */}
+        {onToggleWatch ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleWatch();
+            }}
+            aria-label={isWatched ? "Stop watching this topic" : "Watch this topic"}
+            title={isWatched ? "Watching - you're notified of new replies. Click to stop." : "Watch this topic - get notified of new replies."}
+            className={
+              "shrink-0 rounded border px-1.5 py-0.5 text-xs " +
+              (isWatched
+                ? "border-keep-action/60 bg-keep-action/10 text-keep-action"
+                : "border-keep-rule/60 bg-keep-bg/60 text-keep-muted hover:border-keep-action hover:text-keep-action")
+            }
+          >
+            {isWatched ? "🔔" : "🔕"}
+          </button>
+        ) : null}
+        {!readOnly ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPopout();
+            }}
+            aria-label="Open in focused view"
+            title="Open in focused view"
+            className="shrink-0 rounded border border-keep-rule/60 bg-keep-bg/60 px-1.5 py-0.5 text-xs text-keep-muted hover:border-keep-action hover:bg-keep-action/10 hover:text-keep-action"
+          >
+            ⤢
+          </button>
+        ) : null}
         <span aria-hidden className="shrink-0 text-keep-muted">
           {isActive ? "▼" : "▶"}
         </span>
@@ -1561,19 +1901,12 @@ function TopicCard({
             onTimeClick={onTimeClick}
             showAuthorHeader={false}
             selfNames={selfNames}
+            readOnly={readOnly}
+            {...(postPermalink ? { postPermalink } : {})}
           />
           {replies.length > 0 ? (
             <div className="mt-2 flex flex-col gap-1.5 border-t border-keep-rule/40 pt-2">
-              {hidden > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setExpandAll(true)}
-                  className="self-start rounded text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-action"
-                  title={`Show ${hidden} earlier ${hidden === 1 ? "reply" : "replies"}`}
-                >
-                  ↑ View {hidden} earlier {hidden === 1 ? "reply" : "replies"}
-                </button>
-              ) : null}
+              {replyPager}
               {visibleReplies.map((r) => (
                 <ForumPostBody
                   key={r.id}
@@ -1594,8 +1927,21 @@ function TopicCard({
                   onTimeClick={onTimeClick}
                   showAuthorHeader
                   selfNames={selfNames}
+                  readOnly={readOnly}
+                  {...(postPermalink ? { postPermalink } : {})}
                 />
               ))}
+              {/* Bottom pager too - after reading a page you're at the
+                  bottom, the next click shouldn't require scrolling up. */}
+              {replyPager}
+            </div>
+          ) : null}
+          {/* Ghost reply post (Forums Catalog): the composer lives inside
+              the topic, at the end of its chain — submitting turns it
+              into the real post in place. Chat renders nothing here. */}
+          {renderTopicComposer ? (
+            <div className={replies.length > 0 ? "mt-1.5" : "mt-2 border-t border-keep-rule/40 pt-2"}>
+              {renderTopicComposer(topic)}
             </div>
           ) : null}
         </div>
@@ -1768,6 +2114,8 @@ export function ForumPostBody({
   onJumpToReply,
   showAuthorHeader,
   selfNames = [],
+  readOnly = false,
+  postPermalink,
 }: {
   msg: ChatMessage;
   isOwn: boolean;
@@ -1793,6 +2141,11 @@ export function ForumPostBody({
   showAuthorHeader: boolean;
   /** Viewer identities for self-mention highlighting inside this post's body. Optional. */
   selfNames?: ReadonlyArray<string>;
+  /** Anonymous read-only browsing: the action toolbar is replaced by a
+   *  lone copy-link button (when a permalink builder is present). */
+  readOnly?: boolean;
+  /** Permalink builder for this post (forum surfaces). */
+  postPermalink?: (messageId: string) => string;
 }) {
   // Forum posts use the block-level body renderer so blockquotes
   // (`> quoted text` line prefix) render as styled <blockquote>
@@ -1925,6 +2278,9 @@ export function ForumPostBody({
         const j = await res.json().catch(() => ({} as { error?: string }));
         throw new Error(j.error ?? `HTTP ${res.status}`);
       }
+      // Chat repaints via the socket echo; the Forums Catalog (not in the
+      // board's socket room) refetches off this tick instead.
+      useChat.getState().bumpForumActionTick();
       setEditing(false);
     } catch (err) {
       setEditError(err instanceof Error ? err.message : "edit failed");
@@ -1936,7 +2292,11 @@ export function ForumPostBody({
   return (
     <div
       data-message-id={msg.id}
-      className="group flex gap-2 rounded transition-colors duration-700"
+      // items-start pins the avatar to the post's top line; without it
+      // the avatar floated vertically centered beside tall posts and
+      // short one-liners got inflated by the avatar's showcase frame,
+      // which read as random gaps between replies.
+      className="group flex items-start gap-2 rounded transition-colors duration-700"
     >
       {showAuthorHeader ? (
         <ForumAvatar
@@ -1948,7 +2308,9 @@ export function ForumPostBody({
             e.stopPropagation();
             onIconClick(msg.userId, msg.displayName, msg.characterId ?? null);
           }}
-          size={32}
+          // < 28 = bare circle (no 1.5× showcase slot), so every reply
+          // row has the SAME compact height regardless of frames.
+          size={24}
         />
       ) : null}
       <div className="min-w-0 flex-1">
@@ -2086,6 +2448,11 @@ export function ForumPostBody({
             below via `extraActions`, keeps the toolbar row as a
             single tidy bar of post actions instead of stranding the
             add button on its own row beneath the message. */}
+        {/* OpenGraph card for the post's first link. The author keeps
+            the ✕ in the catalog; the anonymous reader never shows it. */}
+        {msg.linkPreview && !msg.deletedAt ? (
+          <LinkPreviewCard preview={msg.linkPreview} canRemove={isOwn && !readOnly} messageId={msg.id} />
+        ) : null}
         {REPLYABLE_KINDS.has(msg.kind) && !msg.deletedAt ? (
           <div className="mt-1">
             <ReactionBar
@@ -2097,7 +2464,10 @@ export function ForumPostBody({
             />
           </div>
         ) : null}
-        {!editing ? (
+        {/* Read-only mode renders NO per-post chrome — the address bar
+            carries the topic's URL (mirrored on navigation), so guests
+            copy the link from where links live. */}
+        {!editing && !readOnly ? (
           <PostToolbar
             msg={msg}
             isOwn={isOwn}
@@ -2119,6 +2489,7 @@ export function ForumPostBody({
             showReport={showReport && !showOwnControls && !canModerate}
             {...(onQuotePost ? { onQuotePost } : {})}
             {...(onReply ? { onReply } : {})}
+            {...(postPermalink ? { permalinkUrl: postPermalink(msg.id) } : {})}
             onEdit={() => { setDraft(msg.body); setEditing(true); }}
             extraActions={
               REPLYABLE_KINDS.has(msg.kind) && !msg.deletedAt ? (
@@ -2173,6 +2544,7 @@ function PostToolbar({
   onEdit,
   onQuotePost,
   onReply,
+  permalinkUrl,
   extraActions,
 }: {
   msg: ChatMessage;
@@ -2197,6 +2569,8 @@ function PostToolbar({
    * "start replying to this thread" affordance.
    */
   onReply?: () => void;
+  /** Shareable URL for this post; renders a copy-link pill. */
+  permalinkUrl?: string;
   /** Extra actions appended to the right of the standard buttons.
    *  Forum posts mount the "add reaction" trigger here so it lives
    *  inline with Reply/Quote/Bookmark instead of as a separate row
@@ -2242,6 +2616,7 @@ function PostToolbar({
         const j = await res.json().catch(() => ({} as { error?: string }));
         throw new Error(j.error ?? `HTTP ${res.status}`);
       }
+      useChat.getState().bumpForumActionTick();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "delete failed");
     } finally {
@@ -2263,6 +2638,7 @@ function PostToolbar({
         const j = await res.json().catch(() => ({} as { error?: string }));
         throw new Error(j.error ?? `HTTP ${res.status}`);
       }
+      useChat.getState().bumpForumActionTick();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "lock failed");
     } finally {
@@ -2284,6 +2660,7 @@ function PostToolbar({
         const j = await res.json().catch(() => ({} as { error?: string }));
         throw new Error(j.error ?? `HTTP ${res.status}`);
       }
+      useChat.getState().bumpForumActionTick();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "pin failed");
     } finally {
@@ -2296,8 +2673,10 @@ function PostToolbar({
     // Markdown blockquote with attribution. Each line of the original
     // body is prefixed with `> ` so multi-paragraph quotes render as a
     // single blockquote block. A trailing blank line + newline gives
-    // the user a place to type their reply after the quote.
-    const attribution = `**${msg.displayName}** wrote:`;
+    // the user a place to type their reply after the quote. The
+    // "wrote:" is a msg: reference link (see lib/markdown.tsx) so
+    // readers can jump back to the quoted post.
+    const attribution = `**${msg.displayName}** [wrote:](msg:${msg.id})`;
     const bodyLines = msg.body.split("\n").map((l) => `> ${l}`).join("\n");
     const quote = `> ${attribution}\n${bodyLines}\n\n`;
     onQuotePost(quote);
@@ -2383,6 +2762,7 @@ function PostToolbar({
         </button>
       ) : null}
       {showBookmark ? <InlineBookmark msg={msg} /> : null}
+      {permalinkUrl ? <CopyLinkButton url={permalinkUrl} /> : null}
       {showReport ? <InlineReport msg={msg} /> : null}
       {extraActions}
       {actionError ? <span className="normal-case tracking-normal text-keep-accent">{actionError}</span> : null}
@@ -3160,6 +3540,14 @@ function Line({
   // controls row (next to Edit), see `chatReactButton` below.
   // Mirrors the forum-post pattern at line 1814 where the
   // add-reaction trigger sits in the post action toolbar.
+  // OpenGraph card for the body's first link (absent until the unfurl
+  // lands via message:update; gone for everyone once the author ✕'s it).
+  const linkPreviewEl = msg.linkPreview && !msg.deletedAt ? (
+    <div className="pl-12 pr-2">
+      <LinkPreviewCard preview={msg.linkPreview} canRemove={isOwn} messageId={msg.id} />
+    </div>
+  ) : null;
+
   const reactionBar = REPLYABLE_KINDS.has(msg.kind) ? (
     <div className="pl-12">
       <ReactionBar
@@ -3594,6 +3982,7 @@ function Line({
       >
         <div className="pl-12">{quote}</div>
         {lineEl}
+        {linkPreviewEl}
         {inlineEditForm}
         {controls}
         {reactionBar}
@@ -3608,6 +3997,7 @@ function Line({
       className={`group relative transition-colors duration-700 ${rowFocusProps.className} ${hoverRow} ${whisperRest}`}
     >
       {lineEl}
+      {linkPreviewEl}
       {inlineEditForm}
       {controls}
       {reactionBar}

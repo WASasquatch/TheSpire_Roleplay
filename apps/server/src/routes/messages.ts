@@ -10,6 +10,7 @@ import type {
   ServerToClientEvents,
 } from "@thekeep/shared";
 import { messages, rooms, users } from "../db/schema.js";
+import { linkPreviewFromRow } from "../unfurl.js";
 import { sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
 import { getSettings } from "../settings.js";
@@ -34,9 +35,40 @@ async function isForumMessage(db: Db, roomId: string): Promise<boolean> {
   return row?.replyMode === "nested";
 }
 
+/**
+ * Powers-matrix tier for a FORUM board (rooms.forumId set), consulted by
+ * the moderation gates below IN ADDITION to the sitewide permission keys:
+ *
+ *   owner (forum owner / manage_any_forum staff): sticky, lock, edit, and
+ *     delete anything on their boards.
+ *   mod (owner-assigned Forum Moderator): the same topic-level powers
+ *     EXCEPT content authored by the forum owner — per the matrix a mod
+ *     can never edit or delete the owner's posts (lock/sticky are state,
+ *     not content, and stay allowed).
+ *
+ * Returns null for non-board rooms so flat chat and standalone nested
+ * rooms keep today's gates untouched.
+ */
+async function boardModTier(
+  db: Db,
+  user: { id: string; role: Role },
+  roomId: string,
+): Promise<{ tier: "owner" | "mod" | null; forumOwnerUserId: string } | null> {
+  const room = (await db.select({ forumId: rooms.forumId }).from(rooms)
+    .where(eq(rooms.id, roomId)).limit(1))[0];
+  if (!room?.forumId) return null;
+  const { forumAuthority } = await import("../forums/authority.js");
+  const a = await forumAuthority(db, user, room.forumId);
+  if (!a.forum) return null;
+  return {
+    tier: a.isOwner ? "owner" : a.isMod ? "mod" : null,
+    forumOwnerUserId: a.forum.ownerUserId,
+  };
+}
+
 const editBody = z.object({ body: z.string().min(1).max(20_000) }).strict();
 
-function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMessage {
+export function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMessage {
   // Mirrors the row→ChatMessage shape used in broadcast.ts; if either side
   // adds fields, both should be updated. Snapshotted fields stay as-is on
   // edit (mood, npcVoicedBy, replyTo*, etc.), only `body` and `editedAt`
@@ -78,6 +110,7 @@ function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMes
     ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
     ...(m.isSticky ? { isSticky: true } : {}),
     ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+    ...(() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })(),
     ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
     ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
     ...(m.rankKey ? { rankKey: m.rankKey } : {}),
@@ -137,7 +170,14 @@ export async function registerMessageRoutes(
     // unconditional access to their own messages (within the window)
     // independently.
     const canEditOthers = await hasPermission(me, "edit_others_message", db);
-    if (!isAuthor && !canEditOthers) { reply.code(403); return { error: "not yours" }; }
+    if (!isAuthor && !canEditOthers) {
+      // Forum boards: the owner may edit anything; a Forum Moderator may
+      // edit anything EXCEPT the owner's own posts (powers matrix).
+      const board = await boardModTier(db, me, m.roomId);
+      const boardOk = board?.tier === "owner"
+        || (board?.tier === "mod" && m.userId !== board.forumOwnerUserId);
+      if (!boardOk) { reply.code(403); return { error: "not yours" }; }
+    }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
 
     const now = Date.now();
@@ -229,7 +269,14 @@ export async function registerMessageRoutes(
     // `delete_others_message` covers both gate + grace-window bypass
     // for moderators. Same shape as the edit path above.
     const canDeleteOthers = await hasPermission(me, "delete_others_message", db);
-    if (!isAuthor && !canDeleteOthers) { reply.code(403); return { error: "not yours" }; }
+    if (!isAuthor && !canDeleteOthers) {
+      // Forum boards: owner deletes anything; a Forum Moderator deletes
+      // anything EXCEPT owner-authored content (powers matrix).
+      const board = await boardModTier(db, me, m.roomId);
+      const boardOk = board?.tier === "owner"
+        || (board?.tier === "mod" && m.userId !== board.forumOwnerUserId);
+      if (!boardOk) { reply.code(403); return { error: "not yours" }; }
+    }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
 
     const now = Date.now();
@@ -363,10 +410,15 @@ export async function registerMessageRoutes(
 
     const isAuthor = m.userId === me.id;
     // Authors can lock their own topic; mods/admins with the
-    // appropriate permission lock or unlock any topic.
+    // appropriate permission lock or unlock any topic. On forum BOARDS
+    // the forum owner + Forum Moderators get the same lever (lock is
+    // state, not content, so the owner-content exception doesn't apply).
     const key = parsed.locked ? "lock_forum_topic" : "unlock_forum_topic";
     const canModerate = await hasPermission(me, key, db);
-    if (!isAuthor && !canModerate) { reply.code(403); return { error: "not yours" }; }
+    if (!isAuthor && !canModerate) {
+      const board = await boardModTier(db, me, m.roomId);
+      if (!board?.tier) { reply.code(403); return { error: "not yours" }; }
+    }
 
     const lockedAt = parsed.locked ? new Date() : null;
     await db
@@ -394,7 +446,6 @@ export async function registerMessageRoutes(
   app.patch<{ Params: { id: string }; Body: unknown }>("/messages/:id/sticky", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
-    if (!(await hasPermission(me, "pin_forum_topic", db))) { reply.code(403); return { error: "admins only" }; }
 
     let parsed;
     try { parsed = stickyBody.parse(req.body); }
@@ -402,6 +453,13 @@ export async function registerMessageRoutes(
 
     const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
     if (!m) { reply.code(404); return { error: "not found" }; }
+    // Sitewide pin permission (admins), OR — on a forum board — the forum
+    // owner / a Forum Moderator (stickies are the matrix's topic-level
+    // furniture; mods CAN sticky, including the owner's topics).
+    if (!(await hasPermission(me, "pin_forum_topic", db))) {
+      const board = await boardModTier(db, me, m.roomId);
+      if (!board?.tier) { reply.code(403); return { error: "admins only" }; }
+    }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
     if (m.replyToId) { reply.code(400); return { error: "Only top-level topics can be pinned." }; }
 
@@ -416,6 +474,27 @@ export async function registerMessageRoutes(
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
     io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    return { ok: true };
+  });
+
+  /**
+   * DELETE /messages/:id/link-preview — the author removes the unfurled
+   * card from their own message (Discord's ✕). Writes a {"hidden":true}
+   * tombstone (so a late/re-run unfurl can't resurrect it) and
+   * broadcasts the refreshed row; the card disappears for everyone.
+   */
+  app.delete<{ Params: { id: string } }>("/messages/:id/link-preview", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
+    if (!m) { reply.code(404); return { error: "not found" }; }
+    if (m.userId !== me.id) { reply.code(403); return { error: "Only the author can remove their link preview." }; }
+    await db
+      .update(messages)
+      .set({ linkPreviewJson: JSON.stringify({ hidden: true }) })
+      .where(eq(messages.id, m.id));
+    const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
+    if (updated) io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
     return { ok: true };
   });
 }

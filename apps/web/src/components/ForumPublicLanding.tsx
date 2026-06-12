@@ -1,0 +1,545 @@
+/**
+ * Anonymous landing for `/f/<slug>` (Forums revamp, Phase 7).
+ *
+ * The shareable face of a forum for visitors without a session: the
+ * forum's banner/logo/name/tagline, its description, the board list as a
+ * read-only teaser (topic content requires an account), and the classic
+ * forum entrance — log in / register — with context copy that's explicit
+ * about what they're signing up for:
+ *
+ *   open forums:        "you're signing up for <Site> — home of this
+ *                        public forum"
+ *   application forums: "registering lets you APPLY for access to a
+ *                        forum hosted within <Site>'s public forums"
+ *
+ * The chosen destination is remembered in localStorage; after the
+ * login/registration round-trip the authed boot (App) reads the key and
+ * opens the Forums Catalog on this forum, so the visitor lands where the
+ * link promised. The forum's own theme applies to this card only.
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Landmark, Lock, LogIn, MessagesSquare, UserPlus, Users } from "lucide-react";
+import { normalizeTheme } from "@thekeep/shared";
+import type { ChatMessage, ForumDetail, ThreadCategory } from "@thekeep/shared";
+import { fetchForumDetail, fetchRoomCategories, locateForumTopic, relTime } from "../lib/forums.js";
+import { DEFAULT_STYLE_KEY } from "../lib/ornaments/index.js";
+import { inkClass, isDarkSurface, themeStyle, useActiveTheme, useScopedRootDesign } from "../lib/theme.js";
+import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
+import { MessageList } from "./MessageList.js";
+import { useChat } from "../state/store.js";
+
+/** localStorage key the authed boot consumes to land on the forum after
+ *  the login/registration round-trip. */
+export const RETURN_FORUM_STORAGE_KEY = "spire:return-forum";
+
+/**
+ * Read the pending forum destination. The landing stores JSON
+ * `{slug, name}` (the name feeds AuthGate's "you're registering to
+ * access <Forum>" banner); a legacy plain-slug value still parses so
+ * in-flight round-trips across a deploy don't break.
+ */
+export function readReturnForum(): { slug: string; name: string | null } | null {
+  try {
+    const raw = window.localStorage.getItem(RETURN_FORUM_STORAGE_KEY);
+    if (!raw) return null;
+    if (raw.startsWith("{")) {
+      const j = JSON.parse(raw) as { slug?: string; name?: string };
+      return j.slug ? { slug: j.slug, name: j.name ?? null } : null;
+    }
+    return { slug: raw, name: null };
+  } catch {
+    return null;
+  }
+}
+
+/** Bucket shape MessageList's forum view consumes (kept local — the
+ *  landing builds these from anonymous fetches, no store involved). */
+interface AnonBucket {
+  topics: ChatMessage[];
+  hasMore: boolean;
+  loading: boolean;
+  pending: ChatMessage[];
+  currentPage: number;
+  totalPages: number;
+  totalCount: number;
+  perPage: number;
+}
+
+const NOOP = () => { /* anonymous reader: no-op */ };
+
+/**
+ * Read-only board browser for PUBLIC-BROWSING forums — the same
+ * MessageList nested renderer the catalog uses, fed by anonymous
+ * fetches. Every write affordance is hidden (readOnly) and the
+ * "+ New Topic" buttons route to the login CTA instead.
+ */
+function PublicBoardReader({ detail, slug, initialTopicId, initialPostId, onRequireLogin }: {
+  detail: ForumDetail;
+  slug: string;
+  initialTopicId: string | null;
+  initialPostId: string | null;
+  onRequireLogin: () => void;
+}) {
+  const [boardId, setBoardId] = useState<string>(detail.boards[0]?.roomId ?? "");
+  const [cats, setCats] = useState<ThreadCategory[] | null>(null);
+  const [buckets, setBuckets] = useState<Record<string, AnonBucket>>({});
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+
+  const loadPage = useCallback(async (key: string, page: number) => {
+    setBuckets((cur) => ({
+      ...cur,
+      [key]: { ...(cur[key] ?? { topics: [], hasMore: false, pending: [], currentPage: 1, totalPages: 1, totalCount: 0, perPage: 20 }), loading: true },
+    }));
+    try {
+      const categoryParam = key === "_uncat" ? "" : key;
+      const r = await fetch(
+        `/rooms/${encodeURIComponent(boardId)}/topics?category=${encodeURIComponent(categoryParam)}&page=${page}`,
+        { credentials: "include" },
+      );
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = (await r.json()) as {
+        topics: ChatMessage[]; page: number | null; perPage: number; totalPages: number; totalCount: number; hasMore: boolean;
+      };
+      setBuckets((cur) => ({
+        ...cur,
+        [key]: {
+          topics: j.topics,
+          hasMore: j.hasMore,
+          loading: false,
+          pending: [],
+          currentPage: j.page ?? page,
+          totalPages: j.totalPages || 1,
+          totalCount: j.totalCount || 0,
+          perPage: j.perPage || 20,
+        },
+      }));
+    } catch {
+      setBuckets((cur) => cur[key] ? { ...cur, [key]: { ...cur[key]!, loading: false } } : cur);
+    }
+  }, [boardId]);
+
+  // Board switch: fresh categories + first pages.
+  useEffect(() => {
+    if (!boardId) return;
+    let alive = true;
+    setCats(null); setBuckets({}); setMessages([]); setActiveTopicId(null);
+    fetchRoomCategories(boardId)
+      .then((c) => { if (alive) setCats(c); })
+      .catch(() => { if (alive) setCats([]); });
+    return () => { alive = false; };
+  }, [boardId]);
+  useEffect(() => {
+    if (!cats) return;
+    for (const k of [...cats.map((c) => c.id), "_uncat"]) void loadPage(k, 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cats]);
+
+  /** Mirror navigation into the address bar: the URL IS the permalink.
+   *  pushState (not replace) so the browser back button walks out of a
+   *  topic naturally. */
+  const reflectUrl = useCallback((topicId: string | null) => {
+    const url = topicId ? `/f/${slug}/t/${topicId}` : `/f/${slug}`;
+    if (window.location.pathname !== url) window.history.pushState(null, "", url);
+  }, [slug]);
+
+  const hydrate = useCallback(async (topicId: string) => {
+    try {
+      const r = await fetch(
+        `/rooms/${encodeURIComponent(boardId)}/messages/${encodeURIComponent(topicId)}/thread`,
+        { credentials: "include" },
+      );
+      if (!r.ok) return;
+      const j = (await r.json()) as { topic: ChatMessage; replies: ChatMessage[] };
+      setMessages((cur) => {
+        const fresh = new Map<string, ChatMessage>();
+        for (const m of [j.topic, ...j.replies]) fresh.set(m.id, m);
+        return [...cur.filter((m) => !fresh.has(m.id)), ...fresh.values()].sort((a, b) => a.createdAt - b.createdAt);
+      });
+    } catch { /* gone */ }
+  }, [boardId]);
+
+  // Permalink entry: resolve the topic's board, open it, flash the post.
+  useEffect(() => {
+    if (!initialTopicId) return;
+    let alive = true;
+    locateForumTopic(initialTopicId)
+      .then((loc) => {
+        if (!alive || loc.forumId !== detail.id) return;
+        setBoardId(loc.boardRoomId);
+        setActiveTopicId(loc.topicId);
+        void hydrate(loc.topicId).then(() => {
+          if (!alive || !initialPostId) return;
+          requestAnimationFrame(() => requestAnimationFrame(() => setHighlightId(initialPostId)));
+        });
+      })
+      .catch(() => { /* not found / not public: stay on the front page */ });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTopicId, initialPostId, detail.id]);
+
+  // Quote-reference chips ([wrote:](msg:<id>)) work for guests too:
+  // jump within the loaded thread when the quoted post is present.
+  useEffect(() => {
+    const onRef = (ev: Event) => {
+      const messageId = (ev as CustomEvent<{ messageId?: string }>).detail?.messageId;
+      if (!messageId) return;
+      const row = messages.find((m) => m.id === messageId);
+      if (!row) return;
+      const topicId = row.replyToId ?? row.id;
+      setActiveTopicId(topicId);
+      reflectUrl(topicId);
+      requestAnimationFrame(() => requestAnimationFrame(() => setHighlightId(messageId)));
+    };
+    window.addEventListener("spire:quote-ref", onRef);
+    return () => window.removeEventListener("spire:quote-ref", onRef);
+  }, [messages]);
+
+  if (detail.boards.length === 0) {
+    return <p className="px-3 text-sm italic text-keep-muted">No boards raised yet.</p>;
+  }
+  const active = detail.boards.find((b) => b.roomId === boardId) ?? detail.boards[0]!;
+
+  return (
+    <div className="flex h-[78vh] min-h-[30rem] flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg/60">
+      {detail.boards.length > 1 ? (
+        <div className="flex flex-wrap gap-1 border-b border-keep-rule bg-keep-banner/20 px-3 py-1.5">
+          {detail.boards.map((b) => (
+            <button
+              key={b.roomId}
+              type="button"
+              onClick={() => setBoardId(b.roomId)}
+              className={`rounded border px-2.5 py-1 text-xs ${
+                b.roomId === active.roomId
+                  ? "border-keep-action text-keep-action"
+                  : "border-keep-rule text-keep-muted hover:text-keep-text"
+              }`}
+            >
+              {b.name}
+              <span className="ml-1.5 text-[10px] text-keep-rule">{b.topicCount}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <MessageList
+        messages={messages}
+        occupants={[]}
+        selfUserId={null}
+        selfNames={[]}
+        roomType="public"
+        replyMode="nested"
+        roomId={active.roomId}
+        threadCategories={cats ?? []}
+        activeTopicId={activeTopicId}
+        onSetActiveTopic={(id) => {
+          setActiveTopicId(id);
+          if (id) void hydrate(id);
+          reflectUrl(id);
+        }}
+        forumBuckets={buckets}
+        onGoToForumPage={(key, page) => void loadPage(key, page)}
+        onFlushPendingTopics={NOOP}
+        onActivateCategory={NOOP}
+        onStartTopicInCategory={onRequireLogin}
+        onIconClick={onRequireLogin}
+        onNameClick={onRequireLogin}
+        onMentionClick={NOOP}
+        onWorldClick={NOOP}
+        onTimeClick={NOOP}
+        fontStep={1}
+        readOnly
+        highlightMessageId={highlightId}
+        onHighlightDone={() => setHighlightId(null)}
+      />
+    </div>
+  );
+}
+
+export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId = null, onNavigate }: {
+  slug: string;
+  /** Topic permalink (/f/<slug>/t/<topicId>): open the reader on it. */
+  initialTopicId?: string | null;
+  /** #p-<postId> hash: flash that post once the thread renders. */
+  initialPostId?: string | null;
+  onNavigate: (path: string) => void;
+}) {
+  const branding = useChat((s) => s.branding);
+  const siteName = branding.siteName || "The Spire";
+  const [detail, setDetail] = useState<ForumDetail | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetchForumDetail(slug)
+      .then((d) => { if (alive) setDetail(d); })
+      .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : "load failed"); });
+    return () => { alive = false; };
+  }, [slug]);
+
+  const forumTheme = useMemo(() => {
+    if (!detail?.themeJson) return null;
+    try { return normalizeTheme(JSON.parse(detail.themeJson)); } catch { return null; }
+  }, [detail?.themeJson]);
+  // Forum's design style (glass, medieval, …) applied at the ROOT while
+  // this page is up (designs can't be subtree-scoped — their CSS keys
+  // off html[data-theme-style]). Falls back to the site-default design
+  // key when the forum hasn't picked one: anonymous visitors have no
+  // personal design, so the page still gets the full treatment.
+  const activeTheme = useActiveTheme();
+  useScopedRootDesign(
+    forumTheme ?? activeTheme,
+    detail ? detail.themeStyleKey ?? DEFAULT_STYLE_KEY : null,
+    !!detail,
+    activeTheme,
+  );
+
+  const descriptionHtml = useMemo(
+    () => (detail?.descriptionHtml ? sanitizeUserHtml(detail.descriptionHtml) : null),
+    [detail?.descriptionHtml],
+  );
+
+  function go(path: "/login" | "/register") {
+    try {
+      window.localStorage.setItem(
+        RETURN_FORUM_STORAGE_KEY,
+        JSON.stringify({ slug, name: detail?.name ?? null }),
+      );
+    } catch { /* private mode - the visitor just lands in chat instead */ }
+    onNavigate(path);
+  }
+
+  if (err) {
+    return (
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-2xl flex-col items-center justify-center gap-3 px-4 text-center">
+        <Landmark className="h-8 w-8 text-keep-muted" aria-hidden="true" />
+        <p className="text-sm text-keep-text">{err}</p>
+        <a href="/" className="text-xs uppercase tracking-widest text-keep-action hover:underline">
+          To {siteName}
+        </a>
+      </div>
+    );
+  }
+  if (!detail) {
+    return (
+      <div className="relative z-10 flex min-h-screen items-center justify-center">
+        <p className="text-sm italic text-keep-muted">Opening the forum…</p>
+      </div>
+    );
+  }
+
+  const gateCopy = detail.postingMode === "application"
+    ? `This forum accepts new members by application. Create a free ${siteName} account, then send the keeper a short application for posting access.`
+    : `Create a free ${siteName} account to read the boards, post, and join the conversation.`;
+
+  const stats = detail.stats;
+  const onlineTotal = stats ? stats.online.publicNames.length + stats.online.hiddenCount : 0;
+  // Hero ink follows the surface: banner scrim = dark by construction,
+  // else the forum's palette luminance decides.
+  const heroDark = isDarkSurface(forumTheme ?? activeTheme, { imageOverlay: !!detail.bannerImageUrl });
+
+  return (
+    // Sizing contract (per user): FULLSCREEN on mobile (edge-to-edge, no
+    // gutters), and on desktop ~82vw with a 1280px floor — clamped to
+    // the viewport so a 1280-wide screen never scrolls sideways.
+    <div className="relative z-10 mx-auto min-h-screen w-full px-0 py-0 md:px-6 md:py-8 lg:w-[min(100%,max(82vw,80rem))]">
+      <article
+        // text-keep-text re-anchors inherited text to the forum's scoped
+        // palette (the splash shell's color is computed from the SPLASH
+        // theme and would wash white over a light forum).
+        className="keep-frame overflow-hidden border-y border-keep-rule bg-keep-bg text-keep-text shadow-2xl md:rounded-lg md:border"
+        style={forumTheme ? themeStyle(forumTheme) : undefined}
+      >
+        {/* HERO — the forum's marquee. Banner image (or banner tint)
+            behind a big identity block; this is the first impression a
+            share link makes, so it gets real presence on desktop. */}
+        <header
+          className="relative border-b border-keep-rule bg-keep-banner/40 px-5 py-8 md:px-10 md:py-14"
+          style={detail.bannerImageUrl ? {
+            backgroundImage: `linear-gradient(rgba(0,0,0,.6), rgba(0,0,0,.55)), url(${detail.bannerImageUrl})`,
+            backgroundSize: "cover",
+            backgroundPosition: `center ${detail.bannerFocusY ?? 50}%`,
+          } : undefined}
+        >
+          <div className="flex flex-col items-start gap-4 md:flex-row md:items-center md:gap-6">
+            {detail.logoUrl ? (
+              <img src={detail.logoUrl} alt="" className="h-16 w-16 shrink-0 object-contain drop-shadow-lg md:h-24 md:w-24" />
+            ) : (
+              <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg/60 shadow-lg md:h-24 md:w-24">
+                <MessagesSquare className="h-8 w-8 text-keep-accent md:h-12 md:w-12" aria-hidden="true" />
+              </span>
+            )}
+            <div className="min-w-0">
+              {/* Ink follows the surface (isDarkSurface): banner scrims
+                  are dark by construction; otherwise the forum's palette
+                  luminance decides. */}
+              <h1 className={`break-words font-action text-3xl md:text-5xl ${inkClass.title(heroDark)}`}>{detail.name}</h1>
+              {detail.tagline ? <p className={`mt-1 text-sm md:text-lg ${inkClass.sub(heroDark)}`}>{detail.tagline}</p> : null}
+              <p className={`mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] md:text-xs ${inkClass.meta(heroDark)}`}>
+                <span>kept by <span className={inkClass.strong(heroDark)}>{detail.ownerUsername}</span></span>
+                <span className="inline-flex items-center gap-1">
+                  <Users className="h-3 w-3" aria-hidden="true" />
+                  {detail.memberCount > 0 ? `${detail.memberCount} member${detail.memberCount === 1 ? "" : "s"}` : "open to all"}
+                </span>
+                {detail.lastActivityAt ? <span>active {relTime(detail.lastActivityAt)}</span> : null}
+                <span>founded {new Date(detail.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</span>
+              </p>
+            </div>
+          </div>
+        </header>
+
+        {/* CALL TO ACTION — the entrance, loud and clear. */}
+        <div className="border-b border-keep-rule bg-keep-action/10 px-5 py-5 md:px-10">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <p className="font-action text-lg text-keep-text md:text-xl">
+                {detail.postingMode === "application" ? "Apply for a seat at this table" : "Join the conversation"}
+              </p>
+              <p className="mt-1 max-w-2xl text-xs leading-relaxed text-keep-muted md:text-sm">{gateCopy}</p>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => go("/register")}
+                className="flex items-center gap-2 rounded border border-keep-action bg-keep-action px-5 py-2.5 text-sm font-semibold uppercase tracking-widest text-keep-bg shadow-lg transition-transform hover:scale-[1.03]"
+              >
+                <UserPlus className="h-4 w-4" aria-hidden="true" />
+                {detail.postingMode === "application" ? "Register to apply" : "Create your account"}
+              </button>
+              <button
+                type="button"
+                onClick={() => go("/login")}
+                className="flex items-center gap-2 rounded border border-keep-action bg-keep-action/15 px-4 py-2.5 text-sm font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/25"
+              >
+                <LogIn className="h-4 w-4" aria-hidden="true" />
+                Log in
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* BODY — full-width boards (the footer below carries the
+            statistics, classic phpBB/vBulletin layout). */}
+        <div>
+          <div className="min-w-0">
+            {descriptionHtml ? (
+              <div
+                className={`border-b border-keep-rule px-5 py-5 text-sm leading-relaxed md:px-8 ${USER_HTML_SCOPE_CLASS}`}
+                dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+              />
+            ) : null}
+
+            {detail.publicBrowsing ? (
+              /* PUBLIC BROWSING: the real forum renderer, read-only.
+                 Anonymous visitors browse boards, topics, and replies;
+                 every write affordance routes through the login CTA. */
+              <section className="px-2 py-4 md:px-4">
+                <PublicBoardReader
+                  detail={detail}
+                  slug={slug}
+                  initialTopicId={initialTopicId}
+                  initialPostId={initialPostId}
+                  onRequireLogin={() => go("/login")}
+                />
+                <p className="mt-3 px-3 text-[11px] italic text-keep-muted">
+                  Reading as a guest.{" "}
+                  <button type="button" onClick={() => go("/login")} className="text-keep-action underline hover:text-keep-action/80">
+                    Log in
+                  </button>{" "}
+                  or{" "}
+                  <button type="button" onClick={() => go("/register")} className="text-keep-action underline hover:text-keep-action/80">
+                    create an account
+                  </button>{" "}
+                  to post{detail.postingMode === "application" ? " - posting also needs the keeper's approval" : ""}.
+                </p>
+              </section>
+            ) : (
+              /* Boards index (teaser). Reading needs an account, which
+                 keeps the landing light AND gives registration a reason. */
+              <section className="px-5 py-5 md:px-8">
+                <h2 className="mb-3 text-xs uppercase tracking-widest text-keep-muted">Boards</h2>
+                {detail.boards.length === 0 ? (
+                  <p className="text-sm italic text-keep-muted">No boards raised yet.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {detail.boards.map((b) => (
+                      <li
+                        key={b.roomId}
+                        className="flex items-center justify-between gap-3 rounded border border-keep-rule bg-keep-panel/30 px-4 py-3"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-base font-semibold text-keep-text">{b.name}</span>
+                          {b.topic ? <span className="block truncate text-xs text-keep-muted">{b.topic}</span> : null}
+                        </span>
+                        <span className="shrink-0 text-right text-[11px] tabular-nums text-keep-muted">
+                          <span className="flex items-center justify-end gap-1">
+                            <Lock className="h-3 w-3" aria-hidden="true" />
+                            {b.topicCount} topic{b.topicCount === 1 ? "" : "s"}
+                          </span>
+                          {b.lastActivityAt ? <span className="block">active {relTime(b.lastActivityAt)}</span> : null}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="mt-4 text-[11px] italic text-keep-muted">
+                  Sign in to read the boards{detail.postingMode === "application" ? " - posting needs the keeper's approval" : " and join the conversation"}.
+                </p>
+              </section>
+            )}
+          </div>
+
+        </div>
+
+        {/* FOOTER — the traditional forum footer (phpBB / vBulletin
+            style): who's online, then board statistics, then the
+            forum's vitals + host line. */}
+        <footer className="border-t border-keep-rule bg-keep-banner/30 px-5 py-3 text-[11px] text-keep-muted md:px-8">
+          <div className="border-b border-keep-rule/50 pb-2">
+            <h2 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest">
+              <Users className="h-3.5 w-3.5" aria-hidden="true" />
+              Who's online
+            </h2>
+            {!stats || onlineTotal === 0 ? (
+              <p className="italic">The halls are quiet right now - be the spark.</p>
+            ) : (
+              <p>
+                {stats.online.publicNames.length > 0 ? (
+                  <span className="text-keep-text">{stats.online.publicNames.join(", ")}</span>
+                ) : null}
+                {stats.online.hiddenCount > 0
+                  ? `${stats.online.publicNames.length > 0 ? " and " : ""}${stats.online.hiddenCount} keeping to the shadows`
+                  : ""}
+                {stats.online.browsingRecently > 0
+                  ? ` · ${stats.online.browsingRecently} browsing this forum right now`
+                  : ""}
+              </p>
+            )}
+          </div>
+          {stats ? (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-b border-keep-rule/50 py-2">
+              <span className="font-semibold uppercase tracking-widest">Board statistics</span>
+              <span><b className="tabular-nums text-keep-text">{stats.topics.toLocaleString()}</b> topics</span>
+              <span><b className="tabular-nums text-keep-text">{stats.replies.toLocaleString()}</b> replies</span>
+              <span><b className="tabular-nums text-keep-text">{stats.writers.toLocaleString()}</b> writers</span>
+              <span>
+                <b className="tabular-nums text-keep-text">{detail.memberCount > 0 ? detail.memberCount.toLocaleString() : "—"}</b>{" "}
+                {detail.memberCount > 0 ? "members" : "open to all"}
+              </span>
+              <span><b className="tabular-nums text-keep-text">{onlineTotal.toLocaleString()}</b> online now</span>
+            </div>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 pt-2">
+            <span>Posting: <span className="text-keep-text">{detail.postingMode === "application" ? "by application" : "open to all"}</span></span>
+            <span>Keeper: <span className="text-keep-text">{detail.ownerUsername}</span></span>
+            {detail.linkedWorld ? (
+              <span>World: <span className="text-keep-text">{detail.linkedWorld.name}</span></span>
+            ) : null}
+            <span>Founded: <span className="text-keep-text">{new Date(detail.createdAt).toLocaleDateString()}</span></span>
+            <span className="ml-auto">Hosted by <span className="text-keep-text">{siteName}</span></span>
+          </div>
+        </footer>
+      </article>
+    </div>
+  );
+}

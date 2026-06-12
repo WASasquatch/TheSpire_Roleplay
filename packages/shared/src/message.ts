@@ -13,6 +13,20 @@ export type MessageKind =
   | "npc"      // NPC voiced by a user; rendered with a "voiced by" tag
   | "ooc";     // out-of-character aside
 
+/**
+ * OpenGraph unfurl card for a message's first link (Discord-style
+ * preview). All display fields are optional — a card renders with
+ * whatever the target site provided. `url` is the link that was
+ * unfurled (the card's click-through).
+ */
+export interface LinkPreview {
+  url: string;
+  title?: string;
+  description?: string;
+  imageUrl?: string;
+  siteName?: string;
+}
+
 export interface ChatMessage {
   id: string;
   roomId: string;
@@ -149,6 +163,13 @@ export interface ChatMessage {
    * historical messages. Absent on every kind except `cmd`.
    */
   cmdCss?: string | null;
+  /**
+   * OpenGraph unfurl of the body's first http(s) link — the Discord-
+   * style card under the message. Filled shortly after the post lands
+   * (a `message:update` carries it in); absent when there's no link,
+   * the site had nothing to show, or the author removed the card.
+   */
+  linkPreview?: LinkPreview | null;
   /**
    * Snapshot of the author's Earning rank at send time. Drives the
    * inline sigil next to the display name on chat lines + forum

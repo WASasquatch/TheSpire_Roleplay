@@ -32,6 +32,15 @@ export default defineConfig({
       "/api": "http://localhost:3001",
       "/thesaurus": "http://localhost:3001",
       "/earning": "http://localhost:3001",
+      // Forums Catalog API (catalog list/detail, board topics, posting
+      // gates, applications, owner console, visit markers). Without this
+      // the catalog's fetch("/forums") falls through to Vite's SPA
+      // fallback and gets index.html — surfacing as "JSON.parse:
+      // unexpected character at line 1" in the rail and a forever-
+      // loading content pane. `/f` is deliberately NOT proxied: that's
+      // the public forum PAGE route, which the SPA renders client-side
+      // in dev exactly like /p/ profile links.
+      "/forums": "http://localhost:3001",
       // Spire Arcade game endpoints (Eidolon Tamer: GET state, hatch,
       // action, feed, remedy, release). Without this the GET falls through
       // to the SPA index.html (parses as 200 with no `eidolon` field, so the

@@ -49,6 +49,7 @@ import { bumpLifetimeForMessage, classifyMessageForLifetime } from "../lib/lifet
 import { getClearedAt } from "../lib/roomClears.js";
 import { getAway, clearAllAwayForUser } from "./awayState.js";
 import { getMood, clearAllMoodForUser } from "./moodState.js";
+import { linkPreviewFromRow } from "../unfurl.js";
 import {
   checkpointFor,
   getTheater,
@@ -484,6 +485,18 @@ export async function addMessage(
   // author's display name - never the body. The user has to come back to
   // the chat to read what was said.
   void pushTriggers(ctx.io, ctx.db, out, ctx.user, payload.kind);
+
+  // Fire-and-forget link unfurl (OpenGraph preview). Off the hot path:
+  // the card arrives via a message:update once the target site answers.
+  // Failures (timeouts, unsafe hosts, no metadata) are silent.
+  void import("../unfurl.js")
+    .then(({ unfurlAndAttach }) => unfurlAndAttach(ctx.db, ctx.io, {
+      messageId: id,
+      roomId: ctx.roomId,
+      kind: payload.kind,
+      body: out.body,
+    }))
+    .catch(() => { /* cosmetic */ });
 
   // Fire-and-forget Earning award. Failures inside the engine are
   // logged but never surfaced, a flaky award path must not break
@@ -1233,6 +1246,7 @@ export async function sendRoomBacklogTo(
       ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
       ...(m.isSticky ? { isSticky: true } : {}),
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+      ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
       ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
       ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
       ...(m.rankKey ? { rankKey: m.rankKey } : {}),
@@ -1347,6 +1361,21 @@ async function joinRoomBody(
     // settings for a future same-name resurrect via the create path.
     // Treat as 404 for this socket.
     socket.emit("error:notice", { code: "NO_ROOM", message: "Room not found." });
+    return;
+  }
+
+  // Forum boards live ENTIRELY in the Forums Catalog (Forums revamp,
+  // Phase 1C): reading and posting happen in the modal over HTTP +
+  // forum:post, never by occupying the room. Chat joins are therefore
+  // refused outright — for everyone — so a board can never appear as
+  // someone's "current room", leak into presence, or pull forum
+  // interactions back into chat. Legacy sessions whose lastRoomId is a
+  // board fall through to the canonical landing on reconnect.
+  if (room.forumId) {
+    socket.emit("error:notice", {
+      code: "FORUM_BOARD",
+      message: "That's a forum board - it lives in the Forums Catalog. Type /forums to open it.",
+    });
     return;
   }
 
@@ -1775,6 +1804,7 @@ export async function buildRoomSummary(
     theaterMode: room.theaterMode,
     theaterLoop: room.theaterLoop,
     theaterPlaylist: parsePlaylist(room.theaterPlaylist),
+    forumId: room.forumId ?? null,
   };
 }
 

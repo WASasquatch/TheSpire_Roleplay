@@ -524,6 +524,20 @@ interface ChatState {
   appendForumTopicsPage: (roomId: string, categoryKey: string, topics: ChatMessage[], hasMore: boolean) => void;
   /** Mark a bucket as in-flight (UI shows a spinner / disables the button). */
   setForumTopicsLoading: (roomId: string, categoryKey: string, loading: boolean) => void;
+  /**
+   * Bumped by MessageList's forum toolbar (pin/lock/delete) + edit-save
+   * after a SUCCESSFUL mutation. In chat the socket `message:update` echo
+   * repaints, so nothing subscribes; the Forums Catalog (whose viewer is
+   * never in the board's socket room) subscribes and refetches its
+   * buckets + active thread so those actions reflect immediately.
+   */
+  forumActionTick: number;
+  bumpForumActionTick: () => void;
+  /** Unread forum-notification count (replies to your topics, quotes,
+   *  watched-topic activity). Seeded by a boot fetch, kept live by the
+   *  `forum:notifications` socket pulse. Drives the rail + bell badges. */
+  forumNotifUnread: number;
+  setForumNotifUnread: (n: number) => void;
   /** Prepend a brand-new topic that the *viewer themselves* just created. Inserts directly, no pill. */
   prependOwnForumTopic: (roomId: string, categoryKey: string, topic: ChatMessage) => void;
   /** Queue a topic that arrived from another user behind the "new topics" pill. */
@@ -995,6 +1009,10 @@ export const useChat = create<ChatState>((set) => ({
     set((s) => ({ roomHistoryHasMore: { ...s.roomHistoryHasMore, [roomId]: hasMore } })),
 
   forumTopicsByRoom: {},
+  forumActionTick: 0,
+  bumpForumActionTick: () => set((s) => ({ forumActionTick: s.forumActionTick + 1 })),
+  forumNotifUnread: 0,
+  setForumNotifUnread: (n) => set({ forumNotifUnread: n }),
 
   setForumTopicsPage: (roomId, categoryKey, topics, pageInfo) =>
     set((s) => {

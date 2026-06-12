@@ -45,6 +45,14 @@ export interface RoomSummary {
   theaterMode: boolean;
   theaterLoop: TheaterLoop;
   theaterPlaylist: TheaterSource[];
+  /**
+   * Forum container id (Forums revamp). Non-null ⇒ this room is a BOARD
+   * inside that forum: the chat room list filters it out (the Forums
+   * Catalog is its home), keeping only the caller's CURRENT room visible
+   * so navigation never strands them. Filtering keys on this field, NOT
+   * on replyMode — standalone nested rooms stay in the room list.
+   */
+  forumId: string | null;
 }
 
 export type Gender = "male" | "female" | "nonbinary" | "other" | "undisclosed";

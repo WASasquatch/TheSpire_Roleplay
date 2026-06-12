@@ -79,7 +79,15 @@ export type AuditAction =
   | "scheduled_announcement_delete"
   // Profile-customization flairs (migration 0192)
   | "profile_marquee_update"
-  | "profile_visitors_visibility_update";
+  | "profile_visitors_visibility_update"
+  // Forums (community message boards) — owner-issued actions are audited
+  // so staff can adjudicate owner disputes from the Audit tab.
+  | "forum_mod_grant"
+  | "forum_mod_revoke"
+  | "forum_ban"
+  | "forum_unban"
+  | "forum_board_create"
+  | "forum_board_archive";
 
 /**
  * Preset action groups for the AuditTab's category dropdown. Each
@@ -104,6 +112,17 @@ export const AUDIT_ACTION_GROUPS: Record<string, { label: string; actions: reado
   moderation: {
     label: "Moderation",
     actions: ["kick", "mute", "unmute", "ban", "unban", "announce", "incognito_enter", "incognito_exit"],
+  },
+  forums: {
+    label: "Forums",
+    actions: [
+      "forum_mod_grant",
+      "forum_mod_revoke",
+      "forum_ban",
+      "forum_unban",
+      "forum_board_create",
+      "forum_board_archive",
+    ],
   },
   role_changes: {
     label: "Role changes",

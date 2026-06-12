@@ -1013,6 +1013,51 @@ foot of the mountains. Speaks little. Watches everything.</p>
   },
 
   {
+    id: "forums",
+    title: "Forums: long-form boards owned by the community",
+    body: (
+      <>
+        <P>
+          <b>Forums</b> are message boards for slower, longer writing - the kind you come back to
+          over days rather than scroll past in live chat. They live in the <b>Forums Catalog</b>:
+          click the row above the room list, or type <K>/forums</K>.
+        </P>
+        <Heading>Reading</Heading>
+        <Steps>
+          <li>Pick a forum from the list on the right. The Spire's own forum is pinned first.</li>
+          <li>Open a board to see its topics, grouped by category. Pinned topics sit on top.</li>
+          <li>Click a topic to read the whole thread right there in the catalog.</li>
+        </Steps>
+        <P>
+          A small dot on a forum means something new happened since you last looked. If you have a
+          room transition equipped, it plays as you move between forums, boards, and topics.
+        </P>
+        <Heading>Posting</Heading>
+        <P>
+          Hit <b>Join to post</b> on a board and it opens in chat, where you can start topics and
+          reply with the full composer. Some forums accept posts from everyone; others ask you to
+          apply first - you can read either way, and the forum's page tells you which it is.
+        </P>
+        <Heading>Running your own</Heading>
+        <Steps>
+          <li>In the catalog, click <b>Create your Forum</b> and tell the moderators what it's for.</li>
+          <li>Once approved, you're the keeper: the gear on your forum's page opens your settings.</li>
+          <li>Raise boards, shape categories, appoint moderators, and set who may post.</li>
+          <li>Give it a face: a banner, a logo, your own colors, and a linked world if you have one.</li>
+        </Steps>
+        <P>
+          Every forum has a shareable address like <K>/f/your_forum</K> - hand it out anywhere and
+          visitors land on your forum's page, with a sign-in that brings them right back to it.
+        </P>
+        <Tip>
+          Forum moderators can pin, lock, and tidy topics, but your posts and your settings stay
+          yours alone. Bans you issue cover your forum only, never the rest of the Spire.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
     id: "theater",
     title: "Theater rooms: watch videos together",
     requiresPermission: "use_theater_mode",

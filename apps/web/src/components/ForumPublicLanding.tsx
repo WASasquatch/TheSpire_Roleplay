@@ -23,7 +23,7 @@ import { normalizeTheme } from "@thekeep/shared";
 import type { ChatMessage, ForumDetail, ThreadCategory } from "@thekeep/shared";
 import { fetchForumDetail, fetchRoomCategories, locateForumTopic, relTime } from "../lib/forums.js";
 import { DEFAULT_STYLE_KEY } from "../lib/ornaments/index.js";
-import { inkClass, isDarkSurface, themeStyle, useActiveTheme, useScopedRootDesign } from "../lib/theme.js";
+import { forumBannerInk, inkClass, isDarkSurface, themeStyle, useActiveTheme, useImageAverageColor, useScopedRootDesign } from "../lib/theme.js";
 import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import { MessageList } from "./MessageList.js";
 import { useChat } from "../state/store.js";
@@ -210,18 +210,39 @@ function PublicBoardReader({ detail, slug, initialTopicId, initialPostId, onRequ
               key={b.roomId}
               type="button"
               onClick={() => setBoardId(b.roomId)}
-              className={`rounded border px-2.5 py-1 text-xs ${
+              title={b.locked ? `${b.name} — members only` : b.name}
+              className={`inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs ${
                 b.roomId === active.roomId
                   ? "border-keep-action text-keep-action"
                   : "border-keep-rule text-keep-muted hover:text-keep-text"
               }`}
             >
+              {b.locked ? <Lock className="h-3 w-3 shrink-0" aria-label="Members only" /> : null}
               {b.name}
-              <span className="ml-1.5 text-[10px] text-keep-rule">{b.topicCount}</span>
+              <span className="ml-0.5 text-[10px] text-keep-rule">{b.topicCount}</span>
             </button>
           ))}
         </div>
       ) : null}
+      {active.locked ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
+          <div aria-hidden className="flex h-14 w-14 items-center justify-center rounded-full border border-keep-accent/40 bg-keep-accent/10">
+            <Lock className="h-6 w-6 text-keep-accent" aria-hidden="true" />
+          </div>
+          <p className="text-sm font-semibold text-keep-text">This board is for members only</p>
+          <p className="max-w-sm text-xs text-keep-muted">
+            Sign in to read it — and if the forum takes applications, apply to join from this page.
+          </p>
+          <button
+            type="button"
+            onClick={onRequireLogin}
+            className="inline-flex items-center gap-1.5 rounded border border-keep-action bg-keep-action/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
+          >
+            <LogIn className="h-3.5 w-3.5" aria-hidden="true" />
+            Sign in
+          </button>
+        </div>
+      ) : (
       <MessageList
         messages={messages}
         occupants={[]}
@@ -252,6 +273,7 @@ function PublicBoardReader({ detail, slug, initialTopicId, initialPostId, onRequ
         highlightMessageId={highlightId}
         onHighlightDone={() => setHighlightId(null)}
       />
+      )}
     </div>
   );
 }
@@ -299,6 +321,11 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
     [detail?.descriptionHtml],
   );
 
+  // Sample the banner's average color for legible hero ink. MUST run on
+  // every render (before the err/!detail early returns below) or the hook
+  // order changes the moment the forum finishes loading — Rules of Hooks.
+  const bannerColor = useImageAverageColor(detail?.bannerImageUrl ?? null);
+
   function go(path: "/login" | "/register") {
     try {
       window.localStorage.setItem(
@@ -334,9 +361,17 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
 
   const stats = detail.stats;
   const onlineTotal = stats ? stats.online.publicNames.length + stats.online.hiddenCount : 0;
-  // Hero ink follows the surface: banner scrim = dark by construction,
-  // else the forum's palette luminance decides.
-  const heroDark = isDarkSurface(forumTheme ?? activeTheme, { imageOverlay: !!detail.bannerImageUrl });
+  // Hero ink follows the surface (site-wide pattern): with no banner the
+  // forum's palette luminance decides via inkClass. Over a banner IMAGE,
+  // shown AS-IS (no scrim overlay), we SAMPLE its average color and lift
+  // the forum's OWN palette ink to legibility against it (legibleAgainstBg
+  // preserves hue) + a tight text-shadow. Applied INLINE so it beats the
+  // design's `[data-theme-style] h1 { color: rgb(var(--keep-text)) }` rule,
+  // the cause of the dark-on-dark title. CORS-tainted sample → white.
+  const hasBanner = !!detail.bannerImageUrl;
+  const heroPalette = forumTheme ?? activeTheme;
+  const heroDark = isDarkSurface(heroPalette, { imageOverlay: hasBanner });
+  const bannerInk = hasBanner ? forumBannerInk(heroPalette, bannerColor) : null;
 
   return (
     // Sizing contract (per user): FULLSCREEN on mobile (edge-to-edge, no
@@ -356,7 +391,7 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
         <header
           className="relative border-b border-keep-rule bg-keep-banner/40 px-5 py-8 md:px-10 md:py-14"
           style={detail.bannerImageUrl ? {
-            backgroundImage: `linear-gradient(rgba(0,0,0,.6), rgba(0,0,0,.55)), url(${detail.bannerImageUrl})`,
+            backgroundImage: `url(${detail.bannerImageUrl})`,
             backgroundSize: "cover",
             backgroundPosition: `center ${detail.bannerFocusY ?? 50}%`,
           } : undefined}
@@ -370,13 +405,24 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
               </span>
             )}
             <div className="min-w-0">
-              {/* Ink follows the surface (isDarkSurface): banner scrims
-                  are dark by construction; otherwise the forum's palette
-                  luminance decides. */}
-              <h1 className={`break-words font-action text-3xl md:text-5xl ${inkClass.title(heroDark)}`}>{detail.name}</h1>
-              {detail.tagline ? <p className={`mt-1 text-sm md:text-lg ${inkClass.sub(heroDark)}`}>{detail.tagline}</p> : null}
-              <p className={`mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] md:text-xs ${inkClass.meta(heroDark)}`}>
-                <span>kept by <span className={inkClass.strong(heroDark)}>{detail.ownerUsername}</span></span>
+              {/* Ink follows the surface: over a banner IMAGE we sample it
+                  and force light ink inline (beats the design heading rule);
+                  with no banner the palette luminance decides via inkClass. */}
+              <h1
+                className={`break-words font-action text-3xl md:text-5xl ${bannerInk ? "" : inkClass.title(heroDark)}`}
+                style={bannerInk?.title}
+              >{detail.name}</h1>
+              {detail.tagline ? (
+                <p
+                  className={`mt-1 text-sm md:text-lg ${bannerInk ? "" : inkClass.sub(heroDark)}`}
+                  style={bannerInk?.sub}
+                >{detail.tagline}</p>
+              ) : null}
+              <p
+                className={`mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] md:text-xs ${bannerInk ? "" : inkClass.meta(heroDark)}`}
+                style={bannerInk?.meta}
+              >
+                <span>kept by <span className={bannerInk ? "" : inkClass.strong(heroDark)} style={bannerInk?.strong}>{detail.ownerUsername}</span></span>
                 <span className="inline-flex items-center gap-1">
                   <Users className="h-3 w-3" aria-hidden="true" />
                   {detail.memberCount > 0 ? `${detail.memberCount} member${detail.memberCount === 1 ? "" : "s"}` : "open to all"}

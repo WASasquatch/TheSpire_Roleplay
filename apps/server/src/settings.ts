@@ -143,6 +143,8 @@ export interface SiteSettings {
   featuredWorldsEnabled: boolean;
   /** Splash stat: surface the rolling 24h chat message count. Independent of `activityFeedsEnabled`, each toggle gates its own section, so admins can show this alone, the online/room cluster alone, or both together. Off by default. */
   splashMessages24hEnabled: boolean;
+  /** Visual bio Designer (GrapesJS) availability. Off by default; admin opt-in. */
+  profileDesignerEnabled: boolean;
   /** Sanitized HTML for the post-login welcome/announcement modal. Empty string = no welcome to show. */
   newUserWelcomeHtml: string;
   /** SHA hash of the current welcome HTML; clients compare against the user's `welcomeSeenHash` to decide whether to surface the modal. Empty when welcome HTML is empty. */
@@ -251,6 +253,8 @@ export interface SettingsPatch {
   featuredWorldsEnabled?: boolean;
   /** Splash stat for the rolling 24h chat message count. Independent toggle. */
   splashMessages24hEnabled?: boolean;
+  /** Visual bio Designer availability. */
+  profileDesignerEnabled?: boolean;
   /** Pre-sanitized HTML; route handler sanitizes before invoking. Empty string clears it. */
   newUserWelcomeHtml?: string;
   /** Site-wide default theme style key. */
@@ -320,6 +324,7 @@ export async function updateSettings(
   if (patch.activityFeedsEnabled !== undefined) update.activityFeedsEnabled = patch.activityFeedsEnabled;
   if (patch.featuredWorldsEnabled !== undefined) update.featuredWorldsEnabled = patch.featuredWorldsEnabled;
   if (patch.splashMessages24hEnabled !== undefined) update.splashMessages24hEnabled = patch.splashMessages24hEnabled;
+  if (patch.profileDesignerEnabled !== undefined) update.profileDesignerEnabled = patch.profileDesignerEnabled;
   if (patch.defaultStyleKey !== undefined) update.defaultStyleKey = patch.defaultStyleKey;
   if (patch.themeDesignMap !== undefined) {
     update.themeDesignMap =
@@ -392,6 +397,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     activityFeedsEnabled: row.activityFeedsEnabled,
     featuredWorldsEnabled: row.featuredWorldsEnabled,
     splashMessages24hEnabled: row.splashMessages24hEnabled,
+    profileDesignerEnabled: row.profileDesignerEnabled,
     newUserWelcomeHtml: row.newUserWelcomeHtml,
     newUserWelcomeHash: hashWelcome(row.newUserWelcomeHtml),
     newUserWelcomeUpdatedAt: row.newUserWelcomeUpdatedAt ? +row.newUserWelcomeUpdatedAt : null,

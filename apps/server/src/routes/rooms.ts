@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { hasPermission } from "../auth/permissions.js";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { getClearedAt } from "../lib/roomClears.js";
 import type { Server as IoServer } from "socket.io";
 import { nanoid } from "nanoid";
@@ -15,6 +15,8 @@ import type {
   ThreadCategory,
 } from "@thekeep/shared";
 import { forums, ignores, messages, roomMembers, roomThreadCategories, rooms } from "../db/schema.js";
+import { forumBoardReadGate } from "../forums/authority.js";
+import { loadPollState } from "../polls.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
@@ -451,6 +453,14 @@ export async function registerRoomsRoutes(
       ...(m.tier != null ? { tier: m.tier } : {}),
       ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
     }));
+    // Hydrate poll state on any poll rows in this older page (same per-viewer
+    // shape the live backlog attaches).
+    const pollJsonById = new Map(window.filter((m) => m.kind === "poll").map((m) => [m.id, m.pollDataJson]));
+    for (const w of wire) {
+      if (w.kind !== "poll") continue;
+      const state = await loadPollState(db, w.id, me.id, pollJsonById.get(w.id) ?? null);
+      if (state) w.poll = state;
+    }
     return { messages: wire, hasMore };
   });
 
@@ -584,11 +594,14 @@ export async function registerRoomsRoutes(
    */
   async function boardAllowsAnonymousRead(roomId: string): Promise<boolean> {
     const room = (await db
-      .select({ forumId: rooms.forumId })
+      .select({ forumId: rooms.forumId, forumMembersOnly: rooms.forumMembersOnly })
       .from(rooms)
       .where(eq(rooms.id, roomId))
       .limit(1))[0];
     if (!room?.forumId) return false;
+    // A private (members-only) board is NEVER anonymously readable, even when
+    // the forum opts into public browsing (migration 0239).
+    if (room.forumMembersOnly) return false;
     const f = (await db
       .select({ publicBrowsing: forums.publicBrowsing })
       .from(forums)
@@ -632,6 +645,15 @@ export async function registerRoomsRoutes(
         reply.code(401); return { error: "auth" };
       }
 
+      // Private board / category gate (migration 0239): deep links can't be
+      // used to read a topic in a members-only board, nor one filed under a
+      // members-only category, as a non-member.
+      const readGate = await forumBoardReadGate(db, me, req.params.id);
+      if (readGate.boardLocked) {
+        reply.code(403);
+        return { error: "This board is for forum members only.", code: "FORUM_BOARD_MEMBERS_ONLY" };
+      }
+
       const roomId = req.params.id;
       const hit = (await db.select().from(messages).where(eq(messages.id, req.params.messageId)).limit(1))[0];
       if (!hit || hit.roomId !== roomId) {
@@ -646,6 +668,10 @@ export async function registerRoomsRoutes(
       if (!topicRow || topicRow.roomId !== roomId) {
         reply.code(404);
         return { error: "topic not in this room" };
+      }
+      if (topicRow.threadCategoryId && readGate.lockedCatIds.has(topicRow.threadCategoryId)) {
+        reply.code(403);
+        return { error: "This category is for forum members only.", code: "FORUM_BOARD_MEMBERS_ONLY" };
       }
       if (topicRow.deletedAt) {
         // Topic was soft-deleted, surface a 404 rather than handing
@@ -711,8 +737,16 @@ export async function registerRoomsRoutes(
         };
       }
 
+      const topicWire = rowToWire(topicRow);
+      // Hydrate poll state on a poll topic (definition + tallies + this
+      // viewer's ballot) so reopening a poll restores results. Replies are
+      // never polls, so only the topic needs it.
+      if (topicRow.kind === "poll") {
+        const state = await loadPollState(db, topicRow.id, me?.id ?? null, topicRow.pollDataJson);
+        if (state) topicWire.poll = state;
+      }
       return {
-        topic: rowToWire(topicRow),
+        topic: topicWire,
         replies: replyRows.map(rowToWire),
       };
     },
@@ -786,9 +820,24 @@ export async function registerRoomsRoutes(
         reply.code(401); return { error: "auth" };
       }
 
+      // Private board / category gate (migration 0239): non-members can't read
+      // a members-only board at all, nor topics filed under a members-only
+      // category. No-op for ordinary chat rooms.
+      const readGate = await forumBoardReadGate(db, me, req.params.id);
+      if (readGate.boardLocked) {
+        reply.code(403);
+        return { error: "This board is for forum members only.", code: "FORUM_BOARD_MEMBERS_ONLY" };
+      }
+
       let q;
       try { q = topicsQuery.parse(req.query); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid query" }; }
+
+      // Asking for a specific members-only category the viewer can't read.
+      if (q.category && readGate.lockedCatIds.has(q.category)) {
+        reply.code(403);
+        return { error: "This category is for forum members only.", code: "FORUM_BOARD_MEMBERS_ONLY" };
+      }
 
       const settings = await getSettings(db);
       const perPage = q.perPage ?? q.limit ?? settings.forumTopicsPerPage;
@@ -816,17 +865,13 @@ export async function registerRoomsRoutes(
         eq(messages.roomId, roomId),
         isNull(messages.replyToId),
         isNull(messages.deletedAt),
-        // Topics are ONLY ever `kind = "say"`. The forum composer
-        // creates topics with this kind; replies use it too. Every
-        // other top-level row in the messages table, `system`
-        // (joins/leaves/watch pings), `announce`, `scene`, `me`,
-        // `roll`, `npc`, `whisper`, `ooc`, is a chat-shaped event,
-        // not a discussion thread, and must not surface in the forum
-        // topics list. Without this filter, historical system rows
-        // from before the forum-room suppression landed in
-        // `broadcast.ts` show up as "WAS has connected." topics in
-        // the Uncategorized bucket.
-        eq(messages.kind, "say"),
+        // Topics are `kind = "say"` (regular threads) or `"poll"` (poll
+        // topics). The forum composer creates them with these kinds; replies
+        // use "say". Every other top-level row, `system` (joins/leaves/watch
+        // pings), `announce`, `scene`, `me`, `roll`, `npc`, `whisper`,
+        // `ooc`, is a chat-shaped event, not a discussion thread, and must
+        // not surface in the forum topics list.
+        inArray(messages.kind, ["say", "poll"]),
       ];
       if (q.category !== undefined) {
         if (q.category === "") {
@@ -834,6 +879,15 @@ export async function registerRoomsRoutes(
         } else {
           baseConditions.push(eq(messages.threadCategoryId, q.category));
         }
+      } else if (readGate.lockedCatIds.size) {
+        // "All categories" view for a non-member: hide topics that live in a
+        // members-only category, but keep uncategorized topics visible.
+        baseConditions.push(
+          or(
+            isNull(messages.threadCategoryId),
+            notInArray(messages.threadCategoryId, [...readGate.lockedCatIds]),
+          )!,
+        );
       }
 
       // Stickies are always returned on page 1 ONLY, and never count
@@ -934,6 +988,14 @@ export async function registerRoomsRoutes(
         ...(m.tier != null ? { tier: m.tier } : {}),
         ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
       }));
+      // Hydrate poll state on poll topics so the card renders the PollCard
+      // (and the viewer's own ballot) without opening the thread first.
+      const pollJsonById = new Map(pageRows.filter((m) => m.kind === "poll").map((m) => [m.id, m.pollDataJson]));
+      for (const t of topics) {
+        if (t.kind !== "poll") continue;
+        const state = await loadPollState(db, t.id, me?.id ?? null, pollJsonById.get(t.id) ?? null);
+        if (state) t.poll = state;
+      }
       // Response shape:
       //   - `topics`, `hasMore` are kept for back-compat with any
       //     in-flight client that still consumed only these.
@@ -999,6 +1061,12 @@ export async function registerRoomsRoutes(
     if (!me && !(await boardAllowsAnonymousRead(req.params.id))) {
       reply.code(401); return { error: "auth" };
     }
+    // A private board's category list is itself withheld from non-members.
+    const readGate = await forumBoardReadGate(db, me, req.params.id);
+    if (readGate.boardLocked) {
+      reply.code(403);
+      return { error: "This board is for forum members only.", code: "FORUM_BOARD_MEMBERS_ONLY" };
+    }
     const cats = await db
       .select()
       .from(roomThreadCategories)
@@ -1013,6 +1081,9 @@ export async function registerRoomsRoutes(
       iconUrl: c.iconUrl ?? null,
       subtitle: c.subtitle ?? null,
       parentId: c.parentId ?? null,
+      // Shown-but-locked: keep the chip but mark it so the client renders the
+      // lock and never lets a non-member select into it.
+      membersOnly: !!c.membersOnly,
     }));
     return { categories: out };
   });
@@ -1028,6 +1099,8 @@ export async function registerRoomsRoutes(
     subtitle: z.string().trim().max(140).nullable().optional(),
     /** Parent category (same room, itself top-level) ⇒ create a SUBcategory. */
     parentId: z.string().nullable().optional(),
+    /** Private category (migration 0239): owner/mods/members only. */
+    membersOnly: z.boolean().optional(),
   }).strict();
 
   /** Validate a requested parent for one-level nesting: must exist in
@@ -1074,6 +1147,7 @@ export async function registerRoomsRoutes(
           sortOrder: body.sortOrder ?? 0,
           subtitle: body.subtitle?.trim() ? body.subtitle.trim() : null,
           parentId: body.parentId ?? null,
+          membersOnly: body.membersOnly ?? false,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
@@ -1093,6 +1167,8 @@ export async function registerRoomsRoutes(
     subtitle: z.string().trim().max(140).nullable().optional(),
     /** Move under a top-level parent (one level), or null → top level. */
     parentId: z.string().nullable().optional(),
+    /** Private category (migration 0239): owner/mods/members only. */
+    membersOnly: z.boolean().optional(),
   }).strict();
 
   app.patch<{ Params: { id: string; catId: string }; Body: unknown }>(
@@ -1124,6 +1200,7 @@ export async function registerRoomsRoutes(
       const update: Partial<typeof roomThreadCategories.$inferInsert> = {};
       if (body.name !== undefined) update.name = body.name.trim();
       if (body.sortOrder !== undefined) update.sortOrder = body.sortOrder;
+      if (body.membersOnly !== undefined) update.membersOnly = body.membersOnly;
       if (body.subtitle !== undefined) {
         update.subtitle = body.subtitle?.trim() ? body.subtitle.trim() : null;
       }

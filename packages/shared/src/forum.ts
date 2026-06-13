@@ -91,6 +91,14 @@ export interface ForumSummary {
   /** Signed-in viewers only: there's been topic/reply activity since this
    *  viewer last opened the forum in the catalog. Drives the rail dot. */
   unseen?: boolean;
+  /** Signed-in viewers only: this viewer's role in the forum (owner / mod /
+   *  member), or null when they hold none. Lets surfaces like the Tools menu
+   *  list owned + joined forums as quick bookmarks without a detail fetch. */
+  viewerRole?: ForumRole | null;
+  /** Signed-in viewers only: this viewer has opened the forum before (a visit
+   *  marker exists). For open forums — which carry no formal membership — this
+   *  is the "interacted with" signal the bookmark list keys on. */
+  visited?: boolean;
 }
 
 /** One board row inside ForumDetail. A board IS a room; this carries just
@@ -103,6 +111,14 @@ export interface ForumBoardSummary {
   topicCount: number;
   lastActivityAt: number | null;
   archived: boolean;
+  /** Owner flag: this board is private (owner/mods/members only). Drives
+   *  the owner-console toggle state; visible to everyone so the lock chip
+   *  renders for all. */
+  membersOnly: boolean;
+  /** Resolved for THIS viewer: `membersOnly && !viewerIsMember`. When true
+   *  the board lists but its contents are withheld behind a lock prompt.
+   *  Owner/mod/member viewers always see `false`. */
+  locked: boolean;
 }
 
 /** Full forum view (catalog content pane + /f/ page). */
@@ -247,6 +263,11 @@ export interface ForumBoardCategory {
   name: string;
   iconUrl: string | null;
   sortOrder: number;
+  /** Owner flag: category is private (owner/mods/members only). */
+  membersOnly: boolean;
+  /** Resolved for THIS viewer: `membersOnly && !viewerIsMember`. When true
+   *  the chip renders locked and its topics are absent from the feed. */
+  locked: boolean;
 }
 
 /** Page of topics for a board. `hasMore` drives "Load older topics";

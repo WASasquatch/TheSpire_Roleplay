@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.6
+# syntax=docker/dockerfile:1.7-labs
 #
 # Multi-stage build for The Spire on Fly.io (or any Docker host).
 #
@@ -21,10 +21,17 @@ WORKDIR /app
 
 # Copy manifests first so the dep install layer caches independently of
 # source changes — most builds only touch source files, not lockfiles.
+#
+# The per-workspace manifests are copied by GLOB rather than listed one by
+# one, so a brand-new workspace package (apps/foo, packages/bar) is picked
+# up automatically — without it, pnpm's `--frozen-lockfile` would fail on
+# an incomplete workspace the first time someone forgot to add a COPY line.
+# `--parents` (Dockerfile 1.7-labs) preserves each match's directory path,
+# so apps/web/package.json lands at /app/apps/web/package.json instead of
+# being flattened. Only package.json files are copied, so the install layer
+# still caches independently of source edits.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
-COPY apps/server/package.json ./apps/server/
-COPY apps/web/package.json ./apps/web/
-COPY packages/shared/package.json ./packages/shared/
+COPY --parents apps/*/package.json packages/*/package.json ./
 
 RUN pnpm install --frozen-lockfile
 

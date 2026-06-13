@@ -23,6 +23,11 @@ export interface ThreadCategory {
   /** Parent category id (migration 0235). Set ⇒ this is a SUBCATEGORY
    *  rendered under its parent's section. One level only. */
   parentId?: string | null;
+  /** Private (members-only) category for FORUM boards (migration 0239):
+   *  only the forum's owner/mods/members may read topics filed here. The
+   *  chip still renders for everyone (shown-but-locked). Standalone nested
+   *  rooms never set it. */
+  membersOnly?: boolean;
 }
 
 /** Cap for the category subtitle (UI input + server validation). */

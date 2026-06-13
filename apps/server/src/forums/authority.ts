@@ -20,7 +20,7 @@
  */
 import { and, eq } from "drizzle-orm";
 import type { Role } from "@thekeep/shared";
-import { forumBans, forumMembers, forums } from "../db/schema.js";
+import { forumBans, forumMembers, forums, roomThreadCategories, rooms } from "../db/schema.js";
 import { hasPermission } from "../auth/permissions.js";
 import type { Db } from "../db/index.js";
 
@@ -129,4 +129,55 @@ export async function forumGateForBoard(
     };
   }
   return { ok: true, authority };
+}
+
+/**
+ * Per-section READ gate for a forum board (migration 0239). Resolves, for one
+ * viewer + one room, whether the board or any of its categories is marked
+ * "members only" and the viewer isn't a member. Used by the content-read
+ * routes (`/rooms/:id/topics`, `/rooms/:id/thread-categories`, the thread
+ * reader, and the permalink locator) so a private board/category can't be
+ * read by guests OR logged-in non-members. Owner/mods/members pass freely.
+ *
+ * Non-forum rooms (no `forumId`) return `isBoard: false` and never gate —
+ * the helper is a no-op for ordinary chat rooms.
+ */
+export interface ForumBoardReadGate {
+  /** The room is a forum board (membersOnly semantics apply). */
+  isBoard: boolean;
+  /** Viewer is owner/mod/member of the board's forum. */
+  isMember: boolean;
+  /** Board is members-only AND the viewer isn't a member → withhold ALL content. */
+  boardLocked: boolean;
+  /** Category ids the viewer may not read (members-only, viewer not a member). */
+  lockedCatIds: Set<string>;
+}
+
+export async function forumBoardReadGate(
+  db: Db,
+  user: Caller | null,
+  roomId: string,
+): Promise<ForumBoardReadGate> {
+  const room = (await db
+    .select({ forumId: rooms.forumId, forumMembersOnly: rooms.forumMembersOnly })
+    .from(rooms)
+    .where(eq(rooms.id, roomId))
+    .limit(1))[0];
+  if (!room?.forumId) {
+    return { isBoard: false, isMember: false, boardLocked: false, lockedCatIds: new Set() };
+  }
+  const authority = await forumAuthority(db, user, room.forumId);
+  if (authority.isMember) {
+    return { isBoard: true, isMember: true, boardLocked: false, lockedCatIds: new Set() };
+  }
+  const lockedCats = await db
+    .select({ id: roomThreadCategories.id })
+    .from(roomThreadCategories)
+    .where(and(eq(roomThreadCategories.roomId, roomId), eq(roomThreadCategories.membersOnly, true)));
+  return {
+    isBoard: true,
+    isMember: false,
+    boardLocked: !!room.forumMembersOnly,
+    lockedCatIds: new Set(lockedCats.map((c) => c.id)),
+  };
 }

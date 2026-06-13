@@ -1,8 +1,8 @@
-import { createContext, useContext, useEffect, useRef } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { DEFAULT_THEME, isDarkPalette, legibleThemePalette, THEME_PRESETS, type Theme } from "@thekeep/shared";
+import { DEFAULT_THEME, isDarkPalette, legibleAgainstBg, legibleThemePalette, THEME_PRESETS, type Theme } from "@thekeep/shared";
 import { applyStyle } from "./ornaments/index.js";
-import { loadCachedActiveTheme, type SiteBranding } from "../state/store.js";
+import { loadCachedActiveTheme, useChat, type SiteBranding } from "../state/store.js";
 
 /**
  * Read access to the currently-active theme, the same value `applyTheme`
@@ -85,7 +85,15 @@ export function useScopedRootDesign(
     const root = document.documentElement;
     const prevKey = root.getAttribute("data-theme-style");
     applyStyle(theme, styleKey);
+    // Publish the override so App's authoritative theme effect (the PARENT,
+    // whose passive effect runs AFTER this child's) re-asserts the forum
+    // design instead of clobbering data-theme-style back to the viewer's own
+    // design. Without this, signing in from the public forum (the one commit
+    // where App's theme effect re-runs while this surface mounts) left root
+    // showing the viewer's ornaments under the forum's palette.
+    useChat.getState().setScopedRootDesign({ theme, styleKey });
     return () => {
+      useChat.getState().setScopedRootDesign(null);
       applyStyle(restoreRef.current, prevKey);
     };
   }, [theme, styleKey, enabled]);
@@ -528,4 +536,110 @@ export function rgbTripleToHex(triple: string): string {
   ) return "#000000";
   const hex = (n: number) => clamp(n, 0, 255).toString(16).padStart(2, "0");
   return `#${hex(r)}${hex(g)}${hex(b)}`;
+}
+
+/**
+ * Sample the average pixel COLOR of a remote image as `#rrggbb`, so a
+ * caller can decide legible ink for text laid over it the same way the
+ * rest of the site does: feed the sampled surface to {@link legibleAgainstBg}
+ * and let it lift the EXISTING palette color's lightness to a legible
+ * level (hue/identity preserved) — not flatten everything to white.
+ *
+ * Returns null while loading, on error, or on a CORS-tainted canvas
+ * (cross-origin images without the right headers throw on `getImageData`).
+ * Callers treat null as "unknown" and fall back to a safe fixed treatment.
+ */
+export function useImageAverageColor(url: string | null): string | null {
+  const [hex, setHex] = useState<string | null>(null);
+  useEffect(() => {
+    if (!url) { setHex(null); return; }
+    let cancelled = false;
+    setHex(null);
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.referrerPolicy = "no-referrer";
+    img.onload = () => {
+      if (cancelled) return;
+      try {
+        const w = 32, h = 32;
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, w, h);
+        const { data } = ctx.getImageData(0, 0, w, h);
+        let r = 0, g = 0, b = 0;
+        const samples = data.length / 4;
+        for (let i = 0; i < data.length; i += 4) {
+          r += data[i]!; g += data[i + 1]!; b += data[i + 2]!;
+        }
+        const to2 = (n: number) => clamp(Math.round(n / samples), 0, 255).toString(16).padStart(2, "0");
+        if (!cancelled) setHex(`#${to2(r)}${to2(g)}${to2(b)}`);
+      } catch {
+        // CORS-tainted canvas → leave null; caller uses its safe fallback.
+        if (!cancelled) setHex(null);
+      }
+    };
+    img.onerror = () => { if (!cancelled) setHex(null); };
+    img.src = url;
+    return () => { cancelled = true; };
+  }, [url]);
+  return hex;
+}
+
+/** Perceived luminance (0..1, Rec. 709) of a hex color; 0 on parse failure. */
+export function hexLuminance(hex: string): number {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return 0;
+  return (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+}
+
+/**
+ * The effective background a viewer actually sees behind text over a
+ * banner: the banner's average color composited UNDER a black scrim of
+ * the given alpha (the gradient we paint on top). Returned as hex so it
+ * can be passed straight to {@link legibleAgainstBg}.
+ */
+export function scrimmedBannerBg(bannerHex: string, scrimAlpha: number): string {
+  const rgb = hexToRgb(bannerHex);
+  if (!rgb) return bannerHex;
+  const a = clamp(scrimAlpha, 0, 1);
+  const mix = (c: number) => clamp(Math.round(c * (1 - a)), 0, 255).toString(16).padStart(2, "0");
+  return `#${mix(rgb.r)}${mix(rgb.g)}${mix(rgb.b)}`;
+}
+
+/** One legible-ink style for text laid over a banner: the palette `color`
+ *  lifted to `target` contrast on the banner (hue preserved), plus a SUBTLE
+ *  shadow that contrasts with the resolved ink — a soft dark halo only when
+ *  the ink came out light, a faint light halo when it stayed dark (a heavy
+ *  dark shadow under dark text on a light banner just reads as muddy). */
+function bannerInkStyle(color: string, bannerHex: string, target: number): CSSProperties {
+  const ink = legibleAgainstBg(color, bannerHex, target);
+  const shadow = hexLuminance(ink) > 0.55
+    ? "0 1px 2px rgba(0,0,0,.55)"
+    : "0 1px 1px rgba(255,255,255,.35)";
+  return { color: ink, textShadow: shadow };
+}
+
+/** The four banner-ink slots (title/sub/meta/strong) for a forum header or
+ *  hero. `bannerHex` = the banner's sampled average color, or null when
+ *  there's no readable sample (CORS-tainted) — then fall back to white with
+ *  a firm dark shadow, which reads on any image. */
+export function forumBannerInk(theme: Theme, bannerHex: string | null): {
+  title: CSSProperties; sub: CSSProperties; meta: CSSProperties; strong: CSSProperties;
+} {
+  if (!bannerHex) {
+    return {
+      title: { color: "#fff", textShadow: "0 1px 3px rgba(0,0,0,.85)" },
+      sub: { color: "rgba(255,255,255,.9)", textShadow: "0 1px 2px rgba(0,0,0,.8)" },
+      meta: { color: "rgba(255,255,255,.8)", textShadow: "0 1px 2px rgba(0,0,0,.8)" },
+      strong: { color: "#fff" },
+    };
+  }
+  return {
+    title: bannerInkStyle(theme.text, bannerHex, 4.5),
+    sub: bannerInkStyle(theme.muted, bannerHex, 3),
+    meta: bannerInkStyle(theme.muted, bannerHex, 3),
+    strong: { ...bannerInkStyle(theme.text, bannerHex, 4.5), textShadow: undefined },
+  };
 }

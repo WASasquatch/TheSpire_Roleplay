@@ -4,6 +4,7 @@ import type {
   DirectConversationSummary,
   DirectMessage,
   PermissionKey,
+  PollUpdate,
   ProfileView,
   Role,
   RoomOccupant,
@@ -125,6 +126,9 @@ export interface SiteBranding {
    * the same "·"-separated row so the cluster still reads as one beat.
    */
   splashMessages24hEnabled: boolean;
+  /** Visual bio Designer (GrapesJS) availability. When on, the profile editor's
+   *  bio tab offers a Designer/Source toggle (desktop only). Off by default. */
+  profileDesignerEnabled: boolean;
   /**
    * Site-wide default theme style. Orthogonal to `defaultTheme` (palette).
    * Users without a per-user override (Profile.styleKey === null) inherit
@@ -178,6 +182,9 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // as healthy. Independent of `activityFeedsEnabled`, each toggle gates
   // its own splash section.
   splashMessages24hEnabled: false,
+  // ON by default so the bio Designer reliably shows on desktop without
+  // depending on a server round-trip; admins can turn it OFF in settings.
+  profileDesignerEnabled: true,
   // Flagship style. Site admins can change this to any registered style
   // key ('medieval', 'modern', 'scifi'); unknown keys fall back to this
   // value at render time.
@@ -253,6 +260,9 @@ export function loadCachedBranding(): SiteBranding {
       splashMessages24hEnabled: typeof parsed.splashMessages24hEnabled === "boolean"
         ? parsed.splashMessages24hEnabled
         : DEFAULT_BRANDING.splashMessages24hEnabled,
+      profileDesignerEnabled: typeof parsed.profileDesignerEnabled === "boolean"
+        ? parsed.profileDesignerEnabled
+        : DEFAULT_BRANDING.profileDesignerEnabled,
       defaultStyleKey: typeof parsed.defaultStyleKey === "string" && parsed.defaultStyleKey.length > 0
         ? parsed.defaultStyleKey
         : DEFAULT_BRANDING.defaultStyleKey,
@@ -421,6 +431,16 @@ interface ChatState {
   currentRoomId: string | null;
   setCurrentRoom: (id: string | null) => void;
 
+  /**
+   * Forum surface (catalog modal / public landing) currently overriding the
+   * ROOT design — a design can't be subtree-scoped (its CSS keys off
+   * `html[data-theme-style]`). The scoped-design hook publishes the forum's
+   * palette + style here so App's authoritative theme effect re-asserts it
+   * instead of clobbering it back to the viewer's own design (the cause of
+   * the post-login "half forum / half my theme" mix). Null = no override. */
+  scopedRootDesign: { theme: Theme; styleKey: string | null } | null;
+  setScopedRootDesign: (d: { theme: Theme; styleKey: string | null } | null) => void;
+
   /** Equipped room-transition key for the CURRENT identity (active character
    *  or OOC). Null = instant switch. Loaded by App on identity change and
    *  updated when the user equips one in the shop; read by the room-switch
@@ -435,6 +455,11 @@ interface ChatState {
   appendMessage: (msg: ChatMessage) => void;
   /** Replace an existing message in-place (used for edit/delete grace updates). */
   updateMessage: (msg: ChatMessage) => void;
+  /** Merge a live poll:update (tallies / totalVoters / closedAt) into the
+   *  matching poll message wherever it's cached — chat buffers AND forum
+   *  topic buckets. The viewer's own `myVote` is preserved (the server
+   *  broadcast is viewer-agnostic; the PollCard owns its own selection). */
+  applyPollUpdate: (u: PollUpdate) => void;
   setMessages: (roomId: string, msgs: ChatMessage[]) => void;
   /** Drop a batch of messages by id from a room's buffer (the `/trash`
    *  bulk-delete purge). No-op when none of the ids are present. */
@@ -898,6 +923,9 @@ export const useChat = create<ChatState>((set) => ({
   currentRoomId: null,
   setCurrentRoom: (id) => set({ currentRoomId: id }),
 
+  scopedRootDesign: null,
+  setScopedRootDesign: (d) => set({ scopedRootDesign: d }),
+
   myActiveTransitionKey: null,
   setMyActiveTransitionKey: (key) => set({ myActiveTransitionKey: key }),
 
@@ -957,6 +985,55 @@ export const useChat = create<ChatState>((set) => ({
       }
       if (!touched) return {};
       return { messagesByRoom: nextByRoom };
+    }),
+
+  applyPollUpdate: (u) =>
+    set((s) => {
+      const merge = (m: ChatMessage): ChatMessage =>
+        m.id === u.messageId && m.poll
+          ? { ...m, poll: { ...m.poll, tallies: u.tallies, totalVoters: u.totalVoters, closedAt: u.closedAt } }
+          : m;
+
+      // Chat buffers.
+      let msgTouched = false;
+      const nextByRoom: Record<string, ChatMessage[]> = {};
+      for (const rid of Object.keys(s.messagesByRoom)) {
+        const buf = s.messagesByRoom[rid];
+        if (!buf) continue;
+        const idx = buf.findIndex((m) => m.id === u.messageId);
+        if (idx < 0) { nextByRoom[rid] = buf; continue; }
+        const next = buf.slice();
+        next[idx] = merge(buf[idx]!);
+        nextByRoom[rid] = next;
+        msgTouched = true;
+      }
+
+      // Forum topic buckets (the poll topic lives here in forum mode).
+      let topicTouched = false;
+      const nextForum: typeof s.forumTopicsByRoom = {};
+      for (const rid of Object.keys(s.forumTopicsByRoom)) {
+        const room = s.forumTopicsByRoom[rid];
+        if (!room) continue;
+        const nextRoom: typeof room = {};
+        let roomTouched = false;
+        for (const cat of Object.keys(room)) {
+          const bucket = room[cat]!;
+          const topics = bucket.topics.map(merge);
+          const pending = bucket.pending.map(merge);
+          const changed =
+            topics.some((t, i) => t !== bucket.topics[i]) ||
+            pending.some((t, i) => t !== bucket.pending[i]);
+          if (changed) { nextRoom[cat] = { ...bucket, topics, pending }; roomTouched = true; topicTouched = true; }
+          else nextRoom[cat] = bucket;
+        }
+        nextForum[rid] = roomTouched ? nextRoom : room;
+      }
+
+      if (!msgTouched && !topicTouched) return {};
+      return {
+        ...(msgTouched ? { messagesByRoom: nextByRoom } : {}),
+        ...(topicTouched ? { forumTopicsByRoom: nextForum } : {}),
+      };
     }),
 
   setMessages: (roomId, msgs) =>

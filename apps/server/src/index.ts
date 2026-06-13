@@ -28,6 +28,7 @@ import { Server as IoServer } from "socket.io";
 import { ZodError } from "zod";
 import {
   DEFAULT_PRESENCE_TEMPLATES,
+  isAdminRole,
   renderPresenceTemplate,
   type ClientToServerEvents,
   type ServerToClientEvents,
@@ -461,6 +462,9 @@ async function main() {
       // can be on alone, and the splash renders only the sections
       // whose toggle is on. When both are on they share one row.
       splashMessages24hEnabled: s.splashMessages24hEnabled,
+      // Visual bio Designer (GrapesJS) availability. When on, the profile
+      // editor's bio tab offers a Designer/Source toggle (desktop only).
+      profileDesignerEnabled: s.profileDesignerEnabled,
       // Default theme STYLE, orthogonal to defaultTheme above. Users
       // without a per-user style override inherit this. Seeded default
       // is 'medieval'; the catalog also includes 'modern' and 'scifi'.
@@ -1076,7 +1080,10 @@ async function main() {
         }
 
         const text = payload.text.trim();
-        if (!text) { ack?.({ ok: false, code: "EMPTY", message: "Write something first." }); return; }
+        // Poll topics carry their content in the options, so an empty intro
+        // body is fine; every other post needs prose.
+        const isPollTopic = !!payload.poll && !!payload.threadTitle?.trim() && !payload.replyToId;
+        if (!text && !isPollTopic) { ack?.({ ok: false, code: "EMPTY", message: "Write something first." }); return; }
         if (text.startsWith("/")) {
           ack?.({
             ok: false,
@@ -1120,11 +1127,28 @@ async function main() {
         // New topic (title XOR reply — dispatch parity).
         if (threadTitle && !replyToId) {
           const cappedTitle = threadTitle.slice(0, maxForumTopicTitleLength);
+          // Poll topic: the title is the question, options + settings ride
+          // pollDataJson, the body is an optional intro. Same model the
+          // /poll chat command builds.
+          let pollDataJson: string | null = null;
+          if (payload.poll) {
+            const { buildPollData } = await import("./polls.js");
+            const built = buildPollData({
+              optionTexts: payload.poll.optionTexts ?? [],
+              allowMultiple: !!payload.poll.allowMultiple,
+              showVoters: !!payload.poll.showVoters,
+              closesAt: payload.poll.closesAt ?? null,
+              question: cappedTitle,
+            });
+            if (!built.ok) { ack?.({ ok: false, code: "POLL_INVALID", message: built.error }); return; }
+            pollDataJson = built.json;
+          }
           const messageId = await addMessage(ctx, {
-            kind: "say",
+            kind: pollDataJson ? "poll" : "say",
             body: text,
             title: cappedTitle,
             ...(threadCategoryId ? { threadCategoryId } : {}),
+            ...(pollDataJson ? { pollDataJson } : {}),
           });
           if (messageId) {
             // Authors watch their own topics (reply notifications).
@@ -1179,6 +1203,134 @@ async function main() {
         ack?.({ ok: false, code: "FORUM_NEEDS_TOPIC", message: "Start a new topic with a title, or reply to an existing one." });
       } catch (err) {
         log.error({ err }, "forum:post error");
+        ack?.({ ok: false, code: "ERR", message: err instanceof Error ? err.message : "error" });
+      }
+    });
+
+    /**
+     * Resolve a poll message + its room and confirm THIS user may READ it
+     * (and therefore vote/close). Mirrors the forum:post / chat backlog
+     * gates: forum boards consult forumAuthority + the members-only read
+     * gate; private chat rooms require membership; public rooms are open.
+     */
+    async function gatePollAccess(messageId: string): Promise<
+      | { ok: false; code: string; message: string }
+      | { ok: true; msg: typeof messages.$inferSelect; room: typeof rooms.$inferSelect; data: import("@thekeep/shared").PollData }
+    > {
+      const msg = (await db.select().from(messages).where(eq(messages.id, messageId)).limit(1))[0];
+      if (!msg || msg.kind !== "poll" || msg.deletedAt) {
+        return { ok: false, code: "NO_POLL", message: "That poll doesn't exist anymore." };
+      }
+      const { parsePollData } = await import("./polls.js");
+      const data = parsePollData(msg.pollDataJson);
+      if (!data) return { ok: false, code: "NO_POLL", message: "That poll is malformed." };
+      const room = (await db.select().from(rooms).where(eq(rooms.id, msg.roomId)).limit(1))[0];
+      if (!room) return { ok: false, code: "NO_ROOM", message: "That room is gone." };
+      if (room.forumId) {
+        const { forumGateForBoard, forumBoardReadGate } = await import("./forums/authority.js");
+        const g = await forumGateForBoard(db, user, room.forumId);
+        if (!g.ok) return { ok: false, code: g.code, message: g.message };
+        const rg = await forumBoardReadGate(db, user, room.id);
+        if (rg.boardLocked || (msg.threadCategoryId && rg.lockedCatIds.has(msg.threadCategoryId))) {
+          return { ok: false, code: "FORUM_BOARD_MEMBERS_ONLY", message: "This is a members-only section of the forum." };
+        }
+      } else if (room.type === "private") {
+        const member = (await db.select().from(roomMembers)
+          .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, user.id))).limit(1))[0];
+        if (!member) return { ok: false, code: "NOT_MEMBER", message: "You're not in that room." };
+      }
+      return { ok: true, msg, room, data };
+    }
+
+    /** Recompute tallies and fan a poll:update to the room + this socket. */
+    async function broadcastPollUpdate(messageId: string, roomId: string, data: import("@thekeep/shared").PollData): Promise<void> {
+      const { loadPollTallies } = await import("./polls.js");
+      const { tallies, totalVoters } = await loadPollTallies(db, messageId, data);
+      const update = { messageId, tallies, totalVoters, closedAt: data.closedAt };
+      io.to(`room:${roomId}`).emit("poll:update", update);
+      // Forum board viewers aren't joined to the board's room channel, so
+      // reach the actor's own socket directly too (covers the voter even on
+      // a board where the room broadcast doesn't reach them).
+      socket.emit("poll:update", update);
+    }
+
+    socket.on("poll:vote", async (payload, ack) => {
+      try {
+        if (!(await checkAndExtendSession())) {
+          ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
+          return;
+        }
+        const fresh = await loadSessionUser(db, user.id);
+        if (!fresh) { socket.emit("auth:expired"); ack?.({ ok: false, code: "AUTH", message: "Session expired." }); socket.disconnect(true); return; }
+        Object.assign(user, fresh);
+
+        if (!payload?.messageId || !Array.isArray(payload.optionIds)) {
+          ack?.({ ok: false, code: "BAD_INPUT", message: "Malformed vote." });
+          return;
+        }
+        const gate = await gatePollAccess(payload.messageId);
+        if (!gate.ok) { ack?.({ ok: false, code: gate.code, message: gate.message }); return; }
+        const { msg, room, data } = gate;
+
+        if (data.closedAt != null || (data.closesAt != null && Date.now() >= data.closesAt)) {
+          ack?.({ ok: false, code: "POLL_CLOSED", message: "This poll is closed." });
+          return;
+        }
+        const validIds = new Set(data.options.map((o) => o.id));
+        const chosen = [...new Set(payload.optionIds)].filter((id) => validIds.has(id));
+        if (!data.allowMultiple && chosen.length > 1) {
+          ack?.({ ok: false, code: "SINGLE_ONLY", message: "This poll only allows one choice." });
+          return;
+        }
+        const { pollVotes } = await import("./db/schema.js");
+        // Replace the voter's prior ballot (single-choice: at most one row;
+        // multiple-choice: the prior set) with the new selection. An empty
+        // selection retracts the vote.
+        await db.delete(pollVotes).where(and(eq(pollVotes.pollMessageId, msg.id), eq(pollVotes.userId, user.id)));
+        if (chosen.length) {
+          await db.insert(pollVotes).values(chosen.map((optionId) => ({ pollMessageId: msg.id, optionId, userId: user.id })));
+        }
+        await broadcastPollUpdate(msg.id, room.id, data);
+        ack?.({ ok: true });
+      } catch (err) {
+        log.error({ err }, "poll:vote error");
+        ack?.({ ok: false, code: "ERR", message: err instanceof Error ? err.message : "error" });
+      }
+    });
+
+    socket.on("poll:close", async (payload, ack) => {
+      try {
+        if (!(await checkAndExtendSession())) {
+          ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
+          return;
+        }
+        const fresh = await loadSessionUser(db, user.id);
+        if (!fresh) { socket.emit("auth:expired"); ack?.({ ok: false, code: "AUTH", message: "Session expired." }); socket.disconnect(true); return; }
+        Object.assign(user, fresh);
+
+        if (!payload?.messageId) { ack?.({ ok: false, code: "BAD_INPUT", message: "Malformed request." }); return; }
+        const gate = await gatePollAccess(payload.messageId);
+        if (!gate.ok) { ack?.({ ok: false, code: gate.code, message: gate.message }); return; }
+        const { msg, room, data } = gate;
+
+        // Who may close: the author, a site admin, the chat room owner, or a
+        // forum mod/owner on a board.
+        let canClose = msg.userId === user.id || isAdminRole(user.role) || room.ownerId === user.id;
+        if (!canClose && room.forumId) {
+          const { forumAuthority } = await import("./forums/authority.js");
+          const a = await forumAuthority(db, user, room.forumId);
+          canClose = a.isMod;
+        }
+        if (!canClose) { ack?.({ ok: false, code: "FORBIDDEN", message: "Only the poll's author or a moderator can close it." }); return; }
+
+        if (data.closedAt == null) {
+          data.closedAt = Date.now();
+          await db.update(messages).set({ pollDataJson: JSON.stringify(data) }).where(eq(messages.id, msg.id));
+        }
+        await broadcastPollUpdate(msg.id, room.id, data);
+        ack?.({ ok: true });
+      } catch (err) {
+        log.error({ err }, "poll:close error");
         ack?.({ ok: false, code: "ERR", message: err instanceof Error ? err.message : "error" });
       }
     });

@@ -348,6 +348,30 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
     return () => window.clearInterval(id);
   }, [canControl, isPlaying, ready, isEmbed, isLive, emitControl, safeIndex]);
 
+  // Recover from joining a source that already ran PAST its end while the room
+  // sat empty. The server has no per-video durations, so it keeps a finished
+  // source `isPlaying` and extrapolates its position from wall-clock forever;
+  // advancement otherwise depends on a client's onEnded, which never re-fires
+  // for a player loaded AT the end (a seeked-to-end load isn't a "played
+  // through" end). Net effect: come back a day later and the playlist is
+  // wedged at the end of one video and never moves on (the reported bug).
+  //
+  // Once we know the duration, if the shared position is already at/beyond it,
+  // nudge the list forward. The server debounces + validates the index, so
+  // several joiners advance it only once. A video that finishes while someone
+  // is actually watching still advances the normal way (onEnded); this only
+  // covers the no-one-was-here case onEnded can't. Loop "off" on the last
+  // source stops (isPlaying false), so this won't fire there.
+  useEffect(() => {
+    if (!ready || isEmbed || isLive || !isPlaying || duration <= 0) return;
+    if (expectedPosition() >= duration - END_REACHED_GRACE_SEC) {
+      emitControl("ended", { index: safeIndex });
+    }
+    // Keyed on source readiness/duration, NOT the per-second position, so
+    // normal mid-video playback never re-triggers a premature advance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, safeIndex, duration, isPlaying, isEmbed, isLive]);
+
   const togglePlay = () => {
     const positionSec = playerRef.current?.getCurrentTime() ?? expectedPosition();
     emitControl(isPlaying ? "pause" : "play", { positionSec });

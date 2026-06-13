@@ -538,6 +538,15 @@ export const rooms = sqliteTable(
      */
     forumId: text("forum_id").references(() => forums.id, { onDelete: "set null" }),
     /**
+     * Board-level "members only" gate (migration 0239). Only meaningful
+     * when `forumId` is set: when true, this board is PRIVATE — only the
+     * forum's owner, mods, and members may read it. Logged-out guests AND
+     * logged-in non-members are blocked even when the forum has
+     * `publicBrowsing` on. The board still LISTS (shown-but-locked); its
+     * contents are withheld. Resolved through `forumAuthority(...).isMember`.
+     */
+    forumMembersOnly: integer("forum_members_only", { mode: "boolean" }).notNull().default(false),
+    /**
      * Theater (synchronized watch-party) CONFIG. Orthogonal to `type`
      * (a theater can be a public OR private room) - mirrors replyMode as
      * a presentation mode rather than an access mode.
@@ -670,7 +679,7 @@ export const messages = sqliteTable(
     /** snapshot - display name at send time (so renames don't rewrite history) */
     displayName: text("display_name").notNull(),
     kind: text("kind", {
-      enum: ["say", "me", "cmd", "system", "whisper", "roll", "announce", "scene", "npc", "ooc"],
+      enum: ["say", "me", "cmd", "system", "whisper", "roll", "announce", "scene", "npc", "ooc", "poll"],
     })
       .notNull()
       .default("say"),
@@ -809,6 +818,15 @@ export const messages = sqliteTable(
      */
     linkPreviewJson: text("link_preview_json"),
     /**
+     * Poll definition + close-state for `kind: "poll"` rows (migration
+     * 0240). JSON: { options:[{id,text}], allowMultiple, showVoters,
+     * closesAt:ms|null, closedAt:ms|null }. The poll QUESTION rides `body`
+     * (chat) / `title` (forum topic); votes live in `poll_votes`, not here,
+     * so concurrent voting never races on this column. Null on every other
+     * kind. Mirrors the linkPreviewJson / cmdCss JSON-snapshot pattern.
+     */
+    pollDataJson: text("poll_data_json"),
+    /**
      * Earning rank snapshot at send time, drives the chat-line sigil.
      * Same snapshot posture as displayName / color: a later rank-up or
      * a rank-disable doesn't rewrite history. Scope follows the IC/OOC
@@ -838,6 +856,34 @@ export const messages = sqliteTable(
   },
   (t) => ({
     roomTimeIdx: index("messages_room_time_idx").on(t.roomId, t.createdAt),
+  }),
+);
+
+/* ---------- poll votes ---------- */
+/**
+ * One ballot for a `kind: "poll"` message (migration 0240). A row per
+ * (poll, voter, option): single-choice polls keep exactly one row per voter
+ * (the vote route deletes the voter's prior rows before inserting); multiple-
+ * choice polls keep one row per selected option. The poll DEFINITION lives in
+ * messages.pollDataJson; this table is the mutable tally so concurrent votes
+ * never read-modify-write a JSON array.
+ */
+export const pollVotes = sqliteTable(
+  "poll_votes",
+  {
+    pollMessageId: text("poll_message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    /** Matches an option id inside the poll message's pollDataJson. */
+    optionId: text("option_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.pollMessageId, t.userId, t.optionId] }),
+    pollIdx: index("poll_votes_poll_idx").on(t.pollMessageId),
   }),
 );
 
@@ -1336,6 +1382,10 @@ export const siteSettings = sqliteTable("site_settings", {
    * one beat. Default off, see migration 0116 for the rationale.
    */
   splashMessages24hEnabled: integer("splash_messages_24h_enabled", { mode: "boolean" }).notNull().default(false),
+  /** Visual bio "Designer" (GrapesJS) availability (migration 0241; flipped on
+   *  by default in 0242). When off, the bio editor is the raw-HTML source
+   *  textarea only. Admins can disable it from site settings. */
+  profileDesignerEnabled: integer("profile_designer_enabled", { mode: "boolean" }).notNull().default(true),
   /** Sanitized HTML shown once to NEW users (registered after the welcome's last edit) until they dismiss it. Editing the text rotates a hash so the audience sees the new version on next load. */
   newUserWelcomeHtml: text("new_user_welcome_html").notNull().default(""),
   /** Timestamp of the most recent welcome-text edit. Null = never set. The audience filter is `users.created_at > new_user_welcome_updated_at`, so existing users at the time of the edit don't get retroactively spammed. */
@@ -2822,6 +2872,12 @@ export const roomThreadCategories = sqliteTable(
      *  themselves be children (enforced at the route layer). Deleting a
      *  parent promotes children to top level (SET NULL). */
     parentId: text("parent_id"),
+    /** Category-level "members only" gate (migration 0239): when true,
+     *  only the forum's owner/mods/members may read topics filed under this
+     *  category. The chip still renders (shown-but-locked); its topics are
+     *  filtered out for non-members. Mirrors rooms.forumMembersOnly one level
+     *  down. Only meaningful for categories inside a forum board. */
+    membersOnly: integer("members_only", { mode: "boolean" }).notNull().default(false),
     createdAt: ts("created_at"),
   },
   (t) => ({

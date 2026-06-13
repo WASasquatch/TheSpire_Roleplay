@@ -572,6 +572,7 @@ interface SettingsRow {
   activityFeedsEnabled: boolean;
   featuredWorldsEnabled: boolean;
   splashMessages24hEnabled: boolean;
+  profileDesignerEnabled: boolean;
   /** Sanitized HTML for the post-login welcome modal. "" = no welcome shown. */
   newUserWelcomeHtml: string;
   /** Site-wide default theme style key. Users without an override inherit this. */
@@ -984,6 +985,7 @@ function SettingsTab() {
   const [activityFeedsEnabled, setActivityFeedsEnabled] = useState(false);
   const [featuredWorldsEnabled, setFeaturedWorldsEnabled] = useState(false);
   const [splashMessages24hEnabled, setSplashMessages24hEnabled] = useState(false);
+  const [profileDesignerEnabled, setProfileDesignerEnabled] = useState(false);
   const [defaultStyleKey, setDefaultStyleKey] = useState<string>("medieval");
   // Per-preset design pinning. Keyed by THEME_PRESETS name. Empty
   // entry on a preset means "fall through to defaultStyleKey for
@@ -1018,6 +1020,7 @@ function SettingsTab() {
       setActivityFeedsEnabled(j.activityFeedsEnabled);
       setFeaturedWorldsEnabled(j.featuredWorldsEnabled);
       setSplashMessages24hEnabled(j.splashMessages24hEnabled);
+      setProfileDesignerEnabled(j.profileDesignerEnabled);
       setDefaultStyleKey(j.defaultStyleKey || "medieval");
       setThemeDesignMap(j.themeDesignMap ?? {});
     } catch (err) {
@@ -1068,6 +1071,7 @@ function SettingsTab() {
         activityFeedsEnabled,
         featuredWorldsEnabled,
         splashMessages24hEnabled,
+        profileDesignerEnabled,
         defaultStyleKey,
         themeDesignMap,
       };
@@ -1105,6 +1109,7 @@ function SettingsTab() {
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         splashMessages24hEnabled: j.splashMessages24hEnabled,
+        profileDesignerEnabled: j.profileDesignerEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
         // Null = admin hasn't set an explicit override → splash falls
@@ -1348,6 +1353,20 @@ function SettingsTab() {
               Splash page picks up to 10 random open worlds and rotates them as a "settings you can play in" strip. Off by default; the seeded defaults plus any community open worlds will fill the rotation once enabled.
             </span>
           </label>
+          <label className="text-xs">
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Profile bio Designer</span>
+            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+              <input
+                type="checkbox"
+                checked={profileDesignerEnabled}
+                onChange={(e) => setProfileDesignerEnabled(e.target.checked)}
+              />
+              <span>{profileDesignerEnabled ? "On - bio tab offers a visual Designer (desktop)" : "Off - bio editor is raw HTML source only"}</span>
+            </div>
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              Adds a visual drag-and-drop Designer alongside the raw-HTML Source on the profile bio tab (desktop only). Off by default. Try it on your own profile before enabling site-wide; the Source view remains available either way.
+            </span>
+          </label>
         </div>
       </fieldset>
 
@@ -1571,6 +1590,7 @@ function BrandingTab() {
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         splashMessages24hEnabled: j.splashMessages24hEnabled,
+        profileDesignerEnabled: j.profileDesignerEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
         // Null = admin hasn't set an explicit override → splash falls
@@ -1706,6 +1726,7 @@ function BrandingTab() {
               activityFeedsEnabled: j.settings.activityFeedsEnabled,
               featuredWorldsEnabled: j.settings.featuredWorldsEnabled,
               splashMessages24hEnabled: j.settings.splashMessages24hEnabled,
+              profileDesignerEnabled: j.settings.profileDesignerEnabled,
               defaultStyleKey: j.settings.defaultStyleKey,
               themeDesignMap: j.settings.themeDesignMap ?? {},
               defaultThemeJson: j.settings.defaultThemeJson ?? null,
@@ -2068,6 +2089,7 @@ function RulesTab() {
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         splashMessages24hEnabled: j.splashMessages24hEnabled,
+        profileDesignerEnabled: j.profileDesignerEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
         // Null = admin hasn't set an explicit override → splash falls

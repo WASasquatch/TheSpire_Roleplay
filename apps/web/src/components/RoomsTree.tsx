@@ -272,29 +272,11 @@ export function RoomsTree({
         onPointerCancel={endResize}
         className="absolute inset-y-0 left-0 z-30 hidden w-1.5 cursor-ew-resize hover:bg-keep-action/30 active:bg-keep-action/50 lg:block"
       />
-      {/* Header row - title + room count, with the mobile-only close
-          button living inside it (instead of an absolute overlay) so it
-          gets real layout space and never covers the room list. */}
-      <div className="flex items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-2 lg:bg-transparent lg:py-1.5">
-        <span className="text-xs uppercase tracking-widest text-keep-muted">
-          Rooms <span className="text-keep-rule">({visibleRooms.length})</span>
-        </span>
-        {onClose ? (
-          <button
-            type="button"
-            onClick={onClose}
-            className="keep-button flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-base text-keep-text hover:bg-keep-banner lg:hidden"
-            aria-label="Close rooms"
-            title="Close rooms drawer"
-          >
-            ✕
-          </button>
-        ) : null}
-      </div>
-      {/* Forums Catalog entry — pinned above the room list. Forum boards
-          don't live in this rail (see visibleRooms); this is their front
-          door, so it's styled as a BUTTON (inset, action-bordered, with
-          an explicit "Open" chip) — the earlier full-bleed banner row
+      {/* Forums Catalog entry — pinned ABOVE the Rooms header (it's a
+          peer surface to the room list, not a room within it). Forum
+          boards don't live in this rail (see visibleRooms); this is their
+          front door, so it's styled as a BUTTON (inset, action-bordered,
+          with an explicit "Open" chip) — the earlier full-bleed banner row
           read as a section header, not something clickable. */}
       {onOpenForums ? (
         <div className="border-b border-keep-rule px-2 py-1.5">
@@ -316,6 +298,25 @@ export function RoomsTree({
           </button>
         </div>
       ) : null}
+      {/* Header row - title + room count, with the mobile-only close
+          button living inside it (instead of an absolute overlay) so it
+          gets real layout space and never covers the room list. */}
+      <div className="flex items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-2 lg:bg-transparent lg:py-1.5">
+        <span className="text-xs uppercase tracking-widest text-keep-muted">
+          Rooms <span className="text-keep-rule">({visibleRooms.length})</span>
+        </span>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            className="keep-button flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-base text-keep-text hover:bg-keep-banner lg:hidden"
+            aria-label="Close rooms"
+            title="Close rooms drawer"
+          >
+            ✕
+          </button>
+        ) : null}
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {visibleRooms.length === 0 ? (
           <div className="px-3 py-2 text-xs text-keep-muted">(no rooms)</div>

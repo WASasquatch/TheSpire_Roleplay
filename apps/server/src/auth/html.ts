@@ -256,9 +256,22 @@ function cleanAttribs(attribs: Record<string, string>): Record<string, string> {
   return safe;
 }
 
+/**
+ * Strip document-structure WRAPPERS (`<html>` / `<head>` / `<body>`) while
+ * keeping their children. A bio is a document fragment, so these tags are
+ * denied — but the sanitizer's `exclusiveFilter` discards a denied tag's
+ * CHILDREN along with it, which silently wipes an entire bio when an editor
+ * wraps its export in `<body>…</body>` (GrapesJS's `getHtml()` does exactly
+ * this). Unwrapping here keeps the content; any genuinely unsafe head children
+ * (`meta`/`link`/`base`/`title`) are still individually denied below.
+ */
+function stripDocumentWrappers(html: string): string {
+  return html.replace(/<\/?(?:html|head|body)(?:\s[^>]*)?>/gi, "");
+}
+
 /** Sanitize a profile/bio HTML body. Used on save AND on read. */
 export function sanitizeBio(html: string): string {
-  return sanitizeHtml(scrubStyleBlocks(nlToBrForPlainText(html)), {
+  return sanitizeHtml(scrubStyleBlocks(nlToBrForPlainText(stripDocumentWrappers(html))), {
     // Allow EVERY tag, the deny list runs via `exclusiveFilter`
     // below. Posture: profiles are mini-webpages; the writer gets
     // structural HTML freedom (semantic tags, layout containers,

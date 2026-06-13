@@ -11,7 +11,8 @@ export type MessageKind =
   | "announce" // admin broadcast
   | "scene"    // owner/mod scene-marker banner ("Scene begins: ...")
   | "npc"      // NPC voiced by a user; rendered with a "voiced by" tag
-  | "ooc";     // out-of-character aside
+  | "ooc"      // out-of-character aside
+  | "poll";    // poll post: options to vote on, body/title is the question
 
 /**
  * OpenGraph unfurl card for a message's first link (Discord-style
@@ -209,6 +210,14 @@ export interface ChatMessage {
    * absent on backlog payloads predating the feature.
    */
   reactions?: import("./emoticon.js").ReactionEntry[];
+  /**
+   * Resolved poll state for `kind === "poll"` rows: the definition, current
+   * tallies, and THIS viewer's ballot. The server hydrates it per-viewer
+   * (voters list only when the poll's showVoters is on); the client renders
+   * the PollCard from it and merges live `poll:update` events in. Absent on
+   * every non-poll row.
+   */
+  poll?: import("./poll.js").PollState | null;
 }
 
 /**

@@ -16,13 +16,17 @@
  * Forum-to-forum switches play the viewer's equipped room transition.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, Bell, FolderOpen, Globe, Landmark, MessagesSquare, Plus, Settings as SettingsIcon, Star, Users } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, BarChart3, Bell, FolderOpen, Globe, Landmark, Lock, MessagesSquare, Plus, Settings as SettingsIcon, Star, Users, X } from "lucide-react";
 import {
   DEFAULT_THEME,
   FORUM_NAME_MAX,
   FORUM_NAME_MIN,
   FORUM_PURPOSE_MAX,
   FORUM_PURPOSE_MIN,
+  POLL_MAX_OPTIONS,
+  POLL_MIN_OPTIONS,
+  POLL_OPTION_MAX,
+  POLL_QUESTION_MAX,
   normalizeTheme,
   type Theme,
 } from "@thekeep/shared";
@@ -77,7 +81,7 @@ import {
   type ForumRoles,
   type SlugCheck,
 } from "../lib/forums.js";
-import { inkClass, isDarkSurface, themeStyle, useActiveTheme, useScopedRootDesign } from "../lib/theme.js";
+import { forumBannerInk, inkClass, isDarkSurface, themeStyle, useActiveTheme, useImageAverageColor, useScopedRootDesign } from "../lib/theme.js";
 import { playRoomTransition } from "../lib/transitions/orchestrator.js";
 import { Modal } from "./Modal.js";
 import { StylePicker } from "./AdminPanel.js";
@@ -101,6 +105,10 @@ interface Props {
    *  permalinks). Pair with `initialKey` = the board's forum. Optional
    *  postId highlights one specific post in the thread. */
   initialTopic?: { boardId: string; topicId: string; postId?: string } | null;
+  /** Open straight onto the "Create your Forum" application form (Tools →
+   *  Forums → Create a Forum, or `/forums create`). Ignored for viewers
+   *  without `apply_create_forum`. */
+  initialCreate?: boolean;
   onClose: () => void;
   /** Open the world viewer (linked-world strip's View World). The viewer
    *  stacks above this modal and carries the join/apply flow itself. */
@@ -116,7 +124,7 @@ interface Props {
   fontStep: 0 | 1 | 2 | 3;
 }
 
-export function ForumsCatalogModal({ initialKey, initialTopic, onClose, onOpenWorld, onIconClick, onNameClick, onMentionClick, onWorldMentionClick, selfNames, fontStep }: Props) {
+export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, onClose, onOpenWorld, onIconClick, onNameClick, onMentionClick, onWorldMentionClick, selfNames, fontStep }: Props) {
   const me = useChat((s) => s.me);
   const myActiveTransitionKey = useChat((s) => s.myActiveTransitionKey);
   // Per-send identity claim for forum posts — the same source of truth
@@ -142,6 +150,12 @@ export function ForumsCatalogModal({ initialKey, initialTopic, onClose, onOpenWo
   const [urlTopicId, setUrlTopicId] = useState<string | null>(null);
   const forumNotifUnread = useChat((s) => s.forumNotifUnread);
   const canApply = !!me?.permissions?.includes("apply_create_forum");
+  // Tools → Forums → Create a Forum (or `/forums create`) lands straight on
+  // the application form. Gated by canApply; runs once the permission is
+  // known so a slow `me` load doesn't drop the intent.
+  useEffect(() => {
+    if (initialCreate && canApply) setCreateOpen(true);
+  }, [initialCreate, canApply]);
 
   /** Notification click: land on its topic (switching forums if needed). */
   function openNotification(n: ForumNotificationWire) {
@@ -675,6 +689,17 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
   }, [detail.themeJson, viewerTheme]);
   const headerDark = isDarkSurface(headerPalette, { imageOverlay: !!detail.bannerImageUrl });
 
+  // Banner legibility WITHOUT darkening the art: the banner is shown as-is
+  // (no scrim overlay). We SAMPLE its average color and lift the forum's
+  // OWN palette ink to a legible luminosity against it (legibleAgainstBg
+  // preserves hue), with a SUBTLE shadow that adapts to the resolved ink.
+  // Applied INLINE so it beats the design's
+  // `[data-theme-style] h1/h2/h3 { color: rgb(var(--keep-text)) }` rule —
+  // the original dark-on-dark cause. CORS-tainted sample → white fallback.
+  const hasBanner = !!detail.bannerImageUrl;
+  const bannerColor = useImageAverageColor(hasBanner ? detail.bannerImageUrl! : null);
+  const bannerInk = hasBanner ? forumBannerInk(headerPalette, bannerColor) : null;
+
   const banStrip = detail.viewer?.ban ? (
     <div className="border-b border-keep-rule bg-keep-system/10 px-4 py-2 text-sm text-keep-system">
       You are banned from this forum
@@ -689,7 +714,7 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
       <header
         className="relative shrink-0 border-b border-keep-rule bg-keep-banner/30 px-5 py-6 md:px-8 md:py-12"
         style={detail.bannerImageUrl ? {
-          backgroundImage: `linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,.5)), url(${detail.bannerImageUrl})`,
+          backgroundImage: `url(${detail.bannerImageUrl})`,
           backgroundSize: "cover",
           backgroundPosition: `center ${detail.bannerFocusY ?? 50}%`,
         } : undefined}
@@ -705,16 +730,27 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
             </span>
           )}
           <div className="min-w-0">
-            {/* Ink follows the SURFACE (lib/theme isDarkSurface): banner
-                images always carry a dark scrim → light ink; otherwise
-                the palette's luminance decides. The viewer can't recolor
-                someone else's banner, so the renderer must get it right. */}
-            <h3 className={`truncate font-action text-2xl md:text-4xl ${inkClass.title(headerDark)}`}>{detail.name}</h3>
+            {/* Ink follows the SURFACE: over a banner image we sample its
+                luminance and force LIGHT ink via inline style (which wins
+                over the forum design's heading-color rule — the dark-on-dark
+                culprit). With no banner, the palette's luminance decides via
+                inkClass. The viewer can't recolor someone else's banner, so
+                the renderer must get it right. */}
+            <h3
+              className={`truncate font-action text-2xl md:text-4xl ${bannerInk ? "" : inkClass.title(headerDark)}`}
+              style={bannerInk?.title}
+            >{detail.name}</h3>
             {detail.tagline ? (
-              <p className={`truncate text-sm md:text-base ${inkClass.sub(headerDark)}`}>{detail.tagline}</p>
+              <p
+                className={`truncate text-sm md:text-base ${bannerInk ? "" : inkClass.sub(headerDark)}`}
+                style={bannerInk?.sub}
+              >{detail.tagline}</p>
             ) : null}
-            <p className={`mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] md:text-xs ${inkClass.meta(headerDark)}`}>
-              <span>kept by <span className={inkClass.strong(headerDark)}>{detail.ownerUsername}</span></span>
+            <p
+              className={`mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] md:text-xs ${bannerInk ? "" : inkClass.meta(headerDark)}`}
+              style={bannerInk?.meta}
+            >
+              <span>kept by <span className={bannerInk ? "" : inkClass.strong(headerDark)} style={bannerInk?.strong}>{detail.ownerUsername}</span></span>
               {detail.viewer?.role === "mod" ? (
                 <span
                   title="You moderate this forum: sticky, lock, and tidy topics (the owner's posts and settings stay theirs)."
@@ -889,32 +925,75 @@ function ForumBoards({ detail, asCharacterId, chrome, initialTopic, onActiveTopi
               key={b.roomId}
               type="button"
               onClick={() => setBoardId(b.roomId)}
-              title={b.topic ?? b.name}
-              className={`rounded border px-2.5 py-1 text-xs ${
+              title={b.locked ? `${b.name} — members only` : (b.topic ?? b.name)}
+              className={`inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs ${
                 b.roomId === active.roomId
                   ? "border-keep-action text-keep-action"
                   : "border-keep-rule text-keep-muted hover:text-keep-text"
               }`}
             >
+              {b.locked ? <Lock className="h-3 w-3 shrink-0" aria-label="Members only" /> : null}
               {b.name}
-              <span className="ml-1.5 text-[10px] text-keep-rule">{b.topicCount}</span>
+              <span className="ml-0.5 text-[10px] text-keep-rule">{b.topicCount}</span>
             </button>
           ))}
         </div>
       ) : null}
-      <BoardHost
-        key={active.roomId}
-        boardId={active.roomId}
-        forumSlug={detail.slug}
-        canParticipate={detail.viewer?.canParticipate ?? false}
-        canModerate={!!detail.viewer && (detail.viewer.canManage || detail.viewer.role === "mod")}
-        canAdminEdit={!!detail.viewer?.canManage}
-        asCharacterId={asCharacterId}
-        chrome={chrome}
-        initialTopicId={initialTopic?.boardId === active.roomId ? initialTopic.topicId : null}
-        initialPostId={initialTopic?.boardId === active.roomId ? initialTopic.postId ?? null : null}
-        {...(onActiveTopicChange ? { onActiveTopicChange } : {})}
-      />
+      {active.locked ? (
+        <LockedSection
+          kind="board"
+          canApply={!!detail.viewer && !detail.viewer.role && detail.postingMode === "application" && !detail.viewer.membershipPending}
+          signedIn={!!detail.viewer}
+        />
+      ) : (
+        <BoardHost
+          key={active.roomId}
+          boardId={active.roomId}
+          forumSlug={detail.slug}
+          canParticipate={detail.viewer?.canParticipate ?? false}
+          canModerate={!!detail.viewer && (detail.viewer.canManage || detail.viewer.role === "mod")}
+          canAdminEdit={!!detail.viewer?.canManage}
+          asCharacterId={asCharacterId}
+          chrome={chrome}
+          initialTopicId={initialTopic?.boardId === active.roomId ? initialTopic.topicId : null}
+          initialPostId={initialTopic?.boardId === active.roomId ? initialTopic.postId ?? null : null}
+          {...(onActiveTopicChange ? { onActiveTopicChange } : {})}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Shown-but-locked placeholder for a private board (or category) the viewer
+ * can't read (migration 0239). The section still appears in the strip; this
+ * panel stands in for its contents with a short reason and the right next
+ * step (sign in, or apply to join an application-mode forum).
+ */
+function LockedSection({ kind, canApply, signedIn }: {
+  kind: "board" | "category";
+  /** Viewer is signed in, not yet a member, and the forum takes applications. */
+  canApply: boolean;
+  signedIn: boolean;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
+      <div
+        aria-hidden
+        className="flex h-14 w-14 items-center justify-center rounded-full border border-keep-accent/40 bg-keep-accent/10"
+      >
+        <Lock className="h-6 w-6 text-keep-accent" aria-hidden="true" />
+      </div>
+      <p className="text-sm font-semibold text-keep-text">
+        This {kind} is for members only
+      </p>
+      <p className="max-w-sm text-xs text-keep-muted">
+        {signedIn
+          ? canApply
+            ? "Apply to join this forum from its front page, and the keeper can give you access."
+            : "Only the forum's members can read it. Ask the keeper about joining."
+          : "Sign in to read it — and if the forum takes applications, apply to join from its front page."}
+      </p>
     </div>
   );
 }
@@ -1161,7 +1240,7 @@ function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canAdminEd
 
   /** Ghost topic submit: persists, refreshes the section's first page,
    *  and opens the freshly-raised topic. */
-  async function submitTopic(title: string, text: string) {
+  async function submitTopic(title: string, text: string, poll?: PollDraft) {
     const categoryId = composerCat ?? null;
     const messageId = await postToBoard({
       roomId: boardId,
@@ -1169,6 +1248,7 @@ function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canAdminEd
       asCharacterId,
       threadTitle: title,
       ...(categoryId ? { threadCategoryId: categoryId } : {}),
+      ...(poll ? { poll } : {}),
     });
     setComposerCat(undefined);
     await loadBucketPage(categoryId ?? "_uncat", 1);
@@ -1247,7 +1327,7 @@ function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canAdminEd
           }
           return (
             <GhostTopicComposer
-              onSubmit={(title, text) => submitTopic(title, text)}
+              onSubmit={(title, text, poll) => submitTopic(title, text, poll)}
               onCancel={() => setComposerCat(undefined)}
             />
           );
@@ -1325,8 +1405,11 @@ function GhostReplyComposer({ topicId, quoteSeed, onSubmit }: {
  * styled like the card it's about to become. Category comes from the
  * section itself, so there's no category picker.
  */
+/** Poll definition the forum composer sends to postToBoard. */
+type PollDraft = { optionTexts: string[]; allowMultiple: boolean; showVoters: boolean; closesAt: number | null };
+
 function GhostTopicComposer({ onSubmit, onCancel }: {
-  onSubmit: (title: string, text: string) => Promise<void>;
+  onSubmit: (title: string, text: string, poll?: PollDraft) => Promise<void>;
   onCancel: () => void;
 }) {
   const [title, setTitle] = useState("");
@@ -1336,32 +1419,132 @@ function GhostTopicComposer({ onSubmit, onCancel }: {
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
 
+  // Poll mode: the title becomes the question and the body is an optional
+  // intro, so the body requirement is relaxed while polling.
+  const [isPoll, setIsPoll] = useState(false);
+  const [options, setOptions] = useState<string[]>(["", ""]);
+  const [allowMultiple, setAllowMultiple] = useState(false);
+  const [showVoters, setShowVoters] = useState(true);
+  const [deadlineHours, setDeadlineHours] = useState<string>("");
+
   useEffect(() => { titleRef.current?.focus(); }, []);
+
+  const cleanOptions = options.map((o) => o.trim()).filter((o) => o.length > 0);
+  const pollReady = !isPoll || (cleanOptions.length >= POLL_MIN_OPTIONS && cleanOptions.length <= POLL_MAX_OPTIONS);
+
+  function setOption(i: number, v: string) {
+    setOptions((cur) => cur.map((o, idx) => (idx === i ? v : o)));
+  }
+  function addOption() {
+    setOptions((cur) => (cur.length >= POLL_MAX_OPTIONS ? cur : [...cur, ""]));
+  }
+  function removeOption(i: number) {
+    setOptions((cur) => (cur.length <= 2 ? cur : cur.filter((_, idx) => idx !== i)));
+  }
 
   async function go() {
     setBusy(true); setErr(null);
-    try { await onSubmit(title.trim(), draft); }
-    catch (e) { setErr(e instanceof Error ? e.message : "post failed"); setBusy(false); }
+    try {
+      let poll: PollDraft | undefined;
+      if (isPoll) {
+        if (cleanOptions.length < POLL_MIN_OPTIONS) { setErr(`Add at least ${POLL_MIN_OPTIONS} options.`); setBusy(false); return; }
+        const hrs = deadlineHours.trim() ? parseFloat(deadlineHours) : NaN;
+        const closesAt = Number.isFinite(hrs) && hrs > 0 ? Date.now() + hrs * 3_600_000 : null;
+        poll = { optionTexts: cleanOptions, allowMultiple, showVoters, closesAt };
+      }
+      await onSubmit(title.trim(), draft, poll);
+    } catch (e) { setErr(e instanceof Error ? e.message : "post failed"); setBusy(false); }
   }
 
   return (
     <div className="keep-frame rounded border border-dashed border-keep-action/50 bg-keep-banner/40 p-2.5">
-      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-keep-muted">New topic</p>
+      <div className="mb-1.5 flex items-center justify-between">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-keep-muted">
+          {isPoll ? "New poll" : "New topic"}
+        </p>
+        <button
+          type="button"
+          onClick={() => setIsPoll((v) => !v)}
+          aria-pressed={isPoll}
+          className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] uppercase tracking-widest ${
+            isPoll ? "border-keep-accent text-keep-accent" : "border-keep-rule text-keep-muted hover:text-keep-text"
+          }`}
+        >
+          <BarChart3 className="h-3 w-3" aria-hidden="true" /> Poll
+        </button>
+      </div>
       <input
         ref={titleRef}
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        maxLength={120}
-        placeholder="Topic title"
+        maxLength={isPoll ? POLL_QUESTION_MAX : 120}
+        placeholder={isPoll ? "Ask a question…" : "Topic title"}
         className="mb-1.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm font-semibold outline-none focus:border-keep-action"
       />
+
+      {isPoll ? (
+        <div className="mb-1.5 space-y-1.5 rounded border border-keep-rule/60 bg-keep-bg/40 p-2">
+          {options.map((o, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <input
+                value={o}
+                onChange={(e) => setOption(i, e.target.value)}
+                maxLength={POLL_OPTION_MAX}
+                placeholder={`Option ${i + 1}`}
+                className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
+              />
+              <button
+                type="button"
+                onClick={() => removeOption(i)}
+                disabled={options.length <= 2}
+                title="Remove option"
+                aria-label={`Remove option ${i + 1}`}
+                className="rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text disabled:opacity-30"
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </div>
+          ))}
+          {options.length < POLL_MAX_OPTIONS ? (
+            <button
+              type="button"
+              onClick={addOption}
+              className="inline-flex items-center gap-1 rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
+            >
+              <Plus className="h-3 w-3" aria-hidden="true" /> Add option
+            </button>
+          ) : null}
+          <div className="flex flex-wrap gap-3 pt-1 text-xs text-keep-text">
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={allowMultiple} onChange={(e) => setAllowMultiple(e.target.checked)} />
+              Allow multiple
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={showVoters} onChange={(e) => setShowVoters(e.target.checked)} />
+              Show who voted
+            </label>
+            <label className="flex items-center gap-1.5">
+              Close after
+              <input
+                value={deadlineHours}
+                onChange={(e) => setDeadlineHours(e.target.value.replace(/[^\d.]/g, ""))}
+                placeholder="∞"
+                inputMode="decimal"
+                className="w-12 rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-center outline-none focus:border-keep-action"
+              />
+              hrs
+            </label>
+          </div>
+        </div>
+      ) : null}
+
       <FormattingToolbar inputRef={ref} value={draft} onChange={setDraft} disabled={busy} />
       <textarea
         ref={ref}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        rows={4}
-        placeholder="The opening post…"
+        rows={isPoll ? 2 : 4}
+        placeholder={isPoll ? "Optional intro…" : "The opening post…"}
         className="mt-1 w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
       />
       {err ? <p className="mt-1 text-xs text-keep-accent">{err}</p> : null}
@@ -1375,11 +1558,11 @@ function GhostTopicComposer({ onSubmit, onCancel }: {
         </button>
         <button
           type="button"
-          disabled={busy || !draft.trim() || !title.trim()}
+          disabled={busy || !title.trim() || !pollReady || (!isPoll && !draft.trim())}
           onClick={() => void go()}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
         >
-          {busy ? "…" : "Post topic"}
+          {busy ? "…" : isPoll ? "Post poll" : "Post topic"}
         </button>
       </div>
     </div>
@@ -2345,10 +2528,20 @@ function BoardsSettings({ detail, busy, run, onSaved, onBoardArchived }: {
 }) {
   const [newName, setNewName] = useState("");
   const [newTopic, setNewTopic] = useState("");
-  // Which board's category editor is expanded (one at a time keeps the
-  // list scannable). Categories belong to a board, so they're managed
-  // HERE, inline — not on a separate tab with a board dropdown.
-  const [catsOpenFor, setCatsOpenFor] = useState<string | null>(null);
+  // Category editors open by DEFAULT — every board shows its category
+  // designer the moment the Boards tab loads, so adding categories isn't a
+  // hidden affordance. Owners can collapse individual boards to tidy the
+  // list. Categories belong to a board, so they're managed HERE, inline —
+  // not on a separate tab with a board dropdown.
+  const [collapsedCats, setCollapsedCats] = useState<Set<string>>(() => new Set());
+  const catsOpen = (roomId: string) => !collapsedCats.has(roomId);
+  const toggleCats = (roomId: string) =>
+    setCollapsedCats((cur) => {
+      const next = new Set(cur);
+      if (next.has(roomId)) next.delete(roomId);
+      else next.add(roomId);
+      return next;
+    });
   const atCap = detail.boards.length >= 10;
 
   function move(roomId: string, dir: -1 | 1) {
@@ -2367,7 +2560,10 @@ function BoardsSettings({ detail, busy, run, onSaved, onBoardArchived }: {
           <li key={b.roomId} className="rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5">
             <div className="flex items-center gap-2">
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-keep-text">{b.name}</span>
+                <span className="flex items-center gap-1.5 text-sm font-semibold text-keep-text">
+                  {b.membersOnly ? <Lock className="h-3 w-3 shrink-0 text-keep-accent" aria-label="Members only" /> : null}
+                  <span className="truncate">{b.name}</span>
+                </span>
                 <span className="block truncate text-xs text-keep-muted">{b.topic ?? "no topic line"}</span>
               </span>
               <span className="flex shrink-0 items-center gap-1">
@@ -2400,11 +2596,22 @@ function BoardsSettings({ detail, busy, run, onSaved, onBoardArchived }: {
                   className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
                 >Topic</button>
                 <button
-                  type="button"
-                  onClick={() => setCatsOpenFor((cur) => (cur === b.roomId ? null : b.roomId))}
-                  aria-expanded={catsOpenFor === b.roomId}
+                  type="button" disabled={busy}
+                  onClick={() => void run(async () => { await updateBoard(detail.id, b.roomId, { membersOnly: !b.membersOnly }); onSaved(); })}
+                  title={b.membersOnly ? "Private board (members only) — click to make it public" : "Public board — click to make it members only"}
+                  aria-pressed={b.membersOnly}
                   className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
-                    catsOpenFor === b.roomId
+                    b.membersOnly
+                      ? "border-keep-accent text-keep-accent"
+                      : "border-keep-rule text-keep-muted hover:text-keep-text"
+                  }`}
+                >Private</button>
+                <button
+                  type="button"
+                  onClick={() => toggleCats(b.roomId)}
+                  aria-expanded={catsOpen(b.roomId)}
+                  className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
+                    catsOpen(b.roomId)
                       ? "border-keep-action text-keep-action"
                       : "border-keep-rule text-keep-muted hover:text-keep-text"
                   }`}
@@ -2419,7 +2626,7 @@ function BoardsSettings({ detail, busy, run, onSaved, onBoardArchived }: {
                 >Archive</button>
               </span>
             </div>
-            {catsOpenFor === b.roomId ? (
+            {catsOpen(b.roomId) ? (
               <div className="mt-2 border-t border-keep-rule/50 pt-2">
                 <BoardCategoriesEditor detail={detail} boardId={b.roomId} busy={busy} run={run} />
               </div>
@@ -2677,6 +2884,7 @@ function CategoryForm({ forumId, boardId, run, existing, defaultParentId = null,
   const [name, setName] = useState(existing?.name ?? "");
   const [subtitle, setSubtitle] = useState(existing?.subtitle ?? "");
   const [parentId, setParentId] = useState<string>(existing?.parentId ?? defaultParentId ?? "");
+  const [membersOnly, setMembersOnly] = useState(!!existing?.membersOnly);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement | null>(null);
@@ -2692,10 +2900,11 @@ function CategoryForm({ forumId, boardId, run, existing, defaultParentId = null,
         await patchRoomCategory(boardId, existing.id, {
           name: trimmed,
           subtitle: sub,
+          membersOnly,
           ...(canReparent ? { parentId: parentId || null } : {}),
         });
       } else {
-        await createRoomCategory(boardId, trimmed, 9999, sub, parentId || null);
+        await createRoomCategory(boardId, trimmed, 9999, sub, parentId || null, membersOnly);
       }
       onDone();
     } catch (e) {
@@ -2745,6 +2954,22 @@ function CategoryForm({ forumId, boardId, run, existing, defaultParentId = null,
           </select>
         </label>
       ) : null}
+
+      <label className="flex items-start gap-2 text-xs">
+        <input
+          type="checkbox"
+          checked={membersOnly}
+          onChange={(e) => setMembersOnly(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="font-semibold text-keep-text">Members only</span>
+          <span className="block text-[11px] text-keep-muted">
+            Hide this category's topics from guests and non-members. They still see the
+            name, locked.
+          </span>
+        </span>
+      </label>
 
       {/* Icon + delete only make sense for an existing category. */}
       {existing ? (

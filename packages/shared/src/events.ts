@@ -74,8 +74,42 @@ export interface ClientToServerEvents {
       threadTitle?: string;
       replyToId?: string;
       asCharacterId?: string | null;
+      /**
+       * When set on a NEW topic (threadTitle present, no replyToId), the
+       * topic becomes a `kind: "poll"` post: `threadTitle` is the question,
+       * `text` the optional intro body. The server validates option count /
+       * lengths and ignores this on replies. `optionTexts` are raw strings;
+       * the server assigns stable option ids.
+       */
+      poll?: {
+        optionTexts: string[];
+        allowMultiple: boolean;
+        showVoters: boolean;
+        closesAt: number | null;
+      };
     },
     ack?: AckFn<{ ok: true; messageId: string | null } | AckError>,
+  ) => void;
+  /**
+   * Cast (or change) a ballot on a `kind: "poll"` message. `optionIds` are
+   * the option ids the voter selects: exactly one for single-choice polls,
+   * one-or-more for multiple-choice. An empty array retracts the vote. The
+   * server re-checks the room/forum participation gate, rejects closed polls
+   * and unknown option ids, replaces the voter's prior ballot, and broadcasts
+   * `poll:update` to the room. Works for poll posts in chat AND forum boards.
+   */
+  "poll:vote": (
+    payload: { messageId: string; optionIds: string[] },
+    ack?: AckFn<{ ok: true } | AckError>,
+  ) => void;
+  /**
+   * Close a poll early. Allowed for the poll's author, or a room/forum
+   * moderator (same authority the sticky/lock actions use). Stamps closedAt
+   * and broadcasts `poll:update`; results stay visible afterward.
+   */
+  "poll:close": (
+    payload: { messageId: string },
+    ack?: AckFn<{ ok: true } | AckError>,
   ) => void;
   "room:join": (payload: { roomId: string; password?: string }, ack?: AckFn<{ ok: true } | AckError>) => void;
   "room:leave": (payload: { roomId: string }) => void;
@@ -294,6 +328,13 @@ export interface ServerToClientEvents {
    * DM reactions to the two participants' sockets.
    */
   "reaction:update": (payload: import("./emoticon.js").ReactionEvent) => void;
+  /**
+   * A poll's tallies changed (someone voted/retracted) or it was closed.
+   * Clients merge the delta into the cached poll state for that message id;
+   * no full refetch. Scoped to the message's room (chat board or forum).
+   * `voters` is present in each tally only when the poll's showVoters is on.
+   */
+  "poll:update": (payload: import("./poll.js").PollUpdate) => void;
   /**
    * The admin updated the emoticon catalog, new sheet uploaded,
    * labels edited, sheet deleted, etc. Clients refetch
@@ -734,7 +775,7 @@ export type UiHint =
    * Open the Forums Catalog modal (Forums revamp). Optional `slug` lands on
    * a specific forum instead of the system default. Emitted by `/forums`.
    */
-  | { kind: "open-forums"; slug?: string };
+  | { kind: "open-forums"; slug?: string; create?: boolean };
 
 /** Wire shape served by GET /commands. The help modal renders this. */
 export interface CommandDoc {

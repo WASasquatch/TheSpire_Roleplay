@@ -1,4 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { BarChart3, Lock } from "lucide-react";
+import { PollCard } from "./PollCard.js";
 import { customCmdCssToStyle, isAdminRole, resolveMessageColor, type AvatarCrop, type ChatMessage, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
 import { BorderedAvatar, type BorderedAvatarSize } from "./BorderedAvatar.js";
@@ -1188,7 +1190,7 @@ function ForumView({
   // parent is missing or is itself a child (shouldn't happen — the
   // server enforces one level) promotes to top level instead of
   // disappearing.
-  type SubSection = { key: string; label: string; subtitle: string | null; iconUrl: string | null };
+  type SubSection = { key: string; label: string; subtitle: string | null; iconUrl: string | null; membersOnly: boolean };
   const sections = useMemo(() => {
     const validParentIds = new Set(categories.filter((c) => !c.parentId).map((c) => c.id));
     const isSub = (c: ThreadCategory) => !!c.parentId && validParentIds.has(c.parentId);
@@ -1196,10 +1198,10 @@ function ForumView({
     for (const c of categories) {
       if (!isSub(c)) continue;
       const list = subsByParent.get(c.parentId!) ?? [];
-      list.push({ key: c.id, label: c.name, subtitle: c.subtitle ?? null, iconUrl: c.iconUrl ?? null });
+      list.push({ key: c.id, label: c.name, subtitle: c.subtitle ?? null, iconUrl: c.iconUrl ?? null, membersOnly: !!c.membersOnly });
       subsByParent.set(c.parentId!, list);
     }
-    const out: Array<{ key: string; label: string | null; subtitle: string | null; iconUrl: string | null; children: SubSection[] }> = [];
+    const out: Array<{ key: string; label: string | null; subtitle: string | null; iconUrl: string | null; membersOnly: boolean; children: SubSection[] }> = [];
     for (const c of categories) {
       if (isSub(c)) continue;
       out.push({
@@ -1207,13 +1209,14 @@ function ForumView({
         label: c.name,
         subtitle: c.subtitle ?? null,
         iconUrl: c.iconUrl ?? null,
+        membersOnly: !!c.membersOnly,
         children: subsByParent.get(c.id) ?? [],
       });
     }
     const uncatBucket = buckets["_uncat"];
     const uncatVisible = uncatBucket && (uncatBucket.topics.length > 0 || uncatBucket.pending.length > 0 || uncatBucket.hasMore);
     if (uncatVisible || categories.length === 0) {
-      out.push({ key: "_uncat", label: categories.length > 0 ? "Uncategorized" : null, subtitle: null, iconUrl: null, children: [] });
+      out.push({ key: "_uncat", label: categories.length > 0 ? "Uncategorized" : null, subtitle: null, iconUrl: null, membersOnly: false, children: [] });
     }
     return out;
   }, [categories, buckets]);
@@ -1449,7 +1452,12 @@ function ForumView({
                       hidden) can't shrink below the text's intrinsic
                       width because the default flex min-width is auto. */}
                   <span className="min-w-0">
-                    <span className="block truncate">{s.label}</span>
+                    <span className="flex min-w-0 items-center gap-1.5 truncate">
+                      {s.membersOnly ? (
+                        <Lock className="h-3.5 w-3.5 shrink-0 text-keep-accent" aria-label="Members only" />
+                      ) : null}
+                      <span className="truncate">{s.label}</span>
+                    </span>
                     {/* Owner-set "what belongs in here" line. Overrides
                         the header's uppercase/tracking so it reads as
                         prose, not as a second shouting label. */}
@@ -1515,7 +1523,12 @@ function ForumView({
                             <img src={sub.iconUrl} alt="" className="mr-2 h-4 w-4 shrink-0 self-center object-contain" />
                           ) : null}
                           <span className="min-w-0">
-                            <span className="block truncate">{sub.label}</span>
+                            <span className="flex min-w-0 items-center gap-1.5 truncate">
+                              {sub.membersOnly ? (
+                                <Lock className="h-3 w-3 shrink-0 text-keep-accent" aria-label="Members only" />
+                              ) : null}
+                              <span className="truncate">{sub.label}</span>
+                            </span>
                             {sub.subtitle ? (
                               <span className="block truncate text-[11px] font-normal normal-case tracking-normal text-keep-muted">
                                 {sub.subtitle}
@@ -1808,6 +1821,11 @@ function TopicCard({
               className="min-w-0 flex-1 truncate font-semibold text-keep-text"
               title={headingText}
             >
+              {topic.kind === "poll" ? (
+                <span className="mr-1.5 inline-flex items-center gap-1 rounded-full border border-keep-accent/50 bg-keep-accent/10 px-1.5 py-0 align-middle text-[10px] font-semibold uppercase tracking-widest text-keep-accent">
+                  <BarChart3 className="h-3 w-3" aria-hidden="true" /> Poll
+                </span>
+              ) : null}
               {parseInline(headingText)}
             </span>
             <span
@@ -1904,6 +1922,17 @@ function TopicCard({
             readOnly={readOnly}
             {...(postPermalink ? { postPermalink } : {})}
           />
+          {topic.kind === "poll" && topic.poll ? (
+            <div className="mt-2 max-w-lg">
+              <PollCard
+                message={topic}
+                poll={topic.poll}
+                isAuthor={!!selfUserId && topic.userId === selfUserId}
+                canModerate={canModerate}
+                readOnly={readOnly}
+              />
+            </div>
+          ) : null}
           {replies.length > 0 ? (
             <div className="mt-2 flex flex-col gap-1.5 border-t border-keep-rule/40 pt-2">
               {replyPager}
@@ -3616,6 +3645,20 @@ function Line({
       lineEl = (
         <div className="text-keep-system">
           {time}{inlineAvatar}{tag} <span className="whitespace-pre-wrap">🎲 {renderedBody}</span>{editedBadge}
+        </div>
+      );
+      break;
+    case "poll":
+      lineEl = (
+        <div>
+          <div>{time}{tag}</div>
+          {msg.poll ? (
+            <div className="mt-1 max-w-md">
+              <PollCard message={msg} poll={msg.poll} isAuthor={isOwn} canModerate={canModerate} compact />
+            </div>
+          ) : (
+            <span className="whitespace-pre-wrap text-keep-muted italic">poll unavailable</span>
+          )}
         </div>
       );
       break;

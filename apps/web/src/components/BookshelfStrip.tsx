@@ -336,6 +336,10 @@ function StoryBook({
       // desktop the existing `:hover` / `:focus-visible` paths still
       // win and this attr stays undefined.
       data-pulled={isPulled ? "true" : undefined}
+      // The two outermost books open partly past the shelf frame; `data-edge`
+      // pans them inward (toward center) while drawn so the cover is fully in
+      // view instead of clipped at the edge. Middle books need no shift.
+      data-edge={index === 0 ? "l" : index === MIN_BOOKS - 1 ? "r" : undefined}
       className={`bookshelf-book ${lean}`}
       style={styleVars}
       tabIndex={0}
@@ -423,6 +427,7 @@ function PlaceholderBook({
       // On desktop the hover-capable check short-circuits straight
       // to navigation, same as StoryBook.
       data-pulled={isPulled ? "true" : undefined}
+      data-edge={index === 0 ? "l" : index === MIN_BOOKS - 1 ? "r" : undefined}
       className={`bookshelf-book ${lean}`}
       style={styleVars}
       tabIndex={0}

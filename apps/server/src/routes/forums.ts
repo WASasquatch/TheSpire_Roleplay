@@ -176,6 +176,16 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
           .where(eq(forumVisits.userId, me.id))).map((v) => [v.forumId, +v.at]))
       : null;
 
+    // The viewer's own membership rows → role per forum (owner is always
+    // a member row, see the creation transaction). Drives the Tools-menu
+    // bookmark list (owned + joined forums) without a per-forum detail fetch.
+    const rolesBy = me
+      ? new Map((await db
+          .select({ forumId: forumMembers.forumId, role: forumMembers.role })
+          .from(forumMembers)
+          .where(eq(forumMembers.userId, me.id))).map((r) => [r.forumId, r.role]))
+      : null;
+
     const out: ForumSummary[] = rows.map((f) => ({
       id: f.id,
       slug: f.slug,
@@ -199,6 +209,12 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
               const seen = visitsBy.get(f.id);
               return !seen || last > seen;
             })(),
+          }
+        : {}),
+      ...(me
+        ? {
+            viewerRole: rolesBy?.get(f.id) ?? (f.ownerUserId === me.id ? "owner" : null),
+            visited: !!visitsBy?.has(f.id),
           }
         : {}),
     }));
@@ -259,6 +275,12 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
       return ai - bi || +a.createdAt - +b.createdAt;
     });
 
+    // Resolve the viewer's forum authority ONCE (reused by the board-lock
+    // computation below and the viewer-state block further down). Anonymous
+    // ⇒ null ⇒ never a member ⇒ every members-only board reads as locked.
+    const viewerAuthority = me ? await forumAuthority(db, me, forum.id) : null;
+    const viewerIsMember = viewerAuthority?.isMember ?? false;
+
     const boards: ForumBoardSummary[] = boardRows.map((b) => ({
       roomId: b.id,
       name: b.name,
@@ -266,6 +288,10 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
       topicCount: topicsBy.get(b.id) ?? 0,
       lastActivityAt: lastBy.get(b.id) ?? null,
       archived: false,
+      // Shown-but-locked: a private board still lists; `locked` withholds its
+      // contents from non-members (and all anonymous viewers).
+      membersOnly: !!b.forumMembersOnly,
+      locked: !!b.forumMembersOnly && !viewerIsMember,
     }));
 
     // Landing-page statistics (traditional forum index numbers). Topics
@@ -345,8 +371,8 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
 
     // Viewer gates (advisory for the client; every mutation re-checks).
     let viewer: ForumViewerState | null = null;
-    if (me) {
-      const a = await forumAuthority(db, me, forum.id);
+    if (me && viewerAuthority) {
+      const a = viewerAuthority;
       const pending = (await db
         .select({ id: forumMembershipApplications.id })
         .from(forumMembershipApplications)
@@ -741,6 +767,14 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     const { forumGateForBoard } = await import("../forums/authority.js");
     const gate = await forumGateForBoard(db, me, room.forumId);
     if (!gate.ok) { reply.code(403); return { error: gate.message, code: gate.code }; }
+    const isMember = gate.authority.isMember;
+    // Private board: only owner/mods/members may read it (migration 0239).
+    // The board still LISTS in the detail route (shown-but-locked); this
+    // refuses its contents so the client renders the lock state.
+    if (room.forumMembersOnly && !isMember) {
+      reply.code(403);
+      return { error: "This board is for forum members only.", code: "FORUM_BOARD_MEMBERS_ONLY" };
+    }
 
     const before = req.query.before ? parseInt(req.query.before, 10) : NaN;
     const hasCursor = Number.isFinite(before) && before > 0;
@@ -794,12 +828,24 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
       .where(eq(roomThreadCategories.roomId, room.id))
       .orderBy(roomThreadCategories.sortOrder, roomThreadCategories.createdAt);
 
+    // Private categories: their chips still render (shown-but-locked) but a
+    // non-member never sees the topics filed under them. The board itself is
+    // open here (board-level gate above already passed).
+    const lockedCatIds = new Set(
+      isMember ? [] : cats.filter((c) => c.membersOnly).map((c) => c.id),
+    );
+    const visibleTopics = rows.filter(
+      (m) => !(m.threadCategoryId && lockedCatIds.has(m.threadCategoryId)),
+    );
+
     return {
       boardName: room.name,
       categories: cats.map((c) => ({
         id: c.id, name: c.name, iconUrl: c.iconUrl ?? null, sortOrder: c.sortOrder,
+        membersOnly: !!c.membersOnly,
+        locked: !!c.membersOnly && !isMember,
       })),
-      topics: rows.map((m) => ({
+      topics: visibleTopics.map((m) => ({
         id: m.id,
         title: m.title ?? "",
         snippet: m.body.replace(/\s+/g, " ").slice(0, 200),
@@ -1050,6 +1096,8 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
   const patchBoardBody = z.object({
     name: z.string().trim().min(1).max(40).optional(),
     topic: z.string().trim().max(200).nullable().optional(),
+    /** Private board (migration 0239): owner/mods/members only. */
+    membersOnly: z.boolean().optional(),
   }).strict();
 
   app.patch<{ Params: { id: string; roomId: string }; Body: unknown }>(
@@ -1075,6 +1123,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
         update.name = body.name;
       }
       if (body.topic !== undefined) update.topic = body.topic?.trim() ? body.topic.trim() : null;
+      if (body.membersOnly !== undefined) update.forumMembersOnly = body.membersOnly;
       if (Object.keys(update).length === 0) return { ok: true };
       await db.update(rooms).set(update).where(eq(rooms.id, board.id));
       io.emit("rooms:tree-changed");
@@ -1696,11 +1745,26 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     const forum = (await db.select().from(forums).where(eq(forums.id, room.forumId)).limit(1))[0];
     if (!forum) { reply.code(404); return { error: "not found" }; }
     if (!me && !forum.publicBrowsing) { reply.code(401); return { error: "auth" }; }
+    // Don't resolve a permalink into a private board/category for someone who
+    // can't read it (migration 0239) — that would leak its existence and let
+    // the client try (and fail) to open it. Replies inherit their topic's
+    // category, so resolve the category off the TOPIC, not the hit.
+    const { forumBoardReadGate } = await import("../forums/authority.js");
+    const readGate = await forumBoardReadGate(db, me, room.id);
+    const topicId = m.replyToId ?? m.id;
+    const topicCatId = m.replyToId
+      ? (await db.select({ c: messages.threadCategoryId }).from(messages)
+          .where(eq(messages.id, topicId)).limit(1))[0]?.c ?? null
+      : m.threadCategoryId ?? null;
+    if (readGate.boardLocked || (topicCatId && readGate.lockedCatIds.has(topicCatId))) {
+      reply.code(403);
+      return { error: "This is a members-only section of the forum.", code: "FORUM_BOARD_MEMBERS_ONLY" };
+    }
     return {
       forumId: forum.id,
       forumSlug: forum.slug,
       boardRoomId: room.id,
-      topicId: m.replyToId ?? m.id,
+      topicId,
     };
   });
 

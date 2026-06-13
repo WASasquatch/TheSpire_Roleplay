@@ -1,5 +1,18 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import {
+  Globe,
+  FileText,
+  VenetianMask,
+  MessagesSquare,
+  Landmark,
+  Users,
+  Paintbrush2,
+  Settings,
+  Search,
+} from "lucide-react";
 import { useChat } from "../state/store.js";
+import { fetchForums } from "../lib/forums.js";
+import type { ForumSummary } from "@thekeep/shared";
 import { SearchBar } from "./SearchBar.js";
 import { CloseButton } from "./CloseButton.js";
 
@@ -93,6 +106,75 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   // (one-line list item that doesn't have room for two distinct pips)
   // and as the keep-it-simple hover summary on the envelope.
   const messagesBadgeTotal = unreadDmsTotal + pendingFriendRequestsTotal;
+
+  // Aggregate unread forum-notification count (replies to your topics,
+  // quotes, mentions). Same store value the rail's Forums Catalog badge
+  // reads, so the two surfaces never disagree. Drives the badge on the
+  // drawer's "Forums Catalog" row.
+  const forumNotifUnread = useChat((s) => s.forumNotifUnread);
+
+  // Quick-bookmark forum list: forums the viewer owns, mods, or has joined,
+  // plus open forums they've opened before ("interacted with"). Fetched
+  // lazily the first time the drawer opens — most sessions never open the
+  // drawer, so paying the /forums fetch on every mount would be wasteful.
+  // Re-fetched on each open so a freshly-joined/created forum surfaces
+  // without a reload; the cached list renders immediately meanwhile.
+  const [forums, setForums] = useState<ForumSummary[] | null>(null);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    let cancelled = false;
+    fetchForums()
+      .then((list) => { if (!cancelled) setForums(list); })
+      .catch(() => { /* catalog row still works; bookmarks just stay hidden */ });
+    return () => { cancelled = true; };
+  }, [drawerOpen]);
+
+  const forumBookmarks = useMemo(() => {
+    if (!forums) return [] as ForumSummary[];
+    return forums
+      .filter((f) => f.viewerRole != null || (f.postingMode === "open" && f.visited))
+      // Owned forums first (you tend them), then everything else by name.
+      .sort((a, b) => {
+        const rank = (f: ForumSummary) => (f.viewerRole === "owner" ? 0 : 1);
+        return rank(a) - rank(b) || a.name.localeCompare(b.name);
+      });
+  }, [forums]);
+
+  // Accordion: at most one section open at a time. Every section starts
+  // collapsed so the drawer opens as a short, scannable list of category
+  // headers instead of a long wall of rows. Tapping a header opens it and
+  // auto-collapses whichever was open. `null` = all collapsed.
+  const [openSection, setOpenSection] = useState<string | null>(null);
+  function toggleSection(title: string) {
+    setOpenSection((cur) => (cur === title ? null : title));
+  }
+  // Scroll container + per-section anchors. The drawer grows UPWARD out of
+  // the trigger bar, so its "bottom" edge is the one nearest the thumb;
+  // we default the scroll there on open and nudge a freshly-opened section
+  // into view.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // On open: collapse to a clean slate and pin the scroll to the bottom
+  // (the section headers closest to the trigger bar, where the thumb
+  // already rests). rAF so the measurement runs after children paint.
+  useEffect(() => {
+    if (!drawerOpen) { setOpenSection(null); return; }
+    const el = scrollRef.current;
+    if (!el) return;
+    const id = requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+    return () => cancelAnimationFrame(id);
+  }, [drawerOpen]);
+
+  // When a section expands, scroll it into view so its newly-revealed rows
+  // are visible even if it sat above the previously-open (taller) section.
+  useEffect(() => {
+    if (!openSection) return;
+    const el = sectionRefs.current[openSection];
+    if (!el) return;
+    const id = requestAnimationFrame(() => el.scrollIntoView({ block: "nearest" }));
+    return () => cancelAnimationFrame(id);
+  }, [openSection]);
 
   function cycleFont() {
     setFontStep(((fontStep + 1) % 4) as 0 | 1 | 2 | 3);
@@ -224,168 +306,259 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
               top section title disappear behind the chat banner.
               The internal overflow-y-auto handles any overflow from
               tools sections themselves. */}
-          <div className="keep-menu-surface absolute inset-x-0 bottom-full z-40 max-h-[calc(100dvh-14rem)] overflow-y-auto rounded-t border-x border-t border-keep-rule bg-keep-bg shadow-2xl">
-            <header className="sticky top-0 flex items-center justify-between border-b border-keep-rule bg-keep-banner px-3 py-2">
+          <div ref={scrollRef} className="keep-menu-surface absolute inset-x-0 bottom-full z-40 max-h-[calc(100dvh-14rem)] overflow-y-auto rounded-t border-x border-t border-keep-rule bg-keep-bg shadow-2xl">
+            <header className="sticky top-0 z-10 flex items-center justify-between border-b border-keep-rule bg-keep-banner px-3 py-2">
               <span className="text-xs font-action uppercase tracking-widest">Tools</span>
               <CloseButton onClick={() => setDrawerOpen(false)} />
             </header>
 
-            <SectionHeader title="Worldbuilding" />
-            <MenuItem label="My Worlds" hint="Manage your worlds + pages" onClick={() => fire("/worlds")} />
-            <MenuItem label="World Catalog" hint="Browse open worlds" onClick={() => fire("/world catalog")} />
+            {/* Accordion sections. Order runs top→bottom: authoring/creative
+                first, then community + navigation, then social, then prefs,
+                with search last (nearest the trigger bar). Each header taps
+                open/closed; opening one auto-collapses the rest. */}
+            <Section
+              title="Worldbuilding"
+              icon={<Globe size={14} aria-hidden />}
+              open={openSection === "Worldbuilding"}
+              onToggle={() => toggleSection("Worldbuilding")}
+              innerRef={(el) => { sectionRefs.current["Worldbuilding"] = el; }}
+            >
+              <MenuItem label="My Worlds" hint="Manage your worlds + pages" onClick={() => fire("/worlds")} />
+              <MenuItem label="World Catalog" hint="Browse open worlds" onClick={() => fire("/world catalog")} />
+            </Section>
 
-            <SectionHeader title="Writing" />
-            <MenuItem label="My Stories" hint="Drafts + published, open the editor" onClick={() => fire("/scriptorium my")} />
-            <MenuItem label="Scriptorium" hint="Browse the library, read and write" onClick={() => fire("/scriptorium")} />
+            <Section
+              title="Writing"
+              icon={<FileText size={14} aria-hidden />}
+              open={openSection === "Writing"}
+              onToggle={() => toggleSection("Writing")}
+              innerRef={(el) => { sectionRefs.current["Writing"] = el; }}
+            >
+              <MenuItem label="My Stories" hint="Drafts + published, open the editor" onClick={() => fire("/scriptorium my")} />
+              <MenuItem label="Scriptorium" hint="Browse the library, read and write" onClick={() => fire("/scriptorium")} />
+            </Section>
 
-            <SectionHeader title="Roleplay" />
-            <MenuItem
-              label="Set Mood"
-              hint="Show a mood next to your name"
-              active={moodOpen}
-              onClick={() => setMoodOpen((v) => !v)}
-            />
-            {moodOpen ? (
-              <InlinePanel>
-                <InlineForm
-                  placeholder="e.g. brooding, exhausted, smug"
-                  submitLabel="Set"
-                  extraButtons={[{ label: "Clear", onClick: () => fire("/mood clear") }]}
-                  onSubmit={(text) => { if (text.trim()) fire(`/mood ${text.trim()}`); }}
+            <Section
+              title="Roleplay"
+              icon={<VenetianMask size={14} aria-hidden />}
+              open={openSection === "Roleplay"}
+              onToggle={() => toggleSection("Roleplay")}
+              innerRef={(el) => { sectionRefs.current["Roleplay"] = el; }}
+            >
+              <MenuItem
+                label="Set Mood"
+                hint="Show a mood next to your name"
+                active={moodOpen}
+                onClick={() => setMoodOpen((v) => !v)}
+              />
+              {moodOpen ? (
+                <InlinePanel>
+                  <InlineForm
+                    placeholder="e.g. brooding, exhausted, smug"
+                    submitLabel="Set"
+                    extraButtons={[{ label: "Clear", onClick: () => fire("/mood clear") }]}
+                    onSubmit={(text) => { if (text.trim()) fire(`/mood ${text.trim()}`); }}
+                  />
+                </InlinePanel>
+              ) : null}
+              <MenuItem
+                label="Set Scene"
+                hint="Set the room's scene title"
+                active={sceneOpen}
+                onClick={() => setSceneOpen((v) => !v)}
+              />
+              {sceneOpen ? (
+                <InlinePanel>
+                  <InlineForm
+                    placeholder="e.g. The dragon's lair"
+                    submitLabel="Set"
+                    extraButtons={[{ label: "End scene", onClick: () => fire("/scene end") }]}
+                    onSubmit={(text) => { if (text.trim()) fire(`/scene ${text.trim()}`); }}
+                  />
+                </InlinePanel>
+              ) : null}
+              <MenuItem label="NPCs: On" hint="Enable NPC voice in this room" onClick={() => fire("/npcmode on")} />
+              <MenuItem label="NPCs: Off" hint="Disable NPC voice in this room" onClick={() => fire("/npcmode off")} />
+            </Section>
+
+            <Section
+              title="Forums"
+              icon={<MessagesSquare size={14} aria-hidden />}
+              open={openSection === "Forums"}
+              onToggle={() => toggleSection("Forums")}
+              innerRef={(el) => { sectionRefs.current["Forums"] = el; }}
+              badge={forumNotifUnread}
+            >
+              <MenuItem
+                label="Forums Catalog"
+                hint="Community-owned message boards"
+                badge={forumNotifUnread}
+                onClick={() => fire("/forums")}
+              />
+              <MenuItem label="Create a Forum" hint="Apply to open your own forum" onClick={() => fire("/forums create")} />
+              {/* Quick bookmarks: forums you own / have joined, plus open forums
+                  you've visited. Indented as a sub-list under the two actions so
+                  they read as shortcuts, not top-level menu rows. Each lands
+                  straight on its forum via `/forums <slug>`. The unseen dot
+                  mirrors the catalog rail's "new activity since your last visit"
+                  cue. */}
+              {forumBookmarks.map((f) => (
+                <ForumBookmarkRow
+                  key={f.id}
+                  forum={f}
+                  onClick={() => fire(`/forums ${f.slug}`)}
                 />
-              </InlinePanel>
-            ) : null}
-            <MenuItem
-              label="Set Scene"
-              hint="Set the room's scene title"
-              active={sceneOpen}
-              onClick={() => setSceneOpen((v) => !v)}
-            />
-            {sceneOpen ? (
-              <InlinePanel>
-                <InlineForm
-                  placeholder="e.g. The dragon's lair"
-                  submitLabel="Set"
-                  extraButtons={[{ label: "End scene", onClick: () => fire("/scene end") }]}
-                  onSubmit={(text) => { if (text.trim()) fire(`/scene ${text.trim()}`); }}
-                />
-              </InlinePanel>
-            ) : null}
-            <MenuItem label="NPCs: On" hint="Enable NPC voice in this room" onClick={() => fire("/npcmode on")} />
-            <MenuItem label="NPCs: Off" hint="Disable NPC voice in this room" onClick={() => fire("/npcmode off")} />
+              ))}
+            </Section>
 
-            <SectionHeader title="Rooms" />
-            <MenuItem
-              label="Find Rooms"
-              hint="Search for a room by name"
-              active={findOpen}
-              onClick={() => setFindOpen((v) => !v)}
-            />
-            {findOpen ? (
-              <InlinePanel>
-                <InlineForm
-                  placeholder="search text (or empty for all)"
-                  submitLabel="Find"
-                  onSubmit={(text) => fire(text.trim() ? `/find ${text.trim()}` : "/find")}
-                />
-              </InlinePanel>
-            ) : null}
-            <MenuItem label="List Rooms" hint="Show all public rooms" onClick={() => fire("/list")} />
-            <MenuItem
-              label="New Private Room"
-              hint="Create a password-locked room"
-              active={privateOpen}
-              onClick={() => setPrivateOpen((v) => !v)}
-            />
-            {privateOpen ? (
-              <InlinePanel>
-                <PrivateForm onSubmit={(name, pw) => fire(`/private ${name} ${pw}`)} />
-              </InlinePanel>
-            ) : null}
+            <Section
+              title="Rooms"
+              icon={<Landmark size={14} aria-hidden />}
+              open={openSection === "Rooms"}
+              onToggle={() => toggleSection("Rooms")}
+              innerRef={(el) => { sectionRefs.current["Rooms"] = el; }}
+            >
+              <MenuItem
+                label="Find Rooms"
+                hint="Search for a room by name"
+                active={findOpen}
+                onClick={() => setFindOpen((v) => !v)}
+              />
+              {findOpen ? (
+                <InlinePanel>
+                  <InlineForm
+                    placeholder="search text (or empty for all)"
+                    submitLabel="Find"
+                    onSubmit={(text) => fire(text.trim() ? `/find ${text.trim()}` : "/find")}
+                  />
+                </InlinePanel>
+              ) : null}
+              <MenuItem label="List Rooms" hint="Show all public rooms" onClick={() => fire("/list")} />
+              <MenuItem
+                label="New Private Room"
+                hint="Create a password-locked room"
+                active={privateOpen}
+                onClick={() => setPrivateOpen((v) => !v)}
+              />
+              {privateOpen ? (
+                <InlinePanel>
+                  <PrivateForm onSubmit={(name, pw) => fire(`/private ${name} ${pw}`)} />
+                </InlinePanel>
+              ) : null}
+            </Section>
 
-            <SectionHeader title="People" />
-            <MenuItem
-              label="Messages"
-              hint="DMs, friends, and friend requests, all in one place"
+            <Section
+              title="People"
+              icon={<Users size={14} aria-hidden />}
+              open={openSection === "People"}
+              onToggle={() => toggleSection("People")}
+              innerRef={(el) => { sectionRefs.current["People"] = el; }}
               badge={messagesBadgeTotal}
-              onClick={() => { onOpenMessages(); setDrawerOpen(false); }}
-            />
-            <MenuItem label="All Users" hint="Browse the user directory" onClick={() => fire("/users")} />
-            <MenuItem label="Ignore List" hint="Show or clear your ignore list" onClick={() => fire("/ignore")} />
-
-            <SectionHeader title="Display" />
-            <MenuItem
-              label="Chat Color"
-              hint="Set your chat color"
-              active={colorOpen}
-              onClick={() => setColorOpen((v) => !v)}
-            />
-            {colorOpen ? (
-              <InlinePanel>
-                <ColorPicker
-                  onPick={(hex) => fire(`/color ${hex}`)}
-                  onClear={() => fire("/color clear")}
-                />
-              </InlinePanel>
-            ) : null}
-            <MenuItem
-              label={`Font Size: ${fontStep}`}
-              hint="Cycle local chat font size"
-              onClick={cycleFont}
-            />
-            <MenuItem
-              label={refreshIntervalSec > 0 ? `Refresh: every ${refreshIntervalSec}s` : "Refresh"}
-              hint={refreshIntervalSec > 0 ? "Auto-refresh on a schedule" : "Refresh once or schedule"}
-              active={refreshOpen || refreshIntervalSec > 0}
-              onClick={() => setRefreshOpen((v) => !v)}
-            />
-            {refreshOpen ? (
-              <InlinePanel>
-                <RefreshPicker
-                  current={refreshIntervalSec}
-                  onPick={(n) => {
-                    if (n === 0) fire("/refresh off");
-                    else if (n === -1) fire("/refresh");
-                    else fire(`/refresh ${n}`);
-                  }}
-                />
-              </InlinePanel>
-            ) : null}
-
-            <SectionHeader title="Account" />
-            <MenuItem label="Edit Profile" hint="Open your profile editor" onClick={() => fire("/profile")} />
-            {onOpenEarning ? (
+            >
               <MenuItem
-                label="Your Earning"
-                hint="Wallet, ranks, shop, items, collection, pets"
-                onClick={() => { onOpenEarning(); setDrawerOpen(false); }}
+                label="Messages"
+                hint="DMs, friends, and friend requests, all in one place"
+                badge={messagesBadgeTotal}
+                onClick={() => { onOpenMessages(); setDrawerOpen(false); }}
               />
-            ) : null}
-            {onOpenArcade && me?.permissions.includes("use_arcade") ? (
+              <MenuItem label="All Users" hint="Browse the user directory" onClick={() => fire("/users")} />
+              <MenuItem label="Ignore List" hint="Show or clear your ignore list" onClick={() => fire("/ignore")} />
+            </Section>
+
+            <Section
+              title="Display"
+              icon={<Paintbrush2 size={14} aria-hidden />}
+              open={openSection === "Display"}
+              onToggle={() => toggleSection("Display")}
+              innerRef={(el) => { sectionRefs.current["Display"] = el; }}
+            >
               <MenuItem
-                label="Spire Arcade"
-                hint="Play the arcade's games, like the Eidolon Tamer"
-                onClick={() => { onOpenArcade(); setDrawerOpen(false); }}
+                label="Chat Color"
+                hint="Set your chat color"
+                active={colorOpen}
+                onClick={() => setColorOpen((v) => !v)}
               />
-            ) : null}
-            <MenuItem label="Bookmarks" hint="Your saved chat messages" onClick={() => fire("/bookmarks")} />
-            <MenuItem label="Toggle Away" hint="Mark yourself away" onClick={() => fire("/away")} />
-            <MenuItem label="Help / Commands" hint="Browse all commands" onClick={() => fire("/help")} />
+              {colorOpen ? (
+                <InlinePanel>
+                  <ColorPicker
+                    onPick={(hex) => fire(`/color ${hex}`)}
+                    onClear={() => fire("/color clear")}
+                  />
+                </InlinePanel>
+              ) : null}
+              <MenuItem
+                label={`Font Size: ${fontStep}`}
+                hint="Cycle local chat font size"
+                onClick={cycleFont}
+              />
+              <MenuItem
+                label={refreshIntervalSec > 0 ? `Refresh: every ${refreshIntervalSec}s` : "Refresh"}
+                hint={refreshIntervalSec > 0 ? "Auto-refresh on a schedule" : "Refresh once or schedule"}
+                active={refreshOpen || refreshIntervalSec > 0}
+                onClick={() => setRefreshOpen((v) => !v)}
+              />
+              {refreshOpen ? (
+                <InlinePanel>
+                  <RefreshPicker
+                    current={refreshIntervalSec}
+                    onPick={(n) => {
+                      if (n === 0) fire("/refresh off");
+                      else if (n === -1) fire("/refresh");
+                      else fire(`/refresh ${n}`);
+                    }}
+                  />
+                </InlinePanel>
+              ) : null}
+            </Section>
+
+            <Section
+              title="Account"
+              icon={<Settings size={14} aria-hidden />}
+              open={openSection === "Account"}
+              onToggle={() => toggleSection("Account")}
+              innerRef={(el) => { sectionRefs.current["Account"] = el; }}
+            >
+              <MenuItem label="Edit Profile" hint="Open your profile editor" onClick={() => fire("/profile")} />
+              {onOpenEarning ? (
+                <MenuItem
+                  label="Your Earning"
+                  hint="Wallet, ranks, shop, items, collection, pets"
+                  onClick={() => { onOpenEarning(); setDrawerOpen(false); }}
+                />
+              ) : null}
+              {onOpenArcade && me?.permissions.includes("use_arcade") ? (
+                <MenuItem
+                  label="Spire Arcade"
+                  hint="Play the arcade's games, like the Eidolon Tamer"
+                  onClick={() => { onOpenArcade(); setDrawerOpen(false); }}
+                />
+              ) : null}
+              <MenuItem label="Bookmarks" hint="Your saved chat messages" onClick={() => fire("/bookmarks")} />
+              <MenuItem label="Toggle Away" hint="Mark yourself away" onClick={() => fire("/away")} />
+              <MenuItem label="Help / Commands" hint="Browse all commands" onClick={() => fire("/help")} />
+            </Section>
 
             {/* Search lives at the bottom of the drawer so the input is
                 close to the user's resting touch position on mobile.
                 Results render upward (most-relevant nearest the bar), see
                 SearchBar for the spatial-proximity-to-action rationale. */}
-            <SectionHeader title="Search this room" />
-            <div className="px-3 py-2">
-              <SearchBar
-                roomId={currentRoomId}
-                onJump={(messageId) => {
-                  if (currentRoomId) onJumpToMessage(currentRoomId, messageId);
-                }}
-                onClose={() => setDrawerOpen(false)}
-              />
-            </div>
+            <Section
+              title="Search this room"
+              icon={<Search size={14} aria-hidden />}
+              open={openSection === "Search this room"}
+              onToggle={() => toggleSection("Search this room")}
+              innerRef={(el) => { sectionRefs.current["Search this room"] = el; }}
+            >
+              <div className="px-3 py-2">
+                <SearchBar
+                  roomId={currentRoomId}
+                  onJump={(messageId) => {
+                    if (currentRoomId) onJumpToMessage(currentRoomId, messageId);
+                  }}
+                  onClose={() => setDrawerOpen(false)}
+                />
+              </div>
+            </Section>
           </div>
         </>
       ) : null}
@@ -710,15 +883,59 @@ function Avatar({ url, name }: { url: string | null; name: string }) {
  * ------------------------------------------------------------ */
 
 /**
- * Section divider strip. Visually distinct from a menu row, uses the
- * panel tint + uppercase tracking-widest so users scan the
- * categories quickly. Sticky-free so all sections scroll with the
- * drawer.
+ * Collapsible accordion section. The header is a full-width tap target
+ * (icon + title + optional badge + open/closed chevron) styled like the
+ * old divider strip; its rows render only while `open`. The drawer keeps
+ * at most one section open at a time (the parent owns that state), so the
+ * menu reads as a short list of categories until you drill into one.
+ *
+ * `innerRef` exposes the section's root element to the parent so it can
+ * scroll a freshly-opened section into view.
  */
-function SectionHeader({ title }: { title: string }) {
+function Section({
+  title,
+  icon,
+  open,
+  onToggle,
+  innerRef,
+  badge,
+  children,
+}: {
+  title: string;
+  icon: ReactNode;
+  open: boolean;
+  onToggle: () => void;
+  innerRef?: (el: HTMLDivElement | null) => void;
+  /** Optional count shown on the collapsed header so an unread/pending
+   *  cue (forum notifications, messages) is visible without expanding. */
+  badge?: number;
+  children: ReactNode;
+}) {
   return (
-    <div className="border-y border-keep-rule/60 bg-keep-banner/40 px-3 py-0.5 text-[10px] font-action uppercase tracking-[0.2em] text-keep-muted">
-      {title}
+    <div ref={innerRef}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className={`flex w-full items-center gap-2 border-y border-keep-rule/60 px-3 py-1.5 text-[10px] font-action uppercase tracking-[0.2em] lg:py-1 ${
+          open
+            ? "bg-keep-banner/70 text-keep-text"
+            : "bg-keep-banner/40 text-keep-muted hover:bg-keep-banner/60 hover:text-keep-text"
+        }`}
+      >
+        <span aria-hidden className="shrink-0">{icon}</span>
+        <span className="flex-1 text-left">{title}</span>
+        {/* Collapsed-header cue: surface the count so it's visible without
+            opening the section. Hidden while open (the rows inside carry
+            their own badges). */}
+        {!open && badge && badge > 0 ? (
+          <span className="shrink-0 rounded-full bg-keep-action px-1.5 py-0 text-[10px] font-semibold leading-tight text-keep-bg">
+            {badge > 99 ? "99+" : badge}
+          </span>
+        ) : null}
+        <span aria-hidden className="shrink-0 text-sm leading-none">{open ? "▾" : "▸"}</span>
+      </button>
+      {open ? <div>{children}</div> : null}
     </div>
   );
 }
@@ -790,6 +1007,41 @@ function MenuItem({
       <span aria-hidden className="shrink-0 text-keep-muted">
         {active ? "▾" : "›"}
       </span>
+    </button>
+  );
+}
+
+/**
+ * A single forum quick-bookmark row beneath the Forums actions. Compact
+ * and indented (pl-6) so the list reads as shortcuts nested under "Forums
+ * Catalog" / "Create a Forum" rather than as peer menu rows. Shows the
+ * forum's logo (or initials), its name, an owner tag for forums you tend,
+ * and an unseen dot when there's been activity since your last visit.
+ */
+function ForumBookmarkRow({ forum, onClick }: { forum: ForumSummary; onClick: () => void }) {
+  const isOwner = forum.viewerRole === "owner";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={forum.tagline ?? `Open ${forum.name}`}
+      className="flex w-full items-center gap-2 border-b border-keep-rule/40 py-1.5 pl-6 pr-3 text-left text-sm hover:bg-keep-banner/40 lg:py-1"
+    >
+      <Avatar url={forum.logoUrl} name={forum.name} />
+      <span className="min-w-0 flex-1 truncate text-keep-text">{forum.name}</span>
+      {isOwner ? (
+        <span className="shrink-0 rounded border border-keep-rule px-1 text-[9px] font-action uppercase tracking-wider text-keep-muted">
+          Owner
+        </span>
+      ) : null}
+      {forum.unseen ? (
+        <span
+          aria-hidden
+          title="New activity since your last visit"
+          className="h-2 w-2 shrink-0 rounded-full bg-keep-accent"
+        />
+      ) : null}
+      <span aria-hidden className="shrink-0 text-keep-muted">›</span>
     </button>
   );
 }

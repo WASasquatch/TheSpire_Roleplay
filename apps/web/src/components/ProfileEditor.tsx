@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { AvatarCrop, CharacterAttribute, CharacterJournalEntry, CharacterPortrait, CharacterStats, CharacterStatsVisibility, CharacterVibeAxisKey, ProfileCollectionEntry, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
 import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, CHARACTER_ATTRIBUTES_MAX, CHARACTER_ATTRIBUTE_LABEL_MAX, CHARACTER_ATTRIBUTE_VALUE_MAX, CHARACTER_ATTRIBUTE_VALUE_MIN, CHARACTER_VIBE_AXES, DEFAULT_THEME, clampAvatarCrop, isDarkPalette, isDefaultAvatarCrop, normalizeTheme } from "@thekeep/shared";
+import { Code2, HelpCircle, Paintbrush2 } from "lucide-react";
 import { applyStyle } from "../lib/ornaments/index.js";
+import { DesignerTour } from "./DesignerTour.js";
 import { ProfileFlairEditor, VisitorsVisibilityToggleRow } from "./ProfileFlairEditor.js";
 import { applyTheme } from "../lib/theme.js";
 import { GENDER_OPTIONS, type Gender } from "../lib/gender.js";
@@ -31,6 +33,26 @@ import { ThemePicker } from "./ThemePicker.js";
 import { CloseButton } from "./CloseButton.js";
 import { DisplayPrivacyRow } from "./DisplayPrivacyRow.js";
 import { ScriptoriumPrivacyRow } from "./ScriptoriumPrivacyRow.js";
+
+// GrapesJS is heavy (~hundreds of KB); lazy-load it so it only enters the
+// bundle when a writer opens the visual Designer for their bio.
+const ProfileDesigner = lazy(() => import("./ProfileDesigner.js"));
+
+/**
+ * GrapesJS needs real screen room and a precise pointer; below this width we
+ * keep the bio editor as the raw-HTML Source textarea only (the Designer is
+ * mouse/drag-oriented and unusable on phones). Site availability is gated
+ * separately by the admin `branding.profileDesignerEnabled` flag.
+ */
+function isDesignerViewport(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia("(min-width: 900px)").matches;
+}
+
+/** Marks that the user has seen the Designer coach tour. A one-time hint, so
+ *  losing it (cleared storage, new browser) just re-shows the tour — harmless,
+ *  unlike the Designer *availability* flag which lives on the server. */
+const DESIGNER_TOUR_SEEN_KEY = "spire:designerTourSeen:v1";
 
 interface Props {
   /** Initial selection. The user can switch via the dropdown. */
@@ -218,6 +240,41 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   // Form state - reset whenever target changes
   const [name, setName] = useState("");
   const [bioHtml, setBioHtml] = useState("");
+  // Bio editing surface: the GrapesJS visual Designer (default — most users
+  // don't write HTML) or raw HTML source. Both edit the SAME `bioHtml` string,
+  // so switching carries edits across. The Designer offer requires the admin
+  // site flag AND a desktop-width viewport (see `isDesignerViewport`); when it
+  // isn't available the Source textarea renders regardless of this value.
+  const [bioMode, setBioMode] = useState<"source" | "designer">("designer");
+  const designerSiteEnabled = useChat((s) => s.branding.profileDesignerEnabled);
+  const [isWideViewport, setIsWideViewport] = useState(isDesignerViewport);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(min-width: 900px)");
+    const onChange = () => setIsWideViewport(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  const designerAvailable = designerSiteEnabled && isWideViewport;
+  // First-run coach tour for the Designer. Shown once (per browser) the first
+  // time the Designer is the active surface; replayable from the "?" button.
+  const [showDesignerTour, setShowDesignerTour] = useState(false);
+  const tourTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!designerAvailable || bioMode !== "designer" || tourTriggeredRef.current) return;
+    tourTriggeredRef.current = true;
+    try {
+      if (localStorage.getItem(DESIGNER_TOUR_SEEN_KEY)) return;
+    } catch { return; }
+    // Let the Designer mount before spotlighting its panels (the tour also
+    // polls for them, so this only needs to be roughly in time).
+    const t = setTimeout(() => setShowDesignerTour(true), 500);
+    return () => clearTimeout(t);
+  }, [designerAvailable, bioMode]);
+  const closeDesignerTour = () => {
+    setShowDesignerTour(false);
+    try { localStorage.setItem(DESIGNER_TOUR_SEEN_KEY, "1"); } catch { /* private mode */ }
+  };
   const [avatarUrl, setAvatarUrl] = useState("");
   /**
    * Owner-picked zoom + focal point on the avatar source (migration
@@ -1290,23 +1347,77 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   <span className="uppercase tracking-widest text-keep-muted">
                     {isCharacter ? "Character bio" : "OOC bio"}
                   </span>
-                  <span className="text-keep-muted">
-                    Full HTML and CSS supported. See Help &rarr; Formatting for tags, theme colors, and the &lt;youtube&gt; shortcut.
-                  </span>
+                  {designerAvailable ? (
+                    // Designer / Source toggle. Both edit the same `bioHtml`,
+                    // so switching carries edits across. The Designer remounts
+                    // each time it's entered (keyed on the mode), so it always
+                    // loads the latest source — including hand-edits.
+                    <div className="inline-flex items-center gap-1.5">
+                    {bioMode === "designer" ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowDesignerTour(true)}
+                        title="Show the Designer tour"
+                        aria-label="Show the Designer tour"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-keep-rule bg-keep-bg/60 text-keep-muted shadow-sm hover:text-keep-accent"
+                      >
+                        <HelpCircle className="h-4 w-4" aria-hidden />
+                      </button>
+                    ) : null}
+                    <div data-tour="bio-mode-toggle" className="inline-flex items-center gap-1 rounded-lg border border-keep-rule bg-keep-bg/60 p-1 shadow-sm">
+                      {([
+                        { m: "designer", label: "Designer", Icon: Paintbrush2 },
+                        { m: "source", label: "Source", Icon: Code2 },
+                      ] as const).map(({ m, label, Icon }) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setBioMode(m)}
+                          aria-pressed={bioMode === m}
+                          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                            bioMode === m
+                              ? "bg-keep-accent text-keep-bg shadow"
+                              : "text-keep-muted hover:bg-keep-accent/10 hover:text-keep-text"
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5" aria-hidden />
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    </div>
+                  ) : (
+                    <span className="text-keep-muted">
+                      Full HTML and CSS supported. See Help &rarr; Formatting for tags, theme colors, and the &lt;youtube&gt; shortcut.
+                    </span>
+                  )}
                 </div>
-                <textarea
-                  value={bioHtml}
-                  onChange={(e) => setBioHtml(e.target.value)}
-                  className="min-h-0 w-full flex-1 resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs outline-none focus:border-keep-action"
-                  placeholder={
-                    isCharacter
-                      ? "<p>A weather-beaten mercenary from the Reach...</p>"
-                      : "<p>Time-zone, contact preferences, RP boundaries, anything OOC.</p>"
-                  }
-                />
+                {designerAvailable && bioMode === "designer" ? (
+                  <div className="min-h-0 flex-1 overflow-hidden rounded border border-keep-rule">
+                    <Suspense
+                      fallback={<div className="flex h-full items-center justify-center text-xs italic text-keep-muted">Loading the designer…</div>}
+                    >
+                      <ProfileDesigner value={bioHtml} onChange={setBioHtml} />
+                    </Suspense>
+                  </div>
+                ) : (
+                  <textarea
+                    value={bioHtml}
+                    onChange={(e) => setBioHtml(e.target.value)}
+                    className="min-h-0 w-full flex-1 resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs outline-none focus:border-keep-action"
+                    placeholder={
+                      isCharacter
+                        ? "<p>A weather-beaten mercenary from the Reach...</p>"
+                        : "<p>Time-zone, contact preferences, RP boundaries, anything OOC.</p>"
+                    }
+                  />
+                )}
                 <div className="mt-1 text-right text-[10px] text-keep-muted tabular-nums">
                   {bioHtml.length.toLocaleString()} / {(master?.limits?.maxBioLength ?? 50_000).toLocaleString()}
                 </div>
+                {designerAvailable && bioMode === "designer" && showDesignerTour ? (
+                  <DesignerTour onClose={closeDesignerTour} />
+                ) : null}
               </div>
             ) : null}
 
@@ -1917,6 +2028,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
             </button>
             <button
               type="submit"
+              data-tour="profile-save"
               disabled={saving || loadingTarget}
               className="keep-button rounded border border-keep-action bg-keep-action/15 px-4 py-1 text-sm font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
             >

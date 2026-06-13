@@ -61,6 +61,7 @@ import {
   theaterSyncPayload,
 } from "./theaterState.js";
 import { loadReactionsForTargets } from "../reactions.js";
+import { emptyPollState, loadPollState } from "../polls.js";
 import { readPoolRank } from "../earning/resolver.js";
 import { routeMessage } from "../earning/routing.js";
 
@@ -129,6 +130,13 @@ export async function addMessage(
      * caller can't paint an image onto a /me line.
      */
     sceneImageUrl?: string | null;
+    /**
+     * Serialized {@link PollData} for `kind: "poll"` rows (the /poll command
+     * and the forum poll composer build it). Persisted verbatim and echoed
+     * into the outgoing message's hydrated `poll` state (zero tallies at
+     * creation). Ignored on every other kind.
+     */
+    pollDataJson?: string | null;
   },
 ): Promise<string | null> {
   // Inline-command expansion. The body may carry user-authored
@@ -407,6 +415,9 @@ export async function addMessage(
     // upstream (scene.ts validateSceneImageUrl) before this column
     // receives a non-null value.
     sceneImageUrl: payload.kind === "scene" ? (payload.sceneImageUrl ?? null) : null,
+    // Poll definition, gated to `kind: "poll"` for the same reason cmdCss /
+    // sceneImageUrl are gated to their kinds.
+    pollDataJson: payload.kind === "poll" ? (payload.pollDataJson ?? null) : null,
     rankKey: rankKeySnapshot,
     tier: tierSnapshot,
     senderInlineAvatarEnabled: inlineAvatarEnabledSnapshot,
@@ -466,6 +477,13 @@ export async function addMessage(
     ...(tierSnapshot != null ? { tier: tierSnapshot } : {}),
     ...(inlineAvatarEnabledSnapshot ? { senderInlineAvatarEnabled: true } : {}),
     ...(selectedBorderRankKeySnapshot ? { senderSelectedBorderRankKey: selectedBorderRankKeySnapshot } : {}),
+    // Fresh poll: hydrate zero-tally state so the room renders the PollCard on
+    // the creation broadcast. Nobody has voted yet, so myVote/tallies are
+    // empty for every recipient (per-viewer myVote is restored on backlog
+    // hydration via loadPollState).
+    ...(payload.kind === "poll" && payload.pollDataJson && emptyPollState(payload.pollDataJson)
+      ? { poll: emptyPollState(payload.pollDataJson)! }
+      : {}),
   };
   await emitFiltered(ctx.io, ctx.db, ctx.roomId, ctx.user.id, out);
 
@@ -1283,6 +1301,15 @@ export async function sendRoomBacklogTo(
       const r = reactionMap.get(m.id);
       if (r && r.length > 0) m.reactions = r;
     }
+  }
+  // Hydrate poll state per-viewer (definition + tallies + this viewer's
+  // ballot) so the PollCard renders correct results on join without a
+  // follow-up fetch. Voter identities are included only when showVoters.
+  const pollJsonById = new Map(recent.filter((m) => m.kind === "poll").map((m) => [m.id, m.pollDataJson]));
+  for (const m of backlog) {
+    if (m.kind !== "poll") continue;
+    const state = await loadPollState(db, m.id, viewerUserId, pollJsonById.get(m.id) ?? null);
+    if (state) m.poll = state;
   }
   socket.emit("message:bulk", backlog);
   // Authoritative "older messages exist" signal for the scroll-up

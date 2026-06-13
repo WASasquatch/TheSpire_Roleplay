@@ -46,25 +46,37 @@ import { parseVideoEmbed } from "./markdown.js";
 export { USER_HTML_STYLE_MARKER };
 
 /**
- * Sweep the document for every user-bio `<style>` block this surface
- * has rendered, and remove them. Belt-and-suspenders cleanup for the
- * "the profile's custom CSS bled into the next page" complaint: React
- * normally unmounts the portaled bio container on close and the
- * styles go with it, but in a few transitions (Strict-mode double
- * mount, SPA route swap that destroys + recreates the host shell on
- * the same tick) a leftover block was being parsed against the new
- * tree before the GC pass caught up. Calling this from the host
- * modal's effect cleanup guarantees nothing survives the close.
+ * Sweep the document for ORPHANED user-bio `<style>` blocks and remove
+ * them. Belt-and-suspenders cleanup for the "the profile's custom CSS
+ * bled into the next page" complaint: React normally unmounts the bio
+ * container on close and the styles go with it, but in a few transitions
+ * (SPA route swap that destroys + recreates the host shell on the same
+ * tick) a leftover block was being parsed against the new tree before
+ * the GC pass caught up. Calling this from a host modal's effect cleanup
+ * mops those up.
  *
- * Safe to call any time, operates only on tags carrying our marker,
- * which {@link sanitizeUserHtml} stamps; server-rendered chrome
- * `<style>` tags (the inline JSON-LD nonce path, the 404 splash) do
- * NOT carry it and pass through untouched.
+ * Crucially, "orphaned" means a marked `<style>` that is NOT inside a
+ * connected `.user-html-scope` subtree. A bio style is always rendered
+ * INSIDE its scope wrapper, so a style whose wrapper is still on screen
+ * is live and must be left alone. Without this guard the sweep was
+ * destructive under React StrictMode: dev runs effects setup → cleanup
+ * → setup, and the intermediate cleanup deleted the freshly-rendered
+ * style of the very modal that was (re)mounting — leaving the bio
+ * markup styleless because React never re-sets the unchanged innerHTML.
+ *
+ * Operates only on tags carrying our marker, which {@link sanitizeUserHtml}
+ * stamps; server-rendered chrome `<style>` tags (the inline JSON-LD nonce
+ * path, the 404 splash) do NOT carry it and pass through untouched.
  */
 export function sweepOrphanedUserBioStyles(): void {
   if (typeof document === "undefined") return;
-  const orphaned = document.querySelectorAll(`style[${USER_HTML_STYLE_MARKER}]`);
-  for (let i = 0; i < orphaned.length; i++) orphaned[i]!.remove();
+  const marked = document.querySelectorAll(`style[${USER_HTML_STYLE_MARKER}]`);
+  for (let i = 0; i < marked.length; i++) {
+    const el = marked[i]!;
+    // Live if it still sits within a mounted scope wrapper; only sweep
+    // the ones that have genuinely escaped their owning subtree.
+    if (!el.closest(`.${USER_HTML_SCOPE_CLASS}`)) el.remove();
+  }
 }
 
 /**

@@ -373,6 +373,14 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode; requiresPermis
           tables, and so on. The <b>Formatting</b> tab in this Help has the full list of what is
           allowed, with an example you can copy.
         </P>
+        <P>
+          On a wide screen you may also see a <b>Designer</b> and <b>Source</b> switch at the top
+          of the bio. <b>Designer</b> lets you build the page by dragging in pieces (headings,
+          cards, columns, an image, a video) and styling them by clicking, with no HTML to write.
+          <b> Source</b> is the same bio as raw HTML, for full control or for pasting in a theme.
+          Whatever you change in one shows up in the other, so you can rough it out in Designer
+          and tidy the details in Source.
+        </P>
 
         <Heading>A simple example</Heading>
         <pre className="overflow-x-auto rounded border border-keep-rule/60 bg-keep-panel/30 p-2 font-mono text-[10px] leading-relaxed">{`<h3>Sigrid the Quiet</h3>

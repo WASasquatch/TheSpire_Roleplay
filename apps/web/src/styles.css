@@ -3619,6 +3619,15 @@ aside.margin-note {
   border: 1px solid rgb(var(--keep-border) / 0.35);
   background: rgb(var(--keep-bg) / 0.4);
   border-radius: 6px;
+  /* Contain a drawn-out book to the shelf frame. An edge book pulls its
+   * (wide) cover out past the panel; on a narrow phone that bled off the
+   * card / viewport. `clip` on the X axis only keeps the forward-magnified
+   * book free to grow vertically while trimming the horizontal overspill at
+   * the frame, so it reads as "a book coming off the shelf" instead of
+   * sliding off-screen. A small clip-margin lets the resting drift wobble
+   * breathe past the border. */
+  overflow-x: clip;
+  overflow-clip-margin: 6px;
 }
 
 .bookshelf-header {
@@ -4166,10 +4175,22 @@ aside.margin-note {
   z-index: 50;
   outline: none;
 }
+/* Pan the outermost books toward center while drawn so their (wide) cover
+ * lands fully in the frame instead of off the edge. Applied to the INNER 3D
+ * book (the pull transform), NOT the button — the button's hit area must stay
+ * put, or the pan slides it out from under the cursor and `:hover` flickers.
+ * Magnitude scales with cover depth (--d) so it tracks the per-breakpoint
+ * book size. */
+.bookshelf-book[data-edge="r"]:hover,
+.bookshelf-book[data-edge="r"]:focus-visible,
+.bookshelf-book[data-edge="r"][data-pulled="true"] { --pan-x: calc(var(--d) * -0.5); }
+.bookshelf-book[data-edge="l"]:hover,
+.bookshelf-book[data-edge="l"]:focus-visible,
+.bookshelf-book[data-edge="l"][data-pulled="true"] { --pan-x: calc(var(--d) * 0.5); }
 .bookshelf-book:hover .book-3d,
 .bookshelf-book:focus-visible .book-3d,
 .bookshelf-book[data-pulled="true"] .book-3d {
-  transform: translateZ(320px) translateY(-8px) translateX(calc(var(--w) * -0.5)) rotateY(-78deg);
+  transform: translateX(var(--pan-x, 0px)) translateZ(320px) translateY(-8px) translateX(calc(var(--w) * -0.5)) rotateY(-78deg);
 }
 .bookshelf-book:hover .spine-title,
 .bookshelf-book:focus-visible .spine-title,
@@ -4260,7 +4281,7 @@ aside.margin-note {
   .bookshelf-book:hover .book-3d,
   .bookshelf-book:focus-visible .book-3d,
   .bookshelf-book[data-pulled="true"] .book-3d {
-    transform: translateZ(260px) translateY(-6px) translateX(calc(var(--w) * -0.5)) rotateY(-78deg);
+    transform: translateX(var(--pan-x, 0px)) translateZ(260px) translateY(-6px) translateX(calc(var(--w) * -0.5)) rotateY(-78deg);
   }
   .bookshelf-book .spine-title { font-size: 10.5px; letter-spacing: 0.2em; width: var(--h); }
   .bookshelf-book .cover-title { font-size: 0.82rem; }
@@ -4277,7 +4298,7 @@ aside.margin-note {
   .bookshelf-book:hover .book-3d,
   .bookshelf-book:focus-visible .book-3d,
   .bookshelf-book[data-pulled="true"] .book-3d {
-    transform: translateZ(190px) translateY(-4px) translateX(calc(var(--w) * -0.5)) rotateY(-75deg);
+    transform: translateX(var(--pan-x, 0px)) translateZ(190px) translateY(-4px) translateX(calc(var(--w) * -0.5)) rotateY(-75deg);
   }
   .bookshelf-book .spine-title { font-size: 9px; letter-spacing: 0.16em; width: var(--h); }
   .bookshelf-book .cover-content { inset: 14px 10px; }
@@ -4304,9 +4325,60 @@ aside.margin-note {
   .bookshelf-book:hover .book-3d,
   .bookshelf-book:focus-visible .book-3d,
   .bookshelf-book[data-pulled="true"] .book-3d {
-    transform: translateZ(160px) translateY(-3px) translateX(calc(var(--w) * -0.5)) rotateY(-75deg);
+    transform: translateX(var(--pan-x, 0px)) translateZ(160px) translateY(-3px) translateX(calc(var(--w) * -0.5)) rotateY(-75deg);
   }
   .bookshelf-bookend { width: 24px; height: 210px; flex: 0 0 24px; }
+}
+
+/* Column-fit shrinks for the bookshelf. On the redesigned splash the
+ * shelf lives in a fixed-width meta column, so the VIEWPORT media
+ * queries above never fire there (the viewport is huge, the column
+ * is not). SplashLanding wraps the shelf in `.bookshelf-fit`
+ * (container-type: inline-size) and these container queries re-apply
+ * the same shrink ladder against the COLUMN width instead. Placed
+ * after the viewport blocks so they win the cascade when both apply. */
+.bookshelf-fit {
+  container-type: inline-size;
+  min-width: 0;
+}
+@container (max-width: 620px) {
+  .bookshelf-stage { padding: 0 0.5rem; }
+  .bookshelf-shelf { height: 360px; }
+  .bookshelf-book {
+    --h: 280px;
+    --d: 170px;
+    --w: 42px;
+  }
+  .bookshelf-book:hover .book-3d,
+  .bookshelf-book:focus-visible .book-3d,
+  .bookshelf-book[data-pulled="true"] .book-3d {
+    transform: translateX(var(--pan-x, 0px)) translateZ(260px) translateY(-6px) translateX(calc(var(--w) * -0.5)) rotateY(-78deg);
+  }
+  .bookshelf-book .spine-title { font-size: 10.5px; letter-spacing: 0.2em; width: var(--h); }
+  .bookshelf-book .cover-title { font-size: 0.82rem; }
+  .bookshelf-book .cover-author { font-size: 0.66rem; }
+  .bookshelf-bookend { width: 38px; height: 300px; flex: 0 0 38px; }
+}
+@container (max-width: 480px) {
+  .bookshelf-shelf { height: 300px; }
+  .bookshelf-book {
+    --h: 230px;
+    --d: 130px;
+    --w: 34px;
+  }
+  .bookshelf-book:hover .book-3d,
+  .bookshelf-book:focus-visible .book-3d,
+  .bookshelf-book[data-pulled="true"] .book-3d {
+    transform: translateX(var(--pan-x, 0px)) translateZ(190px) translateY(-4px) translateX(calc(var(--w) * -0.5)) rotateY(-75deg);
+  }
+  .bookshelf-book .spine-title { font-size: 9px; letter-spacing: 0.16em; width: var(--h); }
+  .bookshelf-book .cover-content { inset: 14px 10px; }
+  .bookshelf-book .cover-title { font-size: 0.68rem; letter-spacing: 0.16em; }
+  .bookshelf-book .cover-author { font-size: 0.58rem; width: 80%; }
+  .bookshelf-book .cover-rating { font-size: 0.55rem; }
+  .bookshelf-book .cover::after { inset: 9px 6px; }
+  .bookshelf-books { gap: 2px; }
+  .bookshelf-bookend { width: 30px; height: 240px; flex: 0 0 30px; }
 }
 
 @keyframes bookshelf-shelve {
@@ -4323,366 +4395,56 @@ aside.margin-note {
 }
 
 /* ============================================================
- * Spire scroll, splash page "What Awaits You" parchment
+ * Splash feature showcase (FeatureShowcase.tsx)
  * ============================================================
- * Two brass-capped wooden rods slide apart; a parchment expands
- * between them; a quill flies down a feature list typing each
- * description. Animation choreographed in SpireScroll.tsx,
- * this stylesheet just exposes the visual primitives and the
- * `open` / `content-on` / `shown` state classes the component
- * toggles. The palette is intentionally fixed (parchment + wood
- * + brass) so the scroll reads as one piece of medieval ephemera
- * regardless of which app theme the visitor is on.
- */
-.spire-scroll-wrap {
-  width: 100%;
-  position: relative;
-  /* TRUE theme integration, every scroll surface is driven by the
-   * active theme's palette ramps, not blended with a hardcoded
-   * antique base. So on light themes the parchment lands near
-   * `--keep-bg` (cream / light gray, paper-like) with darker rods
-   * built from `--keep-panel-500`; on dark themes the SAME
-   * variables flip, parchment becomes a dark-bg surface with
-   * black-panel rods. The medieval feel comes from the SHAPE
-   * (rod, parchment unfurl, drop-cap layout) not the colors. */
-  --scroll-paper:       rgb(var(--keep-bg));
-  --scroll-paper-mid:   rgb(var(--keep-bg-200));
-  --scroll-paper-deep:  rgb(var(--keep-bg-300));
-  --scroll-wood-deep:   rgb(var(--keep-panel-500));
-  --scroll-wood-mid:    rgb(var(--keep-panel-400));
-  --scroll-wood-hi:     rgb(var(--keep-panel-300));
-  --scroll-wood-rim:    rgb(var(--keep-panel-500) / 0.85);
-  --scroll-wood-vein:   rgb(var(--keep-panel-500) / 0.55);
-  /* Brass colors are MUTED, pure accent reads as eye-searing
-   * neon on saturated themes (pink/magenta/cyan). Each brass stop
-   * mixes the accent ramp with the panel ramp so the rod metal
-   * stays a calmer dusky tone tinted by the theme accent, not the
-   * raw accent value. The mid stops keep enough accent that the
-   * brand color still tracks; the deep stops fold mostly into the
-   * panel tone so the dark edges read as muted shadows. */
-  --scroll-brass-deep:  color-mix(in srgb, rgb(var(--keep-accent-500)) 35%, rgb(var(--keep-panel-500)) 65%);
-  --scroll-brass-mid:   color-mix(in srgb, rgb(var(--keep-accent-400)) 50%, rgb(var(--keep-panel-400)) 50%);
-  --scroll-brass:       color-mix(in srgb, rgb(var(--keep-accent)) 55%, rgb(var(--keep-panel-400)) 45%);
-  --scroll-brass-light: color-mix(in srgb, rgb(var(--keep-accent-200)) 60%, rgb(var(--keep-panel-300)) 40%);
-  --scroll-brass-hi:    color-mix(in srgb, rgb(var(--keep-accent-100)) 65%, rgb(var(--keep-panel-200)) 35%);
-  --scroll-rim:         rgb(var(--keep-border) / 0.7);
-  --scroll-text:        rgb(var(--keep-text));
-  --scroll-text-muted:  rgb(var(--keep-muted));
-  --scroll-heading:     rgb(var(--keep-accent));
-  --scroll-cap:         rgb(var(--keep-action));
-  --scroll-rule:        rgb(var(--keep-accent));
+ * The spotlight panel slides in on every feature change so the
+ * rotation reads as motion, and the active chip carries a filling
+ * progress bar that telegraphs "this is a slideshow, the next one
+ * is coming". Duration is set inline from the component's
+ * ROTATE_MS so CSS and the JS interval can't drift apart. */
+@keyframes feature-panel-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
 }
-.scroll-stage {
-  position: relative;
-  width: 100%;
-  /* Full container width, was 760px when the scroll lived in a
-   * narrow column. With more horizontal room, descriptions fit on
-   * one line and the scroll can be much shorter vertically. */
-  max-width: 100%;
-  margin: 0 auto;
-  height: 560px;
-  /* CSS variables for layout. The rod SVG now has 45px decorative
-   * ends (was 80px) so paper-inset-y matches that, paper edges
-   * land on the main wood shaft just below the second brass collar
-   * with less dead vertical space above and below the parchment.
-   * --paper-overlap-x tucks the paper edge behind the rod's shaft
-   * instead of butting it against the brass. */
-  --paper-inset-y: 45px;
-  --rod-w: 48px;
-  --paper-overlap-x: 14px;
-}
+.feature-panel-in { animation: feature-panel-in 0.45s ease both; }
 
-/* Rods, slide in from center and settle at the stage edges when
- * the stage gets the `open` class. Transition tightened to 0.7s
- * so the splash gets to the content faster. */
-.scroll-rod {
+@keyframes feature-chip-fill {
+  from { width: 0%; }
+  to   { width: 100%; }
+}
+.feature-chip-fill {
   position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: rgb(var(--keep-action));
+  /* Duration comes from the component (--chip-fill-ms, matches its
+   * ROTATE_MS) so CSS and the JS interval stay in sync. Declared
+   * inside the shorthand, a bare shorthand resets duration to 0s
+   * and a 0s `both` animation snaps straight to the 100% end state. */
+  animation: feature-chip-fill var(--chip-fill-ms, 5000ms) linear both;
+}
+.feature-chip-fill.paused { animation-play-state: paused; }
+
+/* Active-dot countdown fill for the FeatureShowcase dot carousel. Reuses
+ * the chip-fill keyframe (width 0%→100%) but fills the pill's full height
+ * so the stretched active dot reads as a tiny progress bar. */
+.feature-dot-fill {
+  position: absolute;
+  left: 0;
   top: 0;
-  width: var(--rod-w);
-  height: 100%;
-  z-index: 3;
-  opacity: 0;
-  transition:
-    left 0.7s cubic-bezier(0.22, 0.61, 0.36, 1),
-    right 0.7s cubic-bezier(0.22, 0.61, 0.36, 1),
-    opacity 0.3s ease;
+  bottom: 0;
+  background: rgb(var(--keep-action));
+  animation: feature-chip-fill var(--chip-fill-ms, 5000ms) linear both;
 }
-.scroll-rod svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.6));
-}
-.scroll-rod-left  { left:  calc(50% - var(--rod-w)); }
-.scroll-rod-right { right: calc(50% - var(--rod-w)); }
-.scroll-rod-right svg { transform: scaleX(-1); }
-.scroll-stage.open .scroll-rod { opacity: 1; }
-.scroll-stage.open .scroll-rod-left  { left:  0; }
-.scroll-stage.open .scroll-rod-right { right: 0; }
-
-/* Parchment, starts at zero width center-anchored, then expands
- * out to (stage - 2 * (rod-w - overlap)) when `open`. Background
- * is pure theme bg ramp so the parchment FLIPS on dark themes:
- * dark bg-shade with theme text on top, instead of bright cream
- * fighting a dark surrounding card. Subtle texture comes from the
- * radial gradient stack, which is alpha-only so it works on both
- * light and dark parchment. Shadows use `light-dark()` so the
- * outer/inset shadows stay soft on light parchment instead of
- * smudging it gray. */
-.scroll-paper {
-  position: absolute;
-  top: var(--paper-inset-y);
-  bottom: var(--paper-inset-y);
-  left: 50%;
-  width: 0;
-  transform: translateX(-50%);
-  background: var(--scroll-paper);
-  background-image:
-    radial-gradient(ellipse at 25% 20%, rgb(var(--keep-accent) / 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse at 75% 80%, rgb(var(--keep-accent) / 0.04) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 50%, var(--scroll-paper) 0%, var(--scroll-paper-mid) 70%, var(--scroll-paper-deep) 100%);
-  box-shadow:
-    inset 0 0 60px light-dark(rgb(120 80 40 / 0.10), rgb(0 0 0 / 0.18)),
-    0 8px 32px light-dark(rgb(80 50 20 / 0.20), rgb(0 0 0 / 0.55));
-  transition: width 0.7s cubic-bezier(0.22, 0.61, 0.36, 1);
-  overflow: hidden;
-  z-index: 2;
-}
-.scroll-stage.open .scroll-paper {
-  width: calc(100% - 2 * (var(--rod-w) - var(--paper-overlap-x)));
-}
-.scroll-paper::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    radial-gradient(circle at 15% 40%, rgba(120, 80, 30, 0.15) 0%, transparent 4%),
-    radial-gradient(circle at 85% 70%, rgba(140, 90, 40, 0.12) 0%, transparent 3%),
-    radial-gradient(circle at 60% 25%, rgba(110, 70, 30, 0.1) 0%, transparent 3%),
-    radial-gradient(circle at 35% 85%, rgba(130, 85, 35, 0.1) 0%, transparent 2.5%);
-  pointer-events: none;
-}
-/* Curl-shadows at the very edges where the paper tucks behind the
- * rod's wood shaft. Narrow band so it reads as parchment going
- * UNDER the rod, not a vignette. */
-.scroll-paper::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  /* Curl-shadow band at the edges where parchment tucks behind the
-   * rod. On light parchment, hard black would read as soot, the
-   * `light-dark()` swap gives a warm brown shadow there and keeps
-   * the deep-black curl on dark parchment. */
-  background: linear-gradient(
-    90deg,
-    light-dark(rgb(80 50 20 / 0.40), rgb(0 0 0 / 0.55)) 0%,
-    light-dark(rgb(80 50 20 / 0.28), rgb(0 0 0 / 0.40)) 2%,
-    light-dark(rgb(80 50 20 / 0.14), rgb(0 0 0 / 0.20)) 5%,
-    transparent 8%,
-    transparent 92%,
-    light-dark(rgb(80 50 20 / 0.14), rgb(0 0 0 / 0.20)) 95%,
-    light-dark(rgb(80 50 20 / 0.28), rgb(0 0 0 / 0.40)) 98%,
-    light-dark(rgb(80 50 20 / 0.40), rgb(0 0 0 / 0.55)) 100%
-  );
-  pointer-events: none;
-}
-
-.scroll-content {
-  position: relative;
-  padding: 1.25rem 3.25rem 1rem;
-  height: 100%;
-  color: var(--scroll-text);
-  opacity: 0;
-  transition: opacity 0.5s ease;
-  z-index: 1;
-  box-sizing: border-box;
-  overflow: hidden;
-  font-family: Georgia, "Cormorant Garamond", "Times New Roman", serif;
-}
-.scroll-stage.content-on .scroll-content { opacity: 1; }
-
-.scroll-heading-wrap {
-  text-align: center;
-  margin-bottom: 0.6rem;
-}
-.scroll-heading-flourish {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.85rem;
-  margin-bottom: 0.3rem;
-}
-.scroll-heading-flourish .ln {
-  flex: 0 0 60px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--scroll-rule), transparent);
-}
-.scroll-heading-flourish .dia {
-  width: 5px;
-  height: 5px;
-  background: var(--scroll-rule);
-  transform: rotate(45deg);
-  box-shadow: 0 0 4px rgb(var(--keep-accent) / 0.45);
-}
-.scroll-heading {
-  font-family: Georgia, serif;
-  font-weight: 600;
-  font-size: 12px;
-  letter-spacing: 0.42em;
-  color: var(--scroll-heading);
-  text-transform: uppercase;
-  margin: 0;
-}
-
-.scroll-feature-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.scroll-feature-item {
-  padding: 0.35rem 0;
-  border-bottom: 0.5px dashed rgb(var(--keep-border) / 0.4);
-  opacity: 0;
-  transform: translateY(4px);
-  transition: opacity 0.4s, transform 0.4s;
-}
-.scroll-feature-item:last-child { border-bottom: none; }
-.scroll-feature-item.shown {
-  opacity: 1;
-  transform: translateY(0);
-}
-/* `clear: both` on each item so a previous item's drop-cap can't
- * overhang into the next item's space if a desc is unusually
- * short. */
-.scroll-feature-item::after {
-  content: "";
-  display: table;
-  clear: both;
-}
-
-/* Drop-cap layout: the title's first letter is enlarged and
- * float-left; the rest of the title + the description flow around
- * it as one paragraph. With the smaller (28px) cap, ~2 lines of
- * body text fit beside the cap before subsequent lines wrap below
- * it as the float clears, matching a true inline drop cap rather
- * than a tall pillar that text can never wrap under. */
-.scroll-feature-body {
-  margin: 0;
-  font-family: Georgia, "Cormorant Garamond", serif;
-  font-size: 13.5px;
-  line-height: 1.55;
-  color: var(--scroll-text);
-  text-shadow: none;
-  /* Long unbroken runs (URLs, no-space tags, dashed phrases like
-   * "IC-and-OOC-strictly-separate") otherwise push past the
-   * parchment's right edge on narrow viewports, `.scroll-content`
-   * has `overflow: hidden` so the bleed silently clips. Word-break +
-   * hyphens lets the browser wrap mid-token when no whitespace
-   * opportunity is available. */
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  hyphens: auto;
-}
-/* Drop cap, uses native `initial-letter` on browsers that
- * support it (Safari and Chrome 110+) for perfect baseline
- * alignment that float can't achieve. The cap automatically sizes
- * to span 2 body lines and its baseline aligns with body line 2's
- * baseline. Firefox (no support) falls back to the inline rule
- * below: cap renders inline at 1.3em with no drop, looks like a
- * slightly enlarged first letter, readable and aligned. */
-.scroll-feature-cap {
-  font-family: Georgia, "Cinzel Decorative", "Cinzel", serif;
-  font-weight: 700;
-  color: var(--scroll-cap);
-  /* Firefox fallback: inline cap, slightly larger than body. */
-  font-size: 1.3em;
-  line-height: inherit;
-  padding-right: 1px;
-  text-shadow: 0 0 5px rgb(var(--keep-accent) / 0.4);
-  user-select: none;
-}
-@supports (initial-letter: 2) or (-webkit-initial-letter: 2) {
-  .scroll-feature-cap {
-    /* Modern: real drop cap. The browser sizes the letter so its
-     * baseline lands on body line 2's baseline and its cap-height
-     * sits at body line 1's top. */
-    -webkit-initial-letter: 2;
-    initial-letter: 2;
-    font-size: inherit;
-    margin-right: 7px;
-    padding-right: 0;
-  }
-}
-.scroll-feature-title {
-  font-weight: 700;
-  font-size: 14px;
-  color: var(--scroll-text);
-  letter-spacing: 0.02em;
-}
-.scroll-feature-desc {
-  font-family: Georgia, "Cormorant Garamond", serif;
-  font-weight: 400;
-  font-style: italic;
-  color: var(--scroll-text-muted);
-  letter-spacing: 0.005em;
-}
-
-.scroll-quill {
-  position: absolute;
-  width: 50px;
-  height: 62px;
-  pointer-events: none;
-  opacity: 0;
-  /* Quick `left`/`top` transition because the quill is now driven
-   * per character, a long 500ms ease would lag the cursor by a
-   * char or two. 90ms feels like a held pen tracking writing. */
-  transition:
-    opacity 0.25s,
-    left 0.09s linear,
-    top 0.09s linear;
-  z-index: 5;
-  transform-origin: bottom left;
-}
-.scroll-quill.flying { opacity: 1; }
-.scroll-quill svg { width: 100%; height: 100%; display: block; }
-
-/* Mobile: full-width scroll still works since it's already 100%
- * of container. Tighten typography AND tighten content padding so
- * the inner column has more horizontal room before bleeding past
- * the parchment art. Stage height grows to fit all 10 features:
- * each item wraps to ~2 lines of 11px body + 12px title + 0.7rem
- * vertical padding ≈ 60px, × 10 = 600px just for the list, plus
- * ~140px for the rod chrome / paper margins / brass collars.
- * 880px gives the last feature ("Commands") room to land before
- * the rod's lower brass collar instead of being clipped by it. */
-@media (max-width: 640px) {
-  .scroll-stage { height: 880px; }
-  .scroll-content { padding: 0.85rem 1.25rem 0.75rem; }
-  .scroll-feature-item { padding: 0.25rem 0; }
-  .scroll-feature-cap { font-size: 20px; padding-top: 1px; }
-  .scroll-feature-title { font-size: 12px; }
-  .scroll-feature-body { font-size: 11px; line-height: 1.5; }
-}
-/* Ultra-narrow (older phones, foldables in cover mode). One more
- * step down on font size; bump stage height a bit further because
- * narrower columns mean longer feature descriptions wrap to three
- * lines (sometimes four), and the cumulative extra row across
- * 10 items eats real vertical space. */
-@media (max-width: 380px) {
-  .scroll-stage { height: 940px; }
-  .scroll-content { padding: 0.75rem 0.9rem 0.65rem; }
-  .scroll-feature-item { padding: 0.2rem 0; }
-  .scroll-feature-cap { font-size: 17px; }
-  .scroll-feature-title { font-size: 11px; }
-  .scroll-feature-body { font-size: 10.5px; line-height: 1.45; }
-}
+.feature-dot-fill.paused { animation-play-state: paused; }
 
 @media (prefers-reduced-motion: reduce) {
-  .scroll-rod,
-  .scroll-paper,
-  .scroll-content,
-  .scroll-feature-item,
-  .scroll-quill { transition: none !important; }
+  /* Only the decorative slide-in is suppressed. The chip fill is a
+   * progress indicator (essential status, like a loading bar), so
+   * it keeps animating, without it a reduced-motion visitor gets
+   * zero warning that the panel is about to swap. */
+  .feature-panel-in { animation: none; }
 }
 
 /* Profile modal, when the viewed profile carries a public BG
@@ -5061,4 +4823,45 @@ aside.margin-note {
 .tk-ranking-flash {
   animation: tkRankingFlash 1.6s ease-in-out;
   border-color: rgb(var(--keep-action) / 0.7);
+}
+
+/* ============================================================
+ * Profile bio Designer (GrapesJS) — retheme the third-party builder chrome
+ * to the active Spire palette so it reads as part of the app rather than a
+ * grey external tool. GrapesJS exposes its UI colors as `--gjs-*` custom
+ * properties; we remap them to the `--keep-*` theme triples (set on :root by
+ * applyTheme), which cascade into every `.gjs-*` element under the editor.
+ * ============================================================ */
+.profile-designer {
+  /* Panels / toolbars / general chrome. */
+  --gjs-primary-color: rgb(var(--keep-panel));
+  --gjs-main-color: rgb(var(--keep-panel));
+  /* Icons + labels riding on the chrome. */
+  --gjs-secondary-color: rgb(var(--keep-text));
+  --gjs-font-color: rgb(var(--keep-muted));
+  --gjs-font-color-active: rgb(var(--keep-text));
+  /* Accents: active state, selection highlight, value handles. */
+  --gjs-tertiary-color: rgb(var(--keep-accent));
+  --gjs-quaternary-color: rgb(var(--keep-action));
+  --gjs-color-highlight: rgb(var(--keep-accent));
+  /* Borders / depth — derive from the theme rule + bg instead of the stock
+   * hard-coded translucent black/white so they read on light themes too. */
+  --gjs-main-dark-color: rgb(var(--keep-bg) / 0.55);
+  --gjs-main-light-color: rgb(var(--keep-border) / 0.4);
+  --gjs-light-border: rgb(var(--keep-border) / 0.3);
+  background: rgb(var(--keep-panel));
+  color: rgb(var(--keep-text));
+}
+/* The canvas gutter (around the page iframe) — default GrapesJS paints it a
+ * flat light grey; tie it to the theme bg so the white page floats on the
+ * app's backdrop, not a mismatched plate. */
+.profile-designer .gjs-cv-canvas {
+  background-color: rgb(var(--keep-bg));
+}
+/* Right-panel empty-state + manager labels: keep them legible on the
+ * theme panel (stock grey-on-grey can wash out on some palettes). */
+.profile-designer .gjs-sm-sector-title,
+.profile-designer .gjs-block-category .gjs-title,
+.profile-designer .gjs-layer-title {
+  color: rgb(var(--keep-text));
 }

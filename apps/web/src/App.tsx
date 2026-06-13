@@ -1099,6 +1099,7 @@ function Chat() {
   const [forumsOpen, setForumsOpen] = useState<{
     key?: string;
     topic?: { boardId: string; topicId: string; postId?: string };
+    create?: boolean;
   } | null>(null);
   // /f/<slug> deep-link for SIGNED-IN visitors (anonymous ones get the
   // public landing in UnauthRouter): open the catalog on that forum and
@@ -1722,6 +1723,11 @@ function Chat() {
   // `defaultStyleKey` is the fallback when nothing matches.
   const siteStyleKey = useChat((s) => s.branding.defaultStyleKey);
   const themeDesignMap = useChat((s) => s.branding.themeDesignMap);
+  // A forum surface (catalog modal / public landing) may be overriding the
+  // root design. When it is, this effect must apply THAT design, not the
+  // viewer's — otherwise it clobbers the forum's ornaments on the one commit
+  // where it re-runs while the surface is mounted (signing in from a forum).
+  const scopedRootDesign = useChat((s) => s.scopedRootDesign);
   useEffect(() => {
     // Apply the palette first so the ornament generator can read the
     // resulting CSS vars. Style resolution priority (highest wins):
@@ -1766,7 +1772,13 @@ function Chat() {
     const resolvedStyle = activeCharacterId
       ? (characterStyleKey || pinnedForPreset || builtinForPreset || siteStyleKey || DEFAULT_STYLE_KEY)
       : (userStyleKey || pinnedForPreset || builtinForPreset || siteStyleKey || DEFAULT_STYLE_KEY);
-    applyStyle(activeTheme, resolvedStyle);
+    // A mounted forum surface owns the root design while it's up; apply its
+    // palette-derived ornaments so this effect re-asserts (never clobbers) it.
+    if (scopedRootDesign) {
+      applyStyle(scopedRootDesign.theme, scopedRootDesign.styleKey);
+    } else {
+      applyStyle(activeTheme, resolvedStyle);
+    }
 
     // Glass shell-bg URL, character > master > Spire artwork
     // (light or dark variant by palette luminance). Published as
@@ -1830,7 +1842,7 @@ function Chat() {
       root.style.removeProperty("--keep-glass-tool-tint");
       root.style.removeProperty("--keep-glass-chat-tint");
     }
-  }, [activeTheme, activeCharacterId, characterStyleKey, userStyleKey, siteStyleKey, themeDesignMap, me, characterBgUrl, characterBgMode, userBgUrl, userBgMode]);
+  }, [activeTheme, activeCharacterId, characterStyleKey, userStyleKey, siteStyleKey, themeDesignMap, me, characterBgUrl, characterBgMode, userBgUrl, userBgMode, scopedRootDesign]);
 
   // Per-user font/size accessibility. Independent of the palette effect
   // above because font preferences don't layer through character/room
@@ -2312,7 +2324,7 @@ function Chat() {
           setScriptoriumOpen(h.tab ? { tab: h.tab } : {});
           break;
         case "open-forums":
-          setForumsOpen(h.slug ? { key: h.slug } : {});
+          setForumsOpen(h.create ? { create: true } : h.slug ? { key: h.slug } : {});
           break;
         case "open-story-editor":
           setStoryEditor({ storyId: h.storyId });
@@ -2664,6 +2676,11 @@ function Chat() {
     socket.on("reaction:update", (event) => {
       const viewerId = useChat.getState().me?.id ?? null;
       useEmoticons.getState().applyReactionEvent(event, viewerId);
+    });
+    // Live poll tally / close. Merge the delta into the matching poll
+    // message wherever it's cached (chat buffer or forum topic bucket).
+    socket.on("poll:update", (update) => {
+      useChat.getState().applyPollUpdate(update);
     });
     // Admin replaced / added / deleted an emoticon sheet, refetch
     // the catalog. Cheap (one round trip, no auth required), and
@@ -4170,6 +4187,7 @@ function Chat() {
         <ForumsCatalogModal
           {...(forumsOpen.key ? { initialKey: forumsOpen.key } : {})}
           {...(forumsOpen.topic ? { initialTopic: forumsOpen.topic } : {})}
+          {...(forumsOpen.create ? { initialCreate: true } : {})}
           onOpenWorld={(worldId) => setWorldViewerId(worldId)}
           onClose={() => setForumsOpen(null)}
           onIconClick={onIconClick}

@@ -124,7 +124,7 @@ export async function createBoard(forumId: string, input: { name: string; topic?
 }
 
 export async function updateBoard(forumId: string, roomId: string, patch: {
-  name?: string; topic?: string | null;
+  name?: string; topic?: string | null; membersOnly?: boolean;
 }): Promise<void> {
   const r = await fetch(`/forums/${encodeURIComponent(forumId)}/boards/${encodeURIComponent(roomId)}`, {
     method: "PATCH",
@@ -210,7 +210,7 @@ export async function fetchRoomCategories(roomId: string): Promise<ThreadCategor
   return j.categories;
 }
 
-export async function createRoomCategory(roomId: string, name: string, sortOrder: number, subtitle?: string | null, parentId?: string | null): Promise<void> {
+export async function createRoomCategory(roomId: string, name: string, sortOrder: number, subtitle?: string | null, parentId?: string | null, membersOnly?: boolean): Promise<void> {
   const r = await fetch(`/admin/rooms/${encodeURIComponent(roomId)}/thread-categories`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -220,12 +220,13 @@ export async function createRoomCategory(roomId: string, name: string, sortOrder
       sortOrder,
       ...(subtitle !== undefined ? { subtitle } : {}),
       ...(parentId ? { parentId } : {}),
+      ...(membersOnly !== undefined ? { membersOnly } : {}),
     }),
   });
   await jsonOrThrow(r);
 }
 
-export async function patchRoomCategory(roomId: string, catId: string, patch: { name?: string; sortOrder?: number; subtitle?: string | null; parentId?: string | null }): Promise<void> {
+export async function patchRoomCategory(roomId: string, catId: string, patch: { name?: string; sortOrder?: number; subtitle?: string | null; parentId?: string | null; membersOnly?: boolean }): Promise<void> {
   const r = await fetch(`/admin/rooms/${encodeURIComponent(roomId)}/thread-categories/${encodeURIComponent(catId)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
@@ -385,6 +386,8 @@ export function postToBoard(input: {
   threadTitle?: string;
   threadCategoryId?: string | null;
   replyToId?: string;
+  /** New poll topic: the title is the question, these are the options/settings. */
+  poll?: { optionTexts: string[]; allowMultiple: boolean; showVoters: boolean; closesAt: number | null };
 }): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const socket = getSocket();
@@ -396,6 +399,7 @@ export function postToBoard(input: {
       ...(input.threadTitle ? { threadTitle: input.threadTitle } : {}),
       ...(input.threadCategoryId ? { threadCategoryId: input.threadCategoryId } : {}),
       ...(input.replyToId ? { replyToId: input.replyToId } : {}),
+      ...(input.poll ? { poll: input.poll } : {}),
     }, (res) => {
       if (res && "ok" in res && res.ok) resolve(res.messageId);
       else reject(new Error(res && "message" in res ? res.message : "Post failed."));

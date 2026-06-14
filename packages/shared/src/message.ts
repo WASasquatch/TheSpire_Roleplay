@@ -149,6 +149,14 @@ export interface ChatMessage {
    */
   lastActivityAt?: number | null;
   /**
+   * Total replies under a top-level forum topic, computed server-side in
+   * `GET /rooms/:id/topics` so the COLLAPSED topic card shows the right
+   * count without first fetching the thread. (The live, expanded view
+   * counts the loaded reply buffer instead, which also reflects replies
+   * arriving over the socket.) Absent on replies and flat-room messages.
+   */
+  replyCount?: number;
+  /**
    * Admin-pinned flag for forum topics. When true, the topic floats
    * above all non-sticky topics in its category and is returned on
    * every page of `GET /rooms/:id/topics`. Only admins can toggle

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Ban, EyeOff, MessageSquare, Send } from "lucide-react";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
-import { CHARACTER_VIBE_AXES, isAdminRole, isDarkPalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
+import { CHARACTER_VIBE_AXES, isAdminRole, isDarkPalette, legibleAgainstBg, legibleThemePalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
 import type { CharacterAttribute, CharacterPortrait, CharacterVibeAxisKey, EidolonProfileSummary, ProfileLibraryEntry, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
 import { buildOrnamentStyle } from "../lib/ornaments/index.js";
@@ -33,7 +33,13 @@ import { ProfileMarquee, ProfileVisitorsChip, useTrackProfileView } from "./Prof
  * `aria-label` + `title` to supply the name/tooltip the visible text used to
  * give. The bases center their icon.
  */
-const ACT_PILL = "inline-flex items-center justify-center rounded border bg-keep-bg px-2 py-1 transition-colors";
+// No `bg-keep-bg` fill: the pills sit transparently on the hero band
+// (`bg-keep-panel`) so the band is unambiguously their background, and the
+// per-pill inline ink (computed in ProfileBody against the panel color) is
+// guaranteed legible. A solid fill could turn translucent under glass
+// designs / profile BG images and let the band bleed through, which was the
+// "invisible icons" bug. Hover tints still paint over the transparent base.
+const ACT_PILL = "inline-flex items-center justify-center rounded border px-2 py-1 transition-colors";
 const ACT_PILL_ACTION = `${ACT_PILL} border-keep-action/50 text-keep-action hover:bg-keep-action/10`;
 const ACT_PILL_NEUTRAL = `${ACT_PILL} border-keep-rule text-keep-text hover:bg-keep-panel`;
 const ACT_PILL_ACCENT = `${ACT_PILL} border-keep-accent/60 text-keep-accent hover:bg-keep-accent/10`;
@@ -589,6 +595,22 @@ function ProfileBody({
   //     XP/Currency as the prominent chip pair, action buttons inline
   //     beneath the meta.
   const hasActions = !!(onWhisper || onMessage || onIgnore || onBlock || activeCharacterAction);
+  // Action-button ink, made legible against the hero band SPECIFICALLY.
+  // The band is a solid `bg-keep-panel`, and the pills/segments render with
+  // transparent fills directly on it — so their semantic colors must be
+  // lifted against the PANEL color, not `theme.bg` (which is all
+  // `legibleThemePalette` targets). Without this the icons vanish on themes
+  // whose panel and bg luminance diverge, or under glass / profile-BG-image
+  // surfaces where the band shows through. `legibleAgainstBg` preserves each
+  // hue while guaranteeing contrast, so Message/Whisper stay action-tinted,
+  // Ignore stays accent, and Block stays its system red.
+  const ownerTheme = profile.profile.theme;
+  const bandHex = ownerTheme.panel;
+  const lp = legibleThemePalette(ownerTheme);
+  const inkAction = legibleAgainstBg(lp.action, bandHex, 3.0);
+  const inkNeutral = legibleAgainstBg(lp.text, bandHex, 4.5);
+  const inkAccent = legibleAgainstBg(lp.accent, bandHex, 3.0);
+  const inkSystem = legibleAgainstBg(lp.system, bandHex, 3.0);
   // Profile banner, the URL slot the owner equipped via the Flair
   // tab. Renders as a 3:1 hero strip ABOVE the existing avatar/name
   // hero band. Falls through to nothing when the URL is null (slot
@@ -971,7 +993,8 @@ function ProfileBody({
                     type="button"
                     onClick={activeCharacterAction.onClick}
                     title="Change your active identity - chat name and theme update immediately."
-                    className="keep-button rounded border border-keep-action/60 bg-keep-bg px-2 py-1 text-keep-action hover:bg-keep-action/10"
+                    style={{ color: inkAction, borderColor: inkAction }}
+                    className="keep-button rounded border px-2 py-1 hover:bg-keep-action/10"
                   >
                     {activeCharacterAction.label}
                   </button>
@@ -982,6 +1005,7 @@ function ProfileBody({
                     onClick={() => onMessage(profile.profile.userId, name, avatar)}
                     title="Open a direct message thread with this user."
                     aria-label="Message"
+                    style={{ color: inkAction, borderColor: inkAction }}
                     className={ACT_PILL_ACTION}
                   >
                     <MessageSquare className="h-4 w-4" aria-hidden="true" />
@@ -993,6 +1017,7 @@ function ProfileBody({
                     onClick={() => onWhisper(name)}
                     title="Send a one-off private message in chat."
                     aria-label="Whisper"
+                    style={{ color: inkNeutral, borderColor: inkNeutral }}
                     className={ACT_PILL_NEUTRAL}
                   >
                     <Send className="h-4 w-4" aria-hidden="true" />
@@ -1008,6 +1033,7 @@ function ProfileBody({
                     }}
                     title="Hide this user's messages from you (one-way, reversible)."
                     aria-label="Ignore"
+                    style={{ color: inkAccent, borderColor: inkAccent }}
                     className={ACT_PILL_ACCENT}
                   >
                     <EyeOff className="h-4 w-4" aria-hidden="true" />
@@ -1023,6 +1049,7 @@ function ProfileBody({
                     }}
                     title="Block: you and this user become invisible to each other everywhere."
                     aria-label="Block"
+                    style={{ color: inkSystem, borderColor: inkSystem }}
                     className={ACT_PILL_SYSTEM}
                   >
                     <Ban className="h-4 w-4" aria-hidden="true" />
@@ -1061,7 +1088,8 @@ function ProfileBody({
                 type="button"
                 onClick={activeCharacterAction.onClick}
                 title="Change your active identity - chat name and theme update immediately."
-                className="keep-button flex-1 border-r border-keep-rule px-2 py-2.5 text-keep-action hover:bg-keep-action/10"
+                style={{ color: inkAction }}
+                className="keep-button flex-1 border-r border-keep-rule px-2 py-2.5 hover:bg-keep-action/10"
               >
                 {activeCharacterAction.label}
               </button>
@@ -1072,6 +1100,7 @@ function ProfileBody({
                 onClick={() => onMessage(profile.profile.userId, name, avatar)}
                 title="Open a direct message thread with this user."
                 aria-label="Message"
+                style={{ color: inkAction }}
                 className={`${ACT_SEG_ACTION} ${ACT_SEG_DIVIDER}`}
               >
                 <MessageSquare className="h-4 w-4" aria-hidden="true" />
@@ -1083,6 +1112,7 @@ function ProfileBody({
                 onClick={() => onWhisper(name)}
                 title="Send a one-off private message in chat."
                 aria-label="Whisper"
+                style={{ color: inkNeutral }}
                 className={`${ACT_SEG_NEUTRAL} ${ACT_SEG_DIVIDER}`}
               >
                 <Send className="h-4 w-4" aria-hidden="true" />
@@ -1098,6 +1128,7 @@ function ProfileBody({
                 }}
                 title="Hide this user's messages from you (one-way, reversible)."
                 aria-label="Ignore"
+                style={{ color: inkAccent }}
                 className={`${ACT_SEG_ACCENT} ${ACT_SEG_DIVIDER}`}
               >
                 <EyeOff className="h-4 w-4" aria-hidden="true" />
@@ -1113,6 +1144,7 @@ function ProfileBody({
                 }}
                 title="Block: you and this user become invisible to each other everywhere."
                 aria-label="Block"
+                style={{ color: inkSystem }}
                 className={ACT_SEG_SYSTEM}
               >
                 <Ban className="h-4 w-4" aria-hidden="true" />

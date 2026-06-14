@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { UNICODE_EMOJI_FLAT } from "@thekeep/shared";
 import { useEmoticons } from "../state/emoticons.js";
@@ -103,10 +103,23 @@ export function EmoticonTypeahead({
   const sheets = useEmoticons((s) => s.sheets);
   const [active, setActive] = useState<ActiveTrigger | null>(null);
   const [selectedIdx, setSelectedIdx] = useState(0);
-  // `pos` is the absolute pixel position to render the popup at
-  // (relative to the document). Measured after each trigger event
-  // so the popup tracks the caret as the user types or scrolls.
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  // Popup placement geometry, measured after each trigger event so the
+  // popup tracks the caret/field as the user types or scrolls. `left` is
+  // the caret column (clamped horizontally at render). Vertically we anchor
+  // to the TEXTAREA (not the caret line) and flip to whichever side has more
+  // room — `openAbove` is true for a bottom-anchored composer, so the popup
+  // rises above the field instead of falling off the bottom of the screen.
+  const [pos, setPos] = useState<{
+    left: number;
+    openAbove: boolean;
+    anchorTop: number;
+    anchorBottom: number;
+  } | null>(null);
+  // Whether the user has explicitly moved the selection with the arrow
+  // keys. Gates Enter: without an explicit pick, Enter must fall through to
+  // the composer (send the message) instead of auto-accepting the
+  // first-highlighted suggestion. Reset on every new trigger.
+  const [navigated, setNavigated] = useState(false);
 
   // Build an index of the sheet emoticons just once per sheet-store
   // snapshot. Each entry carries the same shape as the Unicode flat
@@ -205,13 +218,17 @@ export function EmoticonTypeahead({
     const query = (m[2] ?? "").toLowerCase();
     setActive({ start, end: caret, query });
     setSelectedIdx(0);
+    // Fresh trigger → no explicit selection yet, so Enter sends the message
+    // rather than accepting the auto-highlighted first suggestion.
+    setNavigated(false);
   }, [textareaRef, value]);
 
-  // Re-position the popup whenever the trigger appears or moves. We
-  // use the textarea's bounding rect + a measured caret offset to
-  // place the popup directly beneath the caret line. Falls back to
-  // anchoring at the textarea's bottom-left when caret measurement
-  // isn't available (older browsers).
+  // Re-position the popup whenever the trigger appears or moves. The
+  // horizontal anchor tracks the caret column; the vertical anchor is the
+  // textarea itself, and the popup opens on whichever side (above/below)
+  // has more room so it's never pushed off-screen. The chat composer hugs
+  // the bottom of the viewport, so this resolves to ABOVE the field —
+  // keeping the input visible and the popup reachable.
   useLayoutEffect(() => {
     if (!active) {
       setPos(null);
@@ -220,17 +237,17 @@ export function EmoticonTypeahead({
     const el = textareaRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    // Caret position approximated via a mirror element. Browsers
-    // don't expose a direct API for "give me the caret's pixel
-    // coordinates inside a <textarea>" so we measure by copying the
-    // textarea's text + styles into a hidden <div> and reading the
-    // offset of a sentinel span placed at the caret index. Cheap
-    // enough at chat-input sizes; not in a tight loop because we
-    // only run it on trigger changes.
+    // Caret column approximated via a mirror element. Browsers don't
+    // expose a direct API for "give me the caret's pixel coordinates
+    // inside a <textarea>" so we measure by copying the textarea's text +
+    // styles into a hidden <div> and reading the offset of a sentinel span
+    // placed at the caret index. Cheap at chat-input sizes; only runs on
+    // trigger changes, not in a tight loop.
     const caretOffset = measureCaretOffset(el, active.end);
-    const top = rect.top + caretOffset.top + caretOffset.lineHeight + 4;
     const left = rect.left + caretOffset.left;
-    setPos({ top, left });
+    const spaceAbove = rect.top;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    setPos({ left, openAbove: spaceAbove >= spaceBelow, anchorTop: rect.top, anchorBottom: rect.bottom });
   }, [active, textareaRef, value]);
 
   // Wire selection/input listeners. We mount these once per textarea
@@ -290,16 +307,34 @@ export function EmoticonTypeahead({
       if (e.key === "ArrowDown") {
         e.preventDefault();
         e.stopPropagation();
+        setNavigated(true);
         setSelectedIdx((i) => (i + 1) % suggestions.length);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         e.stopPropagation();
+        setNavigated(true);
         setSelectedIdx((i) => (i - 1 + suggestions.length) % suggestions.length);
-      } else if (e.key === "Enter" || e.key === "Tab") {
+      } else if (e.key === "Tab") {
+        // Tab is an explicit "complete" gesture (never "submit"), so it
+        // always accepts the highlighted suggestion.
         e.preventDefault();
         e.stopPropagation();
         const pick = suggestions[selectedIdx] ?? suggestions[0];
         if (pick) accept(pick);
+      } else if (e.key === "Enter") {
+        // Only accept on Enter if the user explicitly arrow-navigated to a
+        // suggestion. Otherwise the popup just auto-highlighted index 0 and
+        // the user is pressing Enter to SEND their message — let it fall
+        // through to the composer (don't preventDefault/stopPropagation) so
+        // e.g. ":P" sends as-is instead of being swapped for an emoji.
+        if (navigated) {
+          e.preventDefault();
+          e.stopPropagation();
+          const pick = suggestions[selectedIdx] ?? suggestions[0];
+          if (pick) accept(pick);
+        } else {
+          setActive(null);
+        }
       } else if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
@@ -311,15 +346,24 @@ export function EmoticonTypeahead({
     // synthetic handlers in bubble phase so we win.
     el.addEventListener("keydown", handler, true);
     return () => el.removeEventListener("keydown", handler, true);
-  }, [active, suggestions, selectedIdx, accept, textareaRef]);
+  }, [active, suggestions, selectedIdx, navigated, accept, textareaRef]);
 
   if (!active || suggestions.length === 0 || !pos) return null;
   if (typeof document === "undefined") return null;
 
-  // Clamp the popup inside the viewport so it doesn't render
-  // off-screen when the caret is near the right edge.
+  // Clamp the popup inside the viewport so it doesn't render off-screen
+  // when the caret is near the right edge.
   const POPUP_WIDTH = 240;
   const left = Math.max(8, Math.min(pos.left, window.innerWidth - POPUP_WIDTH - 8));
+  // Vertical placement: open on the side with more room (above for a
+  // bottom-anchored composer) and bound the height to the available space
+  // so the list never spills off the top or bottom — the inner
+  // `overflow-y-auto` scrolls a long list within those bounds. When
+  // opening ABOVE we pin the popup's BOTTOM just above the field via the
+  // `bottom` CSS prop so it grows upward regardless of its height.
+  const vStyle: CSSProperties = pos.openAbove
+    ? { bottom: Math.max(8, window.innerHeight - pos.anchorTop + 4), maxHeight: Math.max(96, pos.anchorTop - 12) }
+    : { top: pos.anchorBottom + 4, maxHeight: Math.max(96, window.innerHeight - pos.anchorBottom - 12) };
   return createPortal(
     <ul
       role="listbox"
@@ -327,8 +371,8 @@ export function EmoticonTypeahead({
       // `keep-panel` matches the rest of the floating chrome
       // (mentions popup, history popup) so the typeahead reads as
       // first-class.
-      className="keep-panel pointer-events-auto fixed z-[210] max-h-64 w-60 overflow-y-auto rounded-lg border border-keep-rule shadow-xl"
-      style={{ top: pos.top, left }}
+      className="keep-panel pointer-events-auto fixed z-[210] w-60 overflow-y-auto rounded-lg border border-keep-rule shadow-xl"
+      style={{ left, ...vStyle }}
       // Stop mousedown so clicking a suggestion doesn't steal focus
       // from the textarea, the caret needs to stay where it is so
       // setSelectionRange in `accept` lands correctly.

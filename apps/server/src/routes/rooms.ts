@@ -988,6 +988,23 @@ export async function registerRoomsRoutes(
         ...(m.tier != null ? { tier: m.tier } : {}),
         ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
       }));
+      // Reply counts per topic, so the COLLAPSED topic card shows the
+      // true count without first opening the thread. Forum replies always
+      // attach directly to the topic (`replyToId === topicId`; reply-to-
+      // reply isn't a thing), so a single grouped count is exact. One
+      // indexed IN lookup, bounded by perPage. Deleted replies excluded
+      // to match the thread view. Harmless (0) for standalone nested rooms.
+      const topicIdsForCount = pageRows.map((m) => m.id);
+      const replyCountRows = topicIdsForCount.length
+        ? await db
+            .select({ parentId: messages.replyToId, n: sql<number>`count(*)` })
+            .from(messages)
+            .where(and(inArray(messages.replyToId, topicIdsForCount), isNull(messages.deletedAt)))
+            .groupBy(messages.replyToId)
+        : [];
+      const replyCountBy = new Map(replyCountRows.map((r) => [r.parentId, Number(r.n)]));
+      for (const t of topics) t.replyCount = replyCountBy.get(t.id) ?? 0;
+
       // Hydrate poll state on poll topics so the card renders the PollCard
       // (and the viewer's own ballot) without opening the thread first.
       const pollJsonById = new Map(pageRows.filter((m) => m.kind === "poll").map((m) => [m.id, m.pollDataJson]));

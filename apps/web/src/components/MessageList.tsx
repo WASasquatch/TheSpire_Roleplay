@@ -416,8 +416,8 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     // Forums read TOP-DOWN: never end-pin or auto-scroll the nested
     // view. The chat heuristics below (end-pin on append/replace) were
     // yanking the forum list downward whenever the buffer changed —
-    // e.g. the Forums Catalog hydrating a topic's replies — sliding the
-    // expanded card's header under the sticky category bar.
+    // e.g. the Forums Catalog hydrating a topic's replies — jerking the
+    // reader away from the topic they just expanded.
     if (replyMode === "nested") return;
     if (highlightMessageId) return; // jump-to-message owns scroll
     const prev = scrollState.current;
@@ -1405,24 +1405,21 @@ function ForumView({
                     onActivateCategory(s.key === "_uncat" ? null : s.key);
                   }
                 }}
-                // Sticky behavior is `lg+` only. Anything below a real
-                // desktop (1024px), phones, landscape phones, tablets,
-                // small-window responsive testing, gets normal block
-                // flow. On narrow viewports the sticky header was
-                // overlapping the topics below it as the user scrolled,
-                // both eating vertical space (already scarce on a 360×
-                // 800ish viewport) and reading as a bug, the user
-                // perceived it as the section "hovering" over threads.
-                // In block flow, each section's header sits naturally
-                // above its topics; the count badge + uppercase styling
-                // keep enough visual hierarchy that the category
-                // boundary stays obvious without needing the persistent
-                // header.
+                // NOT sticky at any width. A previous version pinned the
+                // header (`lg:sticky lg:top-0`) on desktop, but at every
+                // size that read as a bug: as the user scrolled, the
+                // header floated over the topics below it instead of
+                // staying in its original spot ("headers scrolling over
+                // topics"). Normal block flow is correct here, each
+                // section's header sits naturally above its own topics and
+                // scrolls away with them; the count badge + uppercase
+                // styling keep enough hierarchy that the category boundary
+                // stays obvious without a persistent floating header.
                 //
                 // Inline backgroundColor uses the CSS var directly so
-                // Tailwind's `<alpha-value>` substitution can't sneak
-                // any transparency in (kept as a defense in depth even
-                // though we're no longer sticky on mobile/tablet).
+                // Tailwind's `<alpha-value>` substitution can't sneak any
+                // transparency in (a translucent header would let topics
+                // ghost through it).
                 style={{ backgroundColor: "rgb(var(--keep-panel))" }}
                 // Full-bleed math (-mx-4 + w-[calc(100%+2rem)]) only applies
                 // on lg+ where the chat scroll root re-adds its px-4 gutter
@@ -1433,7 +1430,7 @@ function ForumView({
                 // lockstep with the gutter it's compensating for, earlier
                 // the two diverged (md vs lg) and headers overflowed the
                 // chat container at 768–1023px widths.
-                className="keep-section-header mb-2 flex w-full cursor-pointer items-baseline justify-between gap-3 border-y border-keep-rule px-4 py-2 text-left text-[1.1rem] font-semibold uppercase tracking-widest text-keep-text shadow-sm hover:brightness-95 lg:-mx-4 lg:w-[calc(100%+2rem)] lg:sticky lg:top-0 lg:z-30"
+                className="keep-section-header mb-2 flex w-full cursor-pointer items-baseline justify-between gap-3 border-y border-keep-rule px-4 py-2 text-left text-[1.1rem] font-semibold uppercase tracking-widest text-keep-text shadow-sm hover:brightness-95 lg:-mx-4 lg:w-[calc(100%+2rem)]"
                 title={isCollapsed ? "Expand category" : "Collapse category"}
               >
                 {/* Left span: name + chevron. min-w-0 + truncate so a
@@ -1856,7 +1853,15 @@ function TopicCard({
               {topic.displayName}
             </button>
             <span className="tabular-nums">
-              · {replies.length} {replies.length === 1 ? "reply" : "replies"}
+              {/* Use the larger of the server-provided total (correct on a
+                  collapsed card before its thread is fetched) and the loaded
+                  reply buffer (grows live as replies stream in once expanded).
+                  Without the server count, a collapsed topic read "0 replies"
+                  until opened. */}
+              {(() => {
+                const n = Math.max(topic.replyCount ?? 0, replies.length);
+                return `· ${n} ${n === 1 ? "reply" : "replies"}`;
+              })()}
             </span>
           </div>
         </div>

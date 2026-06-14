@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Ban, EyeOff, MessageSquare, Send } from "lucide-react";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
-import { CHARACTER_VIBE_AXES, isAdminRole, isDarkPalette, legibleAgainstBg, legibleThemePalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
+import { CHARACTER_VIBE_AXES, isAdminRole, legibleAgainstBg, legibleThemePalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
 import type { CharacterAttribute, CharacterPortrait, CharacterVibeAxisKey, EidolonProfileSummary, ProfileLibraryEntry, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { themeStyle } from "../lib/theme.js";
 import { buildOrnamentStyle } from "../lib/ornaments/index.js";
@@ -206,16 +206,6 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
       }
     : undefined;
 
-  // Sample the BG image's average luminance so the modal can nudge
-  // its scoped text color toward the high-contrast end and tighten
-  // the glass panel opacity. Sampling is best-effort: cross-origin
-  // images without CORS headers taint the canvas and `getImageData`
-  // throws, in which case we leave the luminance null and still
-  // apply the opacity-tightening fallback. Avoids the "neon city
-  // BG bleeds through the panel and the soft theme text becomes
-  // unreadable" failure mode.
-  const bgLuminance = useBgLuminance(profileBgUrl || null);
-
   // Belt-and-suspenders cleanup for the writer's `<style>` blocks.
   // The bio container is portaled to <body> via <Modal>, and React's
   // normal teardown removes it (and the scoped `<style>` tags inside)
@@ -234,51 +224,21 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
 
   // Scoped CSS-var overrides applied to the modal card.
   //
-  // Always-on contract (independent of profile BG image): fully opaque
-  // glass tints. Every theme-style's `.keep-frame` / `.keep-panel`
-  // rule reads `--keep-glass-panel-tint` / `--keep-glass-bg-tint`
-  // (the few that don't, scifi's flat 0.5-alpha, are also overridden
-  // by the inline `backgroundColor` on the card div below). Forcing
-  // these to 1.0 alpha means the owner's theme actually renders
-  // against the owner's `bg`, NOT a 50% blend with whatever's behind
-  // the modal (the viewer's chat shell + the bg-black/40 backdrop).
-  // The blend was the legibility killer: text contrast is computed
-  // against `theme.bg` in `legibleThemePalette`, but with translucent
-  // surfaces the rendered bg color was a totally different value, so
-  // the nudge guaranteed nothing.
-  const ownerIsDark = isDarkPalette(ownerTheme);
+  // The card ALWAYS renders on the owner's OPAQUE surfaces, even when the
+  // profile has a BG image. The image is shown only as the modal BACKDROP
+  // (around the card), never bled through the card itself. The previous
+  // translucent-glass-over-image treatment was the legibility killer:
+  // `legibleThemePalette` lifts the owner's text to contrast against the
+  // owner's `theme.bg`, but a translucent card let a light image wash the
+  // surface to near-white while the (dark-theme) text stayed light —
+  // white-on-white. Forcing every `.keep-frame` / `.keep-panel` glass
+  // tint to full opacity (plus the inline `backgroundColor` below) means
+  // the rendered surface equals the color the contrast math assumes, so
+  // the body stays legible on every theme + image combination.
   const legibilityVars: Record<string, string> = {
     "--keep-glass-panel-tint": "rgb(var(--keep-panel))",
     "--keep-glass-bg-tint": "rgb(var(--keep-bg))",
   };
-  if (profileBgUrl) {
-    // Profile BG image path: keep the high-alpha glass tints (~85-92%)
-    // so the image still reads through faintly as a wash behind the
-    // panel chrome. Mark the owner-is-dark hint with a near-opaque
-    // panel-color tint; light themes get a near-opaque white wash so
-    // bright images don't bleach the body text.
-    legibilityVars["--keep-glass-panel-tint"] = ownerIsDark
-      ? "rgb(var(--keep-panel) / 0.85)"
-      : "rgb(255 255 255 / 0.92)";
-    legibilityVars["--keep-glass-bg-tint"] = ownerIsDark
-      ? "rgb(var(--keep-bg) / 0.85)"
-      : "rgb(255 255 255 / 0.92)";
-
-    // If we successfully sampled the BG luminance, swap the text
-    // color toward the opposite extreme so contrast is guaranteed
-    // regardless of which neon hue is blooming behind the panel.
-    // Mid-luminance BGs (0.35..0.6) leave the theme default alone
-    //, those are already neutral enough for the theme to win.
-    if (bgLuminance !== null) {
-      if (bgLuminance > 0.6) {
-        legibilityVars["--keep-text"] = "20 20 20";
-        legibilityVars["--keep-muted"] = "80 80 80";
-      } else if (bgLuminance < 0.35) {
-        legibilityVars["--keep-text"] = "240 240 240";
-        legibilityVars["--keep-muted"] = "180 180 180";
-      }
-    }
-  }
 
   return (
     <Modal
@@ -336,17 +296,15 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
         // in `legibleThemePalette` then computes against the bg the
         // user actually sees, not a blend.
         //
-        // Skipped when the profile has a BG image: that path is
-        // designed around a frosted-glass treatment that lets the
-        // image read faintly through the card, so we keep the
-        // theme-style's translucent surface in play and rely on
-        // the bgLuminance-driven text-color swap (legibilityVars
-        // above) for legibility instead.
+        // Applied UNCONDITIONALLY — including when the profile has a BG
+        // image. The image lives on the modal backdrop (around the card);
+        // the card stays opaque so the owner's text never lands on a
+        // washed-out, image-tinted surface (the white-on-near-white bug).
         style={{
           ...themeStyle(ownerTheme),
           ...ownerOrnaments.vars,
           ...legibilityVars,
-          ...(profileBgUrl ? {} : { backgroundColor: "rgb(var(--keep-bg))" }),
+          backgroundColor: "rgb(var(--keep-bg))",
         }}
         className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
         onClick={(e) => e.stopPropagation()}
@@ -389,54 +347,6 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   );
 }
 
-/* ============================================================ *
- *  useBgLuminance, sample the average perceived luminance of a
- *  remote image. Returns null while loading, on error, or on
- *  CORS-tainted canvas (cross-origin images without the right
- *  headers throw on getImageData). Callers fall back to safer
- *  fixed-opacity scrims when sampling fails so legibility holds
- *  regardless of the source's CORS posture.
- * ============================================================ */
-function useBgLuminance(url: string | null): number | null {
-  const [lum, setLum] = useState<number | null>(null);
-  useEffect(() => {
-    if (!url) { setLum(null); return; }
-    let cancelled = false;
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.referrerPolicy = "no-referrer";
-    img.onload = () => {
-      if (cancelled) return;
-      try {
-        const w = 32, h = 32;
-        const canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        if (!ctx) return;
-        ctx.drawImage(img, 0, 0, w, h);
-        const { data } = ctx.getImageData(0, 0, w, h);
-        let total = 0;
-        const samples = data.length / 4;
-        for (let i = 0; i < data.length; i += 4) {
-          // Rec. 709 perceived luminance, weights human eye
-          // sensitivity to green much higher than red/blue, so a
-          // neon-cyan BG reads as bright (forces dark text) where
-          // a deep navy reads as dark (forces light text).
-          total += 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!;
-        }
-        if (!cancelled) setLum(total / samples / 255);
-      } catch {
-        // CORS-tainted canvas, getImageData throws. Leave null so
-        // callers fall back to the opacity-tightening path.
-        if (!cancelled) setLum(null);
-      }
-    };
-    img.onerror = () => { if (!cancelled) setLum(null); };
-    img.src = url;
-    return () => { cancelled = true; };
-  }, [url]);
-  return lum;
-}
 
 /* ============================================================ *
  *  ProfileBody - everything that was in the modal before the
@@ -607,10 +517,12 @@ function ProfileBody({
   const ownerTheme = profile.profile.theme;
   const bandHex = ownerTheme.panel;
   const lp = legibleThemePalette(ownerTheme);
-  const inkAction = legibleAgainstBg(lp.action, bandHex, 3.0);
+  // Target 4.5:1 (not 3.0) — these are thin icon strokes, which need more
+  // contrast than large UI shapes to stay visible on a near-white panel.
+  const inkAction = legibleAgainstBg(lp.action, bandHex, 4.5);
   const inkNeutral = legibleAgainstBg(lp.text, bandHex, 4.5);
-  const inkAccent = legibleAgainstBg(lp.accent, bandHex, 3.0);
-  const inkSystem = legibleAgainstBg(lp.system, bandHex, 3.0);
+  const inkAccent = legibleAgainstBg(lp.accent, bandHex, 4.5);
+  const inkSystem = legibleAgainstBg(lp.system, bandHex, 4.5);
   // Profile banner, the URL slot the owner equipped via the Flair
   // tab. Renders as a 3:1 hero strip ABOVE the existing avatar/name
   // hero band. Falls through to nothing when the URL is null (slot

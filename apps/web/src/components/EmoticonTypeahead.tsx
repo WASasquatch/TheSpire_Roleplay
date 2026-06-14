@@ -103,18 +103,12 @@ export function EmoticonTypeahead({
   const sheets = useEmoticons((s) => s.sheets);
   const [active, setActive] = useState<ActiveTrigger | null>(null);
   const [selectedIdx, setSelectedIdx] = useState(0);
-  // Popup placement geometry, measured after each trigger event so the
-  // popup tracks the caret/field as the user types or scrolls. `left` is
-  // the caret column (clamped horizontally at render). Vertically we anchor
-  // to the TEXTAREA (not the caret line) and flip to whichever side has more
-  // room — `openAbove` is true for a bottom-anchored composer, so the popup
-  // rises above the field instead of falling off the bottom of the screen.
-  const [pos, setPos] = useState<{
-    left: number;
-    openAbove: boolean;
-    anchorTop: number;
-    anchorBottom: number;
-  } | null>(null);
+  // The caret column (document px) to align the popup's left edge with.
+  // Vertical placement is computed at RENDER from the textarea's LIVE
+  // bounding rect (see below) rather than stored here — storing it led to
+  // stale anchors (measured before the chat finished laying out) that
+  // flung the popup to the wrong edge of the screen.
+  const [pos, setPos] = useState<{ left: number } | null>(null);
   // Whether the user has explicitly moved the selection with the arrow
   // keys. Gates Enter: without an explicit pick, Enter must fall through to
   // the composer (send the message) instead of auto-accepting the
@@ -223,12 +217,8 @@ export function EmoticonTypeahead({
     setNavigated(false);
   }, [textareaRef, value]);
 
-  // Re-position the popup whenever the trigger appears or moves. The
-  // horizontal anchor tracks the caret column; the vertical anchor is the
-  // textarea itself, and the popup opens on whichever side (above/below)
-  // has more room so it's never pushed off-screen. The chat composer hugs
-  // the bottom of the viewport, so this resolves to ABOVE the field —
-  // keeping the input visible and the popup reachable.
+  // Track the caret column whenever the trigger appears or moves. Vertical
+  // placement is decided at render from the live textarea rect.
   useLayoutEffect(() => {
     if (!active) {
       setPos(null);
@@ -244,10 +234,7 @@ export function EmoticonTypeahead({
     // placed at the caret index. Cheap at chat-input sizes; only runs on
     // trigger changes, not in a tight loop.
     const caretOffset = measureCaretOffset(el, active.end);
-    const left = rect.left + caretOffset.left;
-    const spaceAbove = rect.top;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    setPos({ left, openAbove: spaceAbove >= spaceBelow, anchorTop: rect.top, anchorBottom: rect.bottom });
+    setPos({ left: rect.left + caretOffset.left });
   }, [active, textareaRef, value]);
 
   // Wire selection/input listeners. We mount these once per textarea
@@ -355,15 +342,20 @@ export function EmoticonTypeahead({
   // when the caret is near the right edge.
   const POPUP_WIDTH = 240;
   const left = Math.max(8, Math.min(pos.left, window.innerWidth - POPUP_WIDTH - 8));
-  // Vertical placement: open on the side with more room (above for a
-  // bottom-anchored composer) and bound the height to the available space
-  // so the list never spills off the top or bottom — the inner
-  // `overflow-y-auto` scrolls a long list within those bounds. When
-  // opening ABOVE we pin the popup's BOTTOM just above the field via the
-  // `bottom` CSS prop so it grows upward regardless of its height.
-  const vStyle: CSSProperties = pos.openAbove
-    ? { bottom: Math.max(8, window.innerHeight - pos.anchorTop + 4), maxHeight: Math.max(96, pos.anchorTop - 12) }
-    : { top: pos.anchorBottom + 4, maxHeight: Math.max(96, window.innerHeight - pos.anchorBottom - 12) };
+  // Vertical placement from the textarea's LIVE rect (read here, not from
+  // stored state, so it's never stale). Open on whichever side has more
+  // room — ABOVE for the bottom-anchored chat composer — and bound the
+  // height to that side's available space so the list can NEVER spill off
+  // the top or bottom of the screen (the inner `overflow-y-auto` scrolls a
+  // long list within the bound). Opening above pins the popup's BOTTOM
+  // just above the field so it hugs the input and grows upward.
+  const taRect = textareaRef.current?.getBoundingClientRect();
+  if (!taRect) return null;
+  const vh = window.innerHeight;
+  const openAbove = taRect.top >= vh - taRect.bottom;
+  const vStyle: CSSProperties = openAbove
+    ? { bottom: Math.max(8, vh - taRect.top + 6), maxHeight: Math.max(96, taRect.top - 14) }
+    : { top: Math.max(8, taRect.bottom + 6), maxHeight: Math.max(96, vh - taRect.bottom - 14) };
   return createPortal(
     <ul
       role="listbox"

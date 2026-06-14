@@ -284,7 +284,7 @@ export function SplashLanding({ onNavigate }: Props) {
                   <a
                     href="/login"
                     onClick={(e) => go(e, "/login")}
-                    className="inline-flex items-center gap-1.5 text-base text-keep-text/80 underline-offset-4 hover:text-keep-action hover:underline"
+                    className="inline-flex max-w-full flex-wrap items-center justify-center gap-1.5 text-center text-base text-keep-text/80 underline-offset-4 hover:text-keep-action hover:underline"
                   >
                     <LogIn className="h-4 w-4" aria-hidden />
                     Already have an account? <span className="font-semibold">Log in</span>
@@ -439,7 +439,11 @@ export function SplashLanding({ onNavigate }: Props) {
                   styles.css keys off it so the books scale to the
                   column instead of the viewport. */}
               <aside
-                className={`grid content-start gap-8 min-[1400px]:grid-cols-1 ${
+                // `min-w-0` so the worlds/bookshelf content can't force the
+                // grid column wider than the viewport on a phone — that
+                // horizontal overflow scrolled the whole page sideways and
+                // made the centered CTA / login read as left-aligned.
+                className={`grid min-w-0 content-start gap-8 min-[1400px]:grid-cols-1 ${
                   branding.featuredWorldsEnabled ? "md:grid-cols-2" : ""
                 }`}
               >

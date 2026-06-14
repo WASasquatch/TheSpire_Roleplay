@@ -1351,31 +1351,6 @@ export function Composer({
       // in the simple "send a chat message" state.
       className="keep-composer flex min-h-[5.25rem] flex-col justify-end gap-1 border-t border-keep-rule bg-keep-banner/50 p-2"
     >
-      {/* Mobile-only rooms-drawer trigger for the disabled-input states
-          (forum-disabled / forum-locked-for-viewer). When input is
-          enabled, the rooms button rides on the FormattingToolbar
-          row below; that toolbar is hidden in disabled states, which
-          historically stranded mobile users inside a forum with no
-          composer-level way back to the rooms drawer. Rendering this
-          one-button row here keeps the escape hatch reachable in
-          every state without disturbing the desktop layout (md+ has
-          the rooms tree always visible). */}
-      {inputDisabled && onOpenRail ? (
-        <div className="flex lg:hidden">
-          <button
-            type="button"
-            onClick={onOpenRail}
-            aria-label="Open rooms"
-            title="Rooms"
-            className="keep-button flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none hover:bg-keep-banner"
-          >
-            {/* scroll.png replaces the 💬 chat-bubble emoji for the
-                rooms-drawer trigger per the Earning asset pack. */}
-            <img src="/assets/icons/scroll.png" alt="" aria-hidden className="h-5 w-5 select-none" draggable={false} />
-          </button>
-        </div>
-      ) : null}
-
       {/* Forum-mode disabled state, composer is locked until the user
           picks a topic or starts a new one. The "New Topic" button is
           the primary call-to-action in this state. */}
@@ -1545,51 +1520,44 @@ export function Composer({
           when nothing is selected. Hidden when the input is disabled
           (forum-locked-for-viewer or no-active-topic states) since
           formatting a blocked compose makes no sense. */}
-      {/* Earning stats strip, mobile placement: a standalone row
-          above the formatting toolbar. Self-hides when the earning
-          snapshot hasn't loaded. The desktop placement lives inside
-          the toolbar below (pushed right via ml-auto). */}
-      {!inputDisabled && onOpenEarning ? (
-        // Mobile read-out: compact + right-aligned. NOT `w-full
-        // justify-between`, which spread the rank / coin / XP triad into huge
-        // gaps at tablet widths (the XP bar is capped, so justify-between had
-        // slack to throw around). And rendered WITHOUT `onOpenEarning` so the
-        // full-width bar isn't one giant accidental-tap link to the dashboard;
-        // the desktop strip in the toolbar below stays clickable.
-        <div className="mb-1 flex justify-end lg:hidden">
-          <EarningStatsStrip />
+      {/* Hero rank row (mobile only). Carries the rank / coin / XP read-out
+          AND the MENU button that opens the rooms / userlist drawer. It
+          renders in EVERY composer state (including forum-locked) so the
+          drawer is always reachable on a phone — the old per-toolbar
+          scroll button vanished in disabled states and could sit under the
+          on-screen keyboard, which left iOS users unable to open the
+          userlist. The rail is desktop-always-visible, so this whole row
+          is `lg:hidden`.
+
+          The earning strip self-hides when the snapshot hasn't loaded or
+          the input is disabled (rendered WITHOUT `onOpenEarning` so the
+          read-out isn't one giant accidental-tap link to the dashboard;
+          the desktop strip in the toolbar below stays clickable). The
+          rank read-out sits on the LEFT; MENU is pushed to the RIGHT with
+          `ml-auto` so it stays right-aligned even when the strip is hidden
+          (disabled states). */}
+      {(onOpenRail || (!inputDisabled && onOpenEarning)) ? (
+        <div className="mb-1 flex items-center gap-2 lg:hidden">
+          {!inputDisabled && onOpenEarning ? <EarningStatsStrip /> : null}
+          {onOpenRail ? (
+            <button
+              type="button"
+              onClick={onOpenRail}
+              aria-label="Open menu"
+              title="Menu - rooms, servers, and people"
+              className="keep-button ml-auto flex h-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 px-3 text-[11px] font-semibold uppercase tracking-widest leading-none hover:bg-keep-banner"
+            >
+              Menu
+            </button>
+          ) : null}
         </div>
       ) : null}
       {!inputDisabled ? (
-        // Compact toolbar row. On mobile the rooms-drawer trigger (💬)
-        // lives at the LEFT of this row with a thin vertical divider
-        // after it, freeing the input row below from a 40px-wide
-        // shrink-0 column, that column was eating into the textarea's
-        // width and limiting how much of a long message could be
-        // visible. md+ has the rail always visible, so the 💬 + divider
-        // are hidden and the toolbar's first item is the Bold button.
+        // Compact toolbar row. The mobile rooms-drawer trigger moved up to
+        // the hero rank row above (as the MENU button), so the toolbar's
+        // first item is the Bold button at every width and the input row
+        // below reclaims the width the old drawer column was eating.
         <div className="flex flex-wrap items-center gap-0.5 text-xs">
-          {onOpenRail ? (
-            <>
-              {/* Sizing mirrors FmtButton (`h-8 w-8 text-sm leading-none`)
-                  so the rooms toggle sits flush with the format buttons
-                  to its right, different fixed-height classes were the
-                  source of the misaligned bottom edge. */}
-              <button
-                type="button"
-                onClick={onOpenRail}
-                aria-label="Open rooms"
-                title="Rooms"
-                className="keep-button mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none hover:bg-keep-banner lg:hidden"
-              >
-                {/* scroll.png, same asset swap as the disabled-state
-                    drawer trigger above, applied to the live toolbar
-                    drawer button. */}
-                <img src="/assets/icons/scroll.png" alt="" aria-hidden className="h-5 w-5 select-none" draggable={false} />
-              </button>
-              <span aria-hidden className="mr-1 h-5 w-px shrink-0 bg-keep-rule/60 lg:hidden" />
-            </>
-          ) : null}
           <FmtButton title="Bold (Ctrl+B)" onClick={() => wrapSelection("**", "**", "bold")}>
             <b>B</b>
           </FmtButton>

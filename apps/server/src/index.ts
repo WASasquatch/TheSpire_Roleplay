@@ -2072,6 +2072,19 @@ async function main() {
           reply.code(404);
           return reply.send({ error: "not found" });
         }
+        // Missing hashed build asset (a stale tab asking for a chunk a newer
+        // deploy purged, e.g. react-player's `/assets/YouTube-<hash>.js`).
+        // Answer with a PLAIN 404, never the themed HTML shell: a JS module
+        // import served `text/html` is rejected by the browser for the wrong
+        // MIME type, which used to bubble up and blank the SPA. A clean 404
+        // lets the client error boundary reload into the fresh build instead.
+        const assetPath = req.url.split("?")[0] ?? req.url;
+        if (assetPath.startsWith("/assets/") || /\.(?:js|mjs|css|map|woff2?|ttf)$/i.test(assetPath)) {
+          reply.code(404);
+          reply.type("text/plain; charset=utf-8");
+          reply.header("cache-control", "no-store");
+          return "not found";
+        }
         const nonce = generateCspNonce();
         const html = await render404Html(db, originFromRequest(req), nonce);
         reply.code(404);

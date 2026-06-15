@@ -25,6 +25,7 @@ import { RulesModal } from "./components/RulesModal.js";
 import { RulesPage } from "./components/RulesPage.js";
 import { isRulesUrl, navigateAwayFromRules } from "./lib/rulesUrl.js";
 import { EarningDashboard } from "./components/EarningDashboard.js";
+import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { ArcadeLauncher } from "./components/arcade/ArcadeLauncher.js";
 import { EidolonWindow } from "./components/arcade/EidolonWindow.js";
 import { UrugalWindow } from "./components/arcade/UrugalWindow.js";
@@ -3618,13 +3619,26 @@ function Chat() {
               the chat below takes the remaining flex space. Only renders
               when the room has theater mode on. */}
           {room?.theaterMode && currentRoomId ? (
-            <TheaterPanel
-              socket={socket}
-              roomId={currentRoomId}
-              room={room}
-              canControl={canControlTheater}
-              onShowStreamGuide={() => setHelpOpen({ guide: "theater-stream" })}
-            />
+            // Boundary so a player failure (most often a stale-deploy chunk
+            // 404 on the react-player provider import) reloads to the fresh
+            // build instead of blank-screening the app; a persistent failure
+            // falls back to an inert panel and leaves the chat below working.
+            <ErrorBoundary
+              label="theater"
+              fallback={() => (
+                <div className="flex shrink-0 items-center justify-center bg-black px-4 py-3 text-center text-sm text-white/60">
+                  The theater player couldn't load. Reload the page to try again.
+                </div>
+              )}
+            >
+              <TheaterPanel
+                socket={socket}
+                roomId={currentRoomId}
+                room={room}
+                canControl={canControlTheater}
+                onShowStreamGuide={() => setHelpOpen({ guide: "theater-stream" })}
+              />
+            </ErrorBoundary>
           ) : null}
           {/* "Viewing older history" only applies to flat rooms, for
               forum rooms the topic buckets paginate independently and

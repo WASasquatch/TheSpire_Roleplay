@@ -27,6 +27,7 @@ import { isRulesUrl, navigateAwayFromRules } from "./lib/rulesUrl.js";
 import { EarningDashboard } from "./components/EarningDashboard.js";
 import { ArcadeLauncher } from "./components/arcade/ArcadeLauncher.js";
 import { EidolonWindow } from "./components/arcade/EidolonWindow.js";
+import { UrugalWindow } from "./components/arcade/UrugalWindow.js";
 import { EarningRibbon } from "./components/EarningRibbon.js";
 import { BannerMarquee } from "./components/BannerMarquee.js";
 import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanners.js";
@@ -919,6 +920,27 @@ function PublicViewerShell({
 }) {
   const branding = useChat((s) => s.branding);
   const siteName = branding.siteName || "The Spire";
+
+  // Mirror the authenticated shell's applyTheme onto <html>. The
+  // catalog / reader render through <Modal>, which portals to
+  // document.body and so escapes the subtree theme vars set on the
+  // div below. On a public route the authenticated <Chat> never
+  // mounts, so applyTheme() is otherwise never called and <html>
+  // keeps the static light :root defaults from styles.css — leaving
+  // every portaled modal stuck on that flat palette: illegible
+  // against a dark-device backdrop and ignoring the visitor's
+  // light/dark preference. Stamping the resolved splash palette on
+  // <html> here lets portaled descendants inherit it. Re-resolve on
+  // a prefers-color-scheme flip so toggling the OS theme updates the
+  // page live (resolveSplashTheme reads the media query).
+  useEffect(() => {
+    const apply = () => applyTheme(resolveSplashTheme(branding));
+    apply();
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    mq?.addEventListener?.("change", apply);
+    return () => mq?.removeEventListener?.("change", apply);
+  }, [branding]);
+
   return (
     <div
       style={themeStyle(resolveSplashTheme(branding))}
@@ -1046,6 +1068,7 @@ function Chat() {
   // used. Permission gating is enforced at the dispatch + by the server.
   const [arcadeOpen, setArcadeOpen] = useState(false);
   const [eidolonOpen, setEidolonOpen] = useState(false);
+  const [urugalOpen, setUrugalOpen] = useState(false);
   /**
    * Full-screen item-zoom view triggered by the `/item <name>` chat
    * command. Mounts the same overlay that powers tap-to-zoom on
@@ -4026,12 +4049,15 @@ function Chat() {
       {arcadeOpen ? (
         <ArcadeLauncher
           characterId={activeCharacterId}
-          onLaunch={() => setEidolonOpen(true)}
+          onLaunch={(game) => { if (game === "urugal") setUrugalOpen(true); else setEidolonOpen(true); }}
           onClose={() => setArcadeOpen(false)}
         />
       ) : null}
       {eidolonOpen ? (
         <EidolonWindow characterId={activeCharacterId} onClose={() => setEidolonOpen(false)} />
+      ) : null}
+      {urugalOpen ? (
+        <UrugalWindow characterId={activeCharacterId} onClose={() => setUrugalOpen(false)} />
       ) : null}
       {openItem ? (
         <ItemZoomView entry={openItem} onClose={() => setOpenItem(null)} />

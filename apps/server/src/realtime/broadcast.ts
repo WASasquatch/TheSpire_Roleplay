@@ -13,9 +13,13 @@ import {
   clampAvatarCrop,
   DEFAULT_PRESENCE_TEMPLATES,
   extractMentions,
+  extractMentionTokens,
+  mentionsField,
+  mentionTokenRegex,
   renderPresenceTemplate,
   validateAuthorUiRouteTokens,
 } from "@thekeep/shared";
+import type { MentionRef } from "@thekeep/shared";
 import {
   bans,
   characterEarning,
@@ -82,6 +86,58 @@ type Sock = Socket<ClientToServerEvents, ServerToClientEvents>;
  * returned regardless of caller need so future flows that want it
  * can just await.
  */
+/** NBSP, the "fake space" the mention regex treats as part of a name, so a
+ *  rewritten multi-word mention (`@The Doctor`) reads as a single token. */
+const MENTION_NBSP = String.fromCharCode(0xa0);
+
+/**
+ * Resolve `@id:`/`@cid:` identity tokens in a freshly-composed body. Returns the
+ * body with each resolvable token rewritten to a plain `@<displayName>` (spaces
+ * become NBSP so the mention regex reads it as one token) plus a snapshot of the
+ * resolved identities for the wire. Unresolvable tokens (deleted/missing) are
+ * left exactly as typed; an escaped token (`\@id:...`) drops the backslash and
+ * stays literal so it never renders as a chip or pings anyone.
+ */
+async function resolveMentionTokens(
+  db: Db,
+  body: string,
+): Promise<{ body: string; mentions: MentionRef[] | null }> {
+  const hits = extractMentionTokens(body);
+  if (hits.length === 0) return { body, mentions: null };
+
+  // Resolve each unique token: `id` -> master account; `cid` -> character
+  // (carrying its owning userId). Skip disabled accounts / deleted characters.
+  const resolved = new Map<string, { displayName: string; userId: string; characterId: string | null }>();
+  for (const hit of hits) {
+    if (hit.kind === "id") {
+      const u = (await db.select({ id: users.id, username: users.username, disabledAt: users.disabledAt })
+        .from(users).where(eq(users.id, hit.id)).limit(1))[0];
+      if (u && !u.disabledAt) resolved.set(`id:${hit.id}`, { displayName: u.username, userId: u.id, characterId: null });
+    } else {
+      const c = (await db.select({ id: characters.id, name: characters.name, userId: characters.userId, deletedAt: characters.deletedAt })
+        .from(characters).where(eq(characters.id, hit.id)).limit(1))[0];
+      if (c && !c.deletedAt) resolved.set(`cid:${hit.id}`, { displayName: c.name, userId: c.userId, characterId: c.id });
+    }
+  }
+  if (resolved.size === 0) return { body, mentions: null };
+
+  const newBody = body.replace(mentionTokenRegex(), (full: string, ...args: unknown[]) => {
+    const groups = args[args.length - 1] as { prefix?: string; tokenKind?: string; tokenId?: string };
+    const prefix = groups.prefix ?? "";
+    if (prefix === "\\") return full.slice(1); // escaped: drop the backslash, keep literal
+    const ref = resolved.get(`${groups.tokenKind}:${groups.tokenId}`);
+    if (!ref) return full; // unresolved: leave the token as typed
+    return `${prefix}@${ref.displayName.replace(/ /g, MENTION_NBSP)}`;
+  });
+
+  const mentions: MentionRef[] = [...resolved.values()].map((ref) => ({
+    name: ref.displayName.replace(/ /g, MENTION_NBSP).toLowerCase(),
+    userId: ref.userId,
+    characterId: ref.characterId,
+  }));
+  return { body: newBody, mentions };
+}
+
 export async function addMessage(
   ctx: CommandContext,
   payload: {
@@ -183,6 +239,15 @@ export async function addMessage(
     });
     return null;
   }
+
+  // Resolve identity-token mentions (`@id:`/`@cid:`) the composer inserted.
+  // We rewrite each token in the body to a plain `@<displayName>` (so every
+  // render path shows the right chip with zero render changes) and snapshot the
+  // resolved ids on the message, so a click opens the exact identity and a
+  // self-mention highlights by id rather than by an ambiguous shared name.
+  const resolvedMentions = await resolveMentionTokens(ctx.db, body);
+  body = resolvedMentions.body;
+  const mentionsSnapshot = resolvedMentions.mentions;
 
   // Forum-thread auto-binding. When the dispatcher hydrated a reply
   // context (composer was scoped to an active topic in a nested-mode
@@ -418,6 +483,7 @@ export async function addMessage(
     // Poll definition, gated to `kind: "poll"` for the same reason cmdCss /
     // sceneImageUrl are gated to their kinds.
     pollDataJson: payload.kind === "poll" ? (payload.pollDataJson ?? null) : null,
+    mentionsJson: mentionsSnapshot ? JSON.stringify(mentionsSnapshot) : null,
     rankKey: rankKeySnapshot,
     tier: tierSnapshot,
     senderInlineAvatarEnabled: inlineAvatarEnabledSnapshot,
@@ -484,6 +550,7 @@ export async function addMessage(
     ...(payload.kind === "poll" && payload.pollDataJson && emptyPollState(payload.pollDataJson)
       ? { poll: emptyPollState(payload.pollDataJson)! }
       : {}),
+    ...(mentionsSnapshot ? { mentions: mentionsSnapshot } : {}),
   };
   await emitFiltered(ctx.io, ctx.db, ctx.roomId, ctx.user.id, out);
 
@@ -626,15 +693,41 @@ export async function pushTriggers(
     // human author; scene/npc bodies aren't typically directed at anyone).
     if (kind !== "say" && kind !== "me" && kind !== "ooc" && kind !== "announce") return;
 
+    const tokenRefs = msg.mentions ?? [];
     const names = extractMentions(msg.body);
-    if (names.length === 0) return;
+    if (names.length === 0 && tokenRefs.length === 0) return;
 
-    // Resolve mention names to user ids. Mentions can match either a master
-    // username OR an active character name; the userlist resolver path
-    // already handles both. Cheap to do per-name since most messages have
-    // zero or one mention.
+    // Push to a resolved target once, gated on offline + not-self + not-already-
+    // notified. Shared by the exact token path and the legacy name path so a
+    // message can't double-ping someone it mentions two ways.
     const seen = new Set<string>();
+    const notify = async (targetUserId: string | null | undefined, disabled: boolean): Promise<void> => {
+      if (!targetUserId || disabled || targetUserId === sender.id) return;
+      if (seen.has(targetUserId)) return;
+      seen.add(targetUserId);
+      if (await userIsOnline(io, targetUserId)) return;
+      await pushToUser(db, targetUserId, {
+        title: `Mention from ${sender.displayName}`,
+        body: "You were mentioned in chat.",
+        tag: `mention-${sender.id}`,
+      });
+    };
+
+    // 1. Snapshot (`@id:`/`@cid:`) mentions, the exact identity, resolved at
+    // send time, so a spaced or shared name can't misfire. The body was
+    // rewritten to `@<name>`, so the legacy pass below would re-find these
+    // names; we skip them there to avoid pinging a different identity that
+    // happens to share the name.
+    const tokenNames = new Set(tokenRefs.map((r) => r.name));
+    for (const ref of tokenRefs) {
+      const u = (await db.select({ disabledAt: users.disabledAt }).from(users).where(eq(users.id, ref.userId)).limit(1))[0];
+      await notify(ref.userId, !u || !!u.disabledAt);
+    }
+
+    // 2. Legacy / hand-typed `@name` mentions, resolved by name. Mentions can
+    // match either a master username OR an active character name.
     for (const name of names) {
+      if (tokenNames.has(name)) continue; // already handled exactly above
       if (name === sender.username.toLowerCase()) continue;
       const lower = name.toLowerCase();
       // Master username first (globally unique).
@@ -655,16 +748,7 @@ export async function pushTriggers(
           if (owner && owner.activeCharacterId === c.id) target = owner;
         }
       }
-      if (!target || target.disabledAt || target.id === sender.id) continue;
-      if (seen.has(target.id)) continue;
-      seen.add(target.id);
-      const targetOnline = await userIsOnline(io, target.id);
-      if (targetOnline) continue;
-      await pushToUser(db, target.id, {
-        title: `Mention from ${sender.displayName}`,
-        body: "You were mentioned in chat.",
-        tag: `mention-${sender.id}`,
-      });
+      await notify(target?.id, !!target?.disabledAt);
     }
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -1271,6 +1355,7 @@ export async function sendRoomBacklogTo(
       ...(m.tier != null ? { tier: m.tier } : {}),
       ...(m.senderInlineAvatarEnabled ? { senderInlineAvatarEnabled: true } : {}),
       ...(m.senderSelectedBorderRankKey ? { senderSelectedBorderRankKey: m.senderSelectedBorderRankKey } : {}),
+      ...mentionsField(m.mentionsJson),
       // Admin-only audit field. Mirrors the per-socket gating in the
       // delete route + the history endpoints: site admins receive the
       // original body of a deleted message; everyone else gets the

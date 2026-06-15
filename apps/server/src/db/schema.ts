@@ -827,6 +827,16 @@ export const messages = sqliteTable(
      */
     pollDataJson: text("poll_data_json"),
     /**
+     * Resolved @mention snapshot for this message (migration 0243). JSON array
+     * of { name, userId, characterId } - one per `@id:`/`@cid:` identity token
+     * the composer inserted. Set at send time after the body is rewritten to
+     * plain `@<displayName>`; lets the renderer open the exact mentioned
+     * identity on click and highlight self-mentions by id rather than by a
+     * name two identities might share. Null when a message has no token
+     * mentions (plain typed `@name` still resolves by name as before).
+     */
+    mentionsJson: text("mentions_json"),
+    /**
      * Earning rank snapshot at send time, drives the chat-line sigil.
      * Same snapshot posture as displayName / color: a later rank-up or
      * a rank-disable doesn't rewrite history. Scope follows the IC/OOC
@@ -4508,3 +4518,37 @@ export const eidolonHall = sqliteTable(
   }),
 );
 export type DbEidolonHall = typeof eidolonHall.$inferSelect;
+
+/**
+ * Urugal's Descent run sessions (Spire Arcade game #2). One row per
+ * descent. The server issues `id` at /arcade/urugal/start and validates
+ * every milestone event against it: floors must advance monotonically
+ * (capped jump) and be paced plausibly, and each floor / boss pays at
+ * most once per run. `maxFloor` is the highest PAID floor; `bossesJson`
+ * is a JSON array of PAID boss floors. Reward crediting + the daily cap
+ * live in the route (see routes/arcadeUrugal.ts + the @thekeep/shared
+ * urugal reward curve). The game bundle is untrusted; this table is the
+ * server's authoritative record of what's actually been earned.
+ */
+export const urugalRun = sqliteTable(
+  "urugal_run",
+  {
+    id: text("id").primaryKey(),
+    ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
+    ownerId: text("owner_id").notNull(),
+    /** Master account id (for creditPool's `notifyUserId` + socket emit). */
+    userId: text("user_id").notNull(),
+    startedAt: integer("started_at").notNull(),
+    lastEventAt: integer("last_event_at").notNull(),
+    /** Highest floor already PAID for in this run (monotonic gate). */
+    maxFloor: integer("max_floor").notNull().default(1),
+    /** JSON array of boss floors already PAID for (dedup). */
+    bossesJson: text("bosses_json").notNull().default("[]"),
+    status: text("status", { enum: ["active", "ended"] }).notNull().default("active"),
+    endedAt: integer("ended_at"),
+  },
+  (t) => ({
+    ownerIdx: index("urugal_run_owner_idx").on(t.ownerScope, t.ownerId, t.status),
+  }),
+);
+export type DbUrugalRun = typeof urugalRun.$inferSelect;

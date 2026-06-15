@@ -7,21 +7,24 @@
  * launches the floating window.
  */
 import React, { useEffect, useMemo, useState } from "react";
-import { EIDOLON_UNLOCK_COST } from "@thekeep/shared";
+import { EIDOLON_UNLOCK_COST, URUGAL_UNLOCK_COST } from "@thekeep/shared";
 import { Modal } from "../Modal";
 import { CoinAmount } from "../CoinAmount";
 import { useEarning } from "../../state/earning";
 import { fetchEidolon, unlockEidolon } from "../../lib/arcade";
+import { fetchUrugalAccess, unlockUrugal } from "../../lib/urugal";
 
 type Access = "loading" | "ok" | "locked" | "forbidden";
 
 export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
   characterId: string | null;
-  onLaunch: (game: "eidolon") => void;
+  onLaunch: (game: "eidolon" | "urugal") => void;
   onClose: () => void;
 }): React.JSX.Element {
   const [access, setAccess] = useState<Access>("loading");
   const [working, setWorking] = useState(false);
+  const [urugalAccess, setUrugalAccess] = useState<Access>("loading");
+  const [urugalWorking, setUrugalWorking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const earning = useEarning((s) => s.snapshot);
   const refresh = useEarning((s) => s.refresh);
@@ -35,9 +38,13 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
   useEffect(() => {
     let alive = true;
     setAccess("loading");
+    setUrugalAccess("loading");
     fetchEidolon(characterId)
       .then((r) => { if (alive) setAccess(r.access === "ok" ? "ok" : r.access); })
       .catch(() => { if (alive) setAccess("forbidden"); });
+    fetchUrugalAccess(characterId)
+      .then((a) => { if (alive) setUrugalAccess(a); })
+      .catch(() => { if (alive) setUrugalAccess("forbidden"); });
     return () => { alive = false; };
   }, [characterId]);
 
@@ -57,6 +64,22 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
     }
   };
 
+  const unlockUrugalGame = async () => {
+    if (urugalWorking) return;
+    setUrugalWorking(true); setErr(null);
+    try {
+      await unlockUrugal(characterId);
+      await refresh();
+      setUrugalAccess("ok");
+      onLaunch("urugal");
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Unlock failed.");
+    } finally {
+      setUrugalWorking(false);
+    }
+  };
+
   const T = (a: number) => `rgb(var(--keep-text) / ${a})`;
   // Card layout lives in Tailwind (not inline) so it can go responsive:
   // egg + copy stack as a row, and the CTA drops to a full-width button
@@ -70,6 +93,7 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
   };
 
   const canAfford = currency >= EIDOLON_UNLOCK_COST;
+  const canAffordUrugal = currency >= URUGAL_UNLOCK_COST;
 
   return (
     <Modal onClose={onClose}>
@@ -127,6 +151,45 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
         </div>
 
         {err && <div style={{ marginTop: 10, color: "#e06070", fontSize: 13 }}>{err}</div>}
+
+        {/* Game #2: Urugal's Descent. Phase 1 — playable for anyone with arcade
+            access (the unlock/purchase gate + reward wiring land in later phases). */}
+        <div className={`mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3.5 ${cardClass}`}>
+          <div className="flex min-w-0 flex-1 items-center gap-3.5">
+            <div className="shrink-0" style={{ fontSize: 40, lineHeight: 1 }} aria-hidden>🗡</div>
+            <div className="min-w-0 flex-1">
+              <div style={{ fontSize: 16, fontWeight: 700 }}>Urugal&apos;s Descent</div>
+              <div style={{ fontSize: 12.5, color: T(0.7), lineHeight: 1.45 }}>
+                A gothic roguelike. Pick a class and delve a procedurally-built dungeon — fight, loot,
+                and descend as deep as you dare. Every run is different, and every floor is a fresh gamble.
+              </div>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-col items-stretch gap-1.5 sm:items-end">
+            {urugalAccess === "loading" && <span style={{ fontSize: 12, color: T(0.6), textAlign: "center" }}>…</span>}
+            {urugalAccess === "forbidden" && <span className="text-center sm:max-w-[140px]" style={{ fontSize: 12, color: T(0.6) }}>Unavailable to you right now.</span>}
+            {urugalAccess === "ok" && (
+              <button
+                className="w-full sm:w-auto"
+                style={{ ...ctaBase, background: "rgb(var(--keep-action) / 1)", color: "rgb(var(--keep-bg) / 1)" }}
+                onClick={() => { onLaunch("urugal"); onClose(); }}
+              >
+                ▶ Play
+              </button>
+            )}
+            {urugalAccess === "locked" && (
+              <button
+                className="w-full sm:w-auto"
+                style={{ ...ctaBase, background: canAffordUrugal ? "rgb(var(--keep-accent) / .15)" : "transparent", color: T(canAffordUrugal ? 1 : 0.45), opacity: urugalWorking ? 0.6 : 1, cursor: canAffordUrugal && !urugalWorking ? "pointer" : "not-allowed" }}
+                disabled={!canAffordUrugal || urugalWorking}
+                onClick={() => void unlockUrugalGame()}
+                title={canAffordUrugal ? "Unlock Urugal's Descent" : "Not enough currency"}
+              >
+                {urugalWorking ? "Unlocking…" : <>Unlock · <CoinAmount amount={URUGAL_UNLOCK_COST} /></>}
+              </button>
+            )}
+          </div>
+        </div>
 
         <div className={`mt-3 flex items-center gap-3.5 opacity-[0.55] ${cardClass}`}>
           <div className="shrink-0" style={{ fontSize: 40, lineHeight: 1 }} aria-hidden>✦</div>

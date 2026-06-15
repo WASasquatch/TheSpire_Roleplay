@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import DOMPurify from "dompurify";
 import type { AuditEntry, PermissionKey, ProfileView, ReportEntry, Role, Theme, ThemeableTextSlot, ThreadCategory } from "@thekeep/shared";
 import { AUDIT_ACTION_GROUPS, THEME_PRESETS } from "@thekeep/shared";
@@ -5041,6 +5041,16 @@ function UsersTab() {
   // alongside `q` so the two filters compose at the server.
   const [ipPivot, setIpPivot] = useState("");
   const [editing, setEditing] = useState<AdminUserRow | null>(null);
+  // Inline character expansion: userIds whose row is expanded to show their
+  // full character roster (clicking the username toggles it). A Set so
+  // several users can be expanded at once during a comparison sweep.
+  const [expandedUserIds, setExpandedUserIds] = useState<Set<string>>(new Set());
+  const toggleExpanded = (userId: string) =>
+    setExpandedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId); else next.add(userId);
+      return next;
+    });
   // Default sort lands on newest signups so admins see fresh accounts
   // first, supports the moderation workflow of "who joined since I last
   // looked." Alphabetical is one click away on the header.
@@ -5320,9 +5330,31 @@ function UsersTab() {
             </tr>
           </thead>
           <tbody>
-            {filteredSorted.map((u) => (
-              <tr key={u.userId} className="border-t border-keep-rule">
-                <td className="px-2 py-1 font-semibold">{u.username}</td>
+            {filteredSorted.map((u) => {
+              const isExpanded = expandedUserIds.has(u.userId);
+              const liveCharCount = u.characters.filter((c) => !c.deleted).length;
+              return (
+              <Fragment key={u.userId}>
+              <tr className="border-t border-keep-rule">
+                <td className="px-2 py-1 font-semibold">
+                  {/* Click the username to expand the user's full character
+                      roster inline (see the colspan row below). */}
+                  <button
+                    type="button"
+                    onClick={() => toggleExpanded(u.userId)}
+                    aria-expanded={isExpanded}
+                    title={isExpanded ? "Hide characters" : "Show all characters"}
+                    className="flex items-center gap-1.5 rounded text-left hover:text-keep-action"
+                  >
+                    <span aria-hidden className="text-keep-muted">{isExpanded ? "▾" : "▸"}</span>
+                    <span className="truncate">{u.username}</span>
+                    {liveCharCount > 0 ? (
+                      <span className="rounded-full bg-keep-muted/20 px-1.5 text-[9px] font-normal tabular-nums text-keep-muted">
+                        {liveCharCount}
+                      </span>
+                    ) : null}
+                  </button>
+                </td>
                 <td className="px-2 py-1 font-mono">{u.email}</td>
                 <td className="px-2 py-1 text-center">
                   <span className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
@@ -5387,7 +5419,18 @@ function UsersTab() {
                   ) : null}
                 </td>
               </tr>
-            ))}
+              {isExpanded ? (
+                <tr className="border-t border-keep-rule/40 bg-keep-bg/30">
+                  {/* Full character roster for the user, View/Edit per
+                      profile. colSpan spans all 9 header columns. */}
+                  <td colSpan={9} className="px-3 pb-3">
+                    <AdminCharactersSection user={u} />
+                  </td>
+                </tr>
+              ) : null}
+              </Fragment>
+              );
+            })}
           </tbody>
         </table>
         </div>

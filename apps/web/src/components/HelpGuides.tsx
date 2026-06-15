@@ -340,6 +340,50 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode; requiresPermis
   },
 
   {
+    id: "identity-tokens",
+    title: "Pointing at the right person (@id and @cid)",
+    body: (
+      <>
+        <P>
+          Most commands that target someone take a name: <K>/whisper Sigrid hello</K>. That works
+          fine until the name has a space in it, or two people share a name. For those cases there
+          are exact <b>identity tokens</b> that never get confused.
+        </P>
+        <Heading>The two tokens</Heading>
+        <Bullets>
+          <li>
+            <K>@id:{`<userId>`}</K> points at a whole <b>account</b> (the person, OOC).
+          </li>
+          <li>
+            <K>@cid:{`<characterId>`}</K> points at one specific <b>character</b>.
+          </li>
+        </Bullets>
+        <Heading>Where to get one</Heading>
+        <P>
+          Open someone's profile and look for the small <b>copy token</b> chip. Tap it and the right
+          token is on your clipboard, ready to paste into a command. No need to type the long id by
+          hand.
+        </P>
+        <Heading>Using it</Heading>
+        <P>
+          Drop the token in anywhere a command wants a name. It works for whispers, friends, blocks,
+          ignores, sending Currency, duels, mod actions, and more.
+        </P>
+        <Bullets>
+          <li><K>/whisper @cid:abc123 are you free to write tonight?</K></li>
+          <li><K>/friend @id:def456</K></li>
+          <li><K>/currency send @cid:abc123 50</K></li>
+        </Bullets>
+        <Tip>
+          If you ever type a name and get an "ambiguous" picker (two people match), it lists each
+          match with its token. Copy the right one back into your command and you will land on
+          exactly who you meant.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
     id: "profile-create",
     title: "Building a profile",
     body: (
@@ -592,6 +636,59 @@ foot of the mountains. Speaks little. Watches everything.</p>
           For one minute after sending a DM, you can edit or delete it.
           After that, what's sent is sent.
         </P>
+      </>
+    ),
+  },
+
+  {
+    id: "safety",
+    title: "Staying comfortable: ignore and block",
+    body: (
+      <>
+        <P>
+          Two tools let you control who reaches you. They are different in strength, and picking the
+          right one matters.
+        </P>
+
+        <Heading>Ignore (one-way, reversible)</Heading>
+        <P>
+          <K>/ignore {`<name>`}</K> hides that person's messages from <i>your</i> view. They are not
+          told, and they can still see you. It is a quiet "I would rather not read this right now"
+          and it toggles, run it again to stop ignoring.
+        </P>
+        <Bullets>
+          <li><K>/ignore</K> on its own shows (and lets you clear) your ignore list.</li>
+          <li>You can also open the list from the Tools drawer under People.</li>
+          <li>Good for: a loud channel, a spoiler-heavy chat, someone you just want muted for a bit.</li>
+        </Bullets>
+
+        <Heading>Block (mutual, everywhere)</Heading>
+        <P>
+          <K>/block {`<name>`}</K> is the strong one. You and that person, and <i>every</i> character
+          either of you plays, become invisible to each other everywhere: chat, the userlist,
+          whispers, DMs, friends, profiles, and search. They get no notice that it happened.
+        </P>
+        <Bullets>
+          <li>It is mutual and complete, not a "mute." Use it when you want someone gone from your experience entirely.</li>
+          <li>It is not a toggle. Lift it with <K>/unblock {`<name>`}</K> or from Profile, then Privacy.</li>
+          <li><K>/block</K> on its own lists everyone you have blocked.</li>
+          <li>
+            Moderators and admins cannot be blocked, they need to stay visible to do their job. If a
+            staff member is the problem, use the contacts on the rules page.
+          </li>
+        </Bullets>
+
+        <Heading>Which one?</Heading>
+        <P>
+          Reach for <b>ignore</b> when you just want to turn the volume down and might change your
+          mind. Reach for <b>block</b> when you want a clean, mutual separation that holds across
+          every room and every character. Both stick to your account, so they follow you no matter
+          which character you are playing.
+        </P>
+        <Tip>
+          If someone is breaking the rules, blocking protects you but does not tell the mods. Report
+          it as well (see the rules page for how) so the team can act for everyone, not just you.
+        </Tip>
       </>
     ),
   },
@@ -923,6 +1020,84 @@ foot of the mountains. Speaks little. Watches everything.</p>
   },
 
   {
+    id: "worlds-knowledge-base",
+    title: "Worlds: the Knowledge Base (people, places, arcs, sessions)",
+    body: (
+      <>
+        <P>
+          A world's <b>Lore</b> is free-form pages, great for prose and long write-ups. The
+          <b> Knowledge Base</b> is the other half: structured <b>entries</b> for the building
+          blocks of your setting, so you (and your players) can look up "who is this NPC" or "what
+          is this city" in one tap instead of scrolling a wiki page.
+        </P>
+
+        <Heading>Two kinds of content</Heading>
+        <Bullets>
+          <li>
+            <b>Lore pages</b>, the nested page tree from the Worlds guides above. Best for essays,
+            history, rules, anything that reads top to bottom.
+          </li>
+          <li>
+            <b>Entries</b>, short typed records: <b>NPCs</b> (people), <b>Locations</b> (places),
+            <b> Items</b> (things), <b>Factions</b> (groups), and any <b>custom types</b> you add
+            (spells, ships, houses, whatever your setting needs). Each entry has a name, a body, and
+            tags.
+          </li>
+        </Bullets>
+
+        <Heading>Browsing it as a player</Heading>
+        <P>
+          Open a world and switch to its Knowledge Base. A dashboard shows the counts at a glance,
+          then you can browse the same entries four ways:
+        </P>
+        <Bullets>
+          <li><b>By Type</b>, all the NPCs, all the Locations, and so on.</li>
+          <li><b>By Tag</b>, anything you have tagged, like "villain" or "port city".</li>
+          <li><b>By Arc</b>, entries grouped under a story arc (see below).</li>
+          <li><b>By Session</b>, what came up in each play session log.</li>
+        </Bullets>
+
+        <Heading>Cross-links between entries</Heading>
+        <P>
+          Inside any entry or Lore page, type a link chip as <K>@kind:slug</K>, for example{" "}
+          <K>@npc:sigrid</K> or <K>@location:ironreach</K>. It renders as a clickable chip that
+          jumps straight to that entry. Build a web of people, places, and groups that all reference
+          each other, no copy-pasting URLs.
+        </P>
+
+        <Heading>Arcs and sessions</Heading>
+        <Bullets>
+          <li>
+            <b>Arcs</b> are story threads ("The Siege of Ironreach"). Attach the NPCs, places, and
+            sessions involved so the whole arc is one click to review.
+          </li>
+          <li>
+            <b>Sessions</b> are logs of actual play. Note what happened and which entries featured,
+            and the Knowledge Base can show your world session by session, handy for picking up a
+            long-running game where you left off.
+          </li>
+        </Bullets>
+
+        <Heading>Adding to it as the author</Heading>
+        <Steps>
+          <li>Open your world in the editor (Tools drawer, then My Worlds).</li>
+          <li>
+            Add an entry, choose its type (or define a custom type first), give it a name, write the
+            body, and tag it.
+          </li>
+          <li>Link it to an arc, or note it in a session, if it belongs to one.</li>
+          <li>Drop <K>@kind:slug</K> chips in the body to connect it to related entries.</li>
+        </Steps>
+        <Tip>
+          You do not have to use all of this. A small world can live on Lore pages alone. Reach for
+          entries, arcs, and sessions when a setting grows big enough that "where did I write that
+          down" becomes a real question.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
     id: "rooms",
     title: "Rooms: finding, joining, and hosting",
     body: (
@@ -1022,44 +1197,300 @@ foot of the mountains. Speaks little. Watches everything.</p>
 
   {
     id: "forums",
-    title: "Forums: long-form boards owned by the community",
+    title: "Forums: reading and posting",
     body: (
       <>
         <P>
-          <b>Forums</b> are message boards for slower, longer writing - the kind you come back to
-          over days rather than scroll past in live chat. They live in the <b>Forums Catalog</b>:
-          click the row above the room list, or type <K>/forums</K>.
+          Live chat scrolls away. <b>Forums</b> are for the writing you want to keep and come back
+          to over days, announcements, character sheets, world lore, long slow-burn threads. Each
+          forum is its own little community space with its own boards, its own keeper, and its own
+          look.
         </P>
-        <Heading>Reading</Heading>
+
+        <Heading>Open the Forums Catalog</Heading>
+        <Bullets>
+          <li>Click the <b>Forums Catalog</b> row pinned just above the room list on the right.</li>
+          <li>Or open the <b>Tools</b> drawer and pick <b>Forums Catalog</b>.</li>
+          <li>Or type <K>/forums</K>. Add a name to jump straight in: <K>/forums spire</K>.</li>
+        </Bullets>
+        <P>
+          A little number on the Forums Catalog button is your unread count, replies and mentions
+          waiting for you. The Tools drawer also lists the forums you own or have visited as quick
+          shortcuts under the two Forums buttons, so your regular haunts are one tap away.
+        </P>
+
+        <Heading>Find your way around</Heading>
+        <P>
+          A forum holds <b>boards</b> (think "General Discussion", "Looking for RP"). A board holds
+          <b> topics</b> (individual threads). A topic holds the first post and everyone's replies.
+        </P>
         <Steps>
-          <li>Pick a forum from the list on the right. The Spire's own forum is pinned first.</li>
-          <li>Open a board to see its topics, grouped by category. Pinned topics sit on top.</li>
-          <li>Click a topic to read the whole thread right there in the catalog.</li>
+          <li>Pick a forum from the list. The Spire's own forum is pinned first.</li>
+          <li>
+            Boards are grouped into categories. Pinned topics sit on top, then the rest by most
+            recent reply. A topic shows its reply count so you can see what is busy.
+          </li>
+          <li>Click a topic to read the whole thread right there, without leaving the catalog.</li>
         </Steps>
         <P>
-          A small dot on a forum means something new happened since you last looked. If you have a
-          room transition equipped, it plays as you move between forums, boards, and topics.
+          A small dot on a forum (or a board) means something new has happened since you last
+          looked. If you have a room transition equipped, it plays as you move between forums,
+          boards, and topics, the same flourish you get switching rooms.
         </P>
-        <Heading>Posting</Heading>
+
+        <Heading>Posting and replying</Heading>
         <P>
-          Hit <b>Join to post</b> on a board and it opens in chat, where you can start topics and
-          reply with the full composer. Some forums accept posts from everyone; others ask you to
-          apply first - you can read either way, and the forum's page tells you which it is.
+          When you can post, a board gives you the full writing toolbar, the same formatting,
+          emoticons, and thesaurus you have in chat. Start a <b>New Topic</b> for a fresh thread,
+          or <b>Reply</b> under any post to continue one. You post as whoever is active, your
+          character if you are in one, your OOC self if you are not.
         </P>
-        <Heading>Running your own</Heading>
-        <Steps>
-          <li>In the catalog, click <b>Create your Forum</b> and tell the moderators what it's for.</li>
-          <li>Once approved, you're the keeper: the gear on your forum's page opens your settings.</li>
-          <li>Raise boards, shape categories, appoint moderators, and set who may post.</li>
-          <li>Give it a face: a banner, a logo, your own colors, and a linked world if you have one.</li>
-        </Steps>
         <P>
-          Every forum has a shareable address like <K>/f/your_forum</K> - hand it out anywhere and
-          visitors land on your forum's page, with a sign-in that brings them right back to it.
+          Some forums let anyone post the moment they want to. Others ask you to <b>join</b> first
+          (see the next guide). Either way you can <i>read</i> freely, and the forum's page tells
+          you which kind it is. A few boards or categories are members-only, those show a small lock
+          until you have joined.
+        </P>
+
+        <Heading>Notifications and watching</Heading>
+        <P>
+          The bell at the top of the catalog is your forum inbox. It collects three things: when
+          someone <b>replies</b> to a topic you started, when someone <b>quotes</b> one of your
+          posts, and new replies on topics you are <b>watching</b>. Click a notification to jump
+          straight to that post.
+        </P>
+        <Bullets>
+          <li>You automatically watch any topic you start or reply to.</li>
+          <li>
+            To follow a thread you have not posted in, open it and tap its <b>watch</b> bell. Tap
+            again to stop.
+          </li>
+          <li>
+            The unread number shows on the bell, on the Forums Catalog button above the userlist,
+            and on the Forums row in the Tools drawer, so you never miss a reply just because the
+            catalog is closed.
+          </li>
+        </Bullets>
+
+        <Heading>Sharing a forum</Heading>
+        <P>
+          Every forum has its own web address like <K>/f/spire</K>. Hand it out anywhere. Visitors
+          land right on that forum's page, and if they need to sign in, they come straight back to
+          it afterward. If the keeper has turned on public reading, even signed-out visitors can
+          browse the boards (posting always needs an account).
         </P>
         <Tip>
-          Forum moderators can pin, lock, and tidy topics, but your posts and your settings stay
-          yours alone. Bans you issue cover your forum only, never the rest of the Spire.
+          Forums and chat rooms are different tools for different speeds. Use a room for live
+          back-and-forth; use a forum board for the post you want people to still find next week.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "forums-apply",
+    title: "Forums: joining one that asks you to apply",
+    body: (
+      <>
+        <P>
+          Open forums need nothing from you, just start posting. Some forums are
+          <b> application</b> forums: the keeper wants to meet you (or read a quick pitch) before
+          you can post. This is normal for tight-knit or themed communities. You can always read
+          first and decide if it is for you.
+        </P>
+
+        <Heading>How to apply</Heading>
+        <Steps>
+          <li>Open the forum from the catalog.</li>
+          <li>
+            When posting is gated, the button reads <b>Apply to join</b> instead of letting you
+            post. Click it.
+          </li>
+          <li>
+            A short form opens. The keeper may have written a prompt ("tell us about your
+            character", "how did you hear about us"). Answer what is there and submit. If there is
+            no prompt, just confirm.
+          </li>
+        </Steps>
+
+        <Heading>After you apply</Heading>
+        <P>
+          Your application sits in the keeper's queue and the forum shows <b>Application pending</b>.
+          There is no clock, the keeper reviews when they can. If you change your mind, you can
+          <b> withdraw</b> a pending application and step away.
+        </P>
+        <Bullets>
+          <li>
+            <b>Approved</b>, you are now a member and can post. Any members-only boards unlock too.
+          </li>
+          <li>
+            <b>Declined</b>, you will see the keeper left, if any. You can apply again later, after
+            a short cooldown, so treat a note as friendly feedback rather than a closed door.
+          </li>
+        </Bullets>
+
+        <Heading>Leaving</Heading>
+        <P>
+          Changed your mind, or the story moved on? You can leave a forum at any time from its page.
+          Leaving just removes your membership; you can re-apply later if the forum allows it. Your
+          past posts stay where they are.
+        </P>
+        <Tip>
+          Joining a forum is about that one forum only. It does not change your rooms, your worlds,
+          or anything else on the Spire.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "forums-create",
+    title: "Forums: starting and running your own",
+    body: (
+      <>
+        <P>
+          Want your own corner of the Spire, a guild hall, a game's home base, a fandom space? You
+          can apply to open a forum and become its <b>keeper</b>. Keepers shape the boards, set the
+          rules, pick the look, and tend the place day to day.
+        </P>
+
+        <Heading>Apply to open one</Heading>
+        <Steps>
+          <li>
+            In the Forums Catalog, click <b>Create your Forum</b> (or type <K>/forums create</K>).
+          </li>
+          <li>
+            Pick a <b>name</b> and a short web-address <b>slug</b> (the bit in <K>/f/your-slug</K>).
+            The form checks the slug is free as you type.
+          </li>
+          <li>
+            Write a sentence or two on <b>what the forum is for</b>. The staff team reads this when
+            they review.
+          </li>
+          <li>Submit. You will hear back once a moderator has looked it over.</li>
+        </Steps>
+        <P>
+          A couple of house rules: you can keep only a small number of forums at once, and you can
+          have one application in the queue at a time. If an application is declined, there is a
+          short wait before you can re-apply, so put your best foot forward the first time.
+        </P>
+
+        <Heading>Once you are approved</Heading>
+        <P>
+          Your forum is created with a starter board and a welcome post, and you are its keeper. The
+          <b> gear</b> icon at the top of your forum opens your keeper settings. Everything below
+          lives there.
+        </P>
+
+        <Heading>Boards and categories</Heading>
+        <Bullets>
+          <li>
+            <b>Boards</b> are the main sections. Raise new ones, rename them, give each a short
+            description, and reorder them. Retire a board you no longer need and it tucks away
+            without losing its threads.
+          </li>
+          <li>
+            <b>Categories</b> sort topics inside a board ("Announcements", "Open RP"). Give each a
+            name, a one-line note on what belongs there, and an optional icon. You can nest a
+            category one level under another for a tidy two-tier layout.
+          </li>
+          <li>
+            Mark a board or a category <b>members-only</b> to keep its contents for members while
+            it still shows (locked) to everyone else.
+          </li>
+        </Bullets>
+
+        <Heading>Who may post</Heading>
+        <Bullets>
+          <li>
+            <b>Open</b>, anyone signed in can post right away. Best for public, welcoming spaces.
+          </li>
+          <li>
+            <b>By application</b>, people apply and you approve them. You can write the question
+            applicants answer. Review the queue from your settings, approve or decline with an
+            optional note.
+          </li>
+          <li>
+            <b>Public reading</b>, an on/off switch that lets signed-out visitors browse your
+            boards. Posting always needs an account. Handy when you want to show the place off.
+          </li>
+        </Bullets>
+
+        <Heading>Your moderators</Heading>
+        <P>
+          Appoint <b>forum moderators</b> to help you tend the boards. They can pin, lock, and tidy
+          topics and review join applications. They cannot edit your settings or touch your own
+          posts, the forum stays yours. Add or remove them any time from settings.
+        </P>
+
+        <Heading>Keeping order</Heading>
+        <Bullets>
+          <li><b>Pin</b> a topic to hold it at the top of its board.</li>
+          <li><b>Lock</b> a topic to stop new replies while leaving it readable.</li>
+          <li>
+            <b>Ban</b> someone from your forum if you have to. A forum ban covers <i>your forum
+            only</i>, never the rest of the Spire, and you can lift it later.
+          </li>
+        </Bullets>
+
+        <Heading>Make it yours</Heading>
+        <P>
+          In the appearance settings you can add a <b>banner</b> and a <b>logo</b>, choose your own
+          <b> colors</b>, and link a <b>world</b> you have built so visitors can read its lore right
+          from the forum. The look applies only to your forum, it never changes anyone's chat.
+        </P>
+        <Tip>
+          Share your forum with its <K>/f/your-slug</K> address. Anyone you send it to lands right
+          on your front page, sign-in and all, ready to read or apply.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "forums-admin",
+    title: "Forums: reviewing requests (staff)",
+    requiresPermission: "review_forum_applications",
+    body: (
+      <>
+        <P>
+          People apply to open their own forums, and those requests come to the staff team. This
+          guide is the review side. It shows only for staff who can review forum requests.
+        </P>
+
+        <Heading>Where the queue lives</Heading>
+        <P>
+          Open the <b>Admin</b> panel and go to the <b>Forums</b> tab. Pending requests sit at the
+          top; recently reviewed ones sit below so you can see who decided what.
+        </P>
+
+        <Heading>Reviewing a request</Heading>
+        <Steps>
+          <li>
+            Read the requested name, the web-address slug, and the applicant's note on what the
+            forum is for.
+          </li>
+          <li>
+            <b>Approve</b> to create the forum. It is set up automatically with a starter board and
+            a welcome post, and the applicant becomes its keeper.
+          </li>
+          <li>
+            <b>Decline</b> if it is not a fit. Leave a short note when you can, the applicant sees
+            it, and it doubles as guidance for a stronger re-application later.
+          </li>
+        </Steps>
+
+        <Heading>Oversight after approval</Heading>
+        <P>
+          Keepers run their own forums day to day. Staff with the forum-management permission can
+          still step in on any forum, edit or archive it, lift a forum ban, or step in on
+          moderation, the same way site mods can act in any room. Use it the way you would any
+          override: when the community needs it, not as routine.
+        </P>
+        <Tip>
+          Approving a forum hands real ownership to the applicant. The name and slug become their
+          public address, so a quick sanity check on the slug (no impersonation, nothing that
+          breaks the rules page) before approving saves a rename later.
         </Tip>
       </>
     ),
@@ -1243,14 +1674,24 @@ foot of the mountains. Speaks little. Watches everything.</p>
           <b>Tools</b> button at the bottom of the rail to slide up the drawer. Backdrop tap or{" "}
           <K>Esc</K> closes it.
         </P>
+        <P>
+          The drawer is grouped into sections. Each one is collapsed until you tap its header, so
+          you see a short, tidy list and open only what you need. Opening one section closes the
+          others, and the search box for the current room lives at the bottom.
+        </P>
         <Heading>What lives in there</Heading>
         <Bullets>
           <li><b>Worldbuilding</b> - My Worlds, World Catalog.</li>
+          <li><b>Writing</b> - My Stories, Scriptorium.</li>
           <li><b>Roleplay</b> - Set Mood, Set Scene, NPC mode toggle.</li>
+          <li>
+            <b>Forums</b> - Forums Catalog, Create a Forum, and quick links to the forums you own
+            or visit. An unread badge shows here when you have forum replies waiting.
+          </li>
           <li><b>Rooms</b> - Find Rooms, List Rooms, New Private Room.</li>
           <li><b>People</b> - Messages (DMs + friends + friend requests in one modal), All Users, Ignore List. A small unread-count badge appears on the trigger and on the Messages row when someone DMs you.</li>
           <li><b>Display</b> - Chat color, Font size, Refresh interval.</li>
-          <li><b>Account</b> - Edit Profile, Bookmarks, Toggle Away, Help.</li>
+          <li><b>Account</b> - Edit Profile, Your Earning, Bookmarks, Toggle Away, Help.</li>
         </Bullets>
         <P>
           Anything you can do from the drawer, you can also do via slash command - the drawer just
@@ -1462,6 +1903,55 @@ foot of the mountains. Speaks little. Watches everything.</p>
   },
 
   {
+    id: "polls",
+    title: "Polls: ask the room a question",
+    body: (
+      <>
+        <P>
+          A poll is a quick vote you drop into chat. The room sees the question and the options,
+          taps to vote, and watches the results fill in live.
+        </P>
+        <Heading>Start one</Heading>
+        <P>
+          Type the question, then each option, separated by a vertical bar <K>|</K>. You need at
+          least two options.
+        </P>
+        <Bullets>
+          <li><K>/poll Best season? | Spring | Summer | Fall | Winter</K></li>
+        </Bullets>
+        <Heading>Options you can add</Heading>
+        <P>
+          Put any of these flags right after <K>/poll</K>, before the question:
+        </P>
+        <Bullets>
+          <li><K>--multi</K> lets each voter pick more than one option.</li>
+          <li><K>--secret</K> hides who voted for what; only the counts show.</li>
+          <li>
+            <K>--for 2h</K> closes the poll automatically after a while. Use <K>30m</K>, <K>2h</K>,
+            or <K>1d</K>. You can still close it by hand before then.
+          </li>
+        </Bullets>
+        <Bullets>
+          <li><K>/poll --multi Snacks for movie night? | Chips | Popcorn | Fruit</K></li>
+          <li><K>/poll --secret --for 1d Who should lead the raid? | Sigrid | Kaal</K></li>
+        </Bullets>
+        <Heading>Voting and results</Heading>
+        <P>
+          Tap an option on the poll card to vote, tap again to change your mind while it is open.
+          The bars update for everyone in real time. Unless the poll is secret, you can see who
+          picked what. When the poll closes (on its timer, or when the person who started it closes
+          it), the final tally locks in.
+        </P>
+        <Tip>
+          Polls work in forums too. The forum post composer has a poll option, so a board topic can
+          be a vote ("which night works for the session?") that members answer over days rather
+          than seconds.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
     id: "earning",
     title: "Earning: XP, Currency, ranks, and cosmetics",
     body: (
@@ -1556,6 +2046,12 @@ foot of the mountains. Speaks little. Watches everything.</p>
             <b>Inline avatar in chat</b>, once bought, your round avatar shows after the
             timestamp on every chat line. It also replaces the gender icon in the userlist as
             the click-target for opening your profile.
+          </li>
+          <li>
+            <b>Room transitions</b> (where available), short animations that play when you switch
+            chat rooms (and as you move around the Forums). Buy and equip them in the Earning
+            dashboard, per identity, just like name styles, so a character can make their own kind
+            of entrance.
           </li>
           <li>
             <b>Profile flair</b>, the quote marquee, visitor counter, and typing phrase are all
@@ -1958,6 +2454,48 @@ foot of the mountains. Speaks little. Watches everything.</p>
   },
 
   {
+    id: "arcade",
+    title: "The Spire Arcade and the Eidolon Tamer",
+    requiresPermission: "use_arcade",
+    body: (
+      <>
+        <P>
+          The Spire Arcade is a little games corner, separate from chat. Open it from the
+          <b> Tools</b> drawer under Account, or wherever the arcade is linked. The headline game is
+          the <b>Eidolon Tamer</b>, a pocket familiar you hatch and raise.
+        </P>
+
+        <Heading>Your familiar</Heading>
+        <P>
+          Hatch an eidolon and it becomes a small companion with its own stats and moods. It is a
+          care pet on purpose: its needs drift over time, so it likes a visit each day. Feed it,
+          play with it, and keep it happy and rested. Let it go untended too long and it can get
+          cranky or unwell, the same way a real pet would, so a daily check-in keeps it thriving.
+        </P>
+
+        <Heading>One familiar per identity</Heading>
+        <P>
+          Like most things on the Spire, the eidolon is per-identity. Your OOC self and each
+          character can unlock and raise their own. The unlock is a one-time purchase with Currency
+          on that identity; after that, switching to that identity is how you visit its familiar.
+        </P>
+
+        <Heading>Show it off in chat</Heading>
+        <P>
+          <K>/eidolon emote</K> posts your familiar's current mood into the room as an action, for
+          example "Mortis hums with quiet contentment." It reads the live mood, so it always matches
+          what the arcade is showing. A nice way to bring your pet into a scene.
+        </P>
+        <Tip>
+          The daily-care rhythm is the whole point of the Eidolon Tamer, not a chore the rest of the
+          site shares. Nothing else on the Spire decays or expires for being away; this one corner
+          is meant to reward a little regular attention.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
     id: "scriptorium",
     title: "Scriptorium: long-form fiction",
     body: (
@@ -2046,6 +2584,55 @@ foot of the mountains. Speaks little. Watches everything.</p>
             the prose.
           </li>
         </Bullets>
+
+        <Heading>Earn by writing</Heading>
+        <P>
+          Publishing rewards you. When you publish a chapter, you earn <b>XP</b> and <b>Currency</b>
+          {" "}toward your master account, the same wallet and rank you build in chat. Longer
+          chapters are worth a bit more, and writing across several days in a week adds a small
+          streak bonus on top.
+        </P>
+        <Bullets>
+          <li>
+            The reward is paid <b>once per chapter</b>. Un-publishing and re-publishing the same
+            chapter does not pay again, so there is nothing to farm, just write.
+          </li>
+          <li>
+            There is a gentle daily ceiling on writing earnings so a single marathon does not
+            outpace everything else. Spreading chapters across days earns more than dumping them
+            all at once.
+          </li>
+        </Bullets>
+
+        <Heading>Selling copies (optional)</Heading>
+        <P>
+          Most stories are free to read. If you want, you can put a story behind a <b>Buy a Copy</b>
+          {" "}gate: readers get a short free sample of the first chapter, then buy a copy with
+          Currency to read the rest. You set the price (within a sensible range) or let the site
+          default stand.
+        </P>
+        <Bullets>
+          <li>
+            Buying a copy is a one-time purchase. It is tied to your account, so you keep access no
+            matter which character you are reading as.
+          </li>
+          <li>
+            The author earns a <b>royalty</b> in Currency on every copy sold, a way for readers to
+            directly support writing they love.
+          </li>
+          <li>
+            Free stories stay free. The gate only appears on stories whose author chose to use it,
+            and the catalog card marks which ones cost a copy.
+          </li>
+        </Bullets>
+
+        <Heading>Your Library</Heading>
+        <P>
+          Every copy you buy lands in the <b>Library</b> on your profile, a shelf of the stories you
+          own, so others can see what you read and you can jump back into any of them. Your own
+          published works show there too. It is the long-form cousin of pinning items to your
+          profile.
+        </P>
 
         <Tip>
           Collaborators (Profile ▸ Story Editor ▸ Collaborators) get role-based access:
@@ -2158,6 +2745,51 @@ foot of the mountains. Speaks little. Watches everything.</p>
           If a conversation goes sideways and someone is not sure where the line is, link the
           rules page rather than arguing the case from memory. The whole point is to have one
           shared reference.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "export",
+    title: "Exporting a chat log",
+    body: (
+      <>
+        <P>
+          Want to keep a scene? <K>/export</K> downloads the recent chat from the room you are in as
+          a single tidy web page (an HTML file) you can save, re-read, or use to pick a story back
+          up later. Copy and paste loses the timestamps, the names, and the colors, this keeps them.
+        </P>
+        <Heading>How to use it</Heading>
+        <Bullets>
+          <li><K>/export</K> on its own saves the last 12 hours.</li>
+          <li>
+            Add a window to go further back: <K>/export 5h</K>, <K>/export 90m</K>, <K>/export 2d</K>.
+          </li>
+          <li>
+            Add <K>dark</K> or <K>light</K> for the page's look: <K>/export 1d light</K>. Dark is the
+            default.
+          </li>
+        </Bullets>
+        <Heading>What ends up in the file</Heading>
+        <Bullets>
+          <li>Every message in the window, in order, each stamped with its time.</li>
+          <li>
+            Who said it, the OOC name or the character name exactly as it appeared then, in their
+            color.
+          </li>
+          <li>
+            Your formatting, bold, italics, links, and the like render the way they did in chat, not
+            as raw symbols.
+          </li>
+        </Bullets>
+        <P>
+          The file is self-contained, so it opens in any browser with no internet needed. Tuck it in
+          a folder and your scene is safe.
+        </P>
+        <Tip>
+          You can only export as far back as messages are kept here. If you ask for more than that,
+          the export quietly trims to what still exists and tells you how far it reached.
         </Tip>
       </>
     ),

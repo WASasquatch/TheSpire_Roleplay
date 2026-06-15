@@ -53,6 +53,7 @@ export const PERMISSION_KEYS = [
   // ---- arcade ----
   "use_arcade",
   "use_eidolon_tamer",
+  "use_urugal_descent",
 
   // ---- cosmetics ----
   "use_room_transitions",
@@ -190,6 +191,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   // arcade
   use_arcade: "Open the Spire Arcade and its games. (Each game may also require its own unlock to be purchased.)",
   use_eidolon_tamer: "Play the Eidolon Tamer arcade game (after unlocking it in the shop).",
+  use_urugal_descent: "Play the Urugal's Descent arcade game (after unlocking it in the shop).",
 
   // cosmetics
   use_room_transitions: "Buy and equip room-transition cosmetics (each transition is also purchased with currency).",
@@ -316,6 +318,7 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   // arcade
   use_arcade: "arcade",
   use_eidolon_tamer: "arcade",
+  use_urugal_descent: "arcade",
 
   // cosmetics
   use_room_transitions: "cosmetics",

@@ -305,8 +305,15 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                 notifications · close) aligned right. One predictable
                 home for the controls on every view — nothing floats
                 over the banner or the rail. The notification panel
-                anchors under this bar. */}
-            <div className="relative shrink-0 border-b border-keep-rule bg-keep-banner/30">
+                anchors under this bar.
+
+                `z-30` makes this bar its OWN stacking context above the
+                content below it, so the absolutely-positioned notification
+                dropdown (which drops down OVER the content) paints on top.
+                Without it the topic-card content — which forms its own
+                stacking context via the room-transition transforms —
+                rendered over the dropdown. */}
+            <div className="relative z-30 shrink-0 border-b border-keep-rule bg-keep-banner/30">
               <div className="flex items-center justify-between gap-2 px-3 py-1.5">
                 <nav className="flex min-w-0 items-center gap-1.5 text-xs">
                   {view.kind === "settings" && detail ? (

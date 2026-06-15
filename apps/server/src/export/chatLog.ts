@@ -14,10 +14,19 @@
  * resolve to `rgb(var(--keep-…))`) render without the live app's stylesheet.
  *
  * SECURITY: message bodies are untrusted user input and this file gets opened
- * in a browser. We do NOT reuse the shared `markdownToHtml` (it lets raw HTML
- * pass through for trusted admin input). Instead every body is HTML-escaped
- * first, then a tiny bold/italic pass runs over the already-escaped text so the
- * only tags that can appear are the <strong>/<em> we insert.
+ * in a browser. We do NOT reuse the shared client renderer (it builds a React
+ * tree) or `markdownToHtml` (it lets arbitrary raw HTML through). Instead the
+ * body is HTML-ESCAPED first, then we re-enable only what the live chat
+ * renders, by a strict allow-list, so the export reads the way the chat did:
+ *   - markdown emphasis: **bold**, *italic*, _italic_, ***both***, ~~strike~~
+ *   - the chat's inline HTML aliases (no attributes): <b>/<strong>, <i>/<em>,
+ *     <u>, <s>/<strike>/<del>, <code> — un-escaped back to a fixed safe tag set
+ *   - <font color="#hex"> with a hex-validated color → a colored <span>
+ *   - http(s) links: [text](url) and bare autolinks, stashed BEFORE the escape
+ *     so URL characters survive, then re-inserted as already-built safe <a>
+ * Anything else (other tags, attributes, javascript:/data: URLs) stays escaped
+ * and renders as literal text. The only HTML that can reach the document is the
+ * fixed set above.
  */
 import { resolveMessageColor } from "@thekeep/shared";
 import { formatDurationShort } from "@thekeep/shared";
@@ -110,22 +119,75 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/** Attribute-safe escaping for a URL we drop into an `href`. Quotes/angle
+ *  brackets/ampersands only — the URL is already validated to http(s). */
+function escapeAttrUrl(url: string): string {
+  return url
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/** The chat's inline HTML aliases → the safe tag we emit. Mirrors
+ *  HTML_TAG_ALIASES in the live renderer (apps/web/src/lib/markdown.tsx). */
+const SAFE_INLINE_TAG: Record<string, string> = {
+  b: "strong", strong: "strong",
+  i: "em", em: "em",
+  u: "u",
+  s: "s", strike: "s", del: "s",
+  code: "code",
+};
+
 /**
- * Body renderer. Escapes first (XSS-safe), then applies a minimal inline pass
- * for RP emphasis: `**bold**` and `*italic*` / `_italic_`. Newlines are
- * preserved by `white-space: pre-wrap` on the container, so multi-line poses
- * survive. Nothing here can emit a tag other than <strong>/<em>.
+ * Body renderer. Re-creates the live chat's formatting for a static document
+ * WITHOUT trusting raw HTML. Steps:
+ *   1. Stash http(s) links ([text](url) + bare autolinks) as placeholders so
+ *      their URL characters survive the escape; each is pre-rendered as a
+ *      fully-escaped, scheme-validated <a>.
+ *   2. HTML-escape everything else.
+ *   3. Run the markdown emphasis passes (mirrors the chat's inline subset).
+ *   4. Un-escape ONLY the fixed inline-tag allow-list (no attributes) and the
+ *      hex-validated <font color> → <span>.
+ *   5. Re-insert the stashed links.
+ * Newlines survive via `white-space: pre-wrap` on the container.
  */
 function renderBody(raw: string): string {
-  let s = escapeHtml(raw);
-  // Quote-reference links (`[wrote:](msg:<id>)`, from the forum Quote
-  // button) have no meaning in a static export - keep the label, drop
-  // the reference.
+  // 1. Stash links before escaping (so URL characters survive intact). Each is
+  //    keyed by an `@@LK<n>@@` sentinel that carries no markdown / HTML / escape
+  //    characters, so it passes untouched through every step below and is
+  //    swapped back in step 5. Any literal sentinel a user happened to type is
+  //    stripped from the input first (defang) so it can't collide with a token.
+  const links: string[] = [];
+  const stash = (html: string): string => {
+    const token = `@@LK${links.length}@@`;
+    links.push(html);
+    return token;
+  };
+  let s = raw.replace(/@@LK\d+@@/g, "");
+  // Explicit markdown link: [label](http/https url).
+  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, label: string, url: string) =>
+    stash(`<a href="${escapeAttrUrl(url)}" target="_blank" rel="noopener noreferrer ugc">${escapeHtml(label)}</a>`),
+  );
+  // Quote-reference links (`[wrote:](msg:<id>)`, from the forum Quote button)
+  // have no meaning in a static export - keep the label, drop the reference.
   s = s.replace(/\[([^\]\n]+)\]\(msg:[A-Za-z0-9_-]{4,64}\)/g, "$1");
-  // Split `***` delimiter run, BEFORE the generic bold pass (which would
-  // otherwise swallow the third `*` into the bold's content):
-  // `***Title** rest…*` → em(strong(Title) rest…). Tolerates the habitual
-  // stray space before a line-end closer, mirroring the live chat parser.
+  // Bare http(s) autolink at a word boundary. Sentence punctuation trailing
+  // the URL is left outside the link.
+  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<>"]+)/g, (_m, pre: string, rawUrl: string) => {
+    const trail = /[.,;:!?)\]'"]+$/.exec(rawUrl);
+    const url = trail ? rawUrl.slice(0, -trail[0].length) : rawUrl;
+    const after = trail ? trail[0] : "";
+    return `${pre}${stash(`<a href="${escapeAttrUrl(url)}" target="_blank" rel="noopener noreferrer ugc">${escapeHtml(url)}</a>`)}${after}`;
+  });
+
+  // 2. Escape everything that remains (the body minus the stashed links).
+  s = escapeHtml(s);
+
+  // 3. Markdown emphasis. Split `***` run BEFORE the generic bold pass (which
+  //    would otherwise swallow the third `*` into the bold's content):
+  //    `***Title** rest…*` → em(strong(Title) rest…). Tolerates the habitual
+  //    stray space before a line-end closer, mirroring the live chat parser.
   s = s.replace(/\*\*\*([^*\n]+?)\*\*([^*\n]*?)[ \t]?\*(?=\n|$)/g, "<em><strong>$1</strong>$2</em>");
   s = s.replace(/\*\*([^*\n]+?)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/\*([^*\s][^*\n]*?[^*\s]|[^*\s])\*/g, "<em>$1</em>");
@@ -133,6 +195,25 @@ function renderBody(raw: string): string {
   // asterisk). Only at line/text end, where there's no `2 * 3` ambiguity.
   s = s.replace(/\*([^*\s][^*\n]*?)[ \t]\*(?=\n|$)/g, "<em>$1 </em>");
   s = s.replace(/_([^_\s][^_\n]*?[^_\s]|[^_\s])_/g, "<em>$1</em>");
+  s = s.replace(/~~([^~\n]+?)~~/g, "<s>$1</s>");
+
+  // 4. Re-enable the chat's inline HTML tags. They were escaped in step 2, so
+  //    we ONLY un-escape this fixed allow-list (no attributes) — turning e.g.
+  //    `&lt;i&gt;` back into `<em>`. Everything else stays escaped.
+  s = s.replace(
+    /&lt;(\/?)(b|strong|i|em|u|s|strike|del|code)&gt;/gi,
+    (_m, slash: string, tag: string) => `<${slash}${SAFE_INLINE_TAG[tag.toLowerCase()]}>`,
+  );
+  // <font color="#hex"> → colored span (hex-validated; the only attribute the
+  // chat parser accepts on <font>). The escape turned `"` into `&quot;`.
+  s = s.replace(
+    /&lt;font\s+color\s*=\s*(?:&quot;|')?(#(?:[0-9a-fA-F]{3}){1,2})(?:&quot;|')?\s*&gt;/gi,
+    (_m, hex: string) => `<span style="color:${hex}">`,
+  );
+  s = s.replace(/&lt;\/font\s*&gt;/gi, "</span>");
+
+  // 5. Restore the stashed (already-safe) links.
+  s = s.replace(/@@LK(\d+)@@/g, (_m, idx: string) => links[Number(idx)] ?? "");
   return s;
 }
 

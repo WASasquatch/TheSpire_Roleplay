@@ -9,6 +9,7 @@ import type {
   ClientToServerEvents,
   ServerToClientEvents,
 } from "@thekeep/shared";
+import { mentionsField } from "@thekeep/shared";
 import { messages, rooms, users } from "../db/schema.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import { sanitizeBio } from "../auth/html.js";
@@ -113,6 +114,7 @@ export function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): 
     ...(() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })(),
     ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
     ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
+    ...mentionsField(m.mentionsJson),
     ...(m.rankKey ? { rankKey: m.rankKey } : {}),
     ...(m.tier != null ? { tier: m.tier } : {}),
     ...(m.senderInlineAvatarEnabled ? { senderInlineAvatarEnabled: true } : {}),

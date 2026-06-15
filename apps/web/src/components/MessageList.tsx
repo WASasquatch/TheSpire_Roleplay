@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { BarChart3, Lock } from "lucide-react";
 import { PollCard } from "./PollCard.js";
-import { customCmdCssToStyle, isAdminRole, resolveMessageColor, type AvatarCrop, type ChatMessage, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
+import { customCmdCssToStyle, isAdminRole, resolveMessageColor, type AvatarCrop, type ChatMessage, type MentionRef, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
 import { BorderedAvatar, type BorderedAvatarSize } from "./BorderedAvatar.js";
 import { RankSigil } from "./RankSigil.js";
@@ -2194,8 +2194,8 @@ export function ForumPostBody({
     if (names.length > 0) requestMentionResolve(names);
   }, [msg.body]);
   const renderedBody = useMemo(
-    () => renderForumBody(msg.body, onMentionClick, onWorldClick, selfNames, knownMentions),
-    [msg.body, onMentionClick, onWorldClick, selfNames, knownMentions],
+    () => renderForumBody(msg.body, onMentionClick, onWorldClick, selfNames, knownMentions, msg.mentions ?? []),
+    [msg.body, msg.mentions, onMentionClick, onWorldClick, selfNames, knownMentions],
   );
   // Theme bg drives the legibility nudge that keeps a user-picked color
   // readable when the current palette flips between light and dark.
@@ -3155,11 +3155,23 @@ function renderParts(
    * the fallback for surfaces that don't subscribe to the cache.
    */
   knownNames?: ReadonlySet<string> | null,
+  /**
+   * Snapshot of resolved `@id:`/`@cid:` mentions for this message. When a
+   * mention chip matches one of these (by the displayed name), clicking it
+   * opens the EXACT identity by id, never an ambiguous name, and the chip is
+   * always treated as a known/clickable mention.
+   */
+  mentions: ReadonlyArray<MentionRef> = [],
 ): ReactNode[] {
+  // Normalize NBSP to a regular space so a mention rendered with the "fake
+  // space" matches a viewer/self name (or a snapshot ref) typed with a real
+  // space. Without this, multi-word names never self-highlight or resolve.
+  const norm = (s: string) => s.toLowerCase().replace(/ /g, " ");
   // Lower-cased Set so the inner check is O(1). Empty when no viewer
   // identity is known yet (pre-auth), which falls through to the
   // default action-color mention chip.
-  const selfSet = new Set(selfNames.map((n) => n.toLowerCase()));
+  const selfSet = new Set(selfNames.map(norm));
+  const mentionMap = new Map(mentions.map((m) => [norm(m.name), m]));
   const out: ReactNode[] = [];
   parts.forEach((p, i) => {
     if (p.kind === "text") {
@@ -3179,16 +3191,23 @@ function renderParts(
         </button>,
       );
     } else {
-      const isSelf = selfSet.has(p.name);
+      // Snapshot ref (from an `@id:`/`@cid:` token): when present it pins the
+      // exact identity, so the click opens it by id (no name ambiguity) and
+      // the chip is always a known, clickable mention.
+      const ref = mentionMap.get(norm(p.name));
+      const isSelf = selfSet.has(norm(p.name));
       // If the caller supplied a known-names set and this name isn't
-      // in it (and isn't a self identity), fall back to plain text,
-      // matches the rule: only valid users get the chip treatment;
-      // typos and dangling @bobs stay as literal text.
-      const isKnown = isSelf || (knownNames ? knownNames.has(p.name) : true);
+      // in it (and isn't a self identity or a snapshot ref), fall back to
+      // plain text, matches the rule: only valid users get the chip
+      // treatment; typos and dangling @bobs stay as literal text.
+      const isKnown = isSelf || !!ref || (knownNames ? knownNames.has(p.name) : true);
       if (!isKnown) {
         out.push(<Fragment key={i}>@{p.raw}</Fragment>);
         return;
       }
+      const clickTarget = ref
+        ? (ref.characterId ? `@cid:${ref.characterId}` : `@id:${ref.userId}`)
+        : p.name;
       const className = isSelf
         ? "rounded bg-keep-system-100 px-1 font-semibold text-keep-system-500 ring-1 ring-keep-system/40 hover:bg-keep-system-200 focus:outline-none focus:ring-2"
         : "rounded px-0.5 font-semibold text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action";
@@ -3196,7 +3215,7 @@ function renderParts(
         <button
           key={i}
           type="button"
-          onClick={() => onMentionClick(p.name)}
+          onClick={() => onMentionClick(clickTarget)}
           className={className}
           title={isSelf ? `You were mentioned (${p.raw})` : `View ${p.raw}'s profile`}
         >
@@ -3491,7 +3510,7 @@ function Line({
     const names = extractMentions(msg.body);
     if (names.length > 0) requestMentionResolve(names);
   }, [msg.body]);
-  const renderedBody = renderParts(bodyParts, onMentionClick, onWorldClick, selfNames, knownMentions);
+  const renderedBody = renderParts(bodyParts, onMentionClick, onWorldClick, selfNames, knownMentions, msg.mentions ?? []);
   // Resolve the user's stored color once and feed both kind-shaped
   // body styles below. `themeBg` lets resolveMessageColor swap in a
   // legible variant of literal hex colors when the chosen shade would

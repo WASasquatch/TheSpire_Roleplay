@@ -24,6 +24,7 @@ import DOMPurify from "dompurify";
 import type { PermissionKey } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { BorderedAvatar } from "./BorderedAvatar.js";
+import { UsernameAutocomplete } from "./UsernameAutocomplete.js";
 import { useEarning } from "../state/earning.js";
 import { applyNameStylePlaceholders } from "../lib/nameStyleTemplate.js";
 import {
@@ -2201,14 +2202,22 @@ function ClearFlairCard({
       <div className="font-semibold">{title}</div>
       <p className="text-[10px] text-keep-muted">{hint}</p>
       <label className="block">
-        <span className="text-keep-muted">Target username</span>
-        <input
-          type="text"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="username"
-          className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
-        />
+        <span className="text-keep-muted">Target account</span>
+        {/* Identity autocomplete (same source as the chat @mention picker) so
+            names with NBSP "fake spaces" resolve reliably instead of being
+            retyped. On pick we store the exact `masterUsername`; for the
+            character-scoped kinds, picking a character also fills its id. */}
+        <div className="mt-0.5">
+          <UsernameAutocomplete
+            value={username}
+            onChange={setUsername}
+            onPick={(s) => {
+              setUsername(s.masterUsername);
+              if (supportsCharacterScope) setCharacterId(s.characterId ?? "");
+            }}
+            placeholder="search by name"
+          />
+        </div>
       </label>
       {supportsCharacterScope ? (
         <label className="block">
@@ -3188,12 +3197,18 @@ function TestGrantsSection() {
 
       <section className="rounded border border-keep-rule bg-keep-bg/40 p-3 space-y-3">
         <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Target username</span>
-          <input
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Target account</span>
+          {/* Identity autocomplete (same source as the chat @mention picker)
+              instead of a raw username field: typing a name with NBSP "fake
+              spaces" by hand never matched. Grants target the master pool, so
+              on pick we store the identity's exact `masterUsername` (carrying
+              any NBSP) - picking either an account or one of its characters
+              resolves to the owning account the grant endpoints expect. */}
+          <UsernameAutocomplete
             value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            placeholder={me?.username ?? "username"}
-            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+            onChange={setTarget}
+            onPick={(s) => setTarget(s.masterUsername)}
+            placeholder={me?.username ?? "search by name"}
           />
         </label>
         {err ? (

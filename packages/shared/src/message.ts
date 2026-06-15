@@ -28,6 +28,52 @@ export interface LinkPreview {
   siteName?: string;
 }
 
+/**
+ * A resolved @mention, snapshotted at send time. When the composer inserts an
+ * identity token (`@id:<userId>` / `@cid:<characterId>`), the server resolves
+ * it to the exact identity, rewrites the body to `@<displayName>` for display,
+ * and records one of these so the renderer can open the RIGHT profile on click
+ * and highlight a self-mention by id, never by a name that two identities might
+ * share. `name` is the lowercased display name as it appears in the rewritten
+ * body, the key the renderer matches a mention chip against.
+ */
+export interface MentionRef {
+  /** Lowercased display name as written into the body (the chip's text, lowercased). */
+  name: string;
+  /** Master account id of the mentioned identity. Always set. */
+  userId: string;
+  /** Character id when a specific character was mentioned (`@cid:`); null for a master/OOC mention. */
+  characterId: string | null;
+}
+
+/** Safe-parse a stored `mentions_json` column into MentionRef[] (undefined when
+ *  empty/invalid). Tolerant: a malformed row degrades to no snapshot rather
+ *  than throwing in a message-build path. */
+export function parseMentionsJson(json: string | null | undefined): MentionRef[] | undefined {
+  if (!json) return undefined;
+  try {
+    const arr = JSON.parse(json) as unknown;
+    if (!Array.isArray(arr)) return undefined;
+    const out: MentionRef[] = [];
+    for (const r of arr) {
+      if (r && typeof r === "object" && typeof (r as MentionRef).name === "string" && typeof (r as MentionRef).userId === "string") {
+        const ref = r as MentionRef;
+        out.push({ name: ref.name, userId: ref.userId, characterId: typeof ref.characterId === "string" ? ref.characterId : null });
+      }
+    }
+    return out.length ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Spread helper for message-build sites: `...mentionsField(row.mentionsJson)`
+ *  attaches `mentions` only when the row has a valid snapshot. */
+export function mentionsField(json: string | null | undefined): { mentions?: MentionRef[] } {
+  const mentions = parseMentionsJson(json);
+  return mentions ? { mentions } : {};
+}
+
 export interface ChatMessage {
   id: string;
   roomId: string;
@@ -37,6 +83,14 @@ export interface ChatMessage {
   displayName: string;
   kind: MessageKind;
   body: string;
+  /**
+   * Resolved @mentions for this message, snapshotted at send time from any
+   * `@id:`/`@cid:` identity tokens the composer inserted. Lets the renderer
+   * open the exact mentioned identity on click and highlight self-mentions by
+   * id. Absent on messages with no token mentions (plain `@name` text still
+   * renders and resolves by name as before).
+   */
+  mentions?: MentionRef[];
   /** Snapshot hex color (e.g. "#990000") at send time. Null/absent = default render. */
   color?: string | null;
   /** epoch ms */

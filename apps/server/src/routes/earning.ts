@@ -1841,6 +1841,10 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     // ledger unlock (no toggle slot); the arcade routes gate on the
     // `purchase_flair_eidolon_tamer` ledger row.
     "flair_eidolon_tamer",
+    // Spire Arcade — one-time unlock for Urugal's Descent (game #2). Same
+    // bare-ledger-unlock shape; the urugal routes gate on the
+    // `purchase_flair_urugal_descent` ledger row.
+    "flair_urugal_descent",
   ]);
 
   app.post<{ Params: { key: string }; Body: unknown }>(

@@ -982,6 +982,73 @@ export async function registerUsersRoutes(
   });
 
   /**
+   * Resolve identity TOKENS (`@id:<userId>` / `@cid:<characterId>`) to their
+   * current display names, so the chat composer can show the author WHO a
+   * pasted-or-inserted token references before they send (an `@cid:` token is
+   * an opaque nanoid otherwise). Batched + block-aware, mirroring
+   * `/mentions/resolve`:
+   *   - `id`  → the master account's username (skips disabled + the `system`
+   *             sentinel).
+   *   - `cid` → the character's name (skips deleted characters + characters of
+   *             disabled owners).
+   * Either direction of a block hides the identity (no name leak). Tokens that
+   * don't resolve are simply omitted from the response; the client treats a
+   * missing token as "unknown identity".
+   */
+  app.post<{ Body: unknown }>("/mentions/resolve-tokens", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+
+    const body = req.body as { tokens?: unknown };
+    const rawTokens = Array.isArray(body?.tokens) ? body.tokens : [];
+    const idIds: string[] = [];
+    const cidIds: string[] = [];
+    const seen = new Set<string>();
+    for (const t of rawTokens) {
+      if (!t || typeof t !== "object") continue;
+      const kind = (t as { kind?: unknown }).kind;
+      const id = (t as { id?: unknown }).id;
+      if ((kind !== "id" && kind !== "cid") || typeof id !== "string" || !id || id.length > 64) continue;
+      const key = `${kind}:${id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      (kind === "id" ? idIds : cidIds).push(id);
+      if (seen.size >= 128) break; // hard cap on a single request's fan-out
+    }
+    if (idIds.length === 0 && cidIds.length === 0) return { resolved: [] };
+
+    const blocked = await blockedUserIdsFor(db, me.id);
+    const resolved: Array<{ kind: "id" | "cid"; id: string; name: string }> = [];
+
+    if (idIds.length > 0) {
+      const rows = await db
+        .select({ id: users.id, username: users.username })
+        .from(users)
+        .where(and(
+          inArray(users.id, idIds),
+          isNull(users.disabledAt),
+          sql`${users.username} != 'system'`,
+        ));
+      for (const u of rows) if (!blocked.has(u.id)) resolved.push({ kind: "id", id: u.id, name: u.username });
+    }
+
+    if (cidIds.length > 0) {
+      const rows = await db
+        .select({ id: characters.id, name: characters.name, ownerId: users.id })
+        .from(characters)
+        .innerJoin(users, eq(users.id, characters.userId))
+        .where(and(
+          inArray(characters.id, cidIds),
+          isNull(characters.deletedAt),
+          isNull(users.disabledAt),
+        ));
+      for (const c of rows) if (!blocked.has(c.ownerId)) resolved.push({ kind: "cid", id: c.id, name: c.name });
+    }
+
+    return { resolved };
+  });
+
+  /**
    * Identity-keyed autocomplete for DM compose + add-friend pickers.
    *
    * The legacy `/users` endpoint rolled character matches up under

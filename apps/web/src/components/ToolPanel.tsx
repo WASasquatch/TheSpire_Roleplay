@@ -9,6 +9,7 @@ import {
   Paintbrush2,
   Settings,
   Search,
+  HelpCircle,
 } from "lucide-react";
 import { useChat } from "../state/store.js";
 import { fetchForums } from "../lib/forums.js";
@@ -148,6 +149,11 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   function toggleSection(title: string) {
     setOpenSection((cur) => (cur === title ? null : title));
   }
+  // "Search this room" is the one section that defaults OPEN and lives
+  // OUTSIDE the single-open accordion above, so it stays put while the user
+  // expands category sections. It persists across drawer opens (we never
+  // reset it), so a manual collapse sticks for the session.
+  const [searchOpen, setSearchOpen] = useState(true);
   // Scroll container + per-section anchors. The drawer grows UPWARD out of
   // the trigger bar, so its "bottom" edge is the one nearest the thumb;
   // we default the scroll there on open and nudge a freshly-opened section
@@ -308,7 +314,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
               tools sections themselves. */}
           <div ref={scrollRef} className="keep-menu-surface absolute inset-x-0 bottom-full z-40 max-h-[calc(100dvh-14rem)] overflow-y-auto rounded-t border-x border-t border-keep-rule bg-keep-bg shadow-2xl">
             <header className="sticky top-0 z-10 flex items-center justify-between border-b border-keep-rule bg-keep-banner px-3 py-2">
-              <span className="text-xs font-action uppercase tracking-widest">Tools</span>
+              <span className="text-xs font-action uppercase tracking-widest">Menu</span>
               <CloseButton onClick={() => setDrawerOpen(false)} />
             </header>
 
@@ -535,18 +541,33 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
               ) : null}
               <MenuItem label="Bookmarks" hint="Your saved chat messages" onClick={() => fire("/bookmarks")} />
               <MenuItem label="Toggle Away" hint="Mark yourself away" onClick={() => fire("/away")} />
-              <MenuItem label="Help / Commands" hint="Browse all commands" onClick={() => fire("/help")} />
             </Section>
+
+            {/* Help, always exposed (not tucked inside the Account accordion)
+                so a newcomer can always find the guides + command reference
+                without hunting. Styled like a section header but acts as a
+                direct button. */}
+            <button
+              type="button"
+              onClick={() => fire("/help")}
+              title="Browse the guides and every command"
+              className="flex w-full items-center gap-2 border-y border-keep-rule/60 bg-keep-banner/40 px-3 py-1.5 text-[10px] font-action uppercase tracking-[0.2em] text-keep-muted hover:bg-keep-banner/60 hover:text-keep-text lg:py-1"
+            >
+              <span aria-hidden className="shrink-0"><HelpCircle size={14} aria-hidden /></span>
+              <span className="flex-1 text-left">Help / Commands</span>
+              <span aria-hidden className="shrink-0 text-sm leading-none text-keep-muted">›</span>
+            </button>
 
             {/* Search lives at the bottom of the drawer so the input is
                 close to the user's resting touch position on mobile.
                 Results render upward (most-relevant nearest the bar), see
-                SearchBar for the spatial-proximity-to-action rationale. */}
+                SearchBar for the spatial-proximity-to-action rationale.
+                It defaults OPEN and toggles independently of the accordion. */}
             <Section
               title="Search this room"
               icon={<Search size={14} aria-hidden />}
-              open={openSection === "Search this room"}
-              onToggle={() => toggleSection("Search this room")}
+              open={searchOpen}
+              onToggle={() => setSearchOpen((v) => !v)}
               innerRef={(el) => { sectionRefs.current["Search this room"] = el; }}
             >
               <div className="px-3 py-2">
@@ -648,13 +669,13 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
       <button
         type="button"
         onClick={() => setDrawerOpen((v) => !v)}
-        title="Open the tools drawer"
+        title="Open the menu"
         className={`mt-1 flex h-9 w-full items-center justify-center gap-2 rounded border border-keep-rule text-xs font-semibold uppercase tracking-widest lg:h-7 ${
           drawerOpen ? "bg-keep-banner" : "bg-keep-bg hover:bg-keep-banner"
         }`}
       >
         <span aria-hidden>{drawerOpen ? "▼" : "▲"}</span>
-        Tools
+        Menu
       </button>
     </div>
   );

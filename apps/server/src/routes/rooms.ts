@@ -23,7 +23,7 @@ import { getSessionUser } from "./auth.js";
 import { getSettings } from "../settings.js";
 import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
-import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MAX_MESSAGES } from "@thekeep/shared";
+import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MAX_MESSAGES, mentionsField } from "@thekeep/shared";
 import { buildChatLogHtml, type ExportMessageRow } from "../export/chatLog.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -730,6 +730,7 @@ export async function registerRoomsRoutes(
           ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
         ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
           ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
+          ...mentionsField(m.mentionsJson),
           ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
           ...(m.rankKey ? { rankKey: m.rankKey } : {}),
           ...(m.tier != null ? { tier: m.tier } : {}),
@@ -984,6 +985,7 @@ export async function registerRoomsRoutes(
         ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
         ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
         ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
+        ...mentionsField(m.mentionsJson),
         ...(m.rankKey ? { rankKey: m.rankKey } : {}),
         ...(m.tier != null ? { tier: m.tier } : {}),
         ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),

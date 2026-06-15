@@ -63,6 +63,53 @@ export function mentionRegex(): RegExp {
 }
 
 /**
+ * Identity-token mentions: `@id:<userId>` and `@cid:<characterId>`. The chat
+ * composer inserts these (instead of a bare `@name`) so a mention points at an
+ * exact identity, never an ambiguous name, and survives names that contain
+ * spaces. The server resolves them at send time, rewrites the body to a plain
+ * `@<displayName>` for display, and snapshots the resolved ids on the message.
+ *
+ * Same leading-boundary rule as `mentionRegex` (start, whitespace, or the `\`
+ * escape) and a trailing boundary so the id can't swallow following text. Ids
+ * are nanoid-shaped (`[A-Za-z0-9_-]`).
+ */
+export function mentionTokenRegex(): RegExp {
+  return new RegExp(
+    `(?<prefix>^|[\\s\\\\])@(?<tokenKind>id|cid):(?<tokenId>[A-Za-z0-9_-]{1,64})(?![A-Za-z0-9_-])`,
+    "gu",
+  );
+}
+
+export interface MentionTokenHit {
+  kind: "id" | "cid";
+  id: string;
+}
+
+/**
+ * List the `@id:`/`@cid:` tokens in a body (deduped), skipping ones inside
+ * code spans or escaped with a leading backslash, mirroring `extractMentions`.
+ * The server resolves these to identities before rewriting the body.
+ */
+export function extractMentionTokens(body: string): MentionTokenHit[] {
+  const out: MentionTokenHit[] = [];
+  const seen = new Set<string>();
+  for (const seg of splitOnCode(body)) {
+    if (seg.kind === "code") continue;
+    for (const m of seg.raw.matchAll(mentionTokenRegex())) {
+      if ((m.groups?.prefix ?? "") === "\\") continue;
+      const kind = m.groups?.tokenKind as "id" | "cid" | undefined;
+      const id = m.groups?.tokenId;
+      if (!kind || !id) continue;
+      const key = `${kind}:${id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ kind, id });
+    }
+  }
+  return out;
+}
+
+/**
  * Extract every lowercased @username mention from a body, ignoring world
  * mentions. Used on both sides for notification gating: the client to
  * decide whether to surface a desktop toast, the server to decide

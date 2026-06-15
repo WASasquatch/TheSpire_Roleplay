@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
-import { customCmdCssToStyle, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, splitOnCode, VMARK_SPAN_RE, type UiRoute } from "@thekeep/shared";
+import { customCmdCssToStyle, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, splitOnCode, VMARK_SPAN_RE, type MentionRef, type UiRoute } from "@thekeep/shared";
 import { openUiRoute } from "./uiRouteOpen.js";
 import { resolveDynamicChipLabel } from "./uiRouteDynamicLabel.js";
 import { splitMentions } from "./mentions.js";
@@ -969,6 +969,12 @@ export function renderForumBody(
    * callers that don't subscribe to the mention cache.
    */
   knownMentions?: ReadonlySet<string> | null,
+  /**
+   * Snapshot of resolved `@id:`/`@cid:` mentions for this post. When a mention
+   * chip matches one (by displayed name), clicking opens the exact identity by
+   * id and the chip is always treated as known/clickable.
+   */
+  mentions: ReadonlyArray<MentionRef> = [],
 ): ReactNode {
   const out: ReactNode[] = [];
   splitOnCode(body).forEach((seg, segIdx) => {
@@ -1004,7 +1010,7 @@ export function renderForumBody(
             key={`q${segIdx}-${idx}`}
             className="my-1 whitespace-pre-wrap border-l-2 border-keep-action/50 bg-keep-banner/40 px-3 py-1 text-keep-muted italic"
           >
-            {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames, knownMentions)}
+            {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames, knownMentions, mentions)}
           </blockquote>,
         );
         return;
@@ -1013,7 +1019,7 @@ export function renderForumBody(
       const parts = splitMentions(joined);
       out.push(
         <Fragment key={`p${segIdx}-${idx}`}>
-          {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames, knownMentions)}
+          {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames, knownMentions, mentions)}
         </Fragment>,
       );
     });
@@ -1034,10 +1040,15 @@ function renderPartsInline(
   onWorldClick: (slug: string) => void,
   selfNames: ReadonlyArray<string> = [],
   knownMentions?: ReadonlySet<string> | null,
+  mentions: ReadonlyArray<MentionRef> = [],
 ): ReactNode[] {
+  // Normalize NBSP to a real space so a mention rendered with the "fake space"
+  // matches a self name or a snapshot ref typed with a regular space.
+  const norm = (s: string) => s.toLowerCase().replace(/\u00a0/g, " ");
   // Lowercase + Set for O(1) per-mention lookup. Cheap to rebuild
   // per render; selfNames is typically 0–2 entries.
-  const selfSet = new Set(selfNames.map((n) => n.toLowerCase()));
+  const selfSet = new Set(selfNames.map(norm));
+  const mentionMap = new Map(mentions.map((m) => [norm(m.name), m]));
   const out: ReactNode[] = [];
   parts.forEach((p, i) => {
     if (p.kind === "text") {
@@ -1055,13 +1066,16 @@ function renderPartsInline(
         </button>,
       );
     } else {
-      const isSelf = selfSet.has(p.name);
-      const isKnown = isSelf || (knownMentions ? knownMentions.has(p.name) : true);
+      // Snapshot ref pins the exact identity (from an `@id:`/`@cid:` token):
+      // click opens it by id, and a ref always counts as a known mention.
+      const ref = mentionMap.get(norm(p.name));
+      const isSelf = selfSet.has(norm(p.name));
+      const isKnown = isSelf || !!ref || (knownMentions ? knownMentions.has(p.name) : true);
       if (!isKnown) {
         out.push(<Fragment key={i}>@{p.raw}</Fragment>);
         return;
       }
-      out.push(renderMentionButton(p.raw, p.name, selfSet, onMentionClick, i));
+      out.push(renderMentionButton(p.raw, p.name, isSelf, ref, onMentionClick, i));
     }
   });
   return out;
@@ -1082,11 +1096,17 @@ function renderPartsInline(
 function renderMentionButton(
   raw: string,
   name: string,
-  selfSet: ReadonlySet<string>,
-  onMentionClick: (name: string) => void,
+  isSelf: boolean,
+  ref: MentionRef | undefined,
+  onMentionClick: (nameOrToken: string) => void,
   key: number | string,
 ): ReactNode {
-  const isSelf = selfSet.has(name);
+  // When the mention resolved to a snapshot identity, click by its exact token
+  // so the right profile opens even when a name is shared or contains spaces.
+  // Otherwise fall back to the display name (legacy hand-typed mentions).
+  const clickTarget = ref
+    ? (ref.characterId ? `@cid:${ref.characterId}` : `@id:${ref.userId}`)
+    : name;
   const className = isSelf
     ? "rounded bg-keep-system-100 px-1 font-semibold text-keep-system-500 ring-1 ring-keep-system/40 hover:bg-keep-system-200 focus:outline-none focus:ring-2"
     : "rounded px-0.5 font-semibold text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action";
@@ -1094,7 +1114,7 @@ function renderMentionButton(
     <button
       key={key}
       type="button"
-      onClick={() => onMentionClick(name)}
+      onClick={() => onMentionClick(clickTarget)}
       className={className}
       title={isSelf ? `You were mentioned (${raw})` : `View ${raw}'s profile`}
     >

@@ -9,6 +9,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import type { CommandDoc, RoomOccupant, ThreadCategory } from "@thekeep/shared";
+import { extractMentionTokens } from "@thekeep/shared";
 import { CompleterPopup, type CompletionItem } from "./CompleterPopup.js";
 import { EarningStatsStrip } from "./EarningStatsStrip.js";
 import { EmoticonPickerButton } from "./EmoticonPickerButton.js";
@@ -18,6 +19,13 @@ import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
 import type { InventoryEntry, ItemCatalogRow } from "../lib/earning.js";
 import { markMentionKnown } from "../state/mentions.js";
+import {
+  getIdentityTokenName,
+  isUnknownIdentityToken,
+  markIdentityTokenKnown,
+  requestIdentityTokenResolve,
+  useIdentityTokensCache,
+} from "../state/identityTokens.js";
 import { getSocket } from "../lib/socket.js";
 
 interface Props {
@@ -574,7 +582,10 @@ export function Composer({
   const [serverSuggestions, setServerSuggestions] = useState<ServerSuggestion[]>([]);
   const searchReqRef = useRef(0);
   useEffect(() => {
-    if (!trigger || (trigger.kind !== "@" && trigger.kind !== "whisper-target")) {
+    // Only the whisper-target path still uses the name-string source; `@`
+    // mentions now insert identity tokens from `identitySuggestions` below so
+    // they point at an exact identity (no name collisions, spaces survive).
+    if (!trigger || trigger.kind !== "whisper-target") {
       setServerSuggestions([]);
       return;
     }
@@ -635,7 +646,9 @@ export function Composer({
   const [identitySuggestions, setIdentitySuggestions] = useState<IdentitySuggestion[]>([]);
   const identityReqRef = useRef(0);
   useEffect(() => {
-    if (!trigger || trigger.kind !== "user-target") {
+    // user-target (e.g. /duel) AND `@` mentions both need the full identity
+    // tuple so the picker can insert an `@cid:`/`@id:` token.
+    if (!trigger || (trigger.kind !== "user-target" && trigger.kind !== "@")) {
       setIdentitySuggestions([]);
       return;
     }
@@ -816,7 +829,45 @@ export function Composer({
       out.sort((a, b) => a.label.localeCompare(b.label));
       return out.slice(0, MAX_COMPLETIONS);
     }
-    // @-mention OR whisper-target. Two sources, merged:
+    // @-mention. Inserts an identity TOKEN (`@cid:<id>` / `@id:<id>`), not the
+    // typed name, so the mention points at an EXACT identity. This fixes two
+    // long-standing bugs: a character name with real spaces never matched the
+    // NBSP-escaped mention text (so it silently failed to ping or link), and a
+    // name shared by an account and a character resolved to whichever the
+    // server found first. The server resolves the token at send time, rewrites
+    // the body to `@<displayName>` for display, and snapshots the id so the
+    // chip opens the right profile and self-mentions highlight correctly.
+    // Sources are the same two as before, but both carry the id tuple:
+    // occupants (instant) + /identities/autocomplete (offline / out-of-room).
+    if (trigger.kind === "@") {
+      const out: CompletionItem[] = [];
+      const seen = new Set<string>();
+      const pushIdentity = (
+        userId: string,
+        characterId: string | null,
+        displayName: string,
+        sublabel?: string,
+      ) => {
+        const idKey = characterId ? `c:${characterId}` : `u:${userId}`;
+        if (seen.has(idKey)) return;
+        seen.add(idKey);
+        const token = characterId ? `@cid:${characterId}` : `@id:${userId}`;
+        out.push({ value: token, label: `@${displayName}`, ...(sublabel ? { sublabel } : {}) });
+      };
+      if (occupants) {
+        for (const o of occupants) {
+          if (trigger.query.length > 0 && !o.displayName.toLowerCase().startsWith(trigger.query)) continue;
+          pushIdentity(o.userId, o.characterId, o.displayName, o.away ? "in room, away" : "in room");
+        }
+      }
+      out.sort((a, b) => a.label.localeCompare(b.label));
+      for (const s of identitySuggestions) {
+        const sublabel = s.kind === "character" ? `character of ${s.masterUsername}` : "user";
+        pushIdentity(s.userId, s.characterId, s.displayName, sublabel);
+      }
+      return out.slice(0, MAX_COMPLETIONS);
+    }
+    // whisper-target. Two sources, merged:
     //   1. Occupants of the current room (instant, fastest path for
     //      "who's here right now").
     //   2. Server `/users?q=` suggestions (catches offline folks +
@@ -836,16 +887,16 @@ export function Composer({
     // results don't look weird.
     const NBSP = " ";
     const out: CompletionItem[] = [];
-    const wantAt = trigger.kind === "@";
     const seen = new Set<string>();
     const push = (displayName: string, sublabel?: string) => {
       const key = displayName.toLowerCase();
       if (seen.has(key)) return;
       seen.add(key);
-      const mentionValue = displayName.replace(/ /g, NBSP);
+      // whisper-target inserts the bare (NBSP-joined) name; the /whisper
+      // resolver normalizes NBSP vs space server-side.
       out.push({
-        value: wantAt ? `@${mentionValue}` : mentionValue,
-        label: wantAt ? `@${displayName}` : displayName,
+        value: displayName.replace(/ /g, NBSP),
+        label: displayName,
         ...(sublabel ? { sublabel } : {}),
       });
     };
@@ -1022,6 +1073,16 @@ export function Composer({
     if (t.kind === "@" || t.kind === "whisper-target") {
       const picked = item.value.startsWith("@") ? item.value.slice(1) : item.value;
       if (picked) markMentionKnown(picked);
+    }
+    // If the picker inserted an identity TOKEN (`@cid:`/`@id:`), prime its
+    // display name so the "Mentioning:" hint resolves instantly (no
+    // round-trip), and prime the @name chip cache for the post-send rewrite.
+    const tokenMatch = /^@(id|cid):([A-Za-z0-9_-]{1,64})$/.exec(item.value);
+    const tokKind = tokenMatch?.[1];
+    const tokId = tokenMatch?.[2];
+    if (tokKind && tokId && item.label) {
+      markIdentityTokenKnown(tokKind as "id" | "cid", tokId, item.label);
+      markMentionKnown(item.label);
     }
     // setSelectionRange has to wait for the controlled value to flush, so
     // schedule it after the next paint.
@@ -1339,6 +1400,29 @@ export function Composer({
     (forumCreating && !topicTitle.trim()) ||
     !value.trim();
 
+  // Identity tokens currently in the draft (`@id:`/`@cid:`). The composer
+  // inserts these so a mention targets an exact identity, but the raw token
+  // is an opaque id — resolve each to a display name so the author can see
+  // WHO they're referencing before sending.
+  const draftTokens = useMemo(() => extractMentionTokens(value), [value]);
+  useEffect(() => {
+    if (draftTokens.length > 0) requestIdentityTokenResolve(draftTokens);
+  }, [draftTokens]);
+  // Subscribe to the cache so resolved names re-render the hint when they land.
+  const tokenCacheVersion = useIdentityTokensCache((s) => s.version);
+  const tokenHints = useMemo(
+    () => draftTokens.map((t) => ({
+      key: `${t.kind}:${t.id}`,
+      kind: t.kind,
+      id: t.id,
+      name: getIdentityTokenName(t.kind, t.id),
+      unknown: isUnknownIdentityToken(t.kind, t.id),
+    })),
+    // tokenCacheVersion drives the re-read of the (mutated-in-place) cache.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [draftTokens, tokenCacheVersion],
+  );
+
   return (
     <form
       onSubmit={submit}
@@ -1634,6 +1718,35 @@ export function Composer({
           toolbar row on mobile (md+ never had it), which gives the
           textarea full row-width and lets longer messages show more
           lines without scrolling. */}
+      {/* Resolved-identity hint. When the draft contains `@id:`/`@cid:`
+          tokens (inserted by the @-picker or pasted from a profile's
+          copy-token chip), show who each one references so the opaque id
+          isn't a mystery before sending. Unresolved tokens read as
+          "unknown identity" so a stale/bad token is obvious. */}
+      {tokenHints.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1 px-0.5 text-[11px] text-keep-muted">
+          <span className="opacity-70">Mentioning:</span>
+          {tokenHints.map((h) => (
+            h.name ? (
+              <span
+                key={h.key}
+                className="rounded border border-keep-action/40 bg-keep-action/10 px-1.5 py-0.5 font-medium text-keep-text"
+                title={`@${h.kind}:${h.id}`}
+              >
+                @{h.name}
+              </span>
+            ) : (
+              <span
+                key={h.key}
+                className="rounded border border-keep-rule/50 bg-keep-bg/60 px-1.5 py-0.5"
+                title={`@${h.kind}:${h.id}`}
+              >
+                {h.unknown ? "unknown identity" : "resolving…"}
+              </span>
+            )
+          ))}
+        </div>
+      ) : null}
       <div className="flex items-stretch gap-2">
       <div className="relative flex-1">
         {/* The popup positions itself above the textarea via bottom-full. */}

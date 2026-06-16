@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Ban, EyeOff, MessageSquare, Send } from "lucide-react";
+import { Ban, EyeOff, Flag, MessageSquare, Send } from "lucide-react";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import { CHARACTER_VIBE_AXES, isAdminRole, legibleAgainstBg, legibleThemePalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
 import type { CharacterAttribute, CharacterPortrait, CharacterVibeAxisKey, EidolonProfileSummary, ProfileLibraryEntry, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
@@ -9,7 +9,7 @@ import { BorderedAvatar } from "./BorderedAvatar.js";
 import { CloseButton } from "./CloseButton.js";
 import { genderGlyph } from "../lib/gender.js";
 import type { Gender } from "../lib/gender.js";
-import { profileShareUrl } from "../lib/profiles.js";
+import { profileShareUrl, reportProfile } from "../lib/profiles.js";
 import { fetchPublicEarning, type PublicEarningResponse } from "../lib/earning.js";
 import { ArcadeError, fetchEidolonSummary, patFamiliar } from "../lib/arcade.js";
 import { ItemZoomView } from "./ItemZoomView.js";
@@ -19,6 +19,7 @@ import { StyledName } from "./StyledName.js";
 import { useChat } from "../state/store.js";
 import { ProfileMarquee, ProfileVisitorsChip, useTrackProfileView } from "./ProfileFlairSurfaces.js";
 import { EditBioModal } from "./EditBioModal.js";
+import { loadViewerHiddenImageIds, saveViewerHiddenImageIds } from "../lib/viewerNsfw.js";
 import {
   banAccount,
   fetchUserModeration,
@@ -163,7 +164,11 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   // bypassNsfwGate prop. State is per-modal-mount, so closing + reopening
   // re-prompts (intentional - "I confirmed once 20 minutes ago" isn't a
   // strong enough signal to skip the gate forever).
-  const requiresGate = profile.profile.isNsfw && !bypassNsfwGate;
+  // Gate when the profile is wholly marked NSFW OR contains ANY NSFW image
+  // in its gallery, so a profile that slips explicit content into portraits
+  // (without flagging the whole profile) still prompts before reveal.
+  const anyPortraitNsfw = isChar && profile.profile.portraits.some((p) => p.nsfw);
+  const requiresGate = (profile.profile.isNsfw || anyPortraitNsfw) && !bypassNsfwGate;
   const [gateAccepted, setGateAccepted] = useState(false);
   const gated = requiresGate && !gateAccepted;
 
@@ -466,6 +471,9 @@ function ProfileBody({
   const canEditBio = isModViewer && !isSelfAccount && myPerms.includes(profileEditPerm);
   const canFlagGallery = canEditBio; // same permission family gates both
   const canBanAccount = isModViewer && !isSelfAccount && myPerms.includes("ban_account");
+  // Any signed-in non-owner can report this profile for review.
+  const canReport = viewerId !== null && !isSelfAccount;
+  const [reportOpen, setReportOpen] = useState(false);
   // Scope object reused by the gallery NSFW toggle + the bio editor.
   const modScope: { kind: "character"; characterId: string } | { kind: "master" } = isChar
     ? { kind: "character", characterId: (profile.profile as { id: string }).id }
@@ -546,7 +554,7 @@ function ProfileBody({
   //   - desktop (≥640px): original layout preserved, XL avatar,
   //     XP/Currency as the prominent chip pair, action buttons inline
   //     beneath the meta.
-  const hasActions = !!(onWhisper || onMessage || onIgnore || onBlock || activeCharacterAction);
+  const hasActions = !!(onWhisper || onMessage || onIgnore || onBlock || activeCharacterAction || canReport);
   // Action-button ink, made legible against the hero band SPECIFICALLY.
   // The band is a solid `bg-keep-panel`, and the pills/segments render with
   // transparent fills directly on it — so their semantic colors must be
@@ -1027,6 +1035,19 @@ function ProfileBody({
                     <Ban className="h-4 w-4" aria-hidden="true" />
                   </button>
                 ) : null}
+                {/* Report: any signed-in viewer (not the owner) can flag a
+                    profile for moderator review (e.g. explicit imagery). */}
+                {canReport ? (
+                  <button
+                    type="button"
+                    onClick={() => setReportOpen(true)}
+                    title="Report this profile for moderator review"
+                    aria-label="Report profile"
+                    className={ACT_PILL_ACCENT}
+                  >
+                    <Flag className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1117,14 +1138,37 @@ function ProfileBody({
                 title="Block: you and this user become invisible to each other everywhere."
                 aria-label="Block"
                 style={{ color: inkSystem }}
-                className={ACT_SEG_SYSTEM}
+                // Right-border separator only when the Report segment follows;
+                // otherwise Block is the last segment and gets no trailing rule.
+                className={`${ACT_SEG_SYSTEM}${canReport ? ` ${ACT_SEG_DIVIDER}` : ""}`}
               >
                 <Ban className="h-4 w-4" aria-hidden="true" />
+              </button>
+            ) : null}
+            {canReport ? (
+              <button
+                type="button"
+                onClick={() => setReportOpen(true)}
+                title="Report this profile for moderator review"
+                aria-label="Report profile"
+                style={{ color: inkAccent }}
+                className={ACT_SEG_ACCENT}
+              >
+                <Flag className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : null}
           </div>
         ) : null}
         </div>
+
+        {reportOpen ? (
+          <ReportProfileModal
+            targetUserId={profile.profile.userId}
+            targetCharacterId={isChar ? (profile.profile as { id: string }).id : null}
+            targetName={name}
+            onClose={() => setReportOpen(false)}
+          />
+        ) : null}
 
         {/* Profile-flair surfaces, the quote marquee (when the
             owner has flair_profile_marquee + configured quotes)
@@ -1518,10 +1562,9 @@ function NsfwGate({
   return (
     <div className="flex flex-col items-center justify-center gap-4 px-6 py-10 text-center">
       <div aria-hidden className="text-4xl text-keep-accent">⚠</div>
-      <h2 className="font-action text-xl">NSFW content ahead</h2>
+      <h2 className="font-action text-xl">NSFW Profile</h2>
       <p className="max-w-prose text-sm text-keep-text/80">
-        {subject} is marked <b>NSFW</b> by its owner. Click{" "}
-        <span className="font-semibold">View Profile</span> to confirm you want to see it.
+        {subject} contains content marked <b>NSFW</b>. Do you want to proceed?
         Closing this modal and re-opening will prompt again.
       </p>
       <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
@@ -1530,17 +1573,120 @@ function NsfwGate({
           onClick={onCancel}
           className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
         >
-          Back
+          Go back
         </button>
         <button
           type="button"
           onClick={onAccept}
           className="rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-sm font-semibold text-keep-accent hover:bg-keep-accent/20"
         >
-          View Profile
+          Proceed
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Report-a-profile modal. Any signed-in viewer (not the owner) can flag a
+ * profile for moderator review, e.g. explicit imagery / rule-breaking
+ * content. Sends a `kind: "profile"` report; the queue surfaces it for
+ * mods. A reason is encouraged but optional.
+ */
+function ReportProfileModal({
+  targetUserId,
+  targetCharacterId,
+  targetName,
+  onClose,
+}: {
+  targetUserId: string;
+  targetCharacterId: string | null;
+  targetName: string;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  async function submit() {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await reportProfile(targetUserId, targetCharacterId, reason);
+      setDone(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Report failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose} zIndex={70}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="keep-frame w-[min(440px,96vw)] rounded bg-keep-parchment p-4"
+      >
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="font-action text-lg">Report {targetName}</h3>
+          <CloseButton onClick={onClose} />
+        </div>
+        {done ? (
+          <>
+            <p className="text-sm text-keep-text/80">
+              Thank you. This profile has been sent to the moderators for review.
+            </p>
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
+              >
+                Close
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="mb-2 text-xs text-keep-muted">
+              Flag this profile for moderator review (e.g. explicit imagery or rule-breaking content).
+              Tell us what's wrong, optional but helpful.
+            </p>
+            <textarea
+              value={reason}
+              maxLength={500}
+              rows={4}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="What's wrong with this profile?"
+              className="w-full resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
+              // eslint-disable-next-line jsx-a11y/no-autofocus
+              autoFocus
+            />
+            {err ? <div className="mt-2 text-[11px] text-keep-accent">{err}</div> : null}
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={busy}
+                className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={busy}
+                className="rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-sm font-semibold text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+              >
+                {busy ? "Reporting…" : "Submit report"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -1880,12 +2026,21 @@ function PortraitGallery({
     if (activeId !== null && portraits.some((p) => p.id === activeId)) return;
     setActiveId(portraits[0]!.id);
   }, [portraits, activeId]);
-  // Per-portrait reveal state for owner-marked NSFW tiles. Resets on profile
+  // Per-portrait SESSION reveal state for censored tiles. Resets on profile
   // re-open (the modal remounts), so a viewer who reveals here doesn't stay
   // revealed after closing and reopening the profile.
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
+  // Per-VIEWER permanent censor marks, persisted in localStorage. The viewer
+  // can hide ANY image they dislike (NSFW-flagged or not); it stays censored
+  // for them across sessions until they toggle it back. Private to them, the
+  // owner/mod `nsfw` flag is separate (see lib/viewerNsfw).
+  const [viewerHidden, setViewerHidden] = useState<Set<string>>(loadViewerHiddenImageIds);
+  // An image is censored when EITHER the owner/mod flagged it NSFW OR this
+  // viewer hid it, and it hasn't been session-revealed.
+  const isCensored = (p: CharacterPortrait): boolean =>
+    (p.nsfw || viewerHidden.has(p.id)) && !revealed.has(p.id);
   const active = portraits.find((p) => p.id === activeId) ?? null;
-  const activeIsCensored = !!active && active.nsfw && !revealed.has(active.id);
+  const activeIsCensored = !!active && isCensored(active);
 
   function reveal(id: string) {
     setRevealed((prev) => {
@@ -1893,6 +2048,32 @@ function PortraitGallery({
       next.add(id);
       return next;
     });
+  }
+
+  /** Toggle the viewer's private censor for an image (the red-eye control).
+   *  Visible → hide (persisted, re-blurs now). Censored → reveal this
+   *  session AND clear any persisted hide so it stays shown next time;
+   *  an owner/mod NSFW flag can't be cleared this way (it just reveals
+   *  for the session, the existing per-mount behavior). */
+  function toggleViewerCensor(p: CharacterPortrait) {
+    const censored = isCensored(p);
+    if (censored) {
+      reveal(p.id);
+      if (viewerHidden.has(p.id)) {
+        setViewerHidden((prev) => {
+          const next = new Set(prev); next.delete(p.id); saveViewerHiddenImageIds(next); return next;
+        });
+      }
+    } else {
+      setViewerHidden((prev) => {
+        const next = new Set(prev); next.add(p.id); saveViewerHiddenImageIds(next); return next;
+      });
+      // Drop any session reveal so it re-blurs immediately.
+      setRevealed((prev) => {
+        if (!prev.has(p.id)) return prev;
+        const next = new Set(prev); next.delete(p.id); return next;
+      });
+    }
   }
 
   return (
@@ -1935,13 +2116,26 @@ function PortraitGallery({
             {activeIsCensored ? (
               <button
                 type="button"
-                onClick={() => reveal(active.id)}
+                onClick={() => toggleViewerCensor(active)}
                 className="absolute inset-0 flex flex-col items-center justify-center gap-1 rounded bg-black/40 text-xs uppercase tracking-widest text-white hover:bg-black/30"
               >
-                <span>NSFW</span>
+                <span>{active.nsfw ? "NSFW" : "Hidden"}</span>
                 <span className="rounded border border-white/60 bg-black/40 px-2 py-0.5 text-[10px]">click to reveal</span>
               </button>
-            ) : null}
+            ) : (
+              // Red-eye re-censor toggle on a visible image: hide it for
+              // YOU (persists across sessions until you toggle it back).
+              // Works on any image, NSFW-flagged or not.
+              <button
+                type="button"
+                onClick={() => toggleViewerCensor(active)}
+                className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-black/55 text-keep-accent hover:bg-black/75"
+                title="Censor this image for you (stays hidden when you view this profile again)"
+                aria-label="Censor this image for you"
+              >
+                <EyeOff className="h-4 w-4" />
+              </button>
+            )}
           </div>
           {active.label ? (
             <span className="text-sm italic text-keep-muted">{active.label}</span>
@@ -1986,7 +2180,7 @@ function PortraitGallery({
           the right and pushed the visible row to the left. */}
       <div className="mx-auto grid max-w-[70%] grid-cols-[repeat(auto-fit,88px)] justify-center gap-2">
         {portraits.map((p) => {
-          const tileCensored = p.nsfw && !revealed.has(p.id);
+          const tileCensored = isCensored(p);
           return (
             <button
               key={p.id}
@@ -2001,7 +2195,7 @@ function PortraitGallery({
                 }
                 setActiveId((prev) => (prev === p.id ? null : p.id));
               }}
-              title={p.nsfw ? `${p.label ?? "Portrait"} (NSFW, click to reveal)` : p.label ?? "Portrait"}
+              title={tileCensored ? `${p.label ?? "Portrait"} (${p.nsfw ? "NSFW" : "hidden"}, click to reveal)` : p.label ?? "Portrait"}
               className={`relative aspect-square overflow-hidden rounded transition ${
                 activeId === p.id ? "ring-2 ring-keep-action" : "hover:ring-2 hover:ring-keep-action/50"
               }`}
@@ -2014,7 +2208,7 @@ function PortraitGallery({
               />
               {tileCensored ? (
                 <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-[10px] font-semibold uppercase tracking-widest text-white">
-                  NSFW
+                  {p.nsfw ? "NSFW" : "Hidden"}
                 </span>
               ) : null}
             </button>

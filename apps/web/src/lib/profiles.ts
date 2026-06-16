@@ -106,3 +106,32 @@ export function profileShareUrl(name: string): string {
   if (typeof window === "undefined") return path;
   return `${window.location.origin}${path}`;
 }
+
+/**
+ * File a report against a whole profile (e.g. explicit imagery / rule-
+ * breaking content), for moderator review. `characterId` records which
+ * persona surfaced it; omit for a master/OOC profile. Throws on failure
+ * (incl. 409 "already reported") so the caller can surface the message.
+ */
+export async function reportProfile(
+  targetUserId: string,
+  targetCharacterId: string | null,
+  reason: string,
+): Promise<void> {
+  const r = await fetch("/reports", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      kind: "profile",
+      targetUserId,
+      ...(targetCharacterId ? { targetCharacterId } : {}),
+      ...(reason.trim() ? { reason: reason.trim() } : {}),
+    }),
+  });
+  if (!r.ok) {
+    let msg = `Report failed (${r.status})`;
+    try { const j = (await r.json()) as { error?: string }; if (j?.error) msg = j.error; } catch { /* non-JSON */ }
+    throw new Error(msg);
+  }
+}

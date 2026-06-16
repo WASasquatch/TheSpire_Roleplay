@@ -51,7 +51,7 @@ export async function toggleReaction(
     if (ref.kind === "sheet") {
       recordEmoticonPick(ref.sheetSlug, ref.cellIndex);
     }
-    await fetch("/reactions/toggle", {
+    const res = await fetch("/reactions/toggle", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -64,9 +64,22 @@ export async function toggleReaction(
       }),
       credentials: "include",
     });
-    // The cache will update from the realtime `reaction:update` event.
-    // No manual merge here, that would risk doubling reactor entries
-    // when the socket event races the fetch response.
+    // Apply the authoritative summary the endpoint returns. The realtime
+    // `reaction:update` event ALSO lands for viewers joined to the target's
+    // room, but it does NOT reach surfaces that aren't, most importantly the
+    // Forums Catalog (topics/posts are chat_message reactions, but the
+    // catalog fetches over HTTP and never joins the board's socket room),
+    // which is why reactions there silently did nothing. Applying the
+    // returned summary is an authoritative REPLACE, idempotent with the
+    // socket merge (which dedups by user), so no doubling when both land.
+    if (res.ok) {
+      const data = (await res.json().catch(() => null)) as
+        | { summary?: { targetKind: ReactionTargetKind; targetId: string; entries: ReactionEntry[] } }
+        | null;
+      if (data?.summary && Array.isArray(data.summary.entries)) {
+        useEmoticons.getState().setReactions(targetKind, targetId, data.summary.entries);
+      }
+    }
   } catch {
     /* swallow, network blip; next reload re-syncs from backlog */
   }

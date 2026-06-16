@@ -1,10 +1,10 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { hasPermission } from "../auth/permissions.js";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { ReportEntry, ReportStatus } from "@thekeep/shared";
-import { directConversations, directMessages, messages, reports, rooms, users } from "../db/schema.js";
+import { characters, directConversations, directMessages, messages, reports, rooms, users } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
 import type { Db } from "../db/index.js";
@@ -31,6 +31,16 @@ const createReportBody = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("dm"),
     directMessageId: z.string().min(1),
+    reason: z.string().max(500).optional(),
+  }).strict(),
+  z.object({
+    // Report a whole profile (e.g. explicit imagery / rule-breaking
+    // content found on it). Targets the master account; an optional
+    // characterId records which persona surfaced it. No message body,
+    // the mod opens the profile to review.
+    kind: z.literal("profile"),
+    targetUserId: z.string().min(1),
+    targetCharacterId: z.string().min(1).optional(),
     reason: z.string().max(500).optional(),
   }).strict(),
 ]);
@@ -107,6 +117,40 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
         }
         throw err;
       }
+      return { ok: true };
+    }
+
+    // Profile branch.
+    if (parsed.kind === "profile") {
+      const target = (await db.select().from(users).where(eq(users.id, parsed.targetUserId)).limit(1))[0];
+      if (!target) { reply.code(404); return { error: "user not found" }; }
+      if (target.id === me.id) { reply.code(400); return { error: "you can't report your own profile" }; }
+      let snapName = target.username;
+      if (parsed.targetCharacterId) {
+        const c = (await db.select({ name: characters.name, userId: characters.userId })
+          .from(characters).where(eq(characters.id, parsed.targetCharacterId)).limit(1))[0];
+        if (c && c.userId === target.id) snapName = c.name;
+      }
+      // Dedup: one OPEN profile report per (reporter, target). Profile
+      // reports carry neither messageId nor directMessageId, so the
+      // (reporter, message) unique index doesn't apply, gate in code.
+      const existing = (await db.select({ id: reports.id }).from(reports).where(and(
+        eq(reports.reporterUserId, me.id),
+        eq(reports.senderUserId, target.id),
+        isNull(reports.messageId),
+        isNull(reports.directMessageId),
+        eq(reports.status, "open"),
+      )).limit(1))[0];
+      if (existing) { reply.code(409); return { error: "you already reported this profile" }; }
+      await db.insert(reports).values({
+        id: nanoid(),
+        reporterUserId: me.id,
+        // Reuse senderUserId as the reported party (same as DM reports);
+        // bodySnapshot describes the target so the queue stands alone.
+        senderUserId: target.id,
+        bodySnapshot: `Profile report: ${snapName}${parsed.targetCharacterId ? " (character)" : ""}`,
+        reason: parsed.reason?.trim() || null,
+      });
       return { ok: true };
     }
 
@@ -217,7 +261,10 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
       // looking up the live row. The /admin/* surface deliberately
       // never queries `direct_messages` directly.
       const isDmReport = !!r.directMessageId;
-      const dmSender = r.senderUserId ? userById.get(r.senderUserId) : undefined;
+      // Profile reports carry a reported party (senderUserId) but no
+      // message of either kind; the snapshot describes the target.
+      const isProfileReport = !r.messageId && !r.directMessageId && !!r.senderUserId;
+      const reportedUser = r.senderUserId ? userById.get(r.senderUserId) : undefined;
       return {
         id: r.id,
         reporterUserId: r.reporterUserId,
@@ -225,19 +272,19 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
         messageId: r.messageId ?? r.directMessageId ?? "",
         // Soft-deleted messages return their placeholder rather than the
         // wiped body; admins still see what was reported, but if the
-        // author already removed it the queue makes that visible. DM
-        // reports return their snapshot.
-        messageBody: isDmReport
+        // author already removed it the queue makes that visible. DM +
+        // profile reports return their snapshot.
+        messageBody: isProfileReport || isDmReport
           ? (r.bodySnapshot ?? "[snapshot gone]")
           : (msg
               ? (msg.deletedAt ? "[message removed]" : msg.body)
               : "[message gone]"),
-        messageDisplayName: isDmReport
-          ? (dmSender?.username ?? "(unknown)")
+        messageDisplayName: isProfileReport || isDmReport
+          ? (reportedUser?.username ?? "(unknown)")
           : (msg?.displayName ?? "(unknown)"),
-        messageCreatedAt: msg ? +msg.createdAt : (isDmReport ? +r.createdAt : 0),
+        messageCreatedAt: msg ? +msg.createdAt : ((isDmReport || isProfileReport) ? +r.createdAt : 0),
         roomId: r.roomId ?? "",
-        roomName: isDmReport ? "(direct message)" : (room?.name ?? "(deleted room)"),
+        roomName: isProfileReport ? "(profile)" : isDmReport ? "(direct message)" : (room?.name ?? "(deleted room)"),
         reason: r.reason,
         status: r.status as ReportStatus,
         resolvedById: r.resolvedById,

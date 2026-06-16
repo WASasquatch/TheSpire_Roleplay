@@ -31,6 +31,12 @@ interface EmoticonState {
   setSheets: (sheets: EmoticonSheet[]) => void;
   /** Prime the reactions cache for a target (from inline message payload). */
   primeReactions: (kind: ReactionTargetKind, targetId: string, entries: ReactionEntry[] | undefined) => void;
+  /** Authoritatively REPLACE a target's cached entries (incl. empty, which
+   *  clears them). Used by the toggle endpoint's returned summary so a
+   *  reaction lands even when the realtime `reaction:update` can't reach the
+   *  viewer, e.g. the Forums Catalog, where the socket isn't joined to the
+   *  board's room. Idempotent with the socket merge (which dedups by user). */
+  setReactions: (kind: ReactionTargetKind, targetId: string, entries: ReactionEntry[]) => void;
   /** Drop cached reactions for a target (used when the message is deleted). */
   dropReactions: (kind: ReactionTargetKind, targetId: string) => void;
   /** Merge a realtime add/remove into the cache. */
@@ -56,6 +62,11 @@ export const useEmoticons = create<EmoticonState>((set, get) => ({
       // wipe their fresh reaction.
       return;
     }
+    set((s) => ({
+      reactions: { ...s.reactions, [reactionsKey(kind, targetId)]: entries },
+    }));
+  },
+  setReactions: (kind, targetId, entries) => {
     set((s) => ({
       reactions: { ...s.reactions, [reactionsKey(kind, targetId)]: entries },
     }));

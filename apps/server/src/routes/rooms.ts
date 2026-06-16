@@ -22,6 +22,7 @@ import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { getSettings } from "../settings.js";
 import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
+import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
 import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MAX_MESSAGES, mentionsField } from "@thekeep/shared";
 import { buildChatLogHtml, type ExportMessageRow } from "../export/chatLog.js";
@@ -259,13 +260,7 @@ export async function registerRoomsRoutes(
 
     // Cross-room whisper overlay, see the union in
     // sendRoomBacklogTo / GET /rooms/:id/messages for the rationale.
-    const roomOrPartyWhisper = or(
-      and(sql`${messages.kind} != 'whisper'`, eq(messages.roomId, room.id)),
-      and(
-        sql`${messages.kind} = 'whisper'`,
-        or(eq(messages.userId, me.id), eq(messages.toUserId, me.id)),
-      ),
-    );
+    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id);
 
     // Pull `before` rows with createdAt <= target (inclusive of target via
     // <= + de-dup below), and `after` rows strictly newer.
@@ -387,13 +382,7 @@ export async function registerRoomsRoutes(
     // sendRoomBacklogTo. Non-whisper rows are scoped to THIS room;
     // whisper rows the caller is a party to are pulled regardless of
     // their original room.
-    const roomOrPartyWhisper = or(
-      and(sql`${messages.kind} != 'whisper'`, eq(messages.roomId, room.id)),
-      and(
-        sql`${messages.kind} = 'whisper'`,
-        or(eq(messages.userId, me.id), eq(messages.toUserId, me.id)),
-      ),
-    );
+    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id);
 
     // Per-viewer `/clear` marker: never page back past the point this
     // user cleared the room. Keeps the scroll-up loader from resurrecting
@@ -523,13 +512,7 @@ export async function registerRoomsRoutes(
         .where(eq(ignores.userId, me.id))).map((r) => r.ignoredUserId),
     );
     for (const blockedId of await blockedUserIdsFor(db, me.id)) ignoredIds.add(blockedId);
-    const roomOrPartyWhisper = or(
-      and(sql`${messages.kind} != 'whisper'`, eq(messages.roomId, room.id)),
-      and(
-        sql`${messages.kind} = 'whisper'`,
-        or(eq(messages.userId, me.id), eq(messages.toUserId, me.id)),
-      ),
-    );
+    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id);
     const clearedAt = await getClearedAt(db, me.id, room.id);
 
     // Most recent (window ∩ cap) rows DESC; overfetch one to detect that the

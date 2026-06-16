@@ -189,6 +189,31 @@
   .hint b{color:var(--brass);font-style:normal;font-family:"Spline Sans Mono",monospace;font-size:11px}
   @media (hover:none) and (pointer:coarse){ .kbdonly{display:none} }
   @media (prefers-reduced-motion: reduce){ .card{transition:none} }
+
+  /* ---- mobile / small viewport (the host renders us fullscreen) ----
+     The desktop cabinet is a fixed-aspect "CRT" (.screen aspect-ratio
+     480/600) centered in the body. On a portrait phone that combination
+     (a) leaves dead space above and below the cabinet, and (b) clips the
+     third row of game cards (games 5 & 6) plus the in-game touch controls,
+     because the aspect-locked screen is shorter than its content. On small
+     screens we drop the centering and the fixed aspect, let the cabinet
+     fill the frame, let the screen grow, and scroll the menu so all six
+     cartridges are reachable. The game canvas keeps its own 480x600 aspect
+     via object-fit so play doesn't stretch. */
+  @media (max-width: 1023px){
+    body{ padding:6px; align-items:stretch; justify-content:flex-start; }
+    .cabinet{
+      width:100%; height:100%;
+      display:flex; flex-direction:column;
+      padding:8px 8px 10px; border-radius:14px;
+    }
+    .marquee{ flex:none; margin-bottom:8px; padding:4px 22px 8px; }
+    .screen{ flex:1 1 auto; min-height:0; width:100%; aspect-ratio:auto; }
+    #menu{ overflow-y:auto; padding:12px; }
+    .cards{ flex:0 0 auto; }
+    .pad{ flex:none; margin-top:8px; }
+    canvas{ object-fit:contain; }
+  }
 </style>
 </head>
 <body>

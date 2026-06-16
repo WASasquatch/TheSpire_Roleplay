@@ -401,6 +401,14 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
    *      user lands at the newest content.
    */
   const scrollState = useRef<{ height: number; top: number; firstId: string | null; lastId: string | null } | null>(null);
+  // Bottom re-pin bookkeeping (see the ResizeObserver further below). The
+  // pin is coalesced into a single pending handle (rAF or timeout id), and
+  // it cooperates with the scroll listener: a programmatic pin emits a
+  // scroll event we must NOT read as user intent, and a recent USER scroll
+  // defers the pin so it never fights an in-progress drag.
+  const pinHandleRef = useRef<number | null>(null);
+  const programmaticScrollRef = useRef(false);
+  const lastUserScrollTsRef = useRef(0);
   // Mirror `messages` into a ref so the live scroll listener below can
   // read the current array without re-binding on every change (cheap,
   // but binds dozens of times per second in active rooms). The
@@ -448,6 +456,12 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       // Track parked-at-bottom from the user's own scrolling so the
       // async-growth re-pin below knows whether to follow new content.
       stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+      // A programmatic pin (the ResizeObserver below) also emits a scroll
+      // event; swallow that echo so it isn't mistaken for user intent.
+      // Every OTHER scroll is the reader's, and stamps their last
+      // interaction so the re-pin can hold off and never yank a live drag.
+      if (programmaticScrollRef.current) programmaticScrollRef.current = false;
+      else lastUserScrollTsRef.current = performance.now();
     };
     el.addEventListener("scroll", capture, { passive: true });
     return () => el.removeEventListener("scroll", capture);
@@ -513,23 +527,60 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   // the next arrival's near-bottom test fails (the drift already pushed
   // the position past the threshold) and the reader is stranded a few
   // posts up, the "won't stay at the bottom / pops up several posts"
-  // report. A ResizeObserver on the content box re-pins on any height
-  // change while the user is parked at the bottom (stickRef), and
-  // no-ops the instant they scroll away. Setting scrollTop doesn't
-  // resize anything, so there is no observe→scroll→observe feedback
-  // loop. Forums (nested) read top-down and opt out entirely.
+  // report. A ResizeObserver on the content box re-pins on height changes
+  // while the user is parked at the bottom (stickRef), and no-ops the
+  // instant they scroll away. Forums (nested) read top-down and opt out.
+  //
+  // CRUCIAL: setting scrollTop DOES indirectly resize the content here —
+  // moving the viewport flips MessageVisibilityGate intersection states,
+  // which mount/unmount message bodies and change the feed height, which
+  // re-fires this observer. Writing scrollTop unconditionally turned that
+  // into a runaway observe→pin→gate-flip→observe loop (the "seizure" shake)
+  // that also stole manual scrolling. So the pin is hardened three ways:
+  //   (a) coalesced to ONE write per frame (rAF), never re-entrant;
+  //   (b) skipped once we're already within a pixel of the bottom, so a
+  //       settled feed stops writing and the gates stop thrashing;
+  //   (c) deferred for a beat after any USER scroll, so it never hijacks
+  //       an in-progress drag (mobile momentum especially) — then fires
+  //       once when the reader settles so late media still lands at bottom.
   useLayoutEffect(() => {
     if (replyMode === "nested") return;
     const el = ref.current;
     const content = contentRef.current;
     if (!el || !content || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => {
-      if (!stickRef.current) return;
-      if (highlightMessageId) return; // jump-to-message owns scroll
+    const REPIN_AFTER_USER_MS = 250;
+    const pin = () => {
+      pinHandleRef.current = null;
+      if (!stickRef.current || highlightMessageId) return; // jump owns scroll
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (dist <= 2) return; // (b) already pinned — don't re-trigger the gates
+      const sinceUser = performance.now() - lastUserScrollTsRef.current;
+      if (sinceUser < REPIN_AFTER_USER_MS) {
+        // (c) reader just scrolled: let them settle, then pin exactly once.
+        pinHandleRef.current = window.setTimeout(
+          () => { pinHandleRef.current = null; pin(); },
+          REPIN_AFTER_USER_MS - sinceUser + 16,
+        );
+        return;
+      }
+      programmaticScrollRef.current = true; // mark the scroll-echo as ours
       el.scrollTop = el.scrollHeight;
+    };
+    const ro = new ResizeObserver(() => {
+      if (pinHandleRef.current != null) return; // (a) one pending pin at a time
+      pinHandleRef.current = requestAnimationFrame(pin);
     });
     ro.observe(content);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      // The handle is a rAF id or a timeout id; both cancelers ignore an
+      // id minted by the other, so calling both is safe.
+      if (pinHandleRef.current != null) {
+        cancelAnimationFrame(pinHandleRef.current);
+        clearTimeout(pinHandleRef.current);
+        pinHandleRef.current = null;
+      }
+    };
   }, [replyMode, highlightMessageId]);
 
   // Window the in-memory buffer back down once it grows past HARD_CAP,
@@ -1597,14 +1648,12 @@ function ForumView({
               </div>
             ) : null}
             {isCollapsed ? null : (
-              // Single shared indent for everything that belongs to this
-              // category, so its subcategories and its own topics line up
-              // at the same depth under the header (no header indent when
-              // there's no header — the no-categories / Uncategorized-only
-              // board). Previously topics sat at full width while
-              // subcategories were indented further, which read as a
-              // misalignment bug.
-              <div className={s.label !== null ? "pl-2 lg:pl-5" : undefined}>
+              // No indent at this level: a top-level category's OWN topics
+              // are first-level content and read best flush under the
+              // header. Only a SUBCATEGORY's content gets indented (below),
+              // so the one visible step of depth always means "nested in a
+              // subcategory" rather than "nested in a category."
+              <div>
                 {/* Subcategories first, like a normal forum: a category's
                     sub-boards sit above its own loose topics. Each keeps
                     its own collapse, "+ New Topic", and bucket. */}
@@ -1667,7 +1716,10 @@ function ForumView({
                           </button>
                         </span>
                       </div>
-                      {subCollapsed ? null : renderBucket(sub.key)}
+                      {/* Indent ONLY a subcategory's content, so its topics
+                          read as nested under it; the parent category's own
+                          topics stay flush at first level. */}
+                      {subCollapsed ? null : <div className="pl-2 lg:pl-5">{renderBucket(sub.key)}</div>}
                     </div>
                   );
                 })}

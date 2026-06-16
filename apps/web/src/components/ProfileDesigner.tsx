@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import GjsEditor from "@grapesjs/react";
-import grapesjs, { type Editor } from "grapesjs";
+import grapesjs, { type Editor, type Panel, type Button } from "grapesjs";
 // Side-effect import: Vite bundles this into a linked stylesheet in prod
 // (CSP `style-src 'self'` safe) and injects it in dev (no CSP there). The
 // GrapesJS UI keys off `.gjs-*` classes, so a global import is fine.
@@ -262,6 +262,60 @@ const BASIC_ICONS: Record<string, string> = {
 };
 
 /* ----------------------------------------------------------------------------
+ * Panel-button icons (THE root cause of the recurring "blank buttons").
+ *
+ * GrapesJS labels its default top-panel buttons with Font Awesome CLASSES
+ * (`fa fa-square-o`, `fa fa-code`, `fa fa-paint-brush`, …) but ships NO icon
+ * font — it assumes the host app loads Font Awesome. The Spire never has (we
+ * standardize on inline SVG / lucide), so those buttons render as empty,
+ * clickable boxes. A glyph from an absent font can't be styled into existence,
+ * which is why every color/fill CSS tweak "fixed it briefly" (lighting up the
+ * few buttons GrapesJS draws as real SVG) and then "broke again."
+ *
+ * The durable fix: relabel each fa-glyph button with a self-contained inline
+ * SVG — same approach as the block thumbnails above — so the panel has zero
+ * font dependency. `iconifyPanels` (below) applies these on first ready.
+ *
+ * Lucide-style 24-grid strokes; GrapesJS's `.gjs-pn-btn svg{fill:currentColor}`
+ * plus our themed `color` pin (styles.css) handle the ink. fill:none keeps the
+ * strokes from filling solid.
+ * ------------------------------------------------------------------------- */
+const psv = (inner: string) =>
+  `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`;
+const PANEL_ICONS: Record<string, string> = {
+  "fa-square-o": psv('<rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="4 3"/>'), // borders / outlines
+  "fa-eye": psv('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>'), // preview
+  "fa-eye-slash": psv('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/><line x1="3" y1="3" x2="21" y2="21"/>'),
+  "fa-arrows-alt": psv('<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>'), // fullscreen
+  "fa-code": psv('<path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/>'), // view/export code
+  "fa-paint-brush": psv('<path d="M9.06 11.9 18 3a2.83 2.83 0 1 1 4 4l-8.9 8.94"/><path d="M7 14a3 3 0 0 0-3 3c0 1.5-1 2-2 2 1 1.5 3 2 4 2a3 3 0 0 0 3-3 3 3 0 0 0-2-4Z"/>'), // style manager
+  "fa-cog": psv('<line x1="21" y1="6" x2="11" y2="6"/><line x1="14" y1="17" x2="3" y2="17"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="6" r="3"/>'), // settings / traits
+  "fa-bars": psv('<path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/>'), // layers
+  "fa-th-large": psv('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'), // blocks
+  "fa-pencil": psv('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
+  "fa-caret-down": psv('<path d="m6 9 6 6 6-6"/>'),
+  "fa-caret-right": psv('<path d="m9 6 6 6-6 6"/>'),
+};
+
+/** Replace every fa-glyph panel button label with its inline-SVG equivalent so
+ * the Designer chrome has no Font Awesome dependency. No-op for buttons that
+ * already carry a real SVG icon. Safe to call once after the editor is ready —
+ * panel buttons survive canvas frame reloads, so we don't repeat it. */
+function iconifyPanels(editor: Editor): void {
+  editor.Panels.getPanels().forEach((panel: Panel) => {
+    (panel.get("buttons") as { forEach(cb: (b: Button) => void): void }).forEach((btn: Button) => {
+      const attrs = (btn.get("attributes") as Record<string, string>) || {};
+      const parts = String(attrs.class || "").split(/\s+/).filter(Boolean);
+      const key = parts.find((c) => PANEL_ICONS[c]);
+      if (!key) return;
+      // Drop the dead `fa`/`fa-*` classes and render the SVG as the label.
+      btn.set("attributes", { ...attrs, class: parts.filter((c) => c !== "fa" && c !== key).join(" ") });
+      btn.set("label", PANEL_ICONS[key]);
+    });
+  });
+}
+
+/* ----------------------------------------------------------------------------
  * Templates — full themed scaffolds (class-based markup + their stylesheet).
  *
  * Each theme owns a UNIQUE class prefix, so multiple themes can coexist in one
@@ -430,6 +484,10 @@ export default function ProfileDesigner({ value, onChange }: Props) {
     // the Style Manager, which needs a selection to do anything).
     if (!openedBlocksRef.current) {
       openedBlocksRef.current = true;
+      // Swap GrapesJS's Font-Awesome button labels for inline SVGs so the
+      // panel chrome doesn't depend on a font the app never loads (the recurring
+      // "blank top-bar buttons"). Once is enough — buttons outlive frame reloads.
+      try { iconifyPanels(editor); } catch { /* panels absent in some presets */ }
       try { editor.runCommand("open-blocks"); } catch { /* panel preset absent */ }
     }
   }, []);

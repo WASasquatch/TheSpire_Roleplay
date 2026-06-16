@@ -48,6 +48,11 @@ import { inArray } from "drizzle-orm";
 import type { LinkedWorldRef } from "@thekeep/shared";
 import { pushToUser } from "../push.js";
 import type { Db } from "../db/index.js";
+import {
+  persistRoomDescriptionOnce,
+  persistTargetedSystemMessageToActiveRooms,
+  roomVisibilityWhere,
+} from "./targetedMessages.js";
 import { blockedUserIdsFor, blocksAmong } from "../auth/blocks.js";
 import type { CommandContext, SessionUser } from "../commands/types.js";
 import { expandInlineCommands } from "../commands/registry.js";
@@ -1319,13 +1324,7 @@ export async function sendRoomBacklogTo(
     .select()
     .from(messages)
     .where(and(
-      or(
-        and(sql`${messages.kind} != 'whisper'`, eq(messages.roomId, roomId)),
-        and(
-          sql`${messages.kind} = 'whisper'`,
-          or(eq(messages.userId, viewerUserId), eq(messages.toUserId, viewerUserId)),
-        ),
-      ),
+      roomVisibilityWhere(roomId, viewerUserId),
       clearedAt ? gt(messages.createdAt, clearedAt) : undefined,
     ))
     .orderBy(desc(messages.createdAt))
@@ -1694,18 +1693,26 @@ async function joinRoomBody(
   // isn't a chat log, and other UI affordances surface the description
   // there.
   if (room.description && !hasSeenDescription(user.id, roomId) && room.replyMode !== "nested") {
-    socket.emit("message:new", {
-      id: `desc-${nanoid()}`,
-      roomId,
-      userId: "system",
-      characterId: null,
-      displayName: "system",
-      kind: "system",
-      body: `[Description]: ${room.description}`,
-      color: null,
-      createdAt: Date.now(),
-    });
     markSeenDescription(user.id, roomId);
+    // Persist a per-user copy so the line survives a buffer-replacing
+    // refetch. `isNew` is true only on the genuinely first view; on a
+    // process restart the in-memory seen-set resets but the persisted
+    // copy already rides the backlog (sent just above), so we must NOT
+    // re-emit the live line then or the user sees it twice.
+    const isNew = await persistRoomDescriptionOnce(db, user.id, roomId, `[Description]: ${room.description}`);
+    if (isNew) {
+      socket.emit("message:new", {
+        id: `desc-${nanoid()}`,
+        roomId,
+        userId: "system",
+        characterId: null,
+        displayName: "system",
+        kind: "system",
+        body: `[Description]: ${room.description}`,
+        color: null,
+        createdAt: Date.now(),
+      });
+    }
   }
 
   // Entry/connect chat broadcast. Three mutually-exclusive cases,
@@ -2180,6 +2187,17 @@ async function pingWatchers(
       s.emit("watch:online", payload);
     }
   }
+  // Persist the "☆ X is online." line per watcher so it survives a
+  // refetch. The live copy is still synthesized client-side from the
+  // `watch:online` event above (so older bundles keep working); this only
+  // writes the durable copy and does not emit. Body matches the client's
+  // synthesized text exactly so the two are indistinguishable.
+  await persistTargetedSystemMessageToActiveRooms(
+    io,
+    db,
+    friendSet,
+    `☆ ${user.displayName} is online.`,
+  );
 }
 
 /**

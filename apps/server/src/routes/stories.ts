@@ -89,6 +89,7 @@ import {
   users,
   worlds,
 } from "../db/schema.js";
+import { persistTargetedSystemMessageToActiveRooms } from "../realtime/targetedMessages.js";
 import { sanitizeBio, stripMarginNotes } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
 import { pushToUser } from "../push.js";
@@ -3732,6 +3733,16 @@ async function notifyPublish(
       sock.emit("story:chapter-published", payload);
     }
   }
+  // Persist the "✦ X published …" line per follower so it survives a
+  // refetch. The live copy is still synthesized client-side from the
+  // event above; this only writes the durable, recipient-scoped copy and
+  // does not emit. Body matches the client's synthesized text exactly.
+  await persistTargetedSystemMessageToActiveRooms(
+    io,
+    db,
+    followerIds,
+    `✦ ${payload.authorDisplayName} published "${payload.chapterTitle}" of ${payload.storyTitle}.`,
+  );
 
   // Web-push fan-out for opted-in followers. Self-deliveries already
   // filtered above (followerIds excludes the publishing user).

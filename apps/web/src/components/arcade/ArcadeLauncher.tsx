@@ -7,6 +7,7 @@
  * launches the floating window.
  */
 import React, { useEffect, useMemo, useState } from "react";
+import { Monitor } from "lucide-react";
 import { EIDOLON_UNLOCK_COST, URUGAL_UNLOCK_COST, GRIMHOLD_UNLOCK_COST } from "@thekeep/shared";
 import { Modal } from "../Modal";
 import { CloseButton } from "../CloseButton";
@@ -211,7 +212,21 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
           <div className="flex min-w-0 flex-1 items-center gap-3.5">
             <div className="shrink-0" style={{ fontSize: 40, lineHeight: 1 }} aria-hidden>🗡</div>
             <div className="min-w-0 flex-1">
-              <div style={{ fontSize: 16, fontWeight: 700 }}>Urugal&apos;s Descent</div>
+              <div className="flex flex-wrap items-center gap-2" style={{ fontSize: 16, fontWeight: 700 }}>
+                <span>Urugal&apos;s Descent</span>
+                {/* Always-on tag so the desktop-only nature is clear even on
+                    desktop (where the CTA isn't swapped for the note). */}
+                <span
+                  className="inline-flex items-center gap-1"
+                  style={{
+                    fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5,
+                    color: T(0.6), border: "1px solid rgb(var(--keep-border) / .7)", borderRadius: 6,
+                    padding: "1px 6px", whiteSpace: "nowrap",
+                  }}
+                >
+                  <Monitor className="h-3 w-3" aria-hidden="true" /> Desktop only
+                </span>
+              </div>
               <div style={{ fontSize: 12.5, color: T(0.7), lineHeight: 1.45 }}>
                 A gothic roguelike. Pick a class and delve a procedurally-built dungeon — fight, loot,
                 and descend as deep as you dare. Every run is different, and every floor is a fresh gamble.

@@ -1,5 +1,6 @@
 import { and, eq, or, sql } from "drizzle-orm";
 import { addSystemMessage } from "../../realtime/broadcast.js";
+import { persistTargetedSystemMessageToActiveRooms } from "../../realtime/targetedMessages.js";
 import { resolveDisplayName } from "../../auth/session.js";
 import { characters, friends, users } from "../../db/schema.js";
 import { eqIdentity, type Identity } from "../../auth/identity.js";
@@ -168,6 +169,17 @@ export const friendCommand: CommandHandler = {
       });
     await whisperToSelf(ctx, `Friend request sent to ${targetName}.`);
     await emitFriendRequestTo(ctx, target.userId);
+    // Persist the recipient's "X sent you a friend request" line so it
+    // survives a refetch. Only on a genuinely NEW request (not the accept
+    // branch above). The live copy is still synthesized client-side from
+    // the `friend:request` event; this writes the durable, recipient-
+    // scoped copy without emitting. Body matches the client text exactly.
+    await persistTargetedSystemMessageToActiveRooms(
+      ctx.io,
+      ctx.db,
+      target.userId,
+      `${ctx.user.displayName} sent you a friend request. Open Messages to accept or decline.`,
+    );
   },
 };
 

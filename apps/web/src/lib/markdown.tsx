@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
-import { CHK_SPAN_RE, customCmdCssToStyle, decodeCheckMarker, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, splitOnCode, VMARK_SPAN_RE, type CheckResultData, type MentionRef, type UiRoute } from "@thekeep/shared";
+import { CHK_SPAN_RE, customCmdCssToStyle, decodeCheckMarker, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, VMARK_SPAN_RE, type CheckResultData, type MentionRef, type UiRoute } from "@thekeep/shared";
 import { openUiRoute } from "./uiRouteOpen.js";
 import { resolveDynamicChipLabel } from "./uiRouteDynamicLabel.js";
 import { splitMentions } from "./mentions.js";
@@ -1067,11 +1067,20 @@ function SpoilerSpan({ children }: { children: ReactNode }) {
  * Grouping rule: any line whose first non-whitespace run is `>` is
  * part of a quote. Adjacent quote lines fuse into one blockquote;
  * the `> ` prefix (or just `>`) is stripped from each line before
- * the inline parser runs on the body. Lines inside a fenced ```code```
- * block are exempt, the body is first split into code vs. text
- * regions via `splitOnCode`, and only the text regions undergo the
- * blockquote pass. This way a `> ` line inside a code snippet stays
- * literal instead of getting reclassified as a quote.
+ * the inline parser runs on the body.
+ *
+ * Quote membership is a LINE (block-level) decision, so the grouping runs
+ * over the raw body lines directly — NOT over a `splitOnCode` of it. That
+ * distinction matters: an INLINE `` `code` `` span sits inside a single
+ * line, and splitting the body on it first used to chop a quoted line into
+ * three segments ("> …or ", "`/help`", " command? …") that each re-ran the
+ * quote pass — so everything after the inline code lost its `>` and spilled
+ * OUT of the blockquote. Inline code is now left in place and rendered by
+ * parseInline within its line's group. Only multi-line fenced ```blocks```
+ * are genuinely block-level: we track the fence state so their lines (and
+ * any `>` inside them) aren't reclassified as quotes, and render each fence
+ * as its own segment. A stray (unclosed) ``` stays inline, matching the old
+ * `splitOnCode` lenience.
  */
 export function renderForumBody(
   body: string,
@@ -1099,52 +1108,68 @@ export function renderForumBody(
   mentions: ReadonlyArray<MentionRef> = [],
 ): ReactNode {
   const out: ReactNode[] = [];
-  splitOnCode(body).forEach((seg, segIdx) => {
-    if (seg.kind === "code") {
-      // Hand the raw fenced/inline snippet to parseInline so the same
-      // <pre>/<code> styling fires whether the post is in a forum or a
-      // chat line.
-      out.push(<Fragment key={`c${segIdx}`}>{parseInline(seg.raw)}</Fragment>);
+  // Block-level grouping over the RAW body lines (see the header note on
+  // why we don't pre-split on inline code). Three group kinds: "quote"
+  // (`>`-prefixed lines), "fence" (a closed multi-line ```block```), and
+  // "normal" (everything else). Inline `` `code` `` stays within its line.
+  const rawLines = body.split("\n");
+  type Group = { kind: "quote" | "normal" | "fence"; lines: string[] };
+  const groups: Group[] = [];
+  const isFenceDelim = (l: string) => /^\s*```/.test(l);
+  const pushLine = (kind: "quote" | "normal", line: string) => {
+    const last = groups[groups.length - 1];
+    if (last && last.kind === kind) last.lines.push(line);
+    else groups.push({ kind, lines: [line] });
+  };
+  for (let li = 0; li < rawLines.length; li++) {
+    const line = rawLines[li]!;
+    if (isFenceDelim(line)) {
+      // Opening fence — only when a CLOSING fence exists later; an
+      // unmatched ``` stays a normal/quote line so a stray triple-backtick
+      // doesn't swallow the rest of the post.
+      let close = -1;
+      for (let lj = li + 1; lj < rawLines.length; lj++) {
+        if (isFenceDelim(rawLines[lj]!)) { close = lj; break; }
+      }
+      if (close !== -1) {
+        groups.push({ kind: "fence", lines: rawLines.slice(li, close + 1) });
+        li = close;
+        continue;
+      }
+    }
+    pushLine(/^\s*>/.test(line) ? "quote" : "normal", line);
+  }
+  groups.forEach((g, idx) => {
+    if (g.kind === "fence") {
+      // Hand the raw fence to parseInline so the same <pre>/<code> styling
+      // fires whether the post is in a forum or a chat line.
+      out.push(<Fragment key={`f${idx}`}>{parseInline(g.lines.join("\n"))}</Fragment>);
       return;
     }
-    const lines = seg.raw.split("\n");
-    type Group = { kind: "quote" | "normal"; lines: string[] };
-    const groups: Group[] = [];
-    for (const line of lines) {
-      const isQuote = /^\s*>/.test(line);
-      const last = groups[groups.length - 1];
-      if (last && last.kind === (isQuote ? "quote" : "normal")) {
-        last.lines.push(line);
-      } else {
-        groups.push({ kind: isQuote ? "quote" : "normal", lines: [line] });
-      }
-    }
-    groups.forEach((g, idx) => {
-      if (g.kind === "quote") {
-        // Strip the leading `>` (and one optional following space) from
-        // every line so the inner text reads cleanly. Leaves any
-        // existing markdown inside the quote intact, `> **bold**`
-        // renders the bold inside the blockquote.
-        const stripped = g.lines.map((l) => l.replace(/^\s*>\s?/, "")).join("\n");
-        const parts = splitMentions(stripped);
-        out.push(
-          <blockquote
-            key={`q${segIdx}-${idx}`}
-            className="my-1 whitespace-pre-wrap border-l-2 border-keep-action/50 bg-keep-banner/40 px-3 py-1 text-keep-muted italic"
-          >
-            {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames, knownMentions, mentions)}
-          </blockquote>,
-        );
-        return;
-      }
-      const joined = g.lines.join("\n");
-      const parts = splitMentions(joined);
+    if (g.kind === "quote") {
+      // Strip the leading `>` (and one optional following space) from
+      // every line so the inner text reads cleanly. Leaves any existing
+      // markdown inside the quote intact — `> **bold**` renders the bold,
+      // and `> a `code` b` keeps the inline code in line.
+      const stripped = g.lines.map((l) => l.replace(/^\s*>\s?/, "")).join("\n");
+      const parts = splitMentions(stripped);
       out.push(
-        <Fragment key={`p${segIdx}-${idx}`}>
+        <blockquote
+          key={`q${idx}`}
+          className="my-1 whitespace-pre-wrap border-l-2 border-keep-action/50 bg-keep-banner/40 px-3 py-1 text-keep-muted italic"
+        >
           {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames, knownMentions, mentions)}
-        </Fragment>,
+        </blockquote>,
       );
-    });
+      return;
+    }
+    const joined = g.lines.join("\n");
+    const parts = splitMentions(joined);
+    out.push(
+      <Fragment key={`p${idx}`}>
+        {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames, knownMentions, mentions)}
+      </Fragment>,
+    );
   });
   return out;
 }

@@ -778,6 +778,21 @@ export const messages = sqliteTable(
     toCharacterId: text("to_character_id"),
     /** Snapshot of the recipient's display name at send time (whispers only). */
     toDisplayName: text("to_display_name"),
+    /**
+     * Per-user visibility scope for `system`-kind notifications
+     * (migration 0252). NULL = visible to everyone in the room (the
+     * default for presence / announce / game lines). When set, the row
+     * is a TARGETED notification — "a watched friend came online", "you
+     * have a friend request", a followed story's publish, the per-room
+     * "[Description]:" line — and the backlog filter
+     * (`roomVisibilityWhere`) shows it ONLY to this user. Distinct from
+     * `toUserId`, which is the whisper recipient (whispers overlay across
+     * rooms; targeted system rows stay room-scoped). FK cascade-deletes
+     * a user's targeted lines with the account.
+     */
+    targetUserId: text("target_user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
     /** Id of the message this one is a reply to. Not a FK - if the parent is deleted we still keep the dangling id and render gracefully. */
     replyToId: text("reply_to_id"),
     /** Snapshot of parent author's display name (so renames/deletes don't blank the preview). */

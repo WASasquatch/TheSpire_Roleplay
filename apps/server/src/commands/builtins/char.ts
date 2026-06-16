@@ -7,28 +7,25 @@ import { eqNameInsensitive } from "../../lib/nameLookup.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const MAX_NAME_LEN = 40;
-const NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
+// Mirror of CHAR_NAME_RX in routes/characters.ts, keep in lockstep. A
+// non-breaking space (U+00A0) is allowed and PRESERVED (the parser
+// treats it as a normal word character, so it stays parser-safe); an
+// ASCII space is still accepted for backward compatibility.
+const NAME_RX = /^[\p{L}\p{N}_\-'\u00A0 ]{1,40}$/u;
 
 /**
- * Normalize a typed character name to the storage form before the
- * regex check. The regex itself only accepts ASCII space (U+0020),
- * but real users routinely hand us NBSP (U+00A0) inside names,
- * keyboard autocorrect ("smart" typography on macOS / iOS), pasting
- * from a source that uses NBSP for layout, or clicking an existing
- * master-username link (whose canonical storage IS NBSP and which the
- * client surfaces verbatim into the composer). Folding NBSP to ASCII
- * space here turns a confusing "Character name must be 1-40 chars:
- * letters, numbers, spaces, _ - '" failure, the error message
- * literally promises spaces work, into the expected behavior, while
- * keeping the regex narrow enough to reject genuine whitespace junk
- * like tabs and newlines.
- *
- * Trims surrounding whitespace too so a trailing space typed by the
- * user (or left over from the dispatcher's leading-token strip)
- * doesn't bloat the stored value.
+ * Normalize a typed character name before the regex check. Trims
+ * surrounding whitespace (including edge NBSP) but PRESERVES interior
+ * NBSP (U+00A0): folding it to an ASCII space used to defeat the
+ * Alt+0160 escape hatch, the stored name came back with a real space
+ * that breaks /whisper, /char, and every other name-taking command.
+ * Name lookups (`findCharacter`) canonicalize NBSP\u2194space via
+ * `eqNameInsensitive`, so switching / editing / deleting still
+ * resolves regardless of which form the user typed or stored. Keep in
+ * sync with `normalizeCharName` in routes/characters.ts.
  */
 function normalizeCharName(input: string): string {
-  return input.replace(/\u00A0/g, " ").trim();
+  return input.trim();
 }
 
 function notice(ctx: CommandContext, code: string, message: string) {

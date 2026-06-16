@@ -29,6 +29,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { ArcadeLauncher } from "./components/arcade/ArcadeLauncher.js";
 import { EidolonWindow } from "./components/arcade/EidolonWindow.js";
 import { UrugalWindow } from "./components/arcade/UrugalWindow.js";
+import { GrimholdWindow } from "./components/arcade/GrimholdWindow.js";
 import { EarningRibbon } from "./components/EarningRibbon.js";
 import { BannerMarquee } from "./components/BannerMarquee.js";
 import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanners.js";
@@ -44,6 +45,7 @@ import { WorldCatalogModal } from "./components/WorldCatalogModal.js";
 import { WorldEditorModal } from "./components/WorldEditorModal.js";
 import { WorldViewerModal } from "./components/WorldViewerModal.js";
 import { WorldsListModal } from "./components/WorldsListModal.js";
+import { StaffModal } from "./components/StaffModal.js";
 import { StoryCatalogModal } from "./components/StoryCatalogModal.js";
 import { ForumsCatalogModal } from "./components/ForumsCatalogModal.js";
 import { ForumPublicLanding, readReturnForum, RETURN_FORUM_STORAGE_KEY } from "./components/ForumPublicLanding.js";
@@ -623,6 +625,15 @@ export function App() {
             // Bond clicks load another profile while keeping standalone
             // mode active. World chips do the same via the world path.
             onOpenProfile={(name) => setPendingProfile({ name, data: null })}
+            // Refetch this profile after a mod action so NSFW flags / bio
+            // edits reflect in the standalone viewer too. Reuses the
+            // pendingProfile fetch effect (same path onOpenProfile uses).
+            onModerated={() => {
+              const profileName = openProfileForSync.kind === "master"
+                ? openProfileForSync.profile.username
+                : openProfileForSync.profile.name;
+              setPendingProfile({ name: profileName, data: null });
+            }}
             onOpenWorld={(slug) => setPendingPublicWorld({ slug, data: null })}
           />
         ) : null}
@@ -1070,6 +1081,7 @@ function Chat() {
   const [arcadeOpen, setArcadeOpen] = useState(false);
   const [eidolonOpen, setEidolonOpen] = useState(false);
   const [urugalOpen, setUrugalOpen] = useState(false);
+  const [grimholdOpen, setGrimholdOpen] = useState(false);
   /**
    * Full-screen item-zoom view triggered by the `/item <name>` chat
    * command. Mounts the same overlay that powers tap-to-zoom on
@@ -1113,6 +1125,7 @@ function Chat() {
   // re-open on a future viewer mount for the same world.
   const [pendingWorldApplicationId, setPendingWorldApplicationId] = useState<string | null>(null);
   const [worldCatalogOpen, setWorldCatalogOpen] = useState(false);
+  const [staffOpen, setStaffOpen] = useState(false);
   // Scriptorium catalog state. Object → open; null → closed. The
   // optional `tab` lets `/scriptorium my` etc. land on a specific tab.
   const [scriptoriumOpen, setScriptoriumOpen] = useState<{ tab?: "find" | "my" | "reading" | "following" } | null>(null);
@@ -2516,7 +2529,17 @@ function Chat() {
       // the current active character (or nothing, for OOC). When the
       // user switches characters, the activeCharacterId effect below
       // re-fires onConnect's payload too.
-      const charId = useChat.getState().activeCharacterId;
+      //
+      // If the Messages modal is open and filtered to a DIFFERENT
+      // identity than the global voice, scope to THAT filter instead,
+      // a reconnect-time refetch against the global voice would
+      // full-replace `dmConversations` with the wrong identity's
+      // threads and wipe the open thread's conversation row (messages
+      // vanish + the thread falls back to its "start the conversation"
+      // empty state). `dmInboxFilterCharId` is `undefined` whenever the
+      // modal is closed, in which case we fall back to the global voice.
+      const dmFilter = useChat.getState().dmInboxFilterCharId;
+      const charId = dmFilter !== undefined ? dmFilter : useChat.getState().activeCharacterId;
       fetch(withIdentityQuery("/me/dms", charId), { credentials: "include" })
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => {
@@ -2603,7 +2626,11 @@ function Chat() {
       // /me/dms is bounded by the user's own DM count.
       const known = useChat.getState().dmConversations[message.conversationId];
       if (!known) {
-        const charId = useChat.getState().activeCharacterId;
+        // Scope to the open messenger's filter when it diverges from
+        // the global voice (see onConnect), so surfacing a new thread
+        // doesn't clobber the identity the user is currently viewing.
+        const dmFilter = useChat.getState().dmInboxFilterCharId;
+        const charId = dmFilter !== undefined ? dmFilter : useChat.getState().activeCharacterId;
         fetch(withIdentityQuery("/me/dms", charId), { credentials: "include" })
           .then((r) => (r.ok ? r.json() : null))
           .then((j) => {
@@ -3505,6 +3532,8 @@ function Chat() {
         onOpenEarning={() => setEarningOpen({})}
         onOpenScriptorium={() => setScriptoriumOpen({})}
         onOpenWorlds={() => setWorldCatalogOpen(true)}
+        onOpenArcade={() => setArcadeOpen(true)}
+        onOpenStaff={() => setStaffOpen(true)}
         {...(hasAnyAdminAccess ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
       <BannerMarquee />
@@ -4002,6 +4031,19 @@ function Chat() {
               else setNotice({ code: res.code, message: res.message });
             });
           }}
+          // After a moderator action (gallery NSFW flag, bio edit) re-fetch
+          // THIS profile so the change reflects in place. Uses the identity
+          // token (not the display name) so a character / master sharing a
+          // name can't resolve to the wrong identity, profile:fetch passes
+          // the token straight through resolveProfileView's @id:/@cid: path.
+          onModerated={() => {
+            const token = openProfile.kind === "character"
+              ? `@cid:${openProfile.profile.id}`
+              : `@id:${openProfile.profile.userId}`;
+            socket.emit("profile:fetch", { username: token }, (res) => {
+              if (res.ok) setOpenProfile(res.profile);
+            });
+          }}
           // Worlds chips on the profile open the viewer on top of the
           // profile modal. Closing the world viewer drops the user back to
           // the profile they were reading, which matches how the room
@@ -4063,7 +4105,11 @@ function Chat() {
       {arcadeOpen ? (
         <ArcadeLauncher
           characterId={activeCharacterId}
-          onLaunch={(game) => { if (game === "urugal") setUrugalOpen(true); else setEidolonOpen(true); }}
+          onLaunch={(game) => {
+            if (game === "urugal") setUrugalOpen(true);
+            else if (game === "grimhold") setGrimholdOpen(true);
+            else setEidolonOpen(true);
+          }}
           onClose={() => setArcadeOpen(false)}
         />
       ) : null}
@@ -4072,6 +4118,9 @@ function Chat() {
       ) : null}
       {urugalOpen ? (
         <UrugalWindow characterId={activeCharacterId} onClose={() => setUrugalOpen(false)} />
+      ) : null}
+      {grimholdOpen ? (
+        <GrimholdWindow characterId={activeCharacterId} onClose={() => setGrimholdOpen(false)} />
       ) : null}
       {openItem ? (
         <ItemZoomView entry={openItem} onClose={() => setOpenItem(null)} />
@@ -4174,6 +4223,17 @@ function Chat() {
           onOpenCatalog={() => {
             setWorldsListOpen(false);
             setWorldCatalogOpen(true);
+          }}
+        />
+      ) : null}
+      {staffOpen && me ? (
+        <StaffModal
+          onClose={() => setStaffOpen(false)}
+          meId={me.id}
+          onMessage={(userId) => {
+            // Staff cards are the master/OOC identity; open the DM there.
+            setStaffOpen(false);
+            openDmWithUser(userId, null);
           }}
         />
       ) : null}

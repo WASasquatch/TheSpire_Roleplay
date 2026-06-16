@@ -22,7 +22,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lte } from "drizzle-orm";
 import pino from "pino";
 import { Server as IoServer } from "socket.io";
 import { ZodError } from "zod";
@@ -88,6 +88,7 @@ import { registerCharacterRoutes } from "./routes/characters.js";
 import { registerAffiliateRoutes } from "./routes/affiliates.js";
 import { registerBookmarkRoutes } from "./routes/bookmarks.js";
 import { registerDirectMessageRoutes } from "./routes/directMessages.js";
+import { registerStaffRoutes } from "./routes/staff.js";
 import { registerEmoticonRoutes } from "./routes/emoticons.js";
 import { registerFriendsRoutes } from "./routes/friends.js";
 import { registerBlockRoutes } from "./routes/blocks.js";
@@ -109,6 +110,7 @@ import { registerRoomsRoutes } from "./routes/rooms.js";
 import { registerEarningRoutes } from "./routes/earning.js";
 import { registerArcadeRoutes } from "./routes/arcade.js";
 import { registerUrugalRoutes } from "./routes/arcadeUrugal.js";
+import { registerGrimholdRoutes } from "./routes/arcadeGrimhold.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { registerThesaurusRoutes } from "./routes/thesaurus.js";
 import { registerUsersRoutes } from "./routes/users.js";
@@ -241,12 +243,20 @@ async function main() {
    *     bug can't quietly start using the camera/mic/geolocation/etc.
    *     `interest-cohort=()` opts out of Chrome's FLoC tracking.
    */
-  app.addHook("onSend", async (_req, reply, payload) => {
+  app.addHook("onSend", async (req, reply, payload) => {
     if (!reply.getHeader("x-content-type-options")) {
       reply.header("x-content-type-options", "nosniff");
     }
     if (!reply.getHeader("x-frame-options")) {
-      reply.header("x-frame-options", "DENY");
+      // The vendored arcade bundles under /games/* are embedded by our own
+      // SPA in a same-origin iframe (Eidolon / Urugal / Grimhold windows),
+      // so they must allow same-origin framing. DENY blocked them entirely
+      // ("Firefox Can't Open This Page" inside the game window). SAMEORIGIN
+      // still defeats cross-site clickjacking; the parent SPA's CSP
+      // `frame-src 'self'` is what permits the embed. Everything else keeps
+      // the stricter DENY (CSP `frame-ancestors 'none'` backs it on HTML).
+      const sameOriginFramable = (req.url ?? "").split("?")[0]?.startsWith("/games/") ?? false;
+      reply.header("x-frame-options", sameOriginFramable ? "SAMEORIGIN" : "DENY");
     }
     if (!reply.getHeader("referrer-policy")) {
       reply.header("referrer-policy", "strict-origin-when-cross-origin");
@@ -560,6 +570,25 @@ async function main() {
     void checkpointPlayingTheaters(db).catch(() => { /* swallow; next tick retries */ });
   }, THEATER_CHECKPOINT_MS).unref();
 
+  // Account-ban expiry sweep. Timed bans set `bannedUntil`; when it
+  // passes, clear the ban columns AND `disabledAt` (which the ban set to
+  // block login/chat) so the account silently regains access. Login also
+  // lazy-lifts an expired ban, this catches accounts that never try to log
+  // back in so their banned state doesn't linger in mod review surfaces.
+  // Permanent bans (bannedUntil null) and plain admin disables (bannedAt
+  // null) are untouched. `.unref()` so it never holds the process open.
+  const BAN_SWEEP_MS = 60_000;
+  setInterval(() => {
+    void (async () => {
+      try {
+        await db
+          .update(users)
+          .set({ bannedAt: null, bannedUntil: null, banReason: null, bannedById: null, disabledAt: null })
+          .where(and(isNotNull(users.bannedUntil), lte(users.bannedUntil, new Date())));
+      } catch { /* swallow; next tick retries */ }
+    })();
+  }, BAN_SWEEP_MS).unref();
+
   // Zombie-room sweep. Fires once 60s after boot, long enough that
   // every client that was in a user-created room when the server
   // restarted has had a chance to reconnect and re-occupy it, but
@@ -606,6 +635,7 @@ async function main() {
   await registerFriendsRoutes(baseApp, db, io);
   await registerBlockRoutes(baseApp, db, io);
   await registerDirectMessageRoutes(baseApp, db, io);
+  await registerStaffRoutes(baseApp, db);
   await registerEmoticonRoutes(baseApp, db, io, uploadsRoot);
   await registerMessageRoutes(baseApp, db, io);
   await registerReportRoutes(baseApp, db);
@@ -617,6 +647,7 @@ async function main() {
   await registerEarningRoutes(baseApp, db, io);
   await registerArcadeRoutes(baseApp, db, io);
   await registerUrugalRoutes(baseApp, db, io);
+  await registerGrimholdRoutes(baseApp, db, io);
   await registerThesaurusRoutes(baseApp, db);
   await registerUsersRoutes(baseApp, db, io);
   await registerRoomsRoutes(baseApp, db, io);

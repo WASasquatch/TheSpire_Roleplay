@@ -487,6 +487,18 @@ interface ChatState {
    */
   roomHistoryHasMore: Record<string, boolean>;
   setRoomHistoryHasMore: (roomId: string, hasMore: boolean) => void;
+  /**
+   * Window the in-memory buffer back down to the newest `keep`
+   * messages, dropping older rows from memory. Called by MessageList
+   * only while the reader is parked at the bottom, so unbounded growth
+   * from a long live session or repeated load-older doesn't pile up
+   * thousands of off-screen placeholder rows + IntersectionObservers.
+   * The dropped rows are still on the server and re-hydrate via the
+   * scroll-up load-older fetch (keyed on the new oldest row's
+   * createdAt), so `roomHistoryHasMore` is forced true on any trim,
+   * there is now older content not resident in memory.
+   */
+  trimRoomToRecent: (roomId: string, keep: number) => void;
 
   /**
    * Paginated forum topics, keyed by roomId then by category key.
@@ -778,6 +790,30 @@ interface ChatState {
    * the recipient socket isn't connected; there's no replay).
    */
   dmReseedTick: number;
+
+  /**
+   * While the Messages modal is open, the character id its inbox is
+   * currently filtered to (`null` = master / OOC). `undefined` when
+   * the modal is closed.
+   *
+   * Why this exists: `dmConversations` holds only ONE identity's
+   * threads at a time (every `/me/dms` fetch full-replaces the map).
+   * The modal lets the user browse a DIFFERENT identity's inbox than
+   * their global voice via the character-switcher chips, by design the
+   * chip filter does NOT change `activeCharacterId`. The App-level DM
+   * refetches (socket reconnect via `onConnect`, and the `dm:new`
+   * unknown-conversation refetch) are scoped to the GLOBAL
+   * `activeCharacterId`; if they fire while the modal is filtered to
+   * another identity they replace the map with the global identity's
+   * threads, wiping the open thread's conversation row. ThreadPane then
+   * can't resolve the conversation and snaps back to its "start the
+   * conversation" empty state, the messages appear to vanish and the
+   * rail shows the wrong inbox. Mirroring the filter here lets those
+   * refetches reload the SAME identity the user is looking at, falling
+   * back to the global voice only when the modal is closed.
+   */
+  dmInboxFilterCharId: string | null | undefined;
+  setDmInboxFilterCharId: (id: string | null | undefined) => void;
 
   setDmConversations: (list: DirectConversationSummary[]) => void;
   upsertDmConversation: (c: DirectConversationSummary) => void;
@@ -1084,6 +1120,20 @@ export const useChat = create<ChatState>((set) => ({
   roomHistoryHasMore: {},
   setRoomHistoryHasMore: (roomId, hasMore) =>
     set((s) => ({ roomHistoryHasMore: { ...s.roomHistoryHasMore, [roomId]: hasMore } })),
+  trimRoomToRecent: (roomId, keep) =>
+    set((s) => {
+      const list = s.messagesByRoom[roomId];
+      if (!list || list.length <= keep) return {};
+      const next = list.slice(list.length - keep);
+      return {
+        messagesByRoom: { ...s.messagesByRoom, [roomId]: next },
+        // We dropped older rows from memory; they still exist server-
+        // side, so re-enable "load older" regardless of its prior value
+        // (we may have been at the genuine start of history before the
+        // trim). The scroll-up fetch re-hydrates them on demand.
+        roomHistoryHasMore: { ...s.roomHistoryHasMore, [roomId]: true },
+      };
+    }),
 
   forumTopicsByRoom: {},
   forumActionTick: 0,
@@ -1459,6 +1509,9 @@ export const useChat = create<ChatState>((set) => ({
   }),
   setDmsEnabled: (enabled) => set({ dmsEnabled: enabled }),
   bumpDmReseed: () => set((s) => ({ dmReseedTick: s.dmReseedTick + 1 })),
+
+  dmInboxFilterCharId: undefined,
+  setDmInboxFilterCharId: (id) => set({ dmInboxFilterCharId: id }),
 
   commandsVersion: 0,
   bumpCommandsVersion: () => set((s) => ({ commandsVersion: s.commandsVersion + 1 })),

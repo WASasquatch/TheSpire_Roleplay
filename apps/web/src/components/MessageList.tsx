@@ -337,8 +337,51 @@ function fmtFullTimestamp(ms: number): string {
   return new Date(ms).toLocaleString();
 }
 
+/**
+ * Distance from the bottom (px) within which we treat the reader as
+ * "parked at the latest message." Both the buffer-diff auto-scroll and
+ * the async-growth re-pin (ResizeObserver) share this threshold so they
+ * agree on when to follow new content vs. leave a history-reader alone.
+ */
+const NEAR_BOTTOM_PX = 120;
+
+/**
+ * Flat-buffer windowing bounds. While the reader is parked at the
+ * bottom, the in-memory message buffer is trimmed back to the newest
+ * `SOFT_CAP` once it grows past `HARD_CAP`. The gap between the two is
+ * deliberate hysteresis, trimming on every single live append (back to
+ * exactly the cap) would thrash re-renders; instead we let the buffer
+ * drift up to HARD_CAP, then drop in one batch. Dropped older rows
+ * stay on the server and re-hydrate through the normal scroll-up
+ * load-older fetch, so windowing is lossless to the reader.
+ *
+ * This complements MessageVisibilityGate (which unmounts off-screen
+ * DOM but keeps a placeholder + observer per message): the gate bounds
+ * paint/decode cost, this bounds the row COUNT so a long live session
+ * or repeated load-older doesn't accumulate thousands of placeholders.
+ * SOFT_CAP keeps several scroll-up pages of context resident.
+ */
+const FLAT_BUFFER_SOFT_CAP = 200;
+const FLAT_BUFFER_HARD_CAP = 300;
+
 export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canAdminEdit = false, onQuotePost, forumBuckets, onGoToForumPage, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory, renderTopicComposer, renderNewTopicForm, unreadTopicIds, watchedTopicIds, onToggleTopicWatch, readOnly = false, postPermalink }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
+  /**
+   * The flat feed's content box (wraps the loader + every message row).
+   * Observed by the async-growth re-pin effect below; null in nested
+   * (forum) mode, which reads top-down and never end-pins.
+   */
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * Whether the reader is parked at the bottom. Updated on every scroll
+   * event (and after a programmatic end-pin). The ResizeObserver re-pin
+   * consults this so it follows late height growth only while the user
+   * is actually at the latest message, and never yanks a history-reader.
+   * Determined from user scroll intent, NOT from a post-growth
+   * measurement, the growth itself would otherwise push the position
+   * past the near-bottom threshold and read as "scrolled away."
+   */
+  const stickRef = useRef(true);
   /**
    * Scroll-bookkeeping for flat-mode auto-scroll-vs-preserve. We
    * capture the scroll geometry from BEFORE the upcoming commit and
@@ -401,6 +444,9 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         firstId: msgs[0]?.id ?? null,
         lastId: msgs[msgs.length - 1]?.id ?? null,
       };
+      // Track parked-at-bottom from the user's own scrolling so the
+      // async-growth re-pin below knows whether to follow new content.
+      stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
     };
     el.addEventListener("scroll", capture, { passive: true });
     return () => el.removeEventListener("scroll", capture);
@@ -426,6 +472,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     if (!prev || !prev.firstId || !prev.lastId) {
       // Initial mount or empty → end-pin.
       el.scrollTop = el.scrollHeight;
+      stickRef.current = true;
       return;
     }
     const firstChanged = newFirstId !== prev.firstId;
@@ -440,16 +487,68 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       // Append (or full replacement). End-pin only when the user was
       // already near the bottom, otherwise they're reading older
       // history and we shouldn't yank them away.
-      const NEAR_BOTTOM_PX = 120;
       const wasNearBottom = prev.height - prev.top - el.clientHeight < NEAR_BOTTOM_PX;
       // Detect full-replacement: BOTH endpoints changed (room switch,
       // jump-window swap). End-pin so the user lands at the newest.
       const replaced = firstChanged && lastChanged;
-      if (replaced || wasNearBottom) el.scrollTop = el.scrollHeight;
+      if (replaced || wasNearBottom) {
+        el.scrollTop = el.scrollHeight;
+        // Re-arm the stick so the async-growth re-pin keeps following
+        // this append's late-loading media (a programmatic scrollTop set
+        // doesn't fire a scroll event, so capture() won't re-arm it).
+        stickRef.current = true;
+      }
     }
     // first AND last unchanged → no buffer changes that affect layout
     // (an in-place message edit, for example). Leave scroll alone.
   }, [messages, highlightMessageId, replyMode]);
+
+  // Keep the flat feed pinned to the newest line after LATE height
+  // growth the buffer-diff effect above can't see: avatars / inline
+  // images finishing load, link-preview cards mounting via
+  // message:update, emoji sheets swapping in. Each grows the feed
+  // WITHOUT changing the first/last message id, so the layout effect
+  // leaves scroll alone and the newest post drifts below the fold; then
+  // the next arrival's near-bottom test fails (the drift already pushed
+  // the position past the threshold) and the reader is stranded a few
+  // posts up, the "won't stay at the bottom / pops up several posts"
+  // report. A ResizeObserver on the content box re-pins on any height
+  // change while the user is parked at the bottom (stickRef), and
+  // no-ops the instant they scroll away. Setting scrollTop doesn't
+  // resize anything, so there is no observe→scroll→observe feedback
+  // loop. Forums (nested) read top-down and opt out entirely.
+  useLayoutEffect(() => {
+    if (replyMode === "nested") return;
+    const el = ref.current;
+    const content = contentRef.current;
+    if (!el || !content || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (!stickRef.current) return;
+      if (highlightMessageId) return; // jump-to-message owns scroll
+      el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [replyMode, highlightMessageId]);
+
+  // Window the in-memory buffer back down once it grows past HARD_CAP,
+  // but ONLY while the reader is parked at the bottom. Dropping the
+  // oldest rows is invisible there (they're far above the fold), keeps
+  // the row count + per-message observers bounded over a long live
+  // session, and is lossless: the rows re-hydrate via the scroll-up
+  // load-older fetch. Gated on stickRef so a history-reader's
+  // just-loaded older page is never yanked out from under them, and so
+  // the trim → load-older → trim thrash can't start. The front-trim
+  // re-renders as a "prepend in reverse" the layout effect anchors,
+  // and the bottom stays pinned via the same end-pin path as an append.
+  const trimRoomToRecent = useChat((s) => s.trimRoomToRecent);
+  useEffect(() => {
+    if (replyMode === "nested") return;
+    if (!roomId) return;
+    if (!stickRef.current) return;
+    if (messages.length <= FLAT_BUFFER_HARD_CAP) return;
+    trimRoomToRecent(roomId, FLAT_BUFFER_SOFT_CAP);
+  }, [messages, roomId, replyMode, trimRoomToRecent]);
 
   // Jump-to-message flash. When `highlightMessageId` flips to a value
   // present in the current buffer, find the row's DOM node, scroll it to
@@ -750,6 +849,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   return (
     <FlatMessageView
       scrollRef={ref}
+      contentRef={contentRef}
       messages={messages}
       roomId={roomId ?? null}
       fontStep={fontStep}
@@ -770,12 +870,16 @@ const FLAT_LOAD_OLDER_THRESHOLD_PX = 200;
  */
 function FlatMessageView({
   scrollRef,
+  contentRef,
   messages,
   roomId,
   fontStep,
   lineFor,
 }: {
   scrollRef: React.MutableRefObject<HTMLDivElement | null>;
+  /** Content-box ref the parent observes to re-pin to bottom on late
+   *  height growth (image loads, link cards). See MessageList. */
+  contentRef: React.MutableRefObject<HTMLDivElement | null>;
   messages: ChatMessage[];
   roomId: string | null;
   fontStep: 0 | 1 | 2 | 3;
@@ -864,6 +968,11 @@ function FlatMessageView({
       className="flex-1 overflow-y-auto px-4 pb-7 pt-2 leading-relaxed"
       style={{ fontSize: FONT_EM[fontStep] }}
     >
+      {/* Content box the parent's ResizeObserver watches to keep the
+          feed pinned to the newest line as late-loading media grows the
+          height. A plain wrapper, no layout effect of its own (the
+          scroll container keeps the padding + scroll). */}
+      <div ref={contentRef}>
       {hasMore || loadingOlder ? (
         <div className="mb-1 flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-keep-muted">
           {loadingOlder ? (
@@ -905,6 +1014,7 @@ function FlatMessageView({
         // position never jumps.
         <MessageVisibilityGate key={m.id}>{lineFor(m)}</MessageVisibilityGate>
       ))}
+      </div>
     </div>
   );
 }
@@ -3600,6 +3710,16 @@ function Line({
       <LinkPreviewCard preview={msg.linkPreview} canRemove={isOwn} messageId={msg.id} />
     </div>
   ) : null;
+  // When an OpenGraph card is present, indent any inline image/video
+  // embed in the body so it shares the card's left edge (the card sits
+  // at pl-12; a raw embed otherwise breaks out to the row's left margin
+  // and the two read as disconnected blocks). Scoped to the embed
+  // wrapper (`.md-inline-media`) via an arbitrary descendant variant so
+  // surrounding prose keeps its normal flow. No-op without a card, a
+  // lone posted image stays flush-left as before.
+  const mediaAlignClass = msg.linkPreview && !msg.deletedAt
+    ? "[&_.md-inline-media]:ml-12"
+    : "";
 
   const reactionBar = REPLYABLE_KINDS.has(msg.kind) ? (
     <div className="pl-12">
@@ -4045,7 +4165,7 @@ function Line({
         data-message-id={msg.id}
         tabIndex={rowFocusProps.tabIndex}
         onClick={rowFocusProps.onClick}
-        className={`group relative my-0.5 border-l-2 border-keep-action/50 pl-4 transition-colors duration-700 ${rowFocusProps.className} ${hoverRow} ${whisperRest}`}
+        className={`group relative my-0.5 border-l-2 border-keep-action/50 pl-4 transition-colors duration-700 ${mediaAlignClass} ${rowFocusProps.className} ${hoverRow} ${whisperRest}`}
       >
         <div className="pl-12">{quote}</div>
         {lineEl}
@@ -4061,7 +4181,7 @@ function Line({
       data-message-id={msg.id}
       tabIndex={rowFocusProps.tabIndex}
       onClick={rowFocusProps.onClick}
-      className={`group relative transition-colors duration-700 ${rowFocusProps.className} ${hoverRow} ${whisperRest}`}
+      className={`group relative transition-colors duration-700 ${mediaAlignClass} ${rowFocusProps.className} ${hoverRow} ${whisperRest}`}
     >
       {lineEl}
       {linkPreviewEl}

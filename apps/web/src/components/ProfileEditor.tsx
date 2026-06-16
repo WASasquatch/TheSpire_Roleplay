@@ -28,6 +28,7 @@ import { useEarning, lookupRankTier } from "../state/earning.js";
 import { StylePicker } from "./AdminPanel.js";
 import { DEFAULT_STYLE_KEY } from "../lib/ornaments/index.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
+import { CreateCharacterModal } from "./CreateCharacterModal.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { CloseButton } from "./CloseButton.js";
@@ -2055,7 +2056,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
       ) : null}
       {createOpen ? (
         <div onClick={(e) => e.stopPropagation()}>
-          <CreateCharacterModal
+          <CreateCharacterModal<CharacterRow>
             onCancel={() => setCreateOpen(false)}
             onCreated={(c) => {
               setCharacters((prev) => [...prev, c]);
@@ -2069,96 +2070,6 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           />
         </div>
       ) : null}
-    </Modal>
-  );
-}
-
-/**
- * Name-prompt modal for creating a new character. POSTs /characters and on
- * success returns the new row to the parent so the editor can navigate to it.
- * Server is authoritative on validation; the client-side regex is a fast
- * pre-check so users get immediate feedback for bad chars.
- */
-function CreateCharacterModal({
-  onCancel,
-  onCreated,
-}: {
-  onCancel: () => void;
-  onCreated: (c: CharacterRow) => void;
-}) {
-  const [name, setName] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const trimmed = name.trim();
-  const localValid = /^[\p{L}\p{N}_\-' ]{1,40}$/u.test(trimmed);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!localValid || submitting) return;
-    setError(null);
-    setSubmitting(true);
-    try {
-      const res = await fetch("/characters", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed }),
-      });
-      if (!res.ok) throw new Error(await readError(res));
-      const c = (await res.json()) as CharacterRow;
-      onCreated(c);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "create failed");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <Modal onClose={onCancel} zIndex={60}>
-      <form
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={submit}
-        className="keep-frame w-[min(420px,96vw)] rounded bg-keep-parchment p-4"
-      >
-        <h3 className="mb-2 font-action text-lg">New character</h3>
-        <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Character name</span>
-          <input
-            // eslint-disable-next-line jsx-a11y/no-autofocus
-            autoFocus
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. JohnSmith"
-            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-base outline-none focus:border-keep-action md:text-sm"
-          />
-        </label>
-        <p className="mt-1 text-[10px] text-keep-muted">
-          1-40 chars: letters, numbers, spaces, _ - '. Character names can't be changed, choose wisely.
-        </p>
-        {error ? (
-          <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">
-            {error}
-          </div>
-        ) : null}
-        <div className="mt-3 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={!localValid || submitting}
-            className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-1 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
-          >
-            {submitting ? "Creating..." : "Create"}
-          </button>
-        </div>
-      </form>
     </Modal>
   );
 }

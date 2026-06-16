@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { and, asc, desc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer, Socket } from "socket.io";
@@ -16,7 +17,9 @@ import {
   extractMentionTokens,
   mentionsField,
   mentionTokenRegex,
+  processCheckBlocks,
   renderPresenceTemplate,
+  stripCheckMarkers,
   validateAuthorUiRouteTokens,
 } from "@thekeep/shared";
 import type { MentionRef } from "@thekeep/shared";
@@ -31,6 +34,7 @@ import {
   messages,
   roomInvites,
   roomMembers,
+  roomMods,
   roomWorldLinks,
   rooms,
   userActiveCosmetics,
@@ -248,6 +252,18 @@ export async function addMessage(
   const resolvedMentions = await resolveMentionTokens(ctx.db, body);
   body = resolvedMentions.body;
   const mentionsSnapshot = resolvedMentions.mentions;
+
+  // Dynamic pass/fail prompts. The author may have embedded a
+  // `<check>…</check>` or `<roll:1d20:12>…</roll>` block; resolve it
+  // server-side ONCE (authoritative, like /roll) and replace it with a
+  // self-contained marker the client renders as a collapsible Pass/Fail
+  // card. We strip any pre-existing markers from the (still user-derived)
+  // body first so a pasted "resolved" block can't masquerade as real,
+  // then process to mint authentic ones. Runs AFTER mention resolution so
+  // branch prose carries resolved names, and after the inline-expansion
+  // length gate so the marker's encoding overhead (URI-encoded JSON) is
+  // never charged against the author's typed length.
+  body = processCheckBlocks(stripCheckMarkers(body), randomInt);
 
   // Forum-thread auto-binding. When the dispatcher hydrated a reply
   // context (composer was scoped to an active topic in a nested-mode
@@ -2381,16 +2397,28 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     : [];
   const charById = new Map(charRows.map((c) => [c.id, c]));
 
-  const memberRows = await db
-    .select()
-    .from(roomMembers)
-    .where(
-      and(
-        eq(roomMembers.roomId, roomId),
-        sql`${roomMembers.userId} IN (${sql.join(userIds.map((u) => sql`${u}`), sql`, `)})`,
-      ),
-    );
-  const roleByUser = new Map(memberRows.map((m) => [m.userId, m.role]));
+  // Userlist crown is PER-IDENTITY (see room_mods). Authority remains
+  // per-account on room_members.role, but that role would paint a crown
+  // on EVERY character an owner/mod voices, leaking staff/owner status
+  // into RP. Instead we derive each occupant row's displayed role from:
+  //   - room OWNER → shown only on that account's OOC/master row
+  //     (ownership is an account-level fact; rooms.owner_id).
+  //   - room MOD   → shown only on the exact identity a /promote targeted
+  //     (room_mods, character_id '' = OOC).
+  // Anyone else reads as "member" (no crown).
+  const roomOwnerRow = (await db
+    .select({ ownerId: rooms.ownerId })
+    .from(rooms)
+    .where(eq(rooms.id, roomId))
+    .limit(1))[0];
+  const roomOwnerId = roomOwnerRow?.ownerId ?? null;
+  const modRows = await db
+    .select({ userId: roomMods.userId, characterId: roomMods.characterId })
+    .from(roomMods)
+    .where(eq(roomMods.roomId, roomId));
+  // Key: `${userId}::${characterId}` with '' for OOC, matching the
+  // stored sentinel; occupant lookups map their null characterId to ''.
+  const modIdentityKeys = new Set(modRows.map((m) => `${m.userId}::${m.characterId}`));
 
   // Primary-world resolution was removed in migration 0187. With
   // per-identity memberships there's no single "primary" badge to
@@ -2711,7 +2739,15 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
       idle: idleKeys.has(`${u.id}::${id.characterId ?? ""}`),
       chatColor: effectiveColor,
       gender: resolveGender(u.gender, c?.statsJson),
-      role: roleByUser.get(u.id) ?? "member",
+      // Per-identity displayed role (see modIdentityKeys / roomOwnerId
+      // above). Owner shows only on the OOC/master row; a mod crown shows
+      // only on the exact identity that was /promoted.
+      role:
+        roomOwnerId === u.id && id.characterId === null
+          ? "owner"
+          : modIdentityKeys.has(`${u.id}::${id.characterId ?? ""}`)
+            ? "mod"
+            : "member",
       accountRole: u.role,
       // Mood is per-identity in the same in-memory store as away.
       // Reading the master column here would smear a /mood set on

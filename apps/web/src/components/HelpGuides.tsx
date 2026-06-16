@@ -308,6 +308,86 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode; requiresPermis
   },
 
   {
+    id: "dice-checks",
+    title: "Dice, checks, and pass/fail prompts",
+    body: (
+      <>
+        <P>
+          When a scene needs a little chance, you can let the dice decide. Every result here is
+          rolled on the server and can't be re-rolled or faked, so the whole room can trust the
+          outcome.
+        </P>
+
+        <Heading>Rolling dice</Heading>
+        <Bullets>
+          <li><K>/roll 1d20</K> rolls one twenty-sided die.</li>
+          <li><K>/roll 3d6</K> rolls three six-sided dice and shows each die plus the total.</li>
+          <li><K>/roll 1d20+3</K> adds a flat bonus. <K>/roll 2d6-1</K> subtracts one.</li>
+          <li><K>!roll</K> mid-sentence splices a roll into the line you're writing.</li>
+        </Bullets>
+
+        <Heading>A quick check</Heading>
+        <P>
+          <K>/check</K> is the simplest call: a clean 50/50 Pass or Fail, posted for the room. Drop
+          <K>!check</K> into a sentence for the same thing inline ("she tries the lock ( check: ✓
+          Pass )").
+        </P>
+
+        <Heading>Pass/fail prompts</Heading>
+        <P>
+          Write both outcomes ahead of time and let the result reveal which one happened. The room
+          sees a card with the verdict on top, the winning outcome already open, and the other
+          tucked away to peek at if they're curious.
+        </P>
+        <pre className="overflow-x-auto rounded border border-keep-rule/60 bg-keep-panel/30 p-2 font-mono text-[10px] leading-relaxed">{`/me works the pick into the old lock.
+<check>
+  <pass>The lock gives with a soft click.</pass>
+  <fail>The pick snaps off inside the mechanism.</fail>
+</check>`}</pre>
+
+        <Heading>Letting the dice decide a prompt</Heading>
+        <P>
+          Swap <K>{"<check>"}</K> for a roll with a target number. The roll has to meet or beat the
+          target to pass. The opener is <K>{"<roll:dice:target>"}</K>.
+        </P>
+        <pre className="overflow-x-auto rounded border border-keep-rule/60 bg-keep-panel/30 p-2 font-mono text-[10px] leading-relaxed">{`/me swings for the bridge's rope supports.
+<roll:1d20:12>
+  <pass>The ropes slice clean and whip back toward the center.</pass>
+  <fail>The rope barely takes a mark. This will take time they don't have.</fail>
+</roll>`}</pre>
+        <Bullets>
+          <li><K>{"<roll:1d20:12>"}</K> rolls a d20, and 12 or higher passes.</li>
+          <li><K>{"<roll:1d20+3:12>"}</K> adds a flat bonus before comparing.</li>
+          <li><K>{"<roll:1d20x1.5:12>"}</K> multiplies the roll (handy for advantage or a buff).</li>
+        </Bullets>
+        <Tip>
+          The card shows the math it used, so everyone can see the roll, the bonus, and the target
+          that decided it.
+        </Tip>
+
+        <Heading>A house difficulty for the room</Heading>
+        <P>
+          Room owners and mods can set a single difficulty for the whole room with <K>/roll dc 15</K>.
+          Once it's set, every plain <K>/roll</K> in that room is marked Pass or Fail against it, so
+          a game can keep a steady bar without writing the target on each roll. <K>/roll dc</K> shows
+          the current difficulty, and <K>/roll dc clear</K> removes it.
+        </P>
+
+        <Heading>Initiative</Heading>
+        <P>
+          <K>/initiative</K> (or <K>/init</K>) rolls a d20 for turn order. Add a bonus with{" "}
+          <K>/init +3</K>. If the room has a difficulty set, the initiative roll is marked Pass or
+          Fail against it too.
+        </P>
+        <Tip>
+          All of this works the same in forum threads as it does in chat, so a play-by-post scene
+          can lean on the dice just like a live room.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
     id: "characters",
     title: "Characters: creating, switching, retiring",
     body: (

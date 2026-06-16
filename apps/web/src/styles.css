@@ -1153,13 +1153,35 @@
 [data-theme-style="scifi"] .keep-app-sidebar {
   isolation: isolate;
   background-color: rgb(var(--keep-panel) / 0.28) !important;
-  backdrop-filter: blur(18px) saturate(1.35);
-  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  /* NOTE: the frosted `backdrop-filter` is NOT on this element, it's on
+   * the `::after` layer below. When it lived here, the userlist's
+   * avatars + name-style decorations (which use position/overflow to
+   * bleed VFX into the row gutter, forming their own stacking contexts)
+   * each made Chromium re-sample the backdrop, painting a sharp
+   * rectangular seam around the icon/name cluster, the reported
+   * "erroneous container box." Moving the blur to a behind-content
+   * pseudo keeps the rows out of the filtered element entirely, so the
+   * frost reads the same but no longer seams around its descendants. */
   border-left: 1px solid rgb(var(--keep-action-neon) / 0.75) !important;
   box-shadow:
     inset 3px 0 8px rgb(var(--keep-action-neon) / 0.14),
     -4px 0 14px rgb(var(--keep-action-neon) / 0.22),
     -12px 0 32px -8px rgb(var(--keep-action-neon) / 0.14) !important;
+}
+/* Frosted-glass layer for the rail. `inset: 0` + `z-index: -1` parks it
+ * behind the rail's content but above the element's own translucent
+ * background-color, so its backdrop is the page behind the rail (the
+ * frost) — identical look to filtering the element directly, minus the
+ * descendant seam. `::before` is already the cyber texture, hence
+ * `::after`. */
+[data-theme-style="scifi"] .keep-app-sidebar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
 }
 /* Composer, ACCENT-colored tube on the top edge (the secondary
  * neon, typically pink/magenta complementing the action color).
@@ -1610,10 +1632,21 @@ html[data-theme-style="glass"] body::before {
  * shared frost recipe; if a specific element wants extra glass
  * detail (inset bevel, outer shadow) it can layer that on top via
  * its own rule (see `.keep-frame`, `.keep-app-banner`, etc. below). */
-html[data-theme-style="glass"] [class*="bg-keep-bg"],
-html[data-theme-style="glass"] [class*="bg-keep-banner"],
-html[data-theme-style="glass"] [class*="bg-keep-panel"],
-html[data-theme-style="glass"] [class*="bg-keep-parchment"] {
+/* The `:not(code):not(pre):not(blockquote)` guard keeps the frost on
+ * CHROME panels only. Message-body prose decorations reuse the same
+ * `bg-keep-panel` tint, inline `code` (`bg-keep-panel/60`), fenced
+ * `pre` code blocks, and reply-quote `blockquote`s, so without the
+ * exclusion every one of those tiny inline tiles got its own
+ * backdrop-filter layer. On Android Chrome a swarm of small
+ * backdrop-filter elements inside the scrolling feed renders as smeared
+ * blurred bands across the chat (a code-formatted line painted a frosted
+ * stripe over its neighbours). These decorations already carry a
+ * translucent panel fill; dropping the blur on them costs nothing
+ * visually and removes the artifact. */
+html[data-theme-style="glass"] [class*="bg-keep-bg"]:not(code):not(pre):not(blockquote),
+html[data-theme-style="glass"] [class*="bg-keep-banner"]:not(code):not(pre):not(blockquote),
+html[data-theme-style="glass"] [class*="bg-keep-panel"]:not(code):not(pre):not(blockquote),
+html[data-theme-style="glass"] [class*="bg-keep-parchment"]:not(code):not(pre):not(blockquote) {
   backdrop-filter: blur(18px) saturate(1.3);
   -webkit-backdrop-filter: blur(18px) saturate(1.3);
 }
@@ -4864,4 +4897,27 @@ aside.margin-note {
 .profile-designer .gjs-block-category .gjs-title,
 .profile-designer .gjs-layer-title {
   color: rgb(var(--keep-text));
+}
+/* Top-panel action buttons (device switch, options: borders / code /
+ * undo / redo, and the right-hand view switcher) render as inline SVGs
+ * filled with `currentColor`, with NO icon font. GrapesJS leaves their
+ * `color` to inherit, and on the themed chrome it was resolving to a
+ * near-invisible value, so the buttons read as empty-but-clickable
+ * boxes (the reported "missing buttons"). Pin a legible color + fill
+ * explicitly (the visible text labels already prove `--keep-text`
+ * contrasts here), and add a faint resting chrome so each button is
+ * discoverable even mid-load, with accent hover/active states. */
+.profile-designer .gjs-pn-btn {
+  color: rgb(var(--keep-text));
+  background-color: rgb(var(--keep-text) / 0.05);
+}
+.profile-designer .gjs-pn-btn svg {
+  fill: currentColor;
+}
+.profile-designer .gjs-pn-btn:hover {
+  color: rgb(var(--keep-action));
+  background-color: rgb(var(--keep-text) / 0.12);
+}
+.profile-designer .gjs-pn-btn.gjs-pn-active {
+  color: rgb(var(--keep-accent));
 }

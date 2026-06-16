@@ -312,6 +312,22 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
     setInboxFilterCharId(activeCharacterId);
   }, [activeCharacterId]);
 
+  // Mirror the active inbox filter into the store while this modal is
+  // mounted so the App-level DM refetches (socket reconnect, dm:new
+  // for an unknown conversation) reload the identity the user is
+  // actually viewing rather than the global voice. Without this, a
+  // reconnect/refocus refetch scoped to the global character would
+  // full-replace `dmConversations` with the wrong identity's threads
+  // and wipe the open thread's conversation row, the bug behind
+  // "switching tabs sends to the wrong inbox / removes messages."
+  // Cleared to `undefined` on unmount so a closed messenger falls back
+  // to the global voice.
+  const setDmInboxFilterCharId = useChat((s) => s.setDmInboxFilterCharId);
+  useEffect(() => {
+    setDmInboxFilterCharId(inboxFilterCharId);
+    return () => setDmInboxFilterCharId(undefined);
+  }, [inboxFilterCharId, setDmInboxFilterCharId]);
+
   /**
    * The character roster used to render the switcher chips. Fetched
    * once per modal open from `/characters` (the same endpoint the
@@ -2323,10 +2339,16 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
   // Layout: outer column aligns the message to the appropriate side.
   // Inside, a horizontal flex pairs the sender's snapshotted avatar
   // with the bubble. The wrapper carries the width cap (was on the
-  // bubble before): mobile keeps a roomy ~90% so the alignment cue
-  // still reads, desktop caps at 30vw + the avatar/gap allowance so
-  // the bubble itself still lands ~30vw wide without the avatar
-  // squeezing into it.
+  // bubble before), expressed as a percentage of the CONTAINER (the
+  // thread pane) rather than of the viewport: mobile keeps a roomy
+  // ~92% so the alignment cue still reads, md+ allows up to 85% of the
+  // pane and tops out at 46rem so long paragraphs fill the available
+  // space instead of wrapping into a skinny strip. The earlier `30vw`
+  // cap was viewport-relative, so on a tablet or a constrained desktop
+  // (where the inbox rail already eats a chunk of width) the bubble
+  // collapsed to roughly half the pane, the "very skinny strip of
+  // text" users reported, while an absolute ceiling keeps lines
+  // readable on an ultrawide.
   //
   // `flex-row-reverse` on mine puts my avatar on the right of my
   // bubble, mirroring the existing right-alignment. Avatar uses the
@@ -2364,7 +2386,7 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
     <li className={"group flex flex-col " + (isMine ? "items-end" : "items-start")}>
       <div
         className={
-          "relative flex items-end gap-1.5 max-w-[90%] md:max-w-[calc(30vw+2.25rem)] " +
+          "relative flex items-end gap-1.5 max-w-[92%] md:max-w-[min(85%,46rem)] " +
           (isMine ? "flex-row-reverse" : "flex-row")
         }
       >
@@ -2427,7 +2449,7 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
           {formatDmTime(msg.createdAt)}
         </span>
       ) : null}
-      <div className={"mt-0.5 max-w-[90%] md:max-w-[calc(30vw+2.25rem)] " + (isMine ? "pr-9" : "pl-9")}>
+      <div className={"mt-0.5 max-w-[92%] md:max-w-[min(85%,46rem)] " + (isMine ? "pr-9" : "pl-9")}>
         <ReactionBar
           targetKind="dm"
           targetId={msg.id}

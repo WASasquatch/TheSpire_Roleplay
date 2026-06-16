@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { isAdminRole, roleRank, type PermissionKey } from "@thekeep/shared";
-import { bans, mutes, roomMembers, rooms, users } from "../../db/schema.js";
+import { bans, mutes, roomMembers, roomMods, rooms, users } from "../../db/schema.js";
 import { hasPermission } from "../../auth/permissions.js";
 import {
   addMessage,
@@ -53,6 +53,11 @@ async function findUserByName(ctx: CommandContext, name: string) {
   if (!row) return undefined;
   return Object.assign(row, {
     __resolvedDisplayName: resolution.target.displayName,
+    // The IDENTITY the caller targeted: a character id when they typed
+    // `@cid:` / a character name, or null for the master/OOC handle.
+    // /promote uses this to attribute the room-mod crown to that exact
+    // identity (room_mods); the underlying authority stays per-account.
+    __resolvedCharacterId: resolution.target.characterId,
   });
 }
 
@@ -368,16 +373,10 @@ export const promoteCommand: CommandHandler = {
     if (!target) return;  // findUserByName emitted the appropriate notice.
     if (target.id === ctx.user.id) return notice(ctx, "SELF", "You're already at the top of this room.");
 
-    // Ensure they have a row, then upgrade to mod. Room moderation
-    // is stored per-USER on `room_members` today (not per-identity),
-    // so promoting either the master or a character of the same user
-    // grants moderation power across every identity they voice in
-    // this room. That's the current model; the broadcast below uses
-    // the IDENTITY the caller targeted (character name when the
-    // caller typed a character, master name otherwise) so the room
-    // sees the name they recognize, but the underlying privilege is
-    // user-scoped until / unless we partition room_members per
-    // identity.
+    // Authority is per-ACCOUNT: set room_members.role so the caller keeps
+    // moderation power in this room across every identity they voice (none
+    // of the room-authority checks change, and switching characters never
+    // drops their mod power).
     await ctx.db
       .insert(roomMembers)
       .values({ roomId: ctx.roomId, userId: target.id, role: "mod" })
@@ -385,6 +384,19 @@ export const promoteCommand: CommandHandler = {
         target: [roomMembers.roomId, roomMembers.userId],
         set: { role: "mod" },
       });
+    // Crown display is per-IDENTITY: record WHICH identity this /promote
+    // targeted so the mod crown shows on that identity alone, not on every
+    // character the account voices. `''` = OOC/master. A second /promote
+    // on another of the same user's identities just adds another row (the
+    // "list of ID/CID"); /demote clears them all.
+    await ctx.db
+      .insert(roomMods)
+      .values({
+        roomId: ctx.roomId,
+        userId: target.id,
+        characterId: target.__resolvedCharacterId ?? "",
+      })
+      .onConflictDoNothing();
     const displayed = target.__resolvedDisplayName;
     await addMessage(ctx, {
       kind: "system",
@@ -422,6 +434,11 @@ export const demoteCommand: CommandHandler = {
       .update(roomMembers)
       .set({ role: "member" })
       .where(and(eq(roomMembers.roomId, ctx.roomId), eq(roomMembers.userId, target.id)));
+    // Clear every per-identity crown row for this user in this room (demote
+    // is per-account, mirroring the authority above).
+    await ctx.db
+      .delete(roomMods)
+      .where(and(eq(roomMods.roomId, ctx.roomId), eq(roomMods.userId, target.id)));
     await addMessage(ctx, {
       kind: "system",
       body: `${ctx.user.displayName} demoted ${displayed} to member.`,

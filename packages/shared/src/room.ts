@@ -78,7 +78,14 @@ export interface RoomOccupant {
   chatColor: string | null;
   /** Resolved gender - character.stats.gender if active, else user.gender */
   gender: Gender;
-  /** Per-room role (room_members.role). */
+  /**
+   * Per-room role for THIS identity, drives the userlist crown. Derived
+   * server-side: "owner" only on the room owner's OOC/master row
+   * (rooms.owner_id), "mod" only on the exact identity a /promote
+   * targeted (room_mods), else "member". NOT the per-account
+   * room_members.role (that's the moderation-authority source and would
+   * paint a crown on every character an owner/mod voices).
+   */
   role: "owner" | "mod" | "member";
   /** Account-level role (users.role). Lets the UI mark site admins regardless of room role. */
   accountRole: Role;

@@ -7,6 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "node scripts/apply-migrations.mjs",
     "db:studio": "drizzle-kit studio",

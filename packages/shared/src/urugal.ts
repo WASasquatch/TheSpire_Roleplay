@@ -27,21 +27,23 @@ export const URUGAL_UNLOCK_COST = 2000;
  * ------------------------------------------------------------------- */
 
 /** Currency + XP awarded the FIRST time a run reaches a given floor.
- *  Gentle ramp: floor 1 → 2c, 5 → 3c, 10 → 5c, 20 → 8c. */
+ *  Paid cumulatively per new floor, so a deep run adds up. floor 1 → 4c,
+ *  5 → 8c, 10 → 13c, 20 → 23c (XP 1:1). */
 export function urugalFloorReward(floor: number): { currency: number; xp: number } {
   if (!Number.isFinite(floor) || floor < 1) return { currency: 0, xp: 0 };
-  return { currency: 2 + Math.floor(floor / 3), xp: 1 + Math.floor(floor / 5) };
+  const currency = 3 + floor;
+  return { currency, xp: currency };
 }
 
-/** Bonus for CLEARING a boss floor (every 5th). boss@5 → 8c, @10 → 11c, @20 → 16c. */
+/** Bonus for CLEARING a boss floor (every 5th). boss@5 → 17c, @10 → 22c, @20 → 32c. */
 export function urugalBossReward(floor: number): { currency: number; xp: number } {
   if (!Number.isFinite(floor) || floor < 1) return { currency: 0, xp: 0 };
-  return { currency: 6 + Math.floor(floor / 2), xp: 3 + Math.floor(floor / 5) };
+  const currency = 12 + floor;
+  return { currency, xp: currency };
 }
 
-/** Hard ceiling on currency earned from this game per identity per UTC
- *  day. Sits well under the chat/presence daily cap on purpose. */
-export const URUGAL_DAILY_CURRENCY_CAP = 150;
+/** Hard ceiling on currency earned from this game per identity per UTC day. */
+export const URUGAL_DAILY_CURRENCY_CAP = 500;
 
 /* ---------------------------------------------------------------------
  * Plausibility bounds (server-enforced anti-abuse).

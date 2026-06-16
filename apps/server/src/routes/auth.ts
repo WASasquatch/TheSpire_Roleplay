@@ -330,9 +330,25 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       )
       .limit(1))[0];
 
-    if (!u || u.disabledAt) {
+    if (!u) {
       reply.code(401);
       return { error: "invalid credentials" };
+    }
+    if (u.disabledAt) {
+      // Lazily lift a TIMED ban that has lapsed so the user can sign back
+      // in the instant it expires, without waiting for the periodic sweep.
+      // A permanent ban (bannedUntil null) and a plain admin disable
+      // (bannedAt null) both fall through to the rejection below.
+      const banExpired = u.bannedAt != null && u.bannedUntil != null && +u.bannedUntil <= Date.now();
+      if (banExpired) {
+        await db
+          .update(users)
+          .set({ bannedAt: null, bannedUntil: null, banReason: null, bannedById: null, disabledAt: null })
+          .where(eq(users.id, u.id));
+      } else {
+        reply.code(401);
+        return { error: "invalid credentials" };
+      }
     }
     const ok = await verifyPassword(u.passwordHash, body.password);
     if (!ok) {

@@ -700,6 +700,14 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
   // else in the room.
   const isMasterRow = o.characterId === null;
   if (!isMasterRow) {
+    // `o.role` is now PER-IDENTITY (the server derives it from
+    // room_mods + rooms.owner_id, see broadcast.ts), so a character row
+    // only carries "mod" when THAT identity was specifically /promoted,
+    // and "owner" never lands on a character (ownership shows on the
+    // owner's OOC row alone). That means staff who merely own/moderate
+    // the default rooms no longer leak a crown onto every character they
+    // RP, while a character explicitly promoted to room mod does show
+    // one. Site badges (admin/master/site-mod) stay master-only below.
     if (o.role === "mod" || o.role === "owner") {
       return {
         label: o.role === "owner" ? "Room owner" : "Room Mod",

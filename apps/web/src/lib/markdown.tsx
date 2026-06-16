@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
-import { customCmdCssToStyle, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, splitOnCode, VMARK_SPAN_RE, type MentionRef, type UiRoute } from "@thekeep/shared";
+import { CHK_SPAN_RE, customCmdCssToStyle, decodeCheckMarker, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, splitOnCode, VMARK_SPAN_RE, type CheckResultData, type MentionRef, type UiRoute } from "@thekeep/shared";
 import { openUiRoute } from "./uiRouteOpen.js";
 import { resolveDynamicChipLabel } from "./uiRouteDynamicLabel.js";
 import { splitMentions } from "./mentions.js";
@@ -414,6 +414,27 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
           </VerifiedInline>
         ),
       };
+    }
+  }
+
+  // Resolved <check> / <roll> block. A self-contained marker the server
+  // minted from a `<check>…</check>` or `<roll:NdM:DC>…</roll>` block
+  // (see packages/shared/src/dynamicCheck.ts). It opens with the same
+  // U+2063 separator as the verification marker but carries the `chk:`
+  // tag, so VMARK_SPAN_RE above won't have matched it. Decoded into a
+  // collapsible Pass/Fail card. Like /roll output, the result is
+  // authoritative, the client only renders, never re-rolls.
+  if (text.charCodeAt(i) === 0x2063) {
+    CHK_SPAN_RE.lastIndex = 0;
+    const m = CHK_SPAN_RE.exec(text.slice(i));
+    if (m && m.index === 0) {
+      const data = decodeCheckMarker(m[1] ?? "");
+      if (data) {
+        return {
+          end: i + m[0].length,
+          node: <CheckResultBlock data={data} depth={depth} />,
+        };
+      }
     }
   }
 
@@ -885,6 +906,107 @@ function VerifiedInline({
       {children}
       <span aria-hidden className="ml-0.5 align-super text-[0.7em] text-keep-system">✓</span>
       <span className="sr-only"> (verified /{cmd} output)</span>
+    </span>
+  );
+}
+
+/* Pass/Fail accent colors for the check card. Raw "r g b" triplets so
+ * they compose into `rgb(... / a)` for tints at any opacity. Emerald /
+ * rose, chosen to read as "good / bad" across every theme background
+ * without depending on a theme slot. */
+const CHK_PASS_RGB = "16 185 129";
+const CHK_FAIL_RGB = "244 63 94";
+
+/**
+ * Rendered form of a resolved `<check>` / `<roll>` block. Shows a verdict
+ * chip (the server's authoritative outcome + the mechanical detail line)
+ * above two collapsible branches, "Pass" and "Fail". The winning branch
+ * is auto-expanded and tinted with its accent color; the losing branch is
+ * collapsed and, when opened, rendered at reduced emphasis so the actual
+ * outcome stays visually dominant. Both branches stay independently
+ * toggleable so a curious reader can peek at the road not taken.
+ *
+ * The block is `display:block` so it sits on its own lines like a card
+ * rather than inline with the surrounding action text.
+ */
+function CheckResultBlock({ data, depth }: { data: CheckResultData; depth: number }) {
+  const passWon = data.outcome === "pass";
+  const accent = passWon ? CHK_PASS_RGB : CHK_FAIL_RGB;
+  return (
+    <span className="my-1 block overflow-hidden rounded-lg border border-keep-rule/60 bg-keep-panel/30 text-[0.95em]">
+      {/* Verdict chip. The badge carries the accent; the detail line
+          (dice math) sits beside it muted. */}
+      <span
+        className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-2.5 py-1.5"
+        style={{ background: `rgb(${accent} / 0.12)` }}
+      >
+        <span
+          className="rounded px-1.5 py-0.5 text-[0.85em] font-bold uppercase tracking-wide"
+          style={{ background: `rgb(${accent} / 0.2)`, color: `rgb(${accent})` }}
+        >
+          {passWon ? "✓ Pass" : "✗ Fail"}
+        </span>
+        {data.detail ? (
+          <span className="font-mono text-[0.85em] text-keep-muted">{data.detail}</span>
+        ) : null}
+      </span>
+      {data.pass ? (
+        <CheckBranch label="Pass" rgb={CHK_PASS_RGB} active={passWon} startOpen={passWon} glyph="✓">
+          {parseInline(data.pass, depth + 1)}
+        </CheckBranch>
+      ) : null}
+      {data.fail ? (
+        <CheckBranch label="Fail" rgb={CHK_FAIL_RGB} active={!passWon} startOpen={!passWon} glyph="✗">
+          {parseInline(data.fail, depth + 1)}
+        </CheckBranch>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * One collapsible branch of a {@link CheckResultBlock}. The active (winning)
+ * branch gets a faint accent-tinted background and full-emphasis prose; the
+ * inactive branch carries no tint and renders its prose at reduced opacity
+ * so it reads as the alternative that didn't happen.
+ */
+function CheckBranch({
+  label,
+  rgb,
+  active,
+  startOpen,
+  glyph,
+  children,
+}: {
+  label: string;
+  rgb: string;
+  active: boolean;
+  startOpen: boolean;
+  glyph: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(startOpen);
+  return (
+    <span className="block border-t border-keep-rule/40">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 px-2.5 py-1 text-left text-[0.85em]"
+        style={active ? { background: `rgb(${rgb} / 0.1)` } : undefined}
+      >
+        <span aria-hidden style={{ color: `rgb(${rgb})` }}>{glyph}</span>
+        <span className={active ? "font-semibold text-keep-text" : "text-keep-muted"}>{label}</span>
+        <span aria-hidden className="ml-auto text-[0.8em] text-keep-muted">{open ? "▾" : "▸"}</span>
+      </button>
+      {open ? (
+        <span
+          className={`block px-2.5 py-1.5 ${active ? "" : "opacity-60"}`}
+          style={active ? { background: `rgb(${rgb} / 0.05)` } : undefined}
+        >
+          {children}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -1409,7 +1531,10 @@ function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
         {buttonLabel}
       </button>
       {shown && looksLikeImage ? (
-        <span className="mt-1 block">
+        // `md-inline-media` is a layout hook (no styles of its own): the
+        // chat row uses it to indent the embed into line with an
+        // OpenGraph card when one is present, see MessageList.
+        <span className="md-inline-media mt-1 block">
           {/*
             Viewport-relative cap: 95% of the screen width on mobile so
             a portrait image isn't pushed off the gutter, narrowing to
@@ -1442,7 +1567,7 @@ function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
         //     `max-md:landscape:` scopes this to below-md + landscape
         //     so it doesn't also catch iPads in landscape.
         //   - Desktop / tablet: cap at 1280px (16:9 → 720p height).
-        <span className="mt-1 block w-full max-md:landscape:max-w-[854px] md:max-w-[1280px]">
+        <span className="md-inline-media mt-1 block w-full max-md:landscape:max-w-[854px] md:max-w-[1280px]">
           {/*
             16:9 aspect via `aspect-video` keeps the iframe shape regardless
             of how wide the chat column is. `referrerPolicy=

@@ -26,6 +26,11 @@ interface Props {
    *  shareable links instead. */
   onOpenScriptorium: () => void;
   onOpenWorlds: () => void;
+  /** Opens the Staff directory modal. */
+  onOpenStaff: () => void;
+  /** Opens the Spire Arcade launcher. Permission-gated by the parent;
+   *  the link only renders when the viewer holds `use_arcade`. */
+  onOpenArcade: () => void;
 }
 
 /**
@@ -39,7 +44,7 @@ interface Props {
  * the active theme's panel color / text color / font-action stack when not
  * overridden, so a fresh install still looks coherent.
  */
-export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium, onOpenWorlds }: Props) {
+export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium, onOpenWorlds, onOpenArcade, onOpenStaff }: Props) {
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
   const branding = useChat((s) => s.branding);
@@ -165,7 +170,14 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   function fireEarning() { onOpenEarning(); setMenuOpen(false); }
   function fireScriptorium() { onOpenScriptorium(); setMenuOpen(false); }
   function fireWorlds() { onOpenWorlds(); setMenuOpen(false); }
+  function fireArcade() { onOpenArcade(); setMenuOpen(false); }
+  function fireStaff() { onOpenStaff(); setMenuOpen(false); }
   function fireLogout() { setMenuOpen(false); void logout(); }
+
+  // Arcade is auth-gated AND permission-gated, the launcher itself 403s
+  // without `use_arcade`, so the nav entry stays hidden rather than
+  // teasing a surface the viewer can't open.
+  const canArcade = !!me?.permissions.includes("use_arcade");
 
   return (
     <header
@@ -294,6 +306,28 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
             >
               Worlds
             </button>
+            <span className="text-keep-rule">|</span>
+            <button
+              type="button"
+              onClick={onOpenStaff}
+              className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
+              title="Meet the staff, the mods and admins who run the Spire"
+            >
+              Staff
+            </button>
+            {canArcade ? (
+              <>
+                <span className="text-keep-rule">|</span>
+                <button
+                  type="button"
+                  onClick={onOpenArcade}
+                  className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
+                  title="The Spire Arcade. Play the cabinet's games, like the Eidolon Tamer"
+                >
+                  Arcade
+                </button>
+              </>
+            ) : null}
             <span className="text-keep-rule">|</span>
           </>
         ) : null}
@@ -435,6 +469,22 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                 >
                   <span>Worlds</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={fireStaff}
+                  className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
+                >
+                  <span>Staff</span>
+                </button>
+                {canArcade ? (
+                  <button
+                    type="button"
+                    onClick={fireArcade}
+                    className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
+                  >
+                    <span>Arcade</span>
+                  </button>
+                ) : null}
               </>
             ) : null}
             <button

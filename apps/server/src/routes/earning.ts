@@ -1845,6 +1845,10 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     // bare-ledger-unlock shape; the urugal routes gate on the
     // `purchase_flair_urugal_descent` ledger row.
     "flair_urugal_descent",
+    // Spire Arcade — one-time unlock for the Grimhold cabinet (game #3, six
+    // games). Same bare-ledger-unlock shape; the grimhold routes gate on the
+    // `purchase_flair_grimhold` ledger row.
+    "flair_grimhold",
   ]);
 
   app.post<{ Params: { key: string }; Body: unknown }>(

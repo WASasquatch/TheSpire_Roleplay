@@ -15,6 +15,7 @@ import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { characterPortraits, characters, userPortraits, users } from "../db/schema.js";
 import { bioHtmlForEdit, sanitizeBio } from "../auth/html.js";
+import { recordAudit } from "../audit.js";
 import { getSessionUser } from "./auth.js";
 import { getSettings, parseOwnThemeJson, parseUserThemeJson } from "../settings.js";
 import { broadcastPresence } from "../realtime/broadcast.js";
@@ -23,19 +24,27 @@ import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
-/** Same regex used by `/char create` so the two creation paths stay in lockstep. */
-const CHAR_NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
+/** Same regex used by `/char create` so the two creation paths stay in
+ *  lockstep. A non-breaking space (U+00A0) is allowed and PRESERVED, the
+ *  command parser treats NBSP as a normal word character (see
+ *  commands/parser.ts), so `The\u00A0Watcher` stays one token and works
+ *  with /whisper, /char, etc. An ASCII space is still accepted here for
+ *  backward compatibility with existing names and the `/char create`
+ *  command, but the client creation UIs steer new names away from it
+ *  (it splits on whitespace and breaks those same commands). */
+const CHAR_NAME_RX = /^[\p{L}\p{N}_\-'\u00A0 ]{1,40}$/u;
 
 /**
- * Mirrors `normalizeCharName` in commands/builtins/char.ts. Folds NBSP
- * (U+00A0) to ASCII space before the regex test so a name typed with a
- * "fake space", autocorrect on macOS / iOS, paste from a NBSP-using
- * source, or a click on an existing master-username link whose
- * canonical storage IS NBSP, lands without a confusing BAD_CHAR_NAME
- * error. Keep the two normalizers in sync.
+ * Mirrors `normalizeCharName` in commands/builtins/char.ts. Trims
+ * surrounding whitespace (including NBSP at the edges) but PRESERVES
+ * interior NBSP: folding it to an ASCII space used to defeat the whole
+ * point of typing Alt+0160 for a parser-safe name, the stored value
+ * came back with a real space and broke commands. Dup detection stays
+ * space-insensitive via `eqNameInsensitive` below, so "John Smith" and
+ * "John\u00A0Smith" still collide. Keep the two normalizers in sync.
  */
 function normalizeCharName(input: string): string {
-  return input.replace(/\u00A0/g, " ").trim();
+  return input.trim();
 }
 const createCharacterBody = z.object({ name: z.string().min(1).max(40) }).strict();
 const activeCharacterBody = z.object({
@@ -930,7 +939,14 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         .from(userPortraits)
         .where(eq(userPortraits.id, req.params.portraitId))
         .limit(1))[0];
-      if (!p || p.userId !== me.id) { reply.code(404); return { error: "not found" }; }
+      if (!p) { reply.code(404); return { error: "not found" }; }
+      // Owner edits freely; a moderator holding `edit_others_user` can also
+      // patch someone else's master portrait (the use case is flagging a
+      // gallery image NSFW from the profile modal). Mirrors how the
+      // character-portrait route above honors `edit_others_character`.
+      if (p.userId !== me.id && !(await hasPermission(me, "edit_others_user", db))) {
+        reply.code(403); return { error: "not yours" };
+      }
 
       await db
         .update(userPortraits)
@@ -1093,6 +1109,37 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       const { broadcastPresence } = await import("../realtime/broadcast.js");
       for (const roomId of rooms) await broadcastPresence(io, db, roomId);
     }
+    return { ok: true };
+  });
+
+  /**
+   * Moderator bio edit for ANOTHER user's master (OOC) profile. The
+   * self-edit path is `PUT /me/profile` above; this is the moderation
+   * variant gated by `edit_others_user`, used by the "Edit Bio" button on
+   * the profile modal. Scope is deliberately narrow, ONLY `bioHtml`, the
+   * same sanitize + cap pipeline as the owner path. Character bios go
+   * through `PUT /characters/:id` (which already honors
+   * `edit_others_character`), so this only covers the master profile.
+   */
+  app.put<{ Params: { id: string }; Body: unknown }>("/users/:id/profile", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    if (!(await hasPermission(me, "edit_others_user", db))) {
+      reply.code(403); return { error: "missing permission: edit_others_user" };
+    }
+    const body = z.object({ bioHtml: z.string().max(BIO_HARD_CAP) }).parse(req.body);
+    const target = (await db.select().from(users).where(eq(users.id, req.params.id)).limit(1))[0];
+    if (!target) { reply.code(404); return { error: "not found" }; }
+    if (!(await checkBioCap(db, reply, body.bioHtml))) return;
+    await db
+      .update(users)
+      .set({ bioHtml: sanitizeBio(body.bioHtml) })
+      .where(eq(users.id, target.id));
+    await recordAudit(db, {
+      actorUserId: me.id,
+      action: "user_bio_edit_admin",
+      targetUserId: target.id,
+    });
     return { ok: true };
   });
 }

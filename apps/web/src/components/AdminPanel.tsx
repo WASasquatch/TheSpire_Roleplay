@@ -5196,7 +5196,8 @@ function UsersTab() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <p className="text-xs text-keep-muted sm:max-w-[60%]">
           Every registered account, including disabled ones. Search matches
-          username and email. Editing role to "admin" grants global
+          username, email, and character name (so a persona name finds its
+          owning OOC account). Editing role to "admin" grants global
           moderation - same as <code>/promoteadmin</code>. "masteradmin"
           (master-only to set) additionally unlocks settings, branding,
           rules, account-disable, and email changes.
@@ -5204,7 +5205,7 @@ function UsersTab() {
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search username/email"
+          placeholder="Search username/email/character"
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs sm:w-auto sm:shrink-0"
         />
       </div>

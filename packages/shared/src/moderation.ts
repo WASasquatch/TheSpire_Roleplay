@@ -38,6 +38,9 @@ export type AuditAction =
   // Account management
   | "user_disable"
   | "user_enable"
+  | "account_ban"
+  | "account_unban"
+  | "user_bio_edit_admin"
   | "password_reset"
   | "earning_reset"
   | "character_delete_admin"
@@ -154,6 +157,9 @@ export const AUDIT_ACTION_GROUPS: Record<string, { label: string; actions: reado
     actions: [
       "user_disable",
       "user_enable",
+      "account_ban",
+      "account_unban",
+      "user_bio_edit_admin",
       "password_reset",
       "earning_reset",
       "character_delete_admin",

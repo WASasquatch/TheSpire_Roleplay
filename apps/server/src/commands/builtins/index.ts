@@ -15,7 +15,8 @@ import { colorCommand } from "./color.js";
 import { awayCommand, backCommand } from "./away.js";
 import { incognitoCommand } from "./incognito.js";
 import { refreshCommand } from "./refresh.js";
-import { rollCommand } from "./roll.js";
+import { initiativeCommand, rollCommand } from "./roll.js";
+import { checkCommand } from "./check.js";
 import { pollCommand } from "./poll.js";
 import { whisperCommand } from "./whisper.js";
 import { replyCommand } from "./reply.js";
@@ -103,6 +104,8 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(incognitoCommand);
   reg.registerBuiltin(refreshCommand);
   reg.registerBuiltin(rollCommand);
+  reg.registerBuiltin(initiativeCommand);
+  reg.registerBuiltin(checkCommand);
   reg.registerBuiltin(pollCommand);
   reg.registerBuiltin(whisperCommand);
   reg.registerBuiltin(replyCommand);

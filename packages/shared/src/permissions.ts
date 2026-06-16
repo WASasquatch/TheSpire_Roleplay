@@ -54,6 +54,7 @@ export const PERMISSION_KEYS = [
   "use_arcade",
   "use_eidolon_tamer",
   "use_urugal_descent",
+  "use_grimhold",
 
   // ---- cosmetics ----
   "use_room_transitions",
@@ -69,6 +70,9 @@ export const PERMISSION_KEYS = [
   "reset_user_password",
   "hard_delete_user",
   "edit_others_character",
+  "edit_others_user",
+  "ban_account",
+  "unban_account",
   "view_others_journal",
   "edit_others_journal",
 
@@ -192,6 +196,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   use_arcade: "Open the Spire Arcade and its games. (Each game may also require its own unlock to be purchased.)",
   use_eidolon_tamer: "Play the Eidolon Tamer arcade game (after unlocking it in the shop).",
   use_urugal_descent: "Play the Urugal's Descent arcade game (after unlocking it in the shop).",
+  use_grimhold: "Play the Grimhold cabinet (six arcade games) (after unlocking it in the shop).",
 
   // cosmetics
   use_room_transitions: "Buy and equip room-transition cosmetics (each transition is also purchased with currency).",
@@ -207,6 +212,9 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   reset_user_password: "Generate a password reset link for another user.",
   hard_delete_user: "Permanently delete a user account. Irreversible.",
   edit_others_character: "Edit characters owned by other users (fix names, clear avatars, etc.).",
+  edit_others_user: "Edit another user's master (OOC) profile - bio and gallery NSFW flags - while viewing it.",
+  ban_account: "Ban a user account (timed or permanent, with a reason). Blocks login + chat.",
+  unban_account: "Lift an account ban early.",
   view_others_journal: "Read private journal entries belonging to other users' characters. PRIVACY SENSITIVE.",
   edit_others_journal: "Modify or delete other users' journal entries.",
 
@@ -319,6 +327,7 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   use_arcade: "arcade",
   use_eidolon_tamer: "arcade",
   use_urugal_descent: "arcade",
+  use_grimhold: "arcade",
 
   // cosmetics
   use_room_transitions: "cosmetics",
@@ -334,6 +343,9 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   reset_user_password: "user_admin",
   hard_delete_user: "user_admin",
   edit_others_character: "user_admin",
+  edit_others_user: "user_admin",
+  ban_account: "user_admin",
+  unban_account: "user_admin",
   view_others_journal: "user_admin",
   edit_others_journal: "user_admin",
 

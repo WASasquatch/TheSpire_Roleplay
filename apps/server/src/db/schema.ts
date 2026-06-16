@@ -38,6 +38,16 @@ export const users = sqliteTable(
     role: text("role", { enum: ["user", "trusted", "mod", "admin", "masteradmin"] }).notNull().default("user"),
     /** master profile body (sanitized HTML) shown when /char clear */
     bioHtml: text("bio_html").notNull().default(""),
+    /**
+     * Staff-card copy (migration 0250), editable by the staff member for
+     * their own card on the public Staff page. `staffBio` is the short
+     * one-line tagline (≤120 chars); `staffIntro` is a slightly longer
+     * blurb (≤256 chars). Null until set. Only meaningful for accounts
+     * whose `role` is mod/admin/masteradmin; the Staff route ignores
+     * them for everyone else. Plain text, not HTML.
+     */
+    staffBio: text("staff_bio"),
+    staffIntro: text("staff_intro"),
     avatarUrl: text("avatar_url"),
     /**
      * Avatar zoom / pan / crop (migration 0178). The avatar URL still
@@ -348,6 +358,24 @@ export const users = sqliteTable(
     createdAt: ts("created_at"),
     lastLoginAt: integer("last_login_at", { mode: "timestamp_ms" }),
     disabledAt: integer("disabled_at", { mode: "timestamp_ms" }),
+    /**
+     * Account ban (migration 0247). Distinct from the admin `disabledAt`
+     * toggle: a ban is a mod action carrying a reason + issuer, and may be
+     * timed. When a ban is active the route ALSO sets `disabledAt` so every
+     * existing login/chat/visibility gate (`isNull(disabledAt)`) blocks the
+     * account for free; unban / expiry clears both.
+     *
+     *   bannedAt    = when the current ban was issued (null ⇒ not banned).
+     *   bannedUntil = expiry; null WITH bannedAt set ⇒ permanent. A timed
+     *                 ban whose bannedUntil has passed is auto-lifted by the
+     *                 ban sweep and lazily on login.
+     *   banReason   = mod-supplied reason, surfaced to other mods.
+     *   bannedById  = the issuing mod (for the review surface).
+     */
+    bannedAt: integer("banned_at", { mode: "timestamp_ms" }),
+    bannedUntil: integer("banned_until", { mode: "timestamp_ms" }),
+    banReason: text("ban_reason"),
+    bannedById: text("banned_by_id"),
   },
   (t) => ({
     // Email is no longer unique at the DB layer; the per-account cap is
@@ -518,6 +546,15 @@ export const rooms = sqliteTable(
      */
     messageExpiryMinutes: integer("message_expiry_minutes"),
     /**
+     * Difficulty Class for dice mechanics (migration 0246). When set,
+     * `/roll` and `/initiative` report pass/fail against this threshold
+     * (a roll must MEET OR BEAT it). Owners/mods/admins set it via
+     * `/roll dc <n>`; null = no difficulty configured (rolls just report
+     * their total). Independent of the per-block `<roll:NdM:DC>` target,
+     * which carries its own inline difficulty.
+     */
+    difficultyClass: integer("difficulty_class"),
+    /**
      * "flat" (default) - replies render at the chronological end of chat.
      * "nested" - replies render under their parent in a collapsible thread
      * with a "View More" expander past the latest 5. Owner/mod toggleable.
@@ -639,6 +676,40 @@ export const roomMembers = sqliteTable(
   (t) => ({
     pk: primaryKey({ columns: [t.roomId, t.userId] }),
     userIdx: index("room_members_user_idx").on(t.userId),
+  }),
+);
+
+/* ---------- room_mods ----------
+ * Per-IDENTITY room-moderator attribution, used ONLY for the userlist
+ * crown. Moderation AUTHORITY stays per-account on `room_members.role`
+ * (a /promote still sets that, so switching characters never drops your
+ * mod power and none of the room-authority checks change). This table
+ * additionally records WHICH identity each /promote was aimed at, so
+ * the mod crown shows on that identity alone instead of on every
+ * character the account voices. A user can be listed under more than
+ * one identity (master + several characters), the "list of ID/CID."
+ *
+ * `characterId` is the empty string for the OOC/master identity (a
+ * NOT NULL sentinel keeps the composite primary key clean, SQLite
+ * treats NULLs in a PK as distinct, which would let duplicate OOC rows
+ * slip in). Callers map `null` (the wire/`RoomOccupant` shape) to `''`
+ * at this boundary. Room OWNER is NOT stored here, it derives from
+ * `rooms.ownerId` and surfaces only on that account's OOC row. */
+export const roomMods = sqliteTable(
+  "room_mods",
+  {
+    roomId: text("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    characterId: text("character_id").notNull().default(""),
+    grantedAt: ts("granted_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.roomId, t.userId, t.characterId] }),
+    roomIdx: index("room_mods_room_idx").on(t.roomId),
   }),
 );
 

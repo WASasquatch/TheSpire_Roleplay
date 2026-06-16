@@ -1,5 +1,8 @@
 import { randomInt } from "node:crypto";
-import { addMessage } from "../../realtime/broadcast.js";
+import { and, eq } from "drizzle-orm";
+import { roomMembers, rooms } from "../../db/schema.js";
+import { addMessage, addSystemMessage } from "../../realtime/broadcast.js";
+import { hasPermission } from "../../auth/permissions.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 // `NdM` with an optional `±X` flat modifier, e.g. 1d20+3, 3d6-1, 2d10+0.
@@ -71,6 +74,91 @@ function notice(ctx: CommandContext, code: string, message: string) {
   ctx.socket.emit("error:notice", { code, message });
 }
 
+/** Hard cap on a settable room difficulty. Generous (handles big modifier
+ *  stacks) without letting a typo park an unreachable value. */
+const MAX_DC = 1000;
+
+/** Fetch the current room's configured Difficulty Class, or null when
+ *  unset / the room row is missing. */
+async function getRoomDc(ctx: CommandContext): Promise<number | null> {
+  const r = (await ctx.db
+    .select({ dc: rooms.difficultyClass })
+    .from(rooms)
+    .where(eq(rooms.id, ctx.roomId))
+    .limit(1))[0];
+  return r?.dc ?? null;
+}
+
+/**
+ * Authority to set the room's difficulty. Mirrors room.ts's
+ * `callerCanEditRoom`: site admins (via `edit_any_room_metadata`), the
+ * room owner, or a roomMembers "owner"/"mod".
+ */
+async function callerCanSetDc(ctx: CommandContext): Promise<boolean> {
+  if (await hasPermission(ctx.user, "edit_any_room_metadata", ctx.db)) return true;
+  const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
+  if (!room) return false;
+  if (room.ownerId === ctx.user.id) return true;
+  const m = (await ctx.db
+    .select()
+    .from(roomMembers)
+    .where(and(eq(roomMembers.roomId, ctx.roomId), eq(roomMembers.userId, ctx.user.id)))
+    .limit(1))[0];
+  return m?.role === "owner" || m?.role === "mod";
+}
+
+/**
+ * Pass/fail suffix appended to a roll's body when the room has a DC set.
+ * Empty string when no DC is configured, so a difficulty-free room's
+ * rolls render exactly as before. A roll MEETS OR BEATS the DC to pass.
+ */
+function formatDcSuffix(finalTotal: number, dc: number | null): string {
+  if (dc == null) return "";
+  return `  — vs DC ${dc} ${finalTotal >= dc ? "✓ Pass" : "✗ Fail"}`;
+}
+
+/**
+ * `/roll dc` subcommand. View (no further args), set (`/roll dc 15`), or
+ * clear (`/roll dc clear|off|none`) the room's Difficulty Class. Viewing
+ * is open to anyone in the room; changing it is owner/mod/admin only.
+ */
+async function handleDcSubcommand(ctx: CommandContext): Promise<void> {
+  const rest = ctx.args.slice(1);
+  if (rest.length === 0) {
+    const dc = await getRoomDc(ctx);
+    notice(
+      ctx,
+      "ROLL_DC",
+      dc != null
+        ? `Room difficulty is ${dc}. Rolls meet or beat it to pass.`
+        : "No difficulty set for this room. Owners/mods can set one with /roll dc <n>.",
+    );
+    return;
+  }
+  if (!(await callerCanSetDc(ctx))) {
+    notice(ctx, "PERM", "Only the room owner, a mod, or an admin can set the difficulty.");
+    return;
+  }
+  const first = (rest[0] ?? "").toLowerCase();
+  if (first === "clear" || first === "off" || first === "none") {
+    await ctx.db.update(rooms).set({ difficultyClass: null }).where(eq(rooms.id, ctx.roomId));
+    await addSystemMessage(ctx.io, ctx.db, ctx.roomId, `${ctx.user.displayName} cleared the room difficulty.`);
+    return;
+  }
+  const n = Number(first);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_DC) {
+    notice(ctx, "BAD_DC", `Difficulty must be a whole number from 1 to ${MAX_DC}. Try /roll dc 15.`);
+    return;
+  }
+  await ctx.db.update(rooms).set({ difficultyClass: n }).where(eq(rooms.id, ctx.roomId));
+  await addSystemMessage(
+    ctx.io,
+    ctx.db,
+    ctx.roomId,
+    `${ctx.user.displayName} set the room difficulty to ${n}. Rolls must meet or beat it to pass.`,
+  );
+}
+
 /**
  * /roll <dice>
  *   /roll 1d20      - roll one twenty-sided
@@ -78,10 +166,14 @@ function notice(ctx: CommandContext, code: string, message: string) {
  *   /roll d20       - defaults count to 1
  *   /roll 1d20+3    - roll plus a flat modifier; output appends " + 3 = N"
  *   /roll 2d6-1     - subtraction works too
+ *   /roll dc 15     - (owner/mod/admin) set the room's Difficulty Class
+ *   /roll dc        - show the room's current difficulty
+ *   /roll dc clear  - remove the room's difficulty
  *
  * Output is a `kind=roll` message so it can be styled distinctly. The body is
  * authoritative - clients should not re-roll. Uses crypto.randomInt for fair,
- * non-predictable values.
+ * non-predictable values. When the room has a difficulty set, every roll's
+ * body is tagged with a pass/fail verdict against it.
  */
 export const rollCommand: CommandHandler = {
   name: "roll",
@@ -109,11 +201,23 @@ export const rollCommand: CommandHandler = {
       usage: "/roll 1d20+3",
       description: "Add (or subtract) a flat modifier. Output appends ' + 3 = 17' after the dice total.",
     },
+    {
+      verb: "dc <n>",
+      usage: "/roll dc 15",
+      description: "Owner/mod/admin: set the room's Difficulty Class. /roll dc shows it; /roll dc clear removes it. When set, every roll is tagged pass/fail against it.",
+    },
   ],
   async run(ctx) {
     const arg = ctx.argsText.trim();
     if (!arg) {
       notice(ctx, "ROLL_HELP", "Usage: /roll <NdM[±X]>. Try /roll 1d20, /roll 3d6, /roll 1d20+3.");
+      return;
+    }
+    // `/roll dc [...]` manages the room's Difficulty Class instead of
+    // rolling. Checked before dice parsing so "dc" isn't mistaken for an
+    // expression.
+    if ((ctx.args[0] ?? "").toLowerCase() === "dc") {
+      await handleDcSubcommand(ctx);
       return;
     }
     const parsed = parseDice(arg);
@@ -128,6 +232,10 @@ export const rollCommand: CommandHandler = {
     const total = rolls.reduce((a, b) => a + b, 0);
     const dice = formatDiceExpr(parsed);
     const suffix = formatModifierSuffix(parsed.modifier, total);
+    // Pass/fail tag against the room's difficulty, if one is set. The
+    // comparison uses the modifier-adjusted total so "/roll 1d20+3"
+    // checks 17, not 14.
+    const dcSuffix = formatDcSuffix(total + parsed.modifier, await getRoomDc(ctx));
     // Body format chosen to read naturally with kind=roll's "rolls" prefix.
     // The modifier suffix (when present) is appended to BOTH the single-die
     // and multi-die forms so the running arithmetic stays visible:
@@ -135,8 +243,8 @@ export const rollCommand: CommandHandler = {
     //   "rolls 3d6+2: [4, 2, 6] = 12 + 2 = 14"
     const body =
       parsed.count === 1
-        ? `rolls ${dice}: ${total}${suffix}`
-        : `rolls ${dice}: [${rolls.join(", ")}] = ${total}${suffix}`;
+        ? `rolls ${dice}: ${total}${suffix}${dcSuffix}`
+        : `rolls ${dice}: [${rolls.join(", ")}] = ${total}${suffix}${dcSuffix}`;
     await addMessage(ctx, { kind: "roll", body });
   },
   /**
@@ -166,5 +274,44 @@ export const rollCommand: CommandHandler = {
     const result =
       parsed.count === 1 ? `${total}${suffix}` : `[${rolls.join(", ")}] = ${total}${suffix}`;
     return `( rolls 🎲 ${dice}: ${result} )`;
+  },
+};
+
+/** Optional flat initiative modifier, e.g. `/init +3` or `/init -1`. */
+const INIT_MOD_RX = /^([+-]?\d+)$/;
+const MAX_INIT_MOD = 999;
+
+/**
+ * /initiative  (alias /init)
+ *   Roll 1d20 for turn order. Takes an optional flat modifier
+ *   (`/init +3`). When the room has a Difficulty Class set (via
+ *   `/roll dc`), the result is tagged pass/fail against it, same as
+ *   `/roll`. Output is an authoritative `kind=roll` message.
+ */
+export const initiativeCommand: CommandHandler = {
+  name: "initiative",
+  aliases: ["init"],
+  usage: "/initiative [±X]   (e.g. /init, /init +3)",
+  description: "Roll 1d20 for initiative, with an optional flat modifier. If the room has a difficulty set (/roll dc), the result is marked pass/fail.",
+  async run(ctx) {
+    const arg = ctx.argsText.trim();
+    let mod = 0;
+    if (arg) {
+      const m = INIT_MOD_RX.exec(arg);
+      if (!m) {
+        notice(ctx, "BAD_INIT", "Initiative takes an optional flat modifier, e.g. /init +3.");
+        return;
+      }
+      mod = parseInt(m[1] ?? "0", 10);
+      if (!Number.isFinite(mod) || mod < -MAX_INIT_MOD || mod > MAX_INIT_MOD) {
+        notice(ctx, "BAD_INIT", `Initiative modifier must be between -${MAX_INIT_MOD} and +${MAX_INIT_MOD}.`);
+        return;
+      }
+    }
+    const die = randomInt(1, 21);
+    const total = die + mod;
+    const modSuffix = formatModifierSuffix(mod, die);
+    const dcSuffix = formatDcSuffix(total, await getRoomDc(ctx));
+    await addMessage(ctx, { kind: "roll", body: `rolls for initiative 🎲 1d20: ${die}${modSuffix}${dcSuffix}` });
   },
 };

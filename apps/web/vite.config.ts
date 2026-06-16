@@ -21,6 +21,12 @@ export default defineConfig({
       "/worlds": "http://localhost:3001",
       "/stories": "http://localhost:3001",
       "/me": "http://localhost:3001",
+      // Staff directory (GET /staff). Without this the fetch falls
+      // through to Vite's SPA fallback and returns index.html, which
+      // the Staff modal tries to JSON.parse → "unexpected character at
+      // line 1 column 1". (PUT /me/staff-card rides the `/me` entry
+      // above.)
+      "/staff": "http://localhost:3001",
       "/health": "http://localhost:3001",
       "/users": "http://localhost:3001",
       "/site": "http://localhost:3001",

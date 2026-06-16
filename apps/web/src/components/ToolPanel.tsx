@@ -10,12 +10,14 @@ import {
   Settings,
   Search,
   HelpCircle,
+  Gamepad2,
 } from "lucide-react";
 import { useChat } from "../state/store.js";
 import { fetchForums } from "../lib/forums.js";
 import type { ForumSummary } from "@thekeep/shared";
 import { SearchBar } from "./SearchBar.js";
 import { CloseButton } from "./CloseButton.js";
+import { CreateCharacterModal } from "./CreateCharacterModal.js";
 
 /** Shape of `/characters` rows, narrow projection of the server payload. */
 interface CharacterRow {
@@ -71,6 +73,11 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   const [identityOpen, setIdentityOpen] = useState(false);
   const [characters, setCharacters] = useState<CharacterRow[] | null>(null);
   const [charactersLoading, setCharactersLoading] = useState(false);
+  // "Create Character" name-prompt toggle (opened from the identity
+  // switcher). On create we switch into the new character and open its
+  // profile editor so the user lands straight in setup.
+  const [createCharOpen, setCreateCharOpen] = useState(false);
+  const openEditor = useChat((s) => s.openEditor);
   const me = useChat((s) => s.me);
   const fontStep = useChat((s) => s.fontStep);
   const setFontStep = useChat((s) => s.setFontStep);
@@ -265,6 +272,12 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   function leaveCharacter() {
     onCommand("/char clear");
     setIdentityOpen(false);
+  }
+  function openCreateCharacter() {
+    // Close the dropdown first so the name modal isn't stacked behind
+    // the switcher's backdrop.
+    setIdentityOpen(false);
+    setCreateCharOpen(true);
   }
   function toggleIncognito() {
     onCommand("/incognito");
@@ -532,16 +545,27 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
                   onClick={() => { onOpenEarning(); setDrawerOpen(false); }}
                 />
               ) : null}
-              {onOpenArcade && me?.permissions.includes("use_arcade") ? (
-                <MenuItem
-                  label="Spire Arcade"
-                  hint="Play the arcade's games, like the Eidolon Tamer"
-                  onClick={() => { onOpenArcade(); setDrawerOpen(false); }}
-                />
-              ) : null}
               <MenuItem label="Bookmarks" hint="Your saved chat messages" onClick={() => fire("/bookmarks")} />
               <MenuItem label="Toggle Away" hint="Mark yourself away" onClick={() => fire("/away")} />
             </Section>
+
+            {/* Spire Arcade, always exposed (not tucked inside the Account
+                accordion) so the games stay one tap away. Styled like a
+                section header but acts as a direct button, matching the Help
+                row below. Permission-gated, hidden entirely when the viewer
+                lacks arcade access. */}
+            {onOpenArcade && me?.permissions.includes("use_arcade") ? (
+              <button
+                type="button"
+                onClick={() => { onOpenArcade(); setDrawerOpen(false); }}
+                title="Play the arcade's games, like the Eidolon Tamer"
+                className="flex w-full items-center gap-2 border-y border-keep-rule/60 bg-keep-banner/40 px-3 py-1.5 text-[10px] font-action uppercase tracking-[0.2em] text-keep-muted hover:bg-keep-banner/60 hover:text-keep-text lg:py-1"
+              >
+                <span aria-hidden className="shrink-0"><Gamepad2 size={14} aria-hidden /></span>
+                <span className="flex-1 text-left">Spire Arcade</span>
+                <span aria-hidden className="shrink-0 text-sm leading-none text-keep-muted">›</span>
+              </button>
+            ) : null}
 
             {/* Help, always exposed (not tucked inside the Account accordion)
                 so a newcomer can always find the guides + command reference
@@ -608,6 +632,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
             onClose={() => setIdentityOpen(false)}
             onSwitch={switchCharacter}
             onLeave={leaveCharacter}
+            onCreateCharacter={openCreateCharacter}
             inCharacter={!!activeCharacterId}
             canIncognito={canIncognito}
             incognitoMode={incognitoMode}
@@ -677,6 +702,26 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
         <span aria-hidden>{drawerOpen ? "▼" : "▲"}</span>
         Menu
       </button>
+
+      {/* Create-character name prompt. On success switch into the new
+          character (by id, so a name with a non-breaking space still
+          resolves) and open its profile editor so the user lands in
+          setup immediately. */}
+      {createCharOpen ? (
+        <CreateCharacterModal
+          onCancel={() => setCreateCharOpen(false)}
+          onCreated={(c) => {
+            setCreateCharOpen(false);
+            // Append to the cached roster so the new identity shows on
+            // the next dropdown open without waiting for a refetch.
+            setCharacters((prev) =>
+              prev ? [...prev, { id: c.id, name: c.name, avatarUrl: c.avatarUrl }] : [{ id: c.id, name: c.name, avatarUrl: c.avatarUrl }],
+            );
+            onCommand(`/char switch @cid:${c.id}`);
+            openEditor({ mode: "character", characterId: c.id });
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -709,6 +754,7 @@ function IdentityButton({
   onClose,
   onSwitch,
   onLeave,
+  onCreateCharacter,
   inCharacter,
   canIncognito,
   incognitoMode,
@@ -723,6 +769,8 @@ function IdentityButton({
   onClose: () => void;
   onSwitch: (name: string) => void;
   onLeave: () => void;
+  /** Open the create-character name prompt. */
+  onCreateCharacter: () => void;
   inCharacter: boolean;
   /** True only for users holding the `use_ghost_mode` permission.
    *  When false the incognito row is omitted entirely so regular
@@ -769,7 +817,7 @@ function IdentityButton({
               <div className="px-3 py-2 text-xs italic text-keep-muted">
                 {inCharacter
                   ? "No other characters on this account."
-                  : "No characters yet. Open the profile editor to create one."}
+                  : "No characters yet, create one below."}
               </div>
             ) : (
               <ul>
@@ -788,6 +836,20 @@ function IdentityButton({
                 ))}
               </ul>
             )}
+            {/* "Create Character" lives at the bottom of the switcher so
+                it's always one tap away from the roster. Action-tinted
+                (constructive) to read distinctly from the red
+                "Leave Character" bail below it. Opens the name prompt,
+                then switches into the new character + opens its editor. */}
+            <button
+              type="button"
+              onClick={onCreateCharacter}
+              title="Create a new character and start setting it up"
+              className="flex w-full items-center justify-center gap-1 border-t border-keep-rule bg-keep-action/10 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20 lg:py-1"
+            >
+              <span aria-hidden>+</span>
+              <span>Create Character</span>
+            </button>
             {/* "Leave Character" lives at the very bottom of the
                 dropdown so the destructive option is one extra
                 deliberate scroll away from the casual switch targets.

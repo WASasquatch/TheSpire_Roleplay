@@ -18,6 +18,15 @@ import { RankSigil } from "./RankSigil.js";
 import { StyledName } from "./StyledName.js";
 import { useChat } from "../state/store.js";
 import { ProfileMarquee, ProfileVisitorsChip, useTrackProfileView } from "./ProfileFlairSurfaces.js";
+import { EditBioModal } from "./EditBioModal.js";
+import {
+  banAccount,
+  fetchUserModeration,
+  saveModBio,
+  setPortraitNsfw,
+  unbanAccount,
+  type UserModeration,
+} from "../lib/profileModeration.js";
 
 /**
  * Unified profile action-button styling. Every button shares ONE shape; only
@@ -96,6 +105,14 @@ interface Props {
    */
   activeCharacterAction?: { label: string; onClick: () => void };
   /**
+   * Called after a moderator action that changes the displayed profile
+   * (gallery NSFW flag, bio edit). The parent should re-fetch this
+   * profile and re-pass it so the change reflects without a manual
+   * reopen. Ban/unban state is managed inside the mod panel's own
+   * fetch, so it doesn't depend on this.
+   */
+  onModerated?: () => void;
+  /**
    * Stacking override for the modal backdrop. Defaults to the Modal
    * baseline (40). Bumped above 50 when the profile is opened from
    * inside the admin panel so it sits on top of the admin shell
@@ -103,6 +120,11 @@ interface Props {
    */
   zIndex?: number;
 }
+
+/** Stable empty-permissions fallback so the `useChat` selector returns a
+ *  referentially-stable value for anonymous viewers (a fresh `[]` literal
+ *  would make zustand re-render on every unrelated store change). */
+const EMPTY_PERMS: readonly string[] = [];
 
 /**
  * Read-only profile viewer.
@@ -121,7 +143,7 @@ interface Props {
  * Every section degrades gracefully: characters with nothing filled out
  * still get a clean modal that says "X hasn't filled out their profile yet."
  */
-export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore, onBlock, onOpenProfile, onOpenWorld, activeCharacterAction, bypassNsfwGate, zIndex }: Props) {
+export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore, onBlock, onOpenProfile, onOpenWorld, activeCharacterAction, onModerated, bypassNsfwGate, zIndex }: Props) {
   const isChar = profile.kind === "character";
   const name = isChar ? profile.profile.name : profile.profile.username;
   const bio = profile.profile.bioHtml.trim();
@@ -339,6 +361,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
             onOpenProfile={onOpenProfile}
             onOpenWorld={onOpenWorld}
             activeCharacterAction={activeCharacterAction}
+            onModerated={onModerated}
           />
         )}
       </div>
@@ -376,6 +399,7 @@ function ProfileBody({
   onOpenProfile,
   onOpenWorld,
   activeCharacterAction,
+  onModerated,
 }: {
   /** Discriminated union; ProfileBody narrows on `profile.kind` to access master-only or character-only fields. */
   profile: ProfileView;
@@ -419,6 +443,7 @@ function ProfileBody({
   onOpenProfile: ((name: string) => void) | undefined;
   onOpenWorld: ((slug: string) => void) | undefined;
   activeCharacterAction: { label: string; onClick: () => void } | undefined;
+  onModerated: (() => void) | undefined;
 }) {
   const isChar = profile.kind === "character";
   // Viewer's role drives the mod-tools row: mod+ sees copy-id chips so
@@ -428,6 +453,23 @@ function ProfileBody({
   // and a dedicated prop would just be parent-prop-drilling.
   const viewerRole = useChat((s) => s.me?.role ?? null);
   const isModViewer = viewerRole !== null && roleRank(viewerRole) >= roleRank("mod");
+  // Moderation affordances. All gate on the viewer holding the specific
+  // permission AND not viewing their own account (App already diverts
+  // self-clicks to the editor, but a mod opening their OWN profile from a
+  // chat line shouldn't see "ban yourself"). Character vs master profiles
+  // use different permissions: characters reuse `edit_others_character`,
+  // master/OOC profiles use the new `edit_others_user`.
+  const myPerms = useChat((s) => s.me?.permissions ?? EMPTY_PERMS);
+  const viewerId = useChat((s) => s.me?.id ?? null);
+  const isSelfAccount = viewerId !== null && viewerId === profile.profile.userId;
+  const profileEditPerm = isChar ? "edit_others_character" : "edit_others_user";
+  const canEditBio = isModViewer && !isSelfAccount && myPerms.includes(profileEditPerm);
+  const canFlagGallery = canEditBio; // same permission family gates both
+  const canBanAccount = isModViewer && !isSelfAccount && myPerms.includes("ban_account");
+  // Scope object reused by the gallery NSFW toggle + the bio editor.
+  const modScope: { kind: "character"; characterId: string } | { kind: "master" } = isChar
+    ? { kind: "character", characterId: (profile.profile as { id: string }).id }
+    : { kind: "master" };
   // Earning, fetch the IDENTITY's own pool so the hero shows the
   // right XP / currency / rank / border. Character profiles must
   // pass their character id; without it the endpoint returns the
@@ -892,6 +934,24 @@ function ProfileBody({
                   </>
                 ) : null}
               </div>
+            ) : null}
+            {/* Moderator actions: edit this user's bio, and issue/lift a
+                timed account ban (with the ban status + history for review).
+                Each affordance hides unless the viewer holds the matching
+                permission. */}
+            {canEditBio || canBanAccount ? (
+              <ProfileModPanel
+                profile={profile}
+                isChar={isChar}
+                editTarget={
+                  isChar
+                    ? { kind: "character", characterId: (profile.profile as { id: string }).id }
+                    : { kind: "master", userId: profile.profile.userId }
+                }
+                canEditBio={canEditBio}
+                canBan={canBanAccount}
+                onModerated={onModerated}
+              />
             ) : null}
             {/* Action row, desktop only. Mobile moves the same
                 actions into the full-width segmented bar that sits
@@ -1383,7 +1443,15 @@ function ProfileBody({
                   handles both. The empty state still renders the
                   section heading + a hint pointing at the editor so
                   the feature stays discoverable on fresh profiles. */}
-              <PortraitGallery portraits={profile.profile.portraits} alt={name} />
+              <PortraitGallery
+                portraits={profile.profile.portraits}
+                alt={name}
+                canModerate={canFlagGallery}
+                onToggleNsfw={async (portraitId, nextNsfw) => {
+                  await setPortraitNsfw(modScope, portraitId, nextNsfw);
+                  onModerated?.();
+                }}
+              />
 
               {/* Character journal (public entries only - private ones are
                   filtered server-side and only ever appear in the owner's
@@ -1775,7 +1843,22 @@ function LinkChip({ link }: { link: ProfileLink }) {
  * thumbnails; clicking a tile swaps a larger preview inline above the strip
  * so viewers can study individual portraits without leaving the modal.
  */
-function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; alt: string }) {
+function PortraitGallery({
+  portraits,
+  alt,
+  canModerate = false,
+  onToggleNsfw,
+}: {
+  portraits: CharacterPortrait[];
+  alt: string;
+  /** Mod viewer with the gallery-flag permission: show a per-image NSFW
+   *  toggle on the expanded preview. */
+  canModerate?: boolean;
+  onToggleNsfw?: (portraitId: string, nextNsfw: boolean) => Promise<void> | void;
+}) {
+  // Pending state for the moderator NSFW toggle (per active image).
+  const [flagBusy, setFlagBusy] = useState(false);
+  const [flagErr, setFlagErr] = useState<string | null>(null);
   // Default to the first portrait expanded so visitors see at least
   // one full-size image without having to click a thumbnail. Empty
   // galleries default to null (no expanded view; the thumbnail
@@ -1863,6 +1946,35 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
           {active.label ? (
             <span className="text-sm italic text-keep-muted">{active.label}</span>
           ) : null}
+          {/* Moderator NSFW toggle for the focused image. Owner-set NSFW
+              and mod-set NSFW write the same per-portrait flag, so a mod
+              flagging an image here is identical to the owner having
+              ticked it in their gallery editor. */}
+          {canModerate && onToggleNsfw ? (
+            <div className="flex flex-col items-center gap-0.5">
+              <button
+                type="button"
+                disabled={flagBusy}
+                onClick={async () => {
+                  if (flagBusy) return;
+                  setFlagBusy(true);
+                  setFlagErr(null);
+                  try {
+                    await onToggleNsfw(active.id, !active.nsfw);
+                  } catch (e) {
+                    setFlagErr(e instanceof Error ? e.message : "Failed to update.");
+                  } finally {
+                    setFlagBusy(false);
+                  }
+                }}
+                className="rounded border border-keep-accent/50 bg-keep-accent/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+                title={active.nsfw ? "Clear the NSFW flag on this image" : "Mark this image NSFW (blurs it for viewers)"}
+              >
+                {flagBusy ? "Saving…" : active.nsfw ? "Unmark NSFW" : "Mark NSFW"}
+              </button>
+              {flagErr ? <span className="text-[10px] text-[#e06070]">{flagErr}</span> : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
       {/* Match the active preview's 70% cap + centering so the
@@ -1910,6 +2022,270 @@ function PortraitGallery({ portraits, alt }: { portraits: CharacterPortrait[]; a
         })}
       </div>
     </div>
+  );
+}
+
+/* ============================================================ *
+ *  Moderator panel - Edit Bio + timed account ban + review.
+ *  Rendered in the hero's mod section; each affordance is already
+ *  permission-gated by the caller.
+ * ============================================================ */
+
+const BAN_DURATIONS: ReadonlyArray<{ label: string; ms: number | null }> = [
+  { label: "1 day", ms: 1 * 24 * 60 * 60 * 1000 },
+  { label: "3 days", ms: 3 * 24 * 60 * 60 * 1000 },
+  { label: "7 days", ms: 7 * 24 * 60 * 60 * 1000 },
+  { label: "30 days", ms: 30 * 24 * 60 * 60 * 1000 },
+  { label: "Permanent", ms: null },
+];
+
+function fmtTs(ts: number | null): string {
+  if (ts == null) return "—";
+  try { return new Date(ts).toLocaleString(); } catch { return "—"; }
+}
+
+function ProfileModPanel({
+  profile,
+  isChar,
+  editTarget,
+  canEditBio,
+  canBan,
+  onModerated,
+}: {
+  profile: ProfileView;
+  isChar: boolean;
+  editTarget: { kind: "character"; characterId: string } | { kind: "master"; userId: string };
+  canEditBio: boolean;
+  canBan: boolean;
+  onModerated: (() => void) | undefined;
+}) {
+  const userId = profile.profile.userId;
+  const targetName = profile.kind === "character" ? profile.profile.name : profile.profile.username;
+  const [editOpen, setEditOpen] = useState(false);
+  const [banOpen, setBanOpen] = useState(false);
+  const [mod, setMod] = useState<UserModeration | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function refreshMod() {
+    if (!canBan) return;
+    try { setMod(await fetchUserModeration(userId)); }
+    catch { /* leave prior state; non-fatal for the panel */ }
+  }
+  useEffect(() => {
+    let alive = true;
+    if (canBan) {
+      fetchUserModeration(userId).then((m) => { if (alive) setMod(m); }).catch(() => {});
+    } else {
+      setMod(null);
+    }
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, canBan]);
+
+  const ban = mod?.ban ?? null;
+
+  async function doUnban() {
+    if (busy) return;
+    setBusy(true); setErr(null);
+    try { await unbanAccount(userId); await refreshMod(); }
+    catch (e) { setErr(e instanceof Error ? e.message : "Unban failed."); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      {/* Active-ban banner */}
+      {ban ? (
+        <div className="rounded border border-[#e06070]/50 bg-[#e06070]/10 px-2.5 py-1.5 text-[11px] text-keep-text">
+          <span className="font-semibold text-[#e06070]">⛔ Banned</span>{" "}
+          {ban.bannedUntil ? <>until {fmtTs(ban.bannedUntil)}</> : <>permanently</>}
+          {ban.reason ? <> — “{ban.reason}”</> : null}
+          {ban.by ? <span className="text-keep-muted"> (by {ban.by})</span> : null}
+        </div>
+      ) : null}
+
+      {/* Action buttons */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {canEditBio ? (
+          <button
+            type="button"
+            onClick={() => setEditOpen(true)}
+            className="rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-keep-action hover:bg-keep-action/20"
+            title={`Edit ${targetName}'s bio`}
+          >
+            Edit Bio
+          </button>
+        ) : null}
+        {canBan && ban ? (
+          <button
+            type="button"
+            onClick={() => void doUnban()}
+            disabled={busy}
+            className="rounded border border-keep-rule bg-keep-panel px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-keep-text hover:bg-keep-banner disabled:opacity-50"
+          >
+            {busy ? "Working…" : "Unban"}
+          </button>
+        ) : null}
+        {canBan && !ban ? (
+          <button
+            type="button"
+            onClick={() => setBanOpen(true)}
+            className="rounded border border-[#e06070]/60 bg-[#e06070]/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-[#e06070] hover:bg-[#e06070]/20"
+          >
+            Ban
+          </button>
+        ) : null}
+      </div>
+      {err ? <div className="text-[10px] text-[#e06070]">{err}</div> : null}
+
+      {/* History (mod-only) */}
+      {canBan && mod && mod.history.length > 0 ? (
+        <details className="text-[11px] text-keep-muted">
+          <summary className="cursor-pointer select-none uppercase tracking-widest">
+            Ban history ({mod.history.length})
+          </summary>
+          <ul className="mt-1 flex flex-col gap-0.5">
+            {mod.history.map((h, i) => (
+              <li key={i} className="leading-snug">
+                <span className="text-keep-text">{fmtTs(h.at)}</span>{" "}
+                {h.action === "account_ban" ? (
+                  <>ban{h.until ? <> (until {fmtTs(h.until)})</> : <> (permanent)</>}</>
+                ) : (
+                  <>unban</>
+                )}{" "}
+                <span className="text-keep-muted">by {h.by}</span>
+                {h.reason ? <> — “{h.reason}”</> : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
+      {editOpen ? (
+        <EditBioModal
+          initialBio={profile.profile.bioHtml}
+          targetLabel={isChar ? targetName : `${targetName} (OOC)`}
+          maxBioLength={50_000}
+          onSave={async (html) => {
+            await saveModBio(editTarget, html);
+            onModerated?.();
+          }}
+          onClose={() => setEditOpen(false)}
+        />
+      ) : null}
+
+      {banOpen ? (
+        <BanDialog
+          targetName={targetName}
+          onClose={() => setBanOpen(false)}
+          onConfirm={async (durationMs, reason) => {
+            setBusy(true); setErr(null);
+            try {
+              await banAccount(userId, durationMs, reason);
+              setBanOpen(false);
+              await refreshMod();
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : "Ban failed.");
+              throw e; // keep the dialog open on failure
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function BanDialog({
+  targetName,
+  onConfirm,
+  onClose,
+}: {
+  targetName: string;
+  onConfirm: (durationMs: number | null, reason: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [durIdx, setDurIdx] = useState(0);
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const trimmed = reason.trim();
+
+  async function confirm() {
+    if (submitting || !trimmed) return;
+    setSubmitting(true);
+    try {
+      await onConfirm(BAN_DURATIONS[durIdx]!.ms, trimmed);
+    } catch { /* parent surfaces the error + keeps dialog open */ }
+    finally { setSubmitting(false); }
+  }
+
+  return (
+    <Modal onClose={onClose} variant="centered" zIndex={70}>
+      <div
+        className="w-[min(440px,94vw)] rounded-lg border border-keep-rule bg-keep-bg p-4 text-keep-text shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="mb-1 text-base font-semibold">Ban {targetName}</h3>
+        <p className="mb-3 text-xs text-keep-muted">
+          Blocks login and chat. A timed ban lifts itself when it expires.
+        </p>
+
+        <div className="mb-3">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-keep-muted">Duration</div>
+          <div className="flex flex-wrap gap-1.5">
+            {BAN_DURATIONS.map((d, i) => (
+              <button
+                key={d.label}
+                type="button"
+                onClick={() => setDurIdx(i)}
+                aria-pressed={durIdx === i}
+                className={`rounded border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                  durIdx === i
+                    ? "border-keep-action bg-keep-action text-keep-bg"
+                    : "border-keep-rule bg-keep-panel text-keep-text hover:bg-keep-banner"
+                }`}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="mb-3 block">
+          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-widest text-keep-muted">
+            Reason <span className="text-[#e06070]">(required)</span>
+          </span>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+            maxLength={1000}
+            placeholder="Visible to other moderators in the ban history."
+            className="w-full resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
+          />
+        </label>
+
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-keep-rule bg-keep-panel px-3 py-1.5 text-xs text-keep-text hover:bg-keep-banner"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void confirm()}
+            disabled={submitting || !trimmed}
+            className="rounded border border-[#e06070]/80 bg-[#e06070] px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {submitting ? "Banning…" : "Ban account"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

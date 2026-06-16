@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import { roleRank, type ClientToServerEvents, type ServerToClientEvents } from "@thekeep/shared";
 import { hasPermission } from "../auth/permissions.js";
-import { characters, messages, sessions, userEarning, userIpLog, users } from "../db/schema.js";
+import { auditLog, characters, messages, sessions, userEarning, userIpLog, users } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
 import { recordAudit } from "../audit.js";
@@ -477,6 +477,20 @@ export async function registerUsersRoutes(
         ? or(
             sql`lower(${users.username}) LIKE ${"%" + escapedQ + "%"} ESCAPE '\\'`,
             sql`lower(${users.email}) LIKE ${"%" + escapedQ + "%"} ESCAPE '\\'`,
+            // Also match by CHARACTER name so an admin who only knows a
+            // user by one of their roleplay personas can find the owning
+            // OOC account. Deleted characters are included on purpose:
+            // moderation often needs to trace an account by a persona it
+            // has since deleted (e.g. ban-evasion). The matched account
+            // already surfaces its full character roster in each row, so
+            // the admin can see which persona produced the hit.
+            inArray(
+              users.id,
+              db
+                .select({ userId: characters.userId })
+                .from(characters)
+                .where(sql`lower(${characters.name}) LIKE ${"%" + escapedQ + "%"} ESCAPE '\\'`),
+            ),
           )
         : undefined,
       // The IP filter narrows to a deliberately-targeted set; when no
@@ -818,6 +832,168 @@ export async function registerUsersRoutes(
     }
 
     return { ok: true };
+  });
+
+  /* ----------------------------------------------------------------- *
+   *  Account bans (timed, with reason), reviewable on the profile.
+   *
+   *  Distinct from the admin `disabled` toggle above: a ban is a mod
+   *  action carrying a reason + issuer and may auto-expire. It ALSO sets
+   *  `disabledAt` so every existing login/chat/visibility gate blocks the
+   *  account with zero new enforcement points; unban / expiry clears both.
+   * ----------------------------------------------------------------- */
+
+  /** Upper bound on a timed ban (~5 years). `durationMs: null` = permanent. */
+  const MAX_BAN_MS = 5 * 365 * 24 * 60 * 60 * 1000;
+
+  /** Ban a user account. Gated by `ban_account`; mods can't ban peers or up. */
+  app.post<{ Params: { id: string }; Body: unknown }>("/users/:id/ban", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    if (!(await hasPermission(me, "ban_account", db))) {
+      reply.code(403); return { error: "missing permission: ban_account" };
+    }
+    const { id } = req.params;
+    if (id === me.id) { reply.code(400); return { error: "you cannot ban your own account" }; }
+    const target = (await db.select().from(users).where(eq(users.id, id)).limit(1))[0];
+    if (!target || target.username === "system") { reply.code(404); return { error: "not found" }; }
+    // No banning a peer or anyone who outranks you. Keeps mods from
+    // banning each other / admins, mirroring the role-edit hierarchy gate.
+    if (roleRank(target.role) >= roleRank(me.role)) {
+      reply.code(403); return { error: "cannot ban a user at or above your role" };
+    }
+
+    const { z } = await import("zod");
+    const body = z.object({
+      durationMs: z.number().int().positive().max(MAX_BAN_MS).nullable(),
+      reason: z.string().trim().min(1).max(1000),
+    }).parse(req.body);
+
+    const now = new Date();
+    const bannedUntil = body.durationMs != null ? new Date(now.getTime() + body.durationMs) : null;
+    await db
+      .update(users)
+      .set({
+        bannedAt: now,
+        bannedUntil,
+        banReason: body.reason,
+        bannedById: me.id,
+        // Reuse the disable gate so login + chat + visibility all block.
+        disabledAt: now,
+      })
+      .where(eq(users.id, id));
+
+    // Authoritative logout: revoke sessions + drop live sockets with the
+    // ban reason on the splash. Same path the admin disable uses.
+    const { forceLogoutUser } = await import("../auth/session.js");
+    const untilNote = bannedUntil ? ` until ${bannedUntil.toISOString().slice(0, 16).replace("T", " ")} UTC` : "";
+    await forceLogoutUser(io, db, id, `Your account has been banned${untilNote}. Reason: ${body.reason}`);
+
+    await recordAudit(db, {
+      actorUserId: me.id,
+      action: "account_ban",
+      targetUserId: id,
+      reason: body.reason,
+      metadata: { until: bannedUntil ? bannedUntil.getTime() : null, durationMs: body.durationMs },
+    });
+    return { ok: true };
+  });
+
+  /** Lift an account ban early. Gated by `unban_account`. */
+  app.post<{ Params: { id: string }; Body: unknown }>("/users/:id/unban", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    if (!(await hasPermission(me, "unban_account", db))) {
+      reply.code(403); return { error: "missing permission: unban_account" };
+    }
+    const { id } = req.params;
+    const target = (await db.select().from(users).where(eq(users.id, id)).limit(1))[0];
+    if (!target) { reply.code(404); return { error: "not found" }; }
+    // Only clear `disabledAt` when THIS was a ban; a plain admin-disabled
+    // account that was never banned must stay disabled.
+    const wasBanned = target.bannedAt != null;
+    await db
+      .update(users)
+      .set({
+        bannedAt: null,
+        bannedUntil: null,
+        banReason: null,
+        bannedById: null,
+        ...(wasBanned ? { disabledAt: null } : {}),
+      })
+      .where(eq(users.id, id));
+    if (wasBanned) {
+      await recordAudit(db, { actorUserId: me.id, action: "account_unban", targetUserId: id });
+    }
+    return { ok: true };
+  });
+
+  /**
+   * Mod-only ban review for a single account: current ban status + history.
+   * Gated by `ban_account` so the data never reaches non-mod viewers (it's
+   * deliberately NOT folded into the public `/profiles/:name` payload).
+   */
+  app.get<{ Params: { id: string } }>("/users/:id/moderation", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    if (!(await hasPermission(me, "ban_account", db))) {
+      reply.code(403); return { error: "missing permission: ban_account" };
+    }
+    const { id } = req.params;
+    const target = (await db.select().from(users).where(eq(users.id, id)).limit(1))[0];
+    if (!target) { reply.code(404); return { error: "not found" }; }
+
+    const now = Date.now();
+    const active = target.bannedAt != null
+      && (target.bannedUntil == null || +target.bannedUntil > now);
+    let bannedByName: string | null = null;
+    if (active && target.bannedById) {
+      const issuer = (await db.select({ username: users.username }).from(users).where(eq(users.id, target.bannedById)).limit(1))[0];
+      bannedByName = issuer?.username ?? null;
+    }
+
+    // History: this account's ban/unban audit rows, newest first, with
+    // actor names resolved in one follow-up query.
+    const rows = await db
+      .select()
+      .from(auditLog)
+      .where(and(
+        eq(auditLog.targetUserId, id),
+        inArray(auditLog.action, ["account_ban", "account_unban"]),
+      ))
+      .orderBy(desc(auditLog.createdAt))
+      .limit(50);
+    const actorIds = [...new Set(rows.map((r) => r.actorUserId))];
+    const actors = actorIds.length
+      ? await db.select({ id: users.id, username: users.username }).from(users).where(inArray(users.id, actorIds))
+      : [];
+    const actorName = new Map(actors.map((a) => [a.id, a.username]));
+    const history = rows.map((r) => {
+      let until: number | null = null;
+      if (r.metadataJson) {
+        try { until = (JSON.parse(r.metadataJson) as { until?: number | null }).until ?? null; }
+        catch { until = null; }
+      }
+      return {
+        action: r.action,
+        at: +r.createdAt,
+        by: actorName.get(r.actorUserId) ?? "(unknown)",
+        reason: r.reason ?? null,
+        until,
+      };
+    });
+
+    return {
+      ban: active
+        ? {
+            bannedAt: target.bannedAt ? +target.bannedAt : null,
+            bannedUntil: target.bannedUntil ? +target.bannedUntil : null,
+            reason: target.banReason ?? null,
+            by: bannedByName,
+          }
+        : null,
+      history,
+    };
   });
 
   /**

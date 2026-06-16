@@ -1300,12 +1300,13 @@ export const useChat = create<ChatState>((set) => ({
     set((s) => {
       const room = s.forumTopicsByRoom[msg.roomId];
       if (!room) return {};
-      // Update in whichever bucket holds the topic, then re-sort that
-      // bucket so a sticky toggle (the field most likely to change
-      // ordering) lifts the row to / drops it from the top tier.
-      // Other field changes (lock, edit) don't affect order but the
-      // sort is idempotent so a no-op resort is harmless.
+      // The bucket the topic now belongs in, by its (possibly changed)
+      // category. A category move lands the topic in a different bucket
+      // than the one currently holding it, so we may have to pull it out
+      // of its old bucket and drop it into the target bucket.
+      const targetKey = msg.threadCategoryId ?? "_uncat";
       let touched = false;
+      let foundIn: string | null = null;
       const nextRoom: typeof room = {};
       for (const [key, bucket] of Object.entries(room)) {
         const idx = bucket.topics.findIndex((t) => t.id === msg.id);
@@ -1313,11 +1314,34 @@ export const useChat = create<ChatState>((set) => ({
           nextRoom[key] = bucket;
           continue;
         }
-        const next = bucket.topics.slice();
-        next[idx] = msg;
-        next.sort(compareTopicsForBucket);
-        nextRoom[key] = { ...bucket, topics: next };
+        foundIn = key;
+        if (key === targetKey) {
+          // Same bucket: update in place + re-sort (handles a sticky
+          // toggle lifting/dropping the row; idempotent for lock/edit).
+          const next = bucket.topics.slice();
+          next[idx] = msg;
+          next.sort(compareTopicsForBucket);
+          nextRoom[key] = { ...bucket, topics: next };
+        } else {
+          // Moved out of this bucket: drop the row here; the target
+          // bucket is handled below.
+          const next = bucket.topics.slice();
+          next.splice(idx, 1);
+          nextRoom[key] = { ...bucket, topics: next };
+        }
         touched = true;
+      }
+      // If the topic moved to a category whose bucket is loaded but
+      // didn't already contain it, insert + re-sort there. (If the
+      // target bucket isn't loaded we just drop the stale copy; the
+      // bucket will fetch the topic fresh when it loads.)
+      if (foundIn && foundIn !== targetKey) {
+        const target = nextRoom[targetKey];
+        if (target) {
+          const next = [...target.topics, msg];
+          next.sort(compareTopicsForBucket);
+          nextRoom[targetKey] = { ...target, topics: next };
+        }
       }
       if (!touched) return {};
       return { forumTopicsByRoom: { ...s.forumTopicsByRoom, [msg.roomId]: nextRoom } };

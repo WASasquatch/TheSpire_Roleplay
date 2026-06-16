@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { hasPermission } from "../auth/permissions.js";
 import type { Role } from "@thekeep/shared";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
 import type {
@@ -10,7 +10,7 @@ import type {
   ServerToClientEvents,
 } from "@thekeep/shared";
 import { mentionsField } from "@thekeep/shared";
-import { messages, rooms, users } from "../db/schema.js";
+import { messages, rooms, roomThreadCategories, users } from "../db/schema.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import { sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
@@ -471,6 +471,61 @@ export async function registerMessageRoutes(
     await db
       .update(messages)
       .set({ isSticky: parsed.sticky })
+      .where(eq(messages.id, m.id));
+
+    const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
+    if (!updated) { reply.code(404); return { error: "not found" }; }
+    io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    return { ok: true };
+  });
+
+  /**
+   * Move a forum topic to a different category (or to Uncategorized with
+   * `categoryId: null`). Mods/admins only — recategorizing is a curation
+   * lever, not an authoring one, so the topic author does NOT get it by
+   * default; it reuses the `lock_forum_topic` permission (the general
+   * "can moderate forum topics" capability) plus the forum-board
+   * owner/Forum-Moderator tier.
+   *
+   * Same guards as lock/sticky: forum room only, top-level topic only,
+   * non-deleted only. A non-null target category must belong to the
+   * topic's own room (you can't fling a topic into another board).
+   */
+  const categoryBody = z.object({ categoryId: z.string().min(1).nullable() }).strict();
+  app.patch<{ Params: { id: string }; Body: unknown }>("/messages/:id/category", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+
+    let parsed;
+    try { parsed = categoryBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+
+    const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
+    if (!m) { reply.code(404); return { error: "not found" }; }
+    if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
+    if (m.replyToId) { reply.code(400); return { error: "Only top-level topics can be moved." }; }
+
+    const forum = await isForumMessage(db, m.roomId);
+    if (!forum) { reply.code(400); return { error: "Moving applies only to forum-mode rooms." }; }
+
+    if (!(await hasPermission(me, "lock_forum_topic", db))) {
+      const board = await boardModTier(db, me, m.roomId);
+      if (!board?.tier) { reply.code(403); return { error: "mods only" }; }
+    }
+
+    // A non-null target must be a real category in this same room.
+    if (parsed.categoryId) {
+      const cat = (await db
+        .select()
+        .from(roomThreadCategories)
+        .where(and(eq(roomThreadCategories.id, parsed.categoryId), eq(roomThreadCategories.roomId, m.roomId)))
+        .limit(1))[0];
+      if (!cat) { reply.code(400); return { error: "That category does not exist in this board." }; }
+    }
+
+    await db
+      .update(messages)
+      .set({ threadCategoryId: parsed.categoryId })
       .where(eq(messages.id, m.id));
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];

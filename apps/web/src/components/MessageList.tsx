@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { BarChart3, Lock } from "lucide-react";
+import { BarChart3, FolderInput, Lock } from "lucide-react";
+import { setTopicCategory } from "../lib/forums.js";
 import { PollCard } from "./PollCard.js";
 import { customCmdCssToStyle, isAdminRole, resolveMessageColor, type AvatarCrop, type ChatMessage, type MentionRef, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
@@ -233,7 +234,7 @@ function CopyLinkButton({ url, compact = false }: { url: string; compact?: boole
     >
       <span aria-hidden>{copied ? "✓" : "🔗"}</span>
       {compact ? null : (
-        <span className="ml-1 text-[10px] uppercase tracking-widest">{copied ? "Copied" : "Link"}</span>
+        <span className="ml-1 text-[10px]">{copied ? "Copied" : "Link"}</span>
       )}
     </button>
   );
@@ -1437,6 +1438,7 @@ function ForumView({
               onMentionClick={onMentionClick}
               onWorldClick={onWorldClick}
               onTimeClick={onTimeClick}
+              categories={categories}
             />
           ))
         )}
@@ -1595,16 +1597,23 @@ function ForumView({
               </div>
             ) : null}
             {isCollapsed ? null : (
-              <>
-                {renderBucket(s.key)}
-                {/* Subcategories: smaller indented header bars, each with
+              // Single shared indent for everything that belongs to this
+              // category, so its subcategories and its own topics line up
+              // at the same depth under the header (no header indent when
+              // there's no header — the no-categories / Uncategorized-only
+              // board). Previously topics sat at full width while
+              // subcategories were indented further, which read as a
+              // misalignment bug.
+              <div className={s.label !== null ? "pl-2 lg:pl-5" : undefined}>
+                {/* Subcategories first, like a normal forum: a category's
+                    sub-boards sit above its own loose topics. Each keeps
                     its own collapse, "+ New Topic", and bucket. */}
                 {s.children.map((sub) => {
                   const subCollapsed = collapsed.has(sub.key);
                   const subBucket = buckets[sub.key];
                   const subCount = subBucket?.totalCount ?? subBucket?.topics.length ?? 0;
                   return (
-                    <div key={sub.key} className="mt-2 pl-2 lg:pl-5">
+                    <div key={sub.key} className="mt-2">
                       <div
                         role="button"
                         tabIndex={0}
@@ -1662,7 +1671,11 @@ function ForumView({
                     </div>
                   );
                 })}
-              </>
+                {/* The category's own loose topics, below its subcategories. */}
+                <div className={s.children.length > 0 ? "mt-2" : undefined}>
+                  {renderBucket(s.key)}
+                </div>
+              </div>
             )}
           </section>
         );
@@ -1683,6 +1696,59 @@ function ForumView({
  * newest page; short threads (the overwhelming common case) render
  * whole with no pager.
  */
+/**
+ * Mod/admin "Move topic" picker shown inside an expanded topic card.
+ * Recategorizing rides the HTTP `PATCH /messages/:id/category` route;
+ * because Forums Catalog viewers aren't joined to the board's socket
+ * room they won't receive the `message:update` echo, so we re-bucket
+ * optimistically via `updateForumTopic` on success (the store now moves
+ * a topic between category buckets when its `threadCategoryId` changes).
+ */
+function TopicMoveControl({ topic, categories }: { topic: ChatMessage; categories: ThreadCategory[] }) {
+  const updateForumTopic = useChat((s) => s.updateForumTopic);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const selectId = `topic-move-${topic.id}`;
+  const current = topic.threadCategoryId ?? "";
+
+  async function move(next: string) {
+    const categoryId = next === "" ? null : next;
+    if ((topic.threadCategoryId ?? null) === categoryId) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await setTopicCategory(topic.id, categoryId);
+      updateForumTopic({ ...topic, threadCategoryId: categoryId });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Move failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-keep-rule/40 pt-2 text-[11px] text-keep-muted">
+      <FolderInput size={12} aria-hidden className="shrink-0" />
+      <label htmlFor={selectId}>Move to</label>
+      <select
+        id={selectId}
+        value={current}
+        disabled={busy}
+        onChange={(e) => void move(e.target.value)}
+        className="rounded border border-keep-rule/60 bg-keep-bg/60 px-1.5 py-0.5 text-[11px] text-keep-text disabled:opacity-50"
+      >
+        <option value="">Uncategorized</option>
+        {categories.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+      {err ? <span className="text-rose-300">{err}</span> : null}
+    </div>
+  );
+}
+
 function TopicCard({
   topic,
   replies,
@@ -1712,6 +1778,7 @@ function TopicCard({
   onWorldClick,
   onTimeClick,
   canAdminEdit,
+  categories,
 }: {
   topic: ChatMessage;
   replies: ChatMessage[];
@@ -1762,6 +1829,8 @@ function TopicCard({
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
+  /** Sibling categories in this board, for the mod "Move topic" picker. */
+  categories: ThreadCategory[];
 }) {
   // Reply pagination (classic forum navigation): short chains render
   // whole; past REPLIES_PER_PAGE the chain pages, defaulting to the LAST
@@ -2037,6 +2106,9 @@ function TopicCard({
             readOnly={readOnly}
             {...(postPermalink ? { postPermalink } : {})}
           />
+          {canModerate && !readOnly ? (
+            <TopicMoveControl topic={topic} categories={categories} />
+          ) : null}
           {topic.kind === "poll" && topic.poll ? (
             <div className="mt-2 max-w-lg">
               <PollCard
@@ -2643,7 +2715,7 @@ export function ForumPostBody({
                   asCharacterId={viewerActiveCharacterIdForForum}
                   className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 normal-case hover:bg-keep-banner hover:text-keep-text"
                   title="Add reaction"
-                  label={<><span aria-hidden>+ 😊</span> <span className="text-[10px] uppercase tracking-widest">React</span></>}
+                  label={<><span aria-hidden>+ 😊</span> <span className="text-[10px]">React</span></>}
                 />
               ) : null
             }
@@ -2829,7 +2901,7 @@ function PostToolbar({
   if (!showEdit && !showDelete && !showBookmark && !showReport && !showLock && !showPin && !showQuote && !showReply && !extraActions) return null;
 
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-keep-rule/30 pt-1 text-[10px] uppercase tracking-widest text-keep-muted">
+    <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-keep-rule/30 pt-1 text-[10px] text-keep-muted">
       {showReply ? (
         <button
           type="button"

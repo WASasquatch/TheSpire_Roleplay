@@ -431,6 +431,18 @@ export async function setTopicLock(messageId: string, locked: boolean): Promise<
   await jsonOrThrow(r);
 }
 
+/** Move a topic into a different category, or to Uncategorized with
+ *  `categoryId: null`. Mods/admins only (enforced server-side). */
+export async function setTopicCategory(messageId: string, categoryId: string | null): Promise<void> {
+  const r = await fetch(`/messages/${encodeURIComponent(messageId)}/category`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ categoryId }),
+  });
+  await jsonOrThrow(r);
+}
+
 export async function deleteForumPost(messageId: string): Promise<void> {
   const r = await fetch(`/messages/${encodeURIComponent(messageId)}`, {
     method: "DELETE",

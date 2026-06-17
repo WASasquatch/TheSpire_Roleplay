@@ -2057,6 +2057,22 @@ function Chat() {
   }, [roomsTreeVersion, currentRoomId]);
 
   useEffect(() => {
+    // Coalesced rooms-tree refetch. A presence storm (many joins/leaves/
+    // char-switches in a burst) used to fire one immediate `/rooms` refetch
+    // PER presence event, per client, each rebuilding the whole tree
+    // (N+1 over every public room) - which serialized on the synchronous
+    // SQLite event loop and spiked p99 for everyone. Funnel every
+    // structural refetch through one 400ms trailing debounce so a burst
+    // collapses to a single refetch. The 20s interval backstop and the
+    // inline occupant write below still keep the rail live in the gap.
+    let treeRefetchId: number | null = null;
+    const scheduleTreeRefetch = () => {
+      if (treeRefetchId != null) window.clearTimeout(treeRefetchId);
+      treeRefetchId = window.setTimeout(() => {
+        setRoomsTreeVersion((v) => v + 1);
+        treeRefetchId = null;
+      }, 400);
+    };
     socket.on("room:state", ({ room, occupants }) => {
       setRoom(room);
       setOccupants(room.id, occupants);
@@ -2102,11 +2118,12 @@ function Chat() {
       // Presence changes in our current room mean other rooms might have
       // changed too (e.g. another user just left a room to join ours), and
       // /char switch broadcasts presence - refetch the active theme too.
-      // The /rooms refetch the version bump triggers is now a backstop,
-      // not the primary update path, it corrects for anything the
-      // direct write above couldn't see (a brand-new room the rail
-      // doesn't know about yet, etc.).
-      setRoomsTreeVersion((v) => v + 1);
+      // The /rooms refetch is now a DEBOUNCED backstop, not the primary
+      // update path: the direct occupant write above keeps the rail live,
+      // and the debounce stops a presence storm from firing one full-tree
+      // refetch per event. It still corrects for anything the direct write
+      // couldn't see (a brand-new room the rail doesn't know about yet).
+      scheduleTreeRefetch();
       setThemeVersion((v) => v + 1);
       // The friends modal pulls fresh data on every open, so we no
       // longer need to bump a live refresh key here. Online dots in
@@ -2137,13 +2154,8 @@ function Chat() {
     }
     window.addEventListener("scriptorium:open-world-by-slug", onWorldChip);
 
-    let treeDebounceId: number | null = null;
     socket.on("rooms:tree-changed", () => {
-      if (treeDebounceId != null) window.clearTimeout(treeDebounceId);
-      treeDebounceId = window.setTimeout(() => {
-        setRoomsTreeVersion((v) => v + 1);
-        treeDebounceId = null;
-      }, 400);
+      scheduleTreeRefetch();
     });
 
     /**
@@ -2848,7 +2860,7 @@ function Chat() {
       socket.off("theater:reaction");
       socket.off("chat:typing:update");
       socket.off("rooms:tree-changed");
-      if (treeDebounceId != null) window.clearTimeout(treeDebounceId);
+      if (treeRefetchId != null) window.clearTimeout(treeRefetchId);
       socket.off("message:new");
       socket.off("message:bulk");
       socket.off("message:update");

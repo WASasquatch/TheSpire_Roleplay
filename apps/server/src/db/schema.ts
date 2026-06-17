@@ -1329,12 +1329,13 @@ export const siteSettings = sqliteTable("site_settings", {
   sessionTtlMs: integer("session_ttl_ms").notNull().default(30 * 24 * 60 * 60 * 1000),
   /**
    * ms; how long a disconnected user lingers in the userlist as an
-   * "idle" ghost before being dropped. Default 30 minutes. Overrides
+   * "idle" ghost before being dropped. Default 10 minutes. Overrides
    * the long sessionTtlMs for *visible presence* only, session
    * validity itself is governed by sessionTtlMs. See migration
-   * 0115_idle_grace_ms for the full rationale.
+   * 0115_idle_grace_ms for the original rationale and
+   * 0256_idle_grace_default_10min for the default reduction.
    */
-  idleGraceMs: integer("idle_grace_ms").notNull().default(30 * 60 * 1000),
+  idleGraceMs: integer("idle_grace_ms").notNull().default(10 * 60 * 1000),
   /** JSON-serialized Theme; null = use built-in DEFAULT_THEME */
   defaultThemeJson: text("default_theme_json"),
   /** Public site name shown in the banner, login screen, and tab title. */

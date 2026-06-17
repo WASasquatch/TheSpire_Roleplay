@@ -1,0 +1,16 @@
+-- Lower the idle-ghost presence window default from 30 minutes to 10
+-- minutes (migration 0256).
+--
+-- Migration 0115 introduced `idle_grace_ms` at a 30-minute (1,800,000 ms)
+-- default: after a user's last socket drops without an explicit Exit they
+-- linger in the userlist as an "(idle)" ghost, the room is held open
+-- against auto-archival, and a reconnect inside the window is silent.
+-- 30 minutes proved too long: rooms read as occupied by people who had
+-- closed the tab half an hour earlier. 10 minutes still rides out the
+-- cases the window exists for (a reconnect blip, a brief network drop, a
+-- machine crash) without leaving stale phantom occupants for so long.
+--
+-- Only rows still on the old default are touched, so any value an admin
+-- deliberately set in Settings is preserved. The column default in the
+-- schema is updated to match for fresh installs.
+UPDATE `site_settings` SET `idle_grace_ms` = 600000 WHERE `idle_grace_ms` = 1800000;

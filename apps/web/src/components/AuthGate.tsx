@@ -8,7 +8,6 @@ import { markLoginIntent } from "../lib/socket.js";
 import { resolveSplashTheme, splashBgUrl, themeStyle } from "../lib/theme.js";
 import { isDarkPalette } from "@thekeep/shared";
 import { AffiliatesCarousel } from "./AffiliatesCarousel.js";
-import { FeaturedWorldsCarousel } from "./FeaturedWorldsCarousel.js";
 
 const PROJECT_URL = "https://github.com/WASasquatch/TheSpire_Roleplay";
 
@@ -185,8 +184,8 @@ export function SplashShell({
           // The outer container is `overflow-hidden` (so the bg image
           // can't bleed outside the viewport when the artwork is taller
           // than the available space). That clips anything growing past
-          // the viewport - including the optional FeaturedWorldsCarousel
-          // and AffiliatesCarousel rows below the form. Cap the card's
+          // the viewport - including the optional AffiliatesCarousel
+          // row below the form. Cap the card's
           // height to the viewport (less margin) and let the card scroll
           // internally so additional sections stay reachable on shorter
           // screens.
@@ -290,16 +289,10 @@ export function SplashShell({
               {footer ? <div className="mt-4">{footer}</div> : null}
             </div>
 
-            {/* Featured-worlds + Affiliates carousels span the full
-                card width when present (col-span-2 in the landscape
-                grid). Both honor their admin toggles; carousels render
-                nothing when empty so empty installs don't show a strip
-                of blank rows. */}
-            {branding.featuredWorldsEnabled ? (
-              <div className="max-lg:landscape:col-span-2">
-                <FeaturedWorldsCarousel />
-              </div>
-            ) : null}
+            {/* Affiliates carousel spans the full card width
+                (col-span-2 in the landscape grid). It honors its admin
+                toggle and renders nothing when empty, so empty installs
+                don't show a strip of blank rows. */}
             <div className="max-lg:landscape:col-span-2">
               <AffiliatesCarousel />
             </div>

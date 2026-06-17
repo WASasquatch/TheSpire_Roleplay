@@ -35,6 +35,14 @@ export const users = sqliteTable(
     /** the master/login username - display fallback when no character is active */
     username: text("username").notNull(),
     passwordHash: text("password_hash").notNull(),
+    /**
+     * When the account's email was confirmed (migration 0257). Null =
+     * unverified. Only enforced when `site_settings.email_verification_enabled`
+     * is on; existing accounts were grandfathered to their createdAt by the
+     * migration so they're never nagged. Block-mode enforcement and the
+     * nudge banner both read this.
+     */
+    emailVerifiedAt: integer("email_verified_at", { mode: "timestamp_ms" }),
     role: text("role", { enum: ["user", "trusted", "mod", "admin", "masteradmin"] }).notNull().default("user"),
     /** master profile body (sanitized HTML) shown when /char clear */
     bioHtml: text("bio_html").notNull().default(""),
@@ -1422,6 +1430,27 @@ export const siteSettings = sqliteTable("site_settings", {
   editGraceMs: integer("edit_grace_ms").notNull().default(300_000),
   /** Hard cap on profile bio HTML length (master + character bios). */
   maxBioLength: integer("max_bio_length").notNull().default(50_000),
+  /**
+   * Email verification (migration 0257). When off, registration never
+   * sends a verification email and nothing gates on verified status.
+   * When on, new registrations get a verification email and
+   * `email_verification_mode` decides enforcement.
+   */
+  emailVerificationEnabled: integer("email_verification_enabled", { mode: "boolean" }).notNull().default(false),
+  /**
+   * Enforcement when verification is enabled: "nudge" = account works
+   * fully, a dismissible banner asks them to verify; "block" = the
+   * account can't enter chat / post until verified. Server enforces
+   * block mode; the client mirrors it. Default "nudge".
+   */
+  emailVerificationMode: text("email_verification_mode", { enum: ["nudge", "block"] }).notNull().default("nudge"),
+  /**
+   * Max emails the throttled broadcast queue will send per calendar day
+   * (migration 0257). Defaults to Brevo's free-tier cap (300). The queue
+   * counts the day's sends and pauses when it hits this, auto-resuming
+   * the next day. Transactional account mail is not subject to it.
+   */
+  emailDailyCap: integer("email_daily_cap").notNull().default(300),
   /** Master switch - when false, /auth/register returns 503. */
   registrationOpen: integer("registration_open", { mode: "boolean" }).notNull().default(true),
   /**
@@ -4717,3 +4746,114 @@ export const faqs = sqliteTable(
   }),
 );
 export type DbFaq = typeof faqs.$inferSelect;
+
+/* ---------- email tokens (password reset + verification) ---------- */
+/**
+ * Single-use tokens for transactional account email (migration 0257).
+ * `purpose` discriminates password-reset from email-verification. We store
+ * a SHA-256 HASH of the token, never the raw value, so a DB leak can't be
+ * used to reset accounts. The raw token only ever lives in the emailed
+ * link. `usedAt` marks consumption (single-use); `expiresAt` bounds the
+ * window (reset ~1h, verify ~24h, enforced at the call site).
+ */
+export const emailTokens = sqliteTable(
+  "email_tokens",
+  {
+    id: id(),
+    purpose: text("purpose", { enum: ["password_reset", "email_verify"] }).notNull(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    usedAt: integer("used_at", { mode: "timestamp_ms" }),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    tokenHashIdx: index("email_tokens_hash_idx").on(t.tokenHash),
+    userPurposeIdx: index("email_tokens_user_purpose_idx").on(t.userId, t.purpose),
+  }),
+);
+export type DbEmailToken = typeof emailTokens.$inferSelect;
+
+/* ---------- admin email campaigns (broadcast) ---------- */
+/**
+ * One admin-authored broadcast (migration 0257). The body is composed in
+ * the admin Email tab (tiptap → sanitized HTML) and frozen here at send
+ * time. The throttled queue (see email_outbox) drains recipients within
+ * the daily cap; `sentCount`/`total` track progress for the admin UI.
+ */
+export const emailCampaigns = sqliteTable(
+  "email_campaigns",
+  {
+    id: id(),
+    subject: text("subject").notNull(),
+    bodyHtml: text("body_html").notNull(),
+    /** Broadcast category (see shared EMAIL_CATEGORY_KEYS). Recipients can
+     *  unsubscribe per-category; this is what the footer link drops. */
+    category: text("category").notNull().default("announcements"),
+    /** When to START sending (ms epoch). Null = send immediately. A future
+     *  value parks the campaign as `scheduled` until the queue promotes it. */
+    scheduledAt: integer("scheduled_at", { mode: "timestamp_ms" }),
+    status: text("status", { enum: ["scheduled", "sending", "done", "canceled"] }).notNull().default("sending"),
+    total: integer("total").notNull().default(0),
+    sentCount: integer("sent_count").notNull().default(0),
+    failedCount: integer("failed_count").notNull().default(0),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    statusIdx: index("email_campaigns_status_idx").on(t.status, t.createdAt),
+  }),
+);
+export type DbEmailCampaign = typeof emailCampaigns.$inferSelect;
+
+/* ---------- admin email outbox (throttled per-recipient queue) ---------- */
+/**
+ * One queued recipient of a campaign (migration 0257). The queue worker
+ * sends `pending` rows up to the daily cap, marking each `sent`/`failed`;
+ * `sentAt` is what the daily-cap counter sums over the current calendar
+ * day. Recipients opted out of bulk mail are written as `skipped` so the
+ * campaign totals still reconcile.
+ */
+export const emailOutbox = sqliteTable(
+  "email_outbox",
+  {
+    id: id(),
+    campaignId: text("campaign_id").notNull().references(() => emailCampaigns.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    email: text("email").notNull(),
+    status: text("status", { enum: ["pending", "sent", "failed", "skipped"] }).notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    error: text("error"),
+    sentAt: integer("sent_at", { mode: "timestamp_ms" }),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    statusIdx: index("email_outbox_status_idx").on(t.status),
+    campaignIdx: index("email_outbox_campaign_idx").on(t.campaignId),
+    sentAtIdx: index("email_outbox_sent_at_idx").on(t.sentAt),
+  }),
+);
+export type DbEmailOutbox = typeof emailOutbox.$inferSelect;
+
+/* ---------- per-category email unsubscribes ---------- */
+/**
+ * A user's opt-out of one broadcast CATEGORY (migration 0257). Presence of
+ * a row = unsubscribed from that category; absence = subscribed. The
+ * one-click footer link writes the row for the campaign's category, so
+ * dropping "newsletter" doesn't stop "announcements". Transactional mail
+ * is never a category and ignores this table entirely.
+ */
+export const emailUnsubscribes = sqliteTable(
+  "email_unsubscribes",
+  {
+    id: id(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    category: text("category").notNull(),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    userCatUq: uniqueIndex("email_unsub_user_cat_uq").on(t.userId, t.category),
+  }),
+);
+export type DbEmailUnsubscribe = typeof emailUnsubscribes.$inferSelect;

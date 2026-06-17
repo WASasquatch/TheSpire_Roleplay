@@ -7,7 +7,14 @@ import { sessions, users } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../auth/passwords.js";
 import { permissionsFor } from "../auth/permissions.js";
 import { getSettings } from "../settings.js";
+import { createEmailToken, consumeEmailToken } from "../email/tokens.js";
+import { sendPasswordResetEmail, sendVerificationEmail } from "../email/templates.js";
 import type { Db } from "../db/index.js";
+
+/** Password-reset link validity. Short by design — these are sensitive. */
+const RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
+/** Email-verification link validity. Longer; less sensitive than reset. */
+const VERIFY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 /**
  * Sessions are now bearer-token based, no cookie. The client stores
@@ -265,6 +272,12 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
         // settings, rules, role escalation). Subsequent users default
         // to plain `user` and are promoted by hand.
         role: isFirstUser ? "masteradmin" : "user",
+        // Verified-on-create unless verification is enabled for a normal
+        // signup. This way, flipping verification ON later only affects
+        // accounts made AFTER the flip — nobody who registered while it was
+        // off gets retroactively nagged, and the bootstrap admin is never
+        // gated out of a fresh install.
+        emailVerifiedAt: (settings.emailVerificationEnabled && !isFirstUser) ? null : new Date(),
         // Treat registration itself as the first login so the admin
         // panel's recent-registrations widget doesn't tag a user who
         // signed up + immediately started chatting (via the
@@ -291,6 +304,17 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     const sessionToken = await issueSession(db, id, req);
     const role: Role = isFirstUser ? "masteradmin" : "user";
     const permissions = await permissionsFor({ id, role }, db);
+    // Email verification (admin-toggled). New accounts start unverified
+    // (email_verified_at null). When enabled, send a confirmation link.
+    // Fire-and-forget: a mail hiccup must never fail the signup — the
+    // user can re-request from the verify banner. The bootstrap admin is
+    // exempt (they can't lock themselves out of a fresh install).
+    if (settings.emailVerificationEnabled && !isFirstUser) {
+      try {
+        const token = await createEmailToken(db, id, "email_verify", VERIFY_TTL_MS);
+        void sendVerificationEmail(db, body.email, body.username, token);
+      } catch (err) { req.log.error({ err }, "verification email send failed"); }
+    }
     // Wire shape: `role` and `permissions` now always ride on the
     // register response (previously `role` was spread only on the
     // bootstrap path). The change is backwards compatible, older
@@ -307,6 +331,10 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       // off the register response without a second probe.
       incognitoMode: false,
       incognitoAlias: null,
+      // Unverified only when verification is on for a normal signup
+      // (mirrors the insert above). Lets the client raise the verify
+      // banner/gate straight off the register response.
+      emailVerifiedAt: (settings.emailVerificationEnabled && !isFirstUser) ? null : Date.now(),
       sessionToken,
       ...(isFirstUser ? { bootstrap: true } : {}),
     };
@@ -368,6 +396,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       // next login without having to re-toggle.
       incognitoMode: u.incognitoMode,
       incognitoAlias: u.incognitoAlias,
+      emailVerifiedAt: u.emailVerifiedAt ? +u.emailVerifiedAt : null,
       sessionToken,
     };
   });
@@ -448,10 +477,16 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       .select({
         incognitoMode: users.incognitoMode,
         incognitoAlias: users.incognitoAlias,
+        emailVerifiedAt: users.emailVerifiedAt,
       })
       .from(users)
       .where(eq(users.id, user.id))
       .limit(1))[0];
+    // Verification status + the site policy, mirrored so the client can
+    // decide whether to show the verify banner (nudge) or gate chat
+    // (block) without a second request. `emailVerified` is the resolved
+    // boolean the UI keys on; the mode/enabled drive WHICH treatment.
+    const settings = await getSettings(db);
     return {
       id: user.id,
       username: user.username,
@@ -459,9 +494,82 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       permissions,
       incognitoMode: incognitoRow?.incognitoMode ?? false,
       incognitoAlias: incognitoRow?.incognitoAlias ?? null,
+      emailVerifiedAt: incognitoRow?.emailVerifiedAt ? +incognitoRow.emailVerifiedAt : null,
+      emailVerificationEnabled: settings.emailVerificationEnabled,
+      emailVerificationMode: settings.emailVerificationMode,
       version: VERSION,
       updateMessage,
     };
+  });
+
+  // ---- Password reset ----------------------------------------------------
+  // Request a reset link. ALWAYS returns a generic 200 so an attacker can't
+  // probe which emails are registered. An email may back multiple accounts
+  // (maxAccountsPerEmail); each gets its own link naming its username.
+  const forgotLimit = { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } } as const;
+  app.post<{ Body: unknown }>("/auth/forgot-password", forgotLimit, async (req) => {
+    const body = z.object({ email: z.string().email().max(200) }).parse(req.body);
+    const rows = await db
+      .select()
+      .from(users)
+      .where(sql`lower(${users.email}) = ${body.email.toLowerCase()}`);
+    for (const u of rows) {
+      if (u.disabledAt) continue; // never mail a banned/disabled account
+      try {
+        const token = await createEmailToken(db, u.id, "password_reset", RESET_TTL_MS);
+        void sendPasswordResetEmail(db, u.email, u.username, token);
+      } catch (err) { req.log.error({ err }, "password reset email send failed"); }
+    }
+    return { ok: true };
+  });
+
+  // Redeem a reset link + set a new password. On success every existing
+  // session for the account is revoked (force re-login everywhere).
+  const resetLimit = { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } } as const;
+  app.post<{ Body: unknown }>("/auth/reset-password", resetLimit, async (req, reply) => {
+    const body = z.object({
+      token: z.string().min(1),
+      password: z.string().min(8).max(200),
+    }).parse(req.body);
+    const userId = await consumeEmailToken(db, body.token, "password_reset");
+    if (!userId) {
+      reply.code(400);
+      return { error: "This reset link is invalid or has expired. Request a new one." };
+    }
+    await db.update(users).set({ passwordHash: await hashPassword(body.password) }).where(eq(users.id, userId));
+    await db.delete(sessions).where(eq(sessions.userId, userId));
+    return { ok: true };
+  });
+
+  // ---- Email verification ------------------------------------------------
+  // Confirm an email via the link token. Idempotent-ish: a used/expired
+  // token reads as invalid, but an already-verified account simply re-marks.
+  app.post<{ Body: unknown }>("/auth/verify-email", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (req, reply) => {
+    const body = z.object({ token: z.string().min(1) }).parse(req.body);
+    const userId = await consumeEmailToken(db, body.token, "email_verify");
+    if (!userId) {
+      reply.code(400);
+      return { error: "This confirmation link is invalid or has expired." };
+    }
+    await db.update(users).set({ emailVerifiedAt: new Date() }).where(eq(users.id, userId));
+    return { ok: true };
+  });
+
+  // Re-send the verification email to the signed-in user (from the nudge
+  // banner / block gate). Tight rate limit to prevent mail abuse.
+  app.post("/auth/resend-verification", { config: { rateLimit: { max: 3, timeWindow: "5 minutes" } } }, async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "not authenticated" }; }
+    const settings = await getSettings(db);
+    if (!settings.emailVerificationEnabled) { reply.code(400); return { error: "verification is not enabled" }; }
+    const row = (await db.select().from(users).where(eq(users.id, me.id)).limit(1))[0];
+    if (!row) { reply.code(404); return { error: "no user" }; }
+    if (row.emailVerifiedAt) return { ok: true, alreadyVerified: true };
+    try {
+      const token = await createEmailToken(db, row.id, "email_verify", VERIFY_TTL_MS);
+      void sendVerificationEmail(db, row.email, row.username, token);
+    } catch (err) { req.log.error({ err }, "resend verification email failed"); }
+    return { ok: true };
   });
 }
 

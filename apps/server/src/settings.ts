@@ -119,6 +119,12 @@ export interface SiteSettings {
   editGraceMs: number;
   /** Cap on profile bio HTML length. */
   maxBioLength: number;
+  /** When true, registration sends a verification email and verified status is meaningful. */
+  emailVerificationEnabled: boolean;
+  /** Enforcement when verification is on: "nudge" (banner) or "block" (gate chat until verified). */
+  emailVerificationMode: "nudge" | "block";
+  /** Max broadcast emails the throttled queue sends per calendar day (Brevo free = 300). */
+  emailDailyCap: number;
   /** When false, /auth/register returns 503. */
   registrationOpen: boolean;
   /** Sanitized HTML rendered above the splash login/register form. */
@@ -234,6 +240,12 @@ export interface SettingsPatch {
   /** Author-edit/delete grace window in ms (chat rooms). */
   editGraceMs?: number;
   maxBioLength?: number;
+  /** Toggle email verification on registration. */
+  emailVerificationEnabled?: boolean;
+  /** "nudge" (dismissible banner) or "block" (gate chat until verified). */
+  emailVerificationMode?: "nudge" | "block";
+  /** Broadcast queue daily send cap. Route handler bounds it (1..100000). */
+  emailDailyCap?: number;
   registrationOpen?: boolean;
   /** Pre-sanitized HTML; settings layer doesn't re-sanitize so the route handler must. */
   welcomeHtml?: string;
@@ -314,6 +326,9 @@ export async function updateSettings(
   if (patch.forumTopicsPerPage !== undefined) update.forumTopicsPerPage = patch.forumTopicsPerPage;
   if (patch.editGraceMs !== undefined) update.editGraceMs = patch.editGraceMs;
   if (patch.maxBioLength !== undefined) update.maxBioLength = patch.maxBioLength;
+  if (patch.emailVerificationEnabled !== undefined) update.emailVerificationEnabled = patch.emailVerificationEnabled;
+  if (patch.emailVerificationMode !== undefined) update.emailVerificationMode = patch.emailVerificationMode;
+  if (patch.emailDailyCap !== undefined) update.emailDailyCap = patch.emailDailyCap;
   if (patch.registrationOpen !== undefined) update.registrationOpen = patch.registrationOpen;
   if (patch.welcomeHtml !== undefined) update.welcomeHtml = patch.welcomeHtml;
   if (patch.rulesHtml !== undefined) update.rulesHtml = patch.rulesHtml;
@@ -385,6 +400,9 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     forumTopicsPerPage: row.forumTopicsPerPage,
     editGraceMs: row.editGraceMs,
     maxBioLength: row.maxBioLength,
+    emailVerificationEnabled: row.emailVerificationEnabled,
+    emailVerificationMode: row.emailVerificationMode,
+    emailDailyCap: row.emailDailyCap,
     registrationOpen: row.registrationOpen,
     welcomeHtml: row.welcomeHtml,
     rulesHtml: row.rulesHtml,

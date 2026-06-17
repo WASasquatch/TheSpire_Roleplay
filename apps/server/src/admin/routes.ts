@@ -39,6 +39,7 @@ import { registerAdminPermissionRoutes } from "./permissions.js";
 import { registerAdminAnnouncementRoutes } from "./announcements.js";
 import { registerAdminModCaseRoutes } from "./modCases.js";
 import { registerAdminFaqRoutes } from "./faqs.js";
+import { registerAdminEmailRoutes } from "./email.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -135,6 +136,11 @@ export async function registerAdminRoutes(
   // `view_admin_faqs` (read) / `manage_faqs` (write), seeded to admin by
   // migration 0255. Public read lives in routes/faqs.ts.
   await registerAdminFaqRoutes(app, { db });
+
+  // Admin emailer: single send + throttled broadcast, plus verification
+  // settings live alongside in the Email tab. Gated by `view_admin_email`
+  // (read) / `send_admin_email` (send), seeded by migration 0257.
+  await registerAdminEmailRoutes(app, { db });
 
   // Per-route granular gate. Each handler that performs a side-effect
   // or returns sensitive data calls this with the specific
@@ -962,6 +968,10 @@ export async function registerAdminRoutes(
     editGraceMs: z.number().int().min(0).max(7 * 24 * 60 * 60 * 1000).optional(),
     /** 1000..200000 chars per bio HTML. */
     maxBioLength: z.number().int().min(1000).max(200_000).optional(),
+    /** Email verification toggle + enforcement mode + broadcast daily cap. */
+    emailVerificationEnabled: z.boolean().optional(),
+    emailVerificationMode: z.enum(["nudge", "block"]).optional(),
+    emailDailyCap: z.number().int().min(1).max(100_000).optional(),
     /** Master switch for /auth/register. */
     registrationOpen: z.boolean().optional(),
     // Long-form HTML fields. Caps tuned for "fully comprehensive rules,
@@ -1038,6 +1048,9 @@ export async function registerAdminRoutes(
       forumTopicsPerPage: s.forumTopicsPerPage,
       editGraceMs: s.editGraceMs,
       maxBioLength: s.maxBioLength,
+      emailVerificationEnabled: s.emailVerificationEnabled,
+      emailVerificationMode: s.emailVerificationMode,
+      emailDailyCap: s.emailDailyCap,
       registrationOpen: s.registrationOpen,
       welcomeHtml: s.welcomeHtml,
       rulesHtml: s.rulesHtml,
@@ -1119,6 +1132,9 @@ export async function registerAdminRoutes(
     if (body.forumTopicsPerPage !== undefined) patch.forumTopicsPerPage = body.forumTopicsPerPage;
     if (body.editGraceMs !== undefined) patch.editGraceMs = body.editGraceMs;
     if (body.maxBioLength !== undefined) patch.maxBioLength = body.maxBioLength;
+    if (body.emailVerificationEnabled !== undefined) patch.emailVerificationEnabled = body.emailVerificationEnabled;
+    if (body.emailVerificationMode !== undefined) patch.emailVerificationMode = body.emailVerificationMode;
+    if (body.emailDailyCap !== undefined) patch.emailDailyCap = body.emailDailyCap;
     if (body.registrationOpen !== undefined) patch.registrationOpen = body.registrationOpen;
     if (body.welcomeHtml !== undefined) {
       // Sanitize on save (same allow-list as bios) - never trust admin HTML input.

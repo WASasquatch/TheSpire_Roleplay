@@ -104,8 +104,10 @@ import { initPush } from "./push.js";
 import { registerCommandsRoutes } from "./routes/commands.js";
 import { registerAnnouncementsRoutes } from "./routes/announcements.js";
 import { registerFaqRoutes } from "./routes/faqs.js";
+import { registerUnsubscribeRoute } from "./routes/unsubscribe.js";
 import { registerProfileFlairRoutes } from "./routes/profileFlair.js";
 import { startAnnouncementScheduler } from "./admin/announcements.js";
+import { startEmailQueue } from "./email/queue.js";
 import { registerNavLinkRoutes } from "./routes/nav-links.js";
 import { registerRoomsRoutes } from "./routes/rooms.js";
 import { registerEarningRoutes } from "./routes/earning.js";
@@ -342,6 +344,8 @@ async function main() {
   // /admin/announcements/* via the admin route module.
   await registerAnnouncementsRoutes(baseApp, db);
   await registerFaqRoutes(baseApp, db);
+  // Public one-click unsubscribe landing for broadcast email footers.
+  await registerUnsubscribeRoute(baseApp, db);
   // Profile-flair surfaces: visitor-count tracker + rotating-quote
   // marquee. View logging is always-on (so equipping the flair has
   // data the moment it lands); display + owner CRUD are
@@ -947,6 +951,27 @@ async function main() {
           return;
         }
         Object.assign(user, fresh);
+        // Email-verification block gate (defense-in-depth behind the
+        // client overlay). Only queried when block mode is actually on,
+        // so the common config pays nothing. An unverified account can
+        // read chat but can't send until they confirm their email.
+        // Staff (admin/masteradmin) are exempt so an unverified admin can
+        // never be locked out of the Email settings that turn block mode
+        // off. They still see the nudge banner client-side.
+        if (user.role !== "admin" && user.role !== "masteradmin") {
+          const s = await getSettings(db);
+          if (s.emailVerificationEnabled && s.emailVerificationMode === "block") {
+            const vr = (await db
+              .select({ v: users.emailVerifiedAt })
+              .from(users)
+              .where(eq(users.id, user.id))
+              .limit(1))[0];
+            if (!vr?.v) {
+              ack?.({ ok: false, code: "EMAIL_UNVERIFIED", message: "Please verify your email to chat." });
+              return;
+            }
+          }
+        }
         // Identity resolution for this send, in priority order:
         //
         //   1. `payload.asCharacterId`, the client's per-send claim
@@ -2067,6 +2092,14 @@ async function main() {
       // `/api/faqs*` (under the `/api` apiPrefix) so it doesn't shadow these.
       app.get("/faqs", publicLimit, serveSplash);
       app.get("/faq/:slug", publicLimit, serveSplash);
+      // Transactional email landing pages for logged-out visitors: the
+      // forgot-password request form, the password-reset form, and the
+      // email-verification handler all render the SPA shell so a refresh /
+      // bookmark / cold link resolves (the JSON endpoints live under
+      // /auth/*; without these a direct hit would fall to the 404 page).
+      app.get("/forgot-password", publicLimit, serveSplash);
+      app.get("/reset-password", publicLimit, serveSplash);
+      app.get("/verify-email", publicLimit, serveSplash);
 
       await app.register(fastifyStatic, {
         root: webDistPath,
@@ -2147,6 +2180,8 @@ async function main() {
   // stack timers; the started timer captures `db` + `io` by
   // closure so its lifetime is the process's.
   startAnnouncementScheduler({ db, io });
+  // Drain the broadcast email outbox within the daily cap.
+  startEmailQueue(db);
   // Durable boot-ok marker. Survives the Fly log purge so a future
   // "what was the last successful boot?" question has an answer.
   recordBootSuccess({ port: PORT, mode: IS_PROD ? "production" : "development" });

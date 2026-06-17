@@ -56,6 +56,9 @@ export type AuditAction =
   | "faq_create"
   | "faq_update"
   | "faq_delete"
+  // Admin emailer (single send + broadcast)
+  | "admin_email_send"
+  | "admin_email_broadcast"
   // Scriptorium moderation (Phase 10)
   | "story_force_rate"
   | "story_admin_hide"

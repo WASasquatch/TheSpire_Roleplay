@@ -5,6 +5,8 @@ import { DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, legibleAgainstBg,
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
 import { SplashLanding } from "./components/SplashLanding.js";
+import { ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage } from "./components/EmailAuthPages.js";
+import { VerifyEmailGate } from "./components/VerifyEmailGate.js";
 import { Banner } from "./components/Banner.js";
 import { Composer } from "./components/Composer.js";
 import { TypingIndicator } from "./components/TypingIndicator.js";
@@ -133,6 +135,9 @@ export function App() {
               permissions: PermissionKey[];
               incognitoMode?: boolean;
               incognitoAlias?: string | null;
+              emailVerifiedAt?: number | null;
+              emailVerificationEnabled?: boolean;
+              emailVerificationMode?: "nudge" | "block";
               version?: string;
               updateMessage?: string | null;
             }>)
@@ -167,6 +172,9 @@ export function App() {
             permissions: j.permissions ?? [],
             incognitoMode: j.incognitoMode ?? false,
             incognitoAlias: j.incognitoAlias ?? null,
+            emailVerifiedAt: typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null,
+            emailVerificationEnabled: j.emailVerificationEnabled ?? false,
+            emailVerificationMode: j.emailVerificationMode ?? "nudge",
           });
           // Detect a post-deploy version drift on the very first probe.
           // If the user opened this tab before a deploy, the bundle they
@@ -266,6 +274,9 @@ export function App() {
           permissions?: PermissionKey[];
           incognitoMode?: boolean;
           incognitoAlias?: string | null;
+          emailVerifiedAt?: number | null;
+          emailVerificationEnabled?: boolean;
+          emailVerificationMode?: "nudge" | "block";
           version?: string;
           updateMessage?: string | null;
         };
@@ -283,6 +294,9 @@ export function App() {
           const cur = useChat.getState().me;
           const nextIncognitoMode = j.incognitoMode ?? false;
           const nextIncognitoAlias = j.incognitoAlias ?? null;
+          const nextVerifiedAt = typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null;
+          const nextVerifyEnabled = j.emailVerificationEnabled ?? false;
+          const nextVerifyMode = j.emailVerificationMode ?? "nudge";
           const changed =
             !cur
             || cur.id !== j.id
@@ -290,6 +304,9 @@ export function App() {
             || cur.role !== j.role
             || cur.incognitoMode !== nextIncognitoMode
             || cur.incognitoAlias !== nextIncognitoAlias
+            || cur.emailVerifiedAt !== nextVerifiedAt
+            || cur.emailVerificationEnabled !== nextVerifyEnabled
+            || cur.emailVerificationMode !== nextVerifyMode
             || !samePermissions(cur.permissions, j.permissions);
           if (changed) {
             setMe({
@@ -299,6 +316,9 @@ export function App() {
               permissions: j.permissions,
               incognitoMode: nextIncognitoMode,
               incognitoAlias: nextIncognitoAlias,
+              emailVerifiedAt: nextVerifiedAt,
+              emailVerificationEnabled: nextVerifyEnabled,
+              emailVerificationMode: nextVerifyMode,
             });
           }
         }
@@ -817,6 +837,19 @@ function UnauthRouter(props: {
         </PublicViewerShell>
       );
     }
+  }
+
+  // Email flow pages (logged-out): request a reset link, set a new password
+  // from a ?token= link, confirm an email from a ?token= link. All render
+  // inside SplashShell so they match the login chrome.
+  if (!hasDeepLinkHint && path === "/forgot-password") {
+    return <ForgotPasswordPage onNavigate={navigate} />;
+  }
+  if (!hasDeepLinkHint && path === "/reset-password") {
+    return <ResetPasswordPage onNavigate={navigate} />;
+  }
+  if (!hasDeepLinkHint && path === "/verify-email") {
+    return <VerifyEmailPage onNavigate={navigate} />;
   }
 
   if (!hasDeepLinkHint && path === "/") {
@@ -3569,6 +3602,7 @@ function Chat() {
       <BannerMarquee />
       <StaleVersionBanner />
       <IncognitoBanner />
+      <VerifyEmailGate />
       {/* Earning, persistent rank-up ribbon. Only renders when the
           user has unacknowledged rank-ups. Tucked under the version
           banner so deploy nags still take precedence. */}

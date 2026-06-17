@@ -102,6 +102,7 @@ export const PERMISSION_KEYS = [
   "review_forum_applications",
   "manage_any_forum",
   "manage_faqs",
+  "send_admin_email",
 
   // ---- audit_view (non-tab read permissions) ----
   "view_room_messages_as_admin",
@@ -130,6 +131,7 @@ export const PERMISSION_KEYS = [
   "view_admin_announcements",
   "view_admin_mod_cases",
   "view_admin_faqs",
+  "view_admin_email",
 
   // ---- announcements ----
   // Two independently-grantable manage keys feed the same Announcements
@@ -248,6 +250,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   review_forum_applications: "Approve or reject forum-creation applications in the admin Forums tab.",
   manage_any_forum: "Admin override on any community forum: edit, archive, transfer, delete, and lift forum bans.",
   manage_faqs: "Create, edit, and delete public FAQ entries (question/answer with a shareable slug).",
+  send_admin_email: "Send email from the admin Email tab — to a single user or a throttled broadcast to all users.",
 
   // audit_view
   view_room_messages_as_admin: "Open the admin message scroll-through for a public room.",
@@ -276,6 +279,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   view_admin_announcements: "See the admin Announcements tab. Editing requires manage_banner_announcements and/or manage_scheduled_announcements.",
   view_admin_mod_cases: "See the admin Mod Log tab (the moderation case log). Editing requires manage_mod_cases.",
   view_admin_faqs: "See the admin FAQ tab. Editing requires manage_faqs.",
+  view_admin_email: "See the admin Email tab (verification settings + the emailer). Sending requires send_admin_email.",
 
   // announcements
   manage_banner_announcements: "Create, edit, or delete the rotating chat-top banner announcements (HTML/Markdown).",
@@ -383,6 +387,7 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   review_forum_applications: "content_admin",
   manage_any_forum: "content_admin",
   manage_faqs: "content_admin",
+  send_admin_email: "content_admin",
 
   // audit_view
   view_room_messages_as_admin: "audit_view",
@@ -411,6 +416,7 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   view_admin_announcements: "admin_panel_tabs",
   view_admin_mod_cases: "admin_panel_tabs",
   view_admin_faqs: "admin_panel_tabs",
+  view_admin_email: "admin_panel_tabs",
 
   // announcements
   manage_banner_announcements: "site_admin",

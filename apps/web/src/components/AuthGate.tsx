@@ -663,6 +663,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           permissions: Array.isArray(j.permissions) ? j.permissions : [],
           incognitoMode: j.incognitoMode === true,
           incognitoAlias: typeof j.incognitoAlias === "string" ? j.incognitoAlias : null,
+          emailVerifiedAt: typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null,
         });
       } else {
         const res = await fetch("/auth/login", {
@@ -690,6 +691,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           permissions: Array.isArray(j.permissions) ? j.permissions : [],
           incognitoMode: j.incognitoMode === true,
           incognitoAlias: typeof j.incognitoAlias === "string" ? j.incognitoAlias : null,
+          emailVerifiedAt: typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null,
         });
       }
     } catch (err) {
@@ -837,6 +839,17 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           type="password"
           autoComplete={mode === "register" ? "new-password" : "current-password"}
         />
+        {mode === "login" ? (
+          <div className="text-right">
+            <button
+              type="button"
+              className="text-[11px] text-keep-muted underline underline-offset-2 hover:text-keep-action"
+              onClick={() => onNavigate?.("/forgot-password")}
+            >
+              Forgot password?
+            </button>
+          </div>
+        ) : null}
         {mode === "register" ? (
           <div>
             <Field
@@ -996,7 +1009,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
   );
 }
 
-function Field({
+export function Field({
   label,
   value,
   onChange,

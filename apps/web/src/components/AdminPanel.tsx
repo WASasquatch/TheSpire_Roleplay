@@ -25,6 +25,7 @@ import { AdminPermissionsTab } from "./AdminPermissionsTab.js";
 import { AdminAnnouncementsTab } from "./AdminAnnouncementsTab.js";
 import { AdminModCasesTab } from "./AdminModCasesTab.js";
 import { AdminFaqsTab } from "./AdminFaqsTab.js";
+import { AdminEmailTab } from "./AdminEmailTab.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
@@ -38,7 +39,7 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "mod-cases" | "scriptorium" | "forums" | "emoticons" | "audit" | "backups" | "permissions" | "announcements" | "faqs";
+type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "mod-cases" | "scriptorium" | "forums" | "emoticons" | "audit" | "backups" | "permissions" | "announcements" | "faqs" | "email";
 
 /** Tab grouping for the strip's section dividers. Each tab carries
  *  the id of the group it belongs to; the render walks the list
@@ -102,6 +103,7 @@ const TAB_ITEMS: ReadonlyArray<{
   // either delegate can land here without a separate route.
   { id: "announcements", label: "Announcements", group: "content", permission: "view_admin_announcements" },
   { id: "faqs", label: "FAQ", group: "content", permission: "view_admin_faqs" },
+  { id: "email", label: "Email", group: "siteconfig", permission: "view_admin_email" },
 
   // ----- Site configuration: install-level chrome -----
   { id: "settings", label: "Settings", group: "siteconfig", permission: "view_admin_settings" },
@@ -440,6 +442,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             {tab === "permissions" && canSeeTab("view_admin_permissions") ? <AdminPermissionsTab /> : null}
             {tab === "announcements" && canSeeTab("view_admin_announcements") ? <AdminAnnouncementsTab /> : null}
             {tab === "faqs" && canSeeTab("view_admin_faqs") ? <AdminFaqsTab /> : null}
+            {tab === "email" && canSeeTab("view_admin_email") ? <AdminEmailTab /> : null}
           </div>
         </AdminShellContext.Provider>
 

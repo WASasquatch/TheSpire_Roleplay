@@ -40,6 +40,18 @@ export interface AuthMe {
   /** Display name shown on outgoing system lines while incognito.
    *  Null → server falls back to the literal "System". */
   incognitoAlias: string | null;
+  /**
+   * When this account's email was confirmed (ms epoch), or null if not
+   * verified. Only meaningful when `emailVerificationEnabled` is on.
+   * Drives the verify banner (nudge) / chat gate (block). Present on the
+   * login + register responses and refreshed on every /auth/me poll.
+   */
+  emailVerifiedAt: number | null;
+  /** Site policy: is email verification enabled? Undefined until the first
+   *  /auth/me poll resolves it (login/register responses omit it). */
+  emailVerificationEnabled?: boolean;
+  /** Site policy enforcement mode when verification is on. */
+  emailVerificationMode?: "nudge" | "block";
 }
 
 /**

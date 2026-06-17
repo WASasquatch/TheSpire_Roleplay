@@ -37,6 +37,8 @@ import { registerAdminEarningRoutes } from "./earning.js";
 import { registerAdminBackupRoutes } from "./backup.js";
 import { registerAdminPermissionRoutes } from "./permissions.js";
 import { registerAdminAnnouncementRoutes } from "./announcements.js";
+import { registerAdminModCaseRoutes } from "./modCases.js";
+import { registerAdminFaqRoutes } from "./faqs.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -123,6 +125,16 @@ export async function registerAdminRoutes(
   // `startAnnouncementScheduler` in apps/server/src/index.ts so it
   // runs once per process, not once per route registration.
   await registerAdminAnnouncementRoutes(app, { db, io });
+
+  // Moderation case log, mod-authored complaint/resolution records.
+  // Gated by `view_admin_mod_cases` (read) / `manage_mod_cases` (write),
+  // seeded to mod + admin by migration 0254.
+  await registerAdminModCaseRoutes(app, { db });
+
+  // FAQ entries, admin-authored public Q&A with shareable slugs. Gated by
+  // `view_admin_faqs` (read) / `manage_faqs` (write), seeded to admin by
+  // migration 0255. Public read lives in routes/faqs.ts.
+  await registerAdminFaqRoutes(app, { db });
 
   // Per-route granular gate. Each handler that performs a side-effect
   // or returns sensitive data calls this with the specific

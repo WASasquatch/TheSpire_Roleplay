@@ -58,14 +58,23 @@ primary_region = "sjc"
     soft_limit = 200
     hard_limit = 250
 
-# Health check — Fastify exposes /health unauthenticated.
+# Health check — Fastify exposes /health unauthenticated. timeout is
+# deliberately generous: /health itself is trivial, but a brief event-loop
+# stall (synchronous SQLite under a load spike) can delay the response, and a
+# tight 5s timeout turned those blips into machine restarts. 10s absorbs a
+# transient spike without masking a real outage.
 [[http_service.checks]]
-  grace_period = "10s"
+  grace_period = "15s"
   interval = "30s"
   method = "GET"
-  timeout = "5s"
+  timeout = "10s"
   path = "/health"
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
+  # Dedicated CPU (not shared) — shared-cpu-1x got CPU-throttled under live
+  # load, blocking the synchronous-SQLite event loop until even static 304s
+  # took 18s and health checks failed. performance-1x removes the throttling;
+  # 2GB ends the GC pressure from the old 512MB. Must stay in sync with the
+  # live machine or `fly deploy` reverts it.
+  size = "performance-1x"
+  memory = "2048mb"

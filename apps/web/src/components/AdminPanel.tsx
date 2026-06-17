@@ -23,6 +23,8 @@ import { AdminEmoticonsTab } from "./AdminEmoticonsTab.js";
 import { AdminForumsTab } from "./AdminForumsTab.js";
 import { AdminPermissionsTab } from "./AdminPermissionsTab.js";
 import { AdminAnnouncementsTab } from "./AdminAnnouncementsTab.js";
+import { AdminModCasesTab } from "./AdminModCasesTab.js";
+import { AdminFaqsTab } from "./AdminFaqsTab.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
@@ -36,7 +38,7 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "scriptorium" | "forums" | "emoticons" | "audit" | "backups" | "permissions" | "announcements";
+type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "mod-cases" | "scriptorium" | "forums" | "emoticons" | "audit" | "backups" | "permissions" | "announcements" | "faqs";
 
 /** Tab grouping for the strip's section dividers. Each tab carries
  *  the id of the group it belongs to; the render walks the list
@@ -78,6 +80,7 @@ const TAB_ITEMS: ReadonlyArray<{
   { id: "overview", label: "Overview", group: "monitor" },
   { id: "audit", label: "Audit", group: "monitor" },
   { id: "reports", label: "Reports", group: "monitor" },
+  { id: "mod-cases", label: "Mod Log", group: "monitor", permission: "view_admin_mod_cases" },
 
   // ----- People & access: who can do what -----
   // Permissions ships first because the workflow is "set policy then
@@ -98,6 +101,7 @@ const TAB_ITEMS: ReadonlyArray<{
   // cronjob scheduling, but they share one viewer permission so
   // either delegate can land here without a separate route.
   { id: "announcements", label: "Announcements", group: "content", permission: "view_admin_announcements" },
+  { id: "faqs", label: "FAQ", group: "content", permission: "view_admin_faqs" },
 
   // ----- Site configuration: install-level chrome -----
   { id: "settings", label: "Settings", group: "siteconfig", permission: "view_admin_settings" },
@@ -427,6 +431,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             {tab === "rooms" ? <RoomsTab /> : null}
             {tab === "users" ? <UsersTab /> : null}
             {tab === "reports" ? <ReportsTab /> : null}
+            {tab === "mod-cases" && canSeeTab("view_admin_mod_cases") ? <AdminModCasesTab /> : null}
             {tab === "scriptorium" ? <AdminScriptoriumTab /> : null}
             {tab === "emoticons" ? <AdminEmoticonsTab /> : null}
             {tab === "forums" && canSeeTab("view_admin_forums") ? <AdminForumsTab /> : null}
@@ -434,6 +439,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             {tab === "backups" && canSeeTab("view_admin_backups") ? <AdminBackupsTab /> : null}
             {tab === "permissions" && canSeeTab("view_admin_permissions") ? <AdminPermissionsTab /> : null}
             {tab === "announcements" && canSeeTab("view_admin_announcements") ? <AdminAnnouncementsTab /> : null}
+            {tab === "faqs" && canSeeTab("view_admin_faqs") ? <AdminFaqsTab /> : null}
           </div>
         </AdminShellContext.Provider>
 

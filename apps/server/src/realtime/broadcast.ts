@@ -165,7 +165,7 @@ export async function addMessage(
     replyToBodySnippet?: string;
     /** Override the displayed name (used by /npc to inject the NPC's name in place of the author's). */
     displayNameOverride?: string;
-    /** For /npc: the master username of the user who voiced this NPC. Rendered as a "voiced by" tag on the line. */
+    /** For /npc: the display name of the AUTHOR'S ACTIVE IDENTITY (character, or OOC name when OOC) who voiced this NPC. Rendered as a "voiced by" tag. The real account stays recoverable via the row's userId/characterId. */
     npcVoicedBy?: string;
     /**
      * Thread-category bucket for top-level messages in nested-mode rooms.

@@ -463,14 +463,16 @@ export const characters = sqliteTable(
      * the friend just can't reach this character via DM anymore. Flipping
      * it back on restores reachability with no further action needed.
      *
-     * Migration 0183 added this column with a backfill: any character
-     * with prior friendships or DM conversations was migrated to
-     * `true`; everyone else (and every newly-created character) is
-     * `false` by default. New characters are opt-in.
+     * Reachability is OPT-OUT: new characters are created reachable
+     * (the create routes set this explicitly) and owners turn it OFF
+     * here only if they want a character uncontactable. Migration 0183
+     * first added this column opt-IN (default `false`), but that left
+     * every new character silently unreachable; migration 0253 flipped
+     * the policy and backfilled existing disabled characters to `true`.
      */
     directMessengerEnabled: integer("direct_messenger_enabled", { mode: "boolean" })
       .notNull()
-      .default(false),
+      .default(true),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
     deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
@@ -801,7 +803,7 @@ export const messages = sqliteTable(
     replyToBodySnippet: text("reply_to_body_snippet"),
     /** Snapshot of the author's mood/expression at send time (or null). */
     moodSnapshot: text("mood_snapshot"),
-    /** For /npc messages, the master username of the user who voiced this NPC (accountability tag rendered next to the NPC name). */
+    /** For /npc messages, the display name of the author's ACTIVE identity (character, or OOC name when OOC) that voiced this NPC, rendered as a "voiced by" tag next to the NPC name. NOT the master account — that stays recoverable via this row's userId/characterId for moderation. */
     npcVoicedBy: text("npc_voiced_by"),
     /**
      * Optional hero image for `/scene <title> | <url>` banners.
@@ -4638,3 +4640,79 @@ export const urugalRun = sqliteTable(
   }),
 );
 export type DbUrugalRun = typeof urugalRun.$inferSelect;
+
+/* ---------- moderation case log (migration 0254) ----------
+ *
+ * Mod-authored record of a complaint/dispute and how it was handled —
+ * distinct from the user-filed `reports` table (which is reader-initiated).
+ * Reporter and subject are freehand text by default, but if the mod typed an
+ * `@id:`/`@cid:` identity token we resolve it and ALSO store the linked
+ * userId/characterId + a snapshot label, so the log stays queryable ("every
+ * case about user X") without losing the freehand affordance. FKs use
+ * `set null` so the case survives a deleted account. */
+export const modCases = sqliteTable(
+  "mod_cases",
+  {
+    id: id(),
+    /** Short category/label for the complaint, freehand (e.g. "harassment"). */
+    nature: text("nature").notNull(),
+    /** The freehand narrative the mod typed. */
+    complaintBody: text("complaint_body").notNull(),
+    /** Freehand outcome / action taken; null while the case is open. */
+    resolution: text("resolution"),
+    status: text("status", { enum: ["open", "resolved"] }).notNull().default("open"),
+    /** "Who complained" — freehand text and/or a resolved identity link. */
+    reporterText: text("reporter_text"),
+    reporterUserId: text("reporter_user_id").references(() => users.id, { onDelete: "set null" }),
+    reporterCharacterId: text("reporter_character_id"),
+    reporterLabel: text("reporter_label"),
+    /** "About whom/what" — same shape as the reporter columns. */
+    subjectText: text("subject_text"),
+    subjectUserId: text("subject_user_id").references(() => users.id, { onDelete: "set null" }),
+    subjectCharacterId: text("subject_character_id"),
+    subjectLabel: text("subject_label"),
+    /** Optional link to a user-filed report this case stems from. */
+    relatedReportId: text("related_report_id").references(() => reports.id, { onDelete: "set null" }),
+    /** The mod who recorded the case. */
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+    resolvedAt: integer("resolved_at", { mode: "timestamp_ms" }),
+  },
+  (t) => ({
+    subjectIdx: index("mod_cases_subject_idx").on(t.subjectUserId),
+    reporterIdx: index("mod_cases_reporter_idx").on(t.reporterUserId),
+    statusIdx: index("mod_cases_status_idx").on(t.status, t.createdAt),
+  }),
+);
+export type DbModCase = typeof modCases.$inferSelect;
+
+/* ---------- FAQ entries (migration 0255) ----------
+ *
+ * Admin-authored question/answer entries, each with a globally-unique slug so
+ * a mod can paste a direct public link (`/faq/<slug>`). `answerHtml` is
+ * sanitized server-side (same allow-list as bios/announcements). Mirrors the
+ * announcement_banners shape (enabled/sortOrder/audit). */
+export const faqs = sqliteTable(
+  "faqs",
+  {
+    id: id(),
+    slug: text("slug").notNull(),
+    question: text("question").notNull(),
+    /** Markdown source the editor round-trips. */
+    answerMarkdown: text("answer_markdown").notNull().default(""),
+    /** Rendered + sanitized HTML the public read path serves. */
+    answerHtml: text("answer_html").notNull(),
+    category: text("category"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    slugUq: uniqueIndex("faqs_slug_uq").on(sql`lower(${t.slug})`),
+    enabledIdx: index("faqs_enabled_idx").on(t.enabled, t.sortOrder, t.createdAt),
+  }),
+);
+export type DbFaq = typeof faqs.$inferSelect;

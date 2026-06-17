@@ -72,10 +72,14 @@ export const npcCommand: CommandHandler = {
       kind: "npc",
       body: renderedBody,
       displayNameOverride: npcName,
-      // Use the master username (not displayName) for the voiced-by tag so
-      // players can find the actual account behind the puppet regardless of
-      // which character the author is currently switched to.
-      npcVoicedBy: ctx.user.username,
+      // Attribute the "voiced by" tag to the author's ACTIVE identity (the
+      // character they're speaking as, or their OOC name only when actually
+      // OOC) — never the master account behind a character. Leaking the OOC
+      // account here broke the per-identity contract the rest of the app
+      // upholds. Mod traceability is unaffected: the message row still stores
+      // the real userId + characterId, so the account behind the puppet stays
+      // recoverable from moderation tooling without exposing it to players.
+      npcVoicedBy: ctx.user.displayName,
     });
   },
 };

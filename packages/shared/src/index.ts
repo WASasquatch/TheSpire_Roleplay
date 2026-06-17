@@ -31,5 +31,6 @@ export * from "./story.js";
 export * from "./transitions.js";
 export * from "./export.js";
 export * from "./forum.js";
+export * from "./faq.js";
 export * from "./poll.js";
 export * from "./dynamicCheck.js";

@@ -24,6 +24,8 @@ import { MessagesModal } from "./components/MessagesModal.js";
 import { RulesModal } from "./components/RulesModal.js";
 import { RulesPage } from "./components/RulesPage.js";
 import { isRulesUrl, navigateAwayFromRules } from "./lib/rulesUrl.js";
+import { FaqPage } from "./components/FaqPage.js";
+import { faqRoute, type FaqRoute } from "./lib/faqUrl.js";
 import { EarningDashboard } from "./components/EarningDashboard.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { ArcadeLauncher } from "./components/arcade/ArcadeLauncher.js";
@@ -375,6 +377,16 @@ export function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  // Public FAQ pages (/faqs index, /faq/<slug> entry). Same pre-auth
+  // early-return pattern as the rules page so a mod can link an answer to a
+  // logged-out visitor. Tracked in state with a popstate listener.
+  const [faqPage, setFaqPage] = useState<FaqRoute | null>(() => faqRoute());
+  useEffect(() => {
+    const onPop = () => setFaqPage(faqRoute());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   // Mount-time fetch for the deep-link target. Uses HTTP (works whether the
   // viewer is authed or not) so the AuthGate can decide what banner to show
   // before any session is established.
@@ -585,6 +597,12 @@ export function App() {
         }}
       />
     );
+  }
+
+  // Public FAQ pages render regardless of auth state (the page's own links +
+  // Back control drive navigation, which fires popstate to reset this state).
+  if (faqPage) {
+    return <FaqPage route={faqPage} />;
   }
 
   // Deep-link still resolving, show the standalone shell with a loading

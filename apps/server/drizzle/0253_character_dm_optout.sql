@@ -1,0 +1,15 @@
+-- Make per-character "Direct Messenger" reachability OPT-OUT.
+--
+-- Migration 0183 added `direct_messenger_enabled` as opt-IN (default 0), so
+-- every newly-created character was unreachable — no friend requests, no new
+-- DM threads — until its owner found the toggle in the Privacy tab. In
+-- practice nobody did, so characters across the site were silently
+-- uncontactable.
+--
+-- We flip the policy to reachable-by-default. New characters are created
+-- enabled (the create routes now set it explicitly). This statement makes
+-- the change retroactive: every existing character currently disabled is
+-- enabled, so the whole roster becomes reachable. Owners who actually want a
+-- character private can still turn it off per character; this does not touch
+-- characters that are already enabled.
+UPDATE `characters` SET `direct_messenger_enabled` = 1 WHERE `direct_messenger_enabled` = 0;

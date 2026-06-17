@@ -88,7 +88,10 @@ async function createSubcommand(ctx: CommandContext, rawName: string) {
   }
 
   const id = nanoid();
-  await ctx.db.insert(characters).values({ id, userId: ctx.user.id, name });
+  // Reachable by default (opt-out) — see the route create handler in
+  // routes/characters.ts for the rationale; set explicitly so the older
+  // DB column default can't create an unreachable character.
+  await ctx.db.insert(characters).values({ id, userId: ctx.user.id, name, directMessengerEnabled: true });
 
   ctx.socket.emit("ui:hint", { kind: "open-character-editor", characterId: id });
 }

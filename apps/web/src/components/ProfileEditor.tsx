@@ -182,12 +182,12 @@ interface CharacterRow {
   /** "cover" | "contain" | "tile" | "stretch", display strategy for `publicProfileBgUrl`. */
   publicProfileBgMode?: string | null;
   /**
-   * Per-character Direct Messenger opt-in (migration 0183). When
-   * false, this character is filtered out of friend-request lookups
-   * and DM recipient pickers, existing friends + conversations are
-   * preserved but cannot start a new DM thread with this identity.
-   * Brand-new characters default to false; existing characters with
-   * prior friendships / conversations were migrated to true.
+   * Per-character Direct Messenger reachability. When false, this
+   * character is filtered out of friend-request lookups and DM recipient
+   * pickers, existing friends + conversations are preserved but cannot
+   * start a new DM thread with this identity. Reachability is OPT-OUT:
+   * new characters default to true (migration 0253); owners turn it off
+   * here only to make a character uncontactable.
    */
   directMessengerEnabled?: boolean;
 }
@@ -330,11 +330,11 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   // enforces this too); the UI mirrors that by disabling the Public box.
   const [isPublic, setIsPublic] = useState<boolean>(true);
   const [isNsfw, setIsNsfw] = useState<boolean>(false);
-  // Per-character Direct Messenger opt-in (character targets only).
-  // The master target ignores this state. Default false to match the
-  // schema and the "new characters opt-in" policy; the loader below
+  // Per-character Direct Messenger reachability (character targets only).
+  // The master target ignores this state. Default true to match the
+  // opt-out schema ("new characters are reachable"); the loader below
   // resets to the persisted value when switching into a character.
-  const [directMessengerEnabled, setDirectMessengerEnabled] = useState<boolean>(false);
+  const [directMessengerEnabled, setDirectMessengerEnabled] = useState<boolean>(true);
   // Public-profile backdrop image + display mode. Painted on the
   // profile modal's backdrop (the area outside the modal card) for
   // any viewer of /p/<this identity>. Null URL = no override (modal
@@ -562,10 +562,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           setUserStyleKey(typeof c.styleKey === "string" ? c.styleKey : null);
           setIsPublic(c.isPublic ?? true);
           setIsNsfw(c.isNsfw ?? false);
-          // Default to false so a server response missing the field
-          // (older shape) reads as "opt-out", matches the new
-          // characters policy.
-          setDirectMessengerEnabled(!!c.directMessengerEnabled);
+          // Default to true when the field is absent (older shape) so it
+          // reads as reachable, matching the opt-out policy.
+          setDirectMessengerEnabled(c.directMessengerEnabled ?? true);
           setPublicProfileBgUrl(typeof c.publicProfileBgUrl === "string" ? c.publicProfileBgUrl : "");
           setPublicProfileBgMode(
             c.publicProfileBgMode === "contain" || c.publicProfileBgMode === "tile" || c.publicProfileBgMode === "stretch"
@@ -3677,13 +3676,12 @@ function SoundRow({
 }
 
 /**
- * Character-only Direct Messenger opt-in toggle. New characters
- * default to OFF, friend-add lookups and DM recipient pickers
- * filter them out, and the player has to deliberately turn it on
- * here for the character to appear as a contactable identity. The
- * copy below leans on plain language so the consequence is obvious:
- * existing friendships stick around, but new reach attempts can't
- * land while the switch is off.
+ * Character-only Direct Messenger reachability toggle. Reachability is
+ * OPT-OUT: new characters are reachable by default, and the player turns
+ * this OFF here to remove a character from friend-add lookups and DM
+ * recipient pickers. The copy below leans on plain language so the
+ * consequence is obvious: existing friendships stick around, but new
+ * reach attempts can't land while the switch is off.
  */
 function CharacterDmOptInRow({
   enabled,

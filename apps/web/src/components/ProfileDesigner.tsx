@@ -570,6 +570,14 @@ export default function ProfileDesigner({ value, onChange }: Props) {
         // own storage layer would just fight us.
         storageManager: false,
         fromElement: false,
+        // GrapesJS defaults `cssIcons` to a cdnjs Font Awesome stylesheet it
+        // injects into the page head for its panel-button glyphs. The prod
+        // CSP (`style-src 'self' 'nonce-…'`) blocks cdnjs, so it never loads
+        // and the buttons render blank — the recurring "missing toolbar
+        // icons." We supply our own inline-SVG icons via `iconifyPanels`, so
+        // disable the external fetch entirely (kills the CSP error + the dead
+        // request, and removes the CDN dependency).
+        cssIcons: "",
         blockManager: { blocks: ALL_BLOCKS },
       }}
       onEditor={onEditor}

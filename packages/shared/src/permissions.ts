@@ -41,6 +41,7 @@ export const PERMISSION_KEYS = [
   "announce_room",
   "announce_sitewide",
   "use_ghost_mode",
+  "manage_mod_cases",
 
   // ---- room_admin ----
   "bypass_room_cap",
@@ -100,6 +101,7 @@ export const PERMISSION_KEYS = [
   "apply_create_forum",
   "review_forum_applications",
   "manage_any_forum",
+  "manage_faqs",
 
   // ---- audit_view (non-tab read permissions) ----
   "view_room_messages_as_admin",
@@ -126,6 +128,8 @@ export const PERMISSION_KEYS = [
   "view_admin_nav_links",
   "view_admin_permissions",
   "view_admin_announcements",
+  "view_admin_mod_cases",
+  "view_admin_faqs",
 
   // ---- announcements ----
   // Two independently-grantable manage keys feed the same Announcements
@@ -183,6 +187,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   announce_room: "Send `/announce` in the current room (high-visibility broadcast).",
   announce_sitewide: "Send `/announce all` to every room. Use sparingly.",
   use_ghost_mode: "Use /incognito (or /ghost) to disappear from the userlist and observe rooms unnoticed.",
+  manage_mod_cases: "Create, edit, and resolve entries in the moderation case log.",
 
   // room_admin
   bypass_room_cap: "Skip the per-user max-rooms-owned ceiling on /go and /private.",
@@ -242,6 +247,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   apply_create_forum: "Submit an application to create a community forum (one pending application at a time).",
   review_forum_applications: "Approve or reject forum-creation applications in the admin Forums tab.",
   manage_any_forum: "Admin override on any community forum: edit, archive, transfer, delete, and lift forum bans.",
+  manage_faqs: "Create, edit, and delete public FAQ entries (question/answer with a shareable slug).",
 
   // audit_view
   view_room_messages_as_admin: "Open the admin message scroll-through for a public room.",
@@ -268,6 +274,8 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   view_admin_nav_links: "See the admin Nav Links tab.",
   view_admin_permissions: "See the Roles & Permissions tab (the matrix). Editing requires manage_permissions.",
   view_admin_announcements: "See the admin Announcements tab. Editing requires manage_banner_announcements and/or manage_scheduled_announcements.",
+  view_admin_mod_cases: "See the admin Mod Log tab (the moderation case log). Editing requires manage_mod_cases.",
+  view_admin_faqs: "See the admin FAQ tab. Editing requires manage_faqs.",
 
   // announcements
   manage_banner_announcements: "Create, edit, or delete the rotating chat-top banner announcements (HTML/Markdown).",
@@ -314,6 +322,7 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   announce_room: "chat_moderation",
   announce_sitewide: "chat_moderation",
   use_ghost_mode: "chat_moderation",
+  manage_mod_cases: "chat_moderation",
 
   // room_admin
   bypass_room_cap: "room_admin",
@@ -373,6 +382,7 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   apply_create_forum: "content_admin",
   review_forum_applications: "content_admin",
   manage_any_forum: "content_admin",
+  manage_faqs: "content_admin",
 
   // audit_view
   view_room_messages_as_admin: "audit_view",
@@ -399,6 +409,8 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   view_admin_nav_links: "admin_panel_tabs",
   view_admin_permissions: "admin_panel_tabs",
   view_admin_announcements: "admin_panel_tabs",
+  view_admin_mod_cases: "admin_panel_tabs",
+  view_admin_faqs: "admin_panel_tabs",
 
   // announcements
   manage_banner_announcements: "site_admin",

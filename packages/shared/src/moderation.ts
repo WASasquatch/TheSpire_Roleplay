@@ -48,6 +48,14 @@ export type AuditAction =
   // Reports
   | "report_resolve"
   | "report_dismiss"
+  // Moderation case log (mod-authored complaint/resolution records)
+  | "mod_case_create"
+  | "mod_case_update"
+  | "mod_case_delete"
+  // FAQ entries (admin-authored public Q&A)
+  | "faq_create"
+  | "faq_update"
+  | "faq_delete"
   // Scriptorium moderation (Phase 10)
   | "story_force_rate"
   | "story_admin_hide"
@@ -114,7 +122,10 @@ export const AUDIT_ACTION_GROUPS: Record<string, { label: string; actions: reado
   },
   moderation: {
     label: "Moderation",
-    actions: ["kick", "mute", "unmute", "ban", "unban", "announce", "incognito_enter", "incognito_exit"],
+    actions: [
+      "kick", "mute", "unmute", "ban", "unban", "announce", "incognito_enter", "incognito_exit",
+      "mod_case_create", "mod_case_update", "mod_case_delete",
+    ],
   },
   forums: {
     label: "Forums",
@@ -150,6 +161,9 @@ export const AUDIT_ACTION_GROUPS: Record<string, { label: string; actions: reado
       "custom_command_delete",
       "builtin_command_config_update",
       "logo_upload",
+      "faq_create",
+      "faq_update",
+      "faq_delete",
     ],
   },
   user_admin: {

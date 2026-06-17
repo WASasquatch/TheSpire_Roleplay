@@ -103,6 +103,7 @@ import { registerPushRoutes } from "./routes/push.js";
 import { initPush } from "./push.js";
 import { registerCommandsRoutes } from "./routes/commands.js";
 import { registerAnnouncementsRoutes } from "./routes/announcements.js";
+import { registerFaqRoutes } from "./routes/faqs.js";
 import { registerProfileFlairRoutes } from "./routes/profileFlair.js";
 import { startAnnouncementScheduler } from "./admin/announcements.js";
 import { registerNavLinkRoutes } from "./routes/nav-links.js";
@@ -340,6 +341,7 @@ async function main() {
   // shell paint these for every viewer. Admin CRUD lives behind
   // /admin/announcements/* via the admin route module.
   await registerAnnouncementsRoutes(baseApp, db);
+  await registerFaqRoutes(baseApp, db);
   // Profile-flair surfaces: visitor-count tracker + rotating-quote
   // marquee. View logging is always-on (so equipping the flair has
   // data the moment it lands); display + owner CRUD are
@@ -2059,6 +2061,12 @@ async function main() {
       // booting the React app. Add the explicit handler here alongside
       // the other deep-link routes so the SPA shell actually serves.
       app.get("/rules", publicLimit, serveSplash);
+      // Public FAQ pages: `/faqs` is the index, `/faq/:slug` a single entry.
+      // Both render the SPA shell for anonymous visitors (a mod can link an
+      // answer to someone who hasn't signed up). The JSON lives at
+      // `/api/faqs*` (under the `/api` apiPrefix) so it doesn't shadow these.
+      app.get("/faqs", publicLimit, serveSplash);
+      app.get("/faq/:slug", publicLimit, serveSplash);
 
       await app.register(fastifyStatic, {
         root: webDistPath,

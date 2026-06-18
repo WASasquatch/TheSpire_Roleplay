@@ -3,6 +3,7 @@ import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
 import { disconnect } from "../lib/socket.js";
 import { clearSessionToken } from "../lib/http.js";
+import { ConnectionOrb } from "./ConnectionOrb.js";
 import { useStoryInviteCount } from "../lib/storyInvites.js";
 
 interface NavLinkRow {
@@ -365,6 +366,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
         >
           Exit
         </button>
+        <ConnectionOrb />
       </nav>
 
       {/* Mobile hamburger trigger. The same actions live in a dropdown

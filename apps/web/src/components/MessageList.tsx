@@ -1018,7 +1018,17 @@ function FlatMessageView({
       // typing strip toggles, and the last message stays visible even
       // when the strip is active.
       className="flex-1 overflow-y-auto px-4 pb-7 pt-2 leading-relaxed"
-      style={{ fontSize: FONT_EM[fontStep] }}
+      // `overflow-anchor: none` disables the browser's scroll-anchoring on
+      // this container. This component manages scroll position entirely by
+      // hand (the bottom re-pin, the load-older `scrollTop += delta`
+      // preservation, the buffer-diff auto-scroll). Native scroll anchoring
+      // ALSO nudges scrollTop whenever content above the viewport changes
+      // height (a gate mounting/unmounting, late media) to keep the visible
+      // anchor stable — so the two controllers fight over scrollTop and the
+      // feed wobbles a few px once there's enough history above to anchor
+      // against. Turning anchoring off makes our manual logic the sole
+      // authority and stops the bounce.
+      style={{ fontSize: FONT_EM[fontStep], overflowAnchor: "none" }}
     >
       {/* Content box the parent's ResizeObserver watches to keep the
           feed pinned to the newest line as late-loading media grows the

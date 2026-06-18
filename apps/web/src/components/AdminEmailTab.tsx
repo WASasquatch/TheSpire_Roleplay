@@ -175,7 +175,7 @@ export function AdminEmailTab() {
     if (Number.isNaN(whenMs)) { setNlMsg("Pick a valid delivery time."); return; }
     const future = whenMs > Date.now() + 30_000;
     const label = future ? `scheduled for ${fmtWhen(whenMs)}` : "sent now";
-    if (!window.confirm(`Send this newsletter to everyone subscribed to Newsletter (${label})? It goes out in daily batches.`)) return;
+    if (!window.confirm(`Send this newsletter to everyone who hasn't unsubscribed from Newsletter (${label})? It goes out in daily batches.`)) return;
     setNlSending(true);
     try {
       const r = await fetch("/admin/email/broadcast", {
@@ -183,8 +183,8 @@ export function AdminEmailTab() {
         body: JSON.stringify({ subject: nlSubject, html: nlHtml, category: "newsletter", ...(future ? { scheduledAt: whenMs } : {}) }),
       });
       const j = await r.json();
-      if (!r.ok) throw new Error(j.error === "no_recipients" ? "No subscribers to Newsletter." : "Could not schedule.");
-      setNlMsg(future ? `Scheduled for ${j.total} subscriber(s) at ${fmtWhen(whenMs)}.` : `Sending now to ${j.total} subscriber(s).`);
+      if (!r.ok) throw new Error(j.error === "no_recipients" ? "No eligible recipients." : "Could not schedule.");
+      setNlMsg(future ? `Scheduled for ${j.total} recipient(s) at ${fmtWhen(whenMs)}.` : `Sending now to ${j.total} recipient(s).`);
       setNlSubject(""); setNlHtml(""); setNlWhen("");
       await refreshStatus();
     } catch (err) {
@@ -262,7 +262,7 @@ export function AdminEmailTab() {
                   <span className="mt-1 block text-[11px] text-keep-muted">{EMAIL_CATEGORY_HINTS[category]}</span>
                 </label>
                 <div className="rounded border border-keep-action/40 bg-keep-action/10 px-2 py-1 text-[11px] text-keep-text/90">
-                  Goes to everyone subscribed to <strong>{EMAIL_CATEGORY_LABELS[category]}</strong>, in daily batches of up to {status?.dailyCap ?? 300}. The footer lets each recipient unsubscribe from this category only.
+                  Goes to every account with an email that hasn't unsubscribed from <strong>{EMAIL_CATEGORY_LABELS[category]}</strong> (everyone is included by default), in daily batches of up to {status?.dailyCap ?? 300}. The footer link lets a recipient unsubscribe from this category only.
                 </div>
               </div>
             )}
@@ -292,7 +292,7 @@ export function AdminEmailTab() {
           <form onSubmit={scheduleNewsletter} className={card}>
             <div className={legend}>New newsletter</div>
             <p className="text-[11px] text-keep-muted">
-              Goes to everyone subscribed to <strong>Newsletter</strong>. Pick a delivery time (or leave it blank to send now); it goes out in daily batches starting then, and respects anyone who unsubscribes before it sends.
+              Goes to every account with an email that hasn't unsubscribed from <strong>Newsletter</strong> (everyone is included by default). Pick a delivery time (or leave it blank to send now); it goes out in daily batches starting then, and skips anyone who unsubscribes before it sends.
             </p>
             <input className={input} placeholder="Subject" value={nlSubject} maxLength={200} onChange={(e) => setNlSubject(e.target.value)} />
             <div className="min-h-[220px]"><RichEditor value={nlHtml} onChange={setNlHtml} placeholder="Write the newsletter…" minHeight="180px" /></div>

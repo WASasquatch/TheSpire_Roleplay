@@ -1970,6 +1970,8 @@ function Chat() {
       if (now - lastSent < HEARTBEAT_MS) return;
       lastSent = now;
       socket.emit("presence:active");
+      // Surface the heartbeat to the ConnectionOrb so it pulses on each check.
+      window.dispatchEvent(new Event("tk:heartbeat"));
     }
     function onVisibility() {
       if (!document.hidden) ping();
@@ -1978,6 +1980,18 @@ function Chat() {
     document.addEventListener("keydown", ping);
     document.addEventListener("pointerdown", ping, { passive: true });
     document.addEventListener("visibilitychange", onVisibility);
+    // CRUCIAL: a visible tab is "present" even with zero input. Watching a
+    // live scene (reading, spectating) generates no mousemove/keydown, so
+    // input-only heartbeats let an actively-watching user idle out and get
+    // kicked at the session-timeout boundary while they're right there
+    // seeing chat live. So we ALSO ping on an interval whenever the tab is
+    // visible (`!document.hidden`). A hidden/backgrounded tab stops
+    // pinging and is allowed to idle out as before; switching back fires
+    // `visibilitychange` → an immediate re-ping. ping()'s own 30s throttle
+    // keeps this from doubling up with input-driven pings.
+    const visibleHeartbeat = window.setInterval(() => {
+      if (!document.hidden) ping();
+    }, HEARTBEAT_MS);
     // Send one immediately on mount so the session is extended as soon as
     // the user lands in chat (matches their "I just logged in" intent).
     ping();
@@ -1986,8 +2000,18 @@ function Chat() {
       document.removeEventListener("keydown", ping);
       document.removeEventListener("pointerdown", ping);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.clearInterval(visibleHeartbeat);
     };
   }, [socket]);
+
+  // Manual resync (ConnectionOrb click): reconnecting the socket restores
+  // room state server-side; this also refreshes the rooms rail for the
+  // already-connected case so the click visibly re-syncs the userlist.
+  useEffect(() => {
+    const onResync = () => { setRoomsTreeVersion((v) => v + 1); };
+    window.addEventListener("tk:resync", onResync);
+    return () => window.removeEventListener("tk:resync", onResync);
+  }, []);
 
   /**
    * Desktop notifications - fires when the tab is hidden (minimized OR on

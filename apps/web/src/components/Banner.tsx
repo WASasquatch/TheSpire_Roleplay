@@ -372,16 +372,19 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
       {/* Mobile hamburger trigger. The same actions live in a dropdown
           panel underneath the header so we don't overflow the narrow
           banner with a strip of inline links. */}
-      <button
-        type="button"
-        onClick={() => setMenuOpen((o) => !o)}
-        aria-expanded={menuOpen}
-        aria-label={menuOpen ? "Close menu" : "Open menu"}
-        title="Menu"
-        className="flex h-9 w-9 items-center justify-center rounded border border-keep-rule bg-keep-bg/60 text-lg text-keep-text hover:bg-keep-banner lg:hidden"
-      >
-        {menuOpen ? "✕" : "☰"}
-      </button>
+      <div className="flex items-center gap-2 lg:hidden">
+        <button
+          type="button"
+          onClick={() => setMenuOpen((o) => !o)}
+          aria-expanded={menuOpen}
+          aria-label={menuOpen ? "Close menu" : "Open menu"}
+          title="Menu"
+          className="flex h-9 w-9 items-center justify-center rounded border border-keep-rule bg-keep-bg/60 text-lg text-keep-text hover:bg-keep-banner"
+        >
+          {menuOpen ? "✕" : "☰"}
+        </button>
+        <ConnectionOrb />
+      </div>
 
       {/* Mobile dropdown. Fixed-viewport backdrop catches outside-clicks
           so tapping the chat closes the menu. The panel itself sits

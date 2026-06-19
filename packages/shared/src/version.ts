@@ -15,4 +15,4 @@
  * patch bumps are bug fixes / small adjustments, and a 1.0 release
  * signals "feature-complete for the original scope, API surface settled."
  */
-export const VERSION = "0.28.9";
+export const VERSION = "0.28.10";

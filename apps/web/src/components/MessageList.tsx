@@ -570,7 +570,16 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       if (pinHandleRef.current != null) return; // (a) one pending pin at a time
       pinHandleRef.current = requestAnimationFrame(pin);
     });
+    // Observe the CONTENT box (late media / gate mounts grow the stream)
+    // AND the scroll CONTAINER itself. The container's height changes when
+    // the composer auto-grows as you type (it's a flex sibling) or the
+    // window resizes; with `overflow-anchor: none` the browser no longer
+    // re-pins for us, so without watching the container the feed would
+    // "flop" away from the bottom on every keystroke that resized the
+    // textarea. Setting scrollTop never resizes the container, so this
+    // can't feed back into a loop.
     ro.observe(content);
+    ro.observe(el);
     return () => {
       ro.disconnect();
       // The handle is a rAF id or a timeout id; both cancelers ignore an

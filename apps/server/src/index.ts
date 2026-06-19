@@ -829,10 +829,24 @@ async function main() {
     // gone / private-and-not-a-member / banned / archived. Shared between
     // the per-tab cache (handshake `tabRoomId`) and the account-global
     // `users.lastRoomId` fallback so both go through the same gating.
-    async function validateRoomForUser(candidateId: string | null): Promise<string | null> {
+    // `resurrect`: when this candidate is the user's OWN remembered room
+    // (tab cache / lastRoomId) and it merely ARCHIVED (it emptied out while
+    // they were away — e.g. last occupant dropped overnight), un-archive it
+    // and place them back instead of degrading to the landing lobby. Only
+    // the user's own-room tiers pass resurrect; the sibling-follow tier
+    // doesn't (that room is live and a DIFFERENT location). A truly deleted
+    // room (no row), a forum board, a banned room, or a private room the
+    // user isn't a member of can't be resurrected and still degrade.
+    async function validateRoomForUser(
+      candidateId: string | null,
+      opts?: { resurrect?: boolean },
+    ): Promise<string | null> {
       if (!candidateId) return null;
       const room = (await db.select().from(rooms).where(eq(rooms.id, candidateId)).limit(1))[0];
-      if (!room || room.archivedAt) return null;
+      if (!room) return null;
+      // Archived rooms are normally not joinable; only the resurrect path
+      // (the user returning to their own last room) may bring one back.
+      if (room.archivedAt && !opts?.resurrect) return null;
       // Forum boards aren't chat rooms (they live in the Forums Catalog).
       // A remembered board id — a tab cache or lastRoomId from before the
       // forums moved out of chat, or a tab that was watching a board —
@@ -846,13 +860,21 @@ async function main() {
         .where(and(eq(bans.roomId, room.id), eq(bans.userId, user.id)))
         .limit(1))[0];
       if (ban && (!ban.until || +ban.until > Date.now())) return null;
-      if (room.type === "public") return room.id;
-      const member = (await db
-        .select()
-        .from(roomMembers)
-        .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, user.id)))
-        .limit(1))[0];
-      return member ? room.id : null;
+      const joinable = room.type === "public"
+        || !!(await db
+          .select({ x: roomMembers.userId })
+          .from(roomMembers)
+          .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, user.id)))
+          .limit(1))[0];
+      if (!joinable) return null;
+      // Passed every gate. If it was archived and we're allowed to
+      // resurrect, un-archive it now so the returning occupant lands here
+      // and the room reappears in everyone's rail.
+      if (room.archivedAt && opts?.resurrect) {
+        await db.update(rooms).set({ archivedAt: null }).where(eq(rooms.id, room.id));
+        io.emit("rooms:tree-changed");
+      }
+      return room.id;
     }
 
     // Room-placement priority on (re)connect, highest wins:
@@ -885,7 +907,7 @@ async function main() {
     // the next tier instead of dead-ending the connect.
     let initialRoomId: string | null = null;
     const tabRoomId = (socket.data as { tabRoomId?: string }).tabRoomId ?? null;
-    initialRoomId = await validateRoomForUser(tabRoomId);
+    initialRoomId = await validateRoomForUser(tabRoomId, { resurrect: true });
     if (!initialRoomId) {
       const existingSockets = await io.fetchSockets();
       for (const s of existingSockets) {
@@ -900,7 +922,7 @@ async function main() {
     }
     if (!initialRoomId) {
       const userRow = (await db.select().from(users).where(eq(users.id, user.id)).limit(1))[0];
-      initialRoomId = await validateRoomForUser(userRow?.lastRoomId ?? null);
+      initialRoomId = await validateRoomForUser(userRow?.lastRoomId ?? null, { resurrect: true });
     }
     if (!initialRoomId) {
       const landing = await findCanonicalLanding(db);

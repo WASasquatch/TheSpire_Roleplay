@@ -2077,7 +2077,7 @@ function PortraitGallery({
   }
 
   return (
-    <div className="mt-4 border-t border-keep-rule/60 pt-3">
+    <div className="mt-4 flex flex-col border-t border-keep-rule/60 pt-3">
       {/* Centered header so the gallery section reads as a unified
           centered block (header → active preview → thumbnails), all
           horizontally aligned. Earlier this h3 was left-aligned, which
@@ -2098,18 +2098,24 @@ function PortraitGallery({
         </p>
       ) : null}
       {active ? (
-        <div className="mb-2 flex flex-col items-center gap-1">
+        <div className="order-2 mb-2 flex flex-col items-center gap-1">
           {/* Expanded gallery preview is capped at 70% of the profile
               width and centered, so a tall portrait doesn't dominate
               the modal at every viewport size. The thumbnail strip
               below is the navigation surface, the centered preview
               is for "study one image at a time" without crowding the
               rest of the profile. */}
-          <div className="relative block w-full max-w-[70%]">
+          {/* w-fit so the wrapper hugs the image's ACTUAL rendered box
+              (not a fixed 70% column the image is centered within). The
+              red-eye toggle + the censor `inset-0` overlay anchor to this
+              wrapper, so without the hug they floated in the letterbox gap
+              beside a narrower image. max-w-[70%] still caps a large image;
+              the parent's items-center keeps it centered. */}
+          <div className="relative w-fit max-w-[70%] overflow-hidden rounded">
             <img
               src={active.url}
               alt={active.label || `${alt} portrait`}
-              className={`mx-auto block max-w-full rounded transition ${
+              className={`block max-w-full rounded transition ${
                 activeIsCensored ? "blur-2xl scale-105" : ""
               }`}
             />
@@ -2178,7 +2184,7 @@ function PortraitGallery({
           unused 88px tracks so `justify-center` actually centers
           the populated tiles, `auto-fill` left phantom tracks on
           the right and pushed the visible row to the left. */}
-      <div className="mx-auto grid max-w-[70%] grid-cols-[repeat(auto-fit,88px)] justify-center gap-2">
+      <div className="order-1 mx-auto grid max-w-[70%] grid-cols-[repeat(auto-fit,88px)] justify-center gap-2">
         {portraits.map((p) => {
           const tileCensored = isCensored(p);
           return (

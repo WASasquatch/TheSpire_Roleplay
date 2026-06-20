@@ -294,6 +294,15 @@ if [[ "$HAS_CHANGES" -eq 1 ]]; then
   fi
   echo "==> Committing..."
   git commit -m "$MSG"
+  # The change-log file (commit.md) is a RUNNING list of pending changes.
+  # Now that its contents are captured in the commit, empty it so the next
+  # batch starts clean. Only clears when the message came FROM a file
+  # (MSG_SRC set at slurp time); a literal -m message leaves nothing to
+  # clear. The file is gitignored, so truncating it never dirties the tree.
+  if [[ -n "${MSG_SRC:-}" && -f "$MSG_SRC" ]]; then
+    : > "$MSG_SRC"
+    echo "==> Cleared $MSG_SRC for the next batch."
+  fi
 else
   echo "==> Nothing to commit; proceeding to push + deploy."
 fi

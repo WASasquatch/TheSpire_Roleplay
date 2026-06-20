@@ -549,35 +549,65 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     const content = contentRef.current;
     if (!el || !content || typeof ResizeObserver === "undefined") return;
     const REPIN_AFTER_USER_MS = 250;
+    // Set true when a CONTAINER resize (composer auto-grow as you type, or a
+    // window resize) schedules the pin. A layout resize is NOT a user drag,
+    // so the pin must re-stick immediately and BYPASS the "reader just
+    // scrolled, let them settle" deferral below. Without this, the container
+    // resize is mistaken for a user scroll (it nudges scrollTop), the pin
+    // defers the whole time you're typing, the feed sits a line or two off
+    // the bottom, and it only snaps back ~250ms after you stop typing.
+    let forceNextPin = false;
     const pin = () => {
       pinHandleRef.current = null;
-      if (!stickRef.current || highlightMessageId) return; // jump owns scroll
+      if (!stickRef.current || highlightMessageId) { forceNextPin = false; return; } // jump owns scroll
       const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-      if (dist <= 2) return; // (b) already pinned — don't re-trigger the gates
+      if (dist <= 2) { forceNextPin = false; return; } // (b) already pinned — don't re-trigger the gates
       const sinceUser = performance.now() - lastUserScrollTsRef.current;
-      if (sinceUser < REPIN_AFTER_USER_MS) {
-        // (c) reader just scrolled: let them settle, then pin exactly once.
+      if (!forceNextPin && sinceUser < REPIN_AFTER_USER_MS) {
+        // (c) reader just scrolled (a real drag): let them settle, then pin once.
         pinHandleRef.current = window.setTimeout(
           () => { pinHandleRef.current = null; pin(); },
           REPIN_AFTER_USER_MS - sinceUser + 16,
         );
         return;
       }
+      forceNextPin = false;
       programmaticScrollRef.current = true; // mark the scroll-echo as ours
       el.scrollTop = el.scrollHeight;
     };
-    const ro = new ResizeObserver(() => {
+    // Track the container's last height so we can ignore sub-line wobble.
+    let lastContainerH = el.clientHeight;
+    // Pixels the CONTAINER must change by before we re-pin. The composer
+    // auto-grow re-measures on every keystroke and can jitter by a few px
+    // (min-height vs scrollHeight rounding, the overflowY scrollbar
+    // toggling near max-lines); re-pinning on that micro-wobble made the
+    // feed "bounce" while typing. A real line grow/shrink is ~a line tall,
+    // well over this, so it still pins; content-box growth (late media,
+    // gate mounts) is never gated this way.
+    const CONTAINER_REPIN_MIN_DELTA = 10;
+    const ro = new ResizeObserver((entries) => {
       if (pinHandleRef.current != null) return; // (a) one pending pin at a time
+      let shouldPin = false;
+      for (const e of entries) {
+        if (e.target === el) {
+          // Container (scroll viewport): only react to a meaningful resize,
+          // and force an IMMEDIATE re-stick (a resize is a layout change, not
+          // a user drag — don't let the user-scroll deferral hold it off).
+          const h = el.clientHeight;
+          if (Math.abs(h - lastContainerH) >= CONTAINER_REPIN_MIN_DELTA) { shouldPin = true; forceNextPin = true; }
+          lastContainerH = h;
+        } else {
+          // Content box: late media / gate mounts — always consider.
+          shouldPin = true;
+        }
+      }
+      if (!shouldPin) return;
       pinHandleRef.current = requestAnimationFrame(pin);
     });
     // Observe the CONTENT box (late media / gate mounts grow the stream)
-    // AND the scroll CONTAINER itself. The container's height changes when
-    // the composer auto-grows as you type (it's a flex sibling) or the
-    // window resizes; with `overflow-anchor: none` the browser no longer
-    // re-pins for us, so without watching the container the feed would
-    // "flop" away from the bottom on every keystroke that resized the
-    // textarea. Setting scrollTop never resizes the container, so this
-    // can't feed back into a loop.
+    // AND the scroll CONTAINER itself (composer auto-grow / window resize
+    // shrink it; with `overflow-anchor: none` the browser won't re-pin for
+    // us). Setting scrollTop never resizes the container, so no loop.
     ro.observe(content);
     ro.observe(el);
     return () => {
@@ -1612,7 +1642,7 @@ function ForumView({
                 // lockstep with the gutter it's compensating for, earlier
                 // the two diverged (md vs lg) and headers overflowed the
                 // chat container at 768–1023px widths.
-                className="keep-section-header mb-2 flex w-full cursor-pointer items-baseline justify-between gap-3 border-y border-keep-rule px-4 py-2 text-left text-[1.1rem] font-semibold uppercase tracking-widest text-keep-text shadow-sm hover:brightness-95 lg:-mx-4 lg:w-[calc(100%+2rem)]"
+                className="keep-section-header mb-2 flex w-full cursor-pointer items-center justify-between gap-3 border-y border-keep-rule px-4 py-2 text-left text-[1.1rem] font-semibold uppercase tracking-widest text-keep-text shadow-sm hover:brightness-95 lg:-mx-4 lg:w-[calc(100%+2rem)]"
                 title={isCollapsed ? "Expand category" : "Collapse category"}
               >
                 {/* Left span: name + chevron. min-w-0 + truncate so a
@@ -1698,7 +1728,7 @@ function ForumView({
                             onActivateCategory(sub.key);
                           }
                         }}
-                        className="mb-1.5 flex w-full cursor-pointer items-baseline justify-between gap-3 rounded border border-keep-rule bg-keep-panel/70 px-3 py-1.5 text-left text-[0.92rem] font-semibold uppercase tracking-widest text-keep-text hover:brightness-95"
+                        className="mb-1.5 flex w-full cursor-pointer items-center justify-between gap-3 rounded border border-keep-rule bg-keep-panel/70 px-3 py-1.5 text-left text-[0.92rem] font-semibold uppercase tracking-widest text-keep-text hover:brightness-95"
                         title={subCollapsed ? "Expand subcategory" : "Collapse subcategory"}
                       >
                         <span className="flex min-w-0 items-baseline">

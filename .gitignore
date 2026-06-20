@@ -143,3 +143,7 @@ plan_major.md
 
 # Scratchpad for in-progress commit messages drafted between sessions.
 commit.md
+
+# Running ELI5 "what's new" log for end users (dated entries). Local-only;
+# never cleared by deploy, unlike commit.md.
+updates.md

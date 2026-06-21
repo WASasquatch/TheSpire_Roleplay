@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Ban, EyeOff, Flag, MessageSquare, Send, X } from "lucide-react";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import { CHARACTER_VIBE_AXES, isAdminRole, legibleAgainstBg, legibleThemePalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
@@ -2138,12 +2139,17 @@ function PortraitGallery({
             {/* Full image fills the pane width; object-contain preserves the
                 aspect ratio and centers it within the reserved height. The
                 overlay controls anchor to this wrapper. */}
-            <div className="relative w-full overflow-hidden rounded border border-keep-rule">
+            {/* Wrapper hugs the image (mx-auto centers it in the pane) so the
+                border + censor overlay fit the actual image, not empty pane. */}
+            <div className="relative mx-auto w-fit max-w-full overflow-hidden rounded border border-keep-rule">
                 <img
                   src={active.url}
                   alt={active.label || `${alt} portrait`}
                   onClick={() => { if (!activeIsCensored) setLightboxOpen(true); }}
-                  className={`block h-auto w-full transition ${activeIsCensored ? "blur-2xl scale-105" : "cursor-zoom-in"}`}
+                  // width:auto => true resolution; max-w-full + max-h cap an
+                  // oversized image (shrinks proportionally), and natural width
+                  // means a small image is NOT upscaled/ballooned.
+                  className={`block h-auto w-auto max-h-[78vh] max-w-full transition ${activeIsCensored ? "blur-2xl scale-105" : "cursor-zoom-in"}`}
                 />
                 {activeIsCensored ? (
                   <button
@@ -2241,7 +2247,12 @@ function PortraitLightbox({
     };
   }, [onClose]);
 
-  return (
+  // Portal to <body> so the overlay escapes the profile modal's containing
+  // block. The modal wrapper uses a transform/backdrop-filter, which makes
+  // `position: fixed` resolve against the modal instead of the viewport —
+  // without the portal the lightbox is trapped inside (and sized to) the
+  // profile card rather than filling the screen.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -2271,10 +2282,13 @@ function PortraitLightbox({
           src={url}
           alt={alt}
           onClick={(e) => e.stopPropagation()}
-          className="max-w-none rounded border border-white/15 shadow-2xl"
+          // width:auto + max-w-none => true natural resolution, never upscaled;
+          // the overlay scrolls when the image is larger than the viewport.
+          className="h-auto w-auto max-w-none rounded border border-white/15 shadow-2xl"
         />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

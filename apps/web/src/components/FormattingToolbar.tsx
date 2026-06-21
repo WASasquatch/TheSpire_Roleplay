@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useRef, type RefObject } from "react";
 import {
   Bold,
   Code,
@@ -6,6 +6,7 @@ import {
   Image as ImageIcon,
   Italic,
   Link as LinkIcon,
+  Palette,
   Quote,
   Strikethrough,
   Underline,
@@ -73,6 +74,40 @@ export function FormattingToolbar({
       const innerStart = start + prefix.length;
       const innerEnd = innerStart + inner.length;
       el.setSelectionRange(innerStart, innerEnd);
+    });
+  }
+
+  /**
+   * Text color. A hidden native `<input type="color">` provides the picker
+   * (the OS color wheel; works on desktop + mobile, no extra UI to build).
+   * We snapshot the textarea selection BEFORE opening it, because the
+   * picker dialog blurs the input — then on pick we wrap that selection in
+   * `<font color="#hex">…</font>`, the same construct `parseInline` renders
+   * for everyone. No selection → wraps a "text" placeholder, left selected
+   * so the user can type over it.
+   */
+  const colorInputRef = useRef<HTMLInputElement>(null);
+  const colorSelRef = useRef<{ start: number; end: number } | null>(null);
+  function openColorPicker() {
+    const el = inputRef.current;
+    if (el) colorSelRef.current = { start: el.selectionStart ?? value.length, end: el.selectionEnd ?? value.length };
+    colorInputRef.current?.click();
+  }
+  function applyColor(hex: string) {
+    const el = inputRef.current;
+    if (!el) return;
+    const sel = colorSelRef.current ?? { start: value.length, end: value.length };
+    const before = value.slice(0, sel.start);
+    const selected = value.slice(sel.start, sel.end);
+    const after = value.slice(sel.end);
+    const inner = selected.length > 0 ? selected : "text";
+    const open = `<font color="${hex}">`;
+    const next = `${before}${open}${inner}</font>${after}`;
+    onChange(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const innerStart = sel.start + open.length;
+      el.setSelectionRange(innerStart, innerStart + inner.length);
     });
   }
 
@@ -189,6 +224,21 @@ export function FormattingToolbar({
       <FmtBtn label="Strikethrough (~~text~~)" onClick={() => wrap("~~", "~~", "strike")} disabled={disabled}>
         <Strikethrough className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
+      {/* Text color: opens the OS color picker, wraps the selection in
+          <font color="#hex">. The input is visually hidden but focusable
+          via openColorPicker()'s programmatic click. */}
+      <FmtBtn label="Color selected text" onClick={openColorPicker} disabled={disabled}>
+        <Palette className="h-3.5 w-3.5" aria-hidden="true" />
+      </FmtBtn>
+      <input
+        ref={colorInputRef}
+        type="color"
+        defaultValue="#ff5555"
+        aria-hidden="true"
+        tabIndex={-1}
+        className="pointer-events-none absolute h-0 w-0 opacity-0"
+        onChange={(e) => applyColor(e.target.value)}
+      />
       <FmtBtn label="Inline code (`text`)" onClick={() => wrap("`", "`", "code")} disabled={disabled}>
         <Code className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>

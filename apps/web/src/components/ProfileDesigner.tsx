@@ -300,18 +300,34 @@ const PANEL_ICONS: Record<string, string> = {
 /** Replace every fa-glyph panel button label with its inline-SVG equivalent so
  * the Designer chrome has no Font Awesome dependency. No-op for buttons that
  * already carry a real SVG icon. Safe to call once after the editor is ready —
- * panel buttons survive canvas frame reloads, so we don't repeat it. */
+ * panel buttons survive canvas frame reloads, so we don't repeat it.
+ *
+ * GrapesJS stores a default button's glyph in its `className` model field
+ * (e.g. `className:'fa fa-eye'`), NOT in `attributes.class` — reading the wrong
+ * field was why the swap silently no-op'd and the buttons rendered blank. We
+ * (1) update the model so the SVG survives any panel re-render, and (2) patch
+ * the already-mounted DOM, because setting `label` does not re-render a button
+ * that is already on screen. */
 function iconifyPanels(editor: Editor): void {
   editor.Panels.getPanels().forEach((panel: Panel) => {
     (panel.get("buttons") as { forEach(cb: (b: Button) => void): void }).forEach((btn: Button) => {
-      const attrs = (btn.get("attributes") as Record<string, string>) || {};
-      const parts = String(attrs.class || "").split(/\s+/).filter(Boolean);
-      const key = parts.find((c) => PANEL_ICONS[c]);
+      const cls = String(btn.get("className") || "");
+      const key = cls.split(/\s+/).find((c) => PANEL_ICONS[c]);
       if (!key) return;
-      // Drop the dead `fa`/`fa-*` classes and render the SVG as the label.
-      btn.set("attributes", { ...attrs, class: parts.filter((c) => c !== "fa" && c !== key).join(" ") });
+      // Drop the dead `fa`/`fa-*` classes (so no empty glyph box) and render
+      // the SVG as the label.
+      btn.set("className", cls.split(/\s+/).filter((c) => c !== "fa" && c !== key).join(" "));
       btn.set("label", PANEL_ICONS[key]);
     });
+  });
+  // Patch buttons already painted to the DOM (the model update above only
+  // affects future renders).
+  const root = editor.getContainer?.();
+  root?.querySelectorAll<HTMLElement>(".gjs-pn-btn").forEach((el) => {
+    const key = Array.from(el.classList).find((c) => PANEL_ICONS[c]);
+    if (!key) return;
+    el.classList.remove("fa", key);
+    el.innerHTML = PANEL_ICONS[key] ?? "";
   });
 }
 

@@ -4921,6 +4921,15 @@ aside.margin-note {
 .profile-designer .gjs-pn-btn.gjs-pn-active {
   color: rgb(var(--keep-accent));
 }
+/* The right-hand view switcher (style / settings / layers / blocks) lives in
+ * `.gjs-pn-views`, which GrapesJS pins to the full sidebar width
+ * (`--gjs-left-width`). Its button row defaults to `justify-content:
+ * space-between`, so four buttons spread across ~15% of the editor with large
+ * gaps. Left-align them so they group tightly and sit flush against the
+ * options cluster to their left, reading as one continuous toolbar. */
+.profile-designer .gjs-pn-views .gjs-pn-buttons {
+  justify-content: flex-start;
+}
 
 /* ---------- Connection / heartbeat orb (ConnectionOrb.tsx) ----------
  * Green = live (one-shot pulse each heartbeat, remounted via key=beat).

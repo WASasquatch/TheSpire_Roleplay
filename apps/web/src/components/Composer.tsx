@@ -8,6 +8,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import { Palette } from "lucide-react";
 import type { CommandDoc, RoomOccupant, ThreadCategory } from "@thekeep/shared";
 import { extractMentionTokens } from "@thekeep/shared";
 import { CompleterPopup, type CompletionItem } from "./CompleterPopup.js";
@@ -397,6 +398,12 @@ export function Composer({
   onOpenEarning,
 }: Props) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  // Hidden native color picker + the textarea selection captured the moment
+  // the color button is clicked. We snapshot the selection because opening
+  // the OS picker blurs the textarea (losing selectionStart/End), so we
+  // re-apply against the saved range when a color comes back.
+  const colorInputRef = useRef<HTMLInputElement | null>(null);
+  const colorSelRef = useRef<{ start: number; end: number } | null>(null);
   const lastValueRef = useRef(value);
   // Phase 4 typing indicator, last time this composer fired a
   // `chat:typing` pulse. Throttled to once per 2s so a long
@@ -1313,6 +1320,44 @@ export function Composer({
   }
 
   /**
+   * Color button: snapshot the current selection, then open the hidden
+   * native color picker. `applyColor` runs when the user picks a color.
+   */
+  function openColorPicker(): void {
+    const el = inputRef.current;
+    if (el) {
+      const start = el.selectionStart ?? value.length;
+      const end = el.selectionEnd ?? start;
+      colorSelRef.current = { start, end };
+    }
+    colorInputRef.current?.click();
+  }
+
+  /**
+   * Wrap the saved selection in `<font color="#hex">…</font>`. Mirrors
+   * `wrapSelection` but against the snapshot captured in openColorPicker
+   * (the OS picker steals focus, so the live selection is gone by now).
+   */
+  function applyColor(hex: string): void {
+    const sel = colorSelRef.current ?? { start: value.length, end: value.length };
+    const selected = value.slice(sel.start, sel.end);
+    const content = selected || "text";
+    const before = `<font color="${hex}">`;
+    const inserted = `${before}${content}</font>`;
+    const next = value.slice(0, sel.start) + inserted + value.slice(sel.end);
+    onChange(next);
+    const selStart = sel.start + before.length;
+    const selEnd = selStart + content.length;
+    requestAnimationFrame(() => {
+      const el2 = inputRef.current;
+      if (!el2) return;
+      el2.focus();
+      el2.setSelectionRange(selStart, selEnd);
+      setCaret(selEnd);
+    });
+  }
+
+  /**
    * Prefix every line of the current selection (or the current line
    * if no selection) with `prefix`. Used by the Quote button: turns
    * a multi-line selection into a `> ` blockquote.
@@ -1669,6 +1714,21 @@ export function Composer({
           <FmtButton title="Strikethrough" onClick={() => wrapSelection("~~", "~~", "strikethrough")}>
             <s>S</s>
           </FmtButton>
+          {/* Color: opens the OS color picker, wraps the selection in
+              <font color="#hex">. The input is visually hidden and driven
+              by openColorPicker()'s programmatic click. */}
+          <FmtButton title="Color selected text" onClick={openColorPicker}>
+            <Palette className="h-4 w-4" aria-hidden="true" />
+          </FmtButton>
+          <input
+            ref={colorInputRef}
+            type="color"
+            defaultValue="#ff5555"
+            aria-hidden="true"
+            tabIndex={-1}
+            className="pointer-events-none absolute h-0 w-0 opacity-0"
+            onChange={(e) => applyColor(e.target.value)}
+          />
           <FmtButton title="Inline code" onClick={() => wrapSelection("`", "`", "code")}>
             <span className="font-mono">{"<>"}</span>
           </FmtButton>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Ban, EyeOff, Flag, MessageSquare, Send } from "lucide-react";
+import { Ban, EyeOff, Flag, MessageSquare, Send, X } from "lucide-react";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import { CHARACTER_VIBE_AXES, isAdminRole, legibleAgainstBg, legibleThemePalette, parseFreeformBorderConfig, roleRank } from "@thekeep/shared";
 import type { CharacterAttribute, CharacterPortrait, CharacterVibeAxisKey, EidolonProfileSummary, ProfileLibraryEntry, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
@@ -2005,6 +2005,9 @@ function PortraitGallery({
   // Pending state for the moderator NSFW toggle (per active image).
   const [flagBusy, setFlagBusy] = useState(false);
   const [flagErr, setFlagErr] = useState<string | null>(null);
+  // Lightbox: clicking the focused (uncensored) image opens a full-size,
+  // scrollable overlay above everything else (see PortraitLightbox).
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   // Default to the first portrait expanded so visitors see at least
   // one full-size image without having to click a thumbnail. Empty
   // galleries default to null (no expanded view; the thumbnail
@@ -2078,9 +2081,6 @@ function PortraitGallery({
 
   return (
     <div className="mt-4 border-t border-keep-rule/60 pt-3">
-      <h3 className="mb-2 text-center text-xs font-semibold uppercase tracking-widest text-keep-muted">
-        Gallery
-      </h3>
       {/* Empty-state hint: render the section even when the gallery is
           empty so the feature stays discoverable. Owners reading "No
           additional portraits yet" know to look for the manage path
@@ -2100,7 +2100,7 @@ function PortraitGallery({
         // The per-image label is the header bar over the full image in both.
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
           {/* Thumbnail rail — horizontal row on mobile, vertical column on lg+. */}
-          <div className="flex shrink-0 flex-row gap-2 overflow-x-auto pb-1 lg:max-h-[68vh] lg:w-[15%] lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto lg:pb-0 lg:pr-1">
+          <div className="flex shrink-0 flex-row gap-2 overflow-x-auto p-1 lg:max-h-[78vh] lg:w-24 lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto">
             {portraits.map((p) => {
               const tileCensored = isCensored(p);
               return (
@@ -2132,17 +2132,18 @@ function PortraitGallery({
           {/* Full-image pane: label header bar above the image. */}
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             {/* Label header bar — theme-matched, clean border. */}
-            <div className="rounded border border-keep-rule bg-keep-panel/70 px-3 py-1.5 text-center text-sm font-semibold tracking-wide text-keep-text">
+            <div className="rounded border border-keep-rule bg-keep-panel/70 px-3 py-3 text-center text-[1.5rem] font-semibold leading-tight tracking-wide text-keep-text">
               {active.label || alt}
             </div>
-            <div className="flex justify-center">
-              {/* w-fit wrapper hugs the image so the eye toggle + censor
-                  overlay anchor to the image, never the surrounding pane. */}
-              <div className="relative w-fit max-w-full overflow-hidden rounded border border-keep-rule">
+            {/* Full image fills the pane width; object-contain preserves the
+                aspect ratio and centers it within the reserved height. The
+                overlay controls anchor to this wrapper. */}
+            <div className="relative w-full overflow-hidden rounded border border-keep-rule">
                 <img
                   src={active.url}
                   alt={active.label || `${alt} portrait`}
-                  className={`block max-h-[68vh] max-w-full transition ${activeIsCensored ? "blur-2xl scale-105" : ""}`}
+                  onClick={() => { if (!activeIsCensored) setLightboxOpen(true); }}
+                  className={`block h-auto w-full transition ${activeIsCensored ? "blur-2xl scale-105" : "cursor-zoom-in"}`}
                 />
                 {activeIsCensored ? (
                   <button
@@ -2166,7 +2167,6 @@ function PortraitGallery({
                     <EyeOff className="h-4 w-4" />
                   </button>
                 )}
-              </div>
             </div>
             {/* Moderator NSFW toggle for the focused image. */}
             {canModerate && onToggleNsfw ? (
@@ -2197,6 +2197,83 @@ function PortraitGallery({
           </div>
         </div>
       ) : null}
+      {/* Full-size lightbox for the focused image. Only reachable from an
+          uncensored image (the click handler is gated on !activeIsCensored),
+          so a blurred image can't be opened at full size here. */}
+      {lightboxOpen && active && !activeIsCensored ? (
+        <PortraitLightbox
+          url={active.url}
+          alt={active.label || `${alt} portrait`}
+          onClose={() => setLightboxOpen(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+ * Full-size image lightbox. A dark, glass-blurred overlay that shows the image
+ * at its NATURAL pixel size and lets the viewer scroll the overlay when the
+ * image is larger than the viewport. Sits at z:70 — above the profile card
+ * (z:50) and the item-zoom overlay (z:60). Closes on backdrop click, the close
+ * button, or Esc. Body scroll is locked while open so the page behind doesn't
+ * move under the glass.
+ * ------------------------------------------------------------------------- */
+function PortraitLightbox({
+  url,
+  alt,
+  onClose,
+}: {
+  url: string;
+  alt: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${alt}, full size`}
+      onClick={onClose}
+      className="fixed inset-0 z-[70] overflow-auto overscroll-contain bg-black/85 backdrop-blur-md"
+    >
+      {/* Close control stays pinned to the viewport corner while the overlay
+          scrolls. */}
+      <button
+        type="button"
+        onClick={onClose}
+        className="fixed right-4 top-4 z-[71] flex h-10 w-10 items-center justify-center rounded-full border border-white/30 bg-black/60 text-white transition hover:bg-black/80"
+        title="Close (Esc)"
+        aria-label="Close full-size view"
+      >
+        <X className="h-5 w-5" />
+      </button>
+      {/* `min-w-full w-fit` + `min-h-full` keeps a small image centered while
+          letting a large one grow past the viewport so the overlay scrolls to
+          it (plain flex centering would clip the top/left of an oversized
+          image and make it unscrollable). `max-w-none` renders the image at
+          full natural size. stopPropagation so clicking the image itself
+          doesn't dismiss the overlay. */}
+      <div className="flex min-h-full w-fit min-w-full items-center justify-center p-4 sm:p-8">
+        <img
+          src={url}
+          alt={alt}
+          onClick={(e) => e.stopPropagation()}
+          className="max-w-none rounded border border-white/15 shadow-2xl"
+        />
+      </div>
     </div>
   );
 }

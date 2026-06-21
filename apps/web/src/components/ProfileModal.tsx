@@ -581,6 +581,16 @@ function ProfileBody({
   const bannerUrl = profile.profile.profileBannerUrl?.trim() ?? "";
   return (
     <>
+      {/* On SHORT viewports (notably landscape phones) the hero band alone can
+          exceed the card height; with the hero pinned (shrink-0) and only the
+          body scrolling, the body collapses to ~0 and the bio/gallery become
+          unreachable. This wrapper makes the WHOLE content one scroll container
+          so the header scrolls away. The discriminator is viewport HEIGHT, not
+          width — a wide-but-short landscape window must single-scroll too. At
+          >=700px tall, `contents` dissolves the wrapper to restore the pinned-
+          hero + independently-scrolling-body layout (the body's matching
+          min-height variants re-enable its own scroll). */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto [@media(min-height:700px)]:contents">
       {bannerUrl ? (
         // Standalone hero strip - desktop only. On mobile the same
         // banner image gets re-used as the hero band's background
@@ -1188,8 +1198,11 @@ function ProfileBody({
           profileUserId={profile.profile.userId}
         />
 
-        {/* Body - scrolls independently of the hero */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {/* Body. On tall viewports (>=700px) it scrolls independently beneath
+            the pinned hero; on short viewports the parent wrapper is the
+            scroller (see above), so here it's just a padded block that grows
+            with its content. Matches the wrapper's height breakpoint. */}
+        <div className="px-5 py-4 [@media(min-height:700px)]:min-h-0 [@media(min-height:700px)]:flex-1 [@media(min-height:700px)]:overflow-y-auto">
           {isCompletelyBlank ? (
             <EmptyProfile name={name} kind={isChar ? "character" : "master"} />
           ) : (
@@ -1527,6 +1540,7 @@ function ProfileBody({
             </>
           )}
         </div>
+      </div>
       {/* Tap-to-zoom overlay. Mounted at the fragment's end so it's
           a sibling of the scrolling body, fixed positioning + z:60
           puts it above the profile card (z:50) regardless of where
@@ -2146,10 +2160,11 @@ function PortraitGallery({
                   src={active.url}
                   alt={active.label || `${alt} portrait`}
                   onClick={() => { if (!activeIsCensored) setLightboxOpen(true); }}
-                  // width:auto => true resolution; max-w-full + max-h cap an
-                  // oversized image (shrinks proportionally), and natural width
-                  // means a small image is NOT upscaled/ballooned.
-                  className={`block h-auto w-auto max-h-[78vh] max-w-full transition ${activeIsCensored ? "blur-2xl scale-105" : "cursor-zoom-in"}`}
+                  // width:auto => native resolution. Only max-w-full constrains
+                  // it (shrinks proportionally when wider than the pane); height
+                  // is uncapped so a tall image shows at full size and the body
+                  // scroll handles the overflow. Small images are NOT upscaled.
+                  className={`block h-auto w-auto max-w-full transition ${activeIsCensored ? "blur-2xl scale-105" : "cursor-zoom-in"}`}
                 />
                 {activeIsCensored ? (
                   <button

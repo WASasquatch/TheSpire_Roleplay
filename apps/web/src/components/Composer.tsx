@@ -960,13 +960,23 @@ export function Composer({
   useLayoutEffect(() => {
     const el = inputRef.current;
     if (!el) return;
-    el.style.height = "auto";
     const cs = window.getComputedStyle(el);
     const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
     const padTop = parseFloat(cs.paddingTop) || 0;
     const padBottom = parseFloat(cs.paddingBottom) || 0;
     const minHeight = parseFloat(cs.minHeight) || 0;
     const maxHeight = lineHeight * MAX_VISIBLE_LINES + padTop + padBottom;
+    // Already at max height AND the content still overflows? Typing more
+    // can't change the box height, so SKIP the `height:auto` reset. That
+    // reset forces a reflow that momentarily blows the textarea up to the
+    // full content height (a maxed-out pasted post can be many screens
+    // tall), which resizes the chat feed beside it and snapped the feed up
+    // a whole row and back on every keystroke. Just keep the scrollbar on.
+    if (Math.round(el.offsetHeight) >= Math.round(maxHeight) && el.scrollHeight > maxHeight) {
+      if (el.style.overflowY !== "auto") el.style.overflowY = "auto";
+      return;
+    }
+    el.style.height = "auto";
     const target = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight);
     el.style.height = `${target}px`;
     el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";

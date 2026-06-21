@@ -43,6 +43,20 @@ export type BodyPart = TextPart | MentionPart | WorldMentionPart;
  *   - A backslash immediately before the `@` escapes the mention: the
  *     backslash is dropped and `@name` survives as literal text.
  */
+/**
+ * Inline color/style spans (`<font color=...>...</font>` and
+ * `<span style="...">...</span>`) the inline renderer turns into a styled
+ * span. We protect these whole regions from mention extraction: without
+ * this, an `@mention` INSIDE a color span would split the open and close
+ * tags into separate text parts, the renderer could no longer match them,
+ * and the color silently dropped (a common "coloring doesn't work" cause).
+ * A mention inside such a span therefore renders as plain (colored) text,
+ * not a clickable chip — the @notification path is unaffected (it uses the
+ * shared extractor over the raw body, not this render-time split).
+ */
+const STYLED_SPAN_RE =
+  /<font\s+color\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)\s*>[\s\S]*?<\/font\s*>|<span\s+style\s*=\s*(?:"[^"]*"|'[^']*')\s*>[\s\S]*?<\/span\s*>/gi;
+
 export function splitMentions(body: string): BodyPart[] {
   const out: BodyPart[] = [];
   for (const seg of splitOnCode(body)) {
@@ -52,7 +66,16 @@ export function splitMentions(body: string): BodyPart[] {
       out.push({ kind: "text", text: seg.raw });
       continue;
     }
-    extractFromTextSegment(seg.raw, out);
+    // Carve out color/style spans as protected text, run mention extraction
+    // only on the gaps between them.
+    let last = 0;
+    for (const m of seg.raw.matchAll(STYLED_SPAN_RE)) {
+      const start = m.index ?? 0;
+      if (start > last) extractFromTextSegment(seg.raw.slice(last, start), out);
+      out.push({ kind: "text", text: m[0] });
+      last = start + m[0].length;
+    }
+    if (last < seg.raw.length) extractFromTextSegment(seg.raw.slice(last), out);
   }
   return out;
 }

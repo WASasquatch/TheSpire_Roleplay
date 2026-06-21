@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { CHK_SPAN_RE, customCmdCssToStyle, decodeCheckMarker, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, VMARK_SPAN_RE, type CheckResultData, type MentionRef, type UiRoute } from "@thekeep/shared";
 import { openUiRoute } from "./uiRouteOpen.js";
 import { resolveDynamicChipLabel } from "./uiRouteDynamicLabel.js";
@@ -251,6 +251,55 @@ const HTML_OPEN_RE = /^<([a-zA-Z]+)>/;
 const FONT_OPEN_RE = /^<font\s+color\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))\s*>/i;
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}){1,2}$/;
 
+/** Opener for `<span style="...">`, single `style` attribute (quoted). The
+ *  declarations are sanitized to a safe whitelist below before they reach a
+ *  real `style` object — see `sanitizeChatStyle`. */
+const SPAN_STYLE_OPEN_RE = /^<span\s+style\s*=\s*(?:"([^"]*)"|'([^']*)')\s*>/i;
+
+/**
+ * CSS properties a user's `<span style>` in CHAT is allowed to set. This is
+ * deliberately a small TEXT-STYLING whitelist. Chat is multi-user, so an
+ * unrestricted inline style would let one person break everyone else's
+ * layout, overlay the page (position/z-index), pull remote resources
+ * (background-image: url), or run effects — none of which belong in a chat
+ * line. Anything not listed here is dropped. Values are further screened by
+ * `UNSAFE_STYLE_VALUE_RE`.
+ */
+const SAFE_CHAT_STYLE_PROPS = new Set([
+  "color",
+  "background-color",
+  "font-weight",
+  "font-style",
+  "font-family",
+  "text-decoration",
+  "text-decoration-color",
+  "text-decoration-style",
+  "text-shadow",
+  "letter-spacing",
+  "text-transform",
+]);
+/** Reject any value that loads a resource, runs an expression, or smuggles
+ *  markup / another declaration. (Declarations are already split on `;`.) */
+const UNSAFE_STYLE_VALUE_RE = /url\s*\(|expression|javascript:|image-set|@import|[<>{}\\]/i;
+
+/** Parse a raw `style="..."` string into a SAFE React style object, keeping
+ *  only whitelisted properties with screened values. Returns null when
+ *  nothing safe survives (caller renders an unstyled span). */
+function sanitizeChatStyle(raw: string): CSSProperties | null {
+  const style: Record<string, string> = {};
+  for (const decl of raw.split(";")) {
+    const colon = decl.indexOf(":");
+    if (colon < 0) continue;
+    const prop = decl.slice(0, colon).trim().toLowerCase();
+    const value = decl.slice(colon + 1).trim();
+    if (!SAFE_CHAT_STYLE_PROPS.has(prop)) continue;
+    if (!value || value.length > 120 || UNSAFE_STYLE_VALUE_RE.test(value)) continue;
+    const camel = prop.replace(/-([a-z])/g, (_m, ch: string) => ch.toUpperCase());
+    style[camel] = value;
+  }
+  return Object.keys(style).length ? (style as CSSProperties) : null;
+}
+
 /** Self-closing `<icon src="..."/>` (or `<icon src="...">`) tag used to
  *  embed a small inline image at text-line height. Server-emitted by the
  *  `{icon}` placeholder substitution in item command templates; also
@@ -314,6 +363,29 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
     return {
       end: closeEnd,
       node: <span style={{ color: raw }}>{parseInline(inner, depth + 1)}</span>,
+    };
+  }
+
+  // <span style="..."> — honored with the SAFE whitelist only (see
+  // sanitizeChatStyle). Arbitrary CSS is intentionally NOT applied. When no
+  // safe declarations survive we still render the inner content (unstyled)
+  // so the text isn't dropped.
+  const spanStyle = SPAN_STYLE_OPEN_RE.exec(text.slice(i));
+  if (spanStyle) {
+    const openLen = spanStyle[0].length;
+    const closeRe = /<\/span\s*>/i;
+    const rest = text.slice(i + openLen);
+    const closeMatch = closeRe.exec(rest);
+    if (!closeMatch) return null;
+    const closeStart = i + openLen + closeMatch.index;
+    const closeEnd = closeStart + closeMatch[0].length;
+    const inner = text.slice(i + openLen, closeStart);
+    const style = sanitizeChatStyle(spanStyle[1] ?? spanStyle[2] ?? "");
+    return {
+      end: closeEnd,
+      node: style
+        ? <span style={style}>{parseInline(inner, depth + 1)}</span>
+        : <span>{parseInline(inner, depth + 1)}</span>,
     };
   }
 

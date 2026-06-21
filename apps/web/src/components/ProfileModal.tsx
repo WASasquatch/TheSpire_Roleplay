@@ -2077,11 +2077,7 @@ function PortraitGallery({
   }
 
   return (
-    <div className="mt-4 flex flex-col border-t border-keep-rule/60 pt-3">
-      {/* Centered header so the gallery section reads as a unified
-          centered block (header → active preview → thumbnails), all
-          horizontally aligned. Earlier this h3 was left-aligned, which
-          read as disconnected from the 70%-centered preview below. */}
+    <div className="mt-4 border-t border-keep-rule/60 pt-3">
       <h3 className="mb-2 text-center text-xs font-semibold uppercase tracking-widest text-keep-muted">
         Gallery
       </h3>
@@ -2098,129 +2094,109 @@ function PortraitGallery({
         </p>
       ) : null}
       {active ? (
-        <div className="order-2 mb-2 flex flex-col items-center gap-1">
-          {/* Expanded gallery preview is capped at 70% of the profile
-              width and centered, so a tall portrait doesn't dominate
-              the modal at every viewport size. The thumbnail strip
-              below is the navigation surface, the centered preview
-              is for "study one image at a time" without crowding the
-              rest of the profile. */}
-          {/* w-fit so the wrapper hugs the image's ACTUAL rendered box
-              (not a fixed 70% column the image is centered within). The
-              red-eye toggle + the censor `inset-0` overlay anchor to this
-              wrapper, so without the hug they floated in the letterbox gap
-              beside a narrower image. max-w-[70%] still caps a large image;
-              the parent's items-center keeps it centered. */}
-          <div className="relative w-fit max-w-[70%] overflow-hidden rounded">
-            <img
-              src={active.url}
-              alt={active.label || `${alt} portrait`}
-              className={`block max-w-full rounded transition ${
-                activeIsCensored ? "blur-2xl scale-105" : ""
-              }`}
-            />
-            {activeIsCensored ? (
-              <button
-                type="button"
-                onClick={() => toggleViewerCensor(active)}
-                className="absolute inset-0 flex flex-col items-center justify-center gap-1 rounded bg-black/40 text-xs uppercase tracking-widest text-white hover:bg-black/30"
-              >
-                <span>{active.nsfw ? "NSFW" : "Hidden"}</span>
-                <span className="rounded border border-white/60 bg-black/40 px-2 py-0.5 text-[10px]">click to reveal</span>
-              </button>
-            ) : (
-              // Red-eye re-censor toggle on a visible image: hide it for
-              // YOU (persists across sessions until you toggle it back).
-              // Works on any image, NSFW-flagged or not.
-              <button
-                type="button"
-                onClick={() => toggleViewerCensor(active)}
-                className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-black/55 text-keep-accent hover:bg-black/75"
-                title="Censor this image for you (stays hidden when you view this profile again)"
-                aria-label="Censor this image for you"
-              >
-                <EyeOff className="h-4 w-4" />
-              </button>
-            )}
+        // Two-pane gallery. Desktop (lg+): a narrow vertical-scroll thumbnail
+        // rail (~15%) on the left, the full image reserved on the right.
+        // Mobile: the rail becomes a horizontal-scroll strip ABOVE the image.
+        // The per-image label is the header bar over the full image in both.
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+          {/* Thumbnail rail — horizontal row on mobile, vertical column on lg+. */}
+          <div className="flex shrink-0 flex-row gap-2 overflow-x-auto pb-1 lg:max-h-[68vh] lg:w-[15%] lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto lg:pb-0 lg:pr-1">
+            {portraits.map((p) => {
+              const tileCensored = isCensored(p);
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => { if (tileCensored) { reveal(p.id); return; } setActiveId(p.id); }}
+                  title={tileCensored ? `${p.label ?? "Portrait"} (${p.nsfw ? "NSFW" : "hidden"}, click to reveal)` : p.label ?? "Portrait"}
+                  className={`relative aspect-square h-16 w-16 shrink-0 overflow-hidden rounded border transition lg:h-auto lg:w-full ${
+                    activeId === p.id ? "border-keep-action ring-2 ring-keep-action" : "border-keep-rule hover:ring-2 hover:ring-keep-action/50"
+                  }`}
+                >
+                  <img
+                    src={p.url}
+                    alt={p.label || `${alt} portrait`}
+                    loading="lazy"
+                    className={`h-full w-full object-cover transition ${tileCensored ? "blur-xl scale-110" : ""}`}
+                  />
+                  {tileCensored ? (
+                    <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-[10px] font-semibold uppercase tracking-widest text-white">
+                      {p.nsfw ? "NSFW" : "Hidden"}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
           </div>
-          {active.label ? (
-            <span className="text-sm italic text-keep-muted">{active.label}</span>
-          ) : null}
-          {/* Moderator NSFW toggle for the focused image. Owner-set NSFW
-              and mod-set NSFW write the same per-portrait flag, so a mod
-              flagging an image here is identical to the owner having
-              ticked it in their gallery editor. */}
-          {canModerate && onToggleNsfw ? (
-            <div className="flex flex-col items-center gap-0.5">
-              <button
-                type="button"
-                disabled={flagBusy}
-                onClick={async () => {
-                  if (flagBusy) return;
-                  setFlagBusy(true);
-                  setFlagErr(null);
-                  try {
-                    await onToggleNsfw(active.id, !active.nsfw);
-                  } catch (e) {
-                    setFlagErr(e instanceof Error ? e.message : "Failed to update.");
-                  } finally {
-                    setFlagBusy(false);
-                  }
-                }}
-                className="rounded border border-keep-accent/50 bg-keep-accent/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
-                title={active.nsfw ? "Clear the NSFW flag on this image" : "Mark this image NSFW (blurs it for viewers)"}
-              >
-                {flagBusy ? "Saving…" : active.nsfw ? "Unmark NSFW" : "Mark NSFW"}
-              </button>
-              {flagErr ? <span className="text-[10px] text-[#e06070]">{flagErr}</span> : null}
+
+          {/* Full-image pane: label header bar above the image. */}
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            {/* Label header bar — theme-matched, clean border. */}
+            <div className="rounded border border-keep-rule bg-keep-panel/70 px-3 py-1.5 text-center text-sm font-semibold tracking-wide text-keep-text">
+              {active.label || alt}
             </div>
-          ) : null}
+            <div className="flex justify-center">
+              {/* w-fit wrapper hugs the image so the eye toggle + censor
+                  overlay anchor to the image, never the surrounding pane. */}
+              <div className="relative w-fit max-w-full overflow-hidden rounded border border-keep-rule">
+                <img
+                  src={active.url}
+                  alt={active.label || `${alt} portrait`}
+                  className={`block max-h-[68vh] max-w-full transition ${activeIsCensored ? "blur-2xl scale-105" : ""}`}
+                />
+                {activeIsCensored ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleViewerCensor(active)}
+                    className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/40 text-xs uppercase tracking-widest text-white hover:bg-black/30"
+                  >
+                    <span>{active.nsfw ? "NSFW" : "Hidden"}</span>
+                    <span className="rounded border border-white/60 bg-black/40 px-2 py-0.5 text-[10px]">click to reveal</span>
+                  </button>
+                ) : (
+                  // Red-eye re-censor toggle on a visible image: hide it for YOU
+                  // (persists across sessions). Works on any image.
+                  <button
+                    type="button"
+                    onClick={() => toggleViewerCensor(active)}
+                    className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-black/55 text-keep-accent hover:bg-black/75"
+                    title="Censor this image for you (stays hidden when you view this profile again)"
+                    aria-label="Censor this image for you"
+                  >
+                    <EyeOff className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+            {/* Moderator NSFW toggle for the focused image. */}
+            {canModerate && onToggleNsfw ? (
+              <div className="flex flex-col items-center gap-0.5">
+                <button
+                  type="button"
+                  disabled={flagBusy}
+                  onClick={async () => {
+                    if (flagBusy) return;
+                    setFlagBusy(true);
+                    setFlagErr(null);
+                    try {
+                      await onToggleNsfw(active.id, !active.nsfw);
+                    } catch (e) {
+                      setFlagErr(e instanceof Error ? e.message : "Failed to update.");
+                    } finally {
+                      setFlagBusy(false);
+                    }
+                  }}
+                  className="rounded border border-keep-accent/50 bg-keep-accent/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+                  title={active.nsfw ? "Clear the NSFW flag on this image" : "Mark this image NSFW (blurs it for viewers)"}
+                >
+                  {flagBusy ? "Saving…" : active.nsfw ? "Unmark NSFW" : "Mark NSFW"}
+                </button>
+                {flagErr ? <span className="text-[10px] text-[#e06070]">{flagErr}</span> : null}
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
-      {/* Match the active preview's 70% cap + centering so the
-          thumbnail strip reads as a unified continuation of the
-          preview above, not a full-width row that clings to the
-          modal edges. `auto-fit` (not auto-fill) collapses any
-          unused 88px tracks so `justify-center` actually centers
-          the populated tiles, `auto-fill` left phantom tracks on
-          the right and pushed the visible row to the left. */}
-      <div className="order-1 mx-auto grid max-w-[70%] grid-cols-[repeat(auto-fit,88px)] justify-center gap-2">
-        {portraits.map((p) => {
-          const tileCensored = isCensored(p);
-          return (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => {
-                // First click on a censored tile reveals it (don't expand
-                // yet). Subsequent click expands. Non-NSFW tiles toggle
-                // expansion as before.
-                if (tileCensored) {
-                  reveal(p.id);
-                  return;
-                }
-                setActiveId((prev) => (prev === p.id ? null : p.id));
-              }}
-              title={tileCensored ? `${p.label ?? "Portrait"} (${p.nsfw ? "NSFW" : "hidden"}, click to reveal)` : p.label ?? "Portrait"}
-              className={`relative aspect-square overflow-hidden rounded transition ${
-                activeId === p.id ? "ring-2 ring-keep-action" : "hover:ring-2 hover:ring-keep-action/50"
-              }`}
-            >
-              <img
-                src={p.url}
-                alt={p.label || `${alt} portrait`}
-                loading="lazy"
-                className={`h-full w-full object-cover transition ${tileCensored ? "blur-xl scale-110" : ""}`}
-              />
-              {tileCensored ? (
-                <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-[10px] font-semibold uppercase tracking-widest text-white">
-                  {p.nsfw ? "NSFW" : "Hidden"}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
 }

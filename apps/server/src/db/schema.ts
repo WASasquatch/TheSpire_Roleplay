@@ -634,6 +634,36 @@ export const rooms = sqliteTable(
      */
     archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
     createdAt: ts("created_at"),
+    /**
+     * Room icon for the Room Info bar (migration 0258). Holds EITHER an
+     * http(s) image URL or a short emoji/text glyph; the client picks the
+     * render path. Set via `/icon` (owner/mod/admin). Null = no icon.
+     * Persists across archive/resurrect like topic/description.
+     */
+    icon: text("icon"),
+    /**
+     * Cumulative count of visible chat messages this room has EVER received
+     * (say/me/ooc/roll/scene/npc — the same kinds the lifetime post-counter
+     * counts). Only ever incremented in `addMessage`; NEVER decremented by
+     * retention/expiry sweeps, so it reflects lifetime activity rather than
+     * the live buffer size. Deliberately NOT reset on resurrect. (0258)
+     */
+    messageCount: integer("message_count").notNull().default(0),
+    /**
+     * The room's currently-open scene, mirrored from the latest `/scene`
+     * (set on open, cleared on `/scene end`). Distinct from the per-message
+     * scene banner — this is the live "what beat are we in" state surfaced in
+     * the Room Info pullout. Null when no scene is open. (0258)
+     */
+    currentSceneTitle: text("current_scene_title"),
+    currentSceneImageUrl: text("current_scene_image_url"),
+    /**
+     * JSON array of distinct NPC display names ever voiced in this room, in
+     * first-seen order. Unioned in by `/npc`. Survives message truncation and
+     * archive/resurrect so the Room Info pullout can list the cast even after
+     * the originating messages have been swept. Null/absent = none yet. (0258)
+     */
+    npcList: text("npc_list"),
   },
   (t) => ({
     nameUq: uniqueIndex("rooms_name_uq").on(sql`lower(${t.name})`),

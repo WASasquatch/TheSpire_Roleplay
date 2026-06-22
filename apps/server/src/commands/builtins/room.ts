@@ -309,9 +309,21 @@ export const goCommand: CommandHandler = {
       return;
     }
 
-    // No full-text room match (or matched row is archived). If the user
-    // provided multiple tokens, treat the first as the name and the rest
-    // as a password (the /private form). Single token → public.
+    // The exact argsText matches an ARCHIVED room. Resurrect that room as-is
+    // (preserving its original type + password) instead of falling through to
+    // the token-split path below. This is essential for multi-word names:
+    // `/go Common Room` on archived "Common Room" must bring that room back,
+    // not split into name="Common" / password="Room" and mint a brand-new
+    // room under the first token. `joinOrCreatePublic` takes the resurrection
+    // branch when the row is archived and keeps the prior type/passwordHash.
+    if (fullMatch?.archivedAt) {
+      await joinOrCreatePublic(ctx, argsText);
+      return;
+    }
+
+    // No room by this full name at all. If the user provided multiple tokens,
+    // treat the first as the name and the rest as a password (the /private
+    // form). Single token → public.
     const tokens = argsText.split(/\s+/);
     if (tokens.length === 1) {
       await joinOrCreatePublic(ctx, tokens[0]!);

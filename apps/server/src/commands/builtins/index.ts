@@ -34,6 +34,7 @@ import { worldCommand, worldsCommand } from "./world.js";
 import { forumsCommand } from "./forums.js";
 import { scriptoriumCommand, storyCommand, writeCommand } from "./scriptorium.js";
 import { expiryCommand, replyModeCommand } from "./room_modes.js";
+import { iconCommand } from "./icon.js";
 import { theaterCommand } from "./theater.js";
 import { trashCommand } from "./trash.js";
 import { ignoreCommand, unignoreCommand } from "./ignore.js";
@@ -41,7 +42,7 @@ import { blockCommand, unblockCommand } from "./block.js";
 import { usersCommand } from "./users.js";
 import { bookmarksCommand } from "./bookmarks.js";
 import { exportCommand } from "./export.js";
-import { clearCommand, findCommand, listCommand } from "./rooms_list.js";
+import { clearCommand, findCommand, listCommand, myRoomsCommand } from "./rooms_list.js";
 import {
   announceCommand,
   banCommand,
@@ -93,6 +94,7 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(inviteCommand);
   reg.registerBuiltin(topicCommand);
   reg.registerBuiltin(describeCommand);
+  reg.registerBuiltin(iconCommand);
   reg.registerBuiltin(profileCommand);
   reg.registerBuiltin(whoisCommand);
   reg.registerBuiltin(requestCommand);
@@ -139,6 +141,7 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(listCommand);
   reg.registerBuiltin(clearCommand);
   reg.registerBuiltin(findCommand);
+  reg.registerBuiltin(myRoomsCommand);
   // Moderation
   reg.registerBuiltin(kickCommand);
   reg.registerBuiltin(muteCommand);

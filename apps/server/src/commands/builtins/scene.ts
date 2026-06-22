@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
-import { roomMembers } from "../../db/schema.js";
-import { addMessage } from "../../realtime/broadcast.js";
+import { roomMembers, rooms } from "../../db/schema.js";
+import { addMessage, broadcastRoomState } from "../../realtime/broadcast.js";
 import { hasPermission } from "../../auth/permissions.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
@@ -107,5 +107,25 @@ export const sceneCommand: CommandHandler = {
     }
     const body = isEnd ? "Scene ends." : `Scene: ${titlePart}`;
     await addMessage(ctx, { kind: "scene", body, sceneImageUrl });
+
+    // Mirror the scene onto the room as live state for the Room Info bar
+    // (migration 0258): opening sets the current scene, `/scene end` clears
+    // it. Broadcast room state so the collapsed bar's "current scene" updates
+    // for everyone without a refresh. Best-effort — the banner already went
+    // out above; a failed state write shouldn't surface as a send error.
+    try {
+      await ctx.db
+        .update(rooms)
+        .set(
+          isEnd
+            ? { currentSceneTitle: null, currentSceneImageUrl: null }
+            : { currentSceneTitle: titlePart, currentSceneImageUrl: sceneImageUrl },
+        )
+        .where(eq(rooms.id, ctx.roomId));
+      await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[room-stats] scene state update failed", { roomId: ctx.roomId, err });
+    }
   },
 };

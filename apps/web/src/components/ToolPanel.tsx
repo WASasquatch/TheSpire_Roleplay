@@ -11,10 +11,14 @@ import {
   Search,
   HelpCircle,
   Gamepad2,
+  Archive,
+  Lock,
+  RotateCcw,
 } from "lucide-react";
 import { useChat } from "../state/store.js";
 import { fetchForums } from "../lib/forums.js";
-import type { ForumSummary } from "@thekeep/shared";
+import { fetchArchivedRooms } from "../lib/rooms.js";
+import type { ArchivedRoomBrief, ForumSummary } from "@thekeep/shared";
 import { SearchBar } from "./SearchBar.js";
 import { CloseButton } from "./CloseButton.js";
 import { CreateCharacterModal } from "./CreateCharacterModal.js";
@@ -134,6 +138,21 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
     fetchForums()
       .then((list) => { if (!cancelled) setForums(list); })
       .catch(() => { /* catalog row still works; bookmarks just stay hidden */ });
+    return () => { cancelled = true; };
+  }, [drawerOpen]);
+
+  // Archived rooms the viewer owns, for the "My Rooms" section. Same lazy
+  // pattern as the forum bookmarks above: fetched the first time the drawer
+  // opens and re-fetched on each open so a room that archived (or got
+  // recreated) mid-session stays accurate. `null` = not loaded yet (show a
+  // hint), `[]` = loaded-and-empty.
+  const [archivedRooms, setArchivedRooms] = useState<ArchivedRoomBrief[] | null>(null);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    let cancelled = false;
+    fetchArchivedRooms()
+      .then((list) => { if (!cancelled) setArchivedRooms(list); })
+      .catch(() => { /* section just shows its empty/hint state */ });
     return () => { cancelled = true; };
   }, [drawerOpen]);
 
@@ -464,6 +483,28 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
                   <PrivateForm onSubmit={(name, pw) => fire(`/private ${name} ${pw}`)} />
                 </InlinePanel>
               ) : null}
+            </Section>
+
+            <Section
+              title="My Rooms"
+              icon={<Archive size={14} aria-hidden />}
+              open={openSection === "My Rooms"}
+              onToggle={() => toggleSection("My Rooms")}
+              innerRef={(el) => { sectionRefs.current["My Rooms"] = el; }}
+              {...(archivedRooms ? { badge: archivedRooms.length } : {})}
+            >
+              {archivedRooms === null ? (
+                <div className="px-3 py-2 text-xs text-keep-muted">Loading your rooms…</div>
+              ) : archivedRooms.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-keep-muted">
+                  No archived rooms yet. A room you own is archived once everyone leaves it,
+                  then shows up here so you can bring it back.
+                </div>
+              ) : (
+                archivedRooms.map((r) => (
+                  <ArchivedRoomRow key={r.name} room={r} onRecreate={() => fire(`/go ${r.name}`)} />
+                ))
+              )}
             </Section>
 
             <Section
@@ -1125,6 +1166,43 @@ function ForumBookmarkRow({ forum, onClick }: { forum: ForumSummary; onClick: ()
         />
       ) : null}
       <span aria-hidden className="shrink-0 text-keep-muted">›</span>
+    </button>
+  );
+}
+
+/**
+ * One archived-room row in the "My Rooms" section. The whole row is the
+ * Recreate action — clicking fires `/go <name>`, which resurrects the room
+ * with its original settings (a private room returns private with its
+ * original password) and joins it. A lock glyph marks private rooms; the
+ * topic, when set, rides along as a muted subtitle so a user with several
+ * archived rooms can tell them apart.
+ */
+function ArchivedRoomRow({ room, onRecreate }: { room: ArchivedRoomBrief; onRecreate: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onRecreate}
+      title={
+        room.type === "private"
+          ? `Recreate and join ${room.name} (returns private with its original password)`
+          : `Recreate and join ${room.name}`
+      }
+      className="flex w-full items-center gap-2 border-b border-keep-rule/40 py-1.5 pl-6 pr-3 text-left text-sm hover:bg-keep-banner/40 lg:py-1"
+    >
+      {room.type === "private" ? (
+        <Lock size={12} aria-hidden className="shrink-0 text-keep-muted" />
+      ) : null}
+      <span className="min-w-0 flex-1 truncate">
+        <span className="text-keep-text">{room.name}</span>
+        {room.topic ? (
+          <span className="ml-1.5 truncate text-xs text-keep-muted">— {room.topic}</span>
+        ) : null}
+      </span>
+      <span className="flex shrink-0 items-center gap-1 text-[10px] font-action uppercase tracking-wider text-keep-muted">
+        <RotateCcw size={12} aria-hidden />
+        Recreate
+      </span>
     </button>
   );
 }

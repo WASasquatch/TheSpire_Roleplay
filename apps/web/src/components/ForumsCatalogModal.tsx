@@ -62,6 +62,7 @@ import {
   fetchRoomCategories,
   fetchTopicThread,
   grantForumMod,
+  joinForum,
   leaveForum,
   liftForumBan,
   markForumVisited,
@@ -1734,6 +1735,34 @@ function MembershipStrip({ detail, onChanged }: {
         >
           Leave
         </button>
+      </div>
+    );
+  }
+
+  // Open forum, signed-in non-member: offer a one-click Join. Open forums need
+  // no membership to read/post PUBLIC sections, but a members-only category or
+  // board inside one is members-only to read AND post, and the apply flow
+  // rejects open forums — so this is the only way in. Gate on `isMember` (NOT
+  // `role`): the default/system forum makes every signed-in user an IMPLICIT
+  // member with a null role, so a `!role` check would nag them to join the
+  // forum they already belong to. Owner/mods/staff are members too and skip this.
+  if (detail.postingMode !== "application" && !v.isMember) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-keep-rule bg-keep-panel/20 px-4 py-1.5 text-xs">
+        <span className="text-keep-muted">
+          Join {detail.name} to post in its members-only sections.
+        </span>
+        <div className="flex items-center gap-2">
+          {err ? <span className="text-keep-accent">{err}</span> : null}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void act(() => joinForum(detail.id))}
+            className="rounded border border-keep-action bg-keep-action/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
+          >
+            Join
+          </button>
+        </div>
       </div>
     );
   }

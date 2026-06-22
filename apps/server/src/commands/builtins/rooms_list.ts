@@ -1,5 +1,6 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { roomMembers, rooms } from "../../db/schema.js";
+import { listArchivedOwnedRooms } from "../../lib/archivedRooms.js";
 import { setRoomCleared } from "../../lib/roomClears.js";
 import type { CommandHandler } from "../types.js";
 
@@ -60,6 +61,34 @@ export const listCommand: CommandHandler = {
       title: `Public rooms (${allRooms.length})`,
       body: lines.join("\n"),
     });
+  },
+};
+
+/**
+ * /myrooms - list the rooms you own that have gone quiet (archived).
+ *
+ * A room you own is archived automatically once its last occupant leaves;
+ * the row sticks around holding the name + settings (and, for a private
+ * room, its password hash) so you can bring it back later. This command
+ * surfaces those rooms so you don't have to remember what you named them.
+ *
+ * Output is PRIVATE to you - the list can include private room names, so we
+ * emit a socket-only `my-rooms` hint (the client renders it as a local chat
+ * line) instead of broadcasting it, the same privacy posture `/list` and
+ * `/find` use. Each room renders as a click-to-fill link that drops
+ * `/go <name>` into your composer; sending it resurrects the room exactly as
+ * it was (a private room comes back private with its original password) so
+ * you can tweak the line first if you'd rather change the password.
+ */
+export const myRoomsCommand: CommandHandler = {
+  name: "myrooms",
+  aliases: ["archived"],
+  usage: "/myrooms",
+  description:
+    "List the rooms you own that have gone quiet (archived). Each one becomes a tap-to-fill /go link so you can bring it back - private rooms return private with their original password.",
+  async run(ctx) {
+    const owned = await listArchivedOwnedRooms(ctx.db, ctx.user.id);
+    ctx.socket.emit("ui:hint", { kind: "my-rooms", rooms: owned });
   },
 };
 

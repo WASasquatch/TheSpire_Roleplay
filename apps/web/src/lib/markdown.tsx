@@ -638,6 +638,38 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
             ),
           };
         }
+        // Composer-fill reference: [label](compose:/go <name>), emitted by
+        // the `/myrooms` recreate links. Renders as a chip that dispatches a
+        // DOM event the chat shell listens for, replacing the composer's
+        // contents with the payload so the user can review (and tweak, e.g.
+        // add a password) before sending. parseInline stays pure (no callback
+        // props); the payload is deliberately restricted to a `/go ` command
+        // so a hostile message can't pre-load a destructive command into
+        // someone's input — the worst it can do is offer to join a room, and
+        // nothing sends without the user pressing enter.
+        const composeRef = /^compose:(\/go .+)$/is.exec(url);
+        if (composeRef) {
+          const payload = composeRef[1]!;
+          const label = text.slice(i + 1, closeB);
+          return {
+            end: closeP + 1,
+            node: (
+              <button
+                type="button"
+                title="Tap to load this command into your message box"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.dispatchEvent(
+                    new CustomEvent("spire:compose-set", { detail: { text: payload } }),
+                  );
+                }}
+                className="rounded font-medium text-keep-action underline decoration-dotted underline-offset-2 hover:text-keep-action/80"
+              >
+                {parseInline(label, depth + 1)}
+              </button>
+            ),
+          };
+        }
         // Quoted-post reference: [wrote:](msg:<messageId>), emitted by the
         // forum Quote button. Renders as a jump chip that dispatches a DOM
         // event; the Forums Catalog listens and scrolls/flashes the quoted

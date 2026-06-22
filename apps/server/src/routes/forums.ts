@@ -384,6 +384,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
         .limit(1))[0];
       viewer = {
         role: a.role,
+        isMember: a.isMember,
         ban: a.ban ? { until: a.ban.until ? +a.ban.until : null, reason: a.ban.reason } : null,
         membershipPending: !!pending,
         canParticipate: a.canParticipate,
@@ -1594,6 +1595,30 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     if (!a.role) { reply.code(409); return { error: "You're not a member here." }; }
     await db.delete(forumMembers)
       .where(and(eq(forumMembers.forumId, a.forum.id), eq(forumMembers.userId, me.id)));
+    return { ok: true };
+  });
+
+  /** Self-join an OPEN forum (instant, no review). Open forums need no
+   *  membership to post in public sections, but a members-only CATEGORY
+   *  inside one is readable/postable only by members — and the apply flow
+   *  rejects open forums ("just post"), so there was no way in. This gives a
+   *  one-click membership so a user can unlock those sections themselves.
+   *  Application-mode forums still go through membership-applications; the
+   *  system/default forum needs no join (everyone is an implicit member). */
+  app.post<{ Params: { id: string } }>("/forums/:id/join", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const a = await forumAuthority(db, me, req.params.id);
+    if (!a.forum) { reply.code(404); return { error: "no forum" }; }
+    if (a.ban) { reply.code(403); return { error: "You are banned from this forum." }; }
+    if (a.forum.postingMode === "application") {
+      reply.code(409); return { error: "This forum reviews applications — apply to join instead." };
+    }
+    // Idempotent: owner/mods/existing members already have access.
+    if (a.isMember) return { ok: true };
+    await db.insert(forumMembers)
+      .values({ forumId: a.forum.id, userId: me.id, role: "member" })
+      .onConflictDoNothing();
     return { ok: true };
   });
 

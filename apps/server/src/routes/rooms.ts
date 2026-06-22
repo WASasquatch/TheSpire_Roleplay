@@ -10,11 +10,13 @@ import type {
   ClientToServerEvents,
   MessageSearchHit,
   RoomOccupant,
+  RoomInfo,
   RoomSummary,
   ServerToClientEvents,
   ThreadCategory,
 } from "@thekeep/shared";
-import { forums, ignores, messages, roomMembers, roomThreadCategories, rooms } from "../db/schema.js";
+import { forums, ignores, messages, roomMembers, roomThreadCategories, rooms, users } from "../db/schema.js";
+import { parseNpcList } from "../lib/roomStats.js";
 import { forumBoardReadGate } from "../forums/authority.js";
 import { loadPollState } from "../polls.js";
 import { linkPreviewFromRow } from "../unfurl.js";
@@ -22,6 +24,7 @@ import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { getSettings } from "../settings.js";
 import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
+import { listArchivedOwnedRooms } from "../lib/archivedRooms.js";
 import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
 import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MAX_MESSAGES, mentionsField } from "@thekeep/shared";
@@ -107,6 +110,79 @@ export async function registerRoomsRoutes(
     );
 
     return { rooms: result };
+  });
+
+  /**
+   * GET /rooms/mine/archived
+   *
+   * The caller's own archived rooms (rooms they owned that auto-parked once
+   * the last occupant left). Feeds the Tools-menu "My Rooms" section, whose
+   * Recreate buttons fire `/go <name>` to resurrect each one. Auth-gated and
+   * scoped to the caller, an archived private room's name shouldn't leak to
+   * anyone but its owner.
+   */
+  app.get("/rooms/mine/archived", async (req: FastifyRequest, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const archived = await listArchivedOwnedRooms(db, me.id);
+    return { rooms: archived };
+  });
+
+  /**
+   * GET /rooms/:id/info
+   *
+   * Full room dossier behind the Room Info bar's expandable pullout. Lazy-
+   * loaded only when a viewer expands the bar, so the heavier fields
+   * (description, NPC roster) stay off the hot-path room broadcast. Auth-gated;
+   * for private rooms the caller must be a member (same gate as the messages
+   * route). The password is NEVER returned.
+   */
+  app.get<{ Params: { id: string } }>("/rooms/:id/info", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
+    if (!room || room.archivedAt) { reply.code(404); return { error: "no room" }; }
+    if (room.type === "private") {
+      const member = (await db
+        .select()
+        .from(roomMembers)
+        .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, me.id)))
+        .limit(1))[0];
+      if (!member) { reply.code(403); return { error: "not a member" }; }
+    }
+    // Reuse buildRoomSummary for the linkedWorld lookup (and to keep the shared
+    // fields in lockstep with the broadcast); layer the dossier-only fields on top.
+    const summary = await buildRoomSummary(db, room);
+    let ownerName: string | null = null;
+    if (room.ownerId) {
+      const owner = (await db
+        .select({ username: users.username })
+        .from(users)
+        .where(eq(users.id, room.ownerId))
+        .limit(1))[0];
+      ownerName = owner?.username ?? null;
+    }
+    const info: RoomInfo = {
+      id: room.id,
+      name: room.name,
+      type: room.type,
+      icon: room.icon ?? null,
+      description: room.description ?? null,
+      topic: room.topic ?? null,
+      ownerName,
+      createdAt: +room.createdAt,
+      messageCount: room.messageCount ?? 0,
+      npcs: parseNpcList(room.npcList),
+      currentScene: room.currentSceneTitle
+        ? { title: room.currentSceneTitle, imageUrl: room.currentSceneImageUrl ?? null }
+        : null,
+      replyMode: room.replyMode,
+      messageExpiryMinutes: room.messageExpiryMinutes,
+      difficultyClass: room.difficultyClass ?? null,
+      theaterMode: room.theaterMode,
+      linkedWorld: summary.linkedWorld,
+    };
+    return { info };
   });
 
   /**
@@ -1086,6 +1162,10 @@ export async function registerRoomsRoutes(
       // Shown-but-locked: keep the chip but mark it so the client renders the
       // lock and never lets a non-member select into it.
       membersOnly: !!c.membersOnly,
+      // Locked FOR THIS VIEWER (members-only + not a member). Drives hiding the
+      // "+ New Topic" action so nobody opens an editor for a category the read
+      // gate will then withhold. Empty set ⇒ false for non-board rooms.
+      locked: readGate.lockedCatIds.has(c.id),
     }));
     return { categories: out };
   });

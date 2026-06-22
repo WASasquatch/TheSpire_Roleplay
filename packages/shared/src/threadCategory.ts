@@ -28,6 +28,13 @@ export interface ThreadCategory {
    *  chip still renders for everyone (shown-but-locked). Standalone nested
    *  rooms never set it. */
   membersOnly?: boolean;
+  /** This category is members-only AND the requesting viewer isn't a member —
+   *  i.e. locked FOR THEM specifically. Server-computed per request. The UI
+   *  uses it to withhold the "+ New Topic" action (and keep the picker from
+   *  selecting into it): you can't post where you can't read. Absent/false for
+   *  members, owners/mods/staff, the default-forum implicit members, and every
+   *  category in a non-board (standalone) room. */
+  locked?: boolean;
 }
 
 /** Cap for the category subtitle (UI input + server validation). */

@@ -53,6 +53,55 @@ export interface RoomSummary {
    * on replyMode — standalone nested rooms stay in the room list.
    */
   forumId: string | null;
+  /**
+   * Room icon shown left of the name in the Room Info bar. Holds EITHER an
+   * http(s) image URL (rendered as <img>) OR a short emoji/text glyph
+   * (rendered as-is). Set via `/icon` (owner/mod/admin). Null = no icon.
+   */
+  icon: string | null;
+  /** Room creation time (epoch ms). Surfaced as a "Created …" stat. */
+  createdAt: number;
+  /**
+   * Cumulative count of visible chat messages this room has EVER received
+   * (say/me/ooc/roll/scene/npc). Only ever incremented — unaffected by
+   * retention/expiry truncation — so it reflects lifetime activity, not the
+   * shrinking live buffer. Persists across archive/resurrect.
+   */
+  messageCount: number;
+  /**
+   * Title of the room's currently-open scene (set by `/scene <title>`,
+   * cleared by `/scene end`). Null when no scene is open. Surfaced in the
+   * Room Info bar/pullout so a late joiner sees the active beat.
+   */
+  currentSceneTitle: string | null;
+}
+
+/**
+ * Full room dossier behind the Room Info bar's expandable pullout. Served by
+ * `GET /rooms/:id/info` and lazy-loaded only when a viewer expands the bar, so
+ * the heavier fields (description, NPC history) stay off the hot-path room
+ * broadcast. The password is NEVER included.
+ */
+export interface RoomInfo {
+  id: string;
+  name: string;
+  type: RoomType;
+  icon: string | null;
+  /** Long-form room description (the `/describe` text). Null when unset. */
+  description: string | null;
+  topic: string | null;
+  /** Display name of the current owner, or null for system/ownerless rooms. */
+  ownerName: string | null;
+  createdAt: number;
+  messageCount: number;
+  /** Distinct NPC display names ever voiced in this room, in first-seen order. */
+  npcs: string[];
+  currentScene: { title: string; imageUrl: string | null } | null;
+  replyMode: "flat" | "nested";
+  messageExpiryMinutes: number | null;
+  difficultyClass: number | null;
+  theaterMode: boolean;
+  linkedWorld: LinkedWorldRef | null;
 }
 
 export type Gender = "male" | "female" | "nonbinary" | "other" | "undisclosed";

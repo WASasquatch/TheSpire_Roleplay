@@ -674,6 +674,20 @@ export interface TypingEntry {
   phrase?: string | null;
 }
 
+/**
+ * One archived room the caller owns, surfaced by `/myrooms` (as clickable
+ * recreate links in chat) and by the Tools-menu "My Rooms" section (Recreate
+ * buttons). Recreating any of these is a plain `/go <name>`: the server's
+ * resurrection path preserves the original type + passwordHash, so a private
+ * room comes back private with its original password and the owner re-enters
+ * without a prompt.
+ */
+export interface ArchivedRoomBrief {
+  name: string;
+  type: "public" | "private";
+  topic: string | null;
+}
+
 export type UiHint =
   | { kind: "open-character-editor"; characterId: string }
   | { kind: "open-profile"; profile: ProfileView }
@@ -771,6 +785,14 @@ export type UiHint =
    * so generation never blocks the socket and the cookie session is sent.
    */
   | { kind: "download-export"; url: string; filename: string }
+  /**
+   * Render the caller's archived rooms as a private, client-local chat line
+   * (each room a click-to-fill `/go` link). Emitted by `/myrooms`. Kept
+   * socket-only and injected locally rather than broadcast because the list
+   * can contain PRIVATE room names — same privacy posture as `/list` and
+   * `/find`, which also stay off the room broadcast.
+   */
+  | { kind: "my-rooms"; rooms: ArchivedRoomBrief[] }
   /**
    * Open the Forums Catalog modal (Forums revamp). Optional `slug` lands on
    * a specific forum instead of the system default. Emitted by `/forums`.

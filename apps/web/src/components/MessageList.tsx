@@ -1401,7 +1401,7 @@ function ForumView({
   // parent is missing or is itself a child (shouldn't happen — the
   // server enforces one level) promotes to top level instead of
   // disappearing.
-  type SubSection = { key: string; label: string; subtitle: string | null; iconUrl: string | null; membersOnly: boolean };
+  type SubSection = { key: string; label: string; subtitle: string | null; iconUrl: string | null; membersOnly: boolean; locked: boolean };
   const sections = useMemo(() => {
     const validParentIds = new Set(categories.filter((c) => !c.parentId).map((c) => c.id));
     const isSub = (c: ThreadCategory) => !!c.parentId && validParentIds.has(c.parentId);
@@ -1409,10 +1409,10 @@ function ForumView({
     for (const c of categories) {
       if (!isSub(c)) continue;
       const list = subsByParent.get(c.parentId!) ?? [];
-      list.push({ key: c.id, label: c.name, subtitle: c.subtitle ?? null, iconUrl: c.iconUrl ?? null, membersOnly: !!c.membersOnly });
+      list.push({ key: c.id, label: c.name, subtitle: c.subtitle ?? null, iconUrl: c.iconUrl ?? null, membersOnly: !!c.membersOnly, locked: !!c.locked });
       subsByParent.set(c.parentId!, list);
     }
-    const out: Array<{ key: string; label: string | null; subtitle: string | null; iconUrl: string | null; membersOnly: boolean; children: SubSection[] }> = [];
+    const out: Array<{ key: string; label: string | null; subtitle: string | null; iconUrl: string | null; membersOnly: boolean; locked: boolean; children: SubSection[] }> = [];
     for (const c of categories) {
       if (isSub(c)) continue;
       out.push({
@@ -1421,13 +1421,14 @@ function ForumView({
         subtitle: c.subtitle ?? null,
         iconUrl: c.iconUrl ?? null,
         membersOnly: !!c.membersOnly,
+        locked: !!c.locked,
         children: subsByParent.get(c.id) ?? [],
       });
     }
     const uncatBucket = buckets["_uncat"];
     const uncatVisible = uncatBucket && (uncatBucket.topics.length > 0 || uncatBucket.pending.length > 0 || uncatBucket.hasMore);
     if (uncatVisible || categories.length === 0) {
-      out.push({ key: "_uncat", label: categories.length > 0 ? "Uncategorized" : null, subtitle: null, iconUrl: null, membersOnly: false, children: [] });
+      out.push({ key: "_uncat", label: categories.length > 0 ? "Uncategorized" : null, subtitle: null, iconUrl: null, membersOnly: false, locked: false, children: [] });
     }
     return out;
   }, [categories, buckets]);
@@ -1679,6 +1680,17 @@ function ForumView({
                 </span>
                 <span className="flex shrink-0 items-baseline gap-3">
                   <span className="text-xs tabular-nums text-keep-muted">{headerCount}</span>
+                  {/* Members-only category the viewer can't post in → no
+                      compose action (you can't post where you can't read);
+                      a quiet "Members only" chip stands in for the button. */}
+                  {s.locked ? (
+                    <span
+                      className="rounded border border-keep-rule/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-muted"
+                      title="Members only — join the forum to post here"
+                    >
+                      Members only
+                    </span>
+                  ) : (
                   <button
                     type="button"
                     onClick={(e) => {
@@ -1686,6 +1698,19 @@ function ForumView({
                       // should *only* open the composer for a new topic,
                       // not toggle the section's collapse state.
                       e.stopPropagation();
+                      // Force the section EXPANDED (never collapse it). The
+                      // inline new-topic composer — and, after an in-room
+                      // post, the freshly-created topic — render inside the
+                      // bucket body, which is skipped while the section is
+                      // collapsed. Without this, clicking "+ New Topic" on a
+                      // collapsed (often empty) category set the target but
+                      // showed nothing: the "nothing happens" report.
+                      setCollapsed((prev) => {
+                        if (!prev.has(s.key)) return prev;
+                        const n = new Set(prev);
+                        n.delete(s.key);
+                        return n;
+                      });
                       onStartTopicInCategory(s.key === "_uncat" ? null : s.key);
                     }}
                     className="keep-button rounded border border-keep-action/50 bg-keep-action/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
@@ -1693,6 +1718,7 @@ function ForumView({
                   >
                     + New Topic
                   </button>
+                  )}
                 </span>
               </div>
             ) : null}
@@ -1752,10 +1778,26 @@ function ForumView({
                         </span>
                         <span className="flex shrink-0 items-baseline gap-3">
                           <span className="text-xs tabular-nums text-keep-muted">{subCount}</span>
+                          {sub.locked ? (
+                            <span
+                              className="rounded border border-keep-rule/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-muted"
+                              title="Members only — join the forum to post here"
+                            >
+                              Members only
+                            </span>
+                          ) : (
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
+                              // Expand the subcategory so its inline composer /
+                              // new topic is visible (see the category button).
+                              setCollapsed((prev) => {
+                                if (!prev.has(sub.key)) return prev;
+                                const n = new Set(prev);
+                                n.delete(sub.key);
+                                return n;
+                              });
                               onStartTopicInCategory(sub.key);
                             }}
                             className="keep-button rounded border border-keep-action/50 bg-keep-action/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
@@ -1763,6 +1805,7 @@ function ForumView({
                           >
                             + New Topic
                           </button>
+                          )}
                         </span>
                       </div>
                       {/* Indent ONLY a subcategory's content, so its topics

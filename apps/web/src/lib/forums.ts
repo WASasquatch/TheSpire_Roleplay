@@ -299,6 +299,16 @@ export async function leaveForum(forumId: string): Promise<void> {
   await jsonOrThrow(r);
 }
 
+/** Instantly join an OPEN forum (no review). Used to unlock members-only
+ *  sections of an open forum; application-mode forums use applyForumMembership. */
+export async function joinForum(forumId: string): Promise<void> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/join`, {
+    method: "POST",
+    credentials: "include",
+  });
+  await jsonOrThrow(r);
+}
+
 /* ============================================================
  * Roles + bans (Phase 4)
  * ============================================================ */

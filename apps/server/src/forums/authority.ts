@@ -84,7 +84,15 @@ export async function forumAuthority(
   const staffOverride = await hasPermission(user, "manage_any_forum", db);
   const isOwner = staffOverride || forum.ownerUserId === user.id || role === "owner";
   const isMod = isOwner || role === "mod";
-  const isMember = isMod || role === "member";
+  // The Spire Forums (isSystem) is the site-wide DEFAULT forum: every signed-in
+  // user is implicitly a member, so its members-only categories act as
+  // "signed-in members only" (i.e. everyone but logged-out guests) WITHOUT
+  // needing a forum_members row per account. Without this, members-only
+  // sections of the default forum were invisible to everyone who hadn't been
+  // explicitly enrolled — including the people who posted in them (they could
+  // post via open posting, then the read gate hid the result). Anonymous
+  // callers already returned early above, so this only elevates logged-in users.
+  const isMember = isMod || role === "member" || forum.isSystem === true;
 
   // Owner/staff can always act (even on a forum they were oddly banned
   // in — a ban row against the owner is a data bug, not a lockout).

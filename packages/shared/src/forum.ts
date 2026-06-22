@@ -175,6 +175,15 @@ export interface ForumDetail extends ForumSummary {
  *  (the server re-checks everything; this is advisory UI state). */
 export interface ForumViewerState {
   role: ForumRole | null;
+  /**
+   * Whether the viewer counts as a member for read/post gating. Broader than a
+   * non-null `role`: it's also true for the forum owner, site staff with
+   * `manage_any_forum`, and EVERY signed-in user on the system/default forum
+   * (implicit membership). UI should gate "join" prompts on this, not on
+   * `role`, or an implicit member of the default forum gets nagged to join
+   * something they already belong to.
+   */
+  isMember: boolean;
   /** Active ban, if any. `until` null = permanent. */
   ban: { until: number | null; reason: string | null } | null;
   /** Pending membership application exists. */

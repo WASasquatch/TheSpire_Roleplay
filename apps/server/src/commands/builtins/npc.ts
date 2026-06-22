@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { roomMembers, rooms } from "../../db/schema.js";
 import { addMessage, addSystemMessage, broadcastRoomState } from "../../realtime/broadcast.js";
+import { recordRoomNpc } from "../../lib/roomStats.js";
 import { hasPermission } from "../../auth/permissions.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
@@ -81,6 +82,10 @@ export const npcCommand: CommandHandler = {
       // recoverable from moderation tooling without exposing it to players.
       npcVoicedBy: ctx.user.displayName,
     });
+
+    // Record this NPC into the room's persistent cast list for the Room Info
+    // pullout (migration 0258). Best-effort, after the message is out.
+    await recordRoomNpc(ctx.db, ctx.roomId, npcName);
   },
 };
 

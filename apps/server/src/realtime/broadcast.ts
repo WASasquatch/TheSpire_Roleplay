@@ -633,17 +633,33 @@ export async function addMessage(
       // classify to null and skip. Failure is logged inside the
       // helper, don't let a stuck counter roll back the awarding
       // path below.
+      const lifetimeCategory = classifyMessageForLifetime({
+        kind: payload.kind,
+        replyMode,
+        isReply: !!payload.replyToId,
+        hasTitle: !!payload.title,
+      });
       void bumpLifetimeForMessage(
         ctx.db,
         ctx.user.id,
         ctx.user.activeCharacterId,
-        classifyMessageForLifetime({
-          kind: payload.kind,
-          replyMode,
-          isReply: !!payload.replyToId,
-          hasTitle: !!payload.title,
-        }),
+        lifetimeCategory,
       );
+      // Cumulative per-room "messages ever" counter (migration 0258). Bump on
+      // the same kinds the lifetime counter counts so the Room Info bar's stat
+      // stays consistent with per-user totals. Never decremented — retention /
+      // expiry sweeps shrink the live buffer but not this number. Best-effort:
+      // a failed bump must not roll back the message insert.
+      if (lifetimeCategory !== null) {
+        void ctx.db
+          .update(rooms)
+          .set({ messageCount: sql`${rooms.messageCount} + 1` })
+          .where(eq(rooms.id, ctx.roomId))
+          .catch((err) => {
+            // eslint-disable-next-line no-console
+            console.error("[room-stats] message_count bump failed", { roomId: ctx.roomId, err });
+          });
+      }
       const isForum = replyMode === "nested";
       if (isForum && (payload.title || payload.replyToId)) {
         await awardForForum({
@@ -1940,6 +1956,14 @@ export async function buildRoomSummary(
     theaterLoop: room.theaterLoop,
     theaterPlaylist: parsePlaylist(room.theaterPlaylist),
     forumId: room.forumId ?? null,
+    // Room Info bar fields (migration 0258). The lightweight ones ride the
+    // broadcast so the collapsed bar renders without a follow-up fetch; the
+    // heavier dossier (description, NPC list, metadata) is lazy-loaded via
+    // GET /rooms/:id/info only when the bar is expanded.
+    icon: room.icon ?? null,
+    createdAt: +room.createdAt,
+    messageCount: room.messageCount ?? 0,
+    currentSceneTitle: room.currentSceneTitle ?? null,
   };
 }
 

@@ -1189,7 +1189,26 @@ async function main() {
               eq(roomThreadCategories.id, payload.threadCategoryId),
               eq(roomThreadCategories.roomId, board.id),
             )).limit(1))[0];
-          if (cat) threadCategoryId = cat.id;
+          if (cat) {
+            // A members-only category is members-only for POSTING too, not
+            // just reading. The read gate (forumBoardReadGate) hides
+            // members-only categories from non-members, so without this an
+            // open-posting forum let a non-member create a topic here that
+            // they then couldn't see — they posted into a category the read
+            // gate withholds from them, while members/owner saw it. That's
+            // the "the system isn't showing me my own topics" report. Reject
+            // with the same code the read path uses so the poster gets a
+            // clear members-only notice instead of an invisible topic.
+            if (cat.membersOnly && !gate.authority.isMember) {
+              ack?.({
+                ok: false,
+                code: "FORUM_BOARD_MEMBERS_ONLY",
+                message: "That category is for forum members only — join the forum first to post here.",
+              });
+              return;
+            }
+            threadCategoryId = cat.id;
+          }
         }
 
         const { addMessage } = await import("./realtime/broadcast.js");

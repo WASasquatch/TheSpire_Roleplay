@@ -130,6 +130,12 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
   // `needsHls`). A YouTube live that lacks this flag (added via `/theater add`)
   // falls through to the VOD position-sync path and bounces around — the bug.
   const isLive = current?.kind === "live" || !!current?.live;
+  // The RAW-HLS live backend (`kind: "live"`, hls.js) reports a reliable
+  // seekable end via getDuration(), so we snap it to the live edge. A
+  // YouTube/Vimeo live (the `live` flag, iframe-API backend) must NOT be
+  // snapped that way — see the live-edge effect below. Both still want live
+  // BEHAVIOR (the `isLive` guards turn off VOD position-sync for both).
+  const isHlsLive = current?.kind === "live";
 
   // Expected playback position right now: the anchored position plus the
   // elapsed wall-clock since the server captured it (while playing).
@@ -307,13 +313,23 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
     return () => window.clearInterval(id);
   }, [isPlaying, ready, isEmbed, isLive]);
 
-  // Live-edge tracking. A live source has no position anchor; instead we
-  // pin the player to the broadcast's live edge. hls.js reports the
-  // seekable end as getDuration(), so seeking there drops any buffered
-  // delay accumulated from a slow start, a pause/resume, or a stall.
-  // Runs on (re)play of a live source and nudges every few seconds.
+  // Live-edge tracking — RAW-HLS live only (`kind: "live"`, hls.js backend).
+  // A live source has no position anchor; instead we pin the player to the
+  // broadcast's live edge. hls.js reports the seekable end as getDuration(),
+  // so seeking there drops any buffered delay accumulated from a slow start,
+  // a pause/resume, or a stall. Runs on (re)play and nudges every few seconds.
+  //
+  // Deliberately NOT applied to a YouTube/Vimeo live (the `live` flag): the
+  // iframe API's getDuration() reports the jittery DVR-window length, not a
+  // stable seekable end, and momentarily reads SMALL during a metadata reload
+  // / rebuffer. Seeking to it yanked the player to random earlier points or
+  // back to the start — the "live YouTube broadcast keeps resyncing and won't
+  // stay live" bug. The iframe player already starts and stays at the live
+  // edge on its own (a fresh load of a live watch URL begins at live), and the
+  // `isLive` guards above keep VOD position-sync off it, so we simply let it
+  // play untouched. Hence `isHlsLive`, not the broader `isLive`.
   useEffect(() => {
-    if (!isLive || !ready || !isPlaying) return;
+    if (!isHlsLive || !ready || !isPlaying) return;
     const snapToLive = () => {
       const p = playerRef.current;
       if (!p) return;
@@ -325,7 +341,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
     snapToLive();
     const id = window.setInterval(snapToLive, 5000);
     return () => window.clearInterval(id);
-  }, [isLive, ready, isPlaying, sync?.serverTimeMs, seekTo]);
+  }, [isHlsLive, ready, isPlaying, sync?.serverTimeMs, seekTo]);
 
   const emitControl = useCallback(
     (action: ControlAction, extra?: { positionSec?: number; index?: number }) => {
@@ -679,7 +695,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
             // Live has no timeline: no seek bar, just a live-edge indicator.
             <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-red-400">
               <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" />
-              Live - everyone watching the live edge
+              Live
             </span>
           ) : (
             <>

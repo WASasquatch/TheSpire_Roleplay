@@ -36,6 +36,7 @@ import { UrugalWindow } from "./components/arcade/UrugalWindow.js";
 import { GrimholdWindow } from "./components/arcade/GrimholdWindow.js";
 import { EarningRibbon } from "./components/EarningRibbon.js";
 import { BannerMarquee } from "./components/BannerMarquee.js";
+import { RoomInfoBar } from "./components/RoomInfoBar.js";
 import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanners.js";
 import { onUiRouteOpen } from "./lib/uiRouteOpen.js";
 import { fetchLatestPublishedStory } from "./lib/latestStory.js";
@@ -1427,6 +1428,20 @@ function Chat() {
     }, 500);
     return () => { window.clearTimeout(handle); };
   }, [activeTopicId, composerText]);
+  // Composer-fill chips (`[room](compose:/go room)` links from /myrooms)
+  // dispatch this so a click REPLACES the composer contents with the
+  // command, letting the user review or tweak it (e.g. swap the password)
+  // before sending. The markdown renderer restricts the payload to a
+  // `/go ` command, so nothing destructive can be pre-loaded this way.
+  useEffect(() => {
+    function onComposeSet(e: Event) {
+      const detail = (e as CustomEvent<{ text?: string }>).detail;
+      const text = detail?.text;
+      if (typeof text === "string" && text) setComposerText(text);
+    }
+    window.addEventListener("spire:compose-set", onComposeSet);
+    return () => window.removeEventListener("spire:compose-set", onComposeSet);
+  }, []);
   // "Preferred category for the next + New topic", set when the user
   // clicks a category section header in the forum view. Tristate where
   // `undefined` means "no signal yet" (composer falls back to its own
@@ -2524,6 +2539,41 @@ function Chat() {
           })();
           break;
         }
+        case "my-rooms": {
+          // /myrooms — the caller's archived rooms, rendered as a PRIVATE,
+          // client-local chat line (never broadcast: the list can name
+          // private rooms). Each room is a click-to-fill `/go` link the
+          // composer-set listener below turns into composer text. We inject
+          // straight into the current room's buffer; it isn't persisted, so
+          // it evaporates on the next resync/room-switch, which is the right
+          // lifetime for an ephemeral helper. (Forum/nested rooms filter
+          // local non-reply lines, so there the Tools-menu "My Rooms"
+          // section is the surface instead.)
+          const rid = useChat.getState().currentRoomId;
+          if (!rid) break;
+          const meId = useChat.getState().me?.id ?? "system";
+          const body = h.rooms.length
+            ? [
+                `Your archived rooms (${h.rooms.length}) — tap one to load its /go command into your message box:`,
+                ...h.rooms.map((r) => {
+                  const lock = r.type === "private" ? "🔒 " : "";
+                  const topic = r.topic ? ` — ${r.topic}` : "";
+                  return `${lock}[${r.name}](compose:/go ${r.name})${topic}`;
+                }),
+              ].join("\n")
+            : "You have no archived rooms. A room you own is archived once everyone leaves it; it'll show up here so you can bring it back.";
+          useChat.getState().appendMessage({
+            id: `local-myrooms-${Date.now()}`,
+            roomId: rid,
+            userId: meId,
+            characterId: null,
+            displayName: "system",
+            kind: "system",
+            body,
+            createdAt: Date.now(),
+          });
+          break;
+        }
       }
     });
 
@@ -3490,17 +3540,13 @@ function Chat() {
   // per room so the same affiliation across linked rooms stays
   // dismissed once.
   const linkedWorldId = room?.linkedWorld?.id ?? null;
-  const roomTopic = room?.topic ?? null;
   const [worldBannerDismissed, dismissWorldBanner] = useRoomBannerDismissal(
     currentRoomId,
     "world",
     linkedWorldId,
   );
-  const [topicBannerDismissed, dismissTopicBanner] = useRoomBannerDismissal(
-    currentRoomId,
-    "topic",
-    roomTopic,
-  );
+  // (The room topic is no longer a dismissible banner — it lives in the
+  // always-on RoomInfoBar now, so its dismissal state was removed.)
   // Resolve activeTopicId → the actual topic message so the composer can
   // render the "Replying to" indicator. We look it up by id in the room's
   // buffer; null when the id isn't present (paged out, deleted, or no
@@ -3623,14 +3669,9 @@ function Chat() {
         onOpenStaff={() => setStaffOpen(true)}
         {...(hasAnyAdminAccess ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
-      <BannerMarquee />
       <StaleVersionBanner />
       <IncognitoBanner />
       <VerifyEmailGate />
-      {/* Earning, persistent rank-up ribbon. Only renders when the
-          user has unacknowledged rank-ups. Tucked under the version
-          banner so deploy nags still take precedence. */}
-      <EarningRibbon onOpenEarning={() => setEarningOpen({})} />
       {/* Per-room view wrapper. Bundles the room's own banners (world /
           topic / expiry), the header accent rail, and the chat+rooms row
           into ONE stable flex-col. The room-transition orchestrator snapshots
@@ -3645,81 +3686,11 @@ function Chat() {
           along with the room instead of popping outside the effect. The
           account-level banners (rank-up ribbon, version, marquee) stay OUTSIDE
           so they don't get swept into a room switch. */}
-      <div ref={chatWrapperRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-      {room?.linkedWorld && !worldBannerDismissed ? (
-        <div className="keep-notice keep-notice-accent relative flex w-full items-center justify-center pr-10">
-          <button
-            type="button"
-            onClick={() => setWorldViewerId(room.linkedWorld!.id)}
-            className="flex flex-1 items-center justify-center gap-2 px-4 py-1 text-xs text-keep-action hover:brightness-110"
-            title="Open this room's linked world"
-          >
-            <span className="uppercase tracking-widest">World</span>
-            <span className="font-semibold normal-case tracking-normal">{room.linkedWorld.name}</span>
-            <span className="text-[10px] text-keep-muted">by {room.linkedWorld.ownerUsername}</span>
-          </button>
-          {/* Dismiss ×, absolutely positioned so it doesn't push the
-              centered label off-axis. Reserved right-side padding on
-              the wrapper (`pr-10`) keeps the chip clear of the label
-              even at narrow widths, and the chip itself sits inside
-              `right-2` so it has breathing room from the viewport
-              edge. Accent-tinted background + outline so the
-              affordance reads as "interactive control" against the
-              banner's own accent surface. stopPropagation keeps the
-              dismiss click from also opening the world viewer. */}
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); dismissWorldBanner(); }}
-            title="Hide this world banner. It'll come back if the room's linked world changes."
-            aria-label="Hide world banner"
-            className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded border border-keep-action/40 bg-keep-action/20 text-[11px] leading-none text-keep-action hover:border-keep-action hover:bg-keep-action/40"
-          >
-            ×
-          </button>
-        </div>
-      ) : null}
-      {room?.topic && !topicBannerDismissed ? (
-        <div className="keep-notice relative px-4 py-1 pr-10 text-center text-sm italic text-keep-muted">
-          {room.topic}
-          <button
-            type="button"
-            onClick={dismissTopicBanner}
-            title="Hide this room's topic banner. It'll come back if the topic changes."
-            aria-label="Hide topic banner"
-            className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded border border-keep-accent/40 bg-keep-accent/20 text-[11px] not-italic leading-none text-keep-accent hover:border-keep-accent hover:bg-keep-accent/40"
-          >
-            ×
-          </button>
-        </div>
-      ) : null}
-      {room?.messageExpiryMinutes && room.messageExpiryMinutes > 0 ? (
-        <div className="keep-notice px-4 py-0.5 text-center text-[10px] uppercase tracking-widest text-keep-muted">
-          Messages auto-expire after {formatExpiry(room.messageExpiryMinutes)}
-        </div>
-      ) : null}
-      {/* Accent-color rail. A 3px standalone strip in a light tint of
-          the user's `accent` color, separating the entire header zone
-          (banner + topic + expiry) from the chat content below. In the
-          scifi style it gains a multi-layer accent glow halo so the
-          divider reads as a glowing tube; modern/medieval render it
-          as a clean colored strip without the bloom. The strip exists
-          as its own element rather than a border on a container so it
-          can project its glow downward into the chat without being
-          clipped by the parent. `data-rail="header"` distinguishes
-          this one from the matching rail above the composer so the
-          scifi style can paint it in a darker blue/purple (no bg
-          bloom underneath this rail's bright end, so a flat magenta
-          peak read as a bare neon strip floating on its own, the
-          purple lets it sink into the ambient instead). */}
-      <div aria-hidden className="keep-accent-rail" data-rail="header" />
+      {/* Chat + room-list row. Sits directly under the header/account gates so
+          the room-list rail extends all the way up to the header bar. The chat
+          COLUMN (<main>) is the room-transition snapshot target; the rail is a
+          sibling, so it isn't swept into a room switch. */}
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        {/* The friends list used to live here as an always-visible
-            48px-wide rail, but a column that narrow couldn't fit
-            avatars or a readable label and ended up squeezing the
-            rest of the chat shell. Friends now live inside the
-            unified Messages modal (Tools → People → Messages); the
-            old standalone Friends button was redundant once the two
-            features merged into one surface. */}
         {/* `min-w-0` is non-negotiable: by default a flex child's
             `min-width` is `auto` (= its intrinsic content width), so a
             wide descendant, a long topic title, an action button strip,
@@ -3729,12 +3700,61 @@ function Chat() {
             "everything pushed off-screen" bug in mobile forum view.
             `min-w-0` lets the flex child shrink to its allocated slot
             and forces descendants to honor their own truncation rules. */}
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* Theater (watch-party) video panel. Sits ABOVE the chat but
-              below the banner/marquee/earnings/room-banner stack (those
-              render earlier, outside <main>). Resizable on the vertical;
-              the chat below takes the remaining flex space. Only renders
-              when the room has theater mode on. */}
+        <main ref={chatWrapperRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Site announcements + earning ribbon live INSIDE the chat column
+              (not full-width above the row) so they don't push the room-list
+              rail down off the header. Their content is site/account level —
+              identical across rooms — so sitting inside the transition target
+              is harmless. */}
+          <BannerMarquee />
+          <EarningRibbon onOpenEarning={() => setEarningOpen({})} />
+          {room?.linkedWorld && !worldBannerDismissed ? (
+            <div className="keep-notice keep-notice-accent relative flex w-full items-center justify-center pr-10">
+              <button
+                type="button"
+                onClick={() => setWorldViewerId(room.linkedWorld!.id)}
+                className="flex flex-1 items-center justify-center gap-2 px-4 py-1 text-xs text-keep-action hover:brightness-110"
+                title="Open this room's linked world"
+              >
+                <span className="uppercase tracking-widest">World</span>
+                <span className="font-semibold normal-case tracking-normal">{room.linkedWorld.name}</span>
+                <span className="text-[10px] text-keep-muted">by {room.linkedWorld.ownerUsername}</span>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); dismissWorldBanner(); }}
+                title="Hide this world banner. It'll come back if the room's linked world changes."
+                aria-label="Hide world banner"
+                className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded border border-keep-action/40 bg-keep-action/20 text-[11px] leading-none text-keep-action hover:border-keep-action hover:bg-keep-action/40"
+              >
+                ×
+              </button>
+            </div>
+          ) : null}
+          {/* Room Info bar — clickable; replaces the old dismissible topic
+              marquee. Icon + name + topic + quick stats, expands to a metadata
+              pullout. Skipped for forum boards (their own header chrome). */}
+          {room && !isForumRoom ? (
+            <RoomInfoBar
+              room={room}
+              onOpenWorld={(id) => setWorldViewerId(id)}
+            />
+          ) : null}
+          {room?.messageExpiryMinutes && room.messageExpiryMinutes > 0 ? (
+            <div className="keep-notice px-4 py-0.5 text-center text-[10px] uppercase tracking-widest text-keep-muted">
+              Messages auto-expire after {formatExpiry(room.messageExpiryMinutes)}
+            </div>
+          ) : null}
+          {/* Accent-color rail separating the header/banner zone from the chat.
+              A 3px strip in a light tint of the user's accent; the scifi style
+              gives it a glow halo. `data-rail="header"` distinguishes it from
+              the matching rail above the composer. */}
+          <div aria-hidden className="keep-accent-rail" data-rail="header" />
+          {/* Theater (watch-party) video panel. Sits below the banner /
+              marquee / earning / room-info stack at the top of the chat
+              column, above the message list. Resizable on the vertical; the
+              chat below takes the remaining flex space. Only renders when the
+              room has theater mode on. */}
           {room?.theaterMode && currentRoomId ? (
             // Boundary so a player failure (most often a stale-deploy chunk
             // 404 on the react-player provider import) reloads to the fresh
@@ -3967,8 +3987,7 @@ function Chat() {
           onClose={() => setRailOpen(false)}
           fontStep={fontStep}
         />
-      </div>
-      </div>{/* /per-room view wrapper (transition target) */}
+      </div>{/* /chat + room-list row */}
       {notice ? <Toast notice={notice} onDismiss={() => setNotice(null)} /> : null}
       {openProfile ? (
         <ProfileModal

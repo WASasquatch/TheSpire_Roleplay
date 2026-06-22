@@ -41,6 +41,17 @@ export interface TheaterSource {
   kind: TheaterSourceKind;
   /** Optional owner-supplied label; falls back to the URL in the UI. */
   title?: string;
+  /**
+   * Marks a YouTube/Vimeo source as a LIVE broadcast. Live behavior (no
+   * shared timeline, no drift-to-position, track the live edge, no
+   * auto-advance on a momentary drop) is orthogonal to the player backend:
+   * a YouTube live still plays through the iframe API, not hls.js, so we
+   * can't fold it into `kind: "live"` (which routes to the HLS backend).
+   * `kind: "live"` stays the raw-HLS case; this flag is the embed-backend
+   * live case. Set via `/theater live <youtube|vimeo url>` (a live broadcast
+   * URL is indistinguishable from a VOD one, so it must be declared).
+   */
+  live?: boolean;
 }
 
 /**

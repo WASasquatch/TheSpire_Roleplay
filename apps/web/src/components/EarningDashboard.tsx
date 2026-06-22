@@ -3414,7 +3414,9 @@ function RoomTransitionsTab({ snapshot }: {
   const activeCharacterId = useChat((s) => s.activeCharacterId);
   const setMyActiveTransitionKey = useChat((s) => s.setMyActiveTransitionKey);
   const refresh = useEarning((s) => s.refresh);
-  const previewRef = useRef<HTMLDivElement | null>(null);
+  // Each transition's Preview plays the rite ON that transition's own card,
+  // so the flourish is shown in context (no shared box you scroll away from).
+  const cardRefs = useRef<Map<string, HTMLLIElement>>(new Map());
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -3455,18 +3457,8 @@ function RoomTransitionsTab({ snapshot }: {
       <p className="mt-1 text-xs text-keep-muted">
         A flourish that plays for YOU when you switch rooms — only you see it. Equipped per identity
         ({activeCharacterId ? "this character" : "your OOC / master account"}). Off = instant.
+        Hit Preview on any rite to watch it play right on its card.
       </p>
-      <div
-        ref={previewRef}
-        className="relative mt-3 h-40 overflow-hidden rounded-lg border border-keep-rule bg-keep-bg/60"
-      >
-        <div className="flex h-full flex-col gap-2 p-3 text-xs text-keep-muted">
-          <div className="font-action text-sm text-keep-text">The Obsidian Hall</div>
-          <div>Castellan Vaire: The gates stand open.</div>
-          <div>mira_of_ash: atmospheric, as ever.</div>
-          <div className="mt-auto italic opacity-70">Hit Preview on a rite to see it here.</div>
-        </div>
-      </div>
       {err ? <p className="mt-2 text-xs text-keep-accent">{err}</p> : null}
       <div className="mt-3">
         <button
@@ -3484,13 +3476,20 @@ function RoomTransitionsTab({ snapshot }: {
           const isEquipped = equippedKey === t.key;
           const rowBusy = busyKey === t.key;
           return (
-            <li key={t.key} className="flex flex-col gap-1.5 rounded-lg border border-keep-rule bg-keep-panel/30 p-3">
+            <li
+              key={t.key}
+              ref={(el) => {
+                if (el) cardRefs.current.set(t.key, el);
+                else cardRefs.current.delete(t.key);
+              }}
+              className="flex flex-col gap-1.5 overflow-hidden rounded-lg border border-keep-rule bg-keep-panel/30 p-3"
+            >
               <div className="font-semibold text-keep-text">{t.label}</div>
               <p className="line-clamp-3 text-[11px] leading-snug text-keep-muted">{t.description}</p>
               <div className="mt-auto flex items-center gap-1.5 pt-1">
                 <button
                   type="button"
-                  onClick={() => void previewRoomTransition(t.key, previewRef.current)}
+                  onClick={() => void previewRoomTransition(t.key, cardRefs.current.get(t.key) ?? null)}
                   className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-[11px] text-keep-muted hover:text-keep-text"
                 >
                   Preview

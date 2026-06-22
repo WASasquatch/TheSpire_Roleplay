@@ -4,7 +4,7 @@ import type { TheaterLoop, TheaterSource, TheaterSourceKind } from "@thekeep/sha
 import { rooms } from "../../db/schema.js";
 import { callerCanEditRoom } from "../../auth/roomPermissions.js";
 import { hasPermission } from "../../auth/permissions.js";
-import { clearTheater, getTheater, parsePlaylist, serializePlaylist, setTheater } from "../../realtime/theaterState.js";
+import { applyControl, clearTheater, getTheater, parsePlaylist, serializePlaylist, setTheater } from "../../realtime/theaterState.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -108,13 +108,39 @@ export const theaterCommand: CommandHandler = {
       if (playlist.length >= 50) {
         return notice(ctx, "PLAYLIST_FULL", "Playlist is full (50 sources). Remove some with /theater remove <n>.");
       }
-      const source: TheaterSource = { id: nanoid(), url, kind: kindOverride ?? sniffKind(url), ...(title ? { title } : {}) };
+      // `/theater live` declares a live broadcast. A YouTube/Vimeo live still
+      // plays through its iframe API (NOT hls.js), so keep the sniffed kind and
+      // mark it live via the `live` flag; only a raw stream gets kind:"live"
+      // (the HLS backend). This is why a YouTube live added with `/theater add`
+      // (no flag) misbehaves — it runs the VOD position-sync path.
+      let kind: TheaterSourceKind = kindOverride ?? sniffKind(url);
+      let live = false;
+      if (kindOverride === "live") {
+        const sniffed = sniffKind(url);
+        if (sniffed === "youtube" || sniffed === "vimeo") {
+          kind = sniffed;
+          live = true;
+        } else {
+          kind = "live";
+        }
+      }
+      const source: TheaterSource = { id: nanoid(), url, kind, ...(title ? { title } : {}), ...(live ? { live: true } : {}) };
       const next = [...playlist, source];
       await ctx.db.update(rooms).set({ theaterPlaylist: serializePlaylist(next) }).where(eq(rooms.id, ctx.roomId));
-      notice(ctx, "THEATER", `Added to the theater playlist (#${next.length}, ${KIND_LABEL[source.kind]}): ${title || url}`);
+      const kindLabel = source.live ? `${KIND_LABEL[source.kind]} live` : KIND_LABEL[source.kind];
+      notice(ctx, "THEATER", `Added to the theater playlist (#${next.length}, ${kindLabel}): ${title || url}`);
       await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
-      // If this is the first source, snap viewers onto it.
-      if (playlist.length === 0) await broadcastTheaterSync(ctx.io, ctx.roomId);
+      // First source of an empty playlist: AUTO-START playback (not just snap
+      // viewers onto a paused source). The live state otherwise begins
+      // isPlaying:false and only an owner/mod can press play, so a host who
+      // queues a playlist and leaves — or any room joined while no mod is
+      // present — would sit idle with non-mods unable to start it. Starting it
+      // here means the room is genuinely playing for everyone who joins later.
+      if (playlist.length === 0) {
+        applyControl(ctx.roomId, "play", { len: next.length, loop: room.theaterLoop, now: Date.now() });
+        await broadcastTheaterSync(ctx.io, ctx.roomId);
+        await persistTheaterCheckpoint(ctx.db, ctx.roomId);
+      }
     };
 
     if (verb === "on") {

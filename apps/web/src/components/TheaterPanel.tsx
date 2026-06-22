@@ -124,7 +124,12 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
   const isEmbed = current?.kind === "embed";
   // Live streams: no shared timeline (no seek bar, no drift-to-position,
   // no auto-advance on a momentary drop); everyone tracks the live edge.
-  const isLive = current?.kind === "live";
+  // Two flavors: a raw HLS stream (`kind: "live"`, hls.js backend) and a
+  // YouTube/Vimeo live broadcast (`live` flag, iframe-API backend). Both want
+  // live BEHAVIOR; only the raw-stream one wants the hls BACKEND (see
+  // `needsHls`). A YouTube live that lacks this flag (added via `/theater add`)
+  // falls through to the VOD position-sync path and bounces around — the bug.
+  const isLive = current?.kind === "live" || !!current?.live;
 
   // Expected playback position right now: the anchored position plus the
   // elapsed wall-clock since the server captured it (while playing).
@@ -192,7 +197,11 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
   // or .m3u8 source is actually shown) so non-theater users don't pay the
   // ~400KB. Live HLS still needs the CSP connect-src/media-src allowance for
   // the stream's origin AND CORS headers from that origin to actually play.
-  const needsHls = !isEmbed && (isLive || /\.m3u8(?:[?#]|$)/i.test(current?.url ?? ""));
+  // Only the RAW-stream live (`kind: "live"`) or an explicit .m3u8 needs hls.js.
+  // A YouTube/Vimeo live (the `live` flag) plays through its own iframe API, so
+  // it must NOT be routed to hls.js (doing so is what broke `/theater live
+  // <youtube>` before) — hence `kind === "live"`, not the broader `isLive`.
+  const needsHls = !isEmbed && (current?.kind === "live" || /\.m3u8(?:[?#]|$)/i.test(current?.url ?? ""));
   useEffect(() => {
     if (!needsHls || typeof window === "undefined") return;
     if ((window as { Hls?: unknown }).Hls) return;

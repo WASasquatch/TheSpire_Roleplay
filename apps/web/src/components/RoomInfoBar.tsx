@@ -14,6 +14,10 @@ import { fetchRoomInfo } from "../lib/rooms.js";
 
 interface Props {
   room: RoomSummary;
+  /** True when the viewer can edit this room (owner/mod/admin). Drives the
+   *  "add one with /describe" setup hints under empty sections — text only,
+   *  not an inline editor. */
+  canEdit?: boolean;
   /** Open the linked-world viewer from the metadata grid. */
   onOpenWorld?: (worldId: string) => void;
 }
@@ -50,7 +54,7 @@ function Bevel() {
  * fetched from GET /rooms/:id/info on first expand. The icon is set via the
  * `/icon` command (no inline editor here, by design).
  */
-export function RoomInfoBar({ room, onOpenWorld }: Props) {
+export function RoomInfoBar({ room, canEdit = false, onOpenWorld }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [info, setInfo] = useState<RoomInfo | null>(null);
   const [loading, setLoading] = useState(false);
@@ -125,7 +129,9 @@ export function RoomInfoBar({ room, onOpenWorld }: Props) {
           {bannerText ? (
             <span className="truncate italic text-keep-muted">{bannerText}</span>
           ) : (
-            <span className="truncate text-keep-muted/50">No topic set</span>
+            <span className="truncate text-keep-muted/50">
+              No topic set{canEdit ? " — add one with /topic" : ""}
+            </span>
           )}
         </div>
 
@@ -155,14 +161,18 @@ export function RoomInfoBar({ room, onOpenWorld }: Props) {
             <div className="py-1 text-center text-xs text-keep-muted">Couldn't load room details.</div>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {/* Description: wide column on the left. Metadata flows to its
-                  right (next cell), so the horizontal space is used instead of
-                  the description hogging a full row. */}
-              {info.description ? (
-                <Card icon={<ScrollText size={12} aria-hidden />} title="Description" className="lg:col-span-2">
+              {/* Sections always render — empty ones show a placeholder (and,
+                  for editors, a "/command" setup hint) instead of vanishing, so
+                  the dossier reads the same whether or not a room is filled in.
+                  Description: wide column on the left; metadata flows to its
+                  right (next cell) so the horizontal space is used. */}
+              <Card icon={<ScrollText size={12} aria-hidden />} title="Description" className="lg:col-span-2">
+                {info.description ? (
                   <p className="whitespace-pre-wrap text-xs leading-snug text-keep-text/90">{info.description}</p>
-                </Card>
-              ) : null}
+                ) : (
+                  <Empty text="No description added." hint={canEdit ? "Add one with /describe <text>" : null} />
+                )}
+              </Card>
 
               <Card icon={<Info size={12} aria-hidden />} title="Details">
                 <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs leading-tight">
@@ -198,22 +208,26 @@ export function RoomInfoBar({ room, onOpenWorld }: Props) {
                 </dl>
               </Card>
 
-              {info.currentScene ? (
-                <Card icon={<Drama size={12} aria-hidden />} title="Current scene">
-                  <p className="text-xs leading-snug text-keep-text/90">{info.currentScene.title}</p>
-                  {info.currentScene.imageUrl ? (
-                    <img
-                      src={info.currentScene.imageUrl}
-                      alt=""
-                      className="mt-1.5 max-h-28 w-full rounded object-cover"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : null}
-                </Card>
-              ) : null}
+              <Card icon={<Drama size={12} aria-hidden />} title="Current scene">
+                {info.currentScene ? (
+                  <>
+                    <p className="text-xs leading-snug text-keep-text/90">{info.currentScene.title}</p>
+                    {info.currentScene.imageUrl ? (
+                      <img
+                        src={info.currentScene.imageUrl}
+                        alt=""
+                        className="mt-1.5 max-h-28 w-full rounded object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : null}
+                  </>
+                ) : (
+                  <Empty text="No current scene." hint={canEdit ? "Set the scene with /scene <title>" : null} />
+                )}
+              </Card>
 
-              {info.npcs.length > 0 ? (
-                <Card icon={<Users size={12} aria-hidden />} title={`NPCs (${info.npcs.length})`}>
+              <Card icon={<Users size={12} aria-hidden />} title={info.npcs.length > 0 ? `NPCs (${info.npcs.length})` : "NPCs"}>
+                {info.npcs.length > 0 ? (
                   <div className="flex flex-wrap gap-1">
                     {info.npcs.map((n) => (
                       <span
@@ -224,8 +238,10 @@ export function RoomInfoBar({ room, onOpenWorld }: Props) {
                       </span>
                     ))}
                   </div>
-                </Card>
-              ) : null}
+                ) : (
+                  <Empty text="No NPCs voiced here yet." hint={canEdit ? "Voice one with /npc <Name> <text>" : null} />
+                )}
+              </Card>
             </div>
           )}
         </div>
@@ -244,6 +260,20 @@ function Card({ icon, title, className, children }: { icon: ReactNode; title: st
       </h4>
       {children}
     </section>
+  );
+}
+
+/** Placeholder for an empty pullout section. Shows muted "nothing here yet"
+ *  text, plus (for editors) a one-line `/command` setup hint so a room owner
+ *  knows how to fill it in. */
+function Empty({ text, hint }: { text: string; hint: string | null }) {
+  return (
+    <p className="text-xs italic leading-snug text-keep-muted/70">
+      {text}
+      {hint ? (
+        <span className="mt-0.5 block not-italic text-keep-action/90">{hint}</span>
+      ) : null}
+    </p>
   );
 }
 

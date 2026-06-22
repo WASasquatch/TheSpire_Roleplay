@@ -683,6 +683,8 @@ export interface TypingEntry {
  * without a prompt.
  */
 export interface ArchivedRoomBrief {
+  /** Room id — used by the Tools-menu "X" to hide this room from the list. */
+  id: string;
   name: string;
   type: "public" | "private";
   topic: string | null;

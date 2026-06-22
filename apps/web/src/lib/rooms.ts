@@ -14,6 +14,19 @@ export async function fetchArchivedRooms(): Promise<ArchivedRoomBrief[]> {
 }
 
 /**
+ * Hide one of your archived rooms from the "My Rooms" list (the "X" button).
+ * Non-destructive — the archived room is untouched and can be recreated with
+ * `/go <name>`; this just stops it cluttering the list (e.g. a typo room).
+ */
+export async function hideArchivedRoom(roomId: string): Promise<void> {
+  const r = await fetch(`/rooms/${encodeURIComponent(roomId)}/hide-archived`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!r.ok) throw new Error(`Couldn't hide that room (${r.status}).`);
+}
+
+/**
  * Full room dossier for the Room Info bar's expandable pullout (description,
  * NPC roster, metadata). Lazy-fetched only when a viewer expands the bar, so
  * the heavier fields stay off the room broadcast. Throws on non-OK so the bar

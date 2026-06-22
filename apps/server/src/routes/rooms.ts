@@ -129,6 +129,26 @@ export async function registerRoomsRoutes(
   });
 
   /**
+   * POST /rooms/:id/hide-archived
+   *
+   * Hide one of the caller's ARCHIVED rooms from their "My Rooms" list /
+   * `/myrooms` (e.g. a typo room they never meant to make). Owner-only, and
+   * only for archived rooms (active rooms aren't in the list). NON-destructive:
+   * it just stamps `archive_hidden_at`; the archived row stays put and the
+   * room can be brought back any time with `/go <name>` (which clears it).
+   */
+  app.post<{ Params: { id: string } }>("/rooms/:id/hide-archived", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
+    if (!room) { reply.code(404); return { error: "no room" }; }
+    if (room.ownerId !== me.id) { reply.code(403); return { error: "not your room" }; }
+    if (!room.archivedAt) { reply.code(409); return { error: "room is active" }; }
+    await db.update(rooms).set({ archiveHiddenAt: new Date() }).where(eq(rooms.id, room.id));
+    return { ok: true };
+  });
+
+  /**
    * GET /rooms/:id/info
    *
    * Full room dossier behind the Room Info bar's expandable pullout. Lazy-

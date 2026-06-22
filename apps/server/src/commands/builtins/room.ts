@@ -98,6 +98,10 @@ async function resurrectArchivedRoom(
     .update(rooms)
     .set({
       archivedAt: null,
+      // Clear any "hidden from My Rooms" dismissal (0259): a resurrected room
+      // is intentionally active again, so if it later re-archives it should
+      // reappear in the owner's list rather than stay silently hidden.
+      archiveHiddenAt: null,
       ownerId: ctx.user.id,
       lastOwnerUserId: prior?.ownerId ?? ctx.user.id,
       // Backfill safety: if the row predates migration 0196 and had

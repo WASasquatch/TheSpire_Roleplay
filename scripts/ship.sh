@@ -294,14 +294,16 @@ if [[ "$HAS_CHANGES" -eq 1 ]]; then
   fi
   echo "==> Committing..."
   git commit -m "$MSG"
-  # The change-log file (commit.md) is a RUNNING list of pending changes.
-  # Now that its contents are captured in the commit, empty it so the next
-  # batch starts clean. Only clears when the message came FROM a file
-  # (MSG_SRC set at slurp time); a literal -m message leaves nothing to
-  # clear. The file is gitignored, so truncating it never dirties the tree.
+  # DON'T clear commit.md here. Its contents are now in the commit, but if the
+  # push or deploy below crashes we'd have wiped the running change-log while
+  # the work sits committed-but-undeployed — and a retry would have no message
+  # to ship (this exact bug lost a batch once). Defer the clear to the very end
+  # of the script, after push + deploy BOTH succeed (`set -e` aborts before
+  # then on any failure). Just remember we committed from a file so the
+  # end-of-script step knows to clear it. (A literal `-m` message sets no
+  # MSG_SRC, so there's nothing to clear.)
   if [[ -n "${MSG_SRC:-}" && -f "$MSG_SRC" ]]; then
-    : > "$MSG_SRC"
-    echo "==> Cleared $MSG_SRC for the next batch."
+    CLEAR_MSG_SRC_ON_SUCCESS=1
   fi
 else
   echo "==> Nothing to commit; proceeding to push + deploy."
@@ -329,6 +331,16 @@ if [[ "$SKIP_DEPLOY" -eq 0 ]]; then
   else
     flyctl deploy
   fi
+fi
+
+# Everything above succeeded (`set -e` would have aborted the script on any
+# failure). ONLY NOW is it safe to empty the running change-log so the next
+# batch starts clean — deferred from the commit step so a push/deploy crash
+# never wipes commit.md while the work is committed-but-undeployed. gitignored,
+# so truncating never dirties the tree.
+if [[ "${CLEAR_MSG_SRC_ON_SUCCESS:-0}" -eq 1 && -n "${MSG_SRC:-}" && -f "${MSG_SRC}" ]]; then
+  : > "$MSG_SRC"
+  echo "==> Cleared $MSG_SRC for the next batch."
 fi
 
 echo "ship: done."

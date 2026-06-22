@@ -664,6 +664,15 @@ export const rooms = sqliteTable(
      * the originating messages have been swept. Null/absent = none yet. (0258)
      */
     npcList: text("npc_list"),
+    /**
+     * Owner dismissed this ARCHIVED room from their "My Rooms" list (e.g. a
+     * typo room they never meant to make). Set when the owner clicks the "X"
+     * in the Tools-menu list; it only hides the row from `/myrooms` + the My
+     * Rooms section, the archived row itself is untouched and the room can
+     * still be recreated with `/go <name>` (which clears this on resurrect).
+     * Null = visible in the list. (migration 0259)
+     */
+    archiveHiddenAt: integer("archive_hidden_at", { mode: "timestamp_ms" }),
   },
   (t) => ({
     nameUq: uniqueIndex("rooms_name_uq").on(sql`lower(${t.name})`),

@@ -8,7 +8,18 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { Palette } from "lucide-react";
+import {
+  Bold,
+  Code,
+  Eye,
+  Image as ImageIcon,
+  Italic,
+  Link as LinkIcon,
+  Palette,
+  Quote,
+  Strikethrough,
+  Underline,
+} from "lucide-react";
 import type { CommandDoc, RoomOccupant, ThreadCategory } from "@thekeep/shared";
 import { extractMentionTokens } from "@thekeep/shared";
 import { CompleterPopup, type CompletionItem } from "./CompleterPopup.js";
@@ -1698,10 +1709,10 @@ export function Composer({
         // below reclaims the width the old drawer column was eating.
         <div className="flex flex-wrap items-center gap-0.5 text-xs">
           <FmtButton title="Bold (Ctrl+B)" onClick={() => wrapSelection("**", "**", "bold")}>
-            <b>B</b>
+            <Bold className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           <FmtButton title="Italic (Ctrl+I)" onClick={() => wrapSelection("*", "*", "italic")}>
-            <i>I</i>
+            <Italic className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           {/* Underline has no markdown equivalent (CommonMark reserves
               `__` for bold-alt), so we wrap selection in literal <u>…</u>
@@ -1709,10 +1720,10 @@ export function Composer({
               Same render path as the markdown buttons; the stored body
               just happens to keep the tag. */}
           <FmtButton title="Underline" onClick={() => wrapSelection("<u>", "</u>", "underline")}>
-            <u>U</u>
+            <Underline className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           <FmtButton title="Strikethrough" onClick={() => wrapSelection("~~", "~~", "strikethrough")}>
-            <s>S</s>
+            <Strikethrough className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           {/* Color: opens the OS color picker, wraps the selection in
               <font color="#hex">. The input is visually hidden and driven
@@ -1730,19 +1741,19 @@ export function Composer({
             onChange={(e) => applyColor(e.target.value)}
           />
           <FmtButton title="Inline code" onClick={() => wrapSelection("`", "`", "code")}>
-            <span className="font-mono">{"<>"}</span>
+            <Code className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           <FmtButton title="Spoiler (click to reveal)" onClick={() => wrapSelection("||", "||", "spoiler")}>
-            <span aria-hidden>👁</span>
+            <Eye className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           <FmtButton title="Blockquote, prefixes selected lines with '> '" onClick={() => prefixLines("> ")}>
-            <span aria-hidden>❝</span>
+            <Quote className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           <FmtButton title="Link, wraps selection as [text](url)" onClick={() => insertLinkOrImage("link")}>
-            <span aria-hidden>🔗</span>
+            <LinkIcon className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           <FmtButton title="Image, inserts ![alt](url)" onClick={() => insertLinkOrImage("image")}>
-            <span aria-hidden>🖼</span>
+            <ImageIcon className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           {/* Inline emoticon: pops the picker, then inserts the
               :slug:idx: token at the caret. The markdown renderer

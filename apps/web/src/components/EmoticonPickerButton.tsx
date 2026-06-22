@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
+import { Smile } from "lucide-react";
 import { EmoticonPicker } from "./EmoticonPicker.js";
+import { recordEmoticonPick } from "../lib/recentEmoticons.js";
 
 /**
  * Toolbar button that opens the emoticon picker and, on pick, hands
@@ -51,7 +53,7 @@ export function EmoticonPickerButton({
         disabled={disabled}
         className={className}
       >
-        <span aria-hidden>😊</span>
+        <Smile className="h-4 w-4" aria-hidden="true" />
       </button>
       {open ? (
         <EmoticonPicker
@@ -59,6 +61,13 @@ export function EmoticonPickerButton({
           onClose={() => setOpen(false)}
           onPick={(slug, idx) => {
             setOpen(false);
+            // Bump the local recents so composing with an emoticon feeds the
+            // "Recent" row (frequency-sorted) the same way reacting does — the
+            // more you use one, the higher it climbs. Reactions record via
+            // toggleReaction; this is the missing compose/insert side. (The
+            // reaction picker uses EmoticonPicker directly, not this button,
+            // so there's no double-count.)
+            recordEmoticonPick(slug, idx);
             onPick(slug, idx);
           }}
           {...(onPickUnicode

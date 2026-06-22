@@ -3737,6 +3737,7 @@ function Chat() {
           {room && !isForumRoom ? (
             <RoomInfoBar
               room={room}
+              canEdit={canControlTheater}
               onOpenWorld={(id) => setWorldViewerId(id)}
             />
           ) : null}

@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { rooms } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import type { ArchivedRoomBrief } from "@thekeep/shared";
@@ -24,11 +24,17 @@ export async function listArchivedOwnedRooms(
   userId: string,
 ): Promise<ArchivedRoomBrief[]> {
   const rows = await db
-    .select({ name: rooms.name, type: rooms.type, topic: rooms.topic })
+    .select({ id: rooms.id, name: rooms.name, type: rooms.type, topic: rooms.topic })
     .from(rooms)
-    .where(and(eq(rooms.ownerId, userId), isNotNull(rooms.archivedAt)))
+    .where(and(
+      eq(rooms.ownerId, userId),
+      isNotNull(rooms.archivedAt),
+      // Exclude rooms the owner dismissed from their list via the "X" (0259).
+      isNull(rooms.archiveHiddenAt),
+    ))
     .orderBy(asc(rooms.name));
   return rows.map((r) => ({
+    id: r.id,
     name: r.name,
     type: r.type === "private" ? "private" : "public",
     topic: r.topic ?? null,

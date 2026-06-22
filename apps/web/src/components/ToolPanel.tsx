@@ -14,10 +14,11 @@ import {
   Archive,
   Lock,
   RotateCcw,
+  X,
 } from "lucide-react";
 import { useChat } from "../state/store.js";
 import { fetchForums } from "../lib/forums.js";
-import { fetchArchivedRooms } from "../lib/rooms.js";
+import { fetchArchivedRooms, hideArchivedRoom } from "../lib/rooms.js";
 import type { ArchivedRoomBrief, ForumSummary } from "@thekeep/shared";
 import { SearchBar } from "./SearchBar.js";
 import { CloseButton } from "./CloseButton.js";
@@ -155,6 +156,16 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
       .catch(() => { /* section just shows its empty/hint state */ });
     return () => { cancelled = true; };
   }, [drawerOpen]);
+
+  // "X" on a My Rooms row: hide that archived room from the list (e.g. a typo
+  // room). Optimistic — drop it immediately, restore (re-sorted) if the server
+  // rejects. Non-destructive; the room can be recreated any time with /go.
+  function hideArchivedRoomRow(room: ArchivedRoomBrief) {
+    setArchivedRooms((cur) => (cur ? cur.filter((r) => r.id !== room.id) : cur));
+    void hideArchivedRoom(room.id).catch(() => {
+      setArchivedRooms((cur) => (cur ? [...cur, room].sort((a, b) => a.name.localeCompare(b.name)) : cur));
+    });
+  }
 
   const forumBookmarks = useMemo(() => {
     if (!forums) return [] as ForumSummary[];
@@ -502,7 +513,12 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
                 </div>
               ) : (
                 archivedRooms.map((r) => (
-                  <ArchivedRoomRow key={r.name} room={r} onRecreate={() => fire(`/go ${r.name}`)} />
+                  <ArchivedRoomRow
+                    key={r.id}
+                    room={r}
+                    onRecreate={() => fire(`/go ${r.name}`)}
+                    onHide={() => hideArchivedRoomRow(r)}
+                  />
                 ))
               )}
             </Section>
@@ -1171,39 +1187,55 @@ function ForumBookmarkRow({ forum, onClick }: { forum: ForumSummary; onClick: ()
 }
 
 /**
- * One archived-room row in the "My Rooms" section. The whole row is the
+ * One archived-room row in the "My Rooms" section. The main (left) area is the
  * Recreate action — clicking fires `/go <name>`, which resurrects the room
  * with its original settings (a private room returns private with its
- * original password) and joins it. A lock glyph marks private rooms; the
- * topic, when set, rides along as a muted subtitle so a user with several
- * archived rooms can tell them apart.
+ * original password) and joins it. A trailing "X" hides the room from this
+ * list (non-destructive; for a typo room you never meant to make) — the
+ * archived room is untouched and can be recreated any time with /go. A lock
+ * glyph marks private rooms; the topic, when set, rides along as a muted
+ * subtitle so a user with several archived rooms can tell them apart.
+ *
+ * It's a flex of two sibling <button>s (not nested — invalid HTML): the
+ * Recreate target takes the slack, the X sits flush at the right.
  */
-function ArchivedRoomRow({ room, onRecreate }: { room: ArchivedRoomBrief; onRecreate: () => void }) {
+function ArchivedRoomRow({ room, onRecreate, onHide }: { room: ArchivedRoomBrief; onRecreate: () => void; onHide: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onRecreate}
-      title={
-        room.type === "private"
-          ? `Recreate and join ${room.name} (returns private with its original password)`
-          : `Recreate and join ${room.name}`
-      }
-      className="flex w-full items-center gap-2 border-b border-keep-rule/40 py-1.5 pl-6 pr-3 text-left text-sm hover:bg-keep-banner/40 lg:py-1"
-    >
-      {room.type === "private" ? (
-        <Lock size={12} aria-hidden className="shrink-0 text-keep-muted" />
-      ) : null}
-      <span className="min-w-0 flex-1 truncate">
-        <span className="text-keep-text">{room.name}</span>
-        {room.topic ? (
-          <span className="ml-1.5 truncate text-xs text-keep-muted">— {room.topic}</span>
+    <div className="flex w-full items-center border-b border-keep-rule/40">
+      <button
+        type="button"
+        onClick={onRecreate}
+        title={
+          room.type === "private"
+            ? `Recreate and join ${room.name} (returns private with its original password)`
+            : `Recreate and join ${room.name}`
+        }
+        className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-6 pr-2 text-left text-sm hover:bg-keep-banner/40 lg:py-1"
+      >
+        {room.type === "private" ? (
+          <Lock size={12} aria-hidden className="shrink-0 text-keep-muted" />
         ) : null}
-      </span>
-      <span className="flex shrink-0 items-center gap-1 text-[10px] font-action uppercase tracking-wider text-keep-muted">
-        <RotateCcw size={12} aria-hidden />
-        Recreate
-      </span>
-    </button>
+        <span className="min-w-0 flex-1 truncate">
+          <span className="text-keep-text">{room.name}</span>
+          {room.topic ? (
+            <span className="ml-1.5 truncate text-xs text-keep-muted">— {room.topic}</span>
+          ) : null}
+        </span>
+        <span className="flex shrink-0 items-center gap-1 text-[10px] font-action uppercase tracking-wider text-keep-muted">
+          <RotateCcw size={12} aria-hidden />
+          Recreate
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={onHide}
+        title={`Remove ${room.name} from this list — doesn't delete it; recreate any time with /go`}
+        aria-label={`Remove ${room.name} from your rooms list`}
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-keep-muted hover:bg-keep-banner/60 hover:text-keep-text"
+      >
+        <X size={14} aria-hidden />
+      </button>
+    </div>
   );
 }
 

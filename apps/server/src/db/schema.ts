@@ -673,10 +673,23 @@ export const rooms = sqliteTable(
      * Null = visible in the list. (migration 0259)
      */
     archiveHiddenAt: integer("archive_hidden_at", { mode: "timestamp_ms" }),
+    /**
+     * Short, URL-safe handle (e.g. "the-tavern") for deep-linking the room
+     * from chat / announcements via the `{room:<slug>}` UI-route chip, and
+     * a stable id-independent reference generally. Derived from the name at
+     * create time (lib/roomSlug.deriveUniqueRoomSlug) and owner-editable in
+     * room settings; globally unique (case-insensitive). Nullable only for
+     * the window between migration 0260's ADD COLUMN and the one-shot boot
+     * backfill — every live row carries one. (migration 0260)
+     */
+    slug: text("slug"),
   },
   (t) => ({
     nameUq: uniqueIndex("rooms_name_uq").on(sql`lower(${t.name})`),
     forumIdx: index("rooms_forum_idx").on(t.forumId),
+    // Partial unique index (WHERE slug IS NOT NULL) lives in migration 0260;
+    // drizzle can't express the partial predicate, so it's declared in SQL
+    // only and omitted here (mirrors the difficultyClass/isDefault posture).
   }),
 );
 

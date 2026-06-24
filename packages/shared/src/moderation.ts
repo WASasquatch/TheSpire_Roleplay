@@ -101,7 +101,10 @@ export type AuditAction =
   | "forum_ban"
   | "forum_unban"
   | "forum_board_create"
-  | "forum_board_archive";
+  | "forum_board_archive"
+  // System tab (live-ops maintenance)
+  | "system_restart"           // admin restarted the server process
+  | "system_purge_messages";   // admin purged ALL chat messages site-wide
 
 /**
  * Preset action groups for the AuditTab's category dropdown. Each

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { ChatMessage, PermissionKey, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, UiRouteRankingBoard, WorldDetail } from "@thekeep/shared";
-import { DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, legibleAgainstBg, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
+import { arcadeGameByKey, DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, legibleAgainstBg, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
 import { AdminPanel } from "./components/AdminPanel.js";
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
 import { SplashLanding } from "./components/SplashLanding.js";
@@ -41,7 +41,7 @@ import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanner
 import { onUiRouteOpen } from "./lib/uiRouteOpen.js";
 import { fetchLatestPublishedStory } from "./lib/latestStory.js";
 import { playRoomTransition } from "./lib/transitions/orchestrator.js";
-import { fetchSpotlightMember } from "./lib/uiRouteDynamicLabel.js";
+import { fetchSpotlightMember, fetchRoomBrief } from "./lib/uiRouteDynamicLabel.js";
 import { loadForumDraft, pruneStaleForumDrafts, saveForumDraft } from "./lib/forumDrafts.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
 import { ThreadModal } from "./components/ThreadModal.js";
@@ -1319,14 +1319,44 @@ function Chat() {
       }
       case "open-arcade-game": {
         const perms = useChat.getState().me?.permissions ?? [];
-        if (!perms.includes("use_arcade") || !perms.includes("use_eidolon_tamer")) {
+        const game = arcadeGameByKey(t.game);
+        if (!game || !perms.includes("use_arcade") || !perms.includes(game.permission)) {
           setNotice({ code: "NO_PERMISSION", message: "That game isn't available to you." });
           return;
         }
-        // Only one game today; the launcher handles unlock state, but the
-        // direct chip opens the window (the game itself shows a locked
-        // notice + the server enforces the purchase gate).
-        setEidolonOpen(true);
+        // Open the game's window directly (the window/server enforce the
+        // per-player unlock gate). New games add their opener here; the
+        // launcher is the safe fallback for a registry entry whose window
+        // isn't wired up yet.
+        const openers: Record<string, () => void> = {
+          eidolon: () => setEidolonOpen(true),
+          urugal: () => setUrugalOpen(true),
+          grimhold: () => setGrimholdOpen(true),
+        };
+        (openers[game.key] ?? (() => setArcadeOpen(true)))();
+        return;
+      }
+      case "open-world":
+        // Parametric `{world:<slug>}` chip. The viewer accepts an id or
+        // slug and does its own visibility-gated fetch (a private world
+        // the viewer can't see renders the modal's "private" stub), so
+        // we just hand it the ref straight through.
+        setWorldViewerId(t.ref);
+        return;
+      case "nav-room": {
+        // Parametric `{room:<slug>}` chip. Resolve slug → {id,name} via
+        // the visibility-gated lookup (cached from the label render),
+        // then reuse the same room-join path a userlist/RoomsTree click
+        // takes. A null brief means the room is gone or not visible to
+        // this viewer, so we surface a gentle notice instead of a
+        // silent no-op.
+        void fetchRoomBrief(t.ref).then((brief) => {
+          if (!brief) {
+            setNotice({ code: "NO_ROOM", message: "That room isn't available to you." });
+            return;
+          }
+          onRoomClick(brief.id);
+        });
         return;
       }
       case "modal-rules":     setRulesOpen(true); return;

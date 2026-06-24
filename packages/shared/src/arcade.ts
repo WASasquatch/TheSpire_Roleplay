@@ -12,6 +12,50 @@
  * locally for smooth visuals between syncs (mirrors the Theater model).
  */
 
+import type { PermissionKey } from "./permissions.js";
+
+/* =========================================================================
+   Arcade games registry — the single source of truth for "what games
+   exist." Adding a game here automatically gives it a `{arcade:<key>}`
+   navigation chip (uiRoutes generates one per entry, so the catalog, both
+   chip renderers, the validator, and the Help reference all pick it up)
+   plus per-game permission gating on the chip click. The only per-game
+   piece NOT driven from here is the actual window component + its open
+   state (apps/web/App.tsx, keyed by `key`) — a React component can't be
+   expressed as data.
+   ========================================================================= */
+
+export interface ArcadeGameDef {
+  /** Stable key. Used in the `{arcade:<key>}` token and to look up the
+   *  window opener client-side. Lowercase a-z/digits only so it satisfies
+   *  the UI-route token grammar. */
+  key: string;
+  /** Display name shown on the chip and in Help. */
+  label: string;
+  /** lucide-react icon NAME (PascalCase) rendered before the label. The
+   *  web side maps it to a component (lib/uiRouteIcons). */
+  icon: string;
+  /** Chip title / Help description (terse). */
+  description: string;
+  /** Per-game permission required to PLAY (on top of `use_arcade`). The
+   *  chip-click dispatcher checks both before opening the window. */
+  permission: PermissionKey;
+}
+
+export const ARCADE_GAMES = [
+  { key: "eidolon", label: "Eidolon Tamer", icon: "Egg", description: "Open the Eidolon Tamer.", permission: "use_eidolon_tamer" },
+  { key: "urugal", label: "Urugal's Descent", icon: "Pickaxe", description: "Open Urugal's Descent.", permission: "use_urugal_descent" },
+  { key: "grimhold", label: "Grimhold", icon: "Ghost", description: "Open the Grimhold cabinet (six games).", permission: "use_grimhold" },
+] as const satisfies ReadonlyArray<ArcadeGameDef>;
+
+/** Union of the registered game keys ("eidolon" | "urugal" | "grimhold"). */
+export type ArcadeGameKey = (typeof ARCADE_GAMES)[number]["key"];
+
+/** Lookup by key. Returns null for an unknown key. */
+export function arcadeGameByKey(key: string): ArcadeGameDef | null {
+  return ARCADE_GAMES.find((g) => g.key === key) ?? null;
+}
+
 /** The one-time unlock cosmetic key (a "Flair" in the shop). */
 export const FLAIR_EIDOLON_TAMER = "flair_eidolon_tamer";
 

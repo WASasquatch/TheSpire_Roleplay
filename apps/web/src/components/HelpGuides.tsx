@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from "react";
-import type { PermissionKey } from "@thekeep/shared";
+import { buildUiRouteHelp, type PermissionKey } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
+import { UiRouteIcon } from "../lib/uiRouteIcons.js";
 
 /**
  * TOC click handler. The Help modal scrolls within its own
@@ -125,6 +126,78 @@ function K({ children }: { children: ReactNode }) {
 
 function Heading({ children }: { children: ReactNode }) {
   return <div className="mt-2 font-action text-[13px] uppercase tracking-widest text-keep-muted">{children}</div>;
+}
+
+/**
+ * Body of the "Navigation tags" guide. The tag reference is generated
+ * from the live catalog and filtered to the tags THIS viewer is allowed
+ * to author (so a regular member never sees the staff tags), via the
+ * shared `buildUiRouteHelp`. Reads the viewer's role from the store so
+ * the list re-filters if their role changes mid-session.
+ */
+function NavigationTagsGuide() {
+  const role = useChat((s) => s.me?.role ?? null);
+  const groups = buildUiRouteHelp(role);
+  return (
+    <>
+      <P>
+        Navigation tags are little clickable chips you can drop into chat or an announcement.
+        Type a keyword inside curly braces and it turns into a button that opens the matching
+        page, menu, or place. Readers just click it. They work in chat messages, forum posts,
+        direct messages, and announcements (the banner marquee and scheduled lines).
+      </P>
+      <P>
+        For example, typing <K>{"check out the {shop}!"}</K> posts "check out the" followed by
+        a clickable <b>Shop</b> chip that opens the shop.
+      </P>
+      <Tip>
+        Anything in braces that isn't a real tag just stays as plain text, so writing{" "}
+        <K>{"{nervously}"}</K> in roleplay is perfectly safe. It only becomes a chip when the
+        keyword matches one of the tags below.
+      </Tip>
+
+      <Heading>Link to a specific world or room</Heading>
+      <P>Two tags take a short "handle" so you can point at one exact place:</P>
+      <Bullets>
+        <li>
+          <K>{"{world:the-handle}"}</K> opens that world. The handle is the world's slug (the
+          short name in its web address, like <K>elyria</K>).
+        </li>
+        <li>
+          <K>{"{room:the-handle}"}</K> jumps to that room. To find a room's handle, go to the
+          room and type <K>/slug</K>; it shows the handle and the exact{" "}
+          <K>{"{room:...}"}</K> to paste. Owners and mods can set a custom one with{" "}
+          <K>/slug my-handle</K>.
+        </li>
+      </Bullets>
+      <P>
+        The chip shows the world or room's real name, and it respects privacy: if a reader
+        can't see that place, the chip quietly stays as plain text for them.
+      </P>
+
+      <Heading>Every tag you can use</Heading>
+      <P>
+        These are the tags available to you. Type any of them in braces (for example{" "}
+        <K>{"{rules}"}</K>) and it becomes a clickable chip.
+      </P>
+      {groups.map((g) => (
+        <div key={g.label} className="space-y-1">
+          <div className="font-semibold text-keep-text">{g.label}</div>
+          <ul className="list-disc space-y-1 pl-5">
+            {g.entries.map((e) => (
+              <li key={e.token}>
+                <K>{`{${e.token}}`}</K>{" "}
+                <span className="text-keep-muted">
+                  <UiRouteIcon name={e.icon} className="mr-1 inline-block h-3.5 w-3.5 align-text-bottom text-keep-action" />
+                  {e.label}. {e.description}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </>
+  );
 }
 
 /* ============================================================ *
@@ -1783,36 +1856,8 @@ foot of the mountains. Speaks little. Watches everything.</p>
 
   {
     id: "shortcut-chips",
-    title: "Shortcut chips in chat",
-    body: (
-      <>
-        <P>
-          You can drop a clickable chip into any message that opens a part of The Spire when
-          tapped. Type the shortcut inside curly braces. It renders as a small chip the moment you
-          send.
-        </P>
-        <Heading>What is available</Heading>
-        <Bullets>
-          <li><K>{`{rules}`}</K> opens the rules page.</li>
-          <li><K>{`{help}`}</K> opens this help modal.</li>
-          <li><K>{`{messages}`}</K> opens the Messages inbox.</li>
-          <li><K>{`{earning}`}</K> opens the Earning dashboard.</li>
-          <li><K>{`{shop}`}</K> jumps to the shop.</li>
-          <li><K>{`{scriptorium}`}</K> opens the long-form library.</li>
-          <li><K>{`{scriptorium:latest:story}`}</K> opens the most recently published story.</li>
-        </Bullets>
-        <Heading>Where they work</Heading>
-        <Bullets>
-          <li>Chat messages.</li>
-          <li>Announcements (the banner marquee and scheduled chat lines).</li>
-          <li>Anywhere else text renders the same way as chat.</li>
-        </Bullets>
-        <Tip>
-          Useful for explaining things to a new arrival without making them search a menu. "Have a
-          look at <K>{`{rules}`}</K> when you get a second" lands as a chip they can tap.
-        </Tip>
-      </>
-    ),
+    title: "Shortcut chips: clickable {tags} for chat & announcements",
+    body: <NavigationTagsGuide />,
   },
 
   {

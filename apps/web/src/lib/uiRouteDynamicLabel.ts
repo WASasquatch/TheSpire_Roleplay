@@ -104,6 +104,116 @@ export async function fetchTopRankedName(board: UiRouteRankingBoard): Promise<st
   return r?.boards.find((b) => b.key === board)?.entries[0]?.displayName ?? null;
 }
 
+/* ---------- world / room name (for {world:…} / {room:…} labels) ---------- */
+
+interface NameCell {
+  name: string | null;
+  expiresAt: number;
+  inFlight: Promise<string | null> | null;
+}
+
+/** Shared TTL-cache+coalesce around a per-ref name lookup. Keyed by the
+ *  lowercase slug/id ref so a chat line repeating a chip hits once. */
+function cachedName(
+  cache: Map<string, NameCell>,
+  ref: string,
+  fetcher: () => Promise<string | null>,
+): Promise<string | null> {
+  const key = ref.toLowerCase();
+  const now = Date.now();
+  const cell = cache.get(key);
+  if (cell) {
+    if (cell.name !== null && now < cell.expiresAt) return Promise.resolve(cell.name);
+    if (cell.inFlight) return cell.inFlight;
+  }
+  const inFlight = (async () => {
+    const name = await fetcher();
+    cache.set(key, { name, expiresAt: Date.now() + TTL_MS, inFlight: null });
+    return name;
+  })();
+  cache.set(key, { name: cell?.name ?? null, expiresAt: cell?.expiresAt ?? 0, inFlight });
+  return inFlight;
+}
+
+const worldNameCache = new Map<string, NameCell>();
+
+/**
+ * Resolve a world's display name from its slug/id via the same
+ * `GET /worlds/:idOrSlug` the viewer uses. Visibility is enforced
+ * server-side: a private world the viewer can't see returns the
+ * `{private:true}` stub (or 404), both of which yield a null name so
+ * the chip degrades to its literal `{world:slug}` text.
+ */
+export async function fetchWorldName(ref: string): Promise<string | null> {
+  return cachedName(worldNameCache, ref, async () => {
+    try {
+      const r = await fetch(`/worlds/${encodeURIComponent(ref)}`, { credentials: "include" });
+      if (!r.ok) return null;
+      const j = (await r.json()) as { private?: boolean; world?: { name?: string } };
+      if (j.private) return null;
+      return j.world?.name ?? null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+/* ---------- room brief (id + name, for {room:…} labels + join) ---------- */
+
+export interface RoomBrief {
+  id: string;
+  name: string;
+}
+
+interface RoomBriefCell {
+  brief: RoomBrief | null;
+  expiresAt: number;
+  inFlight: Promise<RoomBrief | null> | null;
+}
+const roomBriefCache = new Map<string, RoomBriefCell>();
+
+/**
+ * Resolve a room's `{id, name}` from its slug via
+ * `GET /rooms/by-slug/:slug`. The endpoint is visibility-gated: a
+ * private room the viewer isn't a member of (and isn't staff for)
+ * 404s, yielding null so the chip degrades to literal text and the
+ * click is a no-op. Cached so the label render + the click-time join
+ * share one lookup. Both `{id, name}` are needed: the label uses the
+ * name, the dispatcher uses the id to drive the existing room:join.
+ */
+export async function fetchRoomBrief(ref: string): Promise<RoomBrief | null> {
+  const key = ref.toLowerCase();
+  const now = Date.now();
+  const cell = roomBriefCache.get(key);
+  if (cell) {
+    if (cell.brief !== null && now < cell.expiresAt) return cell.brief;
+    if (cell.inFlight) return cell.inFlight;
+  }
+  const inFlight = (async () => {
+    let brief: RoomBrief | null = null;
+    try {
+      const r = await fetch(`/rooms/by-slug/${encodeURIComponent(ref)}`, { credentials: "include" });
+      if (r.ok) {
+        const j = (await r.json()) as { room?: RoomBrief };
+        brief = j.room ?? null;
+      }
+    } catch {
+      brief = null;
+    }
+    roomBriefCache.set(key, { brief, expiresAt: Date.now() + TTL_MS, inFlight: null });
+    return brief;
+  })();
+  roomBriefCache.set(key, { brief: cell?.brief ?? null, expiresAt: cell?.expiresAt ?? 0, inFlight });
+  return inFlight;
+}
+
+/** Room display name for a `{room:<slug>}` chip label, or null when the
+ *  room is missing / not visible to the viewer. */
+export async function fetchRoomName(ref: string): Promise<string | null> {
+  const brief = await fetchRoomBrief(ref);
+  return brief?.name ?? null;
+}
+
 /* ---------- unified resolver ---------- */
 
 /**
@@ -130,6 +240,10 @@ export async function resolveDynamicChipLabel(entry: UiRoute): Promise<string | 
       // Keep the board name as context: "Wealthiest: Kaal".
       return top ? `${entry.label}: ${top}` : null;
     }
+    case "open-world":
+      return fetchWorldName(t.ref);
+    case "nav-room":
+      return fetchRoomName(t.ref);
     default:
       return null;
   }

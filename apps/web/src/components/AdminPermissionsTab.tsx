@@ -66,6 +66,7 @@ const GROUP_LABEL: Record<PermissionGroup, string> = {
   admin_panel_tabs: "Admin panel tabs",
   earning_admin: "Earning admin",
   backups: "Backups",
+  system: "System",
   permission_admin: "Permission admin",
 };
 

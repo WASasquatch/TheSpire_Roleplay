@@ -18,6 +18,7 @@ import { parseInline } from "../lib/markdown.js";
 import { listStyles } from "../lib/ornaments/index.js";
 import { AdminEarningTab } from "./AdminEarningTab.js";
 import { AdminBackupsTab } from "./AdminBackupsTab.js";
+import { AdminSystemTab } from "./AdminSystemTab.js";
 import { AdminScriptoriumTab } from "./AdminScriptoriumTab.js";
 import { AdminEmoticonsTab } from "./AdminEmoticonsTab.js";
 import { AdminForumsTab } from "./AdminForumsTab.js";
@@ -39,7 +40,7 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "mod-cases" | "scriptorium" | "forums" | "emoticons" | "audit" | "backups" | "permissions" | "announcements" | "faqs" | "email";
+type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "mod-cases" | "scriptorium" | "forums" | "emoticons" | "audit" | "system" | "backups" | "permissions" | "announcements" | "faqs" | "email";
 
 /** Tab grouping for the strip's section dividers. Each tab carries
  *  the id of the group it belongs to; the render walks the list
@@ -119,6 +120,10 @@ const TAB_ITEMS: ReadonlyArray<{
   // `view_admin_backups` to masteradmin-only; the granular key gives
   // the option of granting it to a delegate without elevating the
   // delegate to full masteradmin.
+  // System tab: live server metrics + masteradmin-only maintenance tools
+  // (restart, purge messages). Sits left of Backups; both are the
+  // destructive "system" group that lands last on the strip.
+  { id: "system", label: "System", group: "system", permission: "view_system_metrics" },
   { id: "backups", label: "Backups", group: "system", permission: "view_admin_backups" },
 ];
 
@@ -438,6 +443,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             {tab === "emoticons" ? <AdminEmoticonsTab /> : null}
             {tab === "forums" && canSeeTab("view_admin_forums") ? <AdminForumsTab /> : null}
             {tab === "audit" ? <AuditTab /> : null}
+            {tab === "system" && canSeeTab("view_system_metrics") ? <AdminSystemTab /> : null}
             {tab === "backups" && canSeeTab("view_admin_backups") ? <AdminBackupsTab /> : null}
             {tab === "permissions" && canSeeTab("view_admin_permissions") ? <AdminPermissionsTab /> : null}
             {tab === "announcements" && canSeeTab("view_admin_announcements") ? <AdminAnnouncementsTab /> : null}

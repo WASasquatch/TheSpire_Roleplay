@@ -1,10 +1,12 @@
 import argon2 from "argon2";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { deriveSlug } from "@thekeep/shared";
 import { bans, roomInvites, roomMembers, rooms } from "../../db/schema.js";
 import { joinRoom } from "../../realtime/broadcast.js";
 import { getSettings } from "../../settings.js";
 import { hasPermission } from "../../auth/permissions.js";
+import { deriveUniqueRoomSlug } from "../../lib/roomSlug.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 /**
@@ -153,6 +155,7 @@ async function joinOrCreatePublic(ctx: CommandContext, name: string) {
     await ctx.db.insert(rooms).values({
       id,
       name,
+      slug: await deriveUniqueRoomSlug(ctx.db, name),
       type: "public",
       ownerId: ctx.user.id,
       // Owner-history seeds: both equal the creator on a fresh room.
@@ -204,6 +207,7 @@ async function createPrivateRoom(ctx: CommandContext, name: string, password: st
   await ctx.db.insert(rooms).values({
     id,
     name,
+    slug: await deriveUniqueRoomSlug(ctx.db, name),
     type: "private",
     passwordHash,
     ownerId: ctx.user.id,
@@ -451,6 +455,83 @@ export const topicCommand: CommandHandler = {
     const { addMessage, broadcastRoomState } = await import("../../realtime/broadcast.js");
     await addMessage(ctx, { kind: "system", body: `Topic set: ${txt}` });
     await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
+  },
+};
+
+/** Mirrors the world-slug shape: starts/ends alphanumeric, hyphens
+ *  between, 1-60 chars. `deriveSlug` already normalizes to this, but we
+ *  re-validate so a normalize-to-empty input (all symbols) is rejected
+ *  with a clear message instead of silently writing nothing. */
+const ROOM_SLUG_RX = /^[a-z0-9](?:[a-z0-9-]{0,58}[a-z0-9])?$/;
+
+/**
+ * /slug [handle]
+ *
+ * Show or set the current room's link handle — the short, URL-safe
+ * token that `{room:<handle>}` chips resolve to in chat / announcements.
+ * No args shows the current handle plus a ready-to-paste `{room:…}`
+ * token; an argument sets a custom handle (owner/mod/admin only),
+ * normalized via the shared `deriveSlug` and kept globally unique.
+ */
+export const slugCommand: CommandHandler = {
+  name: "slug",
+  usage: "/slug [<handle>]",
+  description: "Show or set the room's link handle for {room:…} chips (owner/mod only to set).",
+  subcommands: [
+    {
+      verb: "(no args)",
+      usage: "/slug",
+      description: "Show the room's link handle and its {room:…} chip token.",
+    },
+    {
+      verb: "<handle>",
+      usage: "/slug <handle>",
+      description: "Set the room's link handle (owner/mod/admin only). Letters, numbers, and hyphens.",
+    },
+  ],
+  async run(ctx) {
+    const raw = ctx.argsText.trim();
+    if (!raw) {
+      const r = (await ctx.db.select({ slug: rooms.slug }).from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
+      const slug = r?.slug ?? null;
+      ctx.socket.emit("error:notice", {
+        code: "SLUG",
+        message: slug
+          ? `Room link handle: ${slug}. Paste {room:${slug}} into chat or an announcement to link here.`
+          : "This room has no link handle yet.",
+      });
+      return;
+    }
+    if (!(await callerCanEditRoom(ctx))) {
+      ctx.socket.emit("error:notice", {
+        code: "PERM",
+        message: "Only the room owner or a mod can change the room's link handle.",
+      });
+      return;
+    }
+    const slug = deriveSlug(raw);
+    if (!ROOM_SLUG_RX.test(slug)) {
+      ctx.socket.emit("error:notice", {
+        code: "BAD_SLUG",
+        message: "Handle must be letters, numbers, and hyphens (e.g. the-tavern).",
+      });
+      return;
+    }
+    const taken = (await ctx.db
+      .select({ id: rooms.id })
+      .from(rooms)
+      .where(and(sql`lower(${rooms.slug}) = ${slug}`, ne(rooms.id, ctx.roomId)))
+      .limit(1))[0];
+    if (taken) {
+      ctx.socket.emit("error:notice", {
+        code: "SLUG_TAKEN",
+        message: `The handle "${slug}" is already used by another room.`,
+      });
+      return;
+    }
+    await ctx.db.update(rooms).set({ slug }).where(eq(rooms.id, ctx.roomId));
+    const { addMessage } = await import("../../realtime/broadcast.js");
+    await addMessage(ctx, { kind: "system", body: `Room link handle set: ${slug} (use {room:${slug}} to link here)` });
   },
 };
 

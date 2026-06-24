@@ -36,6 +36,7 @@
 
 import type { Role } from "./profile.js";
 import { roleRank } from "./profile.js";
+import { ARCADE_GAMES, type ArcadeGameKey } from "./arcade.js";
 
 /** Earning dashboard tabs, mirrors the `EarningOpenSpec` in apps/web. */
 export type UiRouteEarningTab =
@@ -107,9 +108,27 @@ export type UiRouteTarget =
    *  notice if the viewer lacks it. */
   | { kind: "open-arcade" }
   /** Open a specific arcade game directly (e.g. the Eidolon Tamer
-   *  window). Dispatcher checks the game's permission + that the player
-   *  has purchased the unlock. */
-  | { kind: "open-arcade-game"; game: "eidolon" };
+   *  window). `game` is a key from the shared ARCADE_GAMES registry;
+   *  the dispatcher checks `use_arcade` + that game's permission, then
+   *  opens its window (which handles the per-player unlock gate). */
+  | { kind: "open-arcade-game"; game: ArcadeGameKey }
+  /**
+   * PARAMETRIC: open a SPECIFIC world's viewer by slug (or id). The
+   * token is `{world:<slug>}` — NOT a static catalog row; it's
+   * synthesized by `resolveUiRoute`'s parametric fallback. The chip
+   * label hydrates to the world's real name at render time and is
+   * visibility-gated: a private world the viewer can't see resolves to
+   * no label, so the chip falls back to literal text. Dispatcher opens
+   * it via `setWorldViewerId(ref)` (the viewer accepts id or slug).
+   */
+  | { kind: "open-world"; ref: string }
+  /**
+   * PARAMETRIC: navigate to a SPECIFIC chat room by slug. Token
+   * `{room:<slug>}`. Like `open-world`: synthesized, name-hydrated, and
+   * access-gated at resolve time (a private room a non-member can't see
+   * resolves to no label). Dispatcher joins it via the room:join path.
+   */
+  | { kind: "nav-room"; ref: string };
 
 export interface UiRoute {
   /** Canonical token (lowercase, colon-delimited). Matches what the
@@ -157,84 +176,96 @@ export interface UiRoute {
  */
 export const UI_ROUTES: ReadonlyArray<UiRoute> = [
   // ----- Top-level pages / sitewide chrome -----
-  { token: "rules", label: "Rules", icon: "📜", description: "Open the site rules modal.", target: { kind: "modal-rules" } },
-  { token: "help", label: "Help", icon: "❓", description: "Open the chat help modal.", target: { kind: "modal-help" } },
-  { token: "messages", label: "Messages", icon: "💬", description: "Open your Direct Messenger.", target: { kind: "modal-messages" } },
-  { token: "dms", label: "DMs", icon: "💬", description: "Open your Direct Messenger.", target: { kind: "modal-messages" } },
-  { token: "worlds", label: "Worlds", icon: "🌍", description: "Open the worlds catalog.", target: { kind: "modal-worlds" } },
-  { token: "profile", label: "My profile", icon: "🪞", description: "Open your own profile editor.", target: { kind: "modal-profile-own" } },
+  // `icon` is a lucide-react icon NAME (PascalCase). The web side maps it
+  // to a component (lib/uiRouteIcons); the HTML announcement path emits a
+  // placeholder the same map hydrates. Unknown names render no glyph.
+  { token: "rules", label: "Rules", icon: "Scroll", description: "Open the site rules modal.", target: { kind: "modal-rules" } },
+  { token: "help", label: "Help", icon: "HelpCircle", description: "Open the chat help modal.", target: { kind: "modal-help" } },
+  { token: "messages", label: "Messages", icon: "MessageSquare", description: "Open your Direct Messenger.", target: { kind: "modal-messages" } },
+  { token: "dms", label: "DMs", icon: "MessageSquare", description: "Open your Direct Messenger.", target: { kind: "modal-messages" } },
+  { token: "worlds", label: "Worlds", icon: "Globe", description: "Open the worlds catalog.", target: { kind: "modal-worlds" } },
+  { token: "profile", label: "My profile", icon: "UserCircle", description: "Open your own profile editor.", target: { kind: "modal-profile-own" } },
 
   // ----- Earning dashboard + tabs (bare + common-plural alias) -----
-  { token: "earning", label: "Earning", icon: "🎖", description: "Open the Earning dashboard.", target: { kind: "modal-earning" } },
-  { token: "earnings", label: "Earnings", icon: "🎖", description: "Open the Earning dashboard.", target: { kind: "modal-earning" } },
-  { token: "earning:overview", label: "Earning overview", icon: "🎖", description: "Open Earning → Overview.", target: { kind: "modal-earning", tab: "overview" } },
-  { token: "earning:ledger", label: "Earning ledger", icon: "📒", description: "Open Earning → Ledger.", target: { kind: "modal-earning", tab: "ledger" } },
-  { token: "earning:styles", label: "Name styles", icon: "🅰️", description: "Open Earning → Name Styles.", target: { kind: "modal-earning", tab: "styles" } },
-  { token: "earning:borders", label: "Borders", icon: "🖼", description: "Open Earning → Borders.", target: { kind: "modal-earning", tab: "borders" } },
-  { token: "earning:cosmetics", label: "Cosmetics", icon: "🎨", description: "Open Earning → Cosmetics.", target: { kind: "modal-earning", tab: "cosmetics" } },
-  { token: "earning:settings", label: "Earning settings", icon: "⚙️", description: "Open Earning → Settings.", target: { kind: "modal-earning", tab: "settings" } },
+  { token: "earning", label: "Earning", icon: "Award", description: "Open the Earning dashboard.", target: { kind: "modal-earning" } },
+  { token: "earnings", label: "Earnings", icon: "Award", description: "Open the Earning dashboard.", target: { kind: "modal-earning" } },
+  { token: "earning:overview", label: "Earning overview", icon: "LayoutDashboard", description: "Open Earning → Overview.", target: { kind: "modal-earning", tab: "overview" } },
+  { token: "earning:ledger", label: "Earning ledger", icon: "NotebookText", description: "Open Earning → Ledger.", target: { kind: "modal-earning", tab: "ledger" } },
+  { token: "earning:styles", label: "Name styles", icon: "Type", description: "Open Earning → Name Styles.", target: { kind: "modal-earning", tab: "styles" } },
+  { token: "earning:borders", label: "Borders", icon: "Frame", description: "Open Earning → Borders.", target: { kind: "modal-earning", tab: "borders" } },
+  { token: "earning:cosmetics", label: "Cosmetics", icon: "Palette", description: "Open Earning → Cosmetics.", target: { kind: "modal-earning", tab: "cosmetics" } },
+  { token: "earning:settings", label: "Earning settings", icon: "Settings", description: "Open Earning → Settings.", target: { kind: "modal-earning", tab: "settings" } },
 
   // ----- Items sub-tabs (bare + nested forms; the bare forms read more
   //                       naturally inline, "check out the {shop}!") -----
-  { token: "items", label: "Items", icon: "🧰", description: "Open Earning → Items.", target: { kind: "modal-earning", tab: "items" } },
-  { token: "earning:items", label: "Items", icon: "🧰", description: "Open Earning → Items.", target: { kind: "modal-earning", tab: "items" } },
-  { token: "earnings:items", label: "Items", icon: "🧰", description: "Open Earning → Items.", target: { kind: "modal-earning", tab: "items" } },
+  { token: "items", label: "Items", icon: "Package", description: "Open Earning → Items.", target: { kind: "modal-earning", tab: "items" } },
+  { token: "earning:items", label: "Items", icon: "Package", description: "Open Earning → Items.", target: { kind: "modal-earning", tab: "items" } },
+  { token: "earnings:items", label: "Items", icon: "Package", description: "Open Earning → Items.", target: { kind: "modal-earning", tab: "items" } },
 
-  { token: "inventory", label: "Inventory", icon: "🧰", description: "Open Items → Inventory.", target: { kind: "modal-earning", tab: "items", itemSubTab: "inventory" } },
-  { token: "earning:items:inventory", label: "Inventory", icon: "🧰", description: "Open Items → Inventory.", target: { kind: "modal-earning", tab: "items", itemSubTab: "inventory" } },
-  { token: "earnings:items:inventory", label: "Inventory", icon: "🧰", description: "Open Items → Inventory.", target: { kind: "modal-earning", tab: "items", itemSubTab: "inventory" } },
+  { token: "inventory", label: "Inventory", icon: "Backpack", description: "Open Items → Inventory.", target: { kind: "modal-earning", tab: "items", itemSubTab: "inventory" } },
+  { token: "earning:items:inventory", label: "Inventory", icon: "Backpack", description: "Open Items → Inventory.", target: { kind: "modal-earning", tab: "items", itemSubTab: "inventory" } },
+  { token: "earnings:items:inventory", label: "Inventory", icon: "Backpack", description: "Open Items → Inventory.", target: { kind: "modal-earning", tab: "items", itemSubTab: "inventory" } },
 
-  { token: "shop", label: "Shop", icon: "🛒", description: "Open Items → Shop.", target: { kind: "modal-earning", tab: "items", itemSubTab: "shop" } },
-  { token: "earning:items:shop", label: "Shop", icon: "🛒", description: "Open Items → Shop.", target: { kind: "modal-earning", tab: "items", itemSubTab: "shop" } },
-  { token: "earnings:items:shop", label: "Shop", icon: "🛒", description: "Open Items → Shop.", target: { kind: "modal-earning", tab: "items", itemSubTab: "shop" } },
+  { token: "shop", label: "Shop", icon: "ShoppingCart", description: "Open Items → Shop.", target: { kind: "modal-earning", tab: "items", itemSubTab: "shop" } },
+  { token: "earning:items:shop", label: "Shop", icon: "ShoppingCart", description: "Open Items → Shop.", target: { kind: "modal-earning", tab: "items", itemSubTab: "shop" } },
+  { token: "earnings:items:shop", label: "Shop", icon: "ShoppingCart", description: "Open Items → Shop.", target: { kind: "modal-earning", tab: "items", itemSubTab: "shop" } },
 
-  { token: "collection", label: "Collection", icon: "📦", description: "Open Items → Collection.", target: { kind: "modal-earning", tab: "items", itemSubTab: "collection" } },
-  { token: "earning:items:collection", label: "Collection", icon: "📦", description: "Open Items → Collection.", target: { kind: "modal-earning", tab: "items", itemSubTab: "collection" } },
-  { token: "earnings:items:collection", label: "Collection", icon: "📦", description: "Open Items → Collection.", target: { kind: "modal-earning", tab: "items", itemSubTab: "collection" } },
+  { token: "collection", label: "Collection", icon: "Boxes", description: "Open Items → Collection.", target: { kind: "modal-earning", tab: "items", itemSubTab: "collection" } },
+  { token: "earning:items:collection", label: "Collection", icon: "Boxes", description: "Open Items → Collection.", target: { kind: "modal-earning", tab: "items", itemSubTab: "collection" } },
+  { token: "earnings:items:collection", label: "Collection", icon: "Boxes", description: "Open Items → Collection.", target: { kind: "modal-earning", tab: "items", itemSubTab: "collection" } },
 
-  { token: "pets", label: "Pets", icon: "🐾", description: "Open Items → Pets.", target: { kind: "modal-earning", tab: "items", itemSubTab: "pets" } },
-  { token: "earning:items:pets", label: "Pets", icon: "🐾", description: "Open Items → Pets.", target: { kind: "modal-earning", tab: "items", itemSubTab: "pets" } },
-  { token: "earnings:items:pets", label: "Pets", icon: "🐾", description: "Open Items → Pets.", target: { kind: "modal-earning", tab: "items", itemSubTab: "pets" } },
+  { token: "pets", label: "Pets", icon: "PawPrint", description: "Open Items → Pets.", target: { kind: "modal-earning", tab: "items", itemSubTab: "pets" } },
+  { token: "earning:items:pets", label: "Pets", icon: "PawPrint", description: "Open Items → Pets.", target: { kind: "modal-earning", tab: "items", itemSubTab: "pets" } },
+  { token: "earnings:items:pets", label: "Pets", icon: "PawPrint", description: "Open Items → Pets.", target: { kind: "modal-earning", tab: "items", itemSubTab: "pets" } },
 
   // ----- Scriptorium routes (full-page nav, not modals) -----
-  { token: "scriptorium", label: "Scriptorium", icon: "📚", description: "Open the Scriptorium catalog.", target: { kind: "nav-scriptorium" } },
-  { token: "scriptorium:latest", label: "Latest in Scriptorium", icon: "📖", description: "Open the Scriptorium catalog sorted newest first.", target: { kind: "nav-scriptorium", sort: "latest" } },
+  { token: "scriptorium", label: "Scriptorium", icon: "Library", description: "Open the Scriptorium catalog.", target: { kind: "nav-scriptorium" } },
+  { token: "scriptorium:latest", label: "Latest in Scriptorium", icon: "BookOpen", description: "Open the Scriptorium catalog sorted newest first.", target: { kind: "nav-scriptorium", sort: "latest" } },
   // DYNAMIC: chip label + click target resolve at render time from
   // the latest published story. The static `label` here is the
   // skeleton shown while the fetch is in flight (and the fallback
   // when nothing is published yet).
-  { token: "scriptorium:latest:story", label: "Latest story", icon: "📖", description: "Open the most recently published story in the Scriptorium.", target: { kind: "nav-scriptorium-latest-story" } },
+  { token: "scriptorium:latest:story", label: "Latest story", icon: "BookOpen", description: "Open the most recently published story in the Scriptorium.", target: { kind: "nav-scriptorium-latest-story" } },
 
   // ----- Earning rankings (Rankings tab + per-board deep links) -----
   // The bare {rankings} opens the tab; each {ranking:<board>} is a
   // DYNAMIC chip whose label surfaces that board's current #1 (resolved
   // at render time) and which scrolls the Rankings tab to that board.
-  { token: "rankings", label: "Rankings", icon: "🏆", description: "Open Earning → Rankings.", target: { kind: "modal-earning", tab: "rankings" } },
-  { token: "earning:rankings", label: "Rankings", icon: "🏆", description: "Open Earning → Rankings.", target: { kind: "modal-earning", tab: "rankings" } },
-  { token: "earnings:rankings", label: "Rankings", icon: "🏆", description: "Open Earning → Rankings.", target: { kind: "modal-earning", tab: "rankings" } },
-  { token: "ranking:currency", label: "Wealthiest", icon: "💰", description: "Top of the Wealthiest (Currency) leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "currency" } },
-  { token: "ranking:xp", label: "Most XP", icon: "✨", description: "Top of the Most XP leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "xp" } },
-  { token: "ranking:rank", label: "Highest Rank", icon: "🎖", description: "Top of the Highest Rank leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "rank" } },
-  { token: "ranking:items", label: "Most Items", icon: "🧰", description: "Top of the Most Items leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "items" } },
-  { token: "ranking:messages", label: "Most Talkative", icon: "💬", description: "Top of the Most Talkative (Messages) leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "messages" } },
-  { token: "ranking:borders", label: "Most Borders", icon: "🖼", description: "Top of the Most Borders leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "borders" } },
-  { token: "ranking:styles", label: "Most Styles", icon: "🅰️", description: "Top of the Most Styles leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "styles" } },
-  { token: "ranking:topics", label: "Forum Founders", icon: "📌", description: "Top of the Forum Founders (Topics) leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "topics" } },
-  { token: "ranking:reactions", label: "Reactor", icon: "❤️", description: "Top of the Reactor (Reactions) leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "reactions" } },
+  { token: "rankings", label: "Rankings", icon: "Trophy", description: "Open Earning → Rankings.", target: { kind: "modal-earning", tab: "rankings" } },
+  { token: "earning:rankings", label: "Rankings", icon: "Trophy", description: "Open Earning → Rankings.", target: { kind: "modal-earning", tab: "rankings" } },
+  { token: "earnings:rankings", label: "Rankings", icon: "Trophy", description: "Open Earning → Rankings.", target: { kind: "modal-earning", tab: "rankings" } },
+  { token: "ranking:currency", label: "Wealthiest", icon: "Coins", description: "Top of the Wealthiest (Currency) leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "currency" } },
+  { token: "ranking:xp", label: "Most XP", icon: "Sparkles", description: "Top of the Most XP leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "xp" } },
+  { token: "ranking:rank", label: "Highest Rank", icon: "Medal", description: "Top of the Highest Rank leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "rank" } },
+  { token: "ranking:items", label: "Most Items", icon: "Package", description: "Top of the Most Items leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "items" } },
+  { token: "ranking:messages", label: "Most Talkative", icon: "MessageSquare", description: "Top of the Most Talkative (Messages) leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "messages" } },
+  { token: "ranking:borders", label: "Most Borders", icon: "Frame", description: "Top of the Most Borders leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "borders" } },
+  { token: "ranking:styles", label: "Most Styles", icon: "Type", description: "Top of the Most Styles leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "styles" } },
+  { token: "ranking:topics", label: "Forum Founders", icon: "Pin", description: "Top of the Forum Founders (Topics) leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "topics" } },
+  { token: "ranking:reactions", label: "Reactor", icon: "Heart", description: "Top of the Reactor (Reactions) leaderboard.", target: { kind: "modal-earning", tab: "rankings", board: "reactions" } },
 
   // ----- Member spotlight (dynamic; opens a profile) -----
-  { token: "users:latest", label: "Newest member", icon: "🧑", description: "Open the most recently joined member's profile.", target: { kind: "open-member", pick: "latest", scope: "user" } },
-  { token: "users:random", label: "Random member", icon: "🎲", description: "Open a random member's profile.", target: { kind: "open-member", pick: "random", scope: "user" } },
-  { token: "users:character:latest", label: "Newest character", icon: "🧑", description: "Open the most recently created character's profile.", target: { kind: "open-member", pick: "latest", scope: "character" } },
-  { token: "users:character:random", label: "Random character", icon: "🎲", description: "Open a random character's profile.", target: { kind: "open-member", pick: "random", scope: "character" } },
+  { token: "users:latest", label: "Newest member", icon: "UserPlus", description: "Open the most recently joined member's profile.", target: { kind: "open-member", pick: "latest", scope: "user" } },
+  { token: "users:random", label: "Random member", icon: "Dices", description: "Open a random member's profile.", target: { kind: "open-member", pick: "random", scope: "user" } },
+  { token: "users:character:latest", label: "Newest character", icon: "UserPlus", description: "Open the most recently created character's profile.", target: { kind: "open-member", pick: "latest", scope: "character" } },
+  { token: "users:character:random", label: "Random character", icon: "Dices", description: "Open a random character's profile.", target: { kind: "open-member", pick: "random", scope: "character" } },
 
   // ----- Spire Arcade -----
-  { token: "arcade", label: "Spire Arcade", icon: "🕹", description: "Open the Spire Arcade.", target: { kind: "open-arcade" } },
-  { token: "arcade:eidolon", label: "Eidolon Tamer", icon: "🥚", description: "Open the Eidolon Tamer.", target: { kind: "open-arcade-game", game: "eidolon" } },
+  { token: "arcade", label: "Spire Arcade", icon: "Gamepad2", description: "Open the Spire Arcade.", target: { kind: "open-arcade" } },
+  // One {arcade:<key>} chip per registered game — generated from the
+  // shared ARCADE_GAMES registry so a new game lights up everywhere
+  // (catalog, both renderers, validator, Help) from one registry entry.
+  ...ARCADE_GAMES.map((g): UiRoute => ({
+    token: `arcade:${g.key}`,
+    label: g.label,
+    icon: g.icon,
+    description: g.description,
+    target: { kind: "open-arcade-game", game: g.key },
+  })),
 
   // ----- Admin / staff (author-gated; viewer-gated mirrors the admin-panel posture) -----
-  { token: "admin", label: "Admin panel", icon: "🛡", description: "Open the admin panel.", authorRole: "admin", viewerRole: "mod", target: { kind: "modal-admin" } },
-  { token: "admin:announcements", label: "Admin · Announcements", icon: "📣", description: "Open the admin Announcements tab.", authorRole: "admin", viewerRole: "mod", target: { kind: "modal-admin", tab: "announcements" } },
+  { token: "admin", label: "Admin panel", icon: "Shield", description: "Open the admin panel.", authorRole: "admin", viewerRole: "mod", target: { kind: "modal-admin" } },
+  { token: "admin:announcements", label: "Admin · Announcements", icon: "Megaphone", description: "Open the admin Announcements tab.", authorRole: "admin", viewerRole: "mod", target: { kind: "modal-admin", tab: "announcements" } },
 ];
 
 /** Build-time lookup by token. */
@@ -242,9 +273,53 @@ const UI_ROUTES_BY_TOKEN = new Map<string, UiRoute>(
   UI_ROUTES.map((r) => [r.token.toLowerCase(), r]),
 );
 
-/** Resolve a token (case-insensitive). Returns null when unknown. */
+/**
+ * PARAMETRIC tokens: `{world:<slug>}` and `{room:<slug>}` reference a
+ * SPECIFIC entity, so they can't be enumerated in the static catalog.
+ * They're synthesized on the fly with a skeleton label ("World"/"Room")
+ * that the dynamic-label pass swaps for the entity's real name. The
+ * slug ref is everything after the first colon (slugs never contain
+ * colons, so multi-segment refs just defensively re-join).
+ */
+function synthesizeParametricRoute(prefix: string, ref: string): UiRoute | null {
+  if (!ref) return null;
+  if (prefix === "world") {
+    return {
+      token: `world:${ref}`,
+      label: "World",
+      icon: "Globe",
+      description: `Open the world "${ref}".`,
+      target: { kind: "open-world", ref },
+    };
+  }
+  if (prefix === "room") {
+    return {
+      token: `room:${ref}`,
+      label: "Room",
+      icon: "DoorOpen",
+      description: `Go to the room "${ref}".`,
+      target: { kind: "nav-room", ref },
+    };
+  }
+  return null;
+}
+
+/**
+ * Resolve a token (case-insensitive). Returns null when unknown. Tries
+ * the static catalog first, then the parametric `{world:…}`/`{room:…}`
+ * fallback. Parametric routes carry no author/viewer role gate here —
+ * access is enforced at resolve time (a private world/room a viewer
+ * can't see hydrates to no label and the chip degrades to plain text).
+ */
 export function resolveUiRoute(token: string): UiRoute | null {
-  return UI_ROUTES_BY_TOKEN.get(token.toLowerCase()) ?? null;
+  const lc = token.toLowerCase();
+  const exact = UI_ROUTES_BY_TOKEN.get(lc);
+  if (exact) return exact;
+  const colon = lc.indexOf(":");
+  if (colon > 0) {
+    return synthesizeParametricRoute(lc.slice(0, colon), lc.slice(colon + 1));
+  }
+  return null;
 }
 
 /**
@@ -333,6 +408,20 @@ export function canViewerSeeUiRoute(entry: UiRoute, viewerRole: Role | null): bo
 }
 
 /**
+ * Author-side gate: can a user of `role` put this token in a message /
+ * announcement? Mirrors the `authorRole` half of
+ * {@link validateAuthorUiRouteTokens}, exposed on its own so the Help
+ * modal can show each viewer ONLY the tags they're actually allowed to
+ * use (a regular user never sees `{admin}` in the reference). Tokens
+ * with no `authorRole` are usable by everyone, including logged-out.
+ */
+export function canViewerAuthorUiRoute(entry: UiRoute, viewerRole: Role | null): boolean {
+  if (!entry.authorRole) return true;
+  if (!viewerRole) return false;
+  return roleRank(viewerRole) >= roleRank(entry.authorRole);
+}
+
+/**
  * Split a body into alternating text + token segments, the building
  * block both the markdown chat renderer and the HTML-body
  * post-processor share. Each token segment carries the original
@@ -417,6 +506,13 @@ export function dynamicMarkerFor(entry: UiRoute): string | null {
     // The bare {rankings} (no board) is static.
     case "modal-earning":
       return t.board ? "ranking" : null;
+    // Parametric world/room chips hydrate their skeleton label
+    // ("World"/"Room") into the entity's actual name, and the resolve
+    // doubles as the visibility gate (no access → no label).
+    case "open-world":
+      return "world";
+    case "nav-room":
+      return "room";
     default:
       return null;
   }
@@ -430,7 +526,14 @@ export function renderUiRouteChipsInHtml(html: string): string {
     if (!entry) return raw;
     const safeToken = escapeHtmlAttr(token);
     const safeLabel = escapeHtml(entry.label);
-    const safeIcon = entry.icon ? `<span aria-hidden="true">${escapeHtml(entry.icon)}</span> ` : "";
+    // Icon is a lucide NAME, not a glyph. Emit an empty placeholder span
+    // carrying the name; the client hydrator (hydrateDynamicUiRouteChips)
+    // mounts the matching lucide SVG into it after mount. Surfaces that
+    // never run the hydrator just show a label-only chip (graceful, no
+    // broken glyph).
+    const safeIcon = entry.icon
+      ? `<span class="tk-ui-route-chip-icon" data-tk-ui-route-icon="${escapeHtmlAttr(entry.icon)}" aria-hidden="true"></span> `
+      : "";
     const safeTitle = escapeHtmlAttr(entry.description);
     // Dynamic-resolved chips (e.g. {scriptorium:latest:story}) carry a
     // `data-tk-ui-route-dynamic="<marker>"` attribute that the
@@ -461,4 +564,69 @@ export function renderUiRouteChipsInHtml(html: string): string {
       `${safeIcon}<span class="tk-ui-route-chip-label">${safeLabel}</span></button>`
     );
   });
+}
+
+/* ============================================================
+ *  Help reference (Help modal → "Navigation tags" guide)
+ * ============================================================ */
+
+/**
+ * Curated grouping for the Help modal's tag reference. Each group lists
+ * the CANONICAL token per destination (aliases like `earnings` /
+ * `earning:items` are intentionally omitted so the reference stays
+ * scannable). Tokens are resolved through the live catalog at build
+ * time, so a renamed/removed entry simply drops out instead of showing
+ * stale docs — the curation can never silently lie about what works.
+ *
+ * The parametric `{world:<slug>}` / `{room:<slug>}` tags are NOT here
+ * (they take an argument, not a fixed token); the guide documents them
+ * with hand-written examples.
+ */
+export const UI_ROUTE_HELP_GROUPS: ReadonlyArray<{ label: string; tokens: ReadonlyArray<string> }> = [
+  { label: "Pages & menus", tokens: ["rules", "help", "messages", "worlds", "profile"] },
+  { label: "Earning", tokens: ["earning", "earning:ledger", "earning:styles", "earning:borders", "earning:cosmetics", "earning:settings"] },
+  { label: "Items", tokens: ["items", "shop", "inventory", "collection", "pets"] },
+  { label: "Scriptorium", tokens: ["scriptorium", "scriptorium:latest", "scriptorium:latest:story"] },
+  { label: "Rankings", tokens: ["rankings", "ranking:currency", "ranking:xp", "ranking:rank", "ranking:items", "ranking:messages", "ranking:borders", "ranking:styles", "ranking:topics", "ranking:reactions"] },
+  { label: "Members", tokens: ["users:latest", "users:random", "users:character:latest", "users:character:random"] },
+  { label: "Arcade", tokens: ["arcade", ...ARCADE_GAMES.map((g) => `arcade:${g.key}`)] },
+  { label: "Staff", tokens: ["admin", "admin:announcements"] },
+];
+
+export interface UiRouteHelpEntry {
+  token: string;
+  label: string;
+  icon?: string;
+  description: string;
+}
+export interface UiRouteHelpGroup {
+  label: string;
+  entries: UiRouteHelpEntry[];
+}
+
+/**
+ * Build the Help-modal tag reference for a viewer of `viewerRole`:
+ * resolves each curated token through the catalog, drops anything the
+ * viewer isn't allowed to AUTHOR (so a regular user never sees the staff
+ * tags), and omits now-empty groups. Pure — the React guide just maps
+ * over the result.
+ */
+export function buildUiRouteHelp(viewerRole: Role | null): UiRouteHelpGroup[] {
+  const out: UiRouteHelpGroup[] = [];
+  for (const group of UI_ROUTE_HELP_GROUPS) {
+    const entries: UiRouteHelpEntry[] = [];
+    for (const token of group.tokens) {
+      const entry = resolveUiRoute(token);
+      if (!entry) continue;
+      if (!canViewerAuthorUiRoute(entry, viewerRole)) continue;
+      entries.push({
+        token: entry.token,
+        label: entry.label,
+        ...(entry.icon ? { icon: entry.icon } : {}),
+        description: entry.description,
+      });
+    }
+    if (entries.length) out.push({ label: group.label, entries });
+  }
+  return out;
 }

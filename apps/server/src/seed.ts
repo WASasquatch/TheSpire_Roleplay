@@ -10,6 +10,7 @@ import { sanitizeBio } from "./auth/html.js";
 import { DEFAULT_WORLDS, WORLDS_SEED_VERSION } from "./seed_worlds.js";
 import type { Db } from "./db/index.js";
 import { runBackfillIfNeeded } from "./earning/backfill.js";
+import { backfillRoomSlugs } from "./lib/roomSlug.js";
 import { schedulePresenceSweep } from "./earning/sweeps.js";
 import { scheduleEidolonNudgeSweep } from "./earning/eidolonNudge.js";
 import { pruneSnapshots } from "./backup/snapshots.js";
@@ -177,6 +178,13 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
   // ungated by SKIP_DEFAULT_SEED, that flag governs the room-rename
   // edge case; item-template policy is a separate concern.
   await maybeReseedItemTemplates(db);
+
+  // Backfill room slugs (migration 0260). Runs AFTER every room-creating
+  // seed above (default rooms + system forum boards) so freshly-seeded
+  // rooms get a slug the same boot. Idempotent + cheap when there's
+  // nothing to fill (a single SELECT). Also catches any runtime create
+  // path that didn't set a slug, so {room:<slug>} links never miss.
+  await backfillRoomSlugs(db);
 }
 
 /**

@@ -1,5 +1,10 @@
+import os from "node:os";
+import { statSync, utimesSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { and, asc, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
+import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
@@ -33,6 +38,7 @@ import {
 } from "../realtime/broadcast.js";
 import { getSettings, updateSettings } from "../settings.js";
 import { recordAudit } from "../audit.js";
+import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
 import { registerAdminEarningRoutes } from "./earning.js";
 import { registerAdminBackupRoutes } from "./backup.js";
 import { registerAdminPermissionRoutes } from "./permissions.js";
@@ -200,6 +206,155 @@ export async function registerAdminRoutes(
       // distinguish "no crashes" from "log file missing."
       totalReturned: crashes.length,
     };
+  });
+
+  /* ---------- System tab: live metrics ----------
+   *
+   * Semi-live server vitals for the admin System tab: process + host
+   * resource use, live connection counts, the SQLite file size, headline
+   * row counts, and (when running on Fly) the machine's identity from the
+   * FLY_* env. Cheap enough to poll every few seconds. Read-only; gated on
+   * `view_system_metrics`.
+   */
+  app.get("/admin/system/metrics", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_system_metrics"))) return;
+
+    const mem = process.memoryUsage();
+    const cpus = os.cpus();
+
+    // Live socket connections, deduped to distinct users (same approach
+    // as /admin/overview).
+    const sockets = await io.fetchSockets();
+    const onlineUsers = new Set<string>();
+    for (const s of sockets) {
+      const uid = (s.data as { userId?: string }).userId;
+      if (uid) onlineUsers.add(uid);
+    }
+
+    // SQLite file size (main DB + its -wal). Mirrors the path resolution
+    // in db/index.ts so it points at the live file on the Fly volume.
+    const dbPath = resolve(process.env.SQLITE_PATH ?? process.env.DATABASE_URL ?? "./data/thekeep.sqlite");
+    const sizeOf = (p: string): number => { try { return statSync(p).size; } catch { return 0; } };
+
+    const countOf = (table: SQLiteTable): Promise<number> =>
+      db.select({ n: sql<number>`count(*)` }).from(table).then((r) => Number(r[0]?.n ?? 0));
+    const [userCount, roomCount, messageCount, sessionCount, worldCount] = await Promise.all([
+      countOf(users), countOf(rooms), countOf(messages), countOf(sessions), countOf(worlds),
+    ]);
+
+    return {
+      serverTimeMs: Date.now(),
+      process: {
+        uptimeSec: Math.floor(process.uptime()),
+        nodeVersion: process.version,
+        pid: process.pid,
+        rss: mem.rss,
+        heapUsed: mem.heapUsed,
+        heapTotal: mem.heapTotal,
+        external: mem.external,
+      },
+      host: {
+        platform: os.platform(),
+        cpuCount: cpus.length,
+        cpuModel: cpus[0]?.model ?? "unknown",
+        // loadavg is [1m, 5m, 15m]; all-zero on platforms that don't
+        // report it (e.g. Windows dev), which the UI renders as "n/a".
+        loadAvg: os.loadavg(),
+        totalMem: os.totalmem(),
+        freeMem: os.freemem(),
+        hostUptimeSec: Math.floor(os.uptime()),
+      },
+      connections: {
+        sockets: sockets.length,
+        onlineUsers: onlineUsers.size,
+      },
+      database: {
+        bytes: sizeOf(dbPath),
+        walBytes: sizeOf(`${dbPath}-wal`),
+      },
+      counts: {
+        users: userCount,
+        rooms: roomCount,
+        messages: messageCount,
+        sessions: sessionCount,
+        worlds: worldCount,
+      },
+      fly: {
+        machineId: process.env.FLY_MACHINE_ID ?? null,
+        region: process.env.FLY_REGION ?? null,
+        app: process.env.FLY_APP_NAME ?? null,
+        imageRef: process.env.FLY_IMAGE_REF ?? null,
+      },
+    };
+  });
+
+  /* ---------- System tab: restart the server process ----------
+   *
+   * The server NEVER spawns its own replacement — that orphaned a
+   * detached process (its own session via setsid) that ignored Ctrl-C
+   * and squatted the port, breaking the next start with EADDRINUSE.
+   * Instead we hand off to whatever launched us, two clean paths:
+   *
+   *   - UNDER `tsx watch` (dev `pnpm dev`): tsx watch already manages
+   *     the process and restarts it on any watched-file change, so we
+   *     just TOUCH this file. The watcher does a managed in-place
+   *     restart — no orphan, still Ctrl-C-able, hot reload intact.
+   *
+   *   - OTHERWISE (Fly, `./local-deploy.sh --prod`, bare `tsx`): exit
+   *     with the RESTART sentinel code. On Fly any non-zero exit trips
+   *     the machine restart policy; local-deploy.sh's boot loop watches
+   *     for this exact code and relaunches in the SAME terminal. A bare
+   *     `pnpm start` with no supervisor just stops (no orphan — the
+   *     operator relaunches), which is the honest outcome there.
+   *
+   * Gated on `restart_application` (masteradmin-only by default).
+   */
+  app.post("/admin/system/restart", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "restart_application"))) return;
+    const actor = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
+    const underTsxWatch = (process.env.npm_lifecycle_script ?? "").includes("tsx watch");
+    await recordAudit(db, { actorUserId: actor?.id ?? "system", action: "system_restart", metadata: { underTsxWatch } });
+    req.log.warn({ by: actor?.id, underTsxWatch }, "[system] admin-triggered process restart");
+    void reply.send({ ok: true, message: "Restarting — the server will be back in a few seconds." });
+    setTimeout(() => {
+      if (underTsxWatch) {
+        // Bump our own mtime so the watcher sees a change and restarts us.
+        try {
+          const self = fileURLToPath(import.meta.url);
+          const now = new Date();
+          utimesSync(self, now, now);
+          return;
+        } catch (err) {
+          req.log.error({ err }, "[system] watch-touch restart failed; exiting instead");
+        }
+      }
+      // RESTART_EXIT_CODE: EX_TEMPFAIL (75) = "relaunch me". local-deploy.sh's
+      // boot loop and Fly's restart policy both bring up a fresh process.
+      process.exit(75);
+    }, 400);
+    return reply;
+  });
+
+  /* ---------- System tab: purge ALL chat messages ----------
+   *
+   * Irreversibly deletes every row in `messages` site-wide. Rooms,
+   * accounts, worlds, etc. are untouched. Requires an explicit
+   * `{ confirm: "PURGE" }` body so a stray POST can't trigger it, on top
+   * of the `purge_all_messages` permission (masteradmin-only by default).
+   */
+  app.post<{ Body: unknown }>("/admin/system/purge-messages", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "purge_all_messages"))) return;
+    const parsed = z.object({ confirm: z.string() }).safeParse(req.body);
+    if (!parsed.success || parsed.data.confirm !== "PURGE") {
+      reply.code(400);
+      return { error: "confirm_required", message: 'Send { "confirm": "PURGE" } to proceed.' };
+    }
+    const actor = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
+    const before = Number((await db.select({ n: sql<number>`count(*)` }).from(messages))[0]?.n ?? 0);
+    await db.delete(messages);
+    await recordAudit(db, { actorUserId: actor?.id ?? "system", action: "system_purge_messages", metadata: { deleted: before } });
+    req.log.warn({ by: actor?.id, deleted: before }, "[system] purged all chat messages");
+    return { ok: true, deleted: before };
   });
 
   app.get<{ Querystring: { tzOffsetMin?: string } }>("/admin/overview", async (req, reply) => {
@@ -666,6 +821,7 @@ export async function registerAdminRoutes(
     await db.insert(rooms).values({
       id,
       name: body.name,
+      slug: await deriveUniqueRoomSlug(db, body.name),
       type: body.type,
       passwordHash: body.type === "private" && body.password
         ? await argon2.hash(body.password)

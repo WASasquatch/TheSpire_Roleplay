@@ -6,6 +6,7 @@ import {
   goCommand,
   inviteCommand,
   privateRoomCommand,
+  slugCommand,
   topicCommand,
 } from "./room.js";
 import { profileCommand, whoisCommand } from "./profile.js";
@@ -93,6 +94,7 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(privateRoomCommand);
   reg.registerBuiltin(inviteCommand);
   reg.registerBuiltin(topicCommand);
+  reg.registerBuiltin(slugCommand);
   reg.registerBuiltin(describeCommand);
   reg.registerBuiltin(iconCommand);
   reg.registerBuiltin(profileCommand);

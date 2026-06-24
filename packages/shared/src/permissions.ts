@@ -132,6 +132,11 @@ export const PERMISSION_KEYS = [
   "view_admin_mod_cases",
   "view_admin_faqs",
   "view_admin_email",
+  "view_system_metrics",
+
+  // ---- system (live metrics + destructive maintenance tools) ----
+  "restart_application",
+  "purge_all_messages",
 
   // ---- announcements ----
   // Two independently-grantable manage keys feed the same Announcements
@@ -280,6 +285,11 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   view_admin_mod_cases: "See the admin Mod Log tab (the moderation case log). Editing requires manage_mod_cases.",
   view_admin_faqs: "See the admin FAQ tab. Editing requires manage_faqs.",
   view_admin_email: "See the admin Email tab (verification settings + the emailer). Sending requires send_admin_email.",
+  view_system_metrics: "See the admin System tab: live server metrics (CPU, memory, connections, database size, uptime, host info).",
+
+  // system (destructive maintenance — masteradmin-only by default)
+  restart_application: "Restart the server process from the System tab. The machine comes back up on its own; live connections briefly drop.",
+  purge_all_messages: "Permanently delete EVERY chat message site-wide from the System tab. Irreversible; rooms and accounts are untouched.",
 
   // announcements
   manage_banner_announcements: "Create, edit, or delete the rotating chat-top banner announcements (HTML/Markdown).",
@@ -417,6 +427,11 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   view_admin_mod_cases: "admin_panel_tabs",
   view_admin_faqs: "admin_panel_tabs",
   view_admin_email: "admin_panel_tabs",
+  view_system_metrics: "admin_panel_tabs",
+
+  // system (destructive maintenance tools)
+  restart_application: "system",
+  purge_all_messages: "system",
 
   // announcements
   manage_banner_announcements: "site_admin",
@@ -453,6 +468,7 @@ export type PermissionGroup =
   | "admin_panel_tabs"
   | "earning_admin"
   | "backups"
+  | "system"
   | "permission_admin";
 
 /**

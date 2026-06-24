@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } fro
 import { CHK_SPAN_RE, customCmdCssToStyle, decodeCheckMarker, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, VMARK_SPAN_RE, type CheckResultData, type MentionRef, type UiRoute } from "@thekeep/shared";
 import { openUiRoute } from "./uiRouteOpen.js";
 import { resolveDynamicChipLabel } from "./uiRouteDynamicLabel.js";
+import { UiRouteIcon } from "./uiRouteIcons.js";
 import { splitMentions } from "./mentions.js";
 import { useActiveTheme } from "./theme.js";
 import { useEmoticons } from "../state/emoticons.js";
@@ -1800,7 +1801,7 @@ function UiRouteChip({ entry }: { entry: UiRoute }) {
       aria-label={entry.description}
       className="mx-1.5 inline-flex items-center gap-1 rounded border border-keep-action/50 bg-keep-action/10 px-1 py-0 align-baseline text-[1em] text-keep-action transition hover:border-keep-action hover:bg-keep-action/20"
     >
-      {entry.icon ? <span aria-hidden>{entry.icon}</span> : null}
+      <UiRouteIcon name={entry.icon} />
       <span>{renderedLabel}</span>
     </button>
   );

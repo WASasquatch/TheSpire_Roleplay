@@ -27,7 +27,7 @@ import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
 import { listArchivedOwnedRooms } from "../lib/archivedRooms.js";
 import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
-import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MAX_MESSAGES, mentionsField } from "@thekeep/shared";
+import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MAX_MESSAGES, mentionsField, roleRank } from "@thekeep/shared";
 import { buildChatLogHtml, type ExportMessageRow } from "../export/chatLog.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -110,6 +110,48 @@ export async function registerRoomsRoutes(
     );
 
     return { rooms: result };
+  });
+
+  /**
+   * GET /rooms/by-slug/:slug
+   *
+   * Lightweight {id, name} lookup for a room by its slug. Powers the
+   * `{room:<slug>}` UI-route chip: the renderer hydrates the chip label
+   * from `name`, and the click handler joins via `id`. Visibility-gated
+   * so a chip can't reveal or navigate into a room the viewer shouldn't
+   * see — public, non-members-only rooms resolve for anyone; private (or
+   * forum members-only) rooms resolve ONLY for a member, the owner, or
+   * staff. Everything else 404s, and the chip degrades to literal text.
+   */
+  app.get<{ Params: { slug: string } }>("/rooms/by-slug/:slug", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    const slug = req.params.slug.trim().toLowerCase();
+    if (!slug) { reply.code(404); return { error: "not found" }; }
+    const room = (await db
+      .select()
+      .from(rooms)
+      .where(and(sql`lower(${rooms.slug}) = ${slug}`, isNull(rooms.archivedAt)))
+      .limit(1))[0];
+    if (!room) { reply.code(404); return { error: "not found" }; }
+    const openToAll = room.type === "public" && !room.forumMembersOnly;
+    if (!openToAll) {
+      // Gated room: require a logged-in viewer who is staff, the owner,
+      // or a member. A 404 (not 403) keeps a gated room's existence from
+      // leaking via the status code.
+      if (!me) { reply.code(404); return { error: "not found" }; }
+      const isStaff = roleRank(me.role) >= roleRank("mod");
+      let allowed = isStaff || room.ownerId === me.id;
+      if (!allowed) {
+        const m = (await db
+          .select({ role: roomMembers.role })
+          .from(roomMembers)
+          .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, me.id)))
+          .limit(1))[0];
+        allowed = !!m;
+      }
+      if (!allowed) { reply.code(404); return { error: "not found" }; }
+    }
+    return { room: { id: room.id, name: room.name } };
   });
 
   /**

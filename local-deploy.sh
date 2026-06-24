@@ -122,7 +122,25 @@ if [[ "$MODE" == "prod" ]]; then
   echo "==> Booting Fastify in production mode (NODE_ENV=production)..."
   echo "==> App will be at http://localhost:${PORT}"
   echo "==> Ctrl+C here stops it."
-  exec pnpm --filter @thekeep/server run start
+  # Restart loop. The System-tab "Restart" button exits the server with
+  # code 75 (EX_TEMPFAIL) to ask for a relaunch; we re-run `start` on that
+  # code ONLY. Any other exit (clean stop, crash, or Ctrl+C/130) ends the
+  # loop so real failures surface instead of hot-looping. Ctrl+C also lands
+  # on the foreground node (same process group), so it stops cleanly; the
+  # trap just tidies the closing message. NOT `exec`, so this bash stays as
+  # the supervisor — that's the whole point.
+  trap 'echo; echo "==> Stopped."; exit 0' INT TERM
+  while true; do
+    set +e
+    pnpm --filter @thekeep/server run start
+    code=$?
+    set -e
+    if [[ "$code" == "75" ]]; then
+      echo "==> Restart requested (exit 75); relaunching server..."
+      continue
+    fi
+    exit "$code"
+  done
 fi
 
 echo "==> Booting Vite (web) + tsx watch (server) via 'pnpm dev'..."

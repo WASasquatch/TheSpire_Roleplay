@@ -123,6 +123,15 @@ export const theaterCommand: CommandHandler = {
         } else {
           kind = "live";
         }
+      } else if (kind === "youtube" && /youtube\.com\/live\//i.test(url)) {
+        // Auto-detect: `youtube.com/live/<id>` is YouTube's canonical
+        // live-broadcast URL, so flag it live even on a plain `/theater add`.
+        // Without the flag the client treats it as a VOD and runs the
+        // position-sync loop, which yanks a live stream around the timeline
+        // (the "live keeps jumping" report). A live opened via a plain
+        // `watch?v=` URL can't be detected from the URL alone — that one
+        // still needs `/theater live`.
+        live = true;
       }
       const source: TheaterSource = { id: nanoid(), url, kind, ...(title ? { title } : {}), ...(live ? { live: true } : {}) };
       const next = [...playlist, source];

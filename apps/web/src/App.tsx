@@ -259,13 +259,24 @@ export function App() {
       try {
         const r = await fetch("/auth/me");
         if (!r.ok) {
-          // Same logic as logout: clear the token before disconnecting
-          // so an in-flight reconnect attempt doesn't carry the dead
-          // sid back to the server.
-          clearSessionToken();
-          setKickReason("Your session expired due to inactivity. Please log in again.");
-          disconnectSocket();
-          setMe(null);
+          // ONLY a definitive 401 means the session is actually gone. Every
+          // other non-2xx is transient and the session is still valid
+          // server-side: 5xx during a synchronous-SQLite event-loop stall,
+          // 502/503 across a deploy or machine restart, 429 from the per-IP
+          // rate limit when several tabs (or NAT/CGNAT-shared users) poll at
+          // once. Treating those as expiry logged healthy users out with a
+          // bogus "inactivity" banner AND wiped their token - forcing a
+          // needless re-login - every single time the backend hiccupped.
+          // Swallow them like the network-blip catch below; the next 60s
+          // tick (or the socket's own auth:expired) surfaces a real expiry.
+          if (r.status === 401) {
+            // Clear the token before disconnecting so an in-flight reconnect
+            // attempt doesn't carry the dead sid back to the server.
+            clearSessionToken();
+            setKickReason("Your session expired due to inactivity. Please log in again.");
+            disconnectSocket();
+            setMe(null);
+          }
           return;
         }
         const j = (await r.json()) as {

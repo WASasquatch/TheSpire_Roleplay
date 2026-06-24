@@ -165,12 +165,25 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
   // over one viewer's network hiccup). Reset on every source change.
   const startedRef = useRef(false);
 
+  // Mirror the active source into a ref so the stable seekTo callback can read
+  // it (for the diagnostic below) without re-creating on every source change.
+  const currentRef = useRef(current);
+  currentRef.current = current;
+
   // All seeks route through here so we can stamp the time (for the
   // post-seek cooldown) and never seek to a negative position.
   const lastSeekAtRef = useRef(0);
   const seekTo = useCallback((sec: number) => {
     const p = playerRef.current;
     if (!p) return;
+    // Diagnostic for "live keeps jumping": every seek logs the target + the
+    // source's live state. A seek firing while `live` is true/`kind:"live"`
+    // would be a bug; a seek firing on a YouTube `live:false` source means the
+    // stream is being treated as a VOD (added without the live flag) — that's
+    // the timeline-hopping cause. `console.debug` stays out of the default
+    // console view, so this is silent for normal users.
+    // eslint-disable-next-line no-console
+    console.debug("[theater] seek", { to: Math.round(sec), kind: currentRef.current?.kind, live: !!currentRef.current?.live });
     p.seekTo(Math.max(0, sec), "seconds");
     lastSeekAtRef.current = Date.now();
   }, []);

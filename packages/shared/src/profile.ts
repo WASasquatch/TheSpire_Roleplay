@@ -108,6 +108,12 @@ export const CHARACTER_VIBE_AXES = [
 
 export type CharacterVibeAxisKey = typeof CHARACTER_VIBE_AXES[number]["key"];
 
+/** Server-enforced cap (chars) on each classic free-text detail field —
+ *  age / race / height / weight / alignment / occupation. These hold
+ *  descriptive text ("Ageless", "early 30s", "looks 25, actually 300"),
+ *  NOT numbers; the editor mirrors this with `maxLength` so a too-long
+ *  value is blocked at the keyboard instead of failing server validation. */
+export const STAT_FIELD_MAX = 80;
 /** Server-enforced cap on the {@link CharacterStats.attributes} array length. */
 export const CHARACTER_ATTRIBUTES_MAX = 20;
 /** Server-enforced cap on a {@link CharacterAttribute.label} length. */

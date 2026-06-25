@@ -3,7 +3,8 @@ import type { AnnouncementBanner } from "@thekeep/shared";
 import { legibleAgainstBg, renderUiRouteChipsInHtml } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
 import { sanitizeUserHtml } from "../lib/userHtml.js";
-import { useDismissed, dismiss } from "../lib/dismissedBanners.js";
+import { useDismissed, dismiss, undismiss, dismissedAt } from "../lib/dismissedBanners.js";
+import { setMarqueeHidden } from "../lib/marqueeVisibility.js";
 import { getSocket } from "../lib/socket.js";
 import { handleUiRouteClickInHtml } from "../lib/uiRouteOpen.js";
 import { hydrateDynamicUiRouteChips } from "../lib/hydrateDynamicUiRouteChips.js";
@@ -26,6 +27,9 @@ import { hydrateDynamicUiRouteChips } from "../lib/hydrateDynamicUiRouteChips.js
  * its own dismiss entry persisted by mistake.
  */
 const DISMISS_NAMESPACE = "announcement-marquee";
+/** How long a dismissal hides the marquee before it re-shows on its own.
+ *  The viewer can bring it back sooner from the Room Info bar's button. */
+const DISMISS_TTL_MS = 24 * 60 * 60 * 1000;
 function buildDismissKey(banners: AnnouncementBanner[]): string {
   if (banners.length === 0) return `${DISMISS_NAMESPACE}:empty`;
   const sig = banners.map((b) => `${b.id}@${b.updatedAt}`).sort().join("|");
@@ -75,8 +79,29 @@ export function BannerMarquee() {
   // Compute the content-aware dismiss key from the CURRENT banner
   // set. Memo'd so every render isn't re-stringifying the signature.
   const dismissKey = useMemo(() => buildDismissKey(banners), [banners]);
-  const dismissed = useDismissed(dismissKey);
+  const dismissed = useDismissed(dismissKey, DISMISS_TTL_MS);
   const theme = useActiveTheme();
+
+  // Publish hidden-state to the Room Info bar's "bring back announcements"
+  // button: hidden ONLY when there are banners but the viewer dismissed
+  // them. The resurrect callback clears this exact (content-aware) key.
+  useEffect(() => {
+    setMarqueeHidden(dismissed && banners.length > 0, () => undismiss(dismissKey));
+  }, [dismissed, banners.length, dismissKey]);
+
+  // Auto-expiry: a tab left open past the 24h window won't re-render on
+  // its own (the dismissal store only notifies on change), so schedule
+  // the re-show at the exact boundary. `undismiss` both clears the stale
+  // entry and flips the bar back on via the store's notify.
+  useEffect(() => {
+    if (!dismissed) return;
+    const ts = dismissedAt(dismissKey);
+    if (ts == null) return;
+    const remaining = DISMISS_TTL_MS - (Date.now() - ts);
+    if (remaining <= 0) { undismiss(dismissKey); return; }
+    const id = window.setTimeout(() => undismiss(dismissKey), remaining + 250);
+    return () => window.clearTimeout(id);
+  }, [dismissed, dismissKey]);
 
   useEffect(() => {
     // ALWAYS fetch, the dismiss-key signature depends on the
@@ -280,7 +305,7 @@ export function BannerMarquee() {
           onClick={() => dismiss(dismissKey)}
           className="flex h-5 w-5 items-center justify-center rounded border border-keep-action/40 bg-keep-action/20 text-[11px] leading-none text-keep-action hover:border-keep-action hover:bg-keep-action/40"
           aria-label="Dismiss site announcements"
-          title="Dismiss this set. Re-shows when an admin adds or edits a banner."
+          title="Hide announcements for 24 hours (or until an admin edits them). Bring them back sooner from the Room Info bar."
         >
           ×
         </button>

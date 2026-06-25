@@ -86,6 +86,10 @@ export interface RoomInfo {
   id: string;
   name: string;
   type: RoomType;
+  /** URL-safe link handle (migration 0260). Drives the `{room:<slug>}`
+   *  navigation chip; surfaced in the Room Info pullout as a copyable
+   *  token. Null only for a row not yet backfilled. */
+  slug: string | null;
   icon: string | null;
   /** Long-form room description (the `/describe` text). Null when unset. */
   description: string | null;

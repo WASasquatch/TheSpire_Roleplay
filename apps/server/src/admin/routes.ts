@@ -1159,6 +1159,8 @@ export async function registerAdminRoutes(
     featuredWorldsEnabled: z.boolean().optional(),
     /** Splash stat: rolling 24h chat message count. Independent toggle. */
     splashMessages24hEnabled: z.boolean().optional(),
+    /** Visual bio Designer availability on the profile bio tab (desktop). */
+    profileDesignerEnabled: z.boolean().optional(),
     /** Sanitized HTML for the post-login welcome modal. Empty string clears the welcome. Same 50KB cap as other rich-text settings. */
     newUserWelcomeHtml: z.string().max(50_000).optional(),
     /**
@@ -1217,6 +1219,7 @@ export async function registerAdminRoutes(
       activityFeedsEnabled: s.activityFeedsEnabled,
       featuredWorldsEnabled: s.featuredWorldsEnabled,
       splashMessages24hEnabled: s.splashMessages24hEnabled,
+      profileDesignerEnabled: s.profileDesignerEnabled,
       newUserWelcomeHtml: s.newUserWelcomeHtml,
       defaultStyleKey: s.defaultStyleKey,
       themeDesignMap: s.themeDesignMap,
@@ -1328,6 +1331,9 @@ export async function registerAdminRoutes(
     }
     if (body.splashMessages24hEnabled !== undefined) {
       patch.splashMessages24hEnabled = body.splashMessages24hEnabled;
+    }
+    if (body.profileDesignerEnabled !== undefined) {
+      patch.profileDesignerEnabled = body.profileDesignerEnabled;
     }
     if (body.newUserWelcomeHtml !== undefined) {
       // Sanitize via the bio allow-list (same trust posture as welcomeHtml /

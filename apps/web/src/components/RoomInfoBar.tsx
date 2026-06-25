@@ -1,16 +1,20 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
+  Check,
   ChevronDown,
   ChevronUp,
   Clock,
+  Copy,
   Drama,
   Info,
+  Megaphone,
   MessagesSquare,
   ScrollText,
   Users,
 } from "lucide-react";
 import type { RoomInfo, RoomSummary } from "@thekeep/shared";
 import { fetchRoomInfo } from "../lib/rooms.js";
+import { useMarqueeHidden, resurrectMarquee } from "../lib/marqueeVisibility.js";
 
 interface Props {
   room: RoomSummary;
@@ -59,6 +63,9 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld }: Props) {
   const [info, setInfo] = useState<RoomInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  // True when site announcements exist but the viewer dismissed them —
+  // drives the "bring back announcements" button in the bar.
+  const marqueeHidden = useMarqueeHidden();
 
   // Lazy-load the dossier the first time the bar is expanded. Cheap — one
   // fetch per open, gated behind a deliberate click.
@@ -147,6 +154,18 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld }: Props) {
             <MessagesSquare size={12} aria-hidden />
             {room.messageCount.toLocaleString()}
           </span>
+          {marqueeHidden ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); resurrectMarquee(); }}
+              className="flex items-center gap-1 rounded border border-keep-action/40 bg-keep-action/15 px-1.5 py-0.5 text-keep-action hover:border-keep-action hover:bg-keep-action/30"
+              title="Bring back the announcements banner you hid"
+              aria-label="Bring back announcements"
+            >
+              <Megaphone size={12} aria-hidden />
+              <span className="hidden sm:inline">Announcements</span>
+            </button>
+          ) : null}
           {expanded ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
         </div>
       </div>
@@ -177,6 +196,7 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld }: Props) {
               <Card icon={<Info size={12} aria-hidden />} title="Details">
                 <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs leading-tight">
                   <Meta label="Type" value={info.type === "private" ? "Private 🔒" : "Public"} />
+                  {info.slug ? <LinkRow slug={info.slug} /> : null}
                   {info.ownerName ? <Meta label="Owner" value={info.ownerName} /> : null}
                   <Meta label="Created" value={fmtCreated(info.createdAt)} />
                   <Meta label="Messages" value={info.messageCount.toLocaleString()} />
@@ -282,6 +302,43 @@ function Meta({ label, value }: { label: string; value: string }) {
     <>
       <dt className="text-keep-muted">{label}</dt>
       <dd className="truncate text-keep-text/90">{value}</dd>
+    </>
+  );
+}
+
+/**
+ * The room's link handle, shown as the ready-to-paste `{room:<slug>}`
+ * navigation-chip token with a one-click copy. Dropping that token into
+ * chat, a forum post, a DM, or an announcement renders a chip that takes
+ * people straight here. (Owners/mods can rename the handle with `/slug`.)
+ */
+function LinkRow({ slug }: { slug: string }) {
+  const [copied, setCopied] = useState(false);
+  const token = `{room:${slug}}`;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(token);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      /* clipboard blocked (insecure context / denied) — no-op */
+    }
+  };
+  return (
+    <>
+      <dt className="text-keep-muted">Link</dt>
+      <dd className="truncate">
+        <button
+          type="button"
+          onClick={copy}
+          title="Copy the chat shortcut that links to this room"
+          aria-label={`Copy ${token}`}
+          className="inline-flex max-w-full items-center gap-1 text-keep-action hover:text-keep-action/80"
+        >
+          <span className="truncate font-mono text-[11px]">{token}</span>
+          {copied ? <Check size={11} aria-hidden /> : <Copy size={11} aria-hidden />}
+        </button>
+      </dd>
     </>
   );
 }

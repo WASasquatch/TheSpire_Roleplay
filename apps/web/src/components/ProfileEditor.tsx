@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { AvatarCrop, CharacterAttribute, CharacterJournalEntry, CharacterPortrait, CharacterStats, CharacterStatsVisibility, CharacterVibeAxisKey, ProfileCollectionEntry, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
-import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, CHARACTER_ATTRIBUTES_MAX, CHARACTER_ATTRIBUTE_LABEL_MAX, CHARACTER_ATTRIBUTE_VALUE_MAX, CHARACTER_ATTRIBUTE_VALUE_MIN, CHARACTER_VIBE_AXES, DEFAULT_THEME, clampAvatarCrop, isDarkPalette, isDefaultAvatarCrop, normalizeTheme } from "@thekeep/shared";
+import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, CHARACTER_ATTRIBUTES_MAX, CHARACTER_ATTRIBUTE_LABEL_MAX, CHARACTER_ATTRIBUTE_VALUE_MAX, CHARACTER_ATTRIBUTE_VALUE_MIN, CHARACTER_VIBE_AXES, DEFAULT_THEME, STAT_FIELD_MAX, clampAvatarCrop, isDarkPalette, isDefaultAvatarCrop, normalizeTheme } from "@thekeep/shared";
 import { Code2, HelpCircle, Paintbrush2 } from "lucide-react";
 import { applyStyle } from "../lib/ornaments/index.js";
 import { DesignerTour } from "./DesignerTour.js";
@@ -1542,6 +1542,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                               ) : (
                                 <input
                                   type="text"
+                                  // Free text (numbers OR "Ageless" / "early 30s"); capped to
+                                  // match the server so a long value is blocked here instead of
+                                  // bouncing off save-time validation.
+                                  maxLength={STAT_FIELD_MAX}
                                   className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
                                   value={(stats[key] as string) ?? ""}
                                   onChange={(e) =>

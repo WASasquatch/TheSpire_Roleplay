@@ -5089,6 +5089,11 @@ function UsersTab() {
       const params = new URLSearchParams();
       if (q.trim()) params.set("q", q.trim());
       if (ipPivot.trim()) params.set("ip", ipPivot.trim());
+      // "disabled" is a DB-backed state, so push it server-side — otherwise
+      // a disabled account past the first page (username-ordered, limit 100)
+      // never loads and the local filter finds nothing. online/offline/away
+      // stay client-side (runtime presence).
+      if (stateFilter === "disabled") params.set("state", "disabled");
       const qs = params.toString();
       const url = qs ? `/admin/users?${qs}` : "/admin/users";
       const r = await fetch(url, { credentials: "include" });
@@ -5105,7 +5110,7 @@ function UsersTab() {
   useEffect(() => {
     const t = window.setTimeout(reload, 200);
     return () => window.clearTimeout(t);
-  }, [q, ipPivot]);
+  }, [q, ipPivot, stateFilter]);
 
   async function patch(id: string, body: Record<string, unknown>) {
     const r = await fetch(`/admin/users/${id}`, {

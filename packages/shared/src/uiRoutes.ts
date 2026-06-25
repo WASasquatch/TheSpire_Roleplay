@@ -531,8 +531,13 @@ export function renderUiRouteChipsInHtml(html: string): string {
     // mounts the matching lucide SVG into it after mount. Surfaces that
     // never run the hydrator just show a label-only chip (graceful, no
     // broken glyph).
+    //
+    // `inline-flex items-center` makes the span center the mounted SVG
+    // itself, instead of letting it ride the text baseline (which left the
+    // glyph visibly high in the marquee). No trailing space — the button's
+    // `gap-1` already spaces the icon from the label.
     const safeIcon = entry.icon
-      ? `<span class="tk-ui-route-chip-icon" data-tk-ui-route-icon="${escapeHtmlAttr(entry.icon)}" aria-hidden="true"></span> `
+      ? `<span class="tk-ui-route-chip-icon inline-flex items-center" data-tk-ui-route-icon="${escapeHtmlAttr(entry.icon)}" aria-hidden="true"></span>`
       : "";
     const safeTitle = escapeHtmlAttr(entry.description);
     // Dynamic-resolved chips (e.g. {scriptorium:latest:story}) carry a

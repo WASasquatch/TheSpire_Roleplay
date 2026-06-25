@@ -28,23 +28,41 @@ const STORAGE_KEY = "tk:dismissedBanners:v1";
 type Listener = () => void;
 const listeners = new Set<Listener>();
 
-function read(): Set<string> {
-  if (typeof localStorage === "undefined") return new Set();
+/** key → dismissedAt (ms epoch). The timestamp powers optional TTL
+ *  expiry: a caller that passes `ttlMs` (e.g. the announcement marquee's
+ *  24h) re-shows once the dismissal ages past it; callers that omit it
+ *  keep the old "dismissed forever" behavior. */
+type Dismissals = Record<string, number>;
+
+function read(): Dismissals {
+  if (typeof localStorage === "undefined") return {};
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return new Set();
+    if (!raw) return {};
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(parsed.filter((s): s is string => typeof s === "string"));
+    // Legacy shape was a `string[]` of keys with no timestamp. Migrate
+    // each to epoch 0: permanent (no-TTL) banners stay dismissed (key
+    // present), TTL banners read as long-expired and re-show once.
+    if (Array.isArray(parsed)) {
+      const out: Dismissals = {};
+      for (const s of parsed) if (typeof s === "string") out[s] = 0;
+      return out;
+    }
+    if (parsed && typeof parsed === "object") {
+      const out: Dismissals = {};
+      for (const [k, v] of Object.entries(parsed)) if (typeof v === "number") out[k] = v;
+      return out;
+    }
+    return {};
   } catch {
-    return new Set();
+    return {};
   }
 }
 
-function write(set: Set<string>): void {
+function write(map: Dismissals): void {
   if (typeof localStorage === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...set]));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
   } catch {
     /* quota / private-mode, silently degrade to per-mount only */
   }
@@ -59,25 +77,41 @@ function notify(): void {
  * checks before mounting heavy chrome). React components should
  * prefer `useDismissed` so they re-render when a sibling tab or a
  * different banner dispatches a dismissal.
+ *
+ * `ttlMs`: when given, a dismissal older than this counts as expired
+ * (returns false). Omit for a permanent dismissal.
  */
-export function isDismissed(key: string): boolean {
-  return read().has(key);
+export function isDismissed(key: string, ttlMs?: number): boolean {
+  const ts = read()[key];
+  if (ts === undefined) return false;
+  if (ttlMs === undefined) return true;
+  return Date.now() - ts < ttlMs;
+}
+
+/** Raw dismissal timestamp (ms epoch) for `key`, or null when not
+ *  dismissed. Lets a TTL caller schedule a re-show at the exact expiry
+ *  boundary instead of waiting for the next reload. */
+export function dismissedAt(key: string): number | null {
+  const ts = read()[key];
+  return ts === undefined ? null : ts;
 }
 
 export function dismiss(key: string): void {
-  const set = read();
-  if (set.has(key)) return;
-  set.add(key);
-  write(set);
+  const map = read();
+  // Always (re)stamp now, so re-dismissing a TTL banner refreshes its
+  // window rather than keeping a stale timestamp.
+  map[key] = Date.now();
+  write(map);
   notify();
 }
 
-/** Remove a key from the dismissed set (rare, admin tooling, "show
- *  this banner again" flows). */
+/** Remove a key from the dismissed set (resurrect / "show this again"
+ *  flows, and TTL-expiry cleanup). */
 export function undismiss(key: string): void {
-  const set = read();
-  if (!set.delete(key)) return;
-  write(set);
+  const map = read();
+  if (!(key in map)) return;
+  delete map[key];
+  write(map);
   notify();
 }
 
@@ -94,10 +128,10 @@ export function clearAllDismissed(): void {
  * Re-renders the calling component when a dismissal lands (from
  * this tab OR a sibling tab via the `storage` event).
  */
-export function useDismissed(key: string): boolean {
+export function useDismissed(key: string, ttlMs?: number): boolean {
   return useSyncExternalStore(
     subscribe,
-    () => isDismissed(key),
+    () => isDismissed(key, ttlMs),
     () => false, // SSR default, banners stay visible until hydration
   );
 }

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import { roleRank, type ClientToServerEvents, type ServerToClientEvents } from "@thekeep/shared";
 import { hasPermission } from "../auth/permissions.js";
@@ -439,11 +439,19 @@ export async function registerUsersRoutes(
   });
 
   /** Admin: same shape as /users plus email/role/disabled state. */
-  app.get<{ Querystring: { q?: string; offset?: string; limit?: string; ip?: string } }>("/admin/users", async (req, reply) => {
+  app.get<{ Querystring: { q?: string; offset?: string; limit?: string; ip?: string; state?: string } }>("/admin/users", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me || !(await hasPermission(me, "view_user_directory_secure", db))) { reply.code(403); return { error: "admin only" }; }
 
     const q = (req.query.q ?? "").trim().toLowerCase();
+    // `state=disabled` filters server-side to disabled accounts. The
+    // UsersTab's other state facets (online / offline / away) are runtime
+    // presence and stay client-side, but "disabled" is a DB column, so
+    // filtering it here is what makes ALL disabled accounts surface — not
+    // just the ones that happened to land in the first page (the bug:
+    // client-side filtering a username-ordered page missed disabled users
+    // past row `limit`).
+    const stateFilter = (req.query.state ?? "").trim();
     const offset = Math.max(0, parseInt(req.query.offset ?? "0", 10) || 0);
     const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit ?? "100", 10) || 100));
     // Optional IP filter, when set, scopes the result to every user who has
@@ -501,6 +509,8 @@ export async function registerUsersRoutes(
         : ipScopedUserIds // empty set → match nothing
           ? sql`1 = 0`
           : undefined,
+      // Server-side disabled-state filter (see note above).
+      stateFilter === "disabled" ? isNotNull(users.disabledAt) : undefined,
     );
 
     // Total count + page in two queries, was: SELECT all, sort in

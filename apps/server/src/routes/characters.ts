@@ -4,6 +4,7 @@ import {
   CHARACTER_ATTRIBUTE_LABEL_MAX,
   CHARACTER_ATTRIBUTE_VALUE_MAX,
   CHARACTER_ATTRIBUTE_VALUE_MIN,
+  STAT_FIELD_MAX,
   parseTagList,
   serializeTagList,
 } from "@thekeep/shared";
@@ -126,14 +127,19 @@ const visibilitySchema = z.object({
   attributes: z.boolean().optional(),
 }).strict().optional();
 
+// Classic profile detail fields are FREE TEXT, not numbers — "age" holds
+// "Ageless" / "Timeless" / "early 30s" / "looks 25, actually 300" just as
+// happily as a plain number. The shared STAT_FIELD_MAX cap (chars) gives
+// room for a descriptive bracket without turning a one-line detail into a
+// second bio; the editor mirrors it with `maxLength`.
 const statsSchema = z.object({
-  age: z.string().max(40).optional(),
-  race: z.string().max(40).optional(),
-  gender: z.string().max(40).optional(),
-  height: z.string().max(40).optional(),
-  weight: z.string().max(40).optional(),
-  alignment: z.string().max(40).optional(),
-  occupation: z.string().max(80).optional(),
+  age: z.string().max(STAT_FIELD_MAX).optional(),
+  race: z.string().max(STAT_FIELD_MAX).optional(),
+  gender: z.string().max(STAT_FIELD_MAX).optional(),
+  height: z.string().max(STAT_FIELD_MAX).optional(),
+  weight: z.string().max(STAT_FIELD_MAX).optional(),
+  alignment: z.string().max(STAT_FIELD_MAX).optional(),
+  occupation: z.string().max(STAT_FIELD_MAX).optional(),
   custom: z.record(z.string().max(40), z.string().max(200)).optional(),
   vibe: vibeSchema,
   attributes: z.array(attributeRowSchema)

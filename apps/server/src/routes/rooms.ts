@@ -228,6 +228,7 @@ export async function registerRoomsRoutes(
       id: room.id,
       name: room.name,
       type: room.type,
+      slug: room.slug ?? null,
       icon: room.icon ?? null,
       description: room.description ?? null,
       topic: room.topic ?? null,

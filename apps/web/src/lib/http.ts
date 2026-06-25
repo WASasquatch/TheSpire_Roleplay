@@ -132,7 +132,20 @@ function writeTokenMap(map: Record<string, TokenMapEntry>): void {
  */
 export async function readError(r: Response): Promise<string> {
   try {
-    const j = (await r.json()) as { error?: string; message?: string };
+    const j = (await r.json()) as {
+      error?: string;
+      message?: string;
+      issues?: Array<{ path?: string; message: string }>;
+    };
+    // Zod validation failures come back from the server's error handler as
+    // `{ error: "validation", issues: [{ path, message }] }`. The bare
+    // "validation" code is meaningless to a user (the "click Save → just
+    // says Validation" report), so surface the first issue's actual reason
+    // — e.g. `bioHtml: String must contain at most 50000 character(s)`.
+    const firstIssue = j.issues?.find((i) => typeof i?.message === "string");
+    if (firstIssue) {
+      return firstIssue.path ? `${firstIssue.path}: ${firstIssue.message}` : firstIssue.message;
+    }
     return j.error ?? j.message ?? `${r.status} ${r.statusText}`;
   } catch {
     return `${r.status} ${r.statusText}`;

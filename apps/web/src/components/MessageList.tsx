@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { BarChart3, FolderInput, Lock } from "lucide-react";
+import { BarChart3, Bookmark, BookmarkCheck, Flag, FolderInput, Lock, Pencil, Reply, SmilePlus, Trash2 } from "lucide-react";
 import { setTopicCategory } from "../lib/forums.js";
 import { PollCard } from "./PollCard.js";
 import { customCmdCssToStyle, isAdminRole, resolveMessageColor, type AvatarCrop, type ChatMessage, type MentionRef, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
@@ -3965,7 +3965,7 @@ function Line({
       targetId={msg.id}
       asCharacterId={viewerActiveCharacterId}
       title="Add reaction"
-      label={<span aria-hidden>+ 😊</span>}
+      label={<span className="inline-flex items-center gap-1"><SmilePlus className="h-3 w-3" aria-hidden />react</span>}
       className="flex h-5 items-center rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action md:invisible md:group-hover:visible md:group-focus-within:visible"
     />
   ) : null;
@@ -4305,6 +4305,22 @@ function Line({
     : "hidden group-focus-within:flex justify-end gap-1 mt-0.5 md:flex md:absolute md:right-3 md:top-0 md:mt-0 md:items-center md:gap-1";
   const controls = hasControls ? (
     <div className={controlsClass}>
+      {/* Reply sits leftmost as the primary reader-facing action. It
+          mirrors the timestamp click (pre-fills the composer with
+          /reply <msgid>) but surfaces the affordance explicitly in the
+          hover dock so it's discoverable without knowing the timestamp
+          trick. Same visibility/shape contract as the rest of the row. */}
+      {reactAvailable ? (
+        <button
+          type="button"
+          onClick={() => onTimeClick(msg.id)}
+          title="Reply to this message"
+          aria-label="Reply to this message"
+          className="flex h-5 items-center gap-1 rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action md:invisible md:group-hover:visible md:group-focus-within:visible"
+        >
+          <Reply className="h-3 w-3" aria-hidden />reply
+        </button>
+      ) : null}
       {showBookmark ? <BookmarkButton msg={msg} /> : null}
       {/* React lives immediately LEFT of Edit so the author-facing
           and reader-facing actions sit side by side. On other
@@ -4455,9 +4471,9 @@ function ReportButton({ msg }: { msg: ChatMessage }) {
         onClick={file}
         disabled={busy || done}
         title={done ? "Reported - admins will review." : "Report this message to admins"}
-        className="flex h-5 items-center rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-accent/60 hover:bg-keep-accent/10 hover:text-keep-accent disabled:opacity-50"
+        className="flex h-5 items-center gap-1 rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-accent/60 hover:bg-keep-accent/10 hover:text-keep-accent disabled:opacity-50"
       >
-        {done ? "reported" : "🚩 report"}
+        {done ? "reported" : <><Flag className="h-3 w-3" aria-hidden />report</>}
       </button>
     </span>
   );
@@ -4533,18 +4549,18 @@ function OwnControls({ msg, onStartEdit }: { msg: ChatMessage; onStartEdit: () =
         type="button"
         onClick={onStartEdit}
         title={`Edit (within ${formatGraceWindow(graceMs)} of sending)`}
-        className="flex h-5 items-center rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action"
+        className="flex h-5 items-center gap-1 rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action"
       >
-        edit
+        <Pencil className="h-3 w-3" aria-hidden />edit
       </button>
       <button
         type="button"
         onClick={doDelete}
         title={`Delete (within ${formatGraceWindow(graceMs)} of sending)`}
         disabled={busy}
-        className="flex h-5 items-center rounded border border-keep-accent/60 bg-keep-accent/10 px-1.5 text-[10px] font-semibold leading-none text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+        className="flex h-5 items-center gap-1 rounded border border-keep-accent/60 bg-keep-accent/10 px-1.5 text-[10px] font-semibold leading-none text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
       >
-        delete
+        <Trash2 className="h-3 w-3" aria-hidden />delete
       </button>
       {error ? <span className="text-[10px] text-keep-accent">{error}</span> : null}
     </span>
@@ -4738,9 +4754,9 @@ function ModControls({
             onStartEdit();
           }}
           title={`Admin: edit ${msg.displayName}'s message`}
-          className="flex h-5 items-center rounded border border-keep-accent/40 bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-accent/80 hover:bg-keep-accent/10 hover:text-keep-accent"
+          className="flex h-5 items-center gap-1 rounded border border-keep-accent/40 bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-accent/80 hover:bg-keep-accent/10 hover:text-keep-accent"
         >
-          edit
+          <Pencil className="h-3 w-3" aria-hidden />edit
         </button>
       ) : null}
       {canDelete ? (
@@ -4749,9 +4765,9 @@ function ModControls({
           onClick={doDelete}
           title={`Hide ${msg.displayName}'s message`}
           disabled={busy}
-          className="flex h-5 items-center rounded border border-keep-accent/60 bg-keep-accent/10 px-1.5 text-[10px] font-semibold leading-none text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
+          className="flex h-5 items-center gap-1 rounded border border-keep-accent/60 bg-keep-accent/10 px-1.5 text-[10px] font-semibold leading-none text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
         >
-          delete
+          <Trash2 className="h-3 w-3" aria-hidden />delete
         </button>
       ) : null}
       {error ? <span className="text-[10px] text-keep-accent">{error}</span> : null}
@@ -4851,12 +4867,13 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
       <button
         type="button"
         onClick={openPopover}
-        title="Bookmark this message"
+        title={done ? "Saved" : "Bookmark this message"}
+        aria-label={done ? "Saved" : "Bookmark this message"}
         // Matches the h-5 / rounded / 10px shape of the edit + delete
         // buttons in OwnControls so the row reads as one consistent set.
-        className="flex h-5 items-center rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action"
+        className="flex h-5 items-center gap-1 rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action"
       >
-        {done ? "✓ saved" : "🔖"}
+        {done ? <BookmarkCheck className="h-3 w-3 text-keep-action" aria-hidden /> : <Bookmark className="h-3 w-3" aria-hidden />}
       </button>
       {open ? (
         <div

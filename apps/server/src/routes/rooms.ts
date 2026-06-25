@@ -94,6 +94,15 @@ export async function registerRoomsRoutes(
     const allRooms = [...publicRows, ...extraPrivate];
     if (allRooms.length === 0) return { rooms: [] };
 
+    // Hide occupants this viewer is mutually blocked with — the same
+    // per-viewer filter the websocket `presence:update` path applies
+    // (occupantsForViewer). Without it, /rooms leaked blocked accounts
+    // (and ALL their characters, since a block is per-master-userId) back
+    // into the rail: the client refetches /rooms on every
+    // `rooms:tree-changed`, so a blocked user the socket path had hidden
+    // reappeared a beat later — visible in the userlist yet 404-ing on a
+    // profile click (the report this fixes).
+    const blocked = me ? await blockedUserIdsFor(db, me.id) : new Set<string>();
     // Delegate summary + occupant assembly to the shared builders so this
     // route returns the same shape as the websocket `room:state`/
     // `presence:update` events. Without unification, fields like
@@ -103,6 +112,7 @@ export async function registerRoomsRoutes(
       allRooms.map(async (r): Promise<RoomWithOccupants> => {
         const summary = await buildRoomSummary(db, r);
         const occupants = (await currentOccupants(io, db, r.id))
+          .filter((o) => !blocked.has(o.userId))
           .slice()
           .sort((a, b) => a.displayName.localeCompare(b.displayName));
         return { ...summary, occupants };

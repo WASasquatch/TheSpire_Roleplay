@@ -34,6 +34,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import DOMPurify from "dompurify";
 import { useEarning } from "../state/earning.js";
+import { useChat } from "../state/store.js";
 import type { NameStyleCatalogRow } from "../lib/earning.js";
 import { applyNameStylePlaceholders } from "../lib/nameStyleTemplate.js";
 import { useActiveTheme } from "../lib/theme.js";
@@ -51,6 +52,14 @@ interface Props {
    * `injectNameStylePreview` to make the row's CSS reachable.
    */
   overrideRow?: NameStyleCatalogRow | null;
+  /**
+   * Bypass the viewer's "disable name styles" flair opt-out. Set on
+   * cosmetic-shop / picker / admin previews (EarningDashboard,
+   * AdminEarningTab) so a user who turned name styles off for performance
+   * can still SEE the styles they're browsing or managing. Ambient
+   * surfaces (chat, userlist, profile) leave it off and honor the pref.
+   */
+  preview?: boolean;
 }
 
 /** Allowed inline tags inside a custom name-style template (fallback path). */
@@ -75,14 +84,18 @@ function nextInstanceId(): string {
   return `nst-${instanceCounter}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function StyledName({ displayName, styleKey, config, baseColor, overrideRow }: Props) {
+export function StyledName({ displayName, styleKey, config, baseColor, overrideRow, preview }: Props) {
   const snapshot = useEarning((s) => s.snapshot);
   const themeBg = useActiveTheme().bg;
+  // Viewer opt-out: when on (and this isn't a shop/admin preview), the
+  // equipped style is ignored and the name renders as plain text.
+  const disableNameStyles = useChat((s) => s.flairPrefs.disableNameStyles);
+  const styleDisabled = disableNameStyles && !preview;
 
   // `overrideRow` wins when set, admin preview pane passes the
   // in-progress draft directly. Otherwise resolve from the live
-  // catalog via the styleKey lookup.
-  const styleRow = overrideRow ?? (snapshot && styleKey
+  // catalog via the styleKey lookup (unless the viewer disabled styles).
+  const styleRow = overrideRow ?? (!styleDisabled && snapshot && styleKey
     ? snapshot.catalog.nameStyles.find((s) => s.key === styleKey)
     : null);
 

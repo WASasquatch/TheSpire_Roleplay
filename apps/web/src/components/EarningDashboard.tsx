@@ -639,7 +639,7 @@ function FlashSaleCard({
 
   const preview = kind === "nameStyle" ? (
     <div className="name-style-preview flex h-full w-full items-center justify-center rounded bg-keep-bg/50 px-4 text-4xl font-bold lg:text-5xl">
-      <StyledName displayName={previewName} styleKey={pick.key} config={null} />
+      <StyledName displayName={previewName} styleKey={pick.key} config={null} preview />
     </div>
   ) : kind === "freeformBorder" ? (
     <div className="flex h-full w-full items-center justify-center rounded bg-keep-bg/50 py-2">
@@ -648,6 +648,7 @@ function FlashSaleCard({
         name={previewName}
         freeformBorderKey={pick.key}
         size="xl"
+        preview
       />
     </div>
   ) : pick.iconUrl ? (
@@ -2006,7 +2007,7 @@ function OwnedStyleCard({
           The Equip button is a sibling above this div, not inside,
           so it stays clickable. */}
       <div className="name-style-preview mt-3 rounded border border-keep-rule/60 bg-keep-bg/60 px-3 py-2 text-2xl font-bold">
-        <StyledName displayName={previewName} styleKey={style.key} config={draft} />
+        <StyledName displayName={previewName} styleKey={style.key} config={draft} preview />
       </div>
 
       <div className="ns-card-controls mt-3 flex flex-wrap gap-3">
@@ -2082,7 +2083,7 @@ function AvailableStyleCard({
             like a fire variant regardless of its actual design.
             `name-style-preview` is the same hook the Owned card uses,
             see comment there for the click-shielding rationale. */}
-        <StyledName displayName={previewName} styleKey={style.key} config={null} />
+        <StyledName displayName={previewName} styleKey={style.key} config={null} preview />
       </div>
     </div>
   );
@@ -2602,6 +2603,7 @@ function FreeformBorderCard({
           freeformBorderKey={border.key}
           freeformConfig={previewConfig}
           size="xl"
+          preview
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -2771,6 +2773,7 @@ function BorderCard({
         name={userDisplayName}
         borderRankKey={tier.rankKey}
         size="xl"
+        preview
       />
       <div className={`min-w-0 flex-1 ${muted ? "opacity-60" : ""}`}>
         <div className="font-semibold">{rankName}</div>

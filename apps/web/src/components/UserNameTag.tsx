@@ -1,6 +1,7 @@
 import { resolveMessageColor, type AvatarCrop } from "@thekeep/shared";
 import type { Gender } from "../lib/gender.js";
 import { genderGlyph } from "../lib/gender.js";
+import { useChat } from "../state/store.js";
 import { useActiveTheme } from "../lib/theme.js";
 import { BorderedAvatar } from "./BorderedAvatar.js";
 import { RankSigil } from "./RankSigil.js";
@@ -157,6 +158,11 @@ export function UserNameTag({
   railAlign = false,
 }: Props) {
   const g = genderGlyph(gender);
+  // Viewer opt-out: when on, the inline avatar thumbnail is suppressed and
+  // the icon slot falls back to the rank sigil / gender glyph. Border +
+  // name-style opt-outs are honored inside BorderedAvatar / StyledName.
+  const disableInlineAvatars = useChat((s) => s.flairPrefs.disableInlineAvatars);
+  const showInlineAvatar = inlineAvatar && !disableInlineAvatars;
   // Resolve theme-slot tokens (e.g. `theme:system`) to a CSS color
   // that follows the viewer's palette. Literal hex strings are nudged
   // toward legibility against the current theme background when the
@@ -231,7 +237,7 @@ export function UserNameTag({
         //      when there's no avatar AND no resolved rank (and always
         //      as the no-avatar fallback in railAlign, see above).
         if (hideIcon) return null;
-        if (inlineAvatar && avatarUrl) {
+        if (showInlineAvatar && avatarUrl) {
           return (
             <BorderedAvatar
               avatarUrl={avatarUrl}
@@ -314,7 +320,7 @@ export function UserNameTag({
         if (!hasResolvedRank) return null;
         // railAlign: the icon slot never shows the rank (see the priority
         // comment above), so this column is the gem's ONLY home there.
-        const rankWasInIconSlot = !railAlign && !hideIcon && !(inlineAvatar && avatarUrl);
+        const rankWasInIconSlot = !railAlign && !hideIcon && !(showInlineAvatar && avatarUrl);
         if (rankWasInIconSlot) return null;
         return (
           <RankSigil rankKey={rankKey ?? null} tier={tier ?? null} size={rankSigilSize ?? "sm"} variant={rankIconVariant} />

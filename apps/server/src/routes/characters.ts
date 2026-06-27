@@ -289,6 +289,15 @@ const masterUpdateBody = z.object({
   disableInputHistory: z.boolean().optional(),
   disableThesaurus: z.boolean().optional(),
   /**
+   * Viewer-side flair opt-outs (migration 0263). Account-wide gates that
+   * turn off rendering of other people's cosmetics FOR THIS VIEWER, a
+   * performance escape hatch for older hardware. Default off; partial
+   * update like the rest of this body.
+   */
+  disableNameStyles: z.boolean().optional(),
+  disableBorderStyles: z.boolean().optional(),
+  disableInlineAvatars: z.boolean().optional(),
+  /**
    * Scriptorium catalog prefs (Phase 9). `storyShowNsfw` opts the
    * caller into R / NC-17 cards in the in-app catalog (anonymous
    * viewers are still gated server-side regardless). `storyCwBlocklist`
@@ -703,6 +712,11 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       soundWhisperEnabled: u.soundWhisperEnabled,
       disableInputHistory: u.disableInputHistory,
       disableThesaurus: u.disableThesaurus,
+      // Viewer-side flair opt-outs (migration 0263). Seeded into the
+      // store on load so the render gates apply before the editor opens.
+      disableNameStyles: u.disableNameStyles,
+      disableBorderStyles: u.disableBorderStyles,
+      disableInlineAvatars: u.disableInlineAvatars,
       // Scriptorium catalog prefs (Phase 9). Editor's Privacy tab
       // reads these so the toggles round-trip cleanly.
       storyShowNsfw: u.storyShowNsfw,
@@ -1086,6 +1100,9 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         ...(body.soundWhisperEnabled !== undefined ? { soundWhisperEnabled: body.soundWhisperEnabled } : {}),
         ...(body.disableInputHistory !== undefined ? { disableInputHistory: body.disableInputHistory } : {}),
         ...(body.disableThesaurus !== undefined ? { disableThesaurus: body.disableThesaurus } : {}),
+        ...(body.disableNameStyles !== undefined ? { disableNameStyles: body.disableNameStyles } : {}),
+        ...(body.disableBorderStyles !== undefined ? { disableBorderStyles: body.disableBorderStyles } : {}),
+        ...(body.disableInlineAvatars !== undefined ? { disableInlineAvatars: body.disableInlineAvatars } : {}),
         ...(body.storyShowNsfw !== undefined ? { storyShowNsfw: body.storyShowNsfw } : {}),
         ...(body.storyCwBlocklist !== undefined
           ? { storyCwBlocklist: serializeTagList(body.storyCwBlocklist) }

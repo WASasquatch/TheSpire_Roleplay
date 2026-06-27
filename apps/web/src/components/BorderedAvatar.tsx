@@ -49,6 +49,7 @@ import DOMPurify from "dompurify";
 import type { AvatarCrop } from "@thekeep/shared";
 import { extractFreeformBorderVars, freeformBorderInlineVars } from "@thekeep/shared";
 import { useEarning } from "../state/earning.js";
+import { useChat } from "../state/store.js";
 import { applyFreeformBorderPlaceholders } from "../lib/freeformBorderTemplate.js";
 import { cropStyleAttr, cropStyleFor } from "../lib/avatarCrop.js";
 
@@ -168,6 +169,15 @@ interface Props {
   onClick?: (e: React.MouseEvent) => void;
   title?: string;
   className?: string;
+  /**
+   * Bypass the viewer's "disable border styles" flair opt-out. Set on
+   * cosmetic-shop / picker / admin previews (EarningDashboard,
+   * AdminEarningTab) so a user who turned borders off for performance can
+   * still SEE the frames they're browsing or managing. Ambient surfaces
+   * (chat, userlist, profile) leave it off and honor the pref — the avatar
+   * still renders, just without the border frame.
+   */
+  preview?: boolean;
 }
 
 export function BorderedAvatar({
@@ -182,8 +192,13 @@ export function BorderedAvatar({
   onClick,
   title,
   className,
+  preview,
 }: Props) {
   const snapshot = useEarning((s) => s.snapshot);
+  // Viewer opt-out: when on (and this isn't a shop/admin preview), no
+  // border frame is resolved — the avatar still renders, just bare.
+  const disableBorderStyles = useChat((s) => s.flairPrefs.disableBorderStyles);
+  const bordersDisabled = disableBorderStyles && !preview && !freeformOverride;
   const avatarSize = AVATAR_SIZE[size];
   const containerScale = CONTAINER_SCALE[size];
   const [errored, setErrored] = useState(false);
@@ -202,11 +217,11 @@ export function BorderedAvatar({
   // bypasses the snapshot lookup entirely, used by admin previews
   // for disabled rows that aren't in the user-facing catalog.
   const freeformRow = freeformOverride ?? (
-    freeformBorderKey && snapshot
+    !bordersDisabled && freeformBorderKey && snapshot
       ? snapshot.catalog.freeformBorders.find((b) => b.key === freeformBorderKey)
       : null
   );
-  const rankBorderUrl = borderRankKey && snapshot
+  const rankBorderUrl = !bordersDisabled && borderRankKey && snapshot
     ? snapshot.catalog.rankTiers.find((t) => t.rankKey === borderRankKey && t.tier === 4)?.borderImageUrl ?? null
     : null;
   // Template-mode freeform border. Skipped at `xs` (chat-line) since

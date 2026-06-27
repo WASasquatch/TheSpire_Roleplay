@@ -128,6 +128,10 @@ interface MasterData {
   /** Input-behavior opt-outs (account-level). See SoundRow / InputBehaviorRow. */
   disableInputHistory?: boolean;
   disableThesaurus?: boolean;
+  /** Viewer-side flair opt-outs (account-level). See FlairDisplayRow. */
+  disableNameStyles?: boolean;
+  disableBorderStyles?: boolean;
+  disableInlineAvatars?: boolean;
   /** Userlist display: when true, rank sigil replaces gender glyph in rail. */
   useRankAsUserlistIcon?: boolean;
   role?: Role;
@@ -325,6 +329,12 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   // popup picks them up without a reload.
   const [disableInputHistory, setDisableInputHistory] = useState<boolean>(false);
   const [disableThesaurus, setDisableThesaurus] = useState<boolean>(false);
+  // Viewer-side flair opt-outs. Default off (= flair shown). Pushed through
+  // `useChat.setFlairPrefs` on save so StyledName / BorderedAvatar /
+  // UserNameTag re-render plain immediately, no reload needed.
+  const [disableNameStyles, setDisableNameStyles] = useState<boolean>(false);
+  const [disableBorderStyles, setDisableBorderStyles] = useState<boolean>(false);
+  const [disableInlineAvatars, setDisableInlineAvatars] = useState<boolean>(false);
   // Public + NSFW visibility flags. Default isPublic=true, isNsfw=false to
   // match the schema. NSFW=true forces isPublic=false on save (server
   // enforces this too); the UI mirrors that by disabling the Public box.
@@ -496,6 +506,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           setSoundAlertEnabled(master.soundAlertEnabled ?? true);
           setDisableInputHistory(master.disableInputHistory ?? false);
           setDisableThesaurus(master.disableThesaurus ?? false);
+          setDisableNameStyles(master.disableNameStyles ?? false);
+          setDisableBorderStyles(master.disableBorderStyles ?? false);
+          setDisableInlineAvatars(master.disableInlineAvatars ?? false);
           setIsPublic(master.isPublic ?? true);
           setIsNsfw(master.isNsfw ?? false);
           setPublicProfileBgUrl(typeof master.publicProfileBgUrl === "string" ? master.publicProfileBgUrl : "");
@@ -627,6 +640,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
             soundAlertEnabled,
             disableInputHistory,
             disableThesaurus,
+            disableNameStyles,
+            disableBorderStyles,
+            disableInlineAvatars,
             chatColor,
             isPublic,
             isNsfw,
@@ -663,6 +679,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
             soundAlertEnabled,
             disableInputHistory,
             disableThesaurus,
+            disableNameStyles,
+            disableBorderStyles,
+            disableInlineAvatars,
             styleKey: userStyleKey,
             uiFontFamily: uiFontFamily && uiFontFamily.trim() !== "" ? uiFontFamily.trim() : null,
             uiFontScale,
@@ -694,6 +713,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         useChat.getState().setInputPrefs({
           disableHistory: disableInputHistory,
           disableThesaurus,
+        });
+        // Push the flair opt-outs into the store so StyledName /
+        // BorderedAvatar / UserNameTag repaint plain (or restore flair)
+        // immediately on save, without waiting for the next /me/profile poll.
+        useChat.getState().setFlairPrefs({
+          disableNameStyles,
+          disableBorderStyles,
+          disableInlineAvatars,
         });
       } else {
         // Attribute-row sanitizer. The editor lets the user type
@@ -1908,6 +1935,16 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     disableThesaurus={disableThesaurus}
                     onChangeDisableHistory={setDisableInputHistory}
                     onChangeDisableThesaurus={setDisableThesaurus}
+                  />
+                ) : null}
+                {!isCharacter ? (
+                  <FlairDisplayRow
+                    disableNameStyles={disableNameStyles}
+                    disableBorderStyles={disableBorderStyles}
+                    disableInlineAvatars={disableInlineAvatars}
+                    onChangeDisableNameStyles={setDisableNameStyles}
+                    onChangeDisableBorderStyles={setDisableBorderStyles}
+                    onChangeDisableInlineAvatars={setDisableInlineAvatars}
                   />
                 ) : null}
                 {/* Earning, Currency privacy. Master-only; characters
@@ -3775,6 +3812,82 @@ function InputBehaviorRow({
           <span className="block text-keep-text">Disable synonym popup on highlighted words</span>
           <span className="block text-[10px] text-keep-muted">
             Stops the thesaurus list from appearing when you select a word inside the composer.
+          </span>
+        </span>
+      </label>
+    </fieldset>
+  );
+}
+
+/**
+ * Visual-flair opt-outs. Account-wide, global toggles that turn OFF
+ * rendering of OTHER people's cosmetic flair FOR THIS VIEWER, a smoother-
+ * experience escape hatch for older / slower devices. Nothing is taken
+ * away from anyone else; these only change what this account's screen
+ * draws. Saved to /me/profile and pushed into the chat store so chat,
+ * the userlist, and profiles repaint immediately.
+ */
+function FlairDisplayRow({
+  disableNameStyles,
+  disableBorderStyles,
+  disableInlineAvatars,
+  onChangeDisableNameStyles,
+  onChangeDisableBorderStyles,
+  onChangeDisableInlineAvatars,
+}: {
+  disableNameStyles: boolean;
+  disableBorderStyles: boolean;
+  disableInlineAvatars: boolean;
+  onChangeDisableNameStyles: (v: boolean) => void;
+  onChangeDisableBorderStyles: (v: boolean) => void;
+  onChangeDisableInlineAvatars: (v: boolean) => void;
+}) {
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Visual flair</legend>
+      <p className="mb-2 text-[10px] text-keep-muted">
+        Turn off other people's animated cosmetics for a smoother, lighter experience
+        on older devices. This only changes what you see; everyone else still shows their flair.
+      </p>
+      <label className="mb-1 flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={disableNameStyles}
+          onChange={(e) => onChangeDisableNameStyles(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="block text-keep-text">Disable name styles</span>
+          <span className="block text-[10px] text-keep-muted">
+            Show everyone's name as plain text instead of their gradient, glow, or animated styles.
+          </span>
+        </span>
+      </label>
+      <label className="mb-1 flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={disableBorderStyles}
+          onChange={(e) => onChangeDisableBorderStyles(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="block text-keep-text">Disable avatar borders</span>
+          <span className="block text-[10px] text-keep-muted">
+            Drop the decorative frames around avatars. The avatar still shows, just without the border.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={disableInlineAvatars}
+          onChange={(e) => onChangeDisableInlineAvatars(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="block text-keep-text">Disable inline avatars</span>
+          <span className="block text-[10px] text-keep-muted">
+            Show the gender or rank icon next to names in chat and the userlist instead of avatar thumbnails.
           </span>
         </span>
       </label>

@@ -181,6 +181,27 @@ export const users = sqliteTable(
       .notNull()
       .default(false),
     /**
+     * Viewer-side flair opt-outs (migration 0263). Account-wide, global
+     * toggles that turn OFF rendering of OTHER people's cosmetic flair
+     * FOR THIS VIEWER — a performance escape hatch for older hardware.
+     * Purely client-render gates: the underlying cosmetics still exist
+     * and everyone else still sees them; only this viewer's UI falls
+     * back to the plain rendering. All default off (= flair shown).
+     *   disableNameStyles    , render equipped name-style names as plain text.
+     *   disableBorderStyles  , render avatars with no rank/freeform border frame.
+     *   disableInlineAvatars , show the gender/rank glyph instead of the inline
+     *                          avatar thumbnail in chat lines + the userlist.
+     */
+    disableNameStyles: integer("disable_name_styles", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    disableBorderStyles: integer("disable_border_styles", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    disableInlineAvatars: integer("disable_inline_avatars", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    /**
      * Scriptorium catalog preferences (migration 0142).
      *
      *   storyShowNsfw , opt-in for R / NC-17 cards in the catalog.

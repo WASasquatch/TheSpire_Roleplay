@@ -795,6 +795,16 @@ interface ChatState {
   inputPrefs: { disableHistory: boolean; disableThesaurus: boolean };
   setInputPrefs: (p: { disableHistory: boolean; disableThesaurus: boolean }) => void;
   /**
+   * Viewer-side flair opt-outs. Mirrors three boolean columns on `users`
+   * (disable_name_styles / disable_border_styles / disable_inline_avatars).
+   * Read by StyledName, BorderedAvatar, and UserNameTag so the viewer can
+   * turn OFF rendering of OTHER people's cosmetic flair for a smoother
+   * experience on older hardware. All default `false` (= flair shown) so a
+   * freshly mounted store, before /me/profile lands, renders normally.
+   */
+  flairPrefs: { disableNameStyles: boolean; disableBorderStyles: boolean; disableInlineAvatars: boolean };
+  setFlairPrefs: (p: { disableNameStyles: boolean; disableBorderStyles: boolean; disableInlineAvatars: boolean }) => void;
+  /**
    * Counter bumped each time the socket (re)connects. Any open
    * ThreadPane watches this and re-runs its history seed when it
    * changes, that's the catch-up path for `dm:new` events the
@@ -1501,6 +1511,8 @@ export const useChat = create<ChatState>((set) => ({
   setSoundPrefs: (p) => set({ soundPrefs: p }),
   inputPrefs: { disableHistory: false, disableThesaurus: false },
   setInputPrefs: (p) => set({ inputPrefs: p }),
+  flairPrefs: { disableNameStyles: false, disableBorderStyles: false, disableInlineAvatars: false },
+  setFlairPrefs: (p) => set({ flairPrefs: p }),
   dmReseedTick: 0,
 
   setDmConversations: (list) => set(() => {

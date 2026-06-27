@@ -1674,6 +1674,9 @@ function Chat() {
           soundWhisperEnabled?: boolean;
           disableInputHistory?: boolean;
           disableThesaurus?: boolean;
+          disableNameStyles?: boolean;
+          disableBorderStyles?: boolean;
+          disableInlineAvatars?: boolean;
           publicProfileBgUrl?: string | null;
           publicProfileBgMode?: "cover" | "contain" | "tile" | "stretch";
           welcome?: { html: string; hash: string } | null;
@@ -1762,6 +1765,15 @@ function Chat() {
           useChat.getState().setInputPrefs({
             disableHistory: u.disableInputHistory ?? false,
             disableThesaurus: u.disableThesaurus ?? false,
+          });
+          // Viewer-side flair opt-outs. StyledName / BorderedAvatar /
+          // UserNameTag read these to render the plain fallback for users
+          // who turned cosmetics off for performance. Defaults false so
+          // flair shows for accounts that haven't touched the toggles.
+          useChat.getState().setFlairPrefs({
+            disableNameStyles: u.disableNameStyles ?? false,
+            disableBorderStyles: u.disableBorderStyles ?? false,
+            disableInlineAvatars: u.disableInlineAvatars ?? false,
           });
           // Admin-configured input caps. Composers (chat, DM, forum
           // topic title, bio editor) read these from the store so a

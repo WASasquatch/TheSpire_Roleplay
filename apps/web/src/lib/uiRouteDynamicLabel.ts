@@ -4,6 +4,7 @@
  * Some `{token}` chips resolve their label (and sometimes their click
  * target) at render time rather than from the static catalog:
  *   - {scriptorium:latest:story} → the latest published story's title
+ *   - {scriptorium:<slug>} → that specific story's title
  *   - {users:latest} / {users:character:latest} → the newest member's name
  *   - {ranking:<board>} → "<Board>: <#1 ranked member>"
  *
@@ -214,6 +215,66 @@ export async function fetchRoomName(ref: string): Promise<string | null> {
   return brief?.name ?? null;
 }
 
+/* ---------- story brief (id + title, for {scriptorium:<slug>} labels + open) ---------- */
+
+export interface StoryBrief {
+  id: string;
+  title: string;
+}
+
+interface StoryBriefCell {
+  brief: StoryBrief | null;
+  expiresAt: number;
+  inFlight: Promise<StoryBrief | null> | null;
+}
+const storyBriefCache = new Map<string, StoryBriefCell>();
+
+/**
+ * Resolve a story's `{id, title}` from its slug (or id) via the same
+ * visibility-gated `GET /stories/:idOrSlug` the reader uses. A private
+ * story the viewer can't see returns the `{private:true}` stub (or
+ * 404), both of which yield null so the chip degrades to its literal
+ * `{scriptorium:slug}` text and the click is a no-op — mirroring the
+ * world/room privacy posture. Cached + coalesced so the label render
+ * and the click-time open share one lookup; both fields are needed
+ * (the label uses the title, the dispatcher uses the id to open the
+ * StoryReader).
+ */
+export async function fetchStoryBrief(ref: string): Promise<StoryBrief | null> {
+  const key = ref.toLowerCase();
+  const now = Date.now();
+  const cell = storyBriefCache.get(key);
+  if (cell) {
+    if (cell.brief !== null && now < cell.expiresAt) return cell.brief;
+    if (cell.inFlight) return cell.inFlight;
+  }
+  const inFlight = (async () => {
+    let brief: StoryBrief | null = null;
+    try {
+      const r = await fetch(`/stories/${encodeURIComponent(ref)}`, { credentials: "include" });
+      if (r.ok) {
+        const j = (await r.json()) as { private?: boolean; story?: { id?: string; title?: string } };
+        if (!j.private && j.story?.id && j.story.title) {
+          brief = { id: j.story.id, title: j.story.title };
+        }
+      }
+    } catch {
+      brief = null;
+    }
+    storyBriefCache.set(key, { brief, expiresAt: Date.now() + TTL_MS, inFlight: null });
+    return brief;
+  })();
+  storyBriefCache.set(key, { brief: cell?.brief ?? null, expiresAt: cell?.expiresAt ?? 0, inFlight });
+  return inFlight;
+}
+
+/** Story title for a `{scriptorium:<slug>}` chip label, or null when the
+ *  story is missing / not visible to the viewer. */
+export async function fetchStoryName(ref: string): Promise<string | null> {
+  const brief = await fetchStoryBrief(ref);
+  return brief?.title ?? null;
+}
+
 /* ---------- unified resolver ---------- */
 
 /**
@@ -244,6 +305,8 @@ export async function resolveDynamicChipLabel(entry: UiRoute): Promise<string | 
       return fetchWorldName(t.ref);
     case "nav-room":
       return fetchRoomName(t.ref);
+    case "open-story":
+      return fetchStoryName(t.ref);
     default:
       return null;
   }

@@ -555,7 +555,21 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     // DM'd unless the owner turns it off in the Privacy tab. Set
     // explicitly so the older DB column default (0, from migration 0183)
     // can't quietly create an unreachable character.
-    await db.insert(characters).values({ id, userId: me.id, name, directMessengerEnabled: true });
+    try {
+      await db.insert(characters).values({ id, userId: me.id, name, directMessengerEnabled: true });
+    } catch (err) {
+      // The partial unique index (migration 0262) lets a soft-deleted name
+      // be reused, so the app-level check above is normally the only gate.
+      // This catch is defense-in-depth: a genuine live-name collision (e.g.
+      // a double-submit race) now returns a clean 409 instead of bubbling
+      // up as a 500 "internal error" the way the pre-0262 soft-delete
+      // collision did.
+      if (err instanceof Error && /unique/i.test(err.message)) {
+        reply.code(409);
+        return { error: `You already have a character named "${name}".` };
+      }
+      throw err;
+    }
     const c = (await db.select().from(characters).where(eq(characters.id, id)).limit(1))[0];
     reply.code(201);
     return c;

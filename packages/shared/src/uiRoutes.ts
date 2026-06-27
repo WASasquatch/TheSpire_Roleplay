@@ -10,6 +10,8 @@
  *   {modal:earning:items:shop}       → opens Earning → Items → Shop
  *   {scriptorium}                    → navigates to /scriptorium
  *   {scriptorium:latest}             → /scriptorium sorted newest-first
+ *   {scriptorium:latest:story}       → opens the newest published story (title shown)
+ *   {scriptorium:<slug>}             → opens that specific story (title shown)
  *
  * Adding a new shortcut = appending ONE entry to {@link UI_ROUTES}.
  * Each entry declares its display label, an optional viewer-role
@@ -128,7 +130,19 @@ export type UiRouteTarget =
    * access-gated at resolve time (a private room a non-member can't see
    * resolves to no label). Dispatcher joins it via the room:join path.
    */
-  | { kind: "nav-room"; ref: string };
+  | { kind: "nav-room"; ref: string }
+  /**
+   * PARAMETRIC: open a SPECIFIC Scriptorium story by slug (or id) in
+   * the reader. Token `{scriptorium:<slug>}`. Like `open-world` /
+   * `nav-room`: synthesized (not a static catalog row), title-hydrated
+   * at render time, and access-gated at resolve time (a private story
+   * the viewer can't see resolves to no label, so the chip falls back
+   * to literal text). Dispatcher pops the StoryReader via the resolved
+   * id. The static `{scriptorium}` / `{scriptorium:latest}` /
+   * `{scriptorium:latest:story}` rows resolve from the catalog first,
+   * so only an actual story slug reaches this parametric fallback.
+   */
+  | { kind: "open-story"; ref: string };
 
 export interface UiRoute {
   /** Canonical token (lowercase, colon-delimited). Matches what the
@@ -299,6 +313,15 @@ function synthesizeParametricRoute(prefix: string, ref: string): UiRoute | null 
       icon: "DoorOpen",
       description: `Go to the room "${ref}".`,
       target: { kind: "nav-room", ref },
+    };
+  }
+  if (prefix === "scriptorium") {
+    return {
+      token: `scriptorium:${ref}`,
+      label: "Story",
+      icon: "BookOpen",
+      description: `Open the story "${ref}" in the Scriptorium.`,
+      target: { kind: "open-story", ref },
     };
   }
   return null;
@@ -513,6 +536,8 @@ export function dynamicMarkerFor(entry: UiRoute): string | null {
       return "world";
     case "nav-room":
       return "room";
+    case "open-story":
+      return "story";
     default:
       return null;
   }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { createElement, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import {
   ANNOUNCEMENT_BANNER_BODY_MAX,
   COLOR_TOKEN_OR_HEX_RE,
@@ -14,9 +14,45 @@ import {
   type ThemeableTextSlot,
 } from "@thekeep/shared";
 import { readError } from "../lib/http.js";
+import { hydrateDynamicUiRouteChips } from "../lib/hydrateDynamicUiRouteChips.js";
 import { useActiveTheme } from "../lib/theme.js";
 import { sanitizeUserHtml } from "../lib/userHtml.js";
 import { useChat } from "../state/store.js";
+
+/**
+ * Render announcement HTML (already run through `renderUiRouteChipsInHtml`)
+ * AND hydrate its chips. The shared HTML generator has no React/lucide,
+ * so it emits icon-less skeleton chips with a static label; without this
+ * post-mount pass the admin preview + listings showed dynamic chips like
+ * {scriptorium:latest:story} stuck on the skeleton ("Latest story", no
+ * icon) instead of the resolved title — the same hydration the banner
+ * marquee + chat surfaces already run. Re-hydrates whenever the html
+ * changes (a keystroke in the live preview, a fresh listing row).
+ */
+function ChipHtml({
+  html,
+  className,
+  style,
+  as = "div",
+}: {
+  html: string;
+  className?: string;
+  style?: CSSProperties;
+  as?: "div" | "span";
+}) {
+  const ref = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    return hydrateDynamicUiRouteChips(el);
+  }, [html]);
+  return createElement(as, {
+    ref,
+    className,
+    style,
+    dangerouslySetInnerHTML: { __html: html },
+  });
+}
 
 /**
  * Admin tab for the two announcement surfaces.
@@ -157,9 +193,9 @@ function BannerSection({ canManage }: { canManage: boolean }) {
             {banners.map((b) => (
               <tr key={b.id} className="border-b border-keep-rule/40 align-top">
                 <td className="px-2 py-2">
-                  <div
+                  <ChipHtml
                     className="prose prose-sm max-w-none"
-                    dangerouslySetInnerHTML={{ __html: renderUiRouteChipsInHtml(sanitizeUserHtml(b.bodyHtml)) }}
+                    html={renderUiRouteChipsInHtml(sanitizeUserHtml(b.bodyHtml))}
                   />
                 </td>
                 <td className="px-2 py-2 text-center tabular-nums">{b.sortOrder}</td>
@@ -304,10 +340,7 @@ function BannerForm({
           <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">
             Preview
           </div>
-          <div
-            className="prose prose-sm max-w-none"
-            dangerouslySetInnerHTML={{ __html: previewHtml }}
-          />
+          <ChipHtml className="prose prose-sm max-w-none" html={previewHtml} />
         </div>
       ) : null}
 
@@ -473,7 +506,7 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
             {rows.map((r) => (
               <tr key={r.id} className="border-b border-keep-rule/40 align-top">
                 <td className="max-w-[240px] px-2 py-2">
-                  <div
+                  <ChipHtml
                     className="prose prose-sm max-w-none [&_p]:m-0"
                     style={(() => {
                       // Same resolver chat uses, theme tokens become
@@ -483,7 +516,7 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
                       const resolved = resolveMessageColor(r.color, themeBg);
                       return resolved ? { color: resolved } : {};
                     })()}
-                    dangerouslySetInnerHTML={{ __html: renderUiRouteChipsInHtml(sanitizeUserHtml(r.bodyHtml)) }}
+                    html={renderUiRouteChipsInHtml(sanitizeUserHtml(r.bodyHtml))}
                   />
                 </td>
                 <td className="px-2 py-2">
@@ -772,7 +805,7 @@ function ScheduledForm({
             style={previewColor ? { color: previewColor } : {}}
           >
             <span aria-hidden>📣 </span>
-            <span dangerouslySetInnerHTML={{ __html: previewHtml }} />
+            <ChipHtml as="span" html={previewHtml} />
           </div>
         </div>
       ) : null}

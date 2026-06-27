@@ -82,6 +82,136 @@ export function clampExportMs(
   return Math.max(MS.m, Math.min(requestedMs, retention, MAX_EXPORT_MS));
 }
 
+/* ============================================================
+ *  Tamper-evident manifest
+ *
+ *  An export carries a signed MANIFEST so a downloaded log can be
+ *  proven authentic against the server (not obfuscated — obfuscation
+ *  buys nothing; anyone can decode + re-encode). The server signs the
+ *  CANONICAL message DATA (ids, bodies, timestamps), never the rendered
+ *  HTML — so a theme/timezone difference never invalidates a log, and
+ *  cosmetic edits to the visible markup are simply ignored by the
+ *  verifier (which re-renders from the signed payload).
+ *
+ *  Symmetric HMAC: only the server can mint OR verify a signature, which
+ *  is exactly the dispute model (staff adjudicate). The verifier
+ *  recomputes the HMAC with the server key and cross-checks the content
+ *  hash against the receipt row recorded at export time.
+ * ============================================================ */
+
+/** Bump when the payload shape or canonicalization changes so an older
+ *  verifier refuses a newer manifest rather than mis-validating it. */
+export const EXPORT_MANIFEST_VERSION = 1;
+
+/** The signing algorithm label baked into the manifest (informational;
+ *  the server only accepts this one). */
+export const EXPORT_SIGN_ALGO = "HMAC-SHA256" as const;
+
+/** One signed message row — the stable DB snapshot, NOT the rendered
+ *  line. `id` is the canonical `messages.id` so a single reported post
+ *  can be located within the wider signed context. */
+export interface ExportPayloadMessage {
+  id: string;
+  kind: string;
+  displayName: string;
+  body: string;
+  color: string | null;
+  createdAt: number;
+  toDisplayName: string | null;
+  moodSnapshot: string | null;
+  npcVoicedBy: string | null;
+}
+
+/** The exact object that gets signed. Everything a verifier needs to
+ *  re-render the log AND to confirm who/when/what was exported. */
+export interface ExportPayload {
+  version: number;
+  receiptId: string;
+  roomId: string;
+  roomName: string;
+  exportedByUserId: string;
+  exportedByUsername: string;
+  generatedAtMs: number;
+  windowMs: number;
+  rangeStartMs: number;
+  rangeEndMs: number;
+  messageCount: number;
+  truncated: boolean;
+  messages: ExportPayloadMessage[];
+}
+
+/** The full manifest embedded (as inert JSON) in the export document and
+ *  submitted to the verifier. `signature` covers {@link ExportPayload}
+ *  only. */
+export interface ExportManifest {
+  version: number;
+  receiptId: string;
+  algo: typeof EXPORT_SIGN_ALGO;
+  signature: string;
+  payload: ExportPayload;
+}
+
+/** The DOM id of the inert `<script type="application/json">` block that
+ *  carries the manifest in an exported document. Shared so the builder
+ *  writes it and the verifier extracts it under the same name. */
+export const EXPORT_MANIFEST_DOM_ID = "thekeep-export-manifest";
+
+/**
+ * Deterministic serialization of a value with object keys sorted
+ * recursively, so the signed/hashed byte string never depends on key
+ * insertion order (the verifier parses the manifest back out of the
+ * file, where order isn't guaranteed). Arrays keep their order — message
+ * order is meaningful. Only the JSON types the payload uses are handled.
+ */
+export function canonicalJsonStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map((v) => canonicalJsonStringify(v)).join(",")}]`;
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  const body = keys
+    .map((k) => `${JSON.stringify(k)}:${canonicalJsonStringify(obj[k])}`)
+    .join(",");
+  return `{${body}}`;
+}
+
+/** The canonical byte string for a payload — the input to both the HMAC
+ *  signature and the content hash. */
+export function canonicalizeExportPayload(payload: ExportPayload): string {
+  return canonicalJsonStringify(payload);
+}
+
+/**
+ * Pull the manifest out of an exported HTML document's inert JSON block.
+ * Tolerant by design — staff paste whatever file they were handed. Returns
+ * null if the block is missing or unparseable (the verifier reports that
+ * as "no manifest found / not a TheKeep export"). Does NOT validate the
+ * signature — that's the server's job with the secret key.
+ */
+export function extractExportManifest(html: string): ExportManifest | null {
+  // Match the inert JSON script block by its id, in either attribute order.
+  const re = new RegExp(
+    `<script[^>]*id=["']${EXPORT_MANIFEST_DOM_ID}["'][^>]*>([\\s\\S]*?)<\\/script>`,
+    "i",
+  );
+  const m = re.exec(html);
+  const raw = m ? m[1] : html; // also accept a bare pasted manifest JSON
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw.trim());
+    if (
+      parsed && typeof parsed === "object" &&
+      typeof parsed.signature === "string" &&
+      parsed.payload && typeof parsed.payload === "object" &&
+      Array.isArray(parsed.payload.messages)
+    ) {
+      return parsed as ExportManifest;
+    }
+  } catch {
+    /* not JSON / not a manifest */
+  }
+  return null;
+}
+
 /** Compact human label for a ms window, e.g. `2d 3h`, `5h`, `45m`. Used in the
  *  clamp notice and the export document header. */
 export function formatDurationShort(ms: number): string {

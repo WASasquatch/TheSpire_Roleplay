@@ -15,7 +15,7 @@ import type {
   ServerToClientEvents,
   ThreadCategory,
 } from "@thekeep/shared";
-import { forums, ignores, messages, roomMembers, roomThreadCategories, rooms, users } from "../db/schema.js";
+import { exportReceipts, forums, ignores, messages, roomMembers, roomThreadCategories, rooms, users } from "../db/schema.js";
 import { parseNpcList } from "../lib/roomStats.js";
 import { forumBoardReadGate } from "../forums/authority.js";
 import { loadPollState } from "../polls.js";
@@ -27,8 +27,9 @@ import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
 import { listArchivedOwnedRooms } from "../lib/archivedRooms.js";
 import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
-import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MAX_MESSAGES, mentionsField, roleRank } from "@thekeep/shared";
+import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MANIFEST_VERSION, EXPORT_MAX_MESSAGES, EXPORT_SIGN_ALGO, mentionsField, roleRank, type ExportManifest, type ExportPayload } from "@thekeep/shared";
 import { buildChatLogHtml, type ExportMessageRow } from "../export/chatLog.js";
+import { signExportPayload } from "../export/sign.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -693,17 +694,75 @@ export async function registerRoomsRoutes(
       npcVoicedBy: m.npcVoicedBy,
     }));
 
+    const rangeStartMs = exportRows.length ? exportRows[0]!.createdAt : now - windowMs;
+    const rangeEndMs = exportRows.length ? exportRows[exportRows.length - 1]!.createdAt : now;
+
+    // Build the canonical, signable payload from the SAME rows the document
+    // renders — the stable DB snapshot (ids/bodies/timestamps), not the HTML.
+    // A receipt of this export is recorded server-side so a downloaded log can
+    // be proven authentic later, even after its messages age out of retention.
+    const receiptId = `EXP-${nanoid()}`;
+    const payload: ExportPayload = {
+      version: EXPORT_MANIFEST_VERSION,
+      receiptId,
+      roomId: room.id,
+      roomName: room.name,
+      exportedByUserId: me.id,
+      exportedByUsername: me.username,
+      generatedAtMs: now,
+      windowMs,
+      rangeStartMs,
+      rangeEndMs,
+      messageCount: capped.length,
+      truncated,
+      messages: capped.map((m) => ({
+        id: m.id,
+        kind: m.kind,
+        displayName: m.displayName,
+        body: m.body,
+        color: m.color,
+        createdAt: +m.createdAt,
+        toDisplayName: m.toDisplayName ?? null,
+        moodSnapshot: m.moodSnapshot ?? null,
+        npcVoicedBy: m.npcVoicedBy ?? null,
+      })),
+    };
+    const { signature, contentHash } = signExportPayload(payload);
+    const manifest: ExportManifest = {
+      version: EXPORT_MANIFEST_VERSION,
+      receiptId,
+      algo: EXPORT_SIGN_ALGO,
+      signature,
+      payload,
+    };
+    await db.insert(exportReceipts).values({
+      id: receiptId,
+      roomId: room.id,
+      roomName: room.name,
+      exportedByUserId: me.id,
+      exportedByUsername: me.username,
+      generatedAt: now,
+      windowMs,
+      rangeStart: rangeStartMs,
+      rangeEnd: rangeEndMs,
+      messageCount: capped.length,
+      truncated,
+      contentHash,
+      signature,
+    });
+
     const html = buildChatLogHtml({
       roomName: room.name,
       exportedBy: me.username,
       generatedAtMs: now,
       windowMs,
-      rangeStartMs: exportRows.length ? exportRows[0]!.createdAt : now - windowMs,
-      rangeEndMs: exportRows.length ? exportRows[exportRows.length - 1]!.createdAt : now,
+      rangeStartMs,
+      rangeEndMs,
       tzMinutes,
       messages: exportRows,
       truncated,
       theme,
+      manifest,
     });
 
     const safeName = (room.name || "chat")

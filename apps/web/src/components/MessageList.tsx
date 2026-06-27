@@ -4305,11 +4305,15 @@ function Line({
     : "hidden group-focus-within:flex justify-end gap-1 mt-0.5 md:flex md:absolute md:right-3 md:top-0 md:mt-0 md:items-center md:gap-1";
   const controls = hasControls ? (
     <div className={controlsClass}>
-      {/* Reply sits leftmost as the primary reader-facing action. It
-          mirrors the timestamp click (pre-fills the composer with
-          /reply <msgid>) but surfaces the affordance explicitly in the
-          hover dock so it's discoverable without knowing the timestamp
-          trick. Same visibility/shape contract as the rest of the row. */}
+      {/* Dock order, left→right, groups actions by intent so the row
+          reads as deliberate clusters rather than a random scatter:
+            engagement (Reply, React) → save (Bookmark) → author/mod
+            (Edit, Delete) → Report.
+          Reply leads as the primary reader-facing action. It mirrors the
+          timestamp click (pre-fills the composer with /reply <msgid>) but
+          surfaces the affordance explicitly so it's discoverable without
+          knowing the timestamp trick. Same visibility/shape contract as
+          the rest of the row. */}
       {reactAvailable ? (
         <button
           type="button"
@@ -4321,13 +4325,10 @@ function Line({
           <Reply className="h-3 w-3" aria-hidden />reply
         </button>
       ) : null}
-      {showBookmark ? <BookmarkButton msg={msg} /> : null}
-      {/* React lives immediately LEFT of Edit so the author-facing
-          and reader-facing actions sit side by side. On other
-          people's messages OwnControls is absent and React just
-          floats next to Bookmark, fine, still left of any
-          ModControls/Report that might follow. */}
+      {/* React sits beside Reply so the two engagement actions read as a
+          pair, then Bookmark (save) follows. */}
       {chatReactButton}
+      {showBookmark ? <BookmarkButton msg={msg} /> : null}
       {/* When the inline edit form is open, the buttons collapse so
           the user isn't staring at duplicate Edit/Cancel affordances
           (the form has its own Save / Cancel). The form itself

@@ -486,8 +486,13 @@ export const characters = sqliteTable(
     deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
   },
   (t) => ({
+    // PARTIAL: only LIVE characters reserve a name, so a soft-deleted
+    // name is immediately reusable (migration 0262). Without the
+    // `WHERE deleted_at IS NULL` clause, recreating a just-deleted
+    // character's name collided here and surfaced as a 500.
     userNameUq: uniqueIndex("characters_user_name_uq")
-      .on(t.userId, sql`lower(${t.name})`),
+      .on(t.userId, sql`lower(${t.name})`)
+      .where(sql`${t.deletedAt} IS NULL`),
     userIdx: index("characters_user_idx").on(t.userId),
   }),
 );
@@ -4909,3 +4914,42 @@ export const emailUnsubscribes = sqliteTable(
   }),
 );
 export type DbEmailUnsubscribe = typeof emailUnsubscribes.$inferSelect;
+
+/**
+ * Tamper-evident chat-export receipts (migration 0261). One row per
+ * `/export`, recording the metadata + a SHA-256 content hash of the signed
+ * canonical payload — never message bodies, so it's privacy-safe to keep
+ * indefinitely and can confirm a submitted file even after its messages
+ * age out of retention. `id` is the human-facing Verification ID printed
+ * in the log footer; `signature` is the HMAC kept so a receipt alone can
+ * re-confirm a file. See export/sign.ts + the verifier admin route.
+ */
+export const exportReceipts = sqliteTable(
+  "export_receipts",
+  {
+    id: id(),
+    /** SET NULL on room delete — the receipt outlives the room. */
+    roomId: text("room_id").references(() => rooms.id, { onDelete: "set null" }),
+    /** Snapshot of the room name at export time. */
+    roomName: text("room_name").notNull(),
+    exportedByUserId: text("exported_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Snapshot of the master username that ran /export. */
+    exportedByUsername: text("exported_by_username").notNull(),
+    generatedAt: integer("generated_at").notNull(),
+    windowMs: integer("window_ms").notNull(),
+    rangeStart: integer("range_start").notNull(),
+    rangeEnd: integer("range_end").notNull(),
+    messageCount: integer("message_count").notNull(),
+    truncated: integer("truncated", { mode: "boolean" }).notNull().default(false),
+    /** SHA-256 of the canonical signed payload (hex). */
+    contentHash: text("content_hash").notNull(),
+    /** HMAC-SHA256 signature (hex). */
+    signature: text("signature").notNull(),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    hashIdx: index("export_receipts_hash_idx").on(t.contentHash),
+    roomIdx: index("export_receipts_room_idx").on(t.roomId, t.generatedAt),
+  }),
+);
+export type DbExportReceipt = typeof exportReceipts.$inferSelect;

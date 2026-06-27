@@ -1370,7 +1370,14 @@ function ProfileBody({
                     column. */}
                 {stats && collectVibeAxes(stats, bypassVisibility).length > 0 ? (
                   <div className="lg:col-span-1">
-                    <Section title="Disposition">
+                    {/* Compact VibeSection drops its own Section chrome, so the
+                        hidden-from-others marker rides this outer Section's
+                        header (the owner/admin is the only one who reaches here
+                        when the section is hidden). */}
+                    <Section
+                      title="Disposition"
+                      badge={bypassVisibility && stats.visibility?.vibe === false ? <HiddenFromOthersBadge /> : undefined}
+                    >
                       <VibeSection
                         stats={stats}
                         bypassVisibility={bypassVisibility}
@@ -2571,7 +2578,7 @@ function BanDialog({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, badge, children }: { title: string; badge?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="mb-5 last:mb-0">
       {/* Header uses `text-keep-text` (not `text-keep-muted`) so it
@@ -2581,11 +2588,32 @@ function Section({ title, children }: { title: string; children: React.ReactNode
           sat close to bg. Bumped to `text-sm` (14px) for parity with
           chat headers + so the labels read as section dividers, not
           metadata. */}
-      <h3 className="mb-2 border-b border-keep-rule/60 pb-1 text-sm font-semibold uppercase tracking-widest text-keep-text">
+      <h3 className="mb-2 flex items-center gap-2 border-b border-keep-rule/60 pb-1 text-sm font-semibold uppercase tracking-widest text-keep-text">
         {title}
+        {badge}
       </h3>
       {children}
     </section>
+  );
+}
+
+/**
+ * "Hidden from others" pill shown next to a profile section the OWNER (or a
+ * mod+ viewer) is seeing only because visibility is bypassed for them. The
+ * section is genuinely hidden from everyone else; without this marker the
+ * owner has no way to tell their hide toggle took effect (the source of the
+ * "I marked it hidden but I could still see it" report). Non-owners never
+ * reach this code path — the section is dropped from their view entirely.
+ */
+function HiddenFromOthersBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-keep-muted"
+      title="You can see this because it's your profile. It's hidden from everyone else."
+    >
+      <EyeOff className="h-3 w-3" aria-hidden="true" />
+      Hidden from others
+    </span>
   );
 }
 
@@ -2822,6 +2850,9 @@ function VibeSection({
   if (!stats) return null;
   const axes = collectVibeAxes(stats, bypassVisibility);
   if (axes.length === 0) return null;
+  // Shown to the owner/admin only because of the bypass; flag it as
+  // hidden-from-others so they can confirm the toggle worked.
+  const hiddenFromOthers = bypassVisibility && stats.visibility?.vibe === false;
   const gridClass =
     variant === "compact"
       ? // Single column: used inside the body's Disposition column
@@ -2884,7 +2915,9 @@ function VibeSection({
       ))}
     </ul>
   );
-  return variant === "compact" ? list : <Section title="Disposition">{list}</Section>;
+  return variant === "compact"
+    ? list
+    : <Section title="Disposition" badge={hiddenFromOthers ? <HiddenFromOthersBadge /> : undefined}>{list}</Section>;
 }
 
 /**
@@ -2906,8 +2939,9 @@ function AttributesSection({
   if (!stats) return null;
   const rows = collectAttributes(stats, bypassVisibility);
   if (rows.length === 0) return null;
+  const hiddenFromOthers = bypassVisibility && stats.visibility?.attributes === false;
   return (
-    <Section title="Attributes">
+    <Section title="Attributes" badge={hiddenFromOthers ? <HiddenFromOthersBadge /> : undefined}>
       <ul className="space-y-2">
         {rows.map((row) => {
           // Defensive against a stored row whose min/max somehow ended

@@ -15,6 +15,7 @@ import {
   characters,
   customCommandAliases,
   customCommands,
+  exportReceipts,
   items as itemsTable,
   messages,
   mutualTitles,
@@ -26,7 +27,8 @@ import {
   users,
   worlds,
 } from "../db/schema.js";
-import { COLOR_TOKEN_OR_HEX_RE, CUSTOM_CMD_CSS_MAX_LEN, sanitizeCustomCmdCss, type AuditEntry, type PermissionKey, type Role } from "@thekeep/shared";
+import { COLOR_TOKEN_OR_HEX_RE, CUSTOM_CMD_CSS_MAX_LEN, extractExportManifest, sanitizeCustomCmdCss, type AuditEntry, type PermissionKey, type Role } from "@thekeep/shared";
+import { verifyExportManifest } from "../export/sign.js";
 import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import { CRASH_LOG_PATH, readRecentCrashes } from "../crashLog.js";
 import type { Db } from "../db/index.js";
@@ -355,6 +357,80 @@ export async function registerAdminRoutes(
     await recordAudit(db, { actorUserId: actor?.id ?? "system", action: "system_purge_messages", metadata: { deleted: before } });
     req.log.warn({ by: actor?.id, deleted: before }, "[system] purged all chat messages");
     return { ok: true, deleted: before };
+  });
+
+  /* ---------- Verify Log tool ----------
+   *
+   * Staff paste/drop a submitted `/export` chat log; we extract its inert
+   * signed manifest, verify the HMAC against this server's key, and cross-
+   * check the content hash against the receipt recorded at export time. The
+   * response carries the verdict, the receipt metadata, and the SIGNED
+   * messages — so staff read what was signed, not the (possibly edited)
+   * visible HTML around it. Bodies are returned raw; the client renders them
+   * as plain text. Gated on `verify_export_logs` (seeded to admin, migration
+   * 0261; masteradmin bypasses).
+   */
+  app.post<{ Body: unknown }>("/admin/export/verify", { bodyLimit: 24 * 1024 * 1024 }, async (req, reply) => {
+    if (!(await requirePermission(req, reply, "verify_export_logs"))) return;
+    const parsed = z.object({ file: z.string().min(1).max(24 * 1024 * 1024) }).safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: "bad_request", message: "Send { file: <the exported log text> }." };
+    }
+
+    const manifest = extractExportManifest(parsed.data.file);
+    if (!manifest) {
+      return {
+        found: false,
+        valid: false,
+        reason: "No verification data found. This doesn't look like a log exported from here (or the manifest was removed).",
+      };
+    }
+
+    const result = verifyExportManifest(manifest);
+    const p = manifest.payload;
+
+    // Cross-check the receipt recorded at export time. A row found by id whose
+    // stored hash matches the file's recomputed hash is the strongest possible
+    // confirmation: the file's content is byte-identical to what the server
+    // logged when it was generated.
+    const row = (await db
+      .select()
+      .from(exportReceipts)
+      .where(eq(exportReceipts.id, manifest.receiptId))
+      .limit(1))[0];
+    const stored = row
+      ? {
+          exists: true,
+          matchesHash: !!result.contentHash && row.contentHash === result.contentHash,
+          generatedAt: Number(row.generatedAt),
+          exportedByUsername: row.exportedByUsername,
+          roomName: row.roomName,
+          messageCount: row.messageCount,
+        }
+      : { exists: false, matchesHash: false };
+
+    return {
+      found: true,
+      valid: result.valid,
+      reason: result.reason,
+      receiptId: manifest.receiptId,
+      meta: {
+        roomName: p.roomName,
+        exportedByUsername: p.exportedByUsername,
+        generatedAtMs: p.generatedAtMs,
+        windowMs: p.windowMs,
+        rangeStartMs: p.rangeStartMs,
+        rangeEndMs: p.rangeEndMs,
+        messageCount: p.messageCount,
+        truncated: p.truncated,
+      },
+      stored,
+      // Only hand back the signed messages when the signature checks out — a
+      // failed verdict means the bodies can't be trusted, so we don't display
+      // them as if they were authoritative.
+      messages: result.valid ? p.messages : [],
+    };
   });
 
   app.get<{ Querystring: { tzOffsetMin?: string } }>("/admin/overview", async (req, reply) => {

@@ -11,8 +11,9 @@ import {
 import { legibleAgainstBg, type RoomOccupant, type RoomSummary, type Theme } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
 import { useChat } from "../state/store.js";
-import { Landmark } from "lucide-react";
+import { Landmark, Plus } from "lucide-react";
 import { AdminIcon, CharacterMaskIcon, MasterAdminIcon, ModIcon } from "./StaffIcons.js";
+import { CreateRoomModal } from "./CreateRoomModal.js";
 import { ToolPanel } from "./ToolPanel.js";
 import { UserNameTag } from "./UserNameTag.js";
 
@@ -150,6 +151,11 @@ export function RoomsTree({
   // back to the original static, always-visible rail. We avoid a separate
   // mobile component by toggling via Tailwind's responsive variants.
   const drawerOpen = isOpen ?? false;
+
+  // "Create Room" prompt, opened from the Rooms header button. Local to the
+  // rail since it only needs `onCommand` (already threaded through) to fire
+  // the create command.
+  const [showCreateRoom, setShowCreateRoom] = useState(false);
 
   // Boards (rooms inside a forum, forumId set) live in the Forums Catalog,
   // not the room list. Filtering keys on forumId — NOT replyMode — so a
@@ -305,17 +311,33 @@ export function RoomsTree({
         <span className="text-xs uppercase tracking-widest text-keep-muted">
           Rooms <span className="text-keep-rule">({visibleRooms.length})</span>
         </span>
-        {onClose ? (
+        <div className="flex items-center gap-1.5">
+          {/* Floating-right create action. Icon-only, so it carries both a
+              title (hover) and aria-label (assistive tech) per the icon-
+              button convention. Available to everyone — anyone can mint a
+              room via /go. */}
           <button
             type="button"
-            onClick={onClose}
-            className="keep-button flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-base text-keep-text hover:bg-keep-banner lg:hidden"
-            aria-label="Close rooms"
-            title="Close rooms drawer"
+            onClick={() => setShowCreateRoom(true)}
+            className="keep-button flex h-7 items-center gap-1 rounded border border-keep-action/60 bg-keep-action/10 px-2 text-xs font-semibold text-keep-action hover:border-keep-action hover:bg-keep-action/20"
+            aria-label="Create a room"
+            title="Create a new room"
           >
-            ✕
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            <span className="hidden sm:inline">New</span>
           </button>
-        ) : null}
+          {onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="keep-button flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-base text-keep-text hover:bg-keep-banner lg:hidden"
+              aria-label="Close rooms"
+              title="Close rooms drawer"
+            >
+              ✕
+            </button>
+          ) : null}
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {visibleRooms.length === 0 ? (
@@ -347,6 +369,9 @@ export function RoomsTree({
         {...(onOpenEarning ? { onOpenEarning } : {})}
         {...(onOpenArcade ? { onOpenArcade } : {})}
       />
+      {showCreateRoom ? (
+        <CreateRoomModal onCommand={onCommand} onClose={() => setShowCreateRoom(false)} />
+      ) : null}
     </aside>
   );
 }

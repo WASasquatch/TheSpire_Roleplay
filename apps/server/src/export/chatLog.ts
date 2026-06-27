@@ -29,7 +29,7 @@
  * fixed set above.
  */
 import { resolveMessageColor } from "@thekeep/shared";
-import { formatDurationShort } from "@thekeep/shared";
+import { EXPORT_MANIFEST_DOM_ID, formatDurationShort, type ExportManifest } from "@thekeep/shared";
 
 export type ExportTheme = "light" | "dark";
 
@@ -109,6 +109,9 @@ export interface ChatLogExportOptions {
   truncated: boolean;
   /** Document palette. Defaults to dark (the live chat's posture). */
   theme?: ExportTheme;
+  /** Signed manifest. When present, an inert JSON block is embedded and a
+   *  Verification ID + tamper-evidence notice is printed in the footer. */
+  manifest?: ExportManifest;
 }
 
 function escapeHtml(s: string): string {
@@ -284,6 +287,22 @@ function renderLine(m: ExportMessageRow, tzMinutes: number, bgHex: string): stri
   }
 }
 
+/**
+ * Serialize the signed manifest into an INERT `<script type="application/json">`
+ * block. `type="application/json"` is data, not executable JS. We still escape
+ * `<`/`>`/`&` to their `\uXXXX` forms so a message body containing a literal
+ * `</script>` (or `<!--`) can't break out of the block — the escapes are valid
+ * JSON and parse back to the exact same characters, so the embedded payload is
+ * byte-for-byte what was signed.
+ */
+function manifestBlock(manifest: ExportManifest): string {
+  const json = JSON.stringify(manifest)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026");
+  return `<script type="application/json" id="${EXPORT_MANIFEST_DOM_ID}">${json}</script>`;
+}
+
 export function buildChatLogHtml(o: ChatLogExportOptions): string {
   const pal = PALETTES[o.theme ?? "dark"];
   const lines = o.messages.map((m) => renderLine(m, o.tzMinutes, pal.bg)).join("\n");
@@ -295,6 +314,17 @@ export function buildChatLogHtml(o: ChatLogExportOptions): string {
     : "";
   const empty = o.messages.length === 0
     ? `<p class="empty">No messages in this window.</p>`
+    : "";
+
+  // Tamper-evidence footer + inert signed manifest. Honest wording: the log is
+  // verifiable BY STAFF against the server, and editing it breaks that check —
+  // not a claim that the file itself is "secure" or "encrypted".
+  const verifyFooter = o.manifest
+    ? `<footer class="verify">
+  <div class="verify-id">Verification ID: <strong>${escapeHtml(o.manifest.receiptId)}</strong></div>
+  <div class="verify-note">This log is digitally signed. Staff can verify it is authentic and unaltered against the server. Editing any part of the file will fail that check — keep the original if you may need to submit it.</div>
+</footer>
+${manifestBlock(o.manifest)}`
     : "";
 
   // `:root` exposes the themeable slots as concrete RGB channels so author
@@ -354,6 +384,13 @@ export function buildChatLogHtml(o: ChatLogExportOptions): string {
   .msg.scene .body { color: rgb(var(--keep-system)); }
   .empty { color: rgb(var(--keep-muted)); font-style: italic; }
   a { color: rgb(var(--keep-accent)); }
+  footer.verify {
+    margin-top: 2rem; padding-top: 1rem; border-top: 1px solid ${pal.ruleStrong};
+    font-size: 11px; color: rgb(var(--keep-muted));
+  }
+  footer.verify .verify-id { font-variant-numeric: tabular-nums; margin-bottom: .25rem; }
+  footer.verify .verify-id strong { color: rgb(var(--keep-text)); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  footer.verify .verify-note { max-width: 60ch; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -366,6 +403,7 @@ export function buildChatLogHtml(o: ChatLogExportOptions): string {
   </div>
 </header>
 ${empty}${lines}
+${verifyFooter}
 </div>
 </body>
 </html>`;

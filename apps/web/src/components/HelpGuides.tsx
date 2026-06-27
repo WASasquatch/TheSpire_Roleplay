@@ -157,7 +157,7 @@ function NavigationTagsGuide() {
       </Tip>
 
       <Heading>Link to a specific world or room</Heading>
-      <P>Two tags take a short "handle" so you can point at one exact place:</P>
+      <P>A few tags take a short "handle" so you can point at one exact place:</P>
       <Bullets>
         <li>
           <K>{"{world:the-handle}"}</K> opens that world. The handle is the world's slug (the
@@ -169,9 +169,14 @@ function NavigationTagsGuide() {
           <K>{"{room:...}"}</K> to paste. Owners and mods can set a custom one with{" "}
           <K>/slug my-handle</K>.
         </li>
+        <li>
+          <K>{"{scriptorium:the-handle}"}</K> opens that story in the reader. The handle is the
+          story's slug (the short name in its web address). <K>{"{scriptorium:latest:story}"}</K>{" "}
+          always points at the newest published story.
+        </li>
       </Bullets>
       <P>
-        The chip shows the world or room's real name, and it respects privacy: if a reader
+        The chip shows the world, room, or story's real name, and it respects privacy: if a reader
         can't see that place, the chip quietly stays as plain text for them.
       </P>
 

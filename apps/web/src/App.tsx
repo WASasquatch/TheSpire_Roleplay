@@ -41,7 +41,7 @@ import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanner
 import { onUiRouteOpen } from "./lib/uiRouteOpen.js";
 import { fetchLatestPublishedStory } from "./lib/latestStory.js";
 import { playRoomTransition } from "./lib/transitions/orchestrator.js";
-import { fetchSpotlightMember, fetchRoomBrief } from "./lib/uiRouteDynamicLabel.js";
+import { fetchSpotlightMember, fetchRoomBrief, fetchStoryBrief } from "./lib/uiRouteDynamicLabel.js";
 import { loadForumDraft, pruneStaleForumDrafts, saveForumDraft } from "./lib/forumDrafts.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
 import { ThreadModal } from "./components/ThreadModal.js";
@@ -1343,6 +1343,22 @@ function Chat() {
         // we just hand it the ref straight through.
         setWorldViewerId(t.ref);
         return;
+      case "open-story": {
+        // Parametric `{scriptorium:<slug>}` chip. Resolve slug → {id,title}
+        // via the visibility-gated lookup (cached from the label render),
+        // then pop the StoryReader to it — the same path the
+        // `{scriptorium:latest:story}` chip + `/story <slug>` take. A null
+        // brief means the story is gone or not visible to this viewer, so
+        // we surface a gentle notice instead of a silent no-op.
+        void fetchStoryBrief(t.ref).then((brief) => {
+          if (!brief) {
+            setNotice({ code: "NO_STORY", message: "That story isn't available to you." });
+            return;
+          }
+          setStoryReader({ storyId: brief.id });
+        });
+        return;
+      }
       case "nav-room": {
         // Parametric `{room:<slug>}` chip. Resolve slug → {id,name} via
         // the visibility-gated lookup (cached from the label render),

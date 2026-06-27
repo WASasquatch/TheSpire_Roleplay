@@ -19,6 +19,7 @@ import { listStyles } from "../lib/ornaments/index.js";
 import { AdminEarningTab } from "./AdminEarningTab.js";
 import { AdminBackupsTab } from "./AdminBackupsTab.js";
 import { AdminSystemTab } from "./AdminSystemTab.js";
+import { AdminVerifyLogTab } from "./AdminVerifyLogTab.js";
 import { AdminScriptoriumTab } from "./AdminScriptoriumTab.js";
 import { AdminEmoticonsTab } from "./AdminEmoticonsTab.js";
 import { AdminForumsTab } from "./AdminForumsTab.js";
@@ -40,7 +41,7 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "mod-cases" | "scriptorium" | "forums" | "emoticons" | "audit" | "system" | "backups" | "permissions" | "announcements" | "faqs" | "email";
+type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "mod-cases" | "verify-logs" | "scriptorium" | "forums" | "emoticons" | "audit" | "system" | "backups" | "permissions" | "announcements" | "faqs" | "email";
 
 /** Tab grouping for the strip's section dividers. Each tab carries
  *  the id of the group it belongs to; the render walks the list
@@ -83,6 +84,7 @@ const TAB_ITEMS: ReadonlyArray<{
   { id: "audit", label: "Audit", group: "monitor" },
   { id: "reports", label: "Reports", group: "monitor" },
   { id: "mod-cases", label: "Mod Log", group: "monitor", permission: "view_admin_mod_cases" },
+  { id: "verify-logs", label: "Verify Log", group: "monitor", permission: "verify_export_logs" },
 
   // ----- People & access: who can do what -----
   // Permissions ships first because the workflow is "set policy then
@@ -439,6 +441,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             {tab === "users" ? <UsersTab /> : null}
             {tab === "reports" ? <ReportsTab /> : null}
             {tab === "mod-cases" && canSeeTab("view_admin_mod_cases") ? <AdminModCasesTab /> : null}
+            {tab === "verify-logs" && canSeeTab("verify_export_logs") ? <AdminVerifyLogTab /> : null}
             {tab === "scriptorium" ? <AdminScriptoriumTab /> : null}
             {tab === "emoticons" ? <AdminEmoticonsTab /> : null}
             {tab === "forums" && canSeeTab("view_admin_forums") ? <AdminForumsTab /> : null}

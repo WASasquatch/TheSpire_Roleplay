@@ -133,6 +133,7 @@ export const PERMISSION_KEYS = [
   "view_admin_faqs",
   "view_admin_email",
   "view_system_metrics",
+  "verify_export_logs",
 
   // ---- system (live metrics + destructive maintenance tools) ----
   "restart_application",
@@ -286,6 +287,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   view_admin_faqs: "See the admin FAQ tab. Editing requires manage_faqs.",
   view_admin_email: "See the admin Email tab (verification settings + the emailer). Sending requires send_admin_email.",
   view_system_metrics: "See the admin System tab: live server metrics (CPU, memory, connections, database size, uptime, host info).",
+  verify_export_logs: "Use the admin Verify Log tool: check whether a submitted /export chat log is authentic and unaltered, and read its signed contents.",
 
   // system (destructive maintenance — masteradmin-only by default)
   restart_application: "Restart the server process from the System tab. The machine comes back up on its own; live connections briefly drop.",
@@ -428,6 +430,7 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   view_admin_faqs: "admin_panel_tabs",
   view_admin_email: "admin_panel_tabs",
   view_system_metrics: "admin_panel_tabs",
+  verify_export_logs: "admin_panel_tabs",
 
   // system (destructive maintenance tools)
   restart_application: "system",

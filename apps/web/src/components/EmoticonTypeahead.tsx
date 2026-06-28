@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { UNICODE_EMOJI_FLAT } from "@thekeep/shared";
 import { useEmoticons } from "../state/emoticons.js";
 import { EmoticonSprite } from "./EmoticonSprite.js";
@@ -45,6 +44,9 @@ const MAX_SUGGESTIONS = 10;
 // avoid pathological input ("::::::longstring::::::") triggering
 // repeated catalog scans.
 const MAX_QUERY_LEN = 32;
+// Popup width (px), w-60 below; used to clamp the caret-aligned left edge so
+// a near-right-edge caret doesn't push the list out of the composer.
+const POPUP_WIDTH = 240;
 
 interface SheetSuggestion {
   kind: "sheet";
@@ -103,11 +105,15 @@ export function EmoticonTypeahead({
   const sheets = useEmoticons((s) => s.sheets);
   const [active, setActive] = useState<ActiveTrigger | null>(null);
   const [selectedIdx, setSelectedIdx] = useState(0);
-  // The caret column (document px) to align the popup's left edge with.
-  // Vertical placement is computed at RENDER from the textarea's LIVE
-  // bounding rect (see below) rather than stored here — storing it led to
-  // stale anchors (measured before the chat finished laying out) that
-  // flung the popup to the wrong edge of the screen.
+  // The caret column to align the popup's left edge with, measured RELATIVE
+  // to the composer's positioned wrapper (the popup renders `absolute
+  // bottom-full` inside it — see render). Vertical placement needs no JS:
+  // `bottom-full` always pins the list to the top edge of the input, immune
+  // to ancestor transforms/filters and measurement timing. The old
+  // viewport-`fixed` + body-portal approach computed top/bottom from the live
+  // rect and could fling the popup to the top of the screen when the rect read
+  // wrong; the three sibling popups (mentions, synonyms, history) all use this
+  // same `absolute bottom-full` anchor, so this brings the emoji list in line.
   const [pos, setPos] = useState<{ left: number } | null>(null);
   // Whether the user has explicitly moved the selection with the arrow
   // keys. Gates Enter: without an explicit pick, Enter must fall through to
@@ -217,8 +223,9 @@ export function EmoticonTypeahead({
     setNavigated(false);
   }, [textareaRef, value]);
 
-  // Track the caret column whenever the trigger appears or moves. Vertical
-  // placement is decided at render from the live textarea rect.
+  // Track the caret column whenever the trigger appears or moves, measured
+  // relative to the composer's positioned wrapper (the popup's offsetParent)
+  // so the `absolute` left lands correctly regardless of page scroll/transform.
   useLayoutEffect(() => {
     if (!active) {
       setPos(null);
@@ -226,7 +233,6 @@ export function EmoticonTypeahead({
     }
     const el = textareaRef.current;
     if (!el) return;
-    const rect = el.getBoundingClientRect();
     // Caret column approximated via a mirror element. Browsers don't
     // expose a direct API for "give me the caret's pixel coordinates
     // inside a <textarea>" so we measure by copying the textarea's text +
@@ -234,7 +240,12 @@ export function EmoticonTypeahead({
     // placed at the caret index. Cheap at chat-input sizes; only runs on
     // trigger changes, not in a tight loop.
     const caretOffset = measureCaretOffset(el, active.end);
-    setPos({ left: rect.left + caretOffset.left });
+    // `offsetLeft` is relative to the offsetParent (the relative wrapper), so
+    // adding the in-textarea caret offset gives the caret's x within that
+    // wrapper. Clamp so the popup never spills past the wrapper's right edge.
+    const wrapperWidth = (el.offsetParent as HTMLElement | null)?.clientWidth ?? el.clientWidth;
+    const rawLeft = el.offsetLeft + caretOffset.left;
+    setPos({ left: Math.max(0, Math.min(rawLeft, Math.max(0, wrapperWidth - POPUP_WIDTH))) });
   }, [active, textareaRef, value]);
 
   // Wire selection/input listeners. We mount these once per textarea
@@ -336,35 +347,23 @@ export function EmoticonTypeahead({
   }, [active, suggestions, selectedIdx, navigated, accept, textareaRef]);
 
   if (!active || suggestions.length === 0 || !pos) return null;
-  if (typeof document === "undefined") return null;
 
-  // Clamp the popup inside the viewport so it doesn't render off-screen
-  // when the caret is near the right edge.
-  const POPUP_WIDTH = 240;
-  const left = Math.max(8, Math.min(pos.left, window.innerWidth - POPUP_WIDTH - 8));
-  // Vertical placement from the textarea's LIVE rect (read here, not from
-  // stored state, so it's never stale). Open on whichever side has more
-  // room — ABOVE for the bottom-anchored chat composer — and bound the
-  // height to that side's available space so the list can NEVER spill off
-  // the top or bottom of the screen (the inner `overflow-y-auto` scrolls a
-  // long list within the bound). Opening above pins the popup's BOTTOM
-  // just above the field so it hugs the input and grows upward.
-  const taRect = textareaRef.current?.getBoundingClientRect();
-  if (!taRect) return null;
-  const vh = window.innerHeight;
-  const openAbove = taRect.top >= vh - taRect.bottom;
-  const vStyle: CSSProperties = openAbove
-    ? { bottom: Math.max(8, vh - taRect.top + 6), maxHeight: Math.max(96, taRect.top - 14) }
-    : { top: Math.max(8, taRect.bottom + 6), maxHeight: Math.max(96, vh - taRect.bottom - 14) };
-  return createPortal(
+  // Anchored inside the composer's `relative` wrapper (same pattern as the
+  // mention / synonym / history popups) instead of a viewport-`fixed` portal:
+  // `absolute bottom-full` always pins the list directly above the input, so
+  // it can't be flung to the top of the screen by an ancestor transform/filter
+  // or a mis-timed rect read. `pos.left` follows the caret, clamped above.
+  return (
     <ul
       role="listbox"
       aria-label="Emoji suggestions"
-      // `keep-panel` matches the rest of the floating chrome
-      // (mentions popup, history popup) so the typeahead reads as
-      // first-class.
-      className="keep-panel pointer-events-auto fixed z-[210] w-60 overflow-y-auto rounded-lg border border-keep-rule shadow-xl"
-      style={{ left, ...vStyle }}
+      // Plain `bg-keep-bg` (like the mention / synonym / history popups) —
+      // NOT `keep-panel`. Several theme styles override `.keep-panel` with a
+      // higher-specificity `[data-theme-style="…"] .keep-panel { position:
+      // relative }` rule, which would clobber the `absolute` below and drop the
+      // list into the document flow (dead space under the input).
+      className="pointer-events-auto absolute bottom-full z-[210] mb-1 max-h-60 w-60 overflow-y-auto rounded-lg border border-keep-rule bg-keep-bg shadow-xl"
+      style={{ left: pos.left }}
       // Stop mousedown so clicking a suggestion doesn't steal focus
       // from the textarea, the caret needs to stay where it is so
       // setSelectionRange in `accept` lands correctly.
@@ -395,8 +394,7 @@ export function EmoticonTypeahead({
       <li className="border-t border-keep-rule/60 px-2 py-1 text-[10px] italic text-keep-muted">
         ↑↓ navigate · enter / tab to insert · esc to dismiss
       </li>
-    </ul>,
-    document.body,
+    </ul>
   );
 }
 

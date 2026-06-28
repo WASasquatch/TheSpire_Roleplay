@@ -1,6 +1,9 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { BarChart3, Bookmark, BookmarkCheck, Flag, FolderInput, Lock, Pencil, Reply, SmilePlus, Trash2 } from "lucide-react";
 import { setTopicCategory } from "../lib/forums.js";
+import { ForumReportContext } from "../lib/forumReportContext.js";
+import { ForumTopicAdminContext } from "../lib/forumTopicAdminContext.js";
+import { ForumPrefixContext } from "../lib/forumPrefixContext.js";
 import { PollCard } from "./PollCard.js";
 import { customCmdCssToStyle, isAdminRole, resolveMessageColor, type AvatarCrop, type ChatMessage, type MentionRef, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
@@ -19,6 +22,7 @@ import { useEmoticons } from "../state/emoticons.js";
 import { handlePlainTextCopy } from "../lib/chatCopy.js";
 import { splitMentions } from "../lib/mentions.js";
 import { extractMentions } from "@thekeep/shared";
+import { prefixAppliesToCategory } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { ReactionAddButton, ReactionBar } from "./ReactionBar.js";
 import { LinkPreviewCard } from "./LinkPreviewCard.js";
@@ -251,7 +255,7 @@ const REPORTABLE_KINDS = new Set(["say", "me", "ooc", "announce", "npc"]);
 // soft "hide controls past the window" check; the server route
 // re-validates and is authoritative.
 
-const REPLYABLE_KINDS = new Set(["say", "me", "ooc"]);
+const REPLYABLE_KINDS = new Set(["say", "me", "ooc", "npc"]);
 
 // Stable empty fallback for the optional `selfNames` prop. Using a
 // literal `[]` in the fallback expression would allocate a fresh array
@@ -339,12 +343,32 @@ function fmtFullTimestamp(ms: number): string {
 }
 
 /**
- * Distance from the bottom (px) within which we treat the reader as
- * "parked at the latest message." Both the buffer-diff auto-scroll and
- * the async-growth re-pin (ResizeObserver) share this threshold so they
- * agree on when to follow new content vs. leave a history-reader alone.
+ * Distance from the bottom (px) within which a NEW message (an append)
+ * is allowed to scroll the reader down to follow it. Generous on
+ * purpose: a brand-new line — especially the reader's OWN send — should
+ * follow even when they're a few lines off the bottom.
  */
 const NEAR_BOTTOM_PX = 120;
+
+/**
+ * Tighter "is the reader actually pinned to the bottom?" threshold, used
+ * ONLY for the async-growth re-pin (ResizeObserver: reaction chips
+ * landing, inline images decoding, link-preview cards mounting). That
+ * growth is incidental — the reader didn't ask for it — so it must only
+ * follow when they're TRULY at the bottom, never when they've manually
+ * scrolled up to read. At the true bottom `dist` is ~0 (the feed's `pb-7`
+ * gutter is inside scrollHeight, so it doesn't inflate the at-bottom
+ * distance); a real scroll-up (a wheel notch is ~100px) clears this
+ * easily, so the stick releases the instant the reader moves up while
+ * sub-pixel / scrollbar rounding at the bottom stays comfortably under it.
+ *
+ * Keeping this SEPARATE from (and much tighter than) NEAR_BOTTOM_PX is
+ * the fix for the "chat bounces when I react to a post or post an image"
+ * report: a reaction chip or a decoding image used to re-pin anyone
+ * within 120px of the bottom, yanking readers who'd deliberately scrolled
+ * up a few lines back down to the latest line.
+ */
+const STICK_BOTTOM_PX = 24;
 
 /**
  * Flat-buffer windowing bounds. While the reader is parked at the
@@ -455,7 +479,12 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       };
       // Track parked-at-bottom from the user's own scrolling so the
       // async-growth re-pin below knows whether to follow new content.
-      stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+      // Uses the TIGHT threshold: the re-pin (reactions, decoding images,
+      // late media) should only follow when the reader is genuinely at the
+      // bottom, so manually scrolling up even a little releases the stick
+      // and stops the "bounce." The looser NEAR_BOTTOM_PX still governs
+      // whether a brand-new message (append, below) scrolls down to follow.
+      stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_BOTTOM_PX;
       // A programmatic pin (the ResizeObserver below) also emits a scroll
       // event; swallow that echo so it isn't mistaken for user intent.
       // Every OTHER scroll is the reader's, and stamps their last
@@ -1588,7 +1617,15 @@ function ForumView({
         const headerCount = ownBucket?.totalCount ?? ownBucket?.topics.length ?? 0;
         const isCollapsed = s.label !== null && collapsed.has(s.key);
         return (
-          <section key={s.key} className="mb-3">
+          // The scroll container intentionally has no top padding so the
+          // first CATEGORY HEADER sits flush (its own chrome separates it).
+          // But a header-less section (`label === null` — the Uncategorized
+          // bucket when the forum has no categories at all) has nothing above
+          // its first topic, so it'd ride the container's top edge. Give that
+          // case its own top padding so the lone post isn't cramped against
+          // the frame. Only the no-categories uncat bucket is ever label-less,
+          // so this never adds a stray gap mid-list.
+          <section key={s.key} className={`mb-3 ${s.label === null ? "pt-3" : ""}`}>
             {s.label !== null ? (
               // Switched from <button> to <div role="button"> so the
               // nested "+ New Topic" action button below is valid HTML
@@ -1848,6 +1885,73 @@ function ForumView({
  * optimistically via `updateForumTopic` on success (the store now moves
  * a topic between category buckets when its `threadCategoryId` changes).
  */
+/** Move-to-board + Merge buttons for a forum topic. Renders only when the
+ *  Forums Catalog provided the admin context (i.e. the viewer holds
+ *  move_topics); the server re-checks. Both open a picker the provider owns. */
+function TopicAdminButtons({ topic }: { topic: ChatMessage }) {
+  const admin = useContext(ForumTopicAdminContext);
+  if (!admin || topic.replyToId) return null;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => admin.onMove(topic.id, topic.roomId, topic.title ?? "this topic")}
+        className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+        title="Move this topic to another board"
+      >
+        <FolderInput className="mr-1 inline h-3 w-3" aria-hidden="true" />Board
+      </button>
+      <button
+        type="button"
+        onClick={() => admin.onMerge(topic.id, topic.title ?? "this topic")}
+        className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+        title="Merge this topic into another"
+      >
+        Merge
+      </button>
+    </>
+  );
+}
+
+/** Prefix chip for a forum topic + (for the author / manage_prefixes) a
+ *  click target to (re)assign it. Resolves the chip from the forum's prefix
+ *  catalog provided via context; renders nothing outside a prefix-enabled
+ *  forum or when the topic has no prefix and the viewer can't assign one. */
+function TopicPrefix({ topic, selfUserId }: { topic: ChatMessage; selfUserId: string | null }) {
+  const ctx = useContext(ForumPrefixContext);
+  if (!ctx || topic.replyToId) return null;
+  const prefix = topic.prefixId ? ctx.byId.get(topic.prefixId) : null;
+  const canAssign = ctx.canManagePrefixes || (!!selfUserId && topic.userId === selfUserId);
+  // Tags this topic's category can actually be given (global + matching-scope).
+  const categoryId = topic.threadCategoryId ?? null;
+  const hasApplicable = ctx.all.some((p) => prefixAppliesToCategory(p, categoryId));
+  // Hide the whole affordance when there's nothing to assign and no way to
+  // mint one — "no tags + custom off ⇒ don't show the tag system".
+  if (!prefix && (!canAssign || (!hasApplicable && !ctx.canCreateCustom))) return null;
+  const chip = prefix ? (
+    <span
+      className="shrink-0 rounded px-1.5 py-0 text-[10px] font-bold uppercase tracking-wide"
+      style={{ backgroundColor: `${prefix.color}22`, color: prefix.color, border: `1px solid ${prefix.color}66` }}
+      title={prefix.tooltip ?? undefined}
+    >
+      {prefix.label}
+    </span>
+  ) : (
+    <span className="shrink-0 rounded border border-dashed border-keep-rule px-1.5 py-0 text-[10px] uppercase tracking-wide text-keep-muted">+ tag</span>
+  );
+  if (!canAssign) return chip;
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); ctx.onAssign(topic.id, topic.prefixId ?? null, topic.threadCategoryId ?? null); }}
+      title="Set this topic's prefix"
+      className="shrink-0"
+    >
+      {chip}
+    </button>
+  );
+}
+
 function TopicMoveControl({ topic, categories }: { topic: ChatMessage; categories: ThreadCategory[] }) {
   const updateForumTopic = useChat((s) => s.updateForumTopic);
   const [busy, setBusy] = useState(false);
@@ -2137,6 +2241,7 @@ function TopicCard({
                 🔒
               </span>
             ) : null}
+            <TopicPrefix topic={topic} selfUserId={selfUserId} />
             <span
               className="min-w-0 flex-1 truncate font-semibold text-keep-text"
               title={headingText}
@@ -2251,7 +2356,10 @@ function TopicCard({
             {...(postPermalink ? { postPermalink } : {})}
           />
           {canModerate && !readOnly ? (
-            <TopicMoveControl topic={topic} categories={categories} />
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              <TopicMoveControl topic={topic} categories={categories} />
+              {!readOnly ? <TopicAdminButtons topic={topic} /> : null}
+            </div>
           ) : null}
           {topic.kind === "poll" && topic.poll ? (
             <div className="mt-2 max-w-lg">
@@ -2794,6 +2902,28 @@ export function ForumPostBody({
             {renderedBody}
             {editedBadge}
           </div>
+        ) : msg.kind === "npc" ? (
+          // NPC post: a streamlined card — the body, an optional stat block,
+          // and a quiet "voiced by" attribution. The NPC's name is the post
+          // author (header above), so the line reads as the NPC speaking.
+          <div className="rounded border-l-2 border-keep-system/50 bg-keep-system/5 px-2 py-1">
+            <div className="whitespace-pre-wrap text-keep-text">
+              {renderedBody}
+              {editedBadge}
+            </div>
+            {msg.npcStats && msg.npcStats.length > 0 ? (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {msg.npcStats.map((s, i) => (
+                  <span key={i} className="rounded border border-keep-rule bg-keep-bg/60 px-1.5 py-0 text-[10px] text-keep-muted">
+                    <b className="text-keep-text">{s.label}</b> {s.value}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {msg.npcVoicedBy ? (
+              <div className="mt-1 text-[10px] italic text-keep-muted">voiced by {msg.npcVoicedBy}</div>
+            ) : null}
+          </div>
         ) : (
           <div className="whitespace-pre-wrap text-keep-text">
             {renderedBody}
@@ -2960,6 +3090,11 @@ function PostToolbar({
   // thread modal where the composer is already targeted at this topic)
   // can simply not pass `onReply` and the button hides itself.
   const showReply = !!onReply;
+  // Forum context: when present, "report" routes to the FORUM's queue
+  // (owner + mods) instead of the site-wide report. Available on any
+  // forum post that isn't the viewer's own.
+  const forumReport = useContext(ForumReportContext);
+  const showForumReport = !!forumReport && !isOwn && REPORTABLE_KINDS.has(msg.kind);
 
   async function doDelete() {
     // The confirm copy differs slightly for moderators so they know
@@ -3042,7 +3177,7 @@ function PostToolbar({
     onQuotePost(quote);
   }
 
-  if (!showEdit && !showDelete && !showBookmark && !showReport && !showLock && !showPin && !showQuote && !showReply && !extraActions) return null;
+  if (!showEdit && !showDelete && !showBookmark && !showReport && !showForumReport && !showLock && !showPin && !showQuote && !showReply && !extraActions) return null;
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-keep-rule/30 pt-1 text-[10px] text-keep-muted">
@@ -3123,7 +3258,19 @@ function PostToolbar({
       ) : null}
       {showBookmark ? <InlineBookmark msg={msg} /> : null}
       {permalinkUrl ? <CopyLinkButton url={permalinkUrl} /> : null}
-      {showReport ? <InlineReport msg={msg} /> : null}
+      {/* Forum posts report to the forum's own queue; suppress the site
+          report in that case so there's exactly one Report affordance. */}
+      {showForumReport ? (
+        <button
+          type="button"
+          onClick={() => forumReport!(msg.id, msg.displayName)}
+          className="keep-button flex items-center gap-1 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 hover:bg-keep-banner hover:text-keep-text"
+          title={`Report ${msg.displayName}'s post to the forum's moderators`}
+        >
+          <Flag className="h-3 w-3" aria-hidden="true" /> Report
+        </button>
+      ) : null}
+      {showReport && !showForumReport ? <InlineReport msg={msg} /> : null}
       {extraActions}
       {actionError ? <span className="normal-case tracking-normal text-keep-accent">{actionError}</span> : null}
     </div>

@@ -105,6 +105,17 @@ interface Props {
  */
 const RAIL_FONT_EM = ["1.15em", "1.3em", "1.5em", "1.75em"] as const;
 
+/**
+ * Shared "action pill" look for the rail's two header affordances — the
+ * Forums Catalog "Open" chip and the Rooms header "New" button — so they
+ * read as one family instead of two unrelated controls. Shape + typography
+ * + accent live here; each call site layers on what's specific to it (the
+ * interactive "New" adds a fill + hover + the Plus icon; the "Open" chip is
+ * a non-interactive label riding the already-filled Forums button).
+ */
+const ACTION_PILL =
+  "rounded-full border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-keep-action";
+
 /** Unread forum-notification pill on the Forums Catalog button. Reads
  *  the store directly so the rail updates on every socket pulse without
  *  threading a prop through App. */
@@ -295,10 +306,7 @@ export function RoomsTree({
             <Landmark className="h-4 w-4 shrink-0 text-keep-action" aria-hidden="true" />
             <span className="font-action text-sm text-keep-text">Forums Catalog</span>
             <ForumNotifBadge />
-            <span
-              aria-hidden
-              className="ml-auto rounded-full border border-keep-action/50 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-keep-action"
-            >
+            <span aria-hidden className={`ml-auto ${ACTION_PILL}`}>
               Open
             </span>
           </button>
@@ -319,11 +327,17 @@ export function RoomsTree({
           <button
             type="button"
             onClick={() => setShowCreateRoom(true)}
-            className="keep-button flex h-7 items-center gap-1 rounded border border-keep-action/60 bg-keep-action/10 px-2 text-xs font-semibold text-keep-action hover:border-keep-action hover:bg-keep-action/20"
+            // Deliberately NOT `.keep-button`: that class is theme-scoped tile
+            // styling ([data-theme-style] .keep-button → 2px radius, panel bg,
+            // neutral border) whose higher specificity overrode the accent
+            // pill, which is exactly why this read as a different control from
+            // the Forums "Open" chip. Styled purely by ACTION_PILL so the two
+            // stay identical across every theme.
+            className={`flex items-center gap-1 ${ACTION_PILL} transition-colors hover:border-keep-action hover:bg-keep-action/20`}
             aria-label="Create a room"
             title="Create a new room"
           >
-            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            <Plus className="h-3 w-3" aria-hidden="true" />
             <span className="hidden sm:inline">New</span>
           </button>
           {onClose ? (

@@ -891,6 +891,9 @@ export const messages = sqliteTable(
     moodSnapshot: text("mood_snapshot"),
     /** For /npc messages, the display name of the author's ACTIVE identity (character, or OOC name when OOC) that voiced this NPC, rendered as a "voiced by" tag next to the NPC name. NOT the master account — that stays recoverable via this row's userId/characterId for moderation. */
     npcVoicedBy: text("npc_voiced_by"),
+    /** For NPC posts voiced from a saved NPC: JSON snapshot of its stat
+     *  lines at post time (migration 0267). Null = no stats. */
+    npcStatsJson: text("npc_stats_json"),
     /**
      * Optional hero image for `/scene <title> | <url>` banners.
      * Frozen at send time so a later edit to whatever the URL points
@@ -976,6 +979,9 @@ export const messages = sqliteTable(
      * `PATCH /messages/:id/sticky`.
      */
     isSticky: integer("is_sticky", { mode: "boolean" }).notNull().default(false),
+    /** Forum topic prefix (migration 0266). Top-level forum topics only;
+     *  null = no prefix. SET NULL when the prefix is deleted. */
+    prefixId: text("prefix_id").references(() => forumPrefixes.id, { onDelete: "set null" }),
     /**
      * Server-validated CSS snapshot for `kind: "cmd"` rows. Frozen on the
      * row at send time so a later edit to the underlying custom command's
@@ -3139,6 +3145,10 @@ export const forums = sqliteTable(
      *  may READ boards/topics/replies without an account. Posting and
      *  joining always require login. Off by default. */
     publicBrowsing: integer("public_browsing", { mode: "boolean" }).notNull().default(false),
+    /** Owner toggle (migration 0268): when true, a mod holding the
+     *  `create_tags` granular permission may mint a topic tag on the fly when
+     *  tagging a topic. Off = the curated catalog only, offered per category. */
+    allowCustomTags: integer("allow_custom_tags", { mode: "boolean" }).notNull().default(false),
     /** Owner-set prompt above the membership application's answer field
      *  (migration 0230). Null = a generic "tell the keeper why" prompt. */
     applicationPrompt: text("application_prompt"),
@@ -3226,6 +3236,11 @@ export const forumMembers = sqliteTable(
     role: text("role", { enum: ["owner", "mod", "member"] })
       .notNull()
       .default("member"),
+    /** Granular mod permissions (migration 0264): JSON array of
+     *  FORUM_MOD_PERMISSIONS keys the owner granted this mod. Empty for
+     *  owners/members (owners hold all implicitly; members hold none).
+     *  Parse via parseForumModPermissions; write via serializeForumModPermissions. */
+    permissionsJson: text("permissions_json").notNull().default("[]"),
     joinedAt: ts("joined_at"),
   },
   (t) => ({
@@ -3233,6 +3248,147 @@ export const forumMembers = sqliteTable(
     userIdx: index("forum_members_user_idx").on(t.userId),
   }),
 );
+
+/**
+ * Per-account saved NPCs (migration 0267). Name + optional stat lines,
+ * reusable in any forum subject to that forum's `use_npc` grant. Posting as
+ * an NPC snapshots the stats onto the message, so this is the editable
+ * "source" the user re-selects from.
+ */
+export const userNpcs = sqliteTable(
+  "user_npcs",
+  {
+    id: id(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** JSON array of {label,value} stat lines. */
+    statsJson: text("stats_json").notNull().default("[]"),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    userIdx: index("user_npcs_user_idx").on(t.userId, t.updatedAt),
+  }),
+);
+export type DbUserNpc = typeof userNpcs.$inferSelect;
+
+/**
+ * Forum topic prefixes (migration 0266). Owner-curated labels shown as
+ * colored chips on topic cards + filterable. A topic's assigned prefix is
+ * `messages.prefix_id`. Curated via manage_prefixes.
+ */
+export const forumPrefixes = sqliteTable(
+  "forum_prefixes",
+  {
+    id: id(),
+    forumId: text("forum_id").notNull().references(() => forums.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    color: text("color").notNull().default("#888888"),
+    /** Short owner-written explanation of the tag, shown on hover (migration
+     *  0269). Null = none (the label stands alone). */
+    tooltip: text("tooltip"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** JSON array of room_thread_category ids this tag is offered in
+     *  (migration 0268). Empty `[]` = global (every topic). Non-empty =
+     *  only topics filed under those categories see it in the picker. */
+    categoryIdsJson: text("category_ids_json").notNull().default("[]"),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    forumIdx: index("forum_prefixes_forum_idx").on(t.forumId, t.sortOrder),
+  }),
+);
+export type DbForumPrefix = typeof forumPrefixes.$inferSelect;
+
+/**
+ * Forum usergroups (migration 0270). Owner/admin-defined groups granting a set
+ * of forum permissions (the unified registry — moderation + member features).
+ * Effective perms for a member = union of the default group + every group
+ * they're in + any direct mod grant (forum_members.permissions_json).
+ */
+export const forumUsergroups = sqliteTable(
+  "forum_usergroups",
+  {
+    id: id(),
+    forumId: text("forum_id").notNull().references(() => forums.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Optional chip color for the group's label. */
+    color: text("color"),
+    /** JSON array of ForumPermission keys this group grants. */
+    permissionsJson: text("permissions_json").notNull().default("[]"),
+    /** Exactly one per forum: the implicit baseline for every participant
+     *  (no member rows). Editing it changes what ungrouped members can do. */
+    isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** JSON array of ForumAutoRule[] — ALL must match for an auto-join. */
+    autoRulesJson: text("auto_rules_json").notNull().default("[]"),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    forumIdx: index("forum_usergroups_forum_idx").on(t.forumId, t.sortOrder),
+    // NOTE: a partial UNIQUE index `forum_usergroups_one_default` on (forum_id)
+    // WHERE is_default = 1 (migration 0271) enforces one default group per
+    // forum. Drizzle can't model partial indexes, so it lives only in the SQL.
+  }),
+);
+export type DbForumUsergroup = typeof forumUsergroups.$inferSelect;
+
+/**
+ * Explicit (non-default) usergroup memberships. `addedBy` null + `isAuto` true
+ * = an automatic membership earned via the group's auto-join rules; a manual
+ * add records the acting manager with `isAuto` false.
+ */
+export const forumUsergroupMembers = sqliteTable(
+  "forum_usergroup_members",
+  {
+    groupId: text("group_id").notNull().references(() => forumUsergroups.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    addedAt: ts("added_at"),
+    addedBy: text("added_by"),
+    isAuto: integer("is_auto", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.groupId, t.userId] }),
+    userIdx: index("forum_usergroup_members_user_idx").on(t.userId),
+  }),
+);
+export type DbForumUsergroupMember = typeof forumUsergroupMembers.$inferSelect;
+
+/**
+ * Forum report queue (migration 0265). A member flags a topic/post to the
+ * forum's owner + mods holding `handle_reports`. Forum-scoped — never
+ * reaches site moderation (that's the separate `reports` table).
+ */
+export const forumReports = sqliteTable(
+  "forum_reports",
+  {
+    id: id(),
+    forumId: text("forum_id").notNull().references(() => forums.id, { onDelete: "cascade" }),
+    /** The reported post (topic header or reply). */
+    messageId: text("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+    /** Snapshot of the board + top-level topic for deep-linking the queue. */
+    boardRoomId: text("board_room_id").references(() => rooms.id, { onDelete: "set null" }),
+    topicId: text("topic_id").references(() => messages.id, { onDelete: "set null" }),
+    reporterUserId: text("reporter_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    /** open | resolved | dismissed. */
+    status: text("status", { enum: ["open", "resolved", "dismissed"] }).notNull().default("open"),
+    resolvedByUserId: text("resolved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    resolutionNote: text("resolution_note"),
+    createdAt: ts("created_at"),
+    resolvedAt: integer("resolved_at", { mode: "timestamp_ms" }),
+  },
+  (t) => ({
+    forumIdx: index("forum_reports_forum_idx").on(t.forumId, t.status, t.createdAt),
+    // A partial UNIQUE index `forum_reports_one_open_uq` on
+    // (forum_id, message_id, reporter_user_id) WHERE status='open' lives in
+    // migration 0265 — drizzle's builder doesn't model partial indexes. The
+    // POST /forums/:id/reports route pre-checks AND catches the index's
+    // violation on the concurrent race, so re-reporting an open post is a
+    // graceful no-op either way.
+  }),
+);
+export type DbForumReport = typeof forumReports.$inferSelect;
 
 /**
  * Forum membership applications (postingMode = "application" forums).
@@ -4768,7 +4924,10 @@ export const modCases = sqliteTable(
     complaintBody: text("complaint_body").notNull(),
     /** Freehand outcome / action taken; null while the case is open. */
     resolution: text("resolution"),
-    status: text("status", { enum: ["open", "resolved"] }).notNull().default("open"),
+    status: text("status", { enum: ["open", "in_progress", "resolved"] }).notNull().default("open"),
+    /** "case" = an infraction/dispute with a workflow; "note" = a standing
+     *  informational note about a user, no resolution needed (migration 0272). */
+    kind: text("kind", { enum: ["case", "note"] }).notNull().default("case"),
     /** "Who complained" — freehand text and/or a resolved identity link. */
     reporterText: text("reporter_text"),
     reporterUserId: text("reporter_user_id").references(() => users.id, { onDelete: "set null" }),
@@ -4794,6 +4953,51 @@ export const modCases = sqliteTable(
   }),
 );
 export type DbModCase = typeof modCases.$inferSelect;
+
+/* Append-only update timeline on a mod case (migration 0272) — staff add
+ * progress notes + status changes without rewriting the original resolution. */
+export const modCaseUpdates = sqliteTable(
+  "mod_case_updates",
+  {
+    id: id(),
+    caseId: text("case_id").notNull().references(() => modCases.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    /** The status this update moved the case to, when it changed one. */
+    statusChange: text("status_change", { enum: ["open", "in_progress", "resolved"] }),
+    authorUserId: text("author_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    caseIdx: index("mod_case_updates_case_idx").on(t.caseId, t.createdAt),
+  }),
+);
+export type DbModCaseUpdate = typeof modCaseUpdates.$inferSelect;
+
+/* Snapshotted chat messages backed up as evidence on a case (migration 0272).
+ * The original message id is kept for reference; body/author/room are
+ * snapshotted so the record survives the janitor hard-deleting the source. */
+export const modCaseEvidence = sqliteTable(
+  "mod_case_evidence",
+  {
+    id: id(),
+    caseId: text("case_id").notNull().references(() => modCases.id, { onDelete: "cascade" }),
+    /** The source message id (for reference; the message itself may be gone). */
+    messageId: text("message_id"),
+    authorUserId: text("author_user_id"),
+    authorLabel: text("author_label"),
+    body: text("body"),
+    kind: text("kind"),
+    roomId: text("room_id"),
+    roomName: text("room_name"),
+    originalCreatedAt: integer("original_created_at"),
+    snapshottedAt: ts("snapshotted_at"),
+  },
+  (t) => ({
+    caseMsgIdx: uniqueIndex("mod_case_evidence_case_msg_idx").on(t.caseId, t.messageId),
+    caseIdx: index("mod_case_evidence_case_idx").on(t.caseId, t.snapshottedAt),
+  }),
+);
+export type DbModCaseEvidence = typeof modCaseEvidence.$inferSelect;
 
 /* ---------- FAQ entries (migration 0255) ----------
  *

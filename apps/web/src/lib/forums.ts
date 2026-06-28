@@ -3,7 +3,7 @@
  * the public catalog endpoints; both tolerate anonymous sessions (the
  * Phase-7 public /f/ page reuses them).
  */
-import type { ChatMessage, ForumBoardTopicsPage, ForumCreationApplicationWire, ForumDetail, ForumMembershipApplicationWire, ForumSummary, ThreadCategory } from "@thekeep/shared";
+import type { ChatMessage, ForumAutoRule, ForumBoardTopicsPage, ForumCreationApplicationWire, ForumDetail, ForumManagedEntry, ForumMemberEntry, ForumMembershipApplicationWire, ForumModEntry, ForumModLogEntry, ForumModPermission, ForumPermission, ForumReportWire, ForumSummary, ForumUsergroupMemberWire, ForumUsergroupWire, ForumUserSearchHit, NpcStat, ThreadCategory, UserNpcWire } from "@thekeep/shared";
 
 export async function fetchForums(): Promise<ForumSummary[]> {
   const r = await fetch("/forums", { credentials: "include" });
@@ -101,7 +101,7 @@ export async function updateForum(forumId: string, patch: {
   name?: string; tagline?: string | null; descriptionHtml?: string | null; boardOrder?: string[];
   postingMode?: "open" | "application"; applicationPrompt?: string | null;
   themeJson?: string | null; themeStyleKey?: string | null; bannerFocusY?: number;
-  publicBrowsing?: boolean; linkedWorldId?: string | null;
+  publicBrowsing?: boolean; allowCustomTags?: boolean; linkedWorldId?: string | null;
 }): Promise<void> {
   const r = await fetch(`/forums/${encodeURIComponent(forumId)}`, {
     method: "PATCH",
@@ -314,8 +314,11 @@ export async function joinForum(forumId: string): Promise<void> {
  * ============================================================ */
 
 export interface ForumRoles {
-  owner: { userId: string; username: string };
-  mods: Array<{ userId: string; username: string; since: number }>;
+  owner: { userId: string; username: string; avatarUrl: string | null };
+  /** The acting manager's own permission set — a non-owner manager can't
+   *  grant keys they don't hold (the picker disables those checkboxes). */
+  managerPermissions: ForumModPermission[];
+  mods: ForumModEntry[];
 }
 
 export interface ForumBanRow {
@@ -332,18 +335,252 @@ export async function fetchForumRoles(forumId: string): Promise<ForumRoles> {
   return jsonOrThrow<ForumRoles>(r);
 }
 
-export async function grantForumMod(forumId: string, target: string): Promise<{ username: string }> {
+export async function grantForumMod(
+  forumId: string,
+  target: string,
+  permissions?: ForumModPermission[],
+): Promise<{ username: string; permissions: ForumModPermission[] }> {
   const r = await fetch(`/forums/${encodeURIComponent(forumId)}/mods`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     credentials: "include",
+    body: JSON.stringify(permissions ? { target, permissions } : { target }),
+  });
+  return jsonOrThrow<{ username: string; permissions: ForumModPermission[] }>(r);
+}
+
+/** Replace an existing mod's granular permission set (Roles tab checkboxes). */
+export async function setForumModPermissions(
+  forumId: string,
+  userId: string,
+  permissions: ForumModPermission[],
+): Promise<{ permissions: ForumModPermission[] }> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/mods/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ permissions }),
+  });
+  return jsonOrThrow<{ permissions: ForumModPermission[] }>(r);
+}
+
+/** The forums the signed-in viewer owns or moderates (with their permission
+ *  set). Used by the profile "Ban from forum" action + its forum-picker.
+ *  Briefly cached so the two profile action rows (mobile + desktop) that
+ *  mount the ban control share one request; `invalidateManagedForums()`
+ *  drops it after a role/ban change. */
+let managedForumsCache: { at: number; promise: Promise<ForumManagedEntry[]> } | null = null;
+const MANAGED_FORUMS_TTL = 30_000;
+export function invalidateManagedForums(): void { managedForumsCache = null; }
+export async function fetchMyManagedForums(): Promise<ForumManagedEntry[]> {
+  const now = Date.now();
+  if (managedForumsCache && now - managedForumsCache.at < MANAGED_FORUMS_TTL) {
+    return managedForumsCache.promise;
+  }
+  const promise = (async () => {
+    const r = await fetch("/me/forums", { credentials: "include" });
+    const j = await jsonOrThrow<{ forums: ForumManagedEntry[] }>(r);
+    return j.forums;
+  })().catch((e) => { managedForumsCache = null; throw e; });
+  managedForumsCache = { at: now, promise };
+  return promise;
+}
+
+/** Typeahead for the mod/ban pickers. Matches a username or character-name
+ *  prefix; each hit is annotated with the account's role/ban in this forum. */
+export async function searchForumUsers(forumId: string, q: string): Promise<ForumUserSearchHit[]> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/user-search?q=${encodeURIComponent(q)}`, { credentials: "include" });
+  const j = await jsonOrThrow<{ hits: ForumUserSearchHit[] }>(r);
+  return j.hits;
+}
+
+export async function revokeForumMod(forumId: string, userId: string): Promise<void> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/mods/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  await jsonOrThrow(r);
+}
+
+/* ============================================================
+ * Usergroups (unified permissions + auto-join rules)
+ * ============================================================ */
+
+export interface ForumUsergroupsResponse {
+  groups: ForumUsergroupWire[];
+  /** Acting manager's own perms — keys they lack are greyed in the grid. */
+  managerPermissions: ForumPermission[];
+}
+
+export async function fetchForumUsergroups(forumId: string): Promise<ForumUsergroupsResponse> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/usergroups`, { credentials: "include" });
+  return jsonOrThrow<ForumUsergroupsResponse>(r);
+}
+
+export async function createForumUsergroup(forumId: string, input: {
+  name: string; color?: string | null; permissions?: ForumPermission[]; autoRules?: ForumAutoRule[];
+}): Promise<string> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/usergroups`, {
+    method: "POST", headers: { "content-type": "application/json" }, credentials: "include",
+    body: JSON.stringify(input),
+  });
+  const j = await jsonOrThrow<{ id: string }>(r);
+  return j.id;
+}
+
+export async function updateForumUsergroup(forumId: string, groupId: string, patch: {
+  name?: string; color?: string | null; permissions?: ForumPermission[]; autoRules?: ForumAutoRule[]; sortOrder?: number;
+}): Promise<void> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/usergroups/${encodeURIComponent(groupId)}`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, credentials: "include",
+    body: JSON.stringify(patch),
+  });
+  await jsonOrThrow(r);
+}
+
+export async function deleteForumUsergroup(forumId: string, groupId: string): Promise<void> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/usergroups/${encodeURIComponent(groupId)}`, {
+    method: "DELETE", credentials: "include",
+  });
+  await jsonOrThrow(r);
+}
+
+export async function fetchForumUsergroupMembers(forumId: string, groupId: string): Promise<ForumUsergroupMemberWire[]> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/usergroups/${encodeURIComponent(groupId)}/members`, { credentials: "include" });
+  const j = await jsonOrThrow<{ members: ForumUsergroupMemberWire[] }>(r);
+  return j.members;
+}
+
+export async function addForumUsergroupMember(forumId: string, groupId: string, target: string): Promise<{ username: string }> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/usergroups/${encodeURIComponent(groupId)}/members`, {
+    method: "PUT", headers: { "content-type": "application/json" }, credentials: "include",
     body: JSON.stringify({ target }),
   });
   return jsonOrThrow<{ username: string }>(r);
 }
 
-export async function revokeForumMod(forumId: string, userId: string): Promise<void> {
-  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/mods/${encodeURIComponent(userId)}`, {
+export async function removeForumUsergroupMember(forumId: string, groupId: string, userId: string): Promise<void> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/usergroups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`, {
+    method: "DELETE", credentials: "include",
+  });
+  await jsonOrThrow(r);
+}
+
+/* ============================================================
+ * Account NPCs (Phase 6) — per-account, reusable in any forum
+ * ============================================================ */
+
+export async function fetchMyNpcs(): Promise<UserNpcWire[]> {
+  const r = await fetch("/me/npcs", { credentials: "include" });
+  const j = await jsonOrThrow<{ npcs: UserNpcWire[] }>(r);
+  return j.npcs;
+}
+
+export async function createNpc(input: { name: string; stats: NpcStat[] }): Promise<UserNpcWire> {
+  const r = await fetch("/me/npcs", {
+    method: "POST", headers: { "content-type": "application/json" }, credentials: "include",
+    body: JSON.stringify(input),
+  });
+  const j = await jsonOrThrow<{ npc: UserNpcWire }>(r);
+  return j.npc;
+}
+
+export async function updateNpc(id: string, input: { name: string; stats: NpcStat[] }): Promise<UserNpcWire> {
+  const r = await fetch(`/me/npcs/${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, credentials: "include",
+    body: JSON.stringify(input),
+  });
+  const j = await jsonOrThrow<{ npc: UserNpcWire }>(r);
+  return j.npc;
+}
+
+export async function deleteNpc(id: string): Promise<void> {
+  const r = await fetch(`/me/npcs/${encodeURIComponent(id)}`, { method: "DELETE", credentials: "include" });
+  await jsonOrThrow(r);
+}
+
+/* ============================================================
+ * Topic prefixes (Phase 5)
+ * ============================================================ */
+
+export async function createForumPrefix(forumId: string, input: { label: string; color: string; tooltip?: string | null; categoryIds?: string[] }): Promise<string> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/prefixes`, {
+    method: "POST", headers: { "content-type": "application/json" }, credentials: "include",
+    body: JSON.stringify(input),
+  });
+  const j = await jsonOrThrow<{ id: string }>(r);
+  return j.id;
+}
+
+export async function updateForumPrefix(forumId: string, prefixId: string, patch: { label?: string; color?: string; tooltip?: string | null; sortOrder?: number; categoryIds?: string[] }): Promise<void> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/prefixes/${encodeURIComponent(prefixId)}`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, credentials: "include",
+    body: JSON.stringify(patch),
+  });
+  await jsonOrThrow(r);
+}
+
+export async function deleteForumPrefix(forumId: string, prefixId: string): Promise<void> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/prefixes/${encodeURIComponent(prefixId)}`, {
+    method: "DELETE", credentials: "include",
+  });
+  await jsonOrThrow(r);
+}
+
+/** Assign (or clear, with null) a topic's prefix. Author or manage_prefixes. */
+export async function setTopicPrefix(messageId: string, prefixId: string | null): Promise<void> {
+  const r = await fetch(`/messages/${encodeURIComponent(messageId)}/prefix`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, credentials: "include",
+    body: JSON.stringify({ prefixId }),
+  });
+  await jsonOrThrow(r);
+}
+
+/** Flag a forum post to the forum's owner/mods (forum report queue). */
+export async function reportForumPost(forumId: string, messageId: string, reason: string): Promise<void> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/reports`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ messageId, reason }),
+  });
+  await jsonOrThrow(r);
+}
+
+/** The forum's report queue (handle_reports). status defaults to open. */
+export async function fetchForumReports(forumId: string, status: "open" | "resolved" | "dismissed" = "open"): Promise<ForumReportWire[]> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/reports?status=${status}`, { credentials: "include" });
+  const j = await jsonOrThrow<{ reports: ForumReportWire[] }>(r);
+  return j.reports;
+}
+
+export async function resolveForumReport(forumId: string, reportId: string, action: "resolve" | "dismiss", note?: string): Promise<void> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/reports/${encodeURIComponent(reportId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(note ? { action, note } : { action }),
+  });
+  await jsonOrThrow(r);
+}
+
+/** Forum-scoped moderation history (Mod Log tab). Owner + any forum mod. */
+export async function fetchForumModLog(forumId: string): Promise<ForumModLogEntry[]> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/mod-log`, { credentials: "include" });
+  const j = await jsonOrThrow<{ entries: ForumModLogEntry[] }>(r);
+  return j.entries;
+}
+
+/** Member directory (owner + mods + members). Needs manage_members. */
+export async function fetchForumMembers(forumId: string): Promise<ForumMemberEntry[]> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/members`, { credentials: "include" });
+  const j = await jsonOrThrow<{ members: ForumMemberEntry[] }>(r);
+  return j.members;
+}
+
+/** Remove a plain member from the forum (mods are demoted via Roles). */
+export async function removeForumMember(forumId: string, userId: string): Promise<void> {
+  const r = await fetch(`/forums/${encodeURIComponent(forumId)}/members/${encodeURIComponent(userId)}`, {
     method: "DELETE",
     credentials: "include",
   });
@@ -398,6 +635,10 @@ export function postToBoard(input: {
   replyToId?: string;
   /** New poll topic: the title is the question, these are the options/settings. */
   poll?: { optionTexts: string[]; allowMultiple: boolean; showVoters: boolean; closesAt: number | null };
+  /** Streamlined reply format (replies only): emote ("action") or NPC. */
+  format?: "say" | "action" | "npc";
+  /** Saved NPC to voice when format = "npc". */
+  npcId?: string;
 }): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const socket = getSocket();
@@ -410,6 +651,8 @@ export function postToBoard(input: {
       ...(input.threadCategoryId ? { threadCategoryId: input.threadCategoryId } : {}),
       ...(input.replyToId ? { replyToId: input.replyToId } : {}),
       ...(input.poll ? { poll: input.poll } : {}),
+      ...(input.format && input.format !== "say" ? { format: input.format } : {}),
+      ...(input.npcId ? { npcId: input.npcId } : {}),
     }, (res) => {
       if (res && "ok" in res && res.ok) resolve(res.messageId);
       else reject(new Error(res && "message" in res ? res.message : "Post failed."));
@@ -449,6 +692,29 @@ export async function setTopicCategory(messageId: string, categoryId: string | n
     headers: { "content-type": "application/json" },
     credentials: "include",
     body: JSON.stringify({ categoryId }),
+  });
+  await jsonOrThrow(r);
+}
+
+/** Move a whole topic (header + replies) to another board in the same forum. */
+export async function moveTopicToBoard(messageId: string, boardRoomId: string, categoryId: string | null = null): Promise<void> {
+  const r = await fetch(`/messages/${encodeURIComponent(messageId)}/move-to-board`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ boardRoomId, categoryId }),
+  });
+  await jsonOrThrow(r);
+}
+
+/** Merge this topic into another topic (non-destructive — its posts become
+ *  replies of the target). Both must be in the same forum. */
+export async function mergeTopicInto(messageId: string, targetTopicId: string): Promise<void> {
+  const r = await fetch(`/messages/${encodeURIComponent(messageId)}/merge-into`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ targetTopicId }),
   });
   await jsonOrThrow(r);
 }

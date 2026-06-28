@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import DOMPurify from "dompurify";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { CloseButton } from "./CloseButton.js";
+import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 
 interface RulesPayload {
   rulesHtml: string;
@@ -37,6 +37,10 @@ export function RulesModal({ onClose }: Props) {
     return () => { cancelled = true; };
   }, []);
 
+  // Sweep any orphaned scoped <style> blocks when the modal unmounts (same
+  // belt-and-suspenders cleanup bios use, so admin CSS never bleeds onward).
+  useEffect(() => () => sweepOrphanedUserBioStyles(), []);
+
   return (
     <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
@@ -57,14 +61,14 @@ export function RulesModal({ onClose }: Props) {
             <div className="space-y-4">
               {data.securityNoticeHtml.trim() ? (
                 <div
-                  className="prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-3"
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(data.securityNoticeHtml) }}
+                  className={`prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-3 ${USER_HTML_SCOPE_CLASS}`}
+                  dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.securityNoticeHtml) }}
                 />
               ) : null}
               {data.rulesHtml.trim() ? (
                 <div
-                  className="prose prose-sm max-w-none"
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(data.rulesHtml) }}
+                  className={`prose prose-sm max-w-none ${USER_HTML_SCOPE_CLASS}`}
+                  dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.rulesHtml) }}
                 />
               ) : (
                 <p className="italic text-keep-muted">No rules have been posted yet.</p>

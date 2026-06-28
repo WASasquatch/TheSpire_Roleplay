@@ -98,10 +98,18 @@ export type AuditAction =
   // so staff can adjudicate owner disputes from the Audit tab.
   | "forum_mod_grant"
   | "forum_mod_revoke"
+  | "forum_mod_perms"
   | "forum_ban"
   | "forum_unban"
   | "forum_board_create"
   | "forum_board_archive"
+  | "forum_topic_lock"
+  | "forum_topic_sticky"
+  | "forum_topic_move"
+  | "forum_post_delete"
+  | "forum_member_remove"
+  | "forum_report_resolve"
+  | "forum_usergroup_change"   // create/edit/delete a usergroup, or change its membership
   // System tab (live-ops maintenance)
   | "system_restart"           // admin restarted the server process
   | "system_purge_messages";   // admin purged ALL chat messages site-wide
@@ -138,10 +146,18 @@ export const AUDIT_ACTION_GROUPS: Record<string, { label: string; actions: reado
     actions: [
       "forum_mod_grant",
       "forum_mod_revoke",
+      "forum_mod_perms",
       "forum_ban",
       "forum_unban",
       "forum_board_create",
       "forum_board_archive",
+      "forum_topic_lock",
+      "forum_topic_sticky",
+      "forum_topic_move",
+      "forum_post_delete",
+      "forum_member_remove",
+      "forum_report_resolve",
+      "forum_usergroup_change",
     ],
   },
   role_changes: {

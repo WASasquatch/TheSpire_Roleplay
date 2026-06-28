@@ -303,15 +303,22 @@ export function sanitizeBio(html: string): string {
       // `allowedAttributes: false`, so this wildcard does it.
       "*": (tagName, attribs) => ({ tagName, attribs: cleanAttribs(attribs) }),
       // <a> tags: same cleaning, plus the standard outbound-link
-      // safety (rel=noopener+noreferrer+ugc, target=_blank).
-      a: (tagName, attribs) => ({
-        tagName: "a",
-        attribs: {
-          ...cleanAttribs(attribs),
-          rel: "noopener noreferrer ugc",
-          target: "_blank",
-        },
-      }),
+      // safety (rel=noopener+noreferrer+ugc, target=_blank). Same-page
+      // anchors (href="#id") are the exception — they must navigate
+      // IN-FRAME so the current view's `:target` highlight + scroll fire;
+      // forcing target=_blank there pops a useless new tab and breaks
+      // in-page rule/TOC links. Drop any author-set target on those.
+      a: (tagName, attribs) => {
+        const cleaned = cleanAttribs(attribs);
+        if ((cleaned.href ?? "").trim().startsWith("#")) {
+          delete cleaned.target;
+          return { tagName: "a", attribs: cleaned };
+        }
+        return {
+          tagName: "a",
+          attribs: { ...cleaned, rel: "noopener noreferrer ugc", target: "_blank" },
+        };
+      },
     },
     disallowedTagsMode: "discard",
     // Silence the stderr warning about `<style>` in the allow set,

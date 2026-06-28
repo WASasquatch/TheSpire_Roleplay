@@ -141,11 +141,17 @@ export function SplashLanding({ onNavigate }: Props) {
       {/* Background art, mirrors SplashShell so the visual identity stays
           consistent between the landing and the auth pages. Same dark-
           mode swap (resolved palette → bg image variant + corner glows).
-          NB: `fixed inset-0` (not `absolute`) so `bg-cover` sizes against
-          the viewport rather than the full (taller) document. */}
+          Sized in VIEWPORT units (100vw × 100vh), not `inset-0`: `inset-0`
+          resolves right/bottom against the initial containing block, whose
+          width shrinks when a vertical scrollbar appears and whose height
+          can track content under a transformed ancestor — either makes
+          `bg-cover` re-fit and the image visibly jump as the carousels
+          change the page height. `w-screen`/`h-screen` (100vw/100vh) include
+          the scrollbar gutter and ignore content height, so the art stays
+          locked to the window. */}
       <div
         aria-hidden
-        className="fixed inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
+        className="fixed left-0 top-0 h-screen w-screen bg-cover bg-[position:-175px_center] md:bg-center"
         style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
       />
       <div

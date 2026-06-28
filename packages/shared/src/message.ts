@@ -120,6 +120,9 @@ export interface ChatMessage {
   moodSnapshot?: string | null;
   /** For `kind === "npc"` only: the master username of the user who voiced this NPC. */
   npcVoicedBy?: string | null;
+  /** For `kind === "npc"` posted from a saved NPC: snapshot of its stat lines
+   *  (label/value), rendered as a small stat block. Omitted when none. */
+  npcStats?: Array<{ label: string; value: string }>;
   /**
    * Optional hero image for `kind === "scene"` banners. Set by
    * `/scene <title> | <url>` and frozen at send time. The renderer
@@ -217,6 +220,9 @@ export interface ChatMessage {
    * this; the forum view shows a 📌 indicator. Defaults to false.
    */
   isSticky?: boolean;
+  /** Forum topic prefix id (resolve against the forum's prefix catalog).
+   *  Top-level forum topics only; omitted when none. */
+  prefixId?: string | null;
   /**
    * Server-validated CSS to apply to the rendered body of a `kind: "cmd"`
    * message. Stored verbatim as a CSS declaration list ("font-weight: bold;

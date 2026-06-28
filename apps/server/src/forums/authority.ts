@@ -18,9 +18,10 @@
  * Forum bans are scoped STRICTLY to the forum's boards: they gate board
  * join, posting, and membership applications, and nothing else anywhere.
  */
-import { and, eq } from "drizzle-orm";
-import type { Role } from "@thekeep/shared";
-import { forumBans, forumMembers, forums, roomThreadCategories, rooms } from "../db/schema.js";
+import { and, eq, inArray } from "drizzle-orm";
+import type { Role, ForumPermission } from "@thekeep/shared";
+import { FORUM_FEATURE_PERMISSIONS, FORUM_PERMISSIONS, parseForumPermissions } from "@thekeep/shared";
+import { forumBans, forumMembers, forumUsergroupMembers, forumUsergroups, forums, roomThreadCategories, rooms } from "../db/schema.js";
 import { hasPermission } from "../auth/permissions.js";
 import type { Db } from "../db/index.js";
 
@@ -36,6 +37,11 @@ export interface ForumAuthority {
   /** Owner ⇒ also true; mods get topic-level powers only. */
   isMod: boolean;
   isMember: boolean;
+  /** Effective forum-permission set across the WHOLE registry (moderation +
+   *  member features). Owner/staff hold EVERY key; everyone else holds the
+   *  union of their default usergroup, every group they're in, and any direct
+   *  mod grant. Use {@link forumCan} rather than reading this directly. */
+  permissions: ForumPermission[];
   /** Active (non-expired) forum ban, if any. `until` null = permanent. */
   ban: { until: Date | null; reason: string | null } | null;
   /**
@@ -48,8 +54,47 @@ export interface ForumAuthority {
 
 const NONE: ForumAuthority = {
   forum: null, role: null, isOwner: false, isMod: false,
-  isMember: false, ban: null, canParticipate: false,
+  isMember: false, permissions: [], ban: null, canParticipate: false,
 };
+
+/** Does this authority hold a given granular mod permission? Owner/staff
+ *  always do. The single helper every forum call site should use so the
+ *  owner-implies-all rule lives in one place. */
+export function forumCan(a: ForumAuthority, key: ForumPermission): boolean {
+  return a.isOwner || a.permissions.includes(key);
+}
+
+/**
+ * Resolve a member's usergroup-derived permissions for a forum: the default
+ * group's baseline (every participant) UNION every non-default group the user
+ * is an explicit member of. When the forum has defined NO groups at all, the
+ * baseline is the full feature set so behavior is unchanged. Owner/staff skip
+ * this (they hold everything). `userId` null = anonymous → no perms.
+ */
+async function resolveUsergroupPerms(db: Db, forumId: string, userId: string | null): Promise<ForumPermission[]> {
+  if (!userId) return [];
+  const groups = await db
+    .select({ id: forumUsergroups.id, permissionsJson: forumUsergroups.permissionsJson, isDefault: forumUsergroups.isDefault })
+    .from(forumUsergroups)
+    .where(eq(forumUsergroups.forumId, forumId));
+  if (!groups.length) return [...FORUM_FEATURE_PERMISSIONS];
+  const defaultGroup = groups.find((g) => g.isDefault);
+  const out = new Set<ForumPermission>(
+    defaultGroup ? parseForumPermissions(defaultGroup.permissionsJson) : [...FORUM_FEATURE_PERMISSIONS],
+  );
+  const nonDefaultIds = groups.filter((g) => !g.isDefault).map((g) => g.id);
+  if (nonDefaultIds.length) {
+    const mine = await db
+      .select({ groupId: forumUsergroupMembers.groupId })
+      .from(forumUsergroupMembers)
+      .where(and(eq(forumUsergroupMembers.userId, userId), inArray(forumUsergroupMembers.groupId, nonDefaultIds)));
+    const myIds = new Set(mine.map((m) => m.groupId));
+    for (const g of groups) {
+      if (!g.isDefault && myIds.has(g.id)) for (const p of parseForumPermissions(g.permissionsJson)) out.add(p);
+    }
+  }
+  return [...out];
+}
 
 /**
  * Resolve the caller's authority over a forum. `user` null = anonymous
@@ -84,6 +129,17 @@ export async function forumAuthority(
   const staffOverride = await hasPermission(user, "manage_any_forum", db);
   const isOwner = staffOverride || forum.ownerUserId === user.id || role === "owner";
   const isMod = isOwner || role === "mod";
+  // Owner/staff implicitly hold EVERY permission. Everyone else: the union of
+  // their direct mod grant (forum_members.permissions_json) + their usergroup
+  // perms (default group baseline + explicit groups). One unified registry.
+  let permissions: ForumPermission[];
+  if (isOwner) {
+    permissions = [...FORUM_PERMISSIONS];
+  } else {
+    const directGrant = role === "mod" ? parseForumPermissions(memberRow?.permissionsJson) : [];
+    const groupPerms = await resolveUsergroupPerms(db, forumId, user.id);
+    permissions = [...new Set<ForumPermission>([...directGrant, ...groupPerms])];
+  }
   // The Spire Forums (isSystem) is the site-wide DEFAULT forum: every signed-in
   // user is implicitly a member, so its members-only categories act as
   // "signed-in members only" (i.e. everyone but logged-out guests) WITHOUT
@@ -99,7 +155,7 @@ export async function forumAuthority(
   const canParticipate =
     isOwner || (!ban && (forum.postingMode === "open" || isMember));
 
-  return { forum, role, isOwner, isMod, isMember, ban, canParticipate };
+  return { forum, role, isOwner, isMod, isMember, permissions, ban, canParticipate };
 }
 
 /**

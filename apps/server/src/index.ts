@@ -35,7 +35,7 @@ import {
 } from "@thekeep/shared";
 
 import { db } from "./db/index.js";
-import { bans, characters, messages, roomMembers, roomThreadCategories, rooms, sessions, userEarning, users } from "./db/schema.js";
+import { bans, characters, messages, roomMembers, roomThreadCategories, rooms, sessions, userEarning, userNpcs, users } from "./db/schema.js";
 import { hasPermission } from "./auth/permissions.js";
 import { CommandRegistry } from "./commands/registry.js";
 import { registerBuiltins } from "./commands/builtins/index.js";
@@ -97,6 +97,7 @@ import { registerLinkRoutes } from "./routes/links.js";
 import { registerWorldRoutes } from "./routes/worlds.js";
 import { registerStoryRoutes } from "./routes/stories.js";
 import { registerForumRoutes } from "./routes/forums.js";
+import { registerNpcRoutes } from "./routes/npcs.js";
 import { registerMessageRoutes } from "./routes/messages.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerPushRoutes } from "./routes/push.js";
@@ -638,6 +639,7 @@ async function main() {
   await registerWorldRoutes(baseApp, db, io);
   await registerStoryRoutes(baseApp, db, io);
   await registerForumRoutes(baseApp, db, io, uploadsRoot);
+  await registerNpcRoutes(baseApp, db);
   await registerFriendsRoutes(baseApp, db, io);
   await registerBlockRoutes(baseApp, db, io);
   await registerDirectMessageRoutes(baseApp, db, io);
@@ -1154,7 +1156,7 @@ async function main() {
           ack?.({ ok: false, code: "NO_BOARD", message: "That board doesn't exist." });
           return;
         }
-        const { forumGateForBoard } = await import("./forums/authority.js");
+        const { forumGateForBoard, forumCan } = await import("./forums/authority.js");
         const gate = await forumGateForBoard(db, user, board.forumId);
         if (!gate.ok) {
           ack?.({ ok: false, code: gate.code, message: gate.message });
@@ -1177,6 +1179,13 @@ async function main() {
         const { maxForumPostLength, maxForumTopicTitleLength } = await getSettings(db);
         if (text.length > maxForumPostLength) {
           ack?.({ ok: false, code: "TOO_LONG", message: `Forum posts are capped at ${maxForumPostLength} chars.` });
+          return;
+        }
+        // Usergroup FEATURE gates (re-checked server-side; the client also
+        // hides what you can't do). Image embeds are detected from the
+        // ![alt](url) markup the composer inserts.
+        if (/!\[[^\]]*\]\([^)]+\)/.test(text) && !forumCan(gate.authority, "upload_images")) {
+          ack?.({ ok: false, code: "NO_IMAGES", message: "You don't have permission to embed images in this forum." });
           return;
         }
 
@@ -1227,12 +1236,20 @@ async function main() {
 
         // New topic (title XOR reply — dispatch parity).
         if (threadTitle && !replyToId) {
+          if (!forumCan(gate.authority, "post_topics")) {
+            ack?.({ ok: false, code: "NO_TOPICS", message: "You don't have permission to start topics in this forum." });
+            return;
+          }
           const cappedTitle = threadTitle.slice(0, maxForumTopicTitleLength);
           // Poll topic: the title is the question, options + settings ride
           // pollDataJson, the body is an optional intro. Same model the
           // /poll chat command builds.
           let pollDataJson: string | null = null;
           if (payload.poll) {
+            if (!forumCan(gate.authority, "create_polls")) {
+              ack?.({ ok: false, code: "NO_POLLS", message: "You don't have permission to create polls in this forum." });
+              return;
+            }
             const { buildPollData } = await import("./polls.js");
             const built = buildPollData({
               optionTexts: payload.poll.optionTexts ?? [],
@@ -1255,12 +1272,19 @@ async function main() {
             // Authors watch their own topics (reply notifications).
             const { ensureTopicWatch } = await import("./forums/notifications.js");
             void ensureTopicWatch(db, user.id, messageId).catch(() => {});
+            // Re-check auto-join usergroups (post/topic count etc. just changed).
+            const { evaluateAutoGroups } = await import("./forums/usergroups.js");
+            void evaluateAutoGroups(db, board.forumId!, user.id).catch(() => {});
           }
           ack?.({ ok: true, messageId });
           return;
         }
         // Reply under an existing topic.
         if (replyToId && !threadTitle) {
+          if (!forumCan(gate.authority, "post_replies")) {
+            ack?.({ ok: false, code: "NO_REPLIES", message: "You don't have permission to reply in this forum." });
+            return;
+          }
           const parent = (await db.select().from(messages).where(eq(messages.id, replyToId)).limit(1))[0];
           if (!parent || parent.roomId !== board.id || parent.deletedAt) {
             ack?.({ ok: false, code: "BAD_TOPIC", message: "That topic isn't on this board (or has been removed)." });
@@ -1275,12 +1299,36 @@ async function main() {
             return;
           }
           const snippet = parent.body.length > 120 ? `${parent.body.slice(0, 120)}…` : parent.body;
+          // Streamlined RP format: "action" → emote (kind "me"); "npc" →
+          // voice a saved NPC (kind "npc"), gated on the forum's use_npc grant
+          // and a npcId the caller owns, snapshotting the NPC's name + stats.
+          let fmtKind: "say" | "me" | "npc" = "say";
+          let npcFields: { displayNameOverride?: string; npcVoicedBy?: string; npcStatsJson?: string | null } = {};
+          if (payload.format === "action") {
+            if (!forumCan(gate.authority, "post_actions")) {
+              ack?.({ ok: false, code: "NO_ACTIONS", message: "You don't have permission to post Action-format replies in this forum." });
+              return;
+            }
+            fmtKind = "me";
+          } else if (payload.format === "npc") {
+            if (!forumCan(gate.authority, "use_npc")) {
+              ack?.({ ok: false, code: "NPC_FORBIDDEN", message: "You don't have permission to voice NPCs in this forum." });
+              return;
+            }
+            const npc = payload.npcId
+              ? (await db.select().from(userNpcs).where(and(eq(userNpcs.id, payload.npcId), eq(userNpcs.userId, user.id))).limit(1))[0]
+              : undefined;
+            if (!npc) { ack?.({ ok: false, code: "NPC_NOT_FOUND", message: "Pick one of your saved NPCs to voice." }); return; }
+            fmtKind = "npc";
+            npcFields = { displayNameOverride: npc.name, npcVoicedBy: user.displayName, npcStatsJson: npc.statsJson };
+          }
           const messageId = await addMessage(ctx, {
-            kind: "say",
+            kind: fmtKind,
             body: text,
             replyToId: parent.id,
             replyToDisplayName: parent.displayName,
             replyToBodySnippet: snippet,
+            ...npcFields,
           });
           if (messageId) {
             // Repliers auto-watch the topic; then fan out the inbox rows
@@ -1297,6 +1345,9 @@ async function main() {
                 actor: { id: user.id, displayName: user.displayName },
               }))
               .catch((err) => log.warn({ err }, "forum notify failed"));
+            // Re-check auto-join usergroups (post count just changed).
+            const { evaluateAutoGroups } = await import("./forums/usergroups.js");
+            void evaluateAutoGroups(db, board.forumId!, user.id).catch(() => {});
           }
           ack?.({ ok: true, messageId });
           return;

@@ -16,6 +16,7 @@ import {
   extractMentions,
   extractMentionTokens,
   mentionsField,
+  parseNpcStats,
   mentionTokenRegex,
   processCheckBlocks,
   renderPresenceTemplate,
@@ -167,6 +168,8 @@ export async function addMessage(
     displayNameOverride?: string;
     /** For /npc: the display name of the AUTHOR'S ACTIVE IDENTITY (character, or OOC name when OOC) who voiced this NPC. Rendered as a "voiced by" tag. The real account stays recoverable via the row's userId/characterId. */
     npcVoicedBy?: string;
+    /** For an NPC voiced from a saved NPC: JSON snapshot of its stat lines. */
+    npcStatsJson?: string | null;
     /**
      * Thread-category bucket for top-level messages in nested-mode rooms.
      * Caller (`dispatchChatInput`) validates the id belongs to the room
@@ -488,6 +491,7 @@ export async function addMessage(
     replyToBodySnippet: payload.replyToBodySnippet ?? null,
     moodSnapshot,
     npcVoicedBy: payload.npcVoicedBy ?? null,
+    npcStatsJson: payload.kind === "npc" ? (payload.npcStatsJson ?? null) : null,
     threadCategoryId: payload.threadCategoryId ?? null,
     title: payload.title ?? null,
     avatarUrl: avatarSnapshot,
@@ -544,6 +548,7 @@ export async function addMessage(
     ...(payload.replyToBodySnippet ? { replyToBodySnippet: payload.replyToBodySnippet } : {}),
     ...(moodSnapshot ? { moodSnapshot } : {}),
     ...(payload.npcVoicedBy ? { npcVoicedBy: payload.npcVoicedBy } : {}),
+    ...(payload.kind === "npc" && payload.npcStatsJson ? { npcStats: parseNpcStats(payload.npcStatsJson) } : {}),
     ...(payload.threadCategoryId ? { threadCategoryId: payload.threadCategoryId } : {}),
     ...(payload.title ? { title: payload.title } : {}),
     ...(avatarSnapshot ? { avatarUrl: avatarSnapshot } : {}),
@@ -1370,6 +1375,7 @@ export async function sendRoomBacklogTo(
       ...(m.replyToBodySnippet ? { replyToBodySnippet: m.replyToBodySnippet } : {}),
       ...(m.moodSnapshot ? { moodSnapshot: m.moodSnapshot } : {}),
       ...(m.npcVoicedBy ? { npcVoicedBy: m.npcVoicedBy } : {}),
+      ...(m.npcStatsJson ? { npcStats: parseNpcStats(m.npcStatsJson) } : {}),
       ...(m.threadCategoryId ? { threadCategoryId: m.threadCategoryId } : {}),
       ...(m.title ? { title: m.title } : {}),
       ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
@@ -2668,18 +2674,17 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     const u = userById.get(id.userId);
     if (!u) continue;
     const c = id.characterId ? charById.get(id.characterId) : undefined;
-    // Privacy: a user whose master profile is marked private
-    // (`users.isPublic = false`) only surfaces in the userlist while
-    // *actively using* a character. In OOC mode (no active character)
-    // they're filtered out entirely, the (ooc) badge would otherwise
-    // expose the master username they specifically opted out of
-    // publishing. Active-character rows still appear (and only the
-    // character name is shown; the master link is independently gated
-    // on the profile endpoint). Side-effect: the room's occupant
-    // count reflects what's visible, not raw socket presence, fine,
-    // since invisible users are by definition not "in" the room from
-    // a viewer's perspective.
-    if (!u.isPublic && !c) continue;
+    // Privacy is NOT a userlist hide: a private account (`users.isPublic
+    // = false`) still appears in the room it's in, OOC or in character —
+    // it's present, and it posts OOC under that name anyway, so omitting
+    // it from the rail only desynced the userlist from the chat. "Private"
+    // means two narrower things, both enforced elsewhere: the profile
+    // isn't viewable to ANONYMOUS (logged-out) visitors — gated on the
+    // /profiles endpoint — and the OOC identity is never linked to the
+    // account's characters (the per-identity contract: OOC and character
+    // rows are independent here, neither reveals the other). So we render
+    // every resolved occupant; incognito (the deliberate vanish) is the
+    // only thing that removes someone from the list, handled above.
     // Same character-first / master-fallback logic the message-author
     // color path uses (see addMessage). Userlist + chat lines have to
     // agree, otherwise a user posting as Character A would show up

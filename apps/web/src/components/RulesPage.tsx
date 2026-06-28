@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import DOMPurify from "dompurify";
+import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 
 interface RulesPayload {
   rulesHtml: string;
@@ -62,6 +62,9 @@ export function RulesPage({ onBack }: Props) {
     return () => { document.title = previous; };
   }, []);
 
+  // Sweep orphaned scoped <style> blocks on unmount (parity with bios).
+  useEffect(() => () => sweepOrphanedUserBioStyles(), []);
+
   const handleBackClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     if (onBack) {
       e.preventDefault();
@@ -96,14 +99,14 @@ export function RulesPage({ onBack }: Props) {
             <div className="space-y-4">
               {data.securityNoticeHtml.trim() ? (
                 <div
-                  className="prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-3"
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(data.securityNoticeHtml) }}
+                  className={`prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-3 ${USER_HTML_SCOPE_CLASS}`}
+                  dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.securityNoticeHtml) }}
                 />
               ) : null}
               {data.rulesHtml.trim() ? (
                 <div
-                  className="prose prose-sm max-w-none"
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(data.rulesHtml) }}
+                  className={`prose prose-sm max-w-none ${USER_HTML_SCOPE_CLASS}`}
+                  dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.rulesHtml) }}
                 />
               ) : (
                 <p className="italic text-keep-muted">No rules have been posted yet.</p>

@@ -75,6 +75,16 @@ export interface ClientToServerEvents {
       replyToId?: string;
       asCharacterId?: string | null;
       /**
+       * Streamlined RP post format. "action" renders the body as an emote
+       * (kind "me"); "npc" voices a saved NPC (kind "npc"), requiring the
+       * forum's `use_npc` grant + a `npcId` the caller owns. Omitted/"say"
+       * is the normal post. Topics (threadTitle) ignore this — only the
+       * body of replies/posts is reformatted.
+       */
+      format?: "say" | "action" | "npc";
+      /** The saved NPC to voice (format "npc"). Must belong to the caller. */
+      npcId?: string;
+      /**
        * When set on a NEW topic (threadTitle present, no replyToId), the
        * topic becomes a `kind: "poll"` post: `threadTitle` is the question,
        * `text` the optional intro body. The server validates option count /

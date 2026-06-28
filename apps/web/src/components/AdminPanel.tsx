@@ -1,5 +1,6 @@
 import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import DOMPurify from "dompurify";
+import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import type { AuditEntry, PermissionKey, ProfileView, ReportEntry, Role, Theme, ThemeableTextSlot, ThreadCategory } from "@thekeep/shared";
 import { AUDIT_ACTION_GROUPS, THEME_PRESETS } from "@thekeep/shared";
 import {
@@ -2234,14 +2235,14 @@ function RulesTab() {
         <div className="space-y-3 rounded border border-keep-rule bg-keep-bg p-3">
           {securityHtml.trim() ? (
             <div
-              className="prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-2"
-              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(securityHtml) }}
+              className={`prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-2 ${USER_HTML_SCOPE_CLASS}`}
+              dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(securityHtml) }}
             />
           ) : null}
           {rulesHtml.trim() ? (
             <div
-              className="prose prose-sm max-w-none"
-              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(rulesHtml) }}
+              className={`prose prose-sm max-w-none ${USER_HTML_SCOPE_CLASS}`}
+              dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(rulesHtml) }}
             />
           ) : (
             <p className="italic text-keep-muted">(no rules set)</p>

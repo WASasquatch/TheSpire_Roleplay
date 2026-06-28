@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { hasPermission } from "../auth/permissions.js";
-import type { Role } from "@thekeep/shared";
-import { and, eq, inArray } from "drizzle-orm";
+import type { Role, ForumPermission, AuditAction } from "@thekeep/shared";
+import { recordAudit } from "../audit.js";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
 import type {
@@ -9,7 +10,7 @@ import type {
   ClientToServerEvents,
   ServerToClientEvents,
 } from "@thekeep/shared";
-import { mentionsField } from "@thekeep/shared";
+import { mentionsField, parseNpcStats } from "@thekeep/shared";
 import { messages, rooms, roomThreadCategories, users } from "../db/schema.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import { sanitizeBio } from "../auth/html.js";
@@ -54,7 +55,13 @@ async function boardModTier(
   db: Db,
   user: { id: string; role: Role },
   roomId: string,
-): Promise<{ tier: "owner" | "mod" | null; forumOwnerUserId: string } | null> {
+): Promise<{
+  /** True for the forum owner / manage_any_forum staff. */
+  isOwner: boolean;
+  /** Effective forum permissions this user holds (owner = all). */
+  permissions: ForumPermission[];
+  forumOwnerUserId: string;
+} | null> {
   const room = (await db.select({ forumId: rooms.forumId }).from(rooms)
     .where(eq(rooms.id, roomId)).limit(1))[0];
   if (!room?.forumId) return null;
@@ -62,9 +69,47 @@ async function boardModTier(
   const a = await forumAuthority(db, user, room.forumId);
   if (!a.forum) return null;
   return {
-    tier: a.isOwner ? "owner" : a.isMod ? "mod" : null,
+    isOwner: a.isOwner,
+    permissions: a.permissions,
     forumOwnerUserId: a.forum.ownerUserId,
   };
+}
+
+/** Owner-implies-all check for a board tier (mirrors forums/authority.forumCan
+ *  without importing it, to keep messages.ts off the authority module's
+ *  static import graph — boardModTier already imports it dynamically). */
+function boardCan(
+  board: { isOwner: boolean; permissions: ForumPermission[] } | null,
+  key: ForumPermission,
+): boolean {
+  return !!board && (board.isOwner || board.permissions.includes(key));
+}
+
+/**
+ * Record a forum-board moderation action into the audit log, stamping the
+ * board's `forumId` into metadata so the forum's Mod Log can filter to it.
+ * No-op for non-forum-board rooms (forumId null), so the chat moderation
+ * paths that share these handlers don't pollute any forum's log.
+ */
+async function auditForumTopic(
+  db: Db,
+  actorUserId: string,
+  roomId: string,
+  messageId: string,
+  action: AuditAction,
+  metadata: Record<string, unknown>,
+  targetUserId?: string | null,
+): Promise<void> {
+  const room = (await db.select({ forumId: rooms.forumId }).from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
+  if (!room?.forumId) return;
+  await recordAudit(db, {
+    actorUserId,
+    action,
+    targetRoomId: roomId,
+    targetMessageId: messageId,
+    ...(targetUserId ? { targetUserId } : {}),
+    metadata: { ...metadata, forumId: room.forumId },
+  });
 }
 
 const editBody = z.object({ body: z.string().min(1).max(20_000) }).strict();
@@ -102,8 +147,10 @@ export function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): 
     ...(m.replyToBodySnippet ? { replyToBodySnippet: m.replyToBodySnippet } : {}),
     ...(m.moodSnapshot ? { moodSnapshot: m.moodSnapshot } : {}),
     ...(m.npcVoicedBy ? { npcVoicedBy: m.npcVoicedBy } : {}),
+    ...(m.npcStatsJson ? { npcStats: parseNpcStats(m.npcStatsJson) } : {}),
     ...(m.threadCategoryId ? { threadCategoryId: m.threadCategoryId } : {}),
     ...(m.title ? { title: m.title } : {}),
+    ...(m.prefixId ? { prefixId: m.prefixId } : {}),
     ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
     ...(m.editedAt ? { editedAt: +m.editedAt } : {}),
     ...(m.deletedAt ? { deletedAt: +m.deletedAt } : {}),
@@ -173,11 +220,11 @@ export async function registerMessageRoutes(
     // independently.
     const canEditOthers = await hasPermission(me, "edit_others_message", db);
     if (!isAuthor && !canEditOthers) {
-      // Forum boards: the owner may edit anything; a Forum Moderator may
-      // edit anything EXCEPT the owner's own posts (powers matrix).
+      // Forum boards: the owner may edit anything; a mod needs the
+      // `edit_posts` grant AND may never edit the owner's own posts.
       const board = await boardModTier(db, me, m.roomId);
-      const boardOk = board?.tier === "owner"
-        || (board?.tier === "mod" && m.userId !== board.forumOwnerUserId);
+      const boardOk = !!board && (board.isOwner
+        || (boardCan(board, "edit_posts") && m.userId !== board.forumOwnerUserId));
       if (!boardOk) { reply.code(403); return { error: "not yours" }; }
     }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
@@ -272,11 +319,11 @@ export async function registerMessageRoutes(
     // for moderators. Same shape as the edit path above.
     const canDeleteOthers = await hasPermission(me, "delete_others_message", db);
     if (!isAuthor && !canDeleteOthers) {
-      // Forum boards: owner deletes anything; a Forum Moderator deletes
-      // anything EXCEPT owner-authored content (powers matrix).
+      // Forum boards: owner deletes anything; a mod needs the
+      // `delete_posts` grant AND may never delete owner-authored content.
       const board = await boardModTier(db, me, m.roomId);
-      const boardOk = board?.tier === "owner"
-        || (board?.tier === "mod" && m.userId !== board.forumOwnerUserId);
+      const boardOk = !!board && (board.isOwner
+        || (boardCan(board, "delete_posts") && m.userId !== board.forumOwnerUserId));
       if (!boardOk) { reply.code(403); return { error: "not yours" }; }
     }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
@@ -313,6 +360,11 @@ export async function registerMessageRoutes(
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
+    // Mod Log: a moderator removing someone ELSE's forum post (self-deletes
+    // aren't moderation). No-op off forum boards.
+    if (!isAuthor) {
+      await auditForumTopic(db, me.id, m.roomId, m.id, "forum_post_delete", { isTopic: !m.replyToId, title: m.title ?? null }, m.userId);
+    }
     // Per-socket emit so site admins (admin / masteradmin) receive the
     // original body alongside the deletion marker, they need to see
     // what got hidden in case the author was burying something. Mods,
@@ -419,7 +471,7 @@ export async function registerMessageRoutes(
     const canModerate = await hasPermission(me, key, db);
     if (!isAuthor && !canModerate) {
       const board = await boardModTier(db, me, m.roomId);
-      if (!board?.tier) { reply.code(403); return { error: "not yours" }; }
+      if (!boardCan(board, "lock_topics")) { reply.code(403); return { error: "not yours" }; }
     }
 
     const lockedAt = parsed.locked ? new Date() : null;
@@ -431,6 +483,11 @@ export async function registerMessageRoutes(
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
     io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    // Mod Log: only when a moderator acts on someone ELSE's topic (an author
+    // locking their own thread isn't moderation).
+    if (m.userId !== me.id) {
+      await auditForumTopic(db, me.id, m.roomId, m.id, "forum_topic_lock", { locked: parsed.locked, title: m.title ?? null }, m.userId);
+    }
     return { ok: true };
   });
 
@@ -460,7 +517,7 @@ export async function registerMessageRoutes(
     // furniture; mods CAN sticky, including the owner's topics).
     if (!(await hasPermission(me, "pin_forum_topic", db))) {
       const board = await boardModTier(db, me, m.roomId);
-      if (!board?.tier) { reply.code(403); return { error: "admins only" }; }
+      if (!boardCan(board, "pin_topics")) { reply.code(403); return { error: "admins only" }; }
     }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
     if (m.replyToId) { reply.code(400); return { error: "Only top-level topics can be pinned." }; }
@@ -476,6 +533,7 @@ export async function registerMessageRoutes(
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
     io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    await auditForumTopic(db, me.id, m.roomId, m.id, "forum_topic_sticky", { sticky: parsed.sticky, title: m.title ?? null }, m.userId);
     return { ok: true };
   });
 
@@ -510,7 +568,7 @@ export async function registerMessageRoutes(
 
     if (!(await hasPermission(me, "lock_forum_topic", db))) {
       const board = await boardModTier(db, me, m.roomId);
-      if (!board?.tier) { reply.code(403); return { error: "mods only" }; }
+      if (!boardCan(board, "move_topics")) { reply.code(403); return { error: "mods only" }; }
     }
 
     // A non-null target must be a real category in this same room.
@@ -531,6 +589,144 @@ export async function registerMessageRoutes(
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
     io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    await auditForumTopic(db, me.id, m.roomId, m.id, "forum_topic_move", { from: m.threadCategoryId ?? null, to: parsed.categoryId, title: m.title ?? null }, m.userId);
+    return { ok: true };
+  });
+
+  /**
+   * PATCH /messages/:id/prefix — set or clear a forum topic's prefix.
+   * Allowed for the topic author OR a mod holding `manage_prefixes`. The
+   * prefix must belong to the topic's own forum. `prefixId: null` clears it.
+   */
+  const prefixBody = z.object({ prefixId: z.string().min(1).nullable() }).strict();
+  app.patch<{ Params: { id: string }; Body: unknown }>("/messages/:id/prefix", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let parsed: z.infer<typeof prefixBody>;
+    try { parsed = prefixBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
+    if (!m || m.deletedAt) { reply.code(404); return { error: "not found" }; }
+    if (m.replyToId) { reply.code(400); return { error: "Only topics carry a prefix." }; }
+    const room = (await db.select({ forumId: rooms.forumId }).from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
+    if (!room?.forumId) { reply.code(400); return { error: "Prefixes apply only to forum topics." }; }
+    // Author may tag their own topic; otherwise needs the manage_prefixes grant.
+    if (m.userId !== me.id) {
+      const board = await boardModTier(db, me, m.roomId);
+      if (!boardCan(board, "manage_prefixes")) { reply.code(403); return { error: "not yours" }; }
+    }
+    // A non-null prefix must belong to THIS forum AND be offered in the
+    // topic's category (global tags apply everywhere; scoped tags only in
+    // their listed categories). Author and mod alike respect the scope.
+    if (parsed.prefixId) {
+      const { forumPrefixes } = await import("../db/schema.js");
+      const { parsePrefixCategoryIds, prefixAppliesToCategory } = await import("@thekeep/shared");
+      const pref = (await db.select({ id: forumPrefixes.id, categoryIdsJson: forumPrefixes.categoryIdsJson }).from(forumPrefixes)
+        .where(and(eq(forumPrefixes.id, parsed.prefixId), eq(forumPrefixes.forumId, room.forumId))).limit(1))[0];
+      if (!pref) { reply.code(400); return { error: "That prefix isn't in this forum." }; }
+      if (!prefixAppliesToCategory({ categoryIds: parsePrefixCategoryIds(pref.categoryIdsJson) }, m.threadCategoryId ?? null)) {
+        reply.code(400); return { error: "That tag isn't available in this topic's category." };
+      }
+    }
+    await db.update(messages).set({ prefixId: parsed.prefixId }).where(eq(messages.id, m.id));
+    const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
+    if (updated) io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    return { ok: true };
+  });
+
+  /** Shared move/merge permission check: the sitewide forum-topic permission
+   *  OR the `move_topics` grant on the topic's own board. Returns true when
+   *  allowed. */
+  async function canMoveTopics(meUser: { id: string; role: Role }, roomId: string): Promise<boolean> {
+    if (await hasPermission(meUser, "lock_forum_topic", db)) return true;
+    return boardCan(await boardModTier(db, meUser, roomId), "move_topics");
+  }
+
+  /**
+   * POST /messages/:id/move-to-board — move a whole topic (header + every
+   * reply) to a DIFFERENT board in the SAME forum, optionally dropping it
+   * into a category there. Needs `move_topics`. Cross-FORUM moves are
+   * refused (a topic can't leave its forum). Replies follow the header.
+   */
+  const moveBoardBody = z.object({
+    boardRoomId: z.string().min(1),
+    categoryId: z.string().min(1).nullable().optional(),
+  }).strict();
+  app.post<{ Params: { id: string }; Body: unknown }>("/messages/:id/move-to-board", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let parsed: z.infer<typeof moveBoardBody>;
+    try { parsed = moveBoardBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+
+    const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
+    if (!m || m.deletedAt) { reply.code(404); return { error: "not found" }; }
+    if (m.replyToId) { reply.code(400); return { error: "Only top-level topics can be moved." }; }
+    const srcRoom = (await db.select({ forumId: rooms.forumId }).from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
+    if (!srcRoom?.forumId) { reply.code(400); return { error: "Moving applies only to forum boards." }; }
+    const tgtRoom = (await db.select({ id: rooms.id, forumId: rooms.forumId }).from(rooms).where(eq(rooms.id, parsed.boardRoomId)).limit(1))[0];
+    if (!tgtRoom?.forumId) { reply.code(404); return { error: "That board doesn't exist." }; }
+    if (tgtRoom.forumId !== srcRoom.forumId) { reply.code(400); return { error: "You can only move a topic between boards in the same forum." }; }
+    if (tgtRoom.id === m.roomId) { reply.code(400); return { error: "That topic is already on this board." }; }
+    if (!(await canMoveTopics(me, m.roomId))) { reply.code(403); return { error: "mods only" }; }
+    // A non-null target category must belong to the TARGET board.
+    if (parsed.categoryId) {
+      const cat = (await db.select({ id: roomThreadCategories.id }).from(roomThreadCategories)
+        .where(and(eq(roomThreadCategories.id, parsed.categoryId), eq(roomThreadCategories.roomId, tgtRoom.id))).limit(1))[0];
+      if (!cat) { reply.code(400); return { error: "That category isn't on the destination board." }; }
+    }
+    const oldRoomId = m.roomId;
+    await db.update(messages).set({ roomId: tgtRoom.id, threadCategoryId: parsed.categoryId ?? null }).where(eq(messages.id, m.id));
+    // Re-home the replies (matched by the OLD room so we don't catch unrelated rows).
+    await db.update(messages).set({ roomId: tgtRoom.id }).where(and(eq(messages.replyToId, m.id), eq(messages.roomId, oldRoomId)));
+    await auditForumTopic(db, me.id, tgtRoom.id, m.id, "forum_topic_move", { toBoard: tgtRoom.id, fromBoard: oldRoomId, title: m.title ?? null }, m.userId);
+    return { ok: true };
+  });
+
+  /**
+   * POST /messages/:id/merge-into — merge THIS topic into another topic in
+   * the same forum. Non-destructive: this topic's replies become replies of
+   * the target, and this topic's header becomes a plain reply (its title is
+   * dropped, its sticky/lock cleared). The target's last-activity is
+   * recomputed so it floats correctly. Needs `move_topics`.
+   */
+  const mergeBody = z.object({ targetTopicId: z.string().min(1) }).strict();
+  app.post<{ Params: { id: string }; Body: unknown }>("/messages/:id/merge-into", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let parsed: z.infer<typeof mergeBody>;
+    try { parsed = mergeBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+
+    const src = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
+    if (!src || src.deletedAt) { reply.code(404); return { error: "not found" }; }
+    if (src.replyToId) { reply.code(400); return { error: "Only a top-level topic can be merged." }; }
+    if (parsed.targetTopicId === src.id) { reply.code(400); return { error: "A topic can't merge into itself." }; }
+    const tgt = (await db.select().from(messages).where(eq(messages.id, parsed.targetTopicId)).limit(1))[0];
+    if (!tgt || tgt.deletedAt || tgt.replyToId) { reply.code(400); return { error: "The destination must be a live topic." }; }
+    const srcRoom = (await db.select({ forumId: rooms.forumId }).from(rooms).where(eq(rooms.id, src.roomId)).limit(1))[0];
+    const tgtRoom = (await db.select({ forumId: rooms.forumId }).from(rooms).where(eq(rooms.id, tgt.roomId)).limit(1))[0];
+    if (!srcRoom?.forumId || srcRoom.forumId !== tgtRoom?.forumId) { reply.code(400); return { error: "Both topics must be in the same forum." }; }
+    if (!(await canMoveTopics(me, src.roomId))) { reply.code(403); return { error: "mods only" }; }
+
+    const oldRoomId = src.roomId;
+    // Source's replies → replies of the target, in the target's room.
+    await db.update(messages).set({ replyToId: tgt.id, roomId: tgt.roomId })
+      .where(and(eq(messages.replyToId, src.id), eq(messages.roomId, oldRoomId)));
+    // Source header → a plain reply of the target (drop topic-only fields).
+    await db.update(messages).set({
+      replyToId: tgt.id, roomId: tgt.roomId, title: null,
+      threadCategoryId: tgt.threadCategoryId, isSticky: false, lockedAt: null,
+    }).where(eq(messages.id, src.id));
+    // Recompute the target's last-activity across its (now larger) thread.
+    const latest = (await db
+      .select({ mx: sql<number>`max(${messages.createdAt})` })
+      .from(messages)
+      .where(or(eq(messages.id, tgt.id), eq(messages.replyToId, tgt.id))))[0];
+    if (latest?.mx) {
+      await db.update(messages).set({ lastActivityAt: new Date(Number(latest.mx)) }).where(eq(messages.id, tgt.id));
+    }
+    await auditForumTopic(db, me.id, tgt.roomId, tgt.id, "forum_topic_move", { mergedFrom: src.id, mergedTitle: src.title ?? null, title: tgt.title ?? null }, src.userId);
     return { ok: true };
   });
 

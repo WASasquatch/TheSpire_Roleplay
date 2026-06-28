@@ -15,6 +15,7 @@ import { fetchPublicEarning, type PublicEarningResponse } from "../lib/earning.j
 import { ArcadeError, fetchEidolonSummary, patFamiliar } from "../lib/arcade.js";
 import { ItemZoomView } from "./ItemZoomView.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
+import { ForumBanFromProfile } from "./ForumBanFromProfile.js";
 import { RankSigil } from "./RankSigil.js";
 import { StyledName } from "./StyledName.js";
 import { useChat } from "../state/store.js";
@@ -1059,6 +1060,12 @@ function ProfileBody({
                     <Flag className="h-4 w-4" aria-hidden="true" />
                   </button>
                 ) : null}
+                {/* Forum owners/mods (with ban_users) can ban this user from a
+                    forum they run, straight from the profile. Self-hides for
+                    everyone else. */}
+                {canReport ? (
+                  <ForumBanFromProfile targetUserId={profile.profile.userId} targetName={name} />
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1168,6 +1175,14 @@ function ProfileBody({
                 <Flag className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : null}
+          </div>
+        ) : null}
+        {/* Forum-ban: full-width row below the mobile action segments (the
+            desktop placement lives in the hero row above). Self-hides unless
+            the viewer runs a forum they can ban from. */}
+        {canReport ? (
+          <div className="mt-2 sm:hidden">
+            <ForumBanFromProfile targetUserId={profile.profile.userId} targetName={name} />
           </div>
         ) : null}
         </div>

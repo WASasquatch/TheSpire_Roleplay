@@ -112,13 +112,15 @@ export function SplashShell({
         // with mountains trailing below. On md+ the viewport is wide
         // enough that the natural cover-center works.
         //
-        // `fixed inset-0` (not `absolute`): the parent expands to fit
-        // the SpireScroll + any below-the-fold content, so absolute-
-        // positioned cover would scale the 2.65:1 panoramic art up to
-        // span the full page height and crop everything but a thin
-        // center band, the "zoomed in" look. Fixed pins the layer to
-        // the viewport so cover sizes against the visible window.
-        className="fixed inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
+        // Sized in VIEWPORT units, not `inset-0`: the parent expands to
+        // fit the SpireScroll + any below-the-fold content, and `inset-0`
+        // resolves right/bottom against a containing block that can track
+        // that content height (and a vertical scrollbar narrows the width),
+        // so cover would scale the 2.65:1 panoramic art up to span the full
+        // page height and crop everything but a thin center band — the
+        // "zoomed in" look. `fixed` + `w-screen`/`h-screen` (100vw/100vh)
+        // pin the layer to the window so cover sizes against the viewport.
+        className="fixed left-0 top-0 h-screen w-screen bg-cover bg-[position:-175px_center] md:bg-center"
         style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
       />
       <div

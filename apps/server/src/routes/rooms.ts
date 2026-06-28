@@ -27,7 +27,7 @@ import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
 import { listArchivedOwnedRooms } from "../lib/archivedRooms.js";
 import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
-import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MANIFEST_VERSION, EXPORT_MAX_MESSAGES, EXPORT_SIGN_ALGO, mentionsField, roleRank, type ExportManifest, type ExportPayload } from "@thekeep/shared";
+import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MANIFEST_VERSION, EXPORT_MAX_MESSAGES, EXPORT_SIGN_ALGO, mentionsField, parseNpcStats, roleRank, type ExportManifest, type ExportPayload } from "@thekeep/shared";
 import { buildChatLogHtml, type ExportMessageRow } from "../export/chatLog.js";
 import { signExportPayload } from "../export/sign.js";
 
@@ -910,8 +910,10 @@ export async function registerRoomsRoutes(
           ...(m.replyToBodySnippet ? { replyToBodySnippet: m.replyToBodySnippet } : {}),
           ...(m.moodSnapshot ? { moodSnapshot: m.moodSnapshot } : {}),
           ...(m.npcVoicedBy ? { npcVoicedBy: m.npcVoicedBy } : {}),
+          ...(m.npcStatsJson ? { npcStats: parseNpcStats(m.npcStatsJson) } : {}),
           ...(m.threadCategoryId ? { threadCategoryId: m.threadCategoryId } : {}),
           ...(m.title ? { title: m.title } : {}),
+          ...(m.prefixId ? { prefixId: m.prefixId } : {}),
           ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
           ...(m.editedAt ? { editedAt: +m.editedAt } : {}),
           ...(m.deletedAt ? { deletedAt: +m.deletedAt } : {}),
@@ -1164,8 +1166,10 @@ export async function registerRoomsRoutes(
         ...(m.replyToBodySnippet ? { replyToBodySnippet: m.replyToBodySnippet } : {}),
         ...(m.moodSnapshot ? { moodSnapshot: m.moodSnapshot } : {}),
         ...(m.npcVoicedBy ? { npcVoicedBy: m.npcVoicedBy } : {}),
+        ...(m.npcStatsJson ? { npcStats: parseNpcStats(m.npcStatsJson) } : {}),
         ...(m.threadCategoryId ? { threadCategoryId: m.threadCategoryId } : {}),
         ...(m.title ? { title: m.title } : {}),
+        ...(m.prefixId ? { prefixId: m.prefixId } : {}),
         ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
         ...(m.editedAt ? { editedAt: +m.editedAt } : {}),
         ...(m.deletedAt ? { deletedAt: +m.deletedAt } : {}),

@@ -38,6 +38,7 @@ import {
   forumPermissionCategory,
   FORUM_PREFIX_TOOLTIP_MAX,
   prefixAppliesToCategory,
+  resolveMessageColor,
   normalizeTheme,
   type Theme,
   type ForumPermission,
@@ -1266,6 +1267,7 @@ function PrefixAssignModal({ detail, topicId, current, topicCategoryId, onForumC
   const [error, setError] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState("");
   const [newColor, setNewColor] = useState("#8a66cc");
+  const themeBg = useActiveTheme().bg;
   const canManagePrefixes = !!detail.viewer && (detail.viewer.canManage || detail.viewer.permissions.includes("manage_prefixes"));
   const canCreateCustom = detail.allowCustomTags && !!detail.viewer && (detail.viewer.canManage || detail.viewer.permissions.includes("create_tags"));
   // Only tags this category can be given. The currently-assigned tag is kept
@@ -1315,7 +1317,7 @@ function PrefixAssignModal({ detail, topicId, current, topicCategoryId, onForumC
               <li key={p.id}>
                 <button type="button" disabled={busy} onClick={() => assign(p.id)} title={p.staffOnly ? `${p.tooltip ? p.tooltip + " — " : ""}Staff only` : (p.tooltip ?? undefined)}
                   className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-bold uppercase tracking-wide"
-                  style={{ backgroundColor: `${p.color}22`, color: p.color, border: `1px solid ${current === p.id ? p.color : `${p.color}66`}` }}>
+                  style={{ backgroundColor: `${p.color}22`, color: resolveMessageColor(p.color, themeBg) ?? p.color, border: `1px solid ${current === p.id ? p.color : `${p.color}66`}` }}>
                   {p.staffOnly ? <Lock className="h-3 w-3" aria-hidden /> : null}{p.label}
                 </button>
               </li>
@@ -3655,6 +3657,7 @@ function PrefixRow({ detail, prefix: p, busy, run, onSaved }: {
 }) {
   const [open, setOpen] = useState(false);
   const [tip, setTip] = useState(p.tooltip ?? "");
+  const themeBg = useActiveTheme().bg;
   const hasCategories = detail.categories.length > 0;
   const multiBoard = detail.boards.length > 1;
   // Save the tooltip on blur, only when it actually changed.
@@ -3686,7 +3689,7 @@ function PrefixRow({ detail, prefix: p, busy, run, onSaved }: {
           className="h-6 w-8 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent"
           title="Chip color"
         />
-        <span className="rounded px-1.5 py-0 text-[10px] font-bold uppercase tracking-wide" style={{ backgroundColor: `${p.color}22`, color: p.color, border: `1px solid ${p.color}66` }} title={p.tooltip ?? undefined}>{p.label}</span>
+        <span className="rounded px-1.5 py-0 text-[10px] font-bold uppercase tracking-wide" style={{ backgroundColor: `${p.color}22`, color: resolveMessageColor(p.color, themeBg) ?? p.color, border: `1px solid ${p.color}66` }} title={p.tooltip ?? undefined}>{p.label}</span>
         <span className="min-w-0 flex-1 truncate text-sm text-keep-text">
           {p.label}
           {p.staffOnly ? <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-[10px] uppercase tracking-widest text-keep-muted" title="Staff only — members can't put this tag on a topic"><Lock className="h-2.5 w-2.5" aria-hidden /> staff</span> : null}

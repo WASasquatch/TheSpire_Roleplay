@@ -2025,6 +2025,10 @@ function TopicManageModal({ topic, boards, onClose, onChanged }: {
  *  catalog provided via context; renders nothing outside a prefix-enabled
  *  forum or when the topic has no prefix and the viewer can't assign one. */
 function TopicPrefix({ topic, selfUserId }: { topic: ChatMessage; selfUserId: string | null }) {
+  // Nudge the tag's ink toward legibility against the viewer's theme bg (same
+  // pass the chat author colors use) so a pale tag survives a light theme and
+  // a dark tag survives a dark one. The faint bg/border tints keep the raw hue.
+  const themeBg = useActiveTheme().bg;
   const ctx = useContext(ForumPrefixContext);
   if (!ctx || topic.replyToId) return null;
   const prefix = topic.prefixId ? ctx.byId.get(topic.prefixId) : null;
@@ -2045,7 +2049,7 @@ function TopicPrefix({ topic, selfUserId }: { topic: ChatMessage; selfUserId: st
   const chip = prefix ? (
     <span
       className="shrink-0 rounded px-1.5 py-0 text-[10px] font-bold uppercase tracking-wide"
-      style={{ backgroundColor: `${prefix.color}22`, color: prefix.color, border: `1px solid ${prefix.color}66` }}
+      style={{ backgroundColor: `${prefix.color}22`, color: resolveMessageColor(prefix.color, themeBg) ?? prefix.color, border: `1px solid ${prefix.color}66` }}
       title={prefix.tooltip ?? undefined}
     >
       {prefix.label}

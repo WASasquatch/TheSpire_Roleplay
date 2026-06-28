@@ -611,19 +611,28 @@ export async function registerMessageRoutes(
     const room = (await db.select({ forumId: rooms.forumId }).from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
     if (!room?.forumId) { reply.code(400); return { error: "Prefixes apply only to forum topics." }; }
     // Author may tag their own topic; otherwise needs the manage_prefixes grant.
-    if (m.userId !== me.id) {
-      const board = await boardModTier(db, me, m.roomId);
-      if (!boardCan(board, "manage_prefixes")) { reply.code(403); return { error: "not yours" }; }
+    // We resolve the grant up front because staff-only tags are manager-gated
+    // even for the author (see below).
+    const isManager = boardCan(await boardModTier(db, me, m.roomId), "manage_prefixes");
+    if (m.userId !== me.id && !isManager) { reply.code(403); return { error: "not yours" }; }
+    const { forumPrefixes } = await import("../db/schema.js");
+    // A staff-only tag already ON the topic can only be changed or cleared by a
+    // manager — an author can't quietly drop the keeper's "Announcement".
+    if (m.prefixId && !isManager) {
+      const cur = (await db.select({ staffOnly: forumPrefixes.staffOnly }).from(forumPrefixes)
+        .where(eq(forumPrefixes.id, m.prefixId)).limit(1))[0];
+      if (cur?.staffOnly) { reply.code(403); return { error: "Only staff can change this topic's tag." }; }
     }
     // A non-null prefix must belong to THIS forum AND be offered in the
     // topic's category (global tags apply everywhere; scoped tags only in
-    // their listed categories). Author and mod alike respect the scope.
+    // their listed categories). Author and mod alike respect the scope. A
+    // staff-only tag additionally requires the manage_prefixes grant to apply.
     if (parsed.prefixId) {
-      const { forumPrefixes } = await import("../db/schema.js");
       const { parsePrefixCategoryIds, prefixAppliesToCategory } = await import("@thekeep/shared");
-      const pref = (await db.select({ id: forumPrefixes.id, categoryIdsJson: forumPrefixes.categoryIdsJson }).from(forumPrefixes)
+      const pref = (await db.select({ id: forumPrefixes.id, categoryIdsJson: forumPrefixes.categoryIdsJson, staffOnly: forumPrefixes.staffOnly }).from(forumPrefixes)
         .where(and(eq(forumPrefixes.id, parsed.prefixId), eq(forumPrefixes.forumId, room.forumId))).limit(1))[0];
       if (!pref) { reply.code(400); return { error: "That prefix isn't in this forum." }; }
+      if (pref.staffOnly && !isManager) { reply.code(403); return { error: "That tag can only be set by staff." }; }
       if (!prefixAppliesToCategory({ categoryIds: parsePrefixCategoryIds(pref.categoryIdsJson) }, m.threadCategoryId ?? null)) {
         reply.code(400); return { error: "That tag isn't available in this topic's category." };
       }

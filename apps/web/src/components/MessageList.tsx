@@ -1921,10 +1921,17 @@ function TopicPrefix({ topic, selfUserId }: { topic: ChatMessage; selfUserId: st
   const ctx = useContext(ForumPrefixContext);
   if (!ctx || topic.replyToId) return null;
   const prefix = topic.prefixId ? ctx.byId.get(topic.prefixId) : null;
-  const canAssign = ctx.canManagePrefixes || (!!selfUserId && topic.userId === selfUserId);
+  // A staff-only tag is manager-controlled: only manage_prefixes may set it,
+  // and once set, only they may change/clear it — the author can't (mirrors
+  // the server gate). So the author's self-tag right is suspended whenever the
+  // current tag is staff-only.
+  const isManager = ctx.canManagePrefixes;
+  const currentIsStaffOnly = !!prefix?.staffOnly;
+  const canAssign = isManager || (!!selfUserId && topic.userId === selfUserId && !currentIsStaffOnly);
   // Tags this topic's category can actually be given (global + matching-scope).
+  // Members don't count staff-only tags toward "is there anything to assign".
   const categoryId = topic.threadCategoryId ?? null;
-  const hasApplicable = ctx.all.some((p) => prefixAppliesToCategory(p, categoryId));
+  const hasApplicable = ctx.all.some((p) => prefixAppliesToCategory(p, categoryId) && (isManager || !p.staffOnly));
   // Hide the whole affordance when there's nothing to assign and no way to
   // mint one — "no tags + custom off ⇒ don't show the tag system".
   if (!prefix && (!canAssign || (!hasApplicable && !ctx.canCreateCustom))) return null;

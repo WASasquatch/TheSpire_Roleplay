@@ -434,11 +434,11 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
       .where(eq(forumMembers.forumId, forum.id)))[0]?.n ?? 0;
 
     const prefixRows = (await db
-      .select({ id: forumPrefixes.id, label: forumPrefixes.label, color: forumPrefixes.color, tooltip: forumPrefixes.tooltip, sortOrder: forumPrefixes.sortOrder, categoryIdsJson: forumPrefixes.categoryIdsJson })
+      .select({ id: forumPrefixes.id, label: forumPrefixes.label, color: forumPrefixes.color, tooltip: forumPrefixes.tooltip, sortOrder: forumPrefixes.sortOrder, categoryIdsJson: forumPrefixes.categoryIdsJson, staffOnly: forumPrefixes.staffOnly })
       .from(forumPrefixes)
       .where(eq(forumPrefixes.forumId, forum.id))
       .orderBy(asc(forumPrefixes.sortOrder), asc(forumPrefixes.createdAt)))
-      .map((p) => ({ id: p.id, label: p.label, color: p.color, tooltip: p.tooltip ?? null, sortOrder: p.sortOrder, categoryIds: parsePrefixCategoryIds(p.categoryIdsJson) }));
+      .map((p) => ({ id: p.id, label: p.label, color: p.color, tooltip: p.tooltip ?? null, sortOrder: p.sortOrder, categoryIds: parsePrefixCategoryIds(p.categoryIdsJson), staffOnly: !!p.staffOnly }));
 
     // Every category across the forum's boards, for the prefix scope picker.
     // `boards` is already loaded (its roomId is the board's room id).
@@ -1655,6 +1655,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     tooltip: z.string().trim().max(FORUM_PREFIX_TOOLTIP_MAX).nullable().optional(),
     sortOrder: z.number().int().min(0).max(999).optional(),
     categoryIds: z.array(z.string().min(1)).max(100).optional(),
+    staffOnly: z.boolean().optional(),
   }).strict();
 
   app.post<{ Params: { id: string }; Body: unknown }>("/forums/:id/prefixes", async (req, reply) => {
@@ -1665,11 +1666,13 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     catch { reply.code(400); return { error: "invalid body" }; }
     const count = Number((await db.select({ n: sql<number>`count(*)` }).from(forumPrefixes).where(eq(forumPrefixes.forumId, gate.forum.id)))[0]?.n ?? 0);
     if (count >= FORUM_MAX_PREFIXES) { reply.code(409); return { error: `A forum can have at most ${FORUM_MAX_PREFIXES} prefixes.` }; }
-    // Category scope only honored for full curators; a create_tags mint is global.
+    // Category scope + staff-only only honored for full curators; a create_tags
+    // mint is always a plain, member-assignable global tag.
     const categoryIds = gate.canManage ? await validPrefixCategoryIds(gate.forum.id, body.categoryIds) : [];
+    const staffOnly = gate.canManage ? !!body.staffOnly : false;
     const tooltip = body.tooltip?.trim() ? body.tooltip.trim() : null;
     const id = nanoid();
-    await db.insert(forumPrefixes).values({ id, forumId: gate.forum.id, label: body.label, color: body.color, tooltip, sortOrder: body.sortOrder ?? count, categoryIdsJson: JSON.stringify(categoryIds) });
+    await db.insert(forumPrefixes).values({ id, forumId: gate.forum.id, label: body.label, color: body.color, tooltip, sortOrder: body.sortOrder ?? count, categoryIdsJson: JSON.stringify(categoryIds), staffOnly });
     return { ok: true, id };
   });
 
@@ -1679,6 +1682,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     tooltip: z.string().trim().max(FORUM_PREFIX_TOOLTIP_MAX).nullable().optional(),
     sortOrder: z.number().int().min(0).max(999).optional(),
     categoryIds: z.array(z.string().min(1)).max(100).optional(),
+    staffOnly: z.boolean().optional(),
   }).strict();
   app.patch<{ Params: { id: string; prefixId: string }; Body: unknown }>("/forums/:id/prefixes/:prefixId", async (req, reply) => {
     const gate = await requireForumPermission(req, req.params.id, "manage_prefixes");
@@ -1695,6 +1699,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
       ...(body.tooltip !== undefined ? { tooltip: body.tooltip?.trim() ? body.tooltip.trim() : null } : {}),
       ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
       ...(body.categoryIds !== undefined ? { categoryIdsJson: JSON.stringify(await validPrefixCategoryIds(gate.forum.id, body.categoryIds)) } : {}),
+      ...(body.staffOnly !== undefined ? { staffOnly: body.staffOnly } : {}),
     }).where(eq(forumPrefixes.id, row.id));
     return { ok: true };
   });

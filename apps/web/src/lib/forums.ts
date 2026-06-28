@@ -503,7 +503,7 @@ export async function deleteNpc(id: string): Promise<void> {
  * Topic prefixes (Phase 5)
  * ============================================================ */
 
-export async function createForumPrefix(forumId: string, input: { label: string; color: string; tooltip?: string | null; categoryIds?: string[] }): Promise<string> {
+export async function createForumPrefix(forumId: string, input: { label: string; color: string; tooltip?: string | null; categoryIds?: string[]; staffOnly?: boolean }): Promise<string> {
   const r = await fetch(`/forums/${encodeURIComponent(forumId)}/prefixes`, {
     method: "POST", headers: { "content-type": "application/json" }, credentials: "include",
     body: JSON.stringify(input),
@@ -512,7 +512,7 @@ export async function createForumPrefix(forumId: string, input: { label: string;
   return j.id;
 }
 
-export async function updateForumPrefix(forumId: string, prefixId: string, patch: { label?: string; color?: string; tooltip?: string | null; sortOrder?: number; categoryIds?: string[] }): Promise<void> {
+export async function updateForumPrefix(forumId: string, prefixId: string, patch: { label?: string; color?: string; tooltip?: string | null; sortOrder?: number; categoryIds?: string[]; staffOnly?: boolean }): Promise<void> {
   const r = await fetch(`/forums/${encodeURIComponent(forumId)}/prefixes/${encodeURIComponent(prefixId)}`, {
     method: "PATCH", headers: { "content-type": "application/json" }, credentials: "include",
     body: JSON.stringify(patch),

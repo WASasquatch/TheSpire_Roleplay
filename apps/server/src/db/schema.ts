@@ -3292,6 +3292,11 @@ export const forumPrefixes = sqliteTable(
      *  (migration 0268). Empty `[]` = global (every topic). Non-empty =
      *  only topics filed under those categories see it in the picker. */
     categoryIdsJson: text("category_ids_json").notNull().default("[]"),
+    /** When set, only a `manage_prefixes` mod/owner may attach or remove this
+     *  tag on a topic — the ordinary topic author can't (migration 0273). Lets
+     *  a keeper mint authoritative tags (e.g. "Announcement") members can't
+     *  self-apply. Default false = any author may set it on their own topic. */
+    staffOnly: integer("staff_only", { mode: "boolean" }).notNull().default(false),
     createdAt: ts("created_at"),
   },
   (t) => ({

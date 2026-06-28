@@ -1127,7 +1127,10 @@ function PrefixAssignModal({ detail, topicId, current, topicCategoryId, onForumC
   const canCreateCustom = detail.allowCustomTags && !!detail.viewer && (detail.viewer.canManage || detail.viewer.permissions.includes("create_tags"));
   // Only tags this category can be given. The currently-assigned tag is kept
   // visible even if it's now out of scope (so you can see + clear it).
-  const applicable = detail.prefixes.filter((p) => prefixAppliesToCategory(p, topicCategoryId) || p.id === current);
+  // Staff-only tags are hidden from non-managers — they can't apply them, and
+  // a topic can only carry one a manager already set (which a non-manager won't
+  // reach this picker to change, per TopicPrefix's gate).
+  const applicable = detail.prefixes.filter((p) => (prefixAppliesToCategory(p, topicCategoryId) || p.id === current) && (canManagePrefixes || !p.staffOnly));
 
   function assign(prefixId: string | null) {
     setBusy(true); setError(null);
@@ -1167,10 +1170,10 @@ function PrefixAssignModal({ detail, topicId, current, topicCategoryId, onForumC
             </li>
             {applicable.map((p) => (
               <li key={p.id}>
-                <button type="button" disabled={busy} onClick={() => assign(p.id)} title={p.tooltip ?? undefined}
-                  className="rounded px-2 py-1 text-xs font-bold uppercase tracking-wide"
+                <button type="button" disabled={busy} onClick={() => assign(p.id)} title={p.staffOnly ? `${p.tooltip ? p.tooltip + " — " : ""}Staff only` : (p.tooltip ?? undefined)}
+                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-bold uppercase tracking-wide"
                   style={{ backgroundColor: `${p.color}22`, color: p.color, border: `1px solid ${current === p.id ? p.color : `${p.color}66`}` }}>
-                  {p.label}
+                  {p.staffOnly ? <Lock className="h-3 w-3" aria-hidden /> : null}{p.label}
                 </button>
               </li>
             ))}
@@ -3543,6 +3546,7 @@ function PrefixesSettings({ detail, busy, run, onSaved }: {
   const [label, setLabel] = useState("");
   const [color, setColor] = useState("#8a66cc");
   const [tooltip, setTooltip] = useState("");
+  const [staffOnly, setStaffOnly] = useState(false);
   return (
     <div className="max-w-xl space-y-3">
       <p className="text-[11px] text-keep-muted">
@@ -3582,7 +3586,7 @@ function PrefixesSettings({ detail, busy, run, onSaved }: {
           <button
             type="button"
             disabled={busy || !label.trim()}
-            onClick={() => void run(async () => { await createForumPrefix(detail.id, { label: label.trim(), color, tooltip: tooltip.trim() || null }); setLabel(""); setTooltip(""); onSaved(); })}
+            onClick={() => void run(async () => { await createForumPrefix(detail.id, { label: label.trim(), color, tooltip: tooltip.trim() || null, staffOnly }); setLabel(""); setTooltip(""); setStaffOnly(false); onSaved(); })}
             className="rounded border border-keep-action bg-keep-action/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50"
           >Add</button>
         </div>
@@ -3591,6 +3595,10 @@ function PrefixesSettings({ detail, busy, run, onSaved }: {
           placeholder="Tooltip — short hover explanation (optional)"
           className="mt-2 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs outline-none focus:border-keep-action"
         />
+        <label className="mt-2 flex items-center gap-2 text-xs text-keep-muted">
+          <input type="checkbox" checked={staffOnly} disabled={busy} onChange={(e) => setStaffOnly(e.target.checked)} />
+          <span><span className="font-semibold text-keep-text">Staff only</span> — only mods/owners can put this tag on a topic (members can't self-apply it). Good for "Announcement", "Official", etc.</span>
+        </label>
       </div>
     </div>
   );
@@ -3640,7 +3648,15 @@ function PrefixRow({ detail, prefix: p, busy, run, onSaved }: {
           title="Chip color"
         />
         <span className="rounded px-1.5 py-0 text-[10px] font-bold uppercase tracking-wide" style={{ backgroundColor: `${p.color}22`, color: p.color, border: `1px solid ${p.color}66` }} title={p.tooltip ?? undefined}>{p.label}</span>
-        <span className="min-w-0 flex-1 truncate text-sm text-keep-text">{p.label}</span>
+        <span className="min-w-0 flex-1 truncate text-sm text-keep-text">
+          {p.label}
+          {p.staffOnly ? <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-[10px] uppercase tracking-widest text-keep-muted" title="Staff only — members can't put this tag on a topic"><Lock className="h-2.5 w-2.5" aria-hidden /> staff</span> : null}
+        </span>
+        <button
+          type="button" disabled={busy} onClick={() => void run(async () => { await updateForumPrefix(detail.id, p.id, { staffOnly: !p.staffOnly }); onSaved(); })}
+          className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${p.staffOnly ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}
+          title={p.staffOnly ? "Staff only — click to let members apply it too" : "Anyone can apply this tag — click to make it staff only"}
+        >Staff only</button>
         {hasCategories ? (
           <button
             type="button" disabled={busy} onClick={() => setOpen((o) => !o)}

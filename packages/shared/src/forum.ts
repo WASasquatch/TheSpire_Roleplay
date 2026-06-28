@@ -464,6 +464,10 @@ export interface ForumPrefixWire {
    *  topic); non-empty = only topics in those categories show it in the
    *  picker. A topic keeps an assigned tag even if later moved out of scope. */
   categoryIds: string[];
+  /** Staff-only: only a mod/owner with manage_prefixes may attach or remove
+   *  this tag — the topic author can't. Members never see it in their picker.
+   *  Use for authoritative tags like "Announcement". Default false. */
+  staffOnly: boolean;
 }
 
 /** A category across a forum's boards, for the prefix category-scope picker

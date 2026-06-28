@@ -177,7 +177,28 @@ export interface SiteSettings {
    * engine can trust the shape unconditionally).
    */
   earningConfig: EarningConfig;
+  /**
+   * Master switch for the multi-server feature (plan §10). Phase 0: sourced
+   * from env SERVERS_ENABLED; Phase 1 swaps to a site_settings column.
+   */
+  serversEnabled: boolean;
   updatedAt: number;
+}
+
+/**
+ * The single chokepoint that decides whether the multi-server feature is
+ * live for this process. Two gates, AND-ed: the soft product switch
+ * (`settings.serversEnabled`, the admin/env opt-in) and the hard operator
+ * kill-switch (`SERVERS_KILL`). The kill-switch wins, an operator who sets
+ * `SERVERS_KILL` in the environment can yank the feature instantly without
+ * touching the DB flag or waiting on a settings write to propagate.
+ *
+ * Phase 0 only introduces this helper; no route or socket consults it yet.
+ * Future server route/socket registration (plan §4/§6, Phase 4) gates on
+ * this and this alone, so the two-flag policy lives in exactly one place.
+ */
+export function areServersEnabled(settings: SiteSettings): boolean {
+  return !process.env.SERVERS_KILL && settings.serversEnabled;
 }
 
 /**
@@ -423,6 +444,10 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     themeDesignMap: parseThemeDesignMap(row.themeDesignMap),
     worldsSeedVersion: row.worldsSeedVersion,
     earningConfig: parseEarningConfig(row.earningConfigJson),
+    // TODO(phase1): read this off a real `site_settings.serversEnabled`
+    // column once the migration lands; for now the soft switch is env-driven
+    // so nothing flips on without an operator opt-in.
+    serversEnabled: process.env.SERVERS_ENABLED === "1",
     updatedAt: +row.updatedAt,
   };
 }

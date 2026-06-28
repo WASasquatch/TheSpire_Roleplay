@@ -202,6 +202,13 @@ export const users = sqliteTable(
       .notNull()
       .default(false),
     /**
+     * Default forum (migration 0274). The forum the catalog opens to when
+     * launched without an explicit deep-link; set from the Forums toolbar
+     * star. NULL = no preference (falls back to the system forum). Synced
+     * across devices. A stale id is ignored client-side.
+     */
+    defaultForumId: text("default_forum_id"),
+    /**
      * Scriptorium catalog preferences (migration 0142).
      *
      *   storyShowNsfw , opt-in for R / NC-17 cards in the catalog.

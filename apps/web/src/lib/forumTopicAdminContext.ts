@@ -1,18 +1,24 @@
 import { createContext } from "react";
 
 /**
- * Lets a forum TOPIC card (deep in MessageList) offer Move-to-board and
- * Merge actions without prop-drilling. The Forums Catalog provides the
- * handlers (it knows the forum's boards + can open the picker modal). A
- * null value means the viewer can't move topics here, so the buttons hide
- * — gating lives entirely in whether the provider passes a value, which the
- * server re-checks on the actual move/merge call.
+ * Lets a forum TOPIC card (deep in MessageList) open the unified "Move topic"
+ * modal — recategorize within the board, move to another board, or merge into
+ * another topic — without prop-drilling the forum's board list. The Forums
+ * Catalog provides the boards + a refresh callback, and ONLY when the viewer
+ * holds `move_topics`; a null value hides the Move affordance entirely. The
+ * server re-checks every move/merge/recategorize call regardless.
  */
+export interface ForumTopicAdminBoard {
+  roomId: string;
+  name: string;
+  topicCount: number;
+}
+
 export interface ForumTopicAdmin {
-  /** Open the board picker to move this topic to another board. */
-  onMove: (topicId: string, currentBoardId: string, title: string) => void;
-  /** Open the topic picker to merge this topic into another. */
-  onMerge: (topicId: string, title: string) => void;
+  /** Boards in this forum, for the move-to-board + merge pickers. */
+  boards: ForumTopicAdminBoard[];
+  /** Refresh the catalog after a successful move / merge / recategorize. */
+  onChanged: () => void;
 }
 
 export const ForumTopicAdminContext = createContext<ForumTopicAdmin | null>(null);

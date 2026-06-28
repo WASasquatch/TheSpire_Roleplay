@@ -58,7 +58,6 @@ import type {
   ForumNotificationWire,
   ForumReportWire,
   ForumSummary,
-  ForumTopicCard,
   ForumUserSearchHit,
   NpcStat,
   RoomOccupant,
@@ -69,7 +68,6 @@ import {
   applyForumMembership,
   archiveBoard,
   banFromForum,
-  fetchBoardTopics,
   checkForumSlug,
   createBoard,
   createRoomCategory,
@@ -97,13 +95,12 @@ import {
   leaveForum,
   liftForumBan,
   markForumVisited,
-  mergeTopicInto,
-  moveTopicToBoard,
   fetchMyNpcs,
   createNpc,
   updateNpc,
   deleteNpc,
   setTopicPrefix,
+  setDefaultForum,
   createForumPrefix,
   updateForumPrefix,
   deleteForumPrefix,
@@ -202,6 +199,12 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
   // prop, retargeted by notification clicks.
   const [navTopic, setNavTopic] = useState<{ boardId: string; topicId: string; postId?: string } | null>(initialTopic ?? null);
   const [notifOpen, setNotifOpen] = useState(false);
+  // Mobile: the forum list lives in a slide-out drawer (the rail is desktop-
+  // only) toggled from the toolbar. Closed by default, like the chat tools.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // The viewer's default forum (account-wide, synced via /me/profile). Seeds
+  // the landing selection and is toggled from the toolbar star.
+  const defaultForumId = useChat((s) => s.defaultForumId);
   // The topic currently open in the board view — mirrored into the URL.
   const [urlTopicId, setUrlTopicId] = useState<string | null>(null);
   const forumNotifUnread = useChat((s) => s.forumNotifUnread);
@@ -212,6 +215,18 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
   useEffect(() => {
     if (initialCreate && canApply) setCreateOpen(true);
   }, [initialCreate, canApply]);
+
+  // Star the currently-viewed forum as your default (or unstar it). Optimistic
+  // store update + a synced /me/profile write; revert if the save fails.
+  const currentForumId = detail?.id ?? selected;
+  const isDefaultForum = !!currentForumId && defaultForumId === currentForumId;
+  function toggleDefaultForum() {
+    if (!currentForumId) return;
+    const prev = defaultForumId;
+    const next = isDefaultForum ? null : currentForumId;
+    useChat.getState().setDefaultForumId(next);
+    void setDefaultForum(next).catch(() => useChat.getState().setDefaultForumId(prev));
+  }
 
   /** Notification click: land on its topic (switching forums if needed). */
   function openNotification(n: ForumNotificationWire) {
@@ -237,14 +252,16 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
       .then((f) => {
         if (!alive) return;
         setList(f);
-        // Default selection: explicit initialKey, else the system forum,
-        // else the first row. Stored as the forum ID so isReady compares
-        // one canonical key regardless of whether a slug was passed.
+        // Default selection: explicit initialKey, else the viewer's chosen
+        // default forum, else the system forum, else the first row. Stored as
+        // the forum ID so isReady compares one canonical key regardless of
+        // whether a slug was passed.
         if (!selected) {
           const init = initialKey
             ? f.find((x) => x.slug === initialKey || x.id === initialKey)
             : undefined;
-          const target = init ?? f.find((x) => x.isSystem) ?? f[0];
+          const fav = defaultForumId ? f.find((x) => x.id === defaultForumId) : undefined;
+          const target = init ?? fav ?? f.find((x) => x.isSystem) ?? f[0];
           if (target) setSelected(target.id);
         }
       })
@@ -252,6 +269,14 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Esc closes the mobile forum drawer (mirrors the chat tools drawer).
+  useEffect(() => {
+    if (!drawerOpen) return;
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setDrawerOpen(false); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
 
   // detailTick lets the owner console force a refetch after a save
   // without re-running the selection logic.
@@ -392,6 +417,30 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                   )}
                 </nav>
                 <div className="flex shrink-0 items-center gap-1.5">
+                  {/* Mobile: open the forum-list drawer (the rail is hidden
+                      under lg). Desktop keeps the always-visible rail. */}
+                  <button
+                    type="button"
+                    onClick={() => setDrawerOpen(true)}
+                    title="Browse forums"
+                    aria-label="Browse forums"
+                    className="rounded border border-keep-rule bg-keep-bg/70 p-1.5 text-keep-muted hover:border-keep-action hover:text-keep-action lg:hidden"
+                  >
+                    <MessagesSquare className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                  {/* Set / unset this forum as your default landing spot. */}
+                  {view.kind === "forum" && detail ? (
+                    <button
+                      type="button"
+                      onClick={toggleDefaultForum}
+                      title={isDefaultForum ? "Your default forum — opens here. Click to unset." : "Set as your default forum (opens here next time)"}
+                      aria-label={isDefaultForum ? "Unset default forum" : "Set as default forum"}
+                      aria-pressed={isDefaultForum}
+                      className={`rounded border p-1.5 ${isDefaultForum ? "border-keep-action/60 bg-keep-action/10 text-keep-action" : "border-keep-rule bg-keep-bg/70 text-keep-muted hover:border-keep-action hover:text-keep-action"}`}
+                    >
+                      <Star className="h-4 w-4" aria-hidden="true" fill={isDefaultForum ? "currentColor" : "none"} />
+                    </button>
+                  ) : null}
                   {view.kind === "forum" && detail && (detail.viewer?.canManage || detail.viewer?.role === "mod") ? (
                     <button
                       type="button"
@@ -459,45 +508,62 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
             )}
           </div>
 
-          {/* Forums rail — right on desktop (mirrors the userlist), a
-              horizontal strip on mobile. */}
-          <aside className="order-1 shrink-0 border-b border-keep-rule bg-keep-banner/20 lg:order-2 lg:flex lg:w-64 lg:flex-col lg:border-b-0 lg:border-l">
-            <div className="hidden items-center justify-between px-3 py-1.5 lg:flex">
+          {/* Forums rail — desktop only (right side, mirrors the chat
+              userlist). On mobile it lives in the slide-out drawer below. */}
+          <aside className="hidden shrink-0 lg:order-2 lg:flex lg:min-h-0 lg:w-64 lg:flex-col lg:border-l lg:border-keep-rule lg:bg-keep-banner/20">
+            <div className="flex items-center justify-between px-3 py-1.5">
               <span className="text-xs uppercase tracking-widest text-keep-muted">
                 Forums <span className="text-keep-rule">({list?.length ?? "…"})</span>
               </span>
             </div>
-            {canApply ? (
-              <div className="px-2 pt-2 lg:pt-0">
-                <button
-                  type="button"
-                  onClick={() => setCreateOpen(true)}
-                  title="Apply to create your own forum - reviewed by the site's moderators"
-                  className="flex w-full items-center justify-center gap-1.5 rounded border border-keep-action/60 bg-keep-action/10 px-2 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action transition-colors hover:bg-keep-action/20"
-                >
-                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                  Create your Forum
-                </button>
-              </div>
-            ) : null}
-            {listErr ? (
-              <p className="px-3 py-2 text-xs text-keep-accent">{listErr}</p>
-            ) : !list ? (
-              <p className="px-3 py-2 text-xs italic text-keep-muted">Loading…</p>
-            ) : (
-              <ul className="flex gap-1 overflow-x-auto px-2 py-2 lg:block lg:max-h-full lg:space-y-1 lg:overflow-y-auto lg:px-2">
-                {list.map((f) => (
-                  <ForumRailRow
-                    key={f.id}
-                    forum={f}
-                    active={detail?.id === f.id || selected === f.id}
-                    onClick={() => navigateToForum(f.id)}
-                  />
-                ))}
-              </ul>
-            )}
+            <ForumRailList
+              list={list}
+              listErr={listErr}
+              activeId={detail?.id ?? selected}
+              defaultForumId={defaultForumId}
+              canApply={canApply}
+              onCreate={() => setCreateOpen(true)}
+              onSelect={(id) => navigateToForum(id)}
+            />
           </aside>
         </div>
+
+        {/* Mobile forum-list drawer — slides in from the right (mirrors the
+            chat userlist); hidden on lg where the rail is always present. */}
+        {drawerOpen ? (
+          <div className="absolute inset-0 z-40 flex lg:hidden">
+            <button
+              type="button"
+              aria-label="Close forum list"
+              onClick={() => setDrawerOpen(false)}
+              className="absolute inset-0 bg-black/40"
+            />
+            <aside className="relative ml-auto flex h-full w-72 max-w-[85%] flex-col border-l border-keep-rule bg-keep-bg shadow-2xl">
+              <div className="flex items-center justify-between border-b border-keep-rule bg-keep-banner/30 px-3 py-2">
+                <span className="text-xs uppercase tracking-widest text-keep-muted">
+                  Forums <span className="text-keep-rule">({list?.length ?? "…"})</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDrawerOpen(false)}
+                  aria-label="Close forum list"
+                  className="rounded border border-keep-rule bg-keep-bg/70 p-1 text-keep-muted hover:border-keep-action hover:text-keep-action"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              <ForumRailList
+                list={list}
+                listErr={listErr}
+                activeId={detail?.id ?? selected}
+                defaultForumId={defaultForumId}
+                canApply={canApply}
+                onCreate={() => { setCreateOpen(true); setDrawerOpen(false); }}
+                onSelect={(id) => { navigateToForum(id); setDrawerOpen(false); }}
+              />
+            </aside>
+          </div>
+        ) : null}
       </div>
       {createOpen ? <CreateForumModal onClose={() => setCreateOpen(false)} /> : null}
     </Modal>
@@ -672,9 +738,91 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function ForumRailRow({ forum, active, onClick }: {
+/** The forum rail's body: a Create button, then your joined/owned forums (+
+ *  the system forum) up top, then everything else folded under a collapsible
+ *  "Explore" section. Shared by the desktop rail and the mobile drawer so both
+ *  read identically; the list always scrolls vertically. */
+function ForumRailList({ list, listErr, activeId, defaultForumId, canApply, onCreate, onSelect }: {
+  list: ForumSummary[] | null;
+  listErr: string | null;
+  activeId: string | null;
+  defaultForumId: string | null;
+  canApply: boolean;
+  onCreate: () => void;
+  onSelect: (id: string) => void;
+}) {
+  // null = follow the default: Explore is collapsed once you have forums of
+  // your own, and auto-open when "mine" is empty so a newcomer sees something.
+  const [exploreOpen, setExploreOpen] = useState<boolean | null>(null);
+  const mine = list ? list.filter((f) => f.viewerRole != null || f.isSystem) : [];
+  const explore = list ? list.filter((f) => f.viewerRole == null && !f.isSystem) : [];
+  const exploreShown = exploreOpen ?? mine.length === 0;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {canApply ? (
+        <div className="shrink-0 px-2 pt-2">
+          <button
+            type="button"
+            onClick={onCreate}
+            title="Apply to create your own forum - reviewed by the site's moderators"
+            className="flex w-full items-center justify-center gap-1.5 rounded border border-keep-action/60 bg-keep-action/10 px-2 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action transition-colors hover:bg-keep-action/20"
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            Create your Forum
+          </button>
+        </div>
+      ) : null}
+      {listErr ? (
+        <p className="px-3 py-2 text-xs text-keep-accent">{listErr}</p>
+      ) : !list ? (
+        <p className="px-3 py-2 text-xs italic text-keep-muted">Loading…</p>
+      ) : (
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-2">
+          {mine.length > 0 ? (
+            <ul className="space-y-1">
+              {mine.map((f) => (
+                <ForumRailRow key={f.id} forum={f} active={activeId === f.id} isDefault={defaultForumId === f.id} onClick={() => onSelect(f.id)} />
+              ))}
+            </ul>
+          ) : null}
+          {explore.length > 0 ? (
+            <div>
+              <button
+                type="button"
+                onClick={() => setExploreOpen(!exploreShown)}
+                aria-expanded={exploreShown}
+                className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-muted hover:text-keep-text"
+                title="Forums you haven't joined"
+              >
+                <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span className="flex-1 text-left">Explore</span>
+                <span className="text-keep-rule">{explore.length}</span>
+                <span aria-hidden>{exploreShown ? "▾" : "▸"}</span>
+              </button>
+              {exploreShown ? (
+                <ul className="mt-1 space-y-1">
+                  {explore.map((f) => (
+                    <ForumRailRow key={f.id} forum={f} active={activeId === f.id} isDefault={defaultForumId === f.id} onClick={() => onSelect(f.id)} />
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+          {mine.length === 0 && explore.length === 0 ? (
+            <p className="px-1 py-2 text-xs italic text-keep-muted">No forums yet.</p>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ForumRailRow({ forum, active, isDefault = false, onClick }: {
   forum: ForumSummary;
   active: boolean;
+  /** This is the viewer's default forum — gets a small filled-star marker. */
+  isDefault?: boolean;
   onClick: () => void;
 }) {
   const pulse = relTime(forum.lastActivityAt);
@@ -711,6 +859,9 @@ function ForumRailRow({ forum, active, onClick }: {
                 title="New activity since your last visit"
                 aria-label="New activity"
               />
+            ) : null}
+            {isDefault ? (
+              <Star className="h-3 w-3 shrink-0 text-keep-action" fill="currentColor" aria-label="Your default forum" />
             ) : null}
           </span>
           <span className="block truncate text-[10px] text-keep-muted">
@@ -988,15 +1139,15 @@ function ForumBoards({ detail, asCharacterId, chrome, initialTopic, onForumChang
   // the viewer can move topics; the picker modal state lives here (where the
   // board list is known). The server re-checks every move/merge.
   const canMoveTopics = !!detail.viewer && (detail.viewer.canManage || detail.viewer.permissions.includes("move_topics"));
-  const [topicAdmin, setTopicAdmin] = useState<
-    { mode: "move" | "merge"; topicId: string; currentBoardId: string; title: string } | null
-  >(null);
+  // The topic toolbar's Move button opens a unified picker (recategorize /
+  // move-to-board / merge) that lives down in MessageList; here we just hand it
+  // the forum's boards + a refresh callback, gated on move_topics.
   const topicAdminValue = useMemo(
     () => canMoveTopics ? {
-      onMove: (topicId: string, currentBoardId: string, title: string) => setTopicAdmin({ mode: "move", topicId, currentBoardId, title }),
-      onMerge: (topicId: string, title: string) => setTopicAdmin({ mode: "merge", topicId, currentBoardId: boardId, title }),
+      boards: detail.boards.map((b) => ({ roomId: b.roomId, name: b.name, topicCount: b.topicCount })),
+      onChanged: () => useChat.getState().bumpForumActionTick(),
     } : null,
-    [canMoveTopics, boardId],
+    [canMoveTopics, detail.boards],
   );
 
   // Topic prefix catalog + assign picker. The context (chip lookup) is shown
@@ -1079,14 +1230,6 @@ function ForumBoards({ detail, asCharacterId, chrome, initialTopic, onForumChang
           {...(onActiveTopicChange ? { onActiveTopicChange } : {})}
         />
         </ForumReportContext.Provider>
-        {topicAdmin ? (
-          <TopicAdminModal
-            detail={detail}
-            state={topicAdmin}
-            onClose={() => setTopicAdmin(null)}
-            onDone={() => { setTopicAdmin(null); useChat.getState().bumpForumActionTick(); }}
-          />
-        ) : null}
         </ForumTopicAdminContext.Provider>
         {prefixAssign ? (
           <PrefixAssignModal
@@ -1190,110 +1333,6 @@ function PrefixAssignModal({ detail, topicId, current, topicCategoryId, onForumC
               className="rounded border border-keep-action bg-keep-action/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50">Add & apply</button>
           </div>
         ) : null}
-
-        {error ? <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">{error}</div> : null}
-        <div className="mt-4 flex justify-end">
-          <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">Close</button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-/**
- * Move-to-board / Merge picker (Phase 4b). Move: choose a destination board
- * (the topic + every reply re-home there). Merge: choose a board, then a
- * topic on it to fold THIS topic into (its posts become replies; nothing is
- * deleted). The server enforces same-forum + move_topics.
- */
-function TopicAdminModal({ detail, state, onClose, onDone }: {
-  detail: ForumDetail;
-  state: { mode: "move" | "merge"; topicId: string; currentBoardId: string; title: string };
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [board, setBoard] = useState<string>(state.currentBoardId);
-  const [topics, setTopics] = useState<ForumTopicCard[] | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Merge mode loads the chosen board's topics to pick a destination.
-  useEffect(() => {
-    if (state.mode !== "merge") return;
-    let alive = true;
-    setTopics(null);
-    fetchBoardTopics(board).then((p) => { if (alive) setTopics(p.topics); }).catch(() => { if (alive) setTopics([]); });
-    return () => { alive = false; };
-  }, [state.mode, board]);
-
-  function moveTo(boardRoomId: string) {
-    setBusy(true); setError(null);
-    moveTopicToBoard(state.topicId, boardRoomId, null)
-      .then(onDone)
-      .catch((e) => { setError(e instanceof Error ? e.message : "Move failed."); setBusy(false); });
-  }
-  function mergeInto(targetId: string, targetTitle: string) {
-    if (!window.confirm(`Merge "${state.title}" into "${targetTitle}"? Its posts become replies there. This can't be auto-undone.`)) return;
-    setBusy(true); setError(null);
-    mergeTopicInto(state.topicId, targetId)
-      .then(onDone)
-      .catch((e) => { setError(e instanceof Error ? e.message : "Merge failed."); setBusy(false); });
-  }
-
-  const otherBoards = detail.boards.filter((b) => b.roomId !== state.currentBoardId);
-
-  return (
-    <Modal onClose={onClose} zIndex={60}>
-      <div onClick={(e) => e.stopPropagation()} className="keep-frame w-full rounded bg-keep-bg p-5 text-keep-text md:w-[min(480px,86vw)]">
-        <h2 className="font-action text-lg">{state.mode === "move" ? "Move topic to a board" : "Merge topic"}</h2>
-        <p className="mt-1 truncate text-sm text-keep-muted">"{state.title}"</p>
-
-        {state.mode === "move" ? (
-          otherBoards.length === 0 ? (
-            <p className="mt-3 text-xs italic text-keep-muted">This forum has only one board — nowhere to move it.</p>
-          ) : (
-            <ul className="mt-3 space-y-1">
-              {otherBoards.map((b) => (
-                <li key={b.roomId}>
-                  <button
-                    type="button" disabled={busy}
-                    onClick={() => moveTo(b.roomId)}
-                    className="flex w-full items-center justify-between rounded border border-keep-rule px-2 py-1.5 text-left text-sm hover:border-keep-action hover:bg-keep-banner/40 disabled:opacity-50"
-                  >
-                    <span className="truncate">{b.name}</span>
-                    <span className="text-[10px] text-keep-muted">{b.topicCount} topics</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )
-        ) : (
-          <div className="mt-3 space-y-2">
-            {detail.boards.length > 1 ? (
-              <select value={board} onChange={(e) => setBoard(e.target.value)} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm">
-                {detail.boards.map((b) => <option key={b.roomId} value={b.roomId}>{b.name}</option>)}
-              </select>
-            ) : null}
-            {!topics ? (
-              <p className="text-xs italic text-keep-muted">Loading topics…</p>
-            ) : (
-              <ul className="max-h-72 space-y-1 overflow-y-auto">
-                {topics.filter((t) => t.id !== state.topicId).map((t) => (
-                  <li key={t.id}>
-                    <button
-                      type="button" disabled={busy}
-                      onClick={() => mergeInto(t.id, t.title)}
-                      className="w-full truncate rounded border border-keep-rule px-2 py-1.5 text-left text-sm hover:border-keep-action hover:bg-keep-banner/40 disabled:opacity-50"
-                    >{t.title}</button>
-                  </li>
-                ))}
-                {topics.filter((t) => t.id !== state.topicId).length === 0 ? (
-                  <li className="text-xs italic text-keep-muted">No other topics on this board.</li>
-                ) : null}
-              </ul>
-            )}
-          </div>
-        )}
 
         {error ? <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">{error}</div> : null}
         <div className="mt-4 flex justify-end">

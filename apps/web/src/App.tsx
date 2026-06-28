@@ -1677,6 +1677,7 @@ function Chat() {
           disableNameStyles?: boolean;
           disableBorderStyles?: boolean;
           disableInlineAvatars?: boolean;
+          defaultForumId?: string | null;
           publicProfileBgUrl?: string | null;
           publicProfileBgMode?: "cover" | "contain" | "tile" | "stretch";
           welcome?: { html: string; hash: string } | null;
@@ -1775,6 +1776,9 @@ function Chat() {
             disableBorderStyles: u.disableBorderStyles ?? false,
             disableInlineAvatars: u.disableInlineAvatars ?? false,
           });
+          // Default forum (the Forums catalog lands here when opened without
+          // a deep-link). Synced across devices via /me/profile.
+          useChat.getState().setDefaultForumId(u.defaultForumId ?? null);
           // Admin-configured input caps. Composers (chat, DM, forum
           // topic title, bio editor) read these from the store so a
           // tuning change picks up on the next /me/profile load

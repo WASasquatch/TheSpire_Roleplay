@@ -1,11 +1,12 @@
 import { Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { BarChart3, Bookmark, BookmarkCheck, Flag, FolderInput, Lock, Pencil, Reply, SmilePlus, Trash2 } from "lucide-react";
-import { setTopicCategory } from "../lib/forums.js";
+import { setTopicCategory, moveTopicToBoard, mergeTopicInto, fetchBoardTopics, fetchRoomCategories } from "../lib/forums.js";
 import { ForumReportContext } from "../lib/forumReportContext.js";
-import { ForumTopicAdminContext } from "../lib/forumTopicAdminContext.js";
+import { ForumTopicAdminContext, type ForumTopicAdminBoard } from "../lib/forumTopicAdminContext.js";
 import { ForumPrefixContext } from "../lib/forumPrefixContext.js";
+import { Modal } from "./Modal.js";
 import { PollCard } from "./PollCard.js";
-import { customCmdCssToStyle, isAdminRole, resolveMessageColor, type AvatarCrop, type ChatMessage, type MentionRef, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
+import { customCmdCssToStyle, isAdminRole, resolveMessageColor, type AvatarCrop, type ChatMessage, type ForumTopicCard, type MentionRef, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
 import { BorderedAvatar, type BorderedAvatarSize } from "./BorderedAvatar.js";
 import { RankSigil } from "./RankSigil.js";
@@ -1351,6 +1352,7 @@ function ForumView({
   replies: ChatMessage[];
   /** Paginated topic buckets keyed by category id (or `"_uncat"`). */
   buckets: Record<string, ForumBucket>;
+  /** Sibling categories in this board, for the per-category headings + counts. */
   categories: ThreadCategory[];
   roomId: string | null;
   fontStep: 0 | 1 | 2 | 3;
@@ -1568,7 +1570,6 @@ function ForumView({
               onMentionClick={onMentionClick}
               onWorldClick={onWorldClick}
               onTimeClick={onTimeClick}
-              categories={categories}
             />
           ))
         )}
@@ -1878,38 +1879,144 @@ function ForumView({
  * whole with no pager.
  */
 /**
- * Mod/admin "Move topic" picker shown inside an expanded topic card.
- * Recategorizing rides the HTTP `PATCH /messages/:id/category` route;
- * because Forums Catalog viewers aren't joined to the board's socket
- * room they won't receive the `message:update` echo, so we re-bucket
- * optimistically via `updateForumTopic` on success (the store now moves
- * a topic between category buckets when its `threadCategoryId` changes).
+ * Unified "Move topic" modal, opened from the topic toolbar's Move button
+ * (mods holding move_topics). One place for the three placement actions:
+ * recategorize within the current board, move to another board, or merge into
+ * another topic. The board list arrives via ForumTopicAdminContext; the current
+ * board's categories are fetched on open (so the modal is self-contained and
+ * needs no category prop-drilling). The server re-checks every action. Forums
+ * Catalog viewers aren't on the board socket, so on success we just ask the
+ * catalog to refresh (`onChanged`) rather than relying on a `message:update`.
  */
-/** Move-to-board + Merge buttons for a forum topic. Renders only when the
- *  Forums Catalog provided the admin context (i.e. the viewer holds
- *  move_topics); the server re-checks. Both open a picker the provider owns. */
-function TopicAdminButtons({ topic }: { topic: ChatMessage }) {
-  const admin = useContext(ForumTopicAdminContext);
-  if (!admin || topic.replyToId) return null;
+function TopicManageModal({ topic, boards, onClose, onChanged }: {
+  topic: ChatMessage;
+  boards: ForumTopicAdminBoard[];
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [cats, setCats] = useState<ThreadCategory[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  // Merge is lazy: a board's topic list only loads once the section is opened.
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeBoard, setMergeBoard] = useState<string>(topic.roomId);
+  const [mergeTopics, setMergeTopics] = useState<ForumTopicCard[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetchRoomCategories(topic.roomId).then((c) => { if (alive) setCats(c); }).catch(() => { if (alive) setCats([]); });
+    return () => { alive = false; };
+  }, [topic.roomId]);
+
+  useEffect(() => {
+    if (!mergeOpen) return;
+    let alive = true;
+    setMergeTopics(null);
+    fetchBoardTopics(mergeBoard).then((p) => { if (alive) setMergeTopics(p.topics); }).catch(() => { if (alive) setMergeTopics([]); });
+    return () => { alive = false; };
+  }, [mergeOpen, mergeBoard]);
+
+  const otherBoards = boards.filter((b) => b.roomId !== topic.roomId);
+  const currentCat = topic.threadCategoryId ?? "";
+
+  function guard(p: Promise<void>) {
+    setBusy(true); setErr(null);
+    p.then(() => { onChanged(); onClose(); })
+     .catch((e) => { setErr(e instanceof Error ? e.message : "Action failed."); setBusy(false); });
+  }
+  function recategorize(next: string) {
+    const categoryId = next === "" ? null : next;
+    if ((topic.threadCategoryId ?? null) === categoryId) return;
+    guard(setTopicCategory(topic.id, categoryId));
+  }
+  function toBoard(roomId: string) { guard(moveTopicToBoard(topic.id, roomId, null)); }
+  function doMerge(targetId: string, targetTitle: string) {
+    if (!window.confirm(`Merge "${topic.title ?? "this topic"}" into "${targetTitle}"? Its posts become replies there. This can't be auto-undone.`)) return;
+    guard(mergeTopicInto(topic.id, targetId));
+  }
+
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => admin.onMove(topic.id, topic.roomId, topic.title ?? "this topic")}
-        className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-        title="Move this topic to another board"
-      >
-        <FolderInput className="mr-1 inline h-3 w-3" aria-hidden="true" />Board
-      </button>
-      <button
-        type="button"
-        onClick={() => admin.onMerge(topic.id, topic.title ?? "this topic")}
-        className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-        title="Merge this topic into another"
-      >
-        Merge
-      </button>
-    </>
+    <Modal onClose={onClose} zIndex={60}>
+      <div onClick={(e) => e.stopPropagation()} className="keep-frame w-full rounded bg-keep-bg p-5 text-keep-text md:w-[min(480px,86vw)]">
+        <h2 className="font-action text-lg">Move topic</h2>
+        <p className="mt-1 truncate text-sm text-keep-muted">"{topic.title ?? "this topic"}"</p>
+
+        {/* Recategorize within the current board (only when it has categories). */}
+        {cats && cats.length > 0 ? (
+          <div className="mt-3">
+            <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Category</div>
+            <select
+              value={currentCat}
+              disabled={busy}
+              onChange={(e) => recategorize(e.target.value)}
+              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm disabled:opacity-50"
+            >
+              <option value="">Uncategorized</option>
+              {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+        ) : null}
+
+        {/* Move the whole topic to a different board. */}
+        {otherBoards.length > 0 ? (
+          <div className="mt-3">
+            <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Move to another board</div>
+            <ul className="space-y-1">
+              {otherBoards.map((b) => (
+                <li key={b.roomId}>
+                  <button
+                    type="button" disabled={busy} onClick={() => toBoard(b.roomId)}
+                    className="flex w-full items-center justify-between rounded border border-keep-rule px-2 py-1.5 text-left text-sm hover:border-keep-action hover:bg-keep-banner/40 disabled:opacity-50"
+                  >
+                    <span className="truncate">{b.name}</span>
+                    <span className="ml-2 shrink-0 text-[10px] text-keep-muted">{b.topicCount} topics</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {/* Merge this topic into another (posts become replies). Lazy-loaded. */}
+        <div className="mt-3">
+          <button
+            type="button" disabled={busy} onClick={() => setMergeOpen((o) => !o)}
+            className="text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
+          >{mergeOpen ? "▾" : "▸"} Merge into another topic</button>
+          {mergeOpen ? (
+            <div className="mt-2 space-y-2">
+              {boards.length > 1 ? (
+                <select value={mergeBoard} onChange={(e) => setMergeBoard(e.target.value)} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm">
+                  {boards.map((b) => <option key={b.roomId} value={b.roomId}>{b.name}</option>)}
+                </select>
+              ) : null}
+              {!mergeTopics ? (
+                <p className="text-xs italic text-keep-muted">Loading topics…</p>
+              ) : (
+                <ul className="max-h-60 space-y-1 overflow-y-auto">
+                  {mergeTopics.filter((t) => t.id !== topic.id).map((t) => (
+                    <li key={t.id}>
+                      <button
+                        type="button" disabled={busy} onClick={() => doMerge(t.id, t.title)}
+                        className="w-full truncate rounded border border-keep-rule px-2 py-1.5 text-left text-sm hover:border-keep-action hover:bg-keep-banner/40 disabled:opacity-50"
+                      >{t.title}</button>
+                    </li>
+                  ))}
+                  {mergeTopics.filter((t) => t.id !== topic.id).length === 0 ? (
+                    <li className="text-xs italic text-keep-muted">No other topics on this board.</li>
+                  ) : null}
+                </ul>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        {err ? <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">{err}</div> : null}
+        <div className="mt-4 flex justify-end">
+          <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">Close</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -1959,51 +2066,6 @@ function TopicPrefix({ topic, selfUserId }: { topic: ChatMessage; selfUserId: st
   );
 }
 
-function TopicMoveControl({ topic, categories }: { topic: ChatMessage; categories: ThreadCategory[] }) {
-  const updateForumTopic = useChat((s) => s.updateForumTopic);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const selectId = `topic-move-${topic.id}`;
-  const current = topic.threadCategoryId ?? "";
-
-  async function move(next: string) {
-    const categoryId = next === "" ? null : next;
-    if ((topic.threadCategoryId ?? null) === categoryId) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await setTopicCategory(topic.id, categoryId);
-      updateForumTopic({ ...topic, threadCategoryId: categoryId });
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Move failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-keep-rule/40 pt-2 text-[11px] text-keep-muted">
-      <FolderInput size={12} aria-hidden className="shrink-0" />
-      <label htmlFor={selectId}>Move to</label>
-      <select
-        id={selectId}
-        value={current}
-        disabled={busy}
-        onChange={(e) => void move(e.target.value)}
-        className="rounded border border-keep-rule/60 bg-keep-bg/60 px-1.5 py-0.5 text-[11px] text-keep-text disabled:opacity-50"
-      >
-        <option value="">Uncategorized</option>
-        {categories.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
-      {err ? <span className="text-rose-300">{err}</span> : null}
-    </div>
-  );
-}
-
 function TopicCard({
   topic,
   replies,
@@ -2033,7 +2095,6 @@ function TopicCard({
   onWorldClick,
   onTimeClick,
   canAdminEdit,
-  categories,
 }: {
   topic: ChatMessage;
   replies: ChatMessage[];
@@ -2084,8 +2145,6 @@ function TopicCard({
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
-  /** Sibling categories in this board, for the mod "Move topic" picker. */
-  categories: ThreadCategory[];
 }) {
   // Reply pagination (classic forum navigation): short chains render
   // whole; past REPLIES_PER_PAGE the chain pages, defaulting to the LAST
@@ -2368,12 +2427,6 @@ function TopicCard({
             readOnly={readOnly}
             {...(postPermalink ? { postPermalink } : {})}
           />
-          {canModerate && !readOnly ? (
-            <div className="mt-1 flex flex-wrap items-center gap-1">
-              <TopicMoveControl topic={topic} categories={categories} />
-              {!readOnly ? <TopicAdminButtons topic={topic} /> : null}
-            </div>
-          ) : null}
           {topic.kind === "poll" && topic.poll ? (
             <div className="mt-2 max-w-lg">
               <PollCard
@@ -3108,6 +3161,12 @@ function PostToolbar({
   // forum post that isn't the viewer's own.
   const forumReport = useContext(ForumReportContext);
   const showForumReport = !!forumReport && !isOwn && REPORTABLE_KINDS.has(msg.kind);
+  // Move/merge: one toolbar button (topics only) opens the unified picker.
+  // Present only when the Forums Catalog wired the admin context, i.e. the
+  // viewer holds move_topics; the server re-checks every action.
+  const topicAdmin = useContext(ForumTopicAdminContext);
+  const [manageOpen, setManageOpen] = useState(false);
+  const showMove = isTopic && !!topicAdmin;
 
   async function doDelete() {
     // The confirm copy differs slightly for moderators so they know
@@ -3193,6 +3252,7 @@ function PostToolbar({
   if (!showEdit && !showDelete && !showBookmark && !showReport && !showForumReport && !showLock && !showPin && !showQuote && !showReply && !extraActions) return null;
 
   return (
+    <>
     <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-keep-rule/30 pt-1 text-[10px] text-keep-muted">
       {showReply ? (
         <button
@@ -3269,6 +3329,16 @@ function PostToolbar({
           {deleteBusy ? "…" : "Delete"}
         </button>
       ) : null}
+      {showMove ? (
+        <button
+          type="button"
+          onClick={() => setManageOpen(true)}
+          className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 hover:bg-keep-banner hover:text-keep-text"
+          title="Move this topic to another category or board, or merge it into another topic"
+        >
+          <FolderInput className="mr-1 inline h-3 w-3" aria-hidden="true" />Move
+        </button>
+      ) : null}
       {showBookmark ? <InlineBookmark msg={msg} /> : null}
       {permalinkUrl ? <CopyLinkButton url={permalinkUrl} /> : null}
       {/* Forum posts report to the forum's own queue; suppress the site
@@ -3287,6 +3357,15 @@ function PostToolbar({
       {extraActions}
       {actionError ? <span className="normal-case tracking-normal text-keep-accent">{actionError}</span> : null}
     </div>
+    {showMove && manageOpen && topicAdmin ? (
+      <TopicManageModal
+        topic={msg}
+        boards={topicAdmin.boards}
+        onChanged={topicAdmin.onChanged}
+        onClose={() => setManageOpen(false)}
+      />
+    ) : null}
+    </>
   );
 }
 

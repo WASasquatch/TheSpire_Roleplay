@@ -805,6 +805,13 @@ interface ChatState {
   flairPrefs: { disableNameStyles: boolean; disableBorderStyles: boolean; disableInlineAvatars: boolean };
   setFlairPrefs: (p: { disableNameStyles: boolean; disableBorderStyles: boolean; disableInlineAvatars: boolean }) => void;
   /**
+   * The viewer's default forum id (mirrors `users.default_forum_id`). The
+   * Forums catalog opens to it when launched without a deep-link; set from the
+   * Forums toolbar star. Null = no preference. Synced via /me/profile.
+   */
+  defaultForumId: string | null;
+  setDefaultForumId: (id: string | null) => void;
+  /**
    * Counter bumped each time the socket (re)connects. Any open
    * ThreadPane watches this and re-runs its history seed when it
    * changes, that's the catch-up path for `dm:new` events the
@@ -1513,6 +1520,8 @@ export const useChat = create<ChatState>((set) => ({
   setInputPrefs: (p) => set({ inputPrefs: p }),
   flairPrefs: { disableNameStyles: false, disableBorderStyles: false, disableInlineAvatars: false },
   setFlairPrefs: (p) => set({ flairPrefs: p }),
+  defaultForumId: null,
+  setDefaultForumId: (id) => set({ defaultForumId: id }),
   dmReseedTick: 0,
 
   setDmConversations: (list) => set(() => {

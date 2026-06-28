@@ -684,6 +684,19 @@ export async function setTopicLock(messageId: string, locked: boolean): Promise<
   await jsonOrThrow(r);
 }
 
+/** Set (or clear, with null) the viewer's default forum — the one the catalog
+ *  lands on when opened without a deep-link. Account-wide, synced via the
+ *  partial /me/profile update. */
+export async function setDefaultForum(forumId: string | null): Promise<void> {
+  const r = await fetch(`/me/profile`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ defaultForumId: forumId }),
+  });
+  await jsonOrThrow(r);
+}
+
 /** Move a topic into a different category, or to Uncategorized with
  *  `categoryId: null`. Mods/admins only (enforced server-side). */
 export async function setTopicCategory(messageId: string, categoryId: string | null): Promise<void> {

@@ -298,6 +298,12 @@ const masterUpdateBody = z.object({
   disableBorderStyles: z.boolean().optional(),
   disableInlineAvatars: z.boolean().optional(),
   /**
+   * Default forum (migration 0274). The forum the catalog lands on when
+   * opened without a deep-link. Null clears the preference (falls back to the
+   * system forum). Partial update like the rest of this body.
+   */
+  defaultForumId: z.string().min(1).nullable().optional(),
+  /**
    * Scriptorium catalog prefs (Phase 9). `storyShowNsfw` opts the
    * caller into R / NC-17 cards in the in-app catalog (anonymous
    * viewers are still gated server-side regardless). `storyCwBlocklist`
@@ -717,6 +723,8 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       disableNameStyles: u.disableNameStyles,
       disableBorderStyles: u.disableBorderStyles,
       disableInlineAvatars: u.disableInlineAvatars,
+      // Default forum (migration 0274) — the Forums catalog lands here.
+      defaultForumId: u.defaultForumId ?? null,
       // Scriptorium catalog prefs (Phase 9). Editor's Privacy tab
       // reads these so the toggles round-trip cleanly.
       storyShowNsfw: u.storyShowNsfw,
@@ -1103,6 +1111,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         ...(body.disableNameStyles !== undefined ? { disableNameStyles: body.disableNameStyles } : {}),
         ...(body.disableBorderStyles !== undefined ? { disableBorderStyles: body.disableBorderStyles } : {}),
         ...(body.disableInlineAvatars !== undefined ? { disableInlineAvatars: body.disableInlineAvatars } : {}),
+        ...(body.defaultForumId !== undefined ? { defaultForumId: body.defaultForumId } : {}),
         ...(body.storyShowNsfw !== undefined ? { storyShowNsfw: body.storyShowNsfw } : {}),
         ...(body.storyCwBlocklist !== undefined
           ? { storyCwBlocklist: serializeTagList(body.storyCwBlocklist) }

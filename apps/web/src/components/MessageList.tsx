@@ -2213,7 +2213,13 @@ function TopicCard({
           {/* min-w-0 on the inner flex too, without it, the `truncate`
               on the title span doesn't actually shrink, because
               min-width:auto on flex children defeats overflow:hidden. */}
-          <div className="flex min-w-0 items-baseline gap-2">
+          {/* On mobile this wraps: the prefix tag + date sit on their own
+              row ABOVE the title (both already smaller than the title),
+              and the title (basis-full) drops to the next line so it gets
+              the full width instead of being squeezed between tag and date.
+              On >=sm it stays a single nowrap row: prefix · title (flex-1) ·
+              right-aligned date (sm:order-last pushes it back to the end). */}
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 sm:flex-nowrap">
             {/* Unread marker (Forums Catalog): activity since the viewer
                 last opened this topic. Cleared when the topic opens. */}
             {isUnread ? (
@@ -2243,7 +2249,13 @@ function TopicCard({
             ) : null}
             <TopicPrefix topic={topic} selfUserId={selfUserId} />
             <span
-              className="min-w-0 flex-1 truncate font-semibold text-keep-text"
+              className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted tabular-nums sm:order-last"
+              title={fmtFullTimestamp(topic.createdAt)}
+            >
+              {fmtForumTime(topic.createdAt)}
+            </span>
+            <span
+              className="min-w-0 basis-full truncate font-semibold text-keep-text sm:basis-auto sm:flex-1"
               title={headingText}
             >
               {topic.kind === "poll" ? (
@@ -2252,12 +2264,6 @@ function TopicCard({
                 </span>
               ) : null}
               {parseInline(headingText)}
-            </span>
-            <span
-              className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted tabular-nums"
-              title={fmtFullTimestamp(topic.createdAt)}
-            >
-              {fmtForumTime(topic.createdAt)}
             </span>
           </div>
           <div className="flex items-baseline gap-2 text-[11px] text-keep-muted">
@@ -4069,7 +4075,7 @@ function Line({
   // OpenGraph card for the body's first link (absent until the unfurl
   // lands via message:update; gone for everyone once the author ✕'s it).
   const linkPreviewEl = msg.linkPreview && !msg.deletedAt ? (
-    <div className="pl-12 pr-2">
+    <div className="pl-6 pr-2 sm:pl-12">
       <LinkPreviewCard preview={msg.linkPreview} canRemove={isOwn} messageId={msg.id} />
     </div>
   ) : null;
@@ -4081,11 +4087,11 @@ function Line({
   // surrounding prose keeps its normal flow. No-op without a card, a
   // lone posted image stays flush-left as before.
   const mediaAlignClass = msg.linkPreview && !msg.deletedAt
-    ? "[&_.md-inline-media]:ml-12"
+    ? "[&_.md-inline-media]:ml-6 sm:[&_.md-inline-media]:ml-12"
     : "";
 
   const reactionBar = REPLYABLE_KINDS.has(msg.kind) ? (
-    <div className="pl-12">
+    <div className="pl-6 sm:pl-12">
       <ReactionBar
         targetKind="chat_message"
         targetId={msg.id}
@@ -4547,7 +4553,7 @@ function Line({
         onClick={rowFocusProps.onClick}
         className={`group relative my-0.5 border-l-2 border-keep-action/50 pl-4 transition-colors duration-700 ${mediaAlignClass} ${rowFocusProps.className} ${hoverRow} ${whisperRest}`}
       >
-        <div className="pl-12">{quote}</div>
+        <div className="pl-6 sm:pl-12">{quote}</div>
         {lineEl}
         {linkPreviewEl}
         {inlineEditForm}

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
+import { useRulesHashHighlight } from "../lib/rulesHashHighlight.js";
 
 interface RulesPayload {
   rulesHtml: string;
@@ -40,6 +41,9 @@ interface Props {
 export function RulesPage({ onBack }: Props) {
   const [data, setData] = useState<RulesPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const rulesRef = useRef<HTMLDivElement>(null);
+  // Deep-link highlight (e.g. /rules#3.6) once the rules HTML is injected.
+  useRulesHashHighlight(rulesRef, !!data?.rulesHtml.trim());
 
   useEffect(() => {
     let cancelled = false;
@@ -105,6 +109,7 @@ export function RulesPage({ onBack }: Props) {
               ) : null}
               {data.rulesHtml.trim() ? (
                 <div
+                  ref={rulesRef}
                   className={`prose prose-sm max-w-none ${USER_HTML_SCOPE_CLASS}`}
                   dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.rulesHtml) }}
                 />

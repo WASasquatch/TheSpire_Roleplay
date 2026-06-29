@@ -2,13 +2,28 @@ import { and, eq, lt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import { emoticonSheets, forums, messages, rooms, sessions, users, worldPages, worlds } from "./db/schema.js";
+import {
+  emoticonSheets,
+  forums,
+  messages,
+  rooms,
+  serverMembers,
+  serverSettings,
+  servers,
+  sessions,
+  siteSettings,
+  users,
+  worldPages,
+  worlds,
+} from "./db/schema.js";
 import { hashPassword } from "./auth/passwords.js";
+import { ensureDefaultUsergroup } from "./servers/usergroups.js";
 import { ensureSiteSettings, getSettings, setWorldsSeedVersion } from "./settings.js";
 import { recordAudit } from "./audit.js";
 import { sanitizeBio } from "./auth/html.js";
 import { DEFAULT_WORLDS, WORLDS_SEED_VERSION } from "./seed_worlds.js";
 import type { Db } from "./db/index.js";
+import { sqliteHandle } from "./db/index.js";
 import { runBackfillIfNeeded } from "./earning/backfill.js";
 import { backfillRoomSlugs } from "./lib/roomSlug.js";
 import { schedulePresenceSweep } from "./earning/sweeps.js";
@@ -173,6 +188,15 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
   // before any user existed.
   await ensureSystemForum(db);
 
+  // The Spire (system DEFAULT server, Servers Lift Phase 1/2). Always-on +
+  // idempotent (fixed id, can never duplicate). Migration 0279 creates it on
+  // installs that had an admin at migration time; this covers fresh installs
+  // where migrations ran before any user existed (and, as a safe superset,
+  // converges to the same end state as 0279 on a fresh DB — see the function
+  // doc). Runs AFTER ensureSystemForum so a same-boot fresh install already
+  // has the system forum to re-home under the new default server if needed.
+  await ensureSystemServer(db);
+
   // Force-reseed the `{icon}` placeholder on item-message templates
   // when the deploy script (remote-deploy.sh) staged the flag. Always
   // ungated by SKIP_DEFAULT_SEED, that flag governs the room-rename
@@ -185,6 +209,12 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
   // nothing to fill (a single SELECT). Also catches any runtime create
   // path that didn't set a slug, so {room:<slug>} links never miss.
   await backfillRoomSlugs(db);
+
+  // Boot-time server data-integrity asserts (plan.md §9.7). LOG-and-continue
+  // ONLY — never throws — so a violated invariant surfaces loudly in the logs
+  // without bricking startup. Runs LAST so it observes the post-seed end state
+  // (ensureSystemServer + its adoption/backfill above have already settled).
+  assertServerInvariants(db);
 }
 
 /**
@@ -223,6 +253,220 @@ async function ensureSystemForum(db: Db): Promise<void> {
     visibility: "public",
     postingMode: "open",
   });
+}
+
+/**
+ * Ensure "The Spire" — the site-owned system DEFAULT server that every signed-in
+ * user is implicitly a member of (Servers Lift Phase 1/2, plan.md §6.5). A clone
+ * of {@link ensureSystemForum}: fixed id `server_spire_system`, `is_system` +
+ * `is_default`, public, open-join, owner re-resolved to the oldest real admin.
+ *
+ * Owner = the oldest masteradmin, falling back to the oldest admin (excluding the
+ * `system` sentinel). When NO admin exists yet (fresh install before the first
+ * registration) we skip and log — a later boot re-resolves it once an admin is
+ * promoted, exactly as ensureSystemForum does. Nothing crashes without the
+ * server: serverAuthority treats a missing/NULL server_id as the default at the
+ * application layer, so single-tenant behavior is unchanged until it lands.
+ *
+ * SAFE SUPERSET OF MIGRATION 0279. On an install that already had an admin at
+ * migration time, 0279 inserts the row (and seeds settings / usergroup / owner
+ * member row / adopts orphan rooms+forums); this function then no-ops on the
+ * fixed id. On a FRESH install (migrations ran before any user existed, so 0279
+ * inserted ZERO rows), 0279 left nothing behind — so when WE create the row here
+ * we must converge to the same end state 0279 would have produced:
+ *   (1) seed server_settings from the singleton (the re-homed behavior slice);
+ *   (2) ensure the default usergroup (full FEATURE baseline);
+ *   (3) write the owner's explicit server_members row (role 'owner');
+ *   (4) adopt any rooms / forums still server_id NULL into the default server.
+ * All four steps are insert-if-missing / NULL-only updates, so re-running is a
+ * no-op and the 0279-already-ran path is never disturbed.
+ *
+ * NOT keyed on SKIP_DEFAULT_SEED: that flag exists for the renamed-default-rooms
+ * case; a fixed-id insert can never duplicate.
+ */
+async function ensureSystemServer(db: Db): Promise<void> {
+  const existing = (await db.select({ id: servers.id }).from(servers)
+    .where(eq(servers.id, "server_spire_system")).limit(1))[0];
+  if (existing) return; // 0279 (or a prior boot) already created it.
+
+  // Oldest masteradmin, else oldest admin. Exclude the `system` sentinel
+  // explicitly: it carries role 'admin' but must never own a server.
+  const owner = (await db.select({ id: users.id }).from(users)
+    .where(sql`${users.role} IN ('masteradmin', 'admin') AND ${users.username} != 'system' AND ${users.id} != 'system'`)
+    .orderBy(sql`CASE ${users.role} WHEN 'masteradmin' THEN 0 ELSE 1 END`, users.createdAt)
+    .limit(1))[0];
+  if (!owner) {
+    // Fresh install before the first admin exists. Skip and let a later boot
+    // re-resolve the owner — mirrors ensureSystemForum's retry posture.
+    console.warn("[server-invariant] system server not created yet: no admin exists to own it (will retry next boot)");
+    return;
+  }
+
+  // Create the fixed-id default server. featured = catalog-pinned at the top;
+  // is_system + is_default mark it undeletable and the auto-join target.
+  await db.insert(servers).values({
+    id: "server_spire_system",
+    slug: "spire",
+    name: "The Spire",
+    tagline: "The beacon-tower where the universe arrives.",
+    ownerUserId: owner.id,
+    isSystem: true,
+    isDefault: true,
+    status: "featured",
+    visibility: "public",
+    joinMode: "open",
+  });
+
+  // (1) Seed the per-server behavior settings from the singleton so the default
+  // server is byte-identical to the legacy global config (the re-homed slice
+  // 0276 split out). Copying the concrete values (rather than leaving NULL =
+  // inherit) makes the default server's numbers survive a later singleton edit
+  // exactly as 0279 freezes them at backfill time.
+  const site = (await db.select().from(siteSettings).where(eq(siteSettings.id, "singleton")).limit(1))[0];
+  if (site) {
+    await db.insert(serverSettings).values({
+      serverId: "server_spire_system",
+      messageRetentionMs: site.messageRetentionMs,
+      maxRoomsPerOwner: site.maxRoomsPerOwner,
+      maxMessageLength: site.maxMessageLength,
+      editGraceMs: site.editGraceMs,
+      defaultThemeJson: site.defaultThemeJson,
+      defaultStyleKey: site.defaultStyleKey,
+      themeDesignMap: site.themeDesignMap,
+      rulesHtml: site.rulesHtml,
+      securityNoticeHtml: site.securityNoticeHtml,
+      newUserWelcomeHtml: site.newUserWelcomeHtml,
+      maxForumPostLength: site.maxForumPostLength,
+      forumTopicsPerPage: site.forumTopicsPerPage,
+      earningConfigJson: site.earningConfigJson,
+    }).onConflictDoNothing();
+  }
+
+  // (2) Default usergroup (full FEATURE baseline) so ungrouped members keep
+  // post / create-room / upload / emoticon / invite, exactly like every fresh
+  // server. ensureDefaultUsergroup is itself conflict-safe + insert-if-missing.
+  await ensureDefaultUsergroup(db, "server_spire_system");
+
+  // (3) Owner's explicit server_members row. The default server's access is the
+  // implicit is_system rule (serverAuthority short-circuits), so this row is a
+  // management-enumeration convenience — but the owner needs role='owner' to
+  // appear in their own roster / pass requireServerOwner. INSERT OR IGNORE.
+  await db.insert(serverMembers).values({
+    serverId: "server_spire_system",
+    userId: owner.id,
+    role: "owner",
+  }).onConflictDoNothing();
+
+  // (4) Adopt every still-orphaned room + forum into the default server (the
+  // 0279 backfill on a fresh DB). NULL-only so a room/forum already homed to
+  // another server is never yanked. On a truly fresh install this is the set of
+  // rooms ensureSystemSeeds just created + the system forum's boards.
+  await db.update(rooms).set({ serverId: "server_spire_system" }).where(sql`${rooms.serverId} IS NULL`);
+  await db.update(forums).set({ serverId: "server_spire_system" }).where(sql`${forums.serverId} IS NULL`);
+}
+
+/**
+ * Boot-time server data-integrity asserts (plan.md §9.7). Verifies the four
+ * post-migration / post-seed invariants and LOGS each violation with a clear
+ * `[server-invariant]` prefix. CRITICAL: this NEVER throws — a violated
+ * invariant is a loud log line, not a startup crash, so a single bad row can't
+ * brick the whole site. Every check is wrapped so even an unexpected SQL error
+ * (e.g. a column the migration didn't add yet) degrades to a warning.
+ *
+ * Synchronous on purpose (the §9.7 signature): it reaches the raw better-sqlite3
+ * handle ({@link sqliteHandle}, the documented escape hatch for PRAGMA /
+ * one-off integrity SQL) rather than the async drizzle wrapper, so the whole
+ * sweep runs inline at the tail of ensureSystemSeeds with no awaits.
+ *
+ * The four invariants:
+ *   (1) ZERO rooms with BOTH server_id NULL AND forum_id NULL — every room must
+ *       be reachable through some server (directly, or via its forum's server).
+ *   (2) AT MOST ONE is_default room per server (the partial unique index already
+ *       enforces this, but we re-assert in case a legacy index drop regressed).
+ *   (3) server_spire_system EXISTS and is is_system=1 — the default server the
+ *       whole NULL-adoption story depends on.
+ *   (4) Every one of the nine 0278 discriminator columns is PRESENT (the
+ *       baseline-trap guard from §9.3 — a partial 0278 apply would silently
+ *       skip later ADD COLUMNs).
+ */
+function assertServerInvariants(db: Db): void {
+  // `db` is accepted for signature symmetry with the other seed helpers; the
+  // checks deliberately use the raw sync handle so this stays a plain function.
+  void db;
+  const warn = (msg: string) => console.warn(`[server-invariant] ${msg}`);
+
+  // (1) Rooms with neither a server nor a forum home.
+  try {
+    const row = sqliteHandle
+      .prepare("SELECT COUNT(*) AS n FROM rooms WHERE server_id IS NULL AND forum_id IS NULL")
+      .get() as { n: number } | undefined;
+    if (row && row.n > 0) {
+      warn(`${row.n} room(s) have BOTH server_id NULL AND forum_id NULL — unreachable by any server (expected 0)`);
+    }
+  } catch (err) {
+    warn(`could not check rooms-without-home invariant: ${(err as Error).message}`);
+  }
+
+  // (2) More than one is_default room within a single server.
+  try {
+    const rows = sqliteHandle
+      .prepare(
+        "SELECT server_id AS s, COUNT(*) AS n FROM rooms WHERE is_default = 1 AND server_id IS NOT NULL GROUP BY server_id HAVING COUNT(*) > 1",
+      )
+      .all() as Array<{ s: string; n: number }>;
+    for (const r of rows) {
+      warn(`server ${r.s} has ${r.n} is_default rooms (expected at most 1)`);
+    }
+  } catch (err) {
+    warn(`could not check one-default-room-per-server invariant: ${(err as Error).message}`);
+  }
+
+  // (3) The system DEFAULT server exists and is flagged is_system.
+  try {
+    const row = sqliteHandle
+      .prepare("SELECT is_system AS isSystem FROM servers WHERE id = 'server_spire_system'")
+      .get() as { isSystem: number } | undefined;
+    if (!row) {
+      // Expected on a fresh install before the first admin exists (the server is
+      // created on a later boot); still worth surfacing so a persistent absence
+      // on an admin'd install is visible.
+      warn("server_spire_system is missing (will be created on a later boot once an admin exists)");
+    } else if (row.isSystem !== 1) {
+      warn("server_spire_system exists but is NOT is_system=1 — the default-server NULL-adoption story is broken");
+    }
+  } catch (err) {
+    warn(`could not check system-server invariant: ${(err as Error).message}`);
+  }
+
+  // (4) Every 0278 discriminator column present (the §9.3 baseline-trap guard).
+  // table -> the server_id-bearing discriminator added in 0278a..0278i.
+  const DISCRIMINATOR_TABLES = [
+    "audit_log", // 0278a
+    "mod_cases", // 0278b
+    "reports", // 0278c
+    "announcement_banners", // 0278d
+    "scheduled_announcements", // 0278e
+    "faqs", // 0278f
+    "emoticon_sheets", // 0278g
+    "custom_commands", // 0278h
+    "title_kinds", // 0278i
+  ];
+  for (const table of DISCRIMINATOR_TABLES) {
+    try {
+      // PRAGMA arg can't be bound, but the table name is a hard-coded literal
+      // from the list above (never user input), so the interpolation is safe.
+      const cols = sqliteHandle.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      if (cols.length === 0) {
+        warn(`table ${table} not found while checking for its server_id discriminator column`);
+        continue;
+      }
+      if (!cols.some((c) => c.name === "server_id")) {
+        warn(`table ${table} is MISSING its 0278 server_id discriminator column (partial migration apply?)`);
+      }
+    } catch (err) {
+      warn(`could not check server_id column on ${table}: ${(err as Error).message}`);
+    }
+  }
 }
 
 /**

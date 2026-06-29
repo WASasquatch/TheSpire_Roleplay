@@ -178,8 +178,10 @@ export interface SiteSettings {
    */
   earningConfig: EarningConfig;
   /**
-   * Master switch for the multi-server feature (plan §10). Phase 0: sourced
-   * from env SERVERS_ENABLED; Phase 1 swaps to a site_settings column.
+   * Master switch for the multi-server feature (plan §10). Soft product flag,
+   * read off the `site_settings.servers_enabled` column (migration 0275).
+   * `areServersEnabled()` ANDs this with the `SERVERS_KILL` operator
+   * kill-switch.
    */
   serversEnabled: boolean;
   updatedAt: number;
@@ -307,6 +309,12 @@ export interface SettingsPatch {
    * range checks, etc.) belong in the admin route handler.
    */
   earningConfig?: EarningConfig | null;
+  /**
+   * Soft master switch for the multi-server feature (migration 0275). The hard
+   * `SERVERS_KILL` env kill-switch still wins in `areServersEnabled()`. Admin
+   * route handler gates this to masteradmin.
+   */
+  serversEnabled?: boolean;
 }
 
 export async function updateSettings(
@@ -374,6 +382,7 @@ export async function updateSettings(
         ? null
         : JSON.stringify(normalizeEarningConfig(patch.earningConfig));
   }
+  if (patch.serversEnabled !== undefined) update.serversEnabled = patch.serversEnabled;
   if (patch.newUserWelcomeHtml !== undefined) {
     // Only bump the welcome's edit timestamp when the text actually changed.
     // The audience filter (`user.createdAt > newUserWelcomeUpdatedAt`)
@@ -444,10 +453,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     themeDesignMap: parseThemeDesignMap(row.themeDesignMap),
     worldsSeedVersion: row.worldsSeedVersion,
     earningConfig: parseEarningConfig(row.earningConfigJson),
-    // TODO(phase1): read this off a real `site_settings.serversEnabled`
-    // column once the migration lands; for now the soft switch is env-driven
-    // so nothing flips on without an operator opt-in.
-    serversEnabled: process.env.SERVERS_ENABLED === "1",
+    serversEnabled: !!row.serversEnabled,
     updatedAt: +row.updatedAt,
   };
 }

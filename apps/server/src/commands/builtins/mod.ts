@@ -1,7 +1,8 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { isAdminRole, roleRank, type PermissionKey } from "@thekeep/shared";
 import { bans, mutes, roomMembers, roomMods, rooms, users } from "../../db/schema.js";
 import { hasPermission } from "../../auth/permissions.js";
+import { areServersEnabled, getSettings } from "../../settings.js";
 import {
   addMessage,
   broadcastPresence,
@@ -10,7 +11,7 @@ import {
   sendRoomBacklogTo,
 } from "../../realtime/broadcast.js";
 import { formatDuration, parseDuration } from "../duration.js";
-import { recordAudit } from "../../audit.js";
+import { auditServerAction, recordAudit } from "../../audit.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
@@ -758,6 +759,61 @@ export const announceCommand: CommandHandler = {
     if (!(await callerCanModerateRoom(ctx, "announce_room"))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /announce.");
     }
+
+    // Servers ON: a room-scoped announce fans across the ISSUING server's
+    // rooms, not just the one the command was typed in. We derive the
+    // server from the issuing room (`rooms.server_id`) and target only that
+    // server's rooms — a sub-server's owner/mod can't reach into a sibling
+    // server's chats, and the system/default server stays the "everyone who
+    // isn't on a sub-server" bucket. Rooms whose `server_id` is NULL belong
+    // to the system/default server, so a NULL-server issuer fans across the
+    // other NULL-server rooms (matched with isNull, not eq-on-null).
+    //
+    // FLAG-OFF: when servers are disabled this whole branch is skipped and
+    // we fall through to the single-room `addMessage(ctx, ...)` below —
+    // byte-identical to today.
+    if (areServersEnabled(await getSettings(ctx.db))) {
+      const issuing = (await ctx.db
+        .select({ serverId: rooms.serverId })
+        .from(rooms)
+        .where(eq(rooms.id, ctx.roomId))
+        .limit(1))[0];
+      const serverId = issuing?.serverId ?? null;
+      const scopedRooms = await ctx.db
+        .select({ id: rooms.id })
+        .from(rooms)
+        .where(serverId === null ? isNull(rooms.serverId) : eq(rooms.serverId, serverId));
+      // Re-use addMessage per room so each room gets its own persisted row,
+      // its own ignore-filtered fan-out, and its own /history visible later
+      // — mirroring the `/announce all` loop above.
+      for (const r of scopedRooms) {
+        const roomCtx = { ...ctx, roomId: r.id };
+        await addMessage(roomCtx, { kind: "announce", body: argsText });
+      }
+      // Audit scoping mirrors §9.8: a REAL sub-server's room-scoped announce
+      // is a server moderation action, so it stamps `server_id` and lands in
+      // that server's Mod Log (auditServerAction). A NULL-server issuer is the
+      // system/default server, which keeps today's GLOBAL Audit feed
+      // (recordAudit) — never a server-scoped row.
+      if (serverId !== null) {
+        await auditServerAction(ctx.db, {
+          serverId,
+          actorUserId: ctx.user.id,
+          action: "announce",
+          targetRoomId: ctx.roomId,
+          metadata: { scope: "server", rooms: scopedRooms.length, body: argsText },
+        });
+      } else {
+        await recordAudit(ctx.db, {
+          actorUserId: ctx.user.id,
+          action: "announce",
+          targetRoomId: ctx.roomId,
+          metadata: { scope: "room", rooms: scopedRooms.length, body: argsText },
+        });
+      }
+      return;
+    }
+
     await addMessage(ctx, { kind: "announce", body: argsText });
     await recordAudit(ctx.db, {
       actorUserId: ctx.user.id,

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { and, asc, eq, lte } from "drizzle-orm";
+import { and, asc, eq, isNull, lte } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
@@ -22,6 +22,7 @@ import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import { sanitizeBio } from "../auth/html.js";
 import { recordAudit } from "../audit.js";
 import { addMessageDirect } from "../realtime/broadcast.js";
+import { areServersEnabled, getSettings } from "../settings.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -565,9 +566,28 @@ async function fireScheduled(
   // through addMessageDirect so each room ends up with its own
   // persisted history row + filtered emit, matching the manual
   // `/announce all` behavior.
+  //
+  // Servers ON + NULL targetRoomId: the "fan out to EVERY room"
+  // clamps to the OWNING server's rooms (migration 0278e's
+  // `scheduled_announcements.server_id`). A schedule stamped with a
+  // sub-server only reaches that server's rooms; a NULL-server
+  // (platform) schedule fans across the system/default server's rooms
+  // (server_id IS NULL), which is the rest of the site. An explicit
+  // `targetRoomId` is already a single room, so it's unaffected by the
+  // scope clamp either way.
+  //
+  // FLAG-OFF: when servers are disabled the clamp is skipped and the
+  // NULL-targetRoomId path selects EVERY room exactly as today —
+  // byte-identical.
   let targetRoomIds: string[];
   if (row.targetRoomId) {
     targetRoomIds = [row.targetRoomId];
+  } else if (areServersEnabled(await getSettings(db))) {
+    const scopedRooms = await db
+      .select({ id: rooms.id })
+      .from(rooms)
+      .where(row.serverId === null ? isNull(rooms.serverId) : eq(rooms.serverId, row.serverId));
+    targetRoomIds = scopedRooms.map((r) => r.id);
   } else {
     const allRooms = await db.select({ id: rooms.id }).from(rooms);
     targetRoomIds = allRooms.map((r) => r.id);

@@ -22,7 +22,7 @@ import { loadPollState } from "../polls.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
-import { getSettings } from "../settings.js";
+import { getSettings, areServersEnabled } from "../settings.js";
 import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
 import { listArchivedOwnedRooms } from "../lib/archivedRooms.js";
 import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
@@ -51,8 +51,22 @@ export async function registerRoomsRoutes(
   db: Db,
   io: Io,
 ): Promise<void> {
-  app.get("/rooms", async (req: FastifyRequest) => {
+  app.get<{ Querystring: { serverId?: string } }>("/rooms", async (req) => {
     const me = await getSessionUser(req, db);
+
+    // Optional per-server scoping (multi-server lift). The web rail and the
+    // ServerSettings → Rooms tab request `/rooms?serverId=<id>` to see only a
+    // single server's rooms. We honor it ONLY when servers are enabled; with
+    // the flag off (or no param) this predicate is `undefined`, so the query
+    // below is byte-identical to today's unfiltered list.
+    const wantServerId =
+      typeof req.query.serverId === "string" && req.query.serverId.trim()
+        ? req.query.serverId.trim()
+        : undefined;
+    const serverScope =
+      wantServerId && areServersEnabled(await getSettings(db))
+        ? eq(rooms.serverId, wantServerId)
+        : undefined;
 
     // 1. Pull every public room. Archived rows (auto-parked after the
     //    last occupant left) are excluded so the name appears
@@ -63,7 +77,7 @@ export async function registerRoomsRoutes(
     const publicRows = await db
       .select()
       .from(rooms)
-      .where(and(eq(rooms.type, "public"), isNull(rooms.archivedAt)))
+      .where(and(eq(rooms.type, "public"), isNull(rooms.archivedAt), serverScope))
       .orderBy(asc(rooms.name));
 
     // 2. If the caller is logged in, find any private room they're currently

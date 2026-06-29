@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Server as IoServer } from "socket.io";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { createHash } from "node:crypto";
@@ -39,6 +39,7 @@ import {
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import { areServersEnabled, getSettings } from "../settings.js";
 import { recordAudit } from "../audit.js";
 import { loadReactionsForTargets, parseSheetCells } from "../reactions.js";
 
@@ -260,6 +261,91 @@ export async function registerEmoticonRoutes(
     return { url: `/uploads/emoticons/${filename}`, mime: detected.mime, bytes: bytes.length };
   }
 
+  /* =====================================================================
+   *  Per-server catalog scoping (multi-server lift, Phase 6b).
+   *
+   *  FLAG-OFF SAFETY: with servers OFF these helpers return a "no scope"
+   *  sentinel (`null`) and the routes behave EXACTLY as before — every
+   *  read/write touches the single global catalog and only the existing
+   *  global permission gate runs. When servers are ON the catalog and the
+   *  submission-review admin scope to a server: reads filter to the
+   *  server's sheets (plus platform-shared NULL-serverId rows), writes
+   *  stamp the server id, and a server owner/mod holding `manage_emoticons`
+   *  for THAT server may act in addition to the existing global admins.
+   *
+   *  The acting server is derived from the request's `serverId` (query or
+   *  body) — the acting room/context the client is operating in — falling
+   *  back to {@link DEFAULT_SERVER_ID} (the Spire system server) when
+   *  absent or unknown. The system/default server keeps today's global
+   *  catalog posture: an unscoped read and the global-only admin gate.
+   * ===================================================================== */
+
+  /** Read the requested acting server id from the request without trusting
+   *  it blindly: an unknown/blank value collapses to the default server. */
+  function requestedServerId(req: { query?: unknown; body?: unknown }): string {
+    const q = (req.query as { serverId?: unknown } | undefined)?.serverId;
+    const b = (req.body as { serverId?: unknown } | undefined)?.serverId;
+    const raw = typeof q === "string" && q ? q : typeof b === "string" && b ? b : "";
+    return raw || DEFAULT_SERVER_ID;
+  }
+
+  /**
+   * Resolve the catalog scope for a request. Returns `null` when servers are
+   * OFF (or the resolved server is the system/default), meaning "behave as
+   * today: no server filter, global admin gate only". Otherwise returns the
+   * resolved (real, non-system) server id to scope reads/writes to.
+   */
+  async function resolveCatalogScope(req: { query?: unknown; body?: unknown }): Promise<string | null> {
+    if (!areServersEnabled(await getSettings(db))) return null;
+    const serverId = requestedServerId(req);
+    const { serverAuthority } = await import("../servers/authority.js");
+    // Resolve anonymously just to learn whether the server exists and is the
+    // system default; the system default keeps today's global posture.
+    const probe = await serverAuthority(db, null, serverId);
+    if (!probe.server || probe.server.isSystem) return null;
+    return serverId;
+  }
+
+  /**
+   * Authorize a catalog/submission admin action. Always honors the EXISTING
+   * global permission check ({@link globalPerm}); when servers are ON and the
+   * action targets a real (non-system) server, ALSO admits a server
+   * owner/mod who holds `manage_emoticons` for that server. Returns the
+   * scope id (or null for the global/default posture) on success, or an
+   * error tuple the caller turns into the same 403 shape as before.
+   */
+  async function authorizeCatalogAdmin(
+    me: { id: string; role: import("@thekeep/shared").Role },
+    globalPerm: "manage_emoticon_catalog" | "review_emoticon_submissions",
+    scopeServerId: string | null,
+  ): Promise<{ ok: true; scope: string | null } | { ok: false }> {
+    if (await hasPermission(me, globalPerm, db)) return { ok: true, scope: scopeServerId };
+    if (scopeServerId) {
+      const { serverAuthority, serverCan } = await import("../servers/authority.js");
+      const a = await serverAuthority(db, me, scopeServerId);
+      if (serverCan(a, "manage_emoticons")) return { ok: true, scope: scopeServerId };
+    }
+    return { ok: false };
+  }
+
+  /**
+   * Cross-server isolation for mutating an EXISTING row. A caller who got in
+   * only via a server's `manage_emoticons` grant (i.e. lacks the global
+   * permission) may touch only rows owned by THAT server — never another
+   * server's content nor a platform-shared (NULL-serverId) sheet. Global
+   * admins (and the flag-off path, where `scope` is null) are unaffected.
+   */
+  async function callerOwnsSheetScope(
+    me: { id: string; role: import("@thekeep/shared").Role },
+    globalPerm: "manage_emoticon_catalog" | "review_emoticon_submissions",
+    scope: string | null,
+    rowServerId: string | null,
+  ): Promise<boolean> {
+    if (scope === null) return true; // flag off / default-server posture
+    if (await hasPermission(me, globalPerm, db)) return true; // global admin
+    return rowServerId === scope; // server admin: own server's rows only
+  }
+
   /* ---------- Public catalog ----------
    *
    * Approved-only filter (migration 0151). Pending and rejected
@@ -268,10 +354,21 @@ export async function registerEmoticonRoutes(
    * exist only as moderation history with their image files
    * already deleted.
    */
-  app.get("/emoticons", async () => {
+  app.get("/emoticons", async (req) => {
     // LEFT JOIN users so community sheets ship with the creator's
     // master username for "by @<name>" display in the picker. System
     // sheets (createdByUserId IS NULL) join-miss and stay anonymous.
+    //
+    // FLAG-OFF: `scope` is null → the original status-only WHERE, byte
+    // identical. Servers ON + a real acting server → also restrict to
+    // that server's sheets PLUS platform-shared (NULL-serverId) rows.
+    const scope = await resolveCatalogScope(req);
+    const where = scope
+      ? and(
+          eq(emoticonSheets.status, "approved"),
+          or(eq(emoticonSheets.serverId, scope), isNull(emoticonSheets.serverId)),
+        )
+      : eq(emoticonSheets.status, "approved");
     const rows = await db
       .select({
         sheet: emoticonSheets,
@@ -279,7 +376,7 @@ export async function registerEmoticonRoutes(
       })
       .from(emoticonSheets)
       .leftJoin(users, eq(users.id, emoticonSheets.createdByUserId))
-      .where(eq(emoticonSheets.status, "approved"))
+      .where(where)
       .orderBy(asc(emoticonSheets.sortOrder), asc(emoticonSheets.createdAt));
     return { sheets: rows.map((r) => sheetRowToWire(r.sheet, r.creatorUsername)) };
   });
@@ -287,9 +384,10 @@ export async function registerEmoticonRoutes(
   /* ---------- Admin: create sheet ---------- */
   app.post<{ Body: unknown }>("/admin/emoticons/sheets", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !(await hasPermission(me, "manage_emoticon_catalog", db))) {
-      reply.code(403); return { error: "forbidden", missing: "manage_emoticon_catalog" };
-    }
+    if (!me) { reply.code(403); return { error: "forbidden", missing: "manage_emoticon_catalog" }; }
+    const scope = await resolveCatalogScope(req);
+    const auth = await authorizeCatalogAdmin(me, "manage_emoticon_catalog", scope);
+    if (!auth.ok) { reply.code(403); return { error: "forbidden", missing: "manage_emoticon_catalog" }; }
 
     let body: z.infer<typeof createSheetBody>;
     try { body = createSheetBody.parse(req.body); }
@@ -317,12 +415,15 @@ export async function registerEmoticonRoutes(
       cells: JSON.stringify(body.cells),
       sortOrder,
       createdByUserId: me.id,
+      // FLAG-OFF: scope is null → column unset (NULL), exactly as today.
+      // Servers ON + a real acting server → stamp the sheet to it.
+      ...(auth.scope ? { serverId: auth.scope } : {}),
     });
 
     await recordAudit(db, {
       actorUserId: me.id,
       action: "emoticon_sheet_create",
-      metadata: { id, slug, name: body.name, bytes: imageResult.bytes, mime: imageResult.mime },
+      metadata: { id, slug, name: body.name, bytes: imageResult.bytes, mime: imageResult.mime, serverId: auth.scope ?? null },
     });
 
     io.emit("emoticons:updated");
@@ -334,11 +435,15 @@ export async function registerEmoticonRoutes(
   /* ---------- Admin: update sheet ---------- */
   app.patch<{ Params: { id: string }; Body: unknown }>("/admin/emoticons/sheets/:id", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !(await hasPermission(me, "manage_emoticon_catalog", db))) {
-      reply.code(403); return { error: "forbidden", missing: "manage_emoticon_catalog" };
-    }
+    if (!me) { reply.code(403); return { error: "forbidden", missing: "manage_emoticon_catalog" }; }
+    const scope = await resolveCatalogScope(req);
+    const auth = await authorizeCatalogAdmin(me, "manage_emoticon_catalog", scope);
+    if (!auth.ok) { reply.code(403); return { error: "forbidden", missing: "manage_emoticon_catalog" }; }
     const current = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.id, req.params.id)).limit(1))[0];
     if (!current) { reply.code(404); return { error: "not found" }; }
+    if (!(await callerOwnsSheetScope(me, "manage_emoticon_catalog", auth.scope, current.serverId))) {
+      reply.code(404); return { error: "not found" };
+    }
 
     let body: z.infer<typeof updateSheetBody>;
     try { body = updateSheetBody.parse(req.body); }
@@ -379,11 +484,15 @@ export async function registerEmoticonRoutes(
   /* ---------- Admin: delete sheet ---------- */
   app.delete<{ Params: { id: string } }>("/admin/emoticons/sheets/:id", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !(await hasPermission(me, "manage_emoticon_catalog", db))) {
-      reply.code(403); return { error: "forbidden", missing: "manage_emoticon_catalog" };
-    }
+    if (!me) { reply.code(403); return { error: "forbidden", missing: "manage_emoticon_catalog" }; }
+    const scope = await resolveCatalogScope(req);
+    const auth = await authorizeCatalogAdmin(me, "manage_emoticon_catalog", scope);
+    if (!auth.ok) { reply.code(403); return { error: "forbidden", missing: "manage_emoticon_catalog" }; }
     const current = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.id, req.params.id)).limit(1))[0];
     if (!current) { reply.code(404); return { error: "not found" }; }
+    if (!(await callerOwnsSheetScope(me, "manage_emoticon_catalog", auth.scope, current.serverId))) {
+      reply.code(404); return { error: "not found" };
+    }
 
     // Phase 3, DELETE refuses to touch pending submissions. Those
     // rows hold the submitter's paid Currency until the moderation
@@ -627,6 +736,11 @@ export async function registerEmoticonRoutes(
      *  a character id pays from that character's pool and tags the
      *  submission so the refund (if any) lands on the right pool. */
     characterId: z.string().nullable().optional(),
+    /** Acting server context (multi-server lift). Only consulted when
+     *  servers are ON; routes the submission into THAT server's review
+     *  queue. Omitted/unknown → the Spire system server (no serverId
+     *  stamp), exactly as today. */
+    serverId: z.string().nullable().optional(),
   }).strict();
 
   app.post<{ Body: unknown }>("/me/emoticon-submissions", async (req, reply) => {
@@ -641,6 +755,11 @@ export async function registerEmoticonRoutes(
     const dup = (await db.select({ id: emoticonSheets.id })
       .from(emoticonSheets).where(eq(emoticonSheets.slug, slug)).limit(1))[0];
     if (dup) { reply.code(409); return { error: "slug already in use" }; }
+
+    // Per-server review routing. FLAG-OFF: null → the sheet's serverId
+    // column is left unset (NULL), byte identical to today. Servers ON +
+    // a real acting server → stamp it so it lands in that server's queue.
+    const submissionScope = await resolveCatalogScope({ body });
 
     const scopeCharacterId = body.characterId ?? null;
     if (scopeCharacterId) {
@@ -761,6 +880,7 @@ export async function registerEmoticonRoutes(
           submitterScope,
           submitterPoolId,
           costPaid: cost,
+          ...(submissionScope ? { serverId: submissionScope } : {}),
         }).run();
       });
     } catch (err) {
@@ -1105,13 +1225,20 @@ export async function registerEmoticonRoutes(
    */
   app.get("/admin/emoticons/submissions", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !(await hasPermission(me, "review_emoticon_submissions", db))) {
-      reply.code(403); return { error: "forbidden", missing: "review_emoticon_submissions" };
-    }
+    if (!me) { reply.code(403); return { error: "forbidden", missing: "review_emoticon_submissions" }; }
+    const scope = await resolveCatalogScope(req);
+    const auth = await authorizeCatalogAdmin(me, "review_emoticon_submissions", scope);
+    if (!auth.ok) { reply.code(403); return { error: "forbidden", missing: "review_emoticon_submissions" }; }
+    // FLAG-OFF: scope null → the original submitter-pool-only WHERE (all
+    // submissions), byte identical. Servers ON + real acting server → the
+    // queue shows only THAT server's submissions.
+    const where = auth.scope
+      ? and(sql`${emoticonSheets.submitterPoolId} IS NOT NULL`, eq(emoticonSheets.serverId, auth.scope))
+      : sql`${emoticonSheets.submitterPoolId} IS NOT NULL`;
     const rows = await db
       .select()
       .from(emoticonSheets)
-      .where(sql`${emoticonSheets.submitterPoolId} IS NOT NULL`)
+      .where(where)
       .orderBy(desc(emoticonSheets.createdAt))
       .limit(50);
     // Resolve submitter display names so admin doesn't have to
@@ -1177,11 +1304,15 @@ export async function registerEmoticonRoutes(
     "/admin/emoticons/submissions/:id/approve",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
-      if (!me || !(await hasPermission(me, "review_emoticon_submissions", db))) {
-        reply.code(403); return { error: "forbidden", missing: "review_emoticon_submissions" };
-      }
+      if (!me) { reply.code(403); return { error: "forbidden", missing: "review_emoticon_submissions" }; }
+      const scope = await resolveCatalogScope(req);
+      const auth = await authorizeCatalogAdmin(me, "review_emoticon_submissions", scope);
+      if (!auth.ok) { reply.code(403); return { error: "forbidden", missing: "review_emoticon_submissions" }; }
       const row = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.id, req.params.id)).limit(1))[0];
       if (!row) { reply.code(404); return { error: "not found" }; }
+      if (!(await callerOwnsSheetScope(me, "review_emoticon_submissions", auth.scope, row.serverId))) {
+        reply.code(404); return { error: "not found" };
+      }
       if (row.status !== "pending") {
         reply.code(409);
         return { error: `submission already ${row.status}` };
@@ -1226,14 +1357,20 @@ export async function registerEmoticonRoutes(
     "/admin/emoticons/submissions/:id/reject",
     async (req, reply) => {
       const me = await getSessionUser(req, db);
-      if (!me || !(await hasPermission(me, "review_emoticon_submissions", db))) {
-        reply.code(403); return { error: "forbidden", missing: "review_emoticon_submissions" };
-      }
+      if (!me) { reply.code(403); return { error: "forbidden", missing: "review_emoticon_submissions" }; }
+      // Scope from the query only — the reject body is `.strict()`, so the
+      // acting server rides on `?serverId=` rather than the JSON body.
+      const scope = await resolveCatalogScope({ query: req.query });
+      const auth = await authorizeCatalogAdmin(me, "review_emoticon_submissions", scope);
+      if (!auth.ok) { reply.code(403); return { error: "forbidden", missing: "review_emoticon_submissions" }; }
       let body: z.infer<typeof rejectSubmissionBody>;
       try { body = rejectSubmissionBody.parse(req.body ?? {}); }
       catch { reply.code(400); return { error: "invalid body" }; }
       const row = (await db.select().from(emoticonSheets).where(eq(emoticonSheets.id, req.params.id)).limit(1))[0];
       if (!row) { reply.code(404); return { error: "not found" }; }
+      if (!(await callerOwnsSheetScope(me, "review_emoticon_submissions", auth.scope, row.serverId))) {
+        reply.code(404); return { error: "not found" };
+      }
       if (row.status !== "pending") {
         reply.code(409);
         return { error: `submission already ${row.status}` };
